@@ -1,0 +1,91 @@
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Models and weights (never commit — too large). The models/ folder
+# itself is kept (models/README.md) so it exists for local dev; only
+# the weight files inside are ignored.
+*.gguf
+*.bin
+*.pt
+*.pth
+*.onnx
+*.safetensors
+models/*
+!models/README.md
+!models/.gitkeep
+
+# Benchmark RUN OUTPUT — the suite code under benchmark/ is committed,
+# but its generated reports / rows / logs are local artifacts.
+benchmark/**/BENCHMARK_*.md
+benchmark/**/*_rows.jsonl
+benchmark/**/*.jsonl
+benchmark/**/*.log
+# Multi-model sweep output — generated per-model logs + JSONL rows.
+benchmark/sweep/
+
+# ...EXCEPT the historical record. The timing suite's append-only
+# history and the level-suite's v1-v5 snapshots ARE the project's
+# performance baseline — they are committed and grow with the repo.
+!benchmark/timing/bench_history.jsonl
+!benchmark/levels/history/
+!benchmark/levels/history/BENCHMARK_*.md
+
+# Vendored / reference clones — NOT part of JROS source. Kept locally
+# for cross-reading hermes-agent during the parity port; never tracked.
+src/python_hermes_agent/upstream/
+
+# JROS runtime artifacts
+*.pid
+*.log
+.jros/
+~/.jros/
+
+# Local secrets
+.env
+.env.*
+!.env.example

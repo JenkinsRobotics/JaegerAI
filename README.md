@@ -1,218 +1,187 @@
-## Jenkins Robotics
-# Project Template
+<!-- Banner — drop an image at assets/banner.png, then uncomment ↓
+<p align="center">
+  <img src="assets/banner.png" alt="JROS" width="100%">
+</p>
+-->
 
-<!-- This is commented out. -->
+<h1 align="center">JROS — Jaeger Robot Operating Software</h1>
 
-## Project Information
+<p align="center">
+  <em>A Mac-native, Python-first operating framework for embodied AI agents.</em>
+</p>
 
-Project Status : <mark style="background-color: green"> &nbsp; COMPLETED &nbsp;</mark>  
-Code Status : <mark style="background-color: green"> &nbsp; GOOD &nbsp;</mark>  
-Development Status : <mark style="background-color: red"> &nbsp; NOT ACTIVE &nbsp;</mark>  
+<p align="center">
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.1.0--alpha-FFD700?style=for-the-badge" alt="Version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
+  <a href="https://discord.gg/sAnE5pRVyT"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://www.youtube.com/@Jenkins_Robotics"><img src="https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube"></a>
+</p>
 
+---
 
+## What is JROS?
 
-&nbsp;
-## General Information
+JROS is the operating framework for **Jaegers** — humanoid robots, drones,
+and digital AI agents that share a single coherent runtime. It provides the
+**nervous system** (transport, nodes, topics) and the **brain** (agent loop,
+memory, learned skills) so the same agent code runs on an LED-faced drone or
+a chat-only desktop companion.
 
+Built from real hardware pain, JROS runs on Apple Silicon and Jetson Orin —
+no Docker, no special OS versions, no dependency hell. It is `pip install`
+simple; a virtual environment is enough.
 
- This is a template README file designed to be adapted for your specific project. Replace this text with a brief overview of your project's purpose and goals.
-For example, you might describe the problem your project solves, its primary features, or its target audience. 
-- [x] Automated Tool Change
-- [x] Manual Tool Change
-- [x] Coolent 
-- [x] Tool Z Probe Macro
-- [x] Work Piece XYZ Probe
-- [x] Spindle Control
-- [x] Modularity
+- 🧠 **Local-first** — runs entirely on-device on an in-process LLM. No cloud account required.
+- 🛠️ **~70 built-in tools across 11 toolset categories** — files (read / write / edit / search), memory, web, code execution, scheduling, background processes, kanban, delegation. A 20-tool CORE is always visible; the rest are reachable via `describe_tool` / `load_toolset` when scoping is enabled.
+- 📋 **Kanban task board** — the agent plans multi-step work as cards; Deep Think jobs live on the same board. `/board` to view it.
+- 📚 **Self-authored skills** — the agent researches, writes, smoke-tests, benchmarks, and versions its own skills.
+- 🖥️ **Computer use** — the flagship skill: drive any macOS app through the accessibility tree (see the screen, click, type, work menus).
+- 🌙 **Deep Think** — an idle "deep sleep" mode that swaps to a heavier coder model and drains a skill-development queue.
+- 🔌 **Model-agnostic** — opt into LM Studio, an OpenAI-compatible endpoint, or Anthropic Claude. Local stays the default.
+- 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
+- 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-&nbsp;
-## WATCH NOW ON YOUTUBE
+> **Status — `0.1.0` alpha.** The agent layer is feature-complete and
+> benchmarked (L1 routing **97.1%** on the default Gemma 4 26B-A4B —
+> see [`benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md`](benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md)).
+> A persistent daemon scaffold + macOS tray ship with this release; the
+> agent-into-daemon move is the next track ([docs/daemon_split_plan.md](docs/daemon_split_plan.md)).
+> Next major beat: **hardware-node layer** (transport, motors, LEDs) on
+> JP01.
 
+---
 
- Watch the project playlist on youtube. 
-
- &nbsp;
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-&nbsp;
-## Support
-
-Did this project help you? Consider supporting! 
-
-Consider Subscribing: https://bit.ly/2DgZyuq <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
-
-
-
-&nbsp;
-## Table of Contents
-
-
-**[Project File Structure](#project-file-structure)**<br>
-**[Installation Instructions](#installation-instructions)**<br>
-**[Next Steps](#next-steps)**<br>
-**[Components](#components)**<br>
-**[Notes and Miscellaneous](#notes-and-miscellaneous)**<br>
-**[Links](#links)**<br>
-
-
-&nbsp;
-## Project File Structure
-
-The following is a breakdown of the different folders and the files contained in them:
-
-1. **FUSION 360 POST PROCESSOR**
-    - *JenkinsCNCReprap.cps*
-    A post processor is the link between the CAM system and your CNC machine. The Post Processor translated the CAM instruction including information like the toolpath data, the type of operation, and the desired spindle feeds/speeds into the language that a CNC machine understands (gcode). Despite the fact that the DUET 3 runs RepRap Firmware, the standard RepRap post processor do not work for CNC machining. Our Custom post processor is based on the default RepRap post processor but fixes the gcode syntax errors and adds many additional modular features. 
-    **Directions:**
-      - Uploading file to Fusion 360 Cloud Storage [Personal-cloud]
-        With-in Fusion 360 open the project navigation panel. Under Libraries select "Assets", then select folder "CAMPosts" (if no folder exist then create one.) Upload the custom Post Processor within this folder for cloud storage. 
-      - Create NC Program
-        After creating your CAD model select the "Manufacturing Tab" in Fusion 360. Complete the "Setup" process and the desired toolpaths. Create a new "NC Program".  Under "Post Configuration / Library" specify the location of the Post Processor File [personal-cloud recommended]. Under Post specify the desired file "Jenkins CNC RepRap". Adjust Post Properties if desired, then export gcode.  
-
-
-    
-    &nbsp;
-2. **GCODE**  
-   - *SDCARD*
-    This folder contains a copy of all they files located on our Duet 3 Motherboard SD Card. The system drive contains multiple subfolders each containing different gcode / system files. Before Copying/referencing our  custom files it is best to upgrade the stock firmware and system files. The official Duet 3 releases can be found on GitHub.  [RepRap Files](https://github.com/Duet3D "Duet3D").
-      
-   - *Macros*
-    The Macro folder contains all the additional system files needed for the Duet 3. Files are grouped by their function. 
-     **Directions:**
-        - Upload any of the desired files. Then review the files and make any necessary  adjustment to the position points and the probe/sensors numbers.  
-
-   - *Sys*
-    The System folder contains all the important system files needed for the Duet 3. Each file serves as important gcode files that configures the machine and provide necessary gcode for specific processes like tool changes. 
-        **Directions:**
-        - For AutoTool Change Upload the following files:  TFree, Tpost, Tpre, ToolZProbe        
-        - For manual tool Change Upload the following files:  manualtoolchange, ToolZProbe,
-
-
-
-    &nbsp;
-3. **GH Pages**
-    - Files used for Github Pages and readme text file. 
-
-
-  
-
-    &nbsp;
-4. **MANUALS**
-   - *Post Processor Training Guide*
-     - The reference file for fusion 360 post proccessor. Contains reference material for different hadware apart of the CNC. 
-    
-  
-      
-
-
-> Note: Updating the RepRap firmware should be done carefully. Uploading the updated ZIP file could erase custom gcode files. 
-
-
-&nbsp;
-## Installation Instructions
-
-Installation instructions can be found in the youtube video linked below 
- 
-
- ### Video link  be updated soon
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-
-<!-- This is commented out.  
-
-The following is a breakdown of the different folders and the files contained in them:
-
+## The Two Layers
 
 ```
-cd utils
-node build.js
+┌────────────────────────────────────────────────────────────┐
+│                      AGENT (BRAIN)                          │
+│         perceive → plan → act    +  memory  +  skills        │
+│         one loop per Jaeger body                             │
+└──────────────────────────┬─────────────────────────────────┘
+                           │  invokes
+┌──────────────────────────▼─────────────────────────────────┐
+│                   NODES (NERVOUS SYSTEM)                     │
+│    tts │ stt │ llm │ vision │ motors │ leds │ mcu_serial     │
+│    pluggable, hot-swappable, transport-agnostic              │
+└──────────────────────────────────────────────────────────────┘
 ```
 
+**Nodes** are processes that do one thing — capture audio, run TTS, drive
+servos, talk to a Teensy. They speak over standardized topics (ZMQ + UDP).
 
-Create a file with a `.zip` extension containing these files and directories:
+**Agents** are the brain. They subscribe to perception topics, reason with
+an LLM, look up memories, plan an action sequence, and dispatch it to nodes.
+
+A Jaeger is the union of **one agent loop** and **a configured set of nodes**.
+
+---
+
+## Prerequisites
+
+- **Python 3.11 or 3.12** (not 3.13 yet — some native deps lack 3.13 wheels).
+- **A C/C++ toolchain** — `llama-cpp-python` and `pywhispercpp` build
+  native code. macOS: `xcode-select --install`. Debian/Ubuntu:
+  `sudo apt install build-essential`.
+- **PortAudio** — for microphone / speaker I/O. macOS: `brew install portaudio`.
+  Debian/Ubuntu: `sudo apt install portaudio19-dev`.
+
+## Quick Start
+
+```bash
+pip install jaeger-os          # the whole framework — agent, voice, vision, tools
+jaeger-os --tui                # boot the agent
+```
+
+A plain `pip install jaeger-os` pulls the **entire** runtime — local LLM,
+Kokoro TTS, Whisper STT, vision, the external-model pipeline, messaging
+bridges. Nothing is left behind an extra. First launch runs a short setup
+wizard (identity, config, model); a GGUF model is fetched from Hugging
+Face on first run, and nothing else phones home.
+
+From source:
+
+```bash
+git clone https://github.com/JenkinsRobotics/JROS.git
+cd JROS
+pip install -e ".[dev]"
+pytest
+```
+
+---
+
+## Reference Jaegers
+
+| Jaeger | Form | Role |
+|---|---|---|
+| **Lilith** | Digital — local LLM with adjustable personality, runs on Mac | First JROS-native agent — proves the `jaeger-os` agent layer before JP01 inherits it. |
+| **JP01** | Drone — Mac + Jetson + Teensy + ESP32 + LED panel + servos + cameras + mics | First hardware Jaeger — inherits Lilith's agent unchanged, adds hardware middleware. |
+
+The strategy is **agent first, body second**: Lilith proves the brain in
+software, then JP01 puts a body around the same brain. A new Jaeger is a
+config file plus a logic node — not a fork of the runtime.
+
+---
+
+## Repo Layout
 
 ```
-manifest.json
-common/
-chrome/
+JROS/
+├── src/jaeger_os/    the framework package  →  pip install jaeger-os
+├── tests/            the framework test suite
+├── docs/             framework documentation
+├── pyproject.toml    packaging — jaeger-os 0.1.0
+├── README.md         this file
+└── LICENSE           Apache-2.0
 ```
 
+---
 
-Create a file with a `.xpi` extension containing these files and directories:
+## Documentation
 
-```
-chrome.manifest
-install.rdf
-common/
-firefox/
-```
+| Doc | What |
+|---|---|
+| [`docs/external_models.md`](docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
+| [`docs/deep_think_design.md`](docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
+| [`docs/marketplace_spec.md`](docs/marketplace_spec.md) | The skill marketplace |
+| [`docs/physical_skills_status.md`](docs/physical_skills_status.md) | Where embodiment / physical skills stand |
+| [`docs/kanban_design.md`](docs/kanban_design.md) | The kanban task board |
+| [`docs/hermes_tool_parity.md`](docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
+| [`docs/BENCHMARK_0.1.0.md`](docs/BENCHMARK_0.1.0.md) | 0.1.0 full verification benchmark |
 
- This is commented out. -->
+The full JROS spec — architecture, transport, the node standard, the agent
+and skill systems — is being written and will land under `docs/`.
 
+---
 
-&nbsp;
-## Next Steps
+## Roadmap
 
-This project is now completed. No next steps are planned. We can release bug fixes if found. 
+- **0.1 — Agent layer.** Local-first agent, 54 tools, self-authored skills,
+  the `computer_use` skill, the kanban task board, Deep Think, the
+  external-model pipeline. ✅ *shipped*
+- **0.2 — Node standard.** ZMQ + UDP transport, the node/plugin contract,
+  the first hardware nodes.
+- **0.3 — Lilith.** The first JROS-native digital Jaeger.
+- **0.4 — JP01.** The first hardware Jaeger — same brain, a body around it.
 
-If you require assistant join our discord channel linked down below.
+---
 
+## Community
 
+Built in the open by **[Jenkins Robotics](https://jenkinsrobotics.github.io)**.
 
-&nbsp;
-## Components 
+**Follow** — [Discord](https://discord.gg/sAnE5pRVyT) ·
+[YouTube](https://www.youtube.com/@Jenkins_Robotics) ·
+[Instagram](https://www.instagram.com/jenkinsrobotics/) ·
+[Facebook](https://www.facebook.com/jenkinsrobotics/)
 
-The following is a breakdown of key components for this project:
-&nbsp;
-| Item          | Function      | Cost  |
-| ------------- |:-------------:| -----:|
-| Fusion 360    | CAD           | Free |
-| VS Code       | Text Editor   |   Free |
+**Support** — [Patreon](https://www.patreon.com/JenkinsRobotics) ·
+[Venmo](https://venmo.com/u/JenkinsRobotics)
 
+---
 
-&nbsp;
-## Notes and Miscellaneous
+## License
 
-
-Disclaimer :
-Modifying your Shapeoko  will void the warranty. Do at your own risk.
-
-**ENJOY!!**
-
-That’s  all Folks. Hope this can help you in some way.
-... Consider Supporting Us Down Below. 
-
-&nbsp;
-## Links
-
-
-SUPPORT US ► 
-
-Consider Subscribing: https://www.youtube.com/@Jenkins_Robotics<br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics  <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
-
-
-FOLLOW US ►
-
-Discord ➔ https://discord.gg/sAnE5pRVyT <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Twitter ➔ https://twitter.com/j <br>
-Instagram  ➔ https://www.instagram.com/jenkinsrobotics/ <br>
-Facebook ➔ https://www.facebook.com/jenkinsrobotics/  <br>
-GitHub  ➔ https://jenkinsrobotics.github.io <br>
-
-
-
-
-
-
-
-
-
-
-
+[Apache-2.0](LICENSE) © Jenkins Robotics
