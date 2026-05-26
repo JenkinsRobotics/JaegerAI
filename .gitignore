@@ -85,6 +85,13 @@ src/python_hermes_agent/upstream/
 .jros/
 ~/.jros/
 
+# Local dev/test sandbox — point JAEGER_INSTANCE_DIR here for in-repo
+# work so the bundled src/jaeger_os/instance/default/ skeleton never
+# accumulates runtime state (and therefore never travels in the wheel).
+# See scripts/dev_env.sh for the one-line shim that exports the env
+# var; HYGIENE-3 in docs/ROADMAP_0.2.0.md for the why.
+sandbox/
+
 # Local secrets
 .env
 .env.*
