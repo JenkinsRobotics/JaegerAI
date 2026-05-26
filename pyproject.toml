@@ -122,14 +122,12 @@ exclude = ["python_hermes_agent*"]
 [tool.setuptools.package-data]
 # Ship the runtime data files inside the wheel so a fresh `pip install`
 # user gets a working framework — system prompt, plugin manifests,
-# core skills, the default-instance skeleton.
+# core skills.
 #
-# instance/ ships ONLY the skeleton (README, parent .gitignore, the
-# .gitkeep placeholders under default/{memory,logs,skills,credentials}).
-# Anything else in instance/default/ is runtime state authored on the
-# packager's machine and must NOT travel in the wheel — that was the
-# 0.1.0 hygiene bug. The wheel-clean check in scripts/check_wheel.py
-# enforces this.
+# INST-10 (0.2.0): the bundled `instance/` skeleton is gone. User
+# state lives exclusively at ``~/.jaeger/instances/<name>/`` and the
+# wizard creates it on first run; nothing about it ships in the
+# wheel. See ``docs/instance_layout.md`` for the user-side layout.
 jaeger_os = [
     "*.md",
     "assets/*",
@@ -139,42 +137,6 @@ jaeger_os = [
     "plugins/**/*.json",
     "plugins/**/*.md",
     "skills/**/*",
-    "instance/*.md",
-    "instance/.gitignore",
-    "instance/**/.gitkeep",
-]
-
-[tool.setuptools.exclude-package-data]
-# Belt-and-suspenders: even if MANIFEST.in or a wildcard above sweeps
-# something in by accident, refuse to ship anything that smells like
-# packager-machine state under the default instance skeleton. Patterns
-# target file extensions / specific names rather than ``dir/*`` so the
-# placeholder ``.gitkeep`` files survive.
-jaeger_os = [
-    "instance/default/config.yaml",
-    "instance/default/identity.yaml",
-    "instance/default/soul.md",
-    "instance/default/manifest.json",
-    "instance/default/permissions.json",
-    "instance/default/.lock",
-    "instance/default/**/*.json",
-    "instance/default/**/*.jsonl",
-    "instance/default/**/*.yaml",
-    "instance/default/**/*.npz",
-    "instance/default/**/*.log",
-    "instance/default/**/*.pid",
-    "instance/default/**/*.sock",
-    "instance/default/**/*.lock",
-    "instance/default/**/*.py",
-    "instance/default/**/*.ini",
-    "instance/default/**/*.cron",
-    "instance/default/**/*.png",
-    "instance/default/**/*.jpg",
-    "instance/default/**/*.env",
-    "instance/default/credentials/external_model_api_key",
-    "instance/default/credentials/ollama_cloud_api_key",
-    "instance/default/.git/**/*",
-    "instance/default/run/**/*",
 ]
 
 [tool.pytest.ini_options]

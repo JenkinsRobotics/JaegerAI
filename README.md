@@ -90,23 +90,50 @@ A Jaeger is the union of **one agent loop** and **a configured set of nodes**.
 
 ## Quick Start
 
+**Recommended — install with [pipx](https://pipx.pypa.io/):**
+
 ```bash
-pip install jaeger-os          # the whole framework — agent, voice, vision, tools
-jaeger-os --tui                # boot the agent
+pipx install jaeger-os         # isolated venv, `jaeger` on PATH
+jaeger setup                   # interactive wizard — identity, model, voice
+jaeger start                   # boot the daemon
+jaeger rich-tui                # talk to the agent
 ```
 
-A plain `pip install jaeger-os` pulls the **entire** runtime — local LLM,
-Kokoro TTS, Whisper STT, vision, the external-model pipeline, messaging
-bridges. Nothing is left behind an extra. First launch runs a short setup
-wizard (identity, config, model); a GGUF model is fetched from Hugging
-Face on first run, and nothing else phones home.
+pipx gives each app its own virtual environment, so JROS's heavy
+native deps (llama-cpp, kokoro, whisper) don't fight with whatever
+else lives in your Python. Upgrades are one line:
 
-From source:
+```bash
+pipx upgrade jaeger-os         # framework upgrade
+jaeger update                  # follow up: backs up + migrates your instances
+```
+
+**Or with plain pip:**
+
+```bash
+pip install jaeger-os          # works, but pollutes your global / current env
+```
+
+A plain install (either way) pulls the **entire** runtime — local
+LLM, Kokoro TTS, Whisper STT, vision, the external-model pipeline,
+messaging bridges. Nothing is left behind an extra. First launch
+runs a short setup wizard (identity, config, model); a GGUF model
+is fetched from Hugging Face on first run, and nothing else phones
+home.
+
+**State lives at `~/.jaeger/instances/<name>/`** — never inside the
+framework install. You can `jaeger backup` an instance, move to a
+new machine, `pipx install jaeger-os`, `jaeger restore <archive>`,
+and pick up where you left off. See
+[docs/instance_layout.md](docs/instance_layout.md) for the full
+layout.
+
+**From source (contributors):**
 
 ```bash
 git clone https://github.com/JenkinsRobotics/JROS.git
 cd JROS
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # editable install for development
 pytest
 ```
 
