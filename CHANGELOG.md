@@ -11,6 +11,25 @@ slate. Theme: refinement + Jaeger-port enablement; not a major
 reshape. The 0.2.0 acceptance bar is "0.1.0 bench numbers held
 or improved on every suite."
 
+### In progress — Group 9: SQLite memory backend (CORE 1.1.0 → 1.2.0)
+
+Full SQLite cutover for the agent's memory layer. Replaces the
+0.1.0 trio of `facts.json` / `episodic.jsonl` /
+`schedules.jsonl` + an NPZ embedding cache with one
+`<instance>/memory/state.db` (WAL mode, FK enforced, 5s
+busy-timeout). New SQL tables: `facts`, `episodic`,
+`episodic_embeddings`, `schedules`, `sessions`, `tool_calls`
+(new — every dispatched tool with redacted args + result for
+training-data extraction), `audit_log` (mirror of
+`logs/audit.log` for queryability — JSONL stays canonical).
+`sqlite-vec` extension loaded opportunistically with a clean
+Python-cosine fallback. Migration `v1_1_0_to_v1_2_0.py` triggers
+lazy importers + renames legacy JSON/JSONL to `.legacy`; never
+deletes data. New verbs: `jaeger memory export <path>` (json /
+jsonl / csv bundle with per-row redaction) and `jaeger memory
+stats` (per-table row counts + DB size). **1491 default-tier
+tests passing** (was 1160 at 0.1.0 release).
+
 ### Planned (highest-leverage)
 
 - Flip the lean tool surface to default-ON (was opt-in via
