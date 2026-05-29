@@ -159,10 +159,47 @@ JROS/
 ├── src/jaeger_os/    the framework package  →  pip install jaeger-os
 ├── tests/            the framework test suite
 ├── docs/             framework documentation
+├── benchmark/        bench corpus + sweep + sanity probe (dev tooling)
 ├── pyproject.toml    packaging — jaeger-os 0.1.0
 ├── README.md         this file
 └── LICENSE           Apache-2.0
 ```
+
+---
+
+## Benchmarking models locally
+
+JROS ships two complementary benches under `benchmark/` for picking
+which local model to run:
+
+- **`run_flat_bench.py` + `run_model_sweep.py`** — *task* benchmark.
+  Runs the 59-case corpus (routing, multistep, recovery, multi-turn,
+  context, safety, hallucination, cross-turn) per model and writes
+  per-run rows + summary under `benchmark/flat/<model>/<ts>/`. The
+  sweep auto-runs hybrid thinking models (Qwen3.x, gemma-4) in BOTH
+  modes — once with thinking ON, once OFF — so the leaderboard shows
+  the deep-think vs direct-mode tradeoff side-by-side.
+- **`run_model_sanity.py`** — *hardware-health* benchmark, separate
+  from task accuracy. Per model: GPU layer offload + Metal/CPU buffer
+  split (did it fully fit?), raw tok/s on a fixed prompt (compare a
+  35B-A3B and a 9B on generation speed alone), and for hybrid models
+  the think vs direct token-count and wall-clock so you can see what
+  reasoning mode actually costs per query.
+
+Useful env knobs (all bench-scoped, default off):
+
+- `JAEGER_BENCH_THINKING=auto|on|off` — force hybrid models into a
+  specific mode for a run (cloud-style toggle, same as Claude /
+  GPT-o1 / Gemini's `thinking` flag).
+- `JAEGER_BENCH_MODEL_TIMEOUT=<seconds>` — per-model wall-clock cap
+  for the sweep (default `3600`).
+- `JAEGER_BENCH_STALL_S=<seconds>` — per-call stall watchdog (default
+  `120`; reasoning models still get bumped to a `300s` floor).
+
+Results aggregate into `benchmark/HISTORY.md` — leaderboard with a
+weighted `Score` column (tools / real-time / context / multi-turn /
+safety), per-category counts, and safety as a hard gate (any safety
+failure → `DQ` regardless of other scores).
 
 ---
 
