@@ -113,11 +113,6 @@ Issues = "https://github.com/JenkinsRobotics/JROS/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-# python_hermes_agent/ is a vendored reference clone kept locally during
-# the parity port — NOT part of JROS source. The root .gitignore keeps
-# it out of git; this exclusion keeps it out of the wheel. (0.1.0 didn't
-# need this because the vendor dir hadn't been added yet.)
-exclude = ["python_hermes_agent*"]
 
 [tool.setuptools.package-data]
 # Ship the runtime data files inside the wheel so a fresh `pip install`

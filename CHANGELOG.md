@@ -211,9 +211,43 @@ hundreds of reasoning tokens before the answer.
   crash mid-sweep keeps everything probed so far (the report
   used to write only at the end).
 
+### Fixed — `max_tokens` config plumbing (closes a 0.1.0 hole)
+
+`LocalLlamaAdapter.__init__` accepted ``max_tokens`` but no caller
+passed it through, AND the local ``ModelConfig`` schema didn't even
+have the field. Every agent turn was capped at the hardcoded 4096
+regardless of what the user put in ``config.yaml`` — a silent
+contract violation.
+
+- **`ModelConfig.max_tokens`** — new field on the local-llama config
+  block, default 4096 (matches 0.1.0 behaviour so unconfigured
+  instances see no change), validated 16 ≤ N ≤ 32 768.
+- **`runtime_bridge._resolve_local_max_tokens`** — reads the field
+  from the active pipeline config (same lazy-import pattern as
+  ``runner.py``) and passes it into ``LocalLlamaAdapter`` at
+  construction. Missing / malformed config falls back to 4096
+  silently so early-boot and unit-test paths aren't surprised.
+
+Lowering this is a pure speed knob — no effect on per-token rate;
+just stops a model from generating to the cap when it would have
+hit EOS earlier. Useful baseline for routing-heavy use:
+``model.max_tokens: 1536``.
+
+### Removed — vendored Hermes reference (`src/python_hermes_agent/`)
+
+The 416 MB / 189-file parity-port reference clone is gone from the
+working tree. Every architectural pattern we adopted from it is
+either live in JROS (drift parser, `HermesXMLAdapter`, toolset
+registry, schema sanitizer, permission tiers, Three Laws, audit
+log, context guard, TUI conventions) or documented in
+`docs/hermes_tool_parity.md` / `hermes_internals_audit.md` /
+`hermes_tool_skill_audit.md` / `hermes_cui_port.md`. The two
+docstring lineage credits (``retry_utils.py``,
+``arg_coercion.py``) are kept as historical attribution.
+
 ### Result
 
-**1667 tests passing** (was 1491 at the Group 9 mark; 1160 at the
+**1670 tests passing** (was 1491 at the Group 9 mark; 1160 at the
 0.1.0 release). The 0.2.0 acceptance bar — "0.1.0 bench numbers
 held or improved on every suite" — holds with margin on every
 model that has data: gemma-4-26B-A4B best route% **100%** (0.1.0
