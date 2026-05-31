@@ -3,15 +3,54 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
-## `0.2.0` — unreleased
+## `0.2.0` — 2026-05-31
 
-Development branch open at `0.2.0`. See
-[docs/ROADMAP_0.2.0.md](docs/ROADMAP_0.2.0.md) for the working
-slate. Theme: refinement + Jaeger-port enablement; not a major
-reshape. The 0.2.0 acceptance bar is "0.1.0 bench numbers held
-or improved on every suite."
+Theme: refinement + Jaeger-port enablement; not a major reshape.
+See [docs/ROADMAP_0.2.0.md](docs/ROADMAP_0.2.0.md) for the original
+slate. The 0.2.0 acceptance bar — "0.1.0 bench numbers held or
+improved on every suite" — was MET against the new 1.1 corpus
+(see `### Result` below).
 
-### In progress — Group 9: SQLite memory backend (CORE 1.1.0 → 1.2.0)
+Headline additions:
+
+- **Sleep-cycle architecture** (Group 14, new). The robot now has
+  symmetric awake/asleep operational modes with a 1-hour inactivity
+  timeout. Active/inactive is the work axis; awake/asleep is the
+  model-resident axis. Kanban tasks carry an optional
+  ``preferred_mode`` hint (auto-inferred from tags when omitted);
+  the daemon swaps to the asleep model when the user has been gone
+  long enough AND there's queued work. See updated
+  [`docs/deep_think_design.md`](docs/deep_think_design.md).
+- **Memory-tier-aware setup wizard**. ``setup_wizard`` step 2 now
+  detects the host's unified memory via stdlib (`sysctl hw.memsize`
+  on macOS, `sysconf` on Linux), classifies into a tier (12 / 24 /
+  32 / 64+ GB), and offers the data-validated awake + asleep model
+  pair for that tier. Operator can accept the recommended pair, pick
+  from the full registry, or supply a custom GGUF path. Pre-download
+  hints for the asleep model are emitted when distinct from the
+  awake model. Lives in
+  ``src/jaeger_os/core/models/host_recommendation.py``.
+- **Bench corpus v1.1** (Group 11+13 retrospective). 59 cases
+  (was 51); adds T1c hallucination (2 cases), T3 cross-turn (3),
+  T5 safety (5 cases including destructive / prompt-injection /
+  credential-exfil). Score is now ``passed/total`` — every case
+  counts the same 1/59. The leaderboard renderer
+  (``bench_history_verb``) was substantially refactored: filters to
+  the current corpus version, hides forced on/off baseline rows
+  from the main table (they live in the sanity probe section now),
+  shows the model's ideal-state run only, and surfaces
+  Tokens/task, Peak TPS, VRAM, and Peak load columns instead of the
+  prior two confusing tok/s columns. ``benchmark/HISTORY.md`` is
+  the persistent leaderboard and auto-regenerates after every bench
+  run completion.
+
+> ⚠️ The full SQLite memory backend (Group 9 below) ships its
+> design and migration but the live cutover is still gated. It
+> activates when the operator sets
+> ``JAEGER_MEMORY_BACKEND=sqlite``; the JSON/JSONL backend remains
+> the default until the next minor release.
+
+### Group 9 — SQLite memory backend (CORE 1.1.0 → 1.2.0, opt-in)
 
 Full SQLite cutover for the agent's memory layer. Replaces the
 0.1.0 trio of `facts.json` / `episodic.jsonl` /
@@ -210,6 +249,57 @@ hundreds of reasoning tokens before the answer.
 - **Per-model incremental writes** in `run_model_sweep` so a
   crash mid-sweep keeps everything probed so far (the report
   used to write only at the end).
+
+### Group 14 — Sleep cycle + tier-aware setup wizard (2026-05-31)
+
+- **Vocabulary clarified.** Two orthogonal axes in
+  ``docs/deep_think_design.md``: **awake/asleep** = which model is
+  resident; **active/inactive** = whether the agent is doing work.
+  Default inactivity timeout for the awake→asleep transition is
+  **3600 s / 1 hour**. Wake-up target: **< 1 minute** (model
+  unload + load on M-series SSDs).
+- **Tier-aware setup wizard.**
+  ``src/jaeger_os/core/models/host_recommendation.py`` is new:
+  detects unified memory via stdlib (no psutil dep), classifies
+  the host into ``12 / 24 / 32 / 64+ GB``, and returns a
+  data-validated ``TierRecommendation`` with an awake +
+  asleep ``ModelPick`` pair. Picks are sourced from
+  ``benchmark/HISTORY.md`` (bench corpus 1.1) and carry HF
+  download URLs. ``setup_wizard.py`` step 2 surfaces the
+  recommendation with three ways to pick: "use recommended,"
+  "choose from registry," or "custom GGUF path." The wizard
+  suppresses the asleep-download hint when awake and asleep
+  resolve to the same model (single-model tiers, e.g. ``<12 GB``
+  fallback).
+- **Default asleep model updated.** ``DEFAULT_CODER_MODEL`` is
+  now an alias for ``DEFAULT_ASLEEP_MODEL = qwen3.5-9b-q4_k_m``
+  (was ``qwen3-coder-30b-a3b-q4_k_m``). Reflects the new corpus
+  data: Qwen3.5-9B Q4 scores 93.2% with the lowest peak load
+  measured anywhere (2.4) at 5.2 GB VRAM — the best Mac-Mini-tier
+  deep-think model. The ``Qwen3-Coder-30B-A3B-Instruct`` family
+  remains in the registry as the right pick for code-heavy
+  kanban queues; the new constant just changes the wizard
+  default.
+- **Recommended pairs** (from the leaderboard, frozen at this
+  release):
+
+  | Tier | Awake | Asleep |
+  |------|-------|--------|
+  | 12 GB | gemma-4-E4B Q4 | Qwen3-4B-Thinking-2507 Q3 |
+  | 24 GB | gemma-4-E4B Q4 | Qwen3.5-9B Q4 |
+  | 32 GB | gemma-4-26B-A4B Q4 | Qwen3-30B-A3B Q4 |
+  | 64+ GB | gemma-4-26B-A4B Q4 | Qwen3-30B-A3B Q4 (co-load viable) |
+
+  Tiebreaker hierarchy noted in code comments for future
+  iteration: **MoE > dense → larger base params → speed →
+  Peak TPS → Peak load** when overall scores are within ~1 case.
+
+- **Tracking still TODO** — the inactivity-timer state machine
+  in ``run_daemon`` (track last user turn, fire the swap when
+  ``now - last_turn >= sleep_cycle.inactivity_timeout_s``). The
+  swap primitive (`switch_model`) and the queue-driven loop
+  already exist from Phase 0; what's missing is the inactivity
+  signal. Slotted for the 0.2.x patch series.
 
 ### Fixed — `max_tokens` config plumbing (closes a 0.1.0 hole)
 

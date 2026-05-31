@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.1.0--alpha-FFD700?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.2.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -43,13 +43,17 @@ simple; a virtual environment is enough.
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.1.0` alpha.** The agent layer is feature-complete and
-> benchmarked (L1 routing **97.1%** on the default Gemma 4 26B-A4B —
-> see [`benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md`](benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md)).
-> A persistent daemon scaffold + macOS tray ship with this release; the
-> agent-into-daemon move is the next track ([docs/daemon_split_plan.md](docs/daemon_split_plan.md)).
-> Next major beat: **hardware-node layer** (transport, motors, LEDs) on
-> JP01.
+> **Status — `0.2.0` released.** Refinement + Jaeger-port-enablement
+> cycle. Adds the **sleep-cycle architecture** (awake/asleep model
+> swap with a 1-hour inactivity timer — see
+> [`docs/deep_think_design.md`](docs/deep_think_design.md)) and a
+> **memory-tier-aware setup wizard** that detects the host's unified
+> RAM and recommends data-validated awake + asleep model pairs (12 /
+> 24 / 32 / 64+ GB ladders). Bench corpus bumped to **v1.1** (59 cases
+> with new T1c hallucination, T3 cross-turn, T5 safety tiers) —
+> rankings refreshed against the new corpus and persisted in
+> [`benchmark/HISTORY.md`](benchmark/HISTORY.md). Next major beat:
+> **hardware-node layer** (transport, motors, LEDs) on JP01.
 
 ---
 
@@ -160,7 +164,7 @@ JROS/
 ├── tests/            the framework test suite
 ├── docs/             framework documentation
 ├── benchmark/        bench corpus + sweep + sanity probe (dev tooling)
-├── pyproject.toml    packaging — jaeger-os 0.1.0
+├── pyproject.toml    packaging — jaeger-os 0.2.0
 ├── README.md         this file
 └── LICENSE           Apache-2.0
 ```
