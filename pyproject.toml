@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-os"
-version = "0.1.0"
+version = "0.2.0"
 description = "Jaeger-OS — a local-first agentic agent framework for embodied AI."
 readme = "README.md"
 # 3.11 / 3.12 only — several native deps (kokoro, pywhispercpp,
@@ -117,7 +117,12 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Ship the runtime data files inside the wheel so a fresh `pip install`
 # user gets a working framework — system prompt, plugin manifests,
-# core skills, the default-instance skeleton.
+# core skills.
+#
+# INST-10 (0.2.0): the bundled `instance/` skeleton is gone. User
+# state lives exclusively at ``~/.jaeger/instances/<name>/`` and the
+# wizard creates it on first run; nothing about it ships in the
+# wheel. See ``docs/instance_layout.md`` for the user-side layout.
 jaeger_os = [
     "*.md",
     "assets/*",
@@ -127,9 +132,6 @@ jaeger_os = [
     "plugins/**/*.json",
     "plugins/**/*.md",
     "skills/**/*",
-    "instance/*.md",
-    "instance/.gitignore",
-    "instance/**/.gitkeep",
 ]
 
 [tool.pytest.ini_options]

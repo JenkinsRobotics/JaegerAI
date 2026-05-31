@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.1.0--alpha-FFD700?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.2.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -43,13 +43,17 @@ simple; a virtual environment is enough.
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.1.0` alpha.** The agent layer is feature-complete and
-> benchmarked (L1 routing **97.1%** on the default Gemma 4 26B-A4B —
-> see [`benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md`](benchmark/levels/history/BENCHMARK_v0.1.0_baseline.md)).
-> A persistent daemon scaffold + macOS tray ship with this release; the
-> agent-into-daemon move is the next track ([docs/daemon_split_plan.md](docs/daemon_split_plan.md)).
-> Next major beat: **hardware-node layer** (transport, motors, LEDs) on
-> JP01.
+> **Status — `0.2.0` released.** Refinement + Jaeger-port-enablement
+> cycle. Adds the **sleep-cycle architecture** (awake/asleep model
+> swap with a 1-hour inactivity timer — see
+> [`docs/deep_think_design.md`](docs/deep_think_design.md)) and a
+> **memory-tier-aware setup wizard** that detects the host's unified
+> RAM and recommends data-validated awake + asleep model pairs (12 /
+> 24 / 32 / 64+ GB ladders). Bench corpus bumped to **v1.1** (59 cases
+> with new T1c hallucination, T3 cross-turn, T5 safety tiers) —
+> rankings refreshed against the new corpus and persisted in
+> [`benchmark/HISTORY.md`](benchmark/HISTORY.md). Next major beat:
+> **hardware-node layer** (transport, motors, LEDs) on JP01.
 
 ---
 
@@ -90,23 +94,50 @@ A Jaeger is the union of **one agent loop** and **a configured set of nodes**.
 
 ## Quick Start
 
+**Recommended — install with [pipx](https://pipx.pypa.io/):**
+
 ```bash
-pip install jaeger-os          # the whole framework — agent, voice, vision, tools
-jaeger-os --tui                # boot the agent
+pipx install jaeger-os         # isolated venv, `jaeger` on PATH
+jaeger setup                   # interactive wizard — identity, model, voice
+jaeger start                   # boot the daemon
+jaeger rich-tui                # talk to the agent
 ```
 
-A plain `pip install jaeger-os` pulls the **entire** runtime — local LLM,
-Kokoro TTS, Whisper STT, vision, the external-model pipeline, messaging
-bridges. Nothing is left behind an extra. First launch runs a short setup
-wizard (identity, config, model); a GGUF model is fetched from Hugging
-Face on first run, and nothing else phones home.
+pipx gives each app its own virtual environment, so JROS's heavy
+native deps (llama-cpp, kokoro, whisper) don't fight with whatever
+else lives in your Python. Upgrades are one line:
 
-From source:
+```bash
+pipx upgrade jaeger-os         # framework upgrade
+jaeger update                  # follow up: backs up + migrates your instances
+```
+
+**Or with plain pip:**
+
+```bash
+pip install jaeger-os          # works, but pollutes your global / current env
+```
+
+A plain install (either way) pulls the **entire** runtime — local
+LLM, Kokoro TTS, Whisper STT, vision, the external-model pipeline,
+messaging bridges. Nothing is left behind an extra. First launch
+runs a short setup wizard (identity, config, model); a GGUF model
+is fetched from Hugging Face on first run, and nothing else phones
+home.
+
+**State lives at `~/.jaeger/instances/<name>/`** — never inside the
+framework install. You can `jaeger backup` an instance, move to a
+new machine, `pipx install jaeger-os`, `jaeger restore <archive>`,
+and pick up where you left off. See
+[docs/instance_layout.md](docs/instance_layout.md) for the full
+layout.
+
+**From source (contributors):**
 
 ```bash
 git clone https://github.com/JenkinsRobotics/JROS.git
 cd JROS
-pip install -e ".[dev]"
+pip install -e ".[dev]"        # editable install for development
 pytest
 ```
 
@@ -132,10 +163,47 @@ JROS/
 ├── src/jaeger_os/    the framework package  →  pip install jaeger-os
 ├── tests/            the framework test suite
 ├── docs/             framework documentation
-├── pyproject.toml    packaging — jaeger-os 0.1.0
+├── benchmark/        bench corpus + sweep + sanity probe (dev tooling)
+├── pyproject.toml    packaging — jaeger-os 0.2.0
 ├── README.md         this file
 └── LICENSE           Apache-2.0
 ```
+
+---
+
+## Benchmarking models locally
+
+JROS ships two complementary benches under `benchmark/` for picking
+which local model to run:
+
+- **`run_flat_bench.py` + `run_model_sweep.py`** — *task* benchmark.
+  Runs the 59-case corpus (routing, multistep, recovery, multi-turn,
+  context, safety, hallucination, cross-turn) per model and writes
+  per-run rows + summary under `benchmark/flat/<model>/<ts>/`. The
+  sweep auto-runs hybrid thinking models (Qwen3.x, gemma-4) in BOTH
+  modes — once with thinking ON, once OFF — so the leaderboard shows
+  the deep-think vs direct-mode tradeoff side-by-side.
+- **`run_model_sanity.py`** — *hardware-health* benchmark, separate
+  from task accuracy. Per model: GPU layer offload + Metal/CPU buffer
+  split (did it fully fit?), raw tok/s on a fixed prompt (compare a
+  35B-A3B and a 9B on generation speed alone), and for hybrid models
+  the think vs direct token-count and wall-clock so you can see what
+  reasoning mode actually costs per query.
+
+Useful env knobs (all bench-scoped, default off):
+
+- `JAEGER_BENCH_THINKING=auto|on|off` — force hybrid models into a
+  specific mode for a run (cloud-style toggle, same as Claude /
+  GPT-o1 / Gemini's `thinking` flag).
+- `JAEGER_BENCH_MODEL_TIMEOUT=<seconds>` — per-model wall-clock cap
+  for the sweep (default `3600`).
+- `JAEGER_BENCH_STALL_S=<seconds>` — per-call stall watchdog (default
+  `120`; reasoning models still get bumped to a `300s` floor).
+
+Results aggregate into `benchmark/HISTORY.md` — leaderboard with a
+weighted `Score` column (tools / real-time / context / multi-turn /
+safety), per-category counts, and safety as a hard gate (any safety
+failure → `DQ` regardless of other scores).
 
 ---
 
