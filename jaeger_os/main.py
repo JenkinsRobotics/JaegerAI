@@ -3247,14 +3247,13 @@ def main() -> int:
     # peel off BEFORE argparse so they don't collide with the positional
     # ``prompt`` argument the legacy CLI takes. Standalone ``jaeger``
     # (no subcommand) falls through to the existing TUI path unchanged.
-    # INST-8 (0.2.0): move any 0.1.0-style ``~/.jaeger/<name>/`` dirs
-    # into the new ``~/.jaeger/instances/<name>/`` nesting BEFORE
-    # anything tries to resolve an instance path. Idempotent — no-op
-    # when nothing is legacy. Runs unconditionally so every entry
-    # path (daemon subcommand, TUI, voice, one-shot CLI) sees the
-    # post-migration layout.
-    from jaeger_os.core.instance.legacy_migrations import migrate_legacy_layout
-    migrate_legacy_layout()
+    # 0.2.6 cleanup: the pre-0.2.0 legacy-layout migration (flat
+    # ``~/.jaeger/<name>/`` → nested ``~/.jaeger/instances/<name>/``)
+    # is gone. JROS instances were prototypes at that point; nothing
+    # operational was running off the 0.1.0 shape. The new operator-
+    # state location at ``<install_root>/.jaeger_os/`` is a fresh
+    # start — operators who want to keep an old instance can copy
+    # it across manually.
 
     from jaeger_os.daemon.cli import dispatch as _daemon_dispatch, is_daemon_subcommand as _is_daemon
     if _is_daemon(sys.argv[1:]):
