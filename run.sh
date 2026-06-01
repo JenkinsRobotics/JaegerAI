@@ -49,7 +49,13 @@ esac
 # of the framework package, but we set JAEGER_HOME explicitly so the
 # resolver gets a stable value regardless of how python computes
 # __file__ (matters when sandbox symlinks the framework dir).
-export JAEGER_HOME="$REPO_ROOT"
+#
+# Respect a pre-set JAEGER_HOME (e.g. ``source scripts/dev_env.sh``
+# pointing at the in-repo sandbox) — only fall back to $REPO_ROOT when
+# nothing is set. Otherwise dev_env.sh's sandbox redirect would get
+# clobbered the moment ./run.sh started.
+: "${JAEGER_HOME:=$REPO_ROOT}"
+export JAEGER_HOME
 
 # ── Subcommand dispatcher ────────────────────────────────────────────
 #
