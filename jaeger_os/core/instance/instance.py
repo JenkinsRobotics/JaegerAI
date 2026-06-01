@@ -65,21 +65,58 @@ from jaeger_os.core.instance.schemas import (
 # falls through to one. Dev checkouts opt into a sandbox via
 # JAEGER_INSTANCE_DIR (see scripts/dev_env.sh).
 SYSTEM_ROOT = Path("/var/lib/jaeger")
-USER_ROOT = Path("~/.jaeger").expanduser()
 INSTANCES_DIR_NAME = "instances"
 ACTIVE_INSTANCE_FILE = "active_instance"
 # jaeger_os/core/instance/instance.py → .parent.parent.parent = jaeger_os/
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
 
+# 0.2.6: operator state lives under ``<install_root>/.jaeger_os/`` —
+# sibling to ``jaeger_os/`` — instead of the user's home ``~/.jaeger/``.
+# This collapses the two-dir installs Hermes / ComfyUI / A1111 already
+# avoid into one place: ``ls <install_root>`` shows the framework
+# (``jaeger_os/``) and the operator's state (``.jaeger_os/``) side by
+# side. ``git pull`` only touches the framework; ``.jaeger_os/`` is
+# gitignored in full.
+OPERATOR_STATE_DIR_NAME = ".jaeger_os"
+
+
+def install_root() -> Path:
+    """The directory containing this install — ``$JAEGER_HOME`` when
+    set, else the parent of the framework package.
+
+    ``run.sh`` exports ``JAEGER_HOME=$REPO_ROOT`` before invoking
+    python, so the env var carries the install location through. The
+    PACKAGE_ROOT fallback covers test contexts that import ``jaeger_os``
+    directly without going through the launcher.
+    """
+    override = os.environ.get("JAEGER_HOME", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return PACKAGE_ROOT.parent
+
+
+def operator_state_root() -> Path:
+    """The ``.jaeger_os/`` dir alongside the framework package."""
+    return install_root() / OPERATOR_STATE_DIR_NAME
+
+
+# Legacy alias kept for any internal call-site that still references it
+# before the migration sweep finishes. The semantics changed in 0.2.6:
+# ``USER_ROOT`` is no longer ``~/.jaeger`` — it's now
+# ``<install_root>/.jaeger_os``. The name is preserved to avoid a
+# wholesale rename.
+USER_ROOT = operator_state_root()
+
 
 def user_instances_root() -> Path:
-    """Where user-mode instances live: ``~/.jaeger/instances/``."""
-    return Path("~/.jaeger").expanduser() / INSTANCES_DIR_NAME
+    """Where instances live: ``<install_root>/.jaeger_os/instances/``."""
+    return operator_state_root() / INSTANCES_DIR_NAME
 
 
 def active_instance_path() -> Path:
-    """Where the sticky-default file lives: ``~/.jaeger/active_instance``."""
-    return Path("~/.jaeger").expanduser() / ACTIVE_INSTANCE_FILE
+    """Where the sticky-default file lives:
+    ``<install_root>/.jaeger_os/active_instance``."""
+    return operator_state_root() / ACTIVE_INSTANCE_FILE
 
 
 def read_active_instance() -> str | None:

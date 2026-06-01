@@ -44,6 +44,13 @@ case ":${PYTHONPATH:-}:" in
   *) export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
+# 0.2.6: the runtime resolves operator state at <install_root>/.jaeger_os/
+# (instances, models, jaeger.env). install_root() defaults to the parent
+# of the framework package, but we set JAEGER_HOME explicitly so the
+# resolver gets a stable value regardless of how python computes
+# __file__ (matters when sandbox symlinks the framework dir).
+export JAEGER_HOME="$REPO_ROOT"
+
 # ── Subcommand dispatcher ────────────────────────────────────────────
 #
 # All management subcommands are thin shells around helpers that already

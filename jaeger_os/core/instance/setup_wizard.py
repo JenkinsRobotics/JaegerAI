@@ -695,16 +695,22 @@ _ENV_FILE_HEADER = (
 )
 
 
+def _env_file_path() -> Path:
+    """The ``jaeger.env`` location — sits alongside the rest of the
+    operator state at ``<install_root>/.jaeger_os/jaeger.env``."""
+    from jaeger_os.core.instance.instance import operator_state_root
+    return operator_state_root() / "jaeger.env"
+
+
 def _write_env_file(instance_root: Path, instance_name: str) -> None:
     """Persist ``export JAEGER_INSTANCE_DIR=…`` (+ INSTANCE_NAME) at
-    ``~/.jaeger/jaeger.env`` so the user has a single, predictable
-    file to ``source``. Best-effort — failures print a note and let
-    the wizard finish (the instance is already on disk).
+    ``<install_root>/.jaeger_os/jaeger.env`` so the user has a single,
+    predictable file to ``source``. Best-effort — failures print a
+    note and let the wizard finish (the instance is already on disk).
     """
-    env_dir = Path("~/.jaeger").expanduser()
-    env_path = env_dir / "jaeger.env"
+    env_path = _env_file_path()
     try:
-        env_dir.mkdir(parents=True, exist_ok=True)
+        env_path.parent.mkdir(parents=True, exist_ok=True)
         body = (
             _ENV_FILE_HEADER
             + f'export JAEGER_INSTANCE_DIR="{instance_root}"\n'
@@ -720,7 +726,7 @@ def _write_env_file(instance_root: Path, instance_name: str) -> None:
 
 def _print_env_hint(instance_name: str) -> None:
     """One-liner the user can copy verbatim into their shell rc."""
-    env_path = Path("~/.jaeger/jaeger.env").expanduser()
+    env_path = _env_file_path()
     print(f"  Env file: {env_path}")
     # Print the source line in a way that's obvious to copy.
     print("  Add this to your shell rc (zsh/bash) to make it stick:")

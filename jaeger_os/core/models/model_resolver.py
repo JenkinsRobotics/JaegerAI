@@ -109,13 +109,20 @@ DEFAULT_CODER_MODEL = DEFAULT_ASLEEP_MODEL
 
 
 def user_cache_dir() -> pathlib.Path:
-    """Returns ``$JAEGER_MODELS_DIR`` if set, else ``~/.jaeger/models/``.
+    """Returns ``$JAEGER_MODELS_DIR`` if set, else
+    ``<install_root>/.jaeger_os/models/``.
 
-    Production deployments override via env var; dev keeps the home dir."""
+    0.2.6: cache moves from the legacy ``~/.jaeger/models/`` into the
+    install's operator-state dir so all operator state sits in one
+    place. The env-var override is still honoured (shared model cache
+    on an external drive, etc.)."""
     override = os.environ.get("JAEGER_MODELS_DIR", "").strip()
     if override:
         return pathlib.Path(override).expanduser().resolve()
-    return pathlib.Path.home() / ".jaeger" / "models"
+    # Lazy import to break the cycle: instance.py imports schemas
+    # which import model_resolver.
+    from jaeger_os.core.instance.instance import operator_state_root
+    return operator_state_root() / "models"
 
 
 def repo_models_dir() -> pathlib.Path | None:

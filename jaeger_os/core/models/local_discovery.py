@@ -50,8 +50,11 @@ from typing import Iterable
 # include ``~`` — they're expanded via ``Path.expanduser()`` at scan
 # time. Order matters: earlier entries win when the same filename
 # appears in multiple locations.
+# 0.2.6: ``~/.jaeger/models`` is gone — the JROS-owned cache moved into
+# ``<install_root>/.jaeger_os/models``. Added at scan time by
+# ``scan_paths()`` since it depends on the runtime install root, not
+# a static template.
 _DEFAULT_SCAN_PATHS: list[tuple[str, str]] = [
-    ("~/.jaeger/models",                            "JROS cache"),
     ("~/.lmstudio/models",                          "LM Studio"),
     ("~/Library/Application Support/LM Studio/models", "LM Studio"),
     ("~/.cache/lm-studio/models",                   "LM Studio (legacy)"),
@@ -78,29 +81,45 @@ def _env_override_paths() -> list[tuple[str, str]]:
 
 
 def _in_tree_models_path() -> tuple[str, str] | None:
-    """Locate ``<repo>/src/jaeger_os/models/`` for dev checkouts.
-
-    Mirrors ``model_resolver.repo_models_dir()`` so the symlinks
-    operators drop in there get picked up by the wizard. Returns
-    None when running from an installed wheel (no repo root)."""
+    """Locate the framework's ``jaeger_os/models/`` dir (where the
+    wizard auto-symlinks discovered GGUFs). 0.2.6: lives directly
+    inside the package after the src/ prefix was dropped."""
     here = pathlib.Path(__file__).resolve()
-    # core/models/local_discovery.py → core/.. → src/jaeger_os/models
+    # core/models/local_discovery.py → core/.. → jaeger_os/models
     candidate = here.parent.parent.parent / "models"
     if candidate.is_dir():
         return (str(candidate), "JROS in-tree (dev)")
     return None
 
 
+def _operator_state_models_path() -> tuple[str, str] | None:
+    """The 0.2.6 operator-state cache at
+    ``<install_root>/.jaeger_os/models/``. Lazy-imported to avoid
+    circular dependency on instance.py at module load."""
+    try:
+        from jaeger_os.core.instance.instance import operator_state_root
+    except ImportError:
+        return None
+    candidate = operator_state_root() / "models"
+    if candidate.is_dir():
+        return (str(candidate), "JROS cache")
+    return None
+
+
 def scan_paths() -> list[tuple[pathlib.Path, str]]:
     """Build the de-duplicated, expanded list of (path, label) pairs
     that will be scanned. Honours the env-var override and adds the
-    in-tree dev slot when applicable.
+    in-tree + operator-state dev slots when applicable.
 
     Paths that don't exist are dropped here so callers don't repeat
     that check. Same path under multiple labels collapses to the
     first label seen — keeps the discover output tidy."""
     entries: list[tuple[str, str]] = []
     entries.extend(_env_override_paths())
+
+    op_state = _operator_state_models_path()
+    if op_state is not None:
+        entries.append(op_state)
 
     in_tree = _in_tree_models_path()
     if in_tree is not None:
