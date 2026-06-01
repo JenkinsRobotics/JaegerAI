@@ -3,6 +3,86 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.1` — 2026-05-31
+
+Patch theme: **architectural refactor — formal System / Runtime /
+User three-layer model**, plus repo housekeeping.
+
+This is a refinement release. No new agent features; the focus is
+making the contract between JROS-the-library and the operator's
+content rigorous so 0.3.x and beyond can be released without breaking
+user customisation.
+
+### Architecture — System / Runtime / User layers
+
+New canonical reference at
+[`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md).
+Every persistent file in a JROS deployment now belongs to exactly one
+of three layers:
+
+| Layer | Where it lives | Owner | Touched by upgrades? |
+|---|---|---|---|
+| **System** | `site-packages/jaeger_os/` (or your `git clone` for dev) | the JROS project | yes — that IS the upgrade |
+| **Runtime** | `~/.jaeger/instances/<name>/` | JROS at runtime | schema migrated; content preserved |
+| **User** | `~/jaeger/agents/<name>/` (default; configurable) | the operator | **never** |
+
+The contract: a JROS upgrade may freely rewrite the System layer and
+migrate the Runtime layer's schema, but **must not modify the User
+layer**. Operators put their persona, custom skills, prompt overlays,
+and workspace files in the User layer and that content survives every
+release boundary.
+
+### Added — User-layer support in the schema + resolver
+
+- **`UserConfig`** in `core/instance/schemas.py` — new schema node on
+  `Config` with a single field `dir` that overrides the default
+  `~/jaeger/agents/<instance_name>/` path. Supports absolute paths
+  and `~`-prefixed shorthand. Lets operators point at a project repo
+  (the Lilith-AI pattern), a shared drive, an external volume, etc.
+- **`resolve_user_dir(instance_name, config_override=None)`** in
+  `core/instance/instance.py` — mirror of `resolve_instance_dir`.
+  Resolution order: `JAEGER_USER_DIR` env var → config override →
+  default. Pure (no side effects); the loader is responsible for
+  `mkdir -p` on first access.
+
+### Repo housekeeping
+
+- **`docs/` → `dev docs/`** — the top-level docs folder is now
+  clearly developer documentation (audits, design docs, status notes
+  for contributors working *on* JROS). User-facing setup runbooks
+  live in downstream consumer repos (e.g. `Lilith-AI/docs/SETUP.md`).
+  *Note: the directory name has a space which can trip shell escaping
+  — consider renaming to `dev-docs/` (hyphen) in a future patch.*
+- **`src/jaeger_os/models/`** — model files moved into the package
+  tree so they're discoverable via standard imports. The `.gitignore`
+  retains `models/*` with a `!models/README.md` exception, so the
+  pip wheel stays small (only the README ships; weights are
+  downloaded on demand).
+
+### Lilith-AI alignment
+
+Lilith-AI 0.2.1 (separate release) adopts the new User-layer
+convention: the repo IS the User layer, and the instance's
+`config.yaml` points `user.dir` at the repo path. No more symlink
+gymnastics; just a config value. See the downstream Lilith-AI
+`docs/SETUP.md` for the new flow.
+
+### Migration
+
+Pre-0.2.1 instances that don't have `user.dir` set will continue
+working — JROS reads persona / skills / prompts from the runtime
+instance dir as a fallback. The `0.3.0` cycle will introduce a
+`jaeger user migrate` command that moves user-authored content out
+to the new default path.
+
+### Result
+
+**1670 tests passing** (no regressions vs. 0.2.0). Architecture
+contract documented; ready for 0.3.x feature work without risk to
+user customisation.
+
+---
+
 ## `0.2.0` — 2026-05-31
 
 Theme: refinement + Jaeger-port enablement; not a major reshape.
