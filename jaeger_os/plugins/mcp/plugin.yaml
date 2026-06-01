@@ -1,0 +1,15 @@
+name: mcp
+version: 1
+description: |
+  Model Context Protocol bridge. Spawns each configured MCP server as a
+  subprocess and dynamically registers its tools as agent tools under
+  `mcp:<server>/<tool>` names. Default agent paths pay zero cost — only
+  loaded when --with-mcp is passed.
+requires:
+  libraries: [mcp]
+  config_file: mcp_config.json
+registers_tools_dynamically: true
+entry: client.py
+hooks:
+  - on_startup       # registry init from mcp_config.json
+  - on_shutdown      # graceful subprocess teardown

@@ -64,8 +64,8 @@ else
   echo "→ --skip-deps: leaving .venv untouched"
 fi
 
-# 4. Scaffold agents/ (idempotent)
-mkdir -p "$REPO_ROOT/src/jaeger_os/agents"
+# 4. Scaffold .jaeger_os/ (idempotent) — operator state root
+mkdir -p "$REPO_ROOT/.jaeger_os/instances"
 
 # 5. Ensure ~/.jaeger/ exists for runtime instance state
 mkdir -p "$HOME/.jaeger/instances"

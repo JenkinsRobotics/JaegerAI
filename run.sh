@@ -20,7 +20,7 @@
 #   ./run.sh --help            Forward to run.py's full argparse help.
 #
 # Any args not starting with a management subcommand fall through to
-# src/jaeger_os/run.py, so every existing CLI flag still works unchanged.
+# jaeger_os/run.py, so every existing CLI flag still works unchanged.
 
 set -euo pipefail
 
@@ -36,10 +36,12 @@ fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-SRC="$REPO_ROOT/src"
+# 0.2.6: package lives at <install_root>/jaeger_os/ (was src/jaeger_os/).
+# PYTHONPATH points at the install root so ``import jaeger_os`` finds it
+# without an editable install.
 case ":${PYTHONPATH:-}:" in
-  *":$SRC:"*) ;;
-  *) export PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}" ;;
+  *":$REPO_ROOT:"*) ;;
+  *) export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
 # ── Subcommand dispatcher ────────────────────────────────────────────
@@ -95,7 +97,10 @@ cmd_delete() {
   # easier to reason about.
   local instance_dir
   instance_dir=$(JAEGER_DEL_NAME="$name" python -c "import os; from jaeger_os.core.instance.instance import resolve_instance_dir; print(resolve_instance_dir(os.environ['JAEGER_DEL_NAME']))")
-  local user_dir="$REPO_ROOT/src/jaeger_os/agents/$name"
+  # 0.2.6: per-agent state moved INTO the instance dir. The old
+  # user-layer location at jaeger_os/agents/<name>/ is no longer used —
+  # delete-cmd only needs to clear the runtime instance dir.
+  local user_dir=""
 
   local found=0
   echo "About to delete agent '$name':"
@@ -180,6 +185,6 @@ case "${1:-}" in
   *)
     # Default: forward everything to run.py (handles --instance, --help,
     # bare launch, start/status/daemon, prompts, etc.).
-    exec python "$REPO_ROOT/src/jaeger_os/run.py" "$@"
+    exec python "$REPO_ROOT/jaeger_os/run.py" "$@"
     ;;
 esac
