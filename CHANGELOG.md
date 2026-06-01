@@ -3,6 +3,94 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.6` — 2026-05-31
+
+Wizard polish + retired-CLI string sweep. The walk-the-flow release
+the 0.2.3–0.2.5 cycle should have been: every change in this version
+came from running the wizard end-to-end on a real machine and
+listing every prompt that didn't make sense or every message that
+referenced a CLI that no longer exists.
+
+### Fixed — wizard UX
+
+- **Banner says "Five quick steps" — actually 7 steps.** The
+  ``_TOTAL_STEPS = 7`` constant has shipped since 0.2.0 but the
+  intro never matched. Rewrote the banner to list all seven step
+  names and added a "Tip: prompts show a [default] in brackets —
+  press Enter to accept" line so muscle memory works.
+- **Step 1 role prompt collided visually with the default suffix.**
+  Read as ``Role — what does it do?  [≤256 chars] [general-purpose
+  agentic assistant]:`` — two unrelated brackets. Length hint is
+  now in parens so it reads as "max-len" followed by the default.
+- **Step 4 interaction prompt referenced the retired ``jaeger``
+  CLI** ("open a TUI when I run ``jaeger``"). Replaced with
+  ``./run.sh``.
+- **Step 4 GUI message was stale.** "The PyQt6 GUI is landing in
+  0.2.0 (Group 3); for now ``jaeger`` will fall back to the TUI" —
+  the 0.2.0 (Group 3) target slipped, and ``jaeger`` is gone. Now
+  reads "The PyQt6 GUI is planned for a future release; for now
+  ./run.sh will fall back to the TUI when invoked."
+- **Voice step's "voice is experimental in 0.2.0" tag-pinned a
+  version that doesn't bound the warning** — dropped the version
+  pin.
+- **Step 2 asleep-model "pre-download (optional)" hint implied a
+  step to skip that didn't exist.** Reworded to "asleep model will
+  be auto-downloaded on first deep-think entry" + the URL as a
+  reference for anyone who wants to grab it manually.
+- **Step 7 review summary dropped Personality + Asleep model.**
+  Both now appear so the operator sees every choice before
+  confirming.
+- **Post-wizard message says "Booting now…" even when the wizard
+  was invoked via ``./run.sh setup`` — but the subcommand exits
+  after the wizard returns, no boot.** Added ``boot_after`` param
+  (default ``True`` for the auto-fire-on-first-launch callers in
+  ``main.py``; ``False`` for the ``./run.sh setup`` subcommand).
+  When ``False`` the wizard now prints "Done — instance ready to
+  launch." with explicit launch + re-config commands.
+
+### Fixed — retired CLI strings outside the wizard
+
+The 0.2.3 cut from ``pip install jaeger-os`` to git-clone retired the
+``jaeger`` / ``jaeger-os`` console scripts. A scan turned up a handful
+of remaining strings that still told users to run them:
+
+- ``main.py`` — ``./run.sh list`` empty-state hint now says
+  ``./run.sh setup`` instead of ``jaeger setup``.
+- ``daemon/instance_verbs.py`` — three empty-state hints + one
+  "instance not found" recovery suggestion updated to ``./run.sh
+  setup [NAME]``.
+- ``plugins/messaging_gateway.py`` + ``plugins/voice_loop.py`` —
+  "instance not initialized; run ``jaeger setup`` first" → "run
+  ``./run.sh setup NAME`` first".
+- ``core/runtime/preflight.py`` — pip-install method check no
+  longer recommends ``pipx install jaeger-os`` (that path is dead);
+  recommends re-installing via the curl one-liner. ``config.yaml``
+  missing check now says ``./run.sh setup``.
+
+Subsystem prefix labels (``[jaeger backup]``, ``[jaeger update]``,
+``[jaeger setup]`` in log lines) are left as-is — they're module
+identifiers, not directives.
+
+### Verification
+
+Two dry-runs against a fresh test instance on the dev clone:
+
+- **Defaults only** — 14 blank Enters covers every prompt; the
+  generated ``identity.yaml`` / ``config.yaml`` / ``manifest.json``
+  / ``distribution.yaml`` all carry the expected defaults plus the
+  bumped ``created_with_framework: 0.2.6``.
+- **Custom answers** — exercises non-default branches (voice #2,
+  registry-pick mode, auto-allow permissions, GUI interaction
+  mode, mixed warm-up flags). Every choice landed correctly in the
+  Step 7 review and the on-disk YAML.
+
+Auto-fire path (``main.py`` calling ``run_wizard`` with default
+``boot_after=True``) still prints "Booting now…" unchanged.
+
+Full fast test tier: **1530 passing**, no regressions.
+
+---
+
 ## `0.2.5` — 2026-05-31
 
 Critical patch for the 0.2.4 management subcommands. Two bugs caught

@@ -65,11 +65,14 @@ cmd_setup() {
   # instance. Operators have lost real Lilith / agent identities to a
   # silent ``force=True`` overwrite — never again. The explicit
   # confirm in setup_wizard.py is the safety net; we keep it in place.
+  # ``boot_after=False`` because this subcommand exits after the wizard
+  # returns — no agent boot follows. The wizard's closing message
+  # changes to "Done — launch with ./run.sh" instead of "Booting now…".
   if [[ $# -ge 1 ]]; then
     export JAEGER_SETUP_NAME="$1"
-    exec python -c "import os; from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False, instance_name=os.environ['JAEGER_SETUP_NAME'])"
+    exec python -c "import os; from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False, instance_name=os.environ['JAEGER_SETUP_NAME'], boot_after=False)"
   else
-    exec python -c "from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False)"
+    exec python -c "from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False, boot_after=False)"
   fi
 }
 
