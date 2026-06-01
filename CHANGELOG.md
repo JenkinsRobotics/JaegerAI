@@ -3,6 +3,72 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.4` — 2026-05-31
+
+Patch follow-ups for the 0.2.3 distribution overhaul. Three things,
+all surfaced while running the new install path end-to-end on a fresh
+Mac Studio.
+
+### Added — explicit agent-management subcommands
+
+The 0.2.3 launcher only exposed agents through bare `./run.sh` +
+`--instance` flags. Creating a second agent or auditing what was
+installed required knowing about an undocumented auto-fire-on-first-
+launch behaviour. Replaced with a discoverable surface:
+
+```
+./run.sh setup [NAME]      Create / re-configure an agent (runs the wizard)
+./run.sh list              List every agent installed on this machine
+./run.sh delete NAME       Remove an agent (type-the-name confirm)
+./run.sh help              Subcommand cheatsheet
+```
+
+Anything that isn't a subcommand still forwards to `run.py`, so
+`--instance`, `--doctor`, `start` / `status` / `daemon`, etc. all work
+unchanged.
+
+Implementation is a bash dispatcher in `run.sh` calling helpers that
+already lived in `jaeger_os.core.instance.setup_wizard` and
+`jaeger_os.main` (`_cli_list_instances`, `resolve_instance_dir`). No
+new Python surface. The bash form keeps `main.py`'s large/turbulent
+argparse block out of the loop and puts user-facing UX at the launcher
+where it belongs.
+
+### Fixed
+
+- **`scripts/install.sh` rejected Macs with Python 3.13 even when 3.12
+  was installed.** The curl-side installer was calling `python3`
+  directly and rejecting whatever version that resolved to. The
+  in-repo `install.sh` already searched for `python3.12` /
+  `python3.11` first, but the curl script didn't get the same
+  treatment — so a fresh install on a Mac with `python3 → 3.13`
+  (from Xcode CLT or python.org installer) failed before cloning.
+  `scripts/install.sh` now searches `python3.12` → `python3.11` →
+  `python3` in order and exports the chosen interpreter so the
+  in-repo `install.sh` picks up the same one.
+
+- **`--setup` flag mentioned in 0.2.3 docs doesn't exist.** README,
+  `dev docs/setup.md`, `install.sh`, `run.sh`, and `scripts/install.sh`
+  all pointed at a `--setup` flag that argparse would reject with
+  `unrecognized arguments: --setup`. Wizard invocation in 0.2.3 was
+  via auto-fire-on-first-run or `--force`. 0.2.4 makes the right
+  invocation explicit (`./run.sh setup [NAME]`) and corrects every
+  doc reference.
+
+### Upgrade notes
+
+Operators running `0.2.3`:
+
+```bash
+cd ~/jaeger && git pull && ./install.sh
+```
+
+The new subcommands are immediately available after the pull —
+`install.sh` only re-runs because that's the documented upgrade
+ritual; dependencies haven't changed since 0.2.3.
+
+---
+
 ## `0.2.3` — 2026-05-31
 
 **Distribution overhaul** — JROS moves from `pip install` to git-clone
