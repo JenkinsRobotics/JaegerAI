@@ -57,6 +57,27 @@ esac
 : "${JAEGER_HOME:=$REPO_ROOT}"
 export JAEGER_HOME
 
+# 0.2.6: disable the macOS 26.x "xzone" nano-malloc allocator.
+#
+# Symptom: agent crashes with
+#   BUG IN LIBMALLOC: malloc assertion "success" failed
+#   _xzm_foreach_lock.cold.1 → _malloc_fork_child → libSystem_atfork_child
+# when any tool that uses ``subprocess`` (terminal, run_python,
+# run_in_venv, install_package, …) forks a child. The new xzone
+# allocator in Tahoe (macOS 26.x) hits an assertion inside its
+# fork-cleanup path when the parent has many live locks. Setting
+# MallocNanoZone=0 reverts to the pre-Tahoe allocator which is
+# fork-stable. Lower-level fix lives at Apple; until then this is
+# the canonical workaround documented in Python issue trackers and
+# the Apple developer forums.
+#
+# Mixed-case is correct — libmalloc reads ``MallocNanoZone`` as-is.
+# Setting it before exec'ing python so the env reaches the child.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    : "${MallocNanoZone:=0}"
+    export MallocNanoZone
+fi
+
 # ── Subcommand dispatcher ────────────────────────────────────────────
 #
 # All management subcommands are thin shells around helpers that already
