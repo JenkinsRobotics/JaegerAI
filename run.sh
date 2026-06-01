@@ -52,25 +52,29 @@ esac
 # extend.
 
 cmd_setup() {
-  # Pass the optional NAME via environment to dodge shell-quoting traps.
+  # CRITICAL — invoke via ``python -c``, NOT a heredoc.
+  #
+  # A heredoc form (``python - <<EOF ... EOF``) hands the heredoc body
+  # to Python as stdin, which means when the wizard calls ``input()``
+  # the very first read hits EOF and the whole flow dies with
+  # ``EOFError: EOF when reading a line``. Using ``-c`` keeps the
+  # interpreter attached to the terminal's stdin so the wizard's
+  # prompts work.
+  #
+  # ``force=False`` so the wizard asks before backing up an existing
+  # instance. Operators have lost real Lilith / agent identities to a
+  # silent ``force=True`` overwrite — never again. The explicit
+  # confirm in setup_wizard.py is the safety net; we keep it in place.
   if [[ $# -ge 1 ]]; then
     export JAEGER_SETUP_NAME="$1"
+    exec python -c "import os; from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False, instance_name=os.environ['JAEGER_SETUP_NAME'])"
   else
-    unset JAEGER_SETUP_NAME 2>/dev/null || true
+    exec python -c "from jaeger_os.core.instance.setup_wizard import run_wizard; run_wizard(force=False)"
   fi
-  exec python - <<'PYEOF'
-import os
-from jaeger_os.core.instance.setup_wizard import run_wizard
-run_wizard(force=True, instance_name=os.environ.get("JAEGER_SETUP_NAME") or None)
-PYEOF
 }
 
 cmd_list() {
-  exec python - <<'PYEOF'
-import sys
-from jaeger_os.main import _cli_list_instances
-sys.exit(_cli_list_instances())
-PYEOF
+  exec python -c "import sys; from jaeger_os.main import _cli_list_instances; sys.exit(_cli_list_instances())"
 }
 
 cmd_delete() {
@@ -80,15 +84,14 @@ cmd_delete() {
     exit 2
   fi
 
-  # Resolve the runtime instance dir via the same helper main.py uses, so
-  # JAEGER_INSTANCE_DIR overrides etc. are honoured.
+  # Resolve the runtime instance dir via the same helper main.py uses,
+  # so JAEGER_INSTANCE_DIR overrides etc. are honoured. ``python -c``
+  # (not a heredoc) for the same stdin-preservation reason as the
+  # interactive subcommands above — even though this one doesn't read
+  # input, keeping the call style consistent makes the dispatcher
+  # easier to reason about.
   local instance_dir
-  instance_dir=$(JAEGER_DEL_NAME="$name" python - <<'PYEOF'
-import os
-from jaeger_os.core.instance.instance import resolve_instance_dir
-print(resolve_instance_dir(os.environ["JAEGER_DEL_NAME"]))
-PYEOF
-)
+  instance_dir=$(JAEGER_DEL_NAME="$name" python -c "import os; from jaeger_os.core.instance.instance import resolve_instance_dir; print(resolve_instance_dir(os.environ['JAEGER_DEL_NAME']))")
   local user_dir="$REPO_ROOT/src/jaeger_os/agents/$name"
 
   local found=0

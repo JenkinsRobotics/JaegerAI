@@ -3,6 +3,54 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.5` — 2026-05-31
+
+Critical patch for the 0.2.4 management subcommands. Two bugs caught
+within minutes of cutting 0.2.4 by running the new flow against an
+existing instance on a real machine.
+
+### Fixed
+
+- **`./run.sh setup [NAME]` crashed with `EOFError: EOF when reading a
+  line` on the very first wizard prompt.** I'd called Python with a
+  bash heredoc (`python - <<EOF ... EOF`), which feeds the heredoc
+  body to the interpreter on stdin. That left no terminal stdin for
+  the wizard's `input()` calls — the first read hit EOF and the
+  whole flow died before the operator could type anything.
+  All four subcommand bodies now use `python -c "..."` so stdin
+  stays attached to the controlling terminal. List/delete also
+  benefit from the consistent call style.
+
+- **`./run.sh setup` silently backed up existing instances** rather
+  than asking. I'd passed `force=True` to `run_wizard()`, which
+  bypasses the wizard's own "this instance already exists — back it
+  up and start fresh?" confirm prompt. An operator running
+  `./run.sh setup` (no name → defaults to the current instance)
+  would see their live agent identity get moved to
+  `<dir>.bak.<timestamp>` without consent. Now `force=False` —
+  the wizard prompts before doing anything destructive.
+
+### Recovery for 0.2.4 operators
+
+If you ran `./run.sh setup` (no name argument) on 0.2.4 and lost your
+default instance, the backup is at
+`~/.jaeger/instances/<name>.bak.<timestamp>`. Restore with:
+
+```bash
+rm -rf ~/.jaeger/instances/default
+mv ~/.jaeger/instances/default.bak.* ~/.jaeger/instances/default
+```
+
+(Adjust the name if you weren't using the `default` instance.)
+
+### Upgrade
+
+```bash
+cd ~/jaeger && git pull && ./install.sh
+```
+
+---
+
 ## `0.2.4` — 2026-05-31
 
 Patch follow-ups for the 0.2.3 distribution overhaul. Three things,
