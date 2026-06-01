@@ -3370,9 +3370,20 @@ def main() -> int:
     # Interactive use (no one-shot prompt) → the TUI is the interface.
     # Every exit-flag mode is already handled above and no instance lock
     # is held yet, so this hand-off is clean: the TUI does its own boot.
+    #
+    # 0.2.6: thread --instance NAME through to the TUI. Pre-0.2.6 this
+    # called tui_main() with no args; the TUI then ignored argv,
+    # silently fell back to the deleted ``jaeger_os/instance/default/``
+    # bundled path, and auto-fired the wizard against ``default`` even
+    # when the operator had passed ``--instance jros-dev`` (or any
+    # other name). Pass the flag through as a CLI arg the TUI's own
+    # argparse honours.
     if not " ".join(args.prompt).strip():
         from .interfaces.tui.__main__ import main as tui_main
-        return tui_main()
+        tui_argv: list[str] = []
+        if args.instance:
+            tui_argv = ["--instance", args.instance]
+        return tui_main(tui_argv)
 
     # Lock
     lock = InstanceLock(layout)
