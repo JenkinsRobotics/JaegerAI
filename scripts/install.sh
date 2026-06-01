@@ -104,8 +104,9 @@ cat <<EOF
 
 Next steps:
   cd $JAEGER_HOME
-  ./run.sh --setup        # first-time wizard (memory tier, model choice)
-  ./run.sh                # launch the agent
+  ./run.sh                # first-time launch auto-fires the wizard
+                          # (memory tier, model choice, voice)
+  ./run.sh --force        # re-run the wizard against an existing instance
 
 Useful commands:
   ./run.sh start          # daemonised background agent

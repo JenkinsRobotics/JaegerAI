@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./run.sh                  # interactive TUI
-#   ./run.sh --setup          # first-time wizard
+#   ./run.sh --force          # re-run the first-time wizard
 #   ./run.sh start            # daemonised background agent
 #   ./run.sh status           # daemon status
 #   …all flags forward to src/jaeger_os/run.py

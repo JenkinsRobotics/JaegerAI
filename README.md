@@ -106,8 +106,17 @@ Then:
 
 ```bash
 cd ~/jaeger
-./run.sh --setup        # first-time wizard (memory tier, model choice)
-./run.sh                # launch the agent
+./run.sh                # first launch auto-fires the wizard
+                        # (memory tier, model choice, voice),
+                        # then drops you into the TUI
+```
+
+Need a specific instance name? Pass `--instance lilith` (or any name) —
+the wizard scaffolds it on first run:
+
+```bash
+./run.sh --instance lilith        # creates + launches "lilith"
+./run.sh --instance lilith --force   # re-run the wizard against it later
 ```
 
 That's the whole flow. The single install pulls the **entire**
@@ -156,7 +165,7 @@ for the full three-layer model.
 git clone https://github.com/JenkinsRobotics/JROS.git ~/jaeger
 cd ~/jaeger
 ./install.sh
-./run.sh --setup
+./run.sh           # first launch auto-fires the wizard
 ```
 
 ---

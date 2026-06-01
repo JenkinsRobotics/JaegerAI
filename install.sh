@@ -75,7 +75,7 @@ echo "✓ Local install complete"
 echo
 echo "Next steps:"
 echo "  ./run.sh              # launches the agent"
-echo "  ./run.sh --setup      # runs the first-time wizard"
+echo "  ./run.sh --force      # re-run the first-time wizard"
 echo
 echo "Optional — add to your shell rc for global access:"
 echo "  export PATH=\"\$PATH:$REPO_ROOT\""
