@@ -96,3 +96,7 @@ sandbox/
 .env
 .env.*
 !.env.example
+
+# 0.2.6 — operator state lives at <install_root>/.jaeger_os/
+# (instances/, agents/, models/, jaeger.env, backups/). Always ignored.
+.jaeger_os/
