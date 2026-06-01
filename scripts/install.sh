@@ -36,25 +36,41 @@ cat <<EOF
 
 EOF
 
-# 1. Prereqs
-for cmd in git python3; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    echo "✗ '$cmd' not found in PATH — install it first" >&2
-    exit 1
-  fi
-done
+# 1. Prereqs — git is required
+if ! command -v git >/dev/null 2>&1; then
+  echo "✗ 'git' not found in PATH — install it first" >&2
+  exit 1
+fi
 
-PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+# Python: prefer an explicit 3.12 / 3.11 binary if one is on PATH, fall back
+# to ``python3`` only as a last resort. macOS users often have
+# ``python3 → 3.13`` from Xcode CLT or the python.org installer while
+# their actual workable interpreter is ``python3.12`` from Homebrew.
+# Hitting the wrong one is the most common install-time failure, so
+# search explicitly rather than trusting ``python3``.
+PY="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"
+if [[ -z "$PY" ]]; then
+  echo "✗ No python3.12 / python3.11 / python3 found on PATH" >&2
+  echo "  hint: macOS — 'brew install python@3.12'" >&2
+  echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
+  exit 1
+fi
+
+PY_VERSION=$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 case "$PY_VERSION" in
   3.11|3.12) ;;
   *)
-    echo "✗ Python $PY_VERSION not supported (need 3.11 or 3.12)" >&2
+    echo "✗ Python $PY_VERSION at $PY is not supported (need 3.11 or 3.12)" >&2
     echo "  hint: macOS — 'brew install python@3.12'" >&2
     echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
+    echo "  after install, re-run this curl line — the script searches for" >&2
+    echo "  python3.12 / python3.11 explicitly before falling back to python3." >&2
     exit 1
     ;;
 esac
-echo "✓ prereqs OK (git, python$PY_VERSION)"
+echo "✓ prereqs OK (git, $PY → python$PY_VERSION)"
+# Export so the in-repo install.sh picks up the same interpreter.
+export PY
 
 # 2. Clone (or update existing)
 if [[ -d "$JAEGER_HOME/.git" ]]; then

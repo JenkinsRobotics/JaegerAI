@@ -27,10 +27,15 @@ echo "JROS local install"
 echo "  repo: $REPO_ROOT"
 echo
 
-# 1. Verify Python version
-PY="$(command -v python3.12 || command -v python3.11 || command -v python3)"
+# 1. Verify Python version. Respect a ``PY`` exported by the curl-side
+# installer (scripts/install.sh) — it already did the explicit-version
+# search and we don't want to disagree. Fall back to our own search
+# when invoked directly (``./install.sh`` from a fresh clone).
+PY="${PY:-$(command -v python3.12 || command -v python3.11 || command -v python3 || true)}"
 if [[ -z "${PY:-}" ]]; then
   echo "✗ python3 not found — install Python 3.11 or 3.12 first" >&2
+  echo "  hint: macOS — 'brew install python@3.12'" >&2
+  echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
   exit 1
 fi
 PY_VERSION=$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
