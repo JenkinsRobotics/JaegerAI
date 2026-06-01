@@ -263,13 +263,26 @@ def run_wizard(
 
     _banner("Welcome to Jaeger-OS")
     print()
-    print("  Let's set up your Jaeger. Six quick steps:")
+    # Show the install destination LOUDLY before anything else. The
+    # wizard never asks "where should this live?" — the path was set
+    # by the install (``curl … install.sh | bash`` → ~/jaeger/,
+    # ``JAEGER_HOME=/x`` override, ``source dev_env.sh`` redirect, …).
+    # Surfacing it explicitly here means an operator who didn't mean
+    # to land in the current install (e.g. accidentally inside the
+    # sandbox shell) can bail before typing anything.
+    print("  This agent will live at:")
+    print(f"    {layout.root}/")
+    print()
+    print("  Install location set by the install — to put an agent")
+    print("  somewhere else, cancel (Ctrl-C), re-install with a")
+    print("  different JAEGER_HOME, and re-run.")
+    print()
+    print("  Six quick steps:")
     print("    1. identity        4. interaction")
     print("    2. model           5. warm-up")
     print("    3. permissions     6. review")
     print()
     print("  Tip: prompts show a [default] in brackets — press Enter to accept.")
-    print(f"  Instance: {layout.root}")
 
     if layout.exists():
         if not force and not _ask_yn(
