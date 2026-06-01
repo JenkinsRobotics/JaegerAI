@@ -1,0 +1,80 @@
+"""Gemma 3 / 4 dialect.
+
+Presentation: **none**. Gemma's structured ``tools=`` path works through
+llama-cpp's function-calling handler, so injecting system-prompt prose
+would be redundant and risks perturbing a model that already routes
+well. :func:`render_tools` returns ``""`` by construction.
+
+Parsing: Gemma emits tool calls in three native shapes, all salvaged
+here (the model only ever speaks one, but builds vary):
+
+  * brace args:  ``<|tool_call>call:name{"k": "v"}<tool_call|>``
+  * paren kwargs: ``<|tool_call>call:name(key='value', n=3)<tool_call|>``
+  * legacy JSON envelope: ``<|tool_call|>{"name": …}<|/tool_call|>``
+
+Tool names allow ``:`` and ``/`` so MCP-qualified names like
+``mcp:web/fetch`` salvage.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from . import _shared
+
+
+# Gemma's three native envelopes. Order matters — it is preserved by the
+# package dispatcher so multi-call output ordering stays byte-for-byte
+# identical to the pre-refactor parser.
+NATIVE_PATTERNS = [
+    # <|tool_call>call:name{...}<tool_call|>  (brace args)
+    re.compile(
+        r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w:/.\-]*)\s*\{(.*?)\}\s*<tool_call\|>",
+        re.DOTALL,
+    ),
+    # <|tool_call>call:name(key='value')<tool_call|>  (paren kwargs)
+    re.compile(
+        r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w:/.\-]*)\s*\((.*?)\)\s*<tool_call\|>",
+        re.DOTALL,
+    ),
+    # <|tool_call|>…<|/tool_call|>   (legacy JSON envelope)
+    re.compile(r"<\|tool_call\|>\s*(.*?)\s*<\|/tool_call\|>", re.DOTALL),
+]
+
+
+def extract_native(text: str) -> list[dict[str, Any]]:
+    """Salvage Gemma's three native tool-call forms. Returns
+    ``[{name, args}]`` in pattern order, then match order within a
+    pattern."""
+    out: list[dict[str, Any]] = []
+    for pat_idx, pattern in enumerate(NATIVE_PATTERNS):
+        for match in pattern.finditer(text):
+            groups = match.groups()
+            if len(groups) == 2:
+                # Brace (pat 0) or paren (pat 1) args.
+                name = groups[0]
+                if pat_idx == 1:
+                    args: Any = _shared.parse_paren_args(groups[1])
+                else:
+                    args = _shared.parse_gemma_args(groups[1])
+                if not name:
+                    continue
+                if not isinstance(args, dict):
+                    args = {"value": args}
+                out.append({"name": str(name), "args": args})
+            else:
+                # Legacy JSON envelope (pat 2) — tolerant payload parse.
+                call = _shared.payload_to_call(groups[0])
+                if call:
+                    out.append(call)
+    return out
+
+
+def render_tools(tools: list[Any]) -> str:
+    """Gemma needs no prose injection — its structured ``tools=`` path
+    works. Always returns ``""``."""
+    return ""
+
+
+__all__ = ["extract_native", "render_tools", "NATIVE_PATTERNS"]

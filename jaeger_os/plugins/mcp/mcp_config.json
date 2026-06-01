@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "name": "web",
+      "enabled": true,
+      "command": "python",
+      "args": ["-m", "mcp_server_fetch"]
+    }
+  ]
+}
