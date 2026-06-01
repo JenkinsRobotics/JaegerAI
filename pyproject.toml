@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-os"
-version = "0.2.1"
+version = "0.2.2"
 description = "Jaeger-OS — a local-first agentic agent framework for embodied AI."
 readme = "README.md"
 # 3.11 / 3.12 only — several native deps (kokoro, pywhispercpp,

@@ -3,6 +3,40 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.2` — 2026-05-31
+
+Patch fix-ups for the 0.2.1 `models/` relocation. `repo_models_dir()`
+still pointed at the old `<repo>/models/` location even though the
+files had moved to `<repo>/src/jaeger_os/models/` in 0.2.1.
+
+### Fixed
+
+- **`repo_models_dir()` (`core/models/model_resolver.py`)** — now
+  resolves to the package-internal location
+  (`<repo>/src/jaeger_os/models/`) first, with the pre-0.2.1
+  `<repo>/models/` location preserved as a fallback so older dev
+  checkouts still work.
+- **Resolver docstring + module docstring** — updated to describe
+  the new path. The `History:` notes call out the 0.2.1 move so a
+  reader of older code understands the migration.
+- **`MANIFEST.in`** — dropped the now-incorrect
+  `include models/README.md` line (the README is covered by the
+  existing `recursive-include src/jaeger_os *.md` rule). Added an
+  explicit `global-exclude *.gguf` belt-and-suspenders so weight
+  files never accidentally ship in the sdist.
+- **`MANIFEST.in` `docs/` references** — bumped to `"dev docs/"`
+  (the post-0.2.1 folder name); the old `docs/` paths would have
+  been no-ops since the folder doesn't exist anymore.
+
+### Result
+
+**1670 tests passing.** `repo_models_dir()` now returns
+`<repo>/src/jaeger_os/models/`. Anyone installing
+`git+...JROS.git@0.2.2` gets a model resolver that matches the
+on-disk layout.
+
+---
+
 ## `0.2.1` — 2026-05-31
 
 Patch theme: **architectural refactor — formal System / Runtime /
