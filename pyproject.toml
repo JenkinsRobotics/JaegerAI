@@ -1,29 +1,34 @@
 # JROS — Jaeger-OS.
 #
-# 0.2.3: JROS is no longer distributed as a pip package. Operators
+# 0.2.3+: JROS is no longer distributed as a pip package. Operators
 # clone the repo and run ./install.sh (or use the one-line curl
 # installer in scripts/install.sh). Runtime dependencies are pinned
-# in ../requirements.txt. The README has the full install flow.
+# in requirements.txt. The README has the full install flow.
 #
 # This file only carries config for dev tooling (pytest, ruff). The
-# package itself is imported by adding `src/` to PYTHONPATH (which
-# run.sh does automatically), not by installing it.
+# package itself is imported by adding the install root to PYTHONPATH
+# (which run.sh does automatically), not by installing it.
 #
-# Background on the move from pip:
-#   - JROS is an app, not a library — Hermes-Agent, ComfyUI, A1111 and
-#     the like all use a git-clone + venv install rather than pip.
-#   - Putting weights, models, and per-agent workspaces inside a
-#     site-packages tree was confusing operators about where their
-#     data lived.
-#   - Upgrades via `git pull && ./install.sh` are clearer and faster
-#     than `pip install --upgrade jaeger-os`.
-# See `dev docs/setup.md` for the canonical install / upgrade story.
+# 0.2.6: dev-only material moved under dev_-prefixed directories so the
+# repo root makes the framework/dev distinction obvious:
+#
+#   <repo>/
+#   ├── jaeger_os/        ← framework code (the product)
+#   ├── install.sh, run.sh, requirements.txt, scripts/install.sh
+#   ├── README.md, CHANGELOG.md, LICENSE
+#   ├── dev_docs/         ← architecture, design notes (dev)
+#   ├── dev_tests/        ← test suite (dev)
+#   ├── dev_benchmark/    ← bench corpus + harness (dev)
+#   ├── dev_scripts/      ← dev_env.sh, run_tests.sh, … (dev)
+#   └── sandbox/          ← in-repo test install (gitignored)
+#
+# See dev_docs/setup.md for the canonical install / upgrade story.
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["dev_tests"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration
 # suites take real wall time. Mark them and skip by default; the
-# ``scripts/run_tests.sh`` driver picks the right subset for CI vs
+# ``dev_scripts/run_tests.sh`` driver picks the right subset for CI vs
 # local iteration. New tests should pick the closest marker that
 # applies (or none — unmarked = fast deterministic unit test).
 markers = [

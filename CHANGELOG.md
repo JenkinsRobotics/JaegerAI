@@ -184,7 +184,7 @@ where it belongs.
   in-repo `install.sh` picks up the same one.
 
 - **`--setup` flag mentioned in 0.2.3 docs doesn't exist.** README,
-  `dev docs/setup.md`, `install.sh`, `run.sh`, and `scripts/install.sh`
+  `dev_docs/setup.md`, `install.sh`, `run.sh`, and `scripts/install.sh`
   all pointed at a `--setup` flag that argparse would reject with
   `unrecognized arguments: --setup`. Wizard invocation in 0.2.3 was
   via auto-fire-on-first-run or `--force`. 0.2.4 makes the right
@@ -295,7 +295,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
   root. Gitignored except for the README and `.gitignore` itself —
   upstream JROS never ships agent content; users populate it
   manually or via `jaeger create-agent`.
-- **`dev docs/setup.md`** — canonical install / upgrade / uninstall
+- **`dev_docs/setup.md`** — canonical install / upgrade / uninstall
   guide. Covers prereqs, the curl one-liner, version pinning,
   custom install locations, multi-instance setups, developer
   install, and troubleshooting.
@@ -314,7 +314,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
 │   └── agents/                        ← "User" layer (gitignored)
 │       ├── lilith/
 │       └── eren/
-├── tests/, benchmark/, dev docs/
+├── tests/, benchmark/, dev_docs/
 └── pyproject.toml                     ← pytest config only
 ```
 
@@ -365,7 +365,7 @@ files had moved to `<repo>/src/jaeger_os/models/` in 0.2.1.
   existing `recursive-include src/jaeger_os *.md` rule). Added an
   explicit `global-exclude *.gguf` belt-and-suspenders so weight
   files never accidentally ship in the sdist.
-- **`MANIFEST.in` `docs/` references** — bumped to `"dev docs/"`
+- **`MANIFEST.in` `docs/` references** — bumped to `"dev_docs/"`
   (the post-0.2.1 folder name); the old `docs/` paths would have
   been no-ops since the folder doesn't exist anymore.
 
@@ -391,7 +391,7 @@ user customisation.
 ### Architecture — System / Runtime / User layers
 
 New canonical reference at
-[`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md).
+[`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md).
 Every persistent file in a JROS deployment now belongs to exactly one
 of three layers:
 
@@ -422,7 +422,7 @@ release boundary.
 
 ### Repo housekeeping
 
-- **`docs/` → `dev docs/`** — the top-level docs folder is now
+- **`docs/` → `dev_docs/`** — the top-level docs folder is now
   clearly developer documentation (audits, design docs, status notes
   for contributors working *on* JROS). User-facing setup runbooks
   live in downstream consumer repos (e.g. `Lilith-AI/docs/SETUP.md`).

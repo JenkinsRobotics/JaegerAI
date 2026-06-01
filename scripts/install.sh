@@ -14,7 +14,7 @@
 #   1. Verify prereqs (git, python 3.11/3.12).
 #   2. Clone JROS to $JAEGER_HOME (default ~/jaeger).
 #   3. Run the in-repo ./install.sh — creates .venv, installs deps,
-#      scaffolds src/jaeger_os/agents/, ensures ~/.jaeger/ exists.
+#      scaffolds <install_root>/.jaeger_os/ for instance state.
 #   4. Print next-step instructions.
 #
 # Idempotent: re-running on an existing clone runs `git pull` and
@@ -116,11 +116,10 @@ Useful commands:
   ./run.sh status         # daemon status
   git pull && ./install.sh   # upgrade JROS
 
-Per-agent workspaces live at:
-  $JAEGER_HOME/src/jaeger_os/agents/<name>/
-
-Runtime state (memory, daemon socket, logs):
-  ~/.jaeger/instances/<name>/
+Each agent is self-contained at:
+  $JAEGER_HOME/.jaeger_os/instances/<name>/
+    (identity, persona, config, memory, skills, prompts, workspace,
+    logs, credentials — all per agent)
 
 Optional — add JROS to your PATH:
   echo 'export PATH="\$PATH:$JAEGER_HOME"' >> ~/.zshrc
