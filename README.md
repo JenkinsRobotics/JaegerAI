@@ -155,16 +155,17 @@ JAEGER_HOME=/opt/jaeger curl -fsSL \
   https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
 ```
 
-**Where everything lives** — three layers, cleanly separated:
+**Where everything lives** — two clear buckets, side by side:
 
 | Layer | Path | What |
 |---|---|---|
-| **System** | `~/jaeger/` | The framework (this repo, owned by git) |
-| **Runtime** | `~/.jaeger/instances/<name>/` | Memory, daemon socket, logs |
-| **User** | `~/jaeger/src/jaeger_os/agents/<name>/` | Your personas, skills, files |
+| **Framework** | `~/jaeger/jaeger_os/` | The code (git-tracked, upgraded by `git pull`) |
+| **Operator state** | `~/jaeger/.jaeger_os/instances/<name>/` | Each agent's persona, config, memory, skills, prompts, workspace, logs, credentials — one folder per agent |
 
-See [`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md)
-for the full three-layer model.
+The two sibling dirs at the install root make the framework / operator
+split obvious. Operator state is fully `.gitignore`d; framework upgrades
+never touch it. See [`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md)
+for the design rationale.
 
 **Manual install (no curl)** — if you'd rather see every step:
 
@@ -194,25 +195,35 @@ config file plus a logic node — not a fork of the runtime.
 ## Repo Layout
 
 ```
-JROS/                      ← clone goes here (default ~/jaeger)
-├── install.sh             ← venv + deps; safe to re-run
-├── run.sh                 ← launcher (activates venv, runs run.py)
-├── requirements.txt       ← runtime deps (pip-installed into .venv)
-├── scripts/install.sh     ← the curl one-liner target
-├── src/jaeger_os/         ← the framework package
-│   ├── run.py             ← entry point (thin wrapper around main:main)
-│   ├── agents/            ← per-agent workspaces (gitignored, user-owned)
-│   ├── core/, plugins/, skills/, prompts/  ← framework internals
-│   └── models/            ← downloaded GGUF weights
-├── tests/                 ← framework test suite
-├── benchmark/             ← bench corpus + sweep + sanity probe
-├── dev docs/              ← architecture + setup docs (for JROS devs)
-├── pyproject.toml         ← test/lint config only (no pip packaging)
-└── LICENSE                ← Apache-2.0
+JROS/                       ← clone goes here (default ~/jaeger)
+├── install.sh              ← venv + deps; safe to re-run
+├── run.sh                  ← launcher
+├── requirements.txt        ← runtime deps (installed into .venv)
+├── scripts/install.sh      ← curl one-liner target (user-facing)
+├── jaeger_os/              ← framework code (git-tracked)
+│   ├── run.py, main.py     ← entry points
+│   ├── core/, plugins/, skills/, prompts/, assets/, daemon/, interfaces/
+│   ├── migrations/         ← per-version migration scripts
+│   └── models/             ← downloaded GGUF weights (gitignored except README)
+├── .jaeger_os/             ← operator state (gitignored)
+│   ├── instances/<name>/   ← each agent's full state, one folder per agent
+│   ├── models/             ← shared model cache
+│   ├── backups/            ← `./run.sh backup` output
+│   └── jaeger.env          ← sourceable instance pin
+├── dev_docs/               ← architecture + design notes
+├── dev_tests/              ← framework test suite
+├── dev_benchmark/          ← bench corpus + sweep + sanity probe
+├── dev_scripts/            ← dev_env.sh, run_tests.sh, generators
+├── sandbox/                ← in-repo isolated test install (gitignored)
+├── pyproject.toml          ← pytest + ruff config
+├── README.md, CHANGELOG.md, LICENSE
+└── .git/, .gitignore
 ```
 
-Runtime state — memory, daemon socket, logs — is **outside the repo**
-at `~/.jaeger/instances/<name>/`, so `git pull` never disturbs it.
+Two clear buckets at the install root: `jaeger_os/` (framework, owned
+by upstream) and `.jaeger_os/` (operator state, gitignored). `git pull`
+only touches the first; instance memory/logs/credentials survive every
+upgrade.
 
 ---
 
@@ -256,17 +267,17 @@ failure → `DQ` regardless of other scores).
 
 | Doc | What |
 |---|---|
-| [`dev docs/setup.md`](dev%20docs/setup.md) | Canonical install, upgrade, and uninstall guide |
-| [`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
-| [`dev docs/external_models.md`](dev%20docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
-| [`dev docs/deep_think_design.md`](dev%20docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
-| [`dev docs/marketplace_spec.md`](dev%20docs/marketplace_spec.md) | The skill marketplace |
-| [`dev docs/physical_skills_status.md`](dev%20docs/physical_skills_status.md) | Where embodiment / physical skills stand |
-| [`dev docs/kanban_design.md`](dev%20docs/kanban_design.md) | The kanban task board |
-| [`dev docs/hermes_tool_parity.md`](dev%20docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
+| [`dev_docs/setup.md`](dev_docs/setup.md) | Canonical install, upgrade, and uninstall guide |
+| [`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
+| [`dev_docs/external_models.md`](dev_docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
+| [`dev_docs/deep_think_design.md`](dev_docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
+| [`dev_docs/marketplace_spec.md`](dev_docs/marketplace_spec.md) | The skill marketplace |
+| [`dev_docs/physical_skills_status.md`](dev_docs/physical_skills_status.md) | Where embodiment / physical skills stand |
+| [`dev_docs/kanban_design.md`](dev_docs/kanban_design.md) | The kanban task board |
+| [`dev_docs/hermes_tool_parity.md`](dev_docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
 
 The full JROS spec — architecture, transport, the node standard, the agent
-and skill systems — continues to land under `dev docs/`.
+and skill systems — continues to land under `dev_docs/`.
 
 ---
 
