@@ -1676,7 +1676,22 @@ class JaegerTUI:
 
     def _shutdown(self) -> None:
         """Tear down the turn worker, the mic, and the pipeline on REPL
-        exit. Idempotent enough to run from the REPL's finally block."""
+        exit. Idempotent enough to run from the REPL's finally block.
+
+        0.2.6: previously this left llama-cpp's Metal backend, Kokoro's
+        audio stream, and Whisper's Metal backend to be finalised by
+        Python's interpreter-shutdown GC. Three native libraries' GC
+        finalisers were racing each other AND PortAudio's CoreAudio
+        callback threads — Obj-C runtime sometimes hit a freed handle
+        from the wrong thread and the process exited with
+        ``zsh: segmentation fault``.
+
+        New order: explicit ordered teardown HERE, in this frame, while
+        we still hold the GIL and the audio callback threads are still
+        alive. Drop our references and force a ``gc.collect()`` so
+        finalisers fire deterministically; THEN let the audio threads
+        wind down.
+        """
         # Cancel any in-flight turn so the worker unwinds promptly.
         try:
             from jaeger_os.main import request_turn_cancel
@@ -1701,6 +1716,48 @@ class JaegerTUI:
         self._agent = None
         self._client = None
         self._boot = None
+
+        # Stop any TTS playback currently in flight. Kokoro queues audio
+        # through sounddevice; if a stream is still active when we hand
+        # off to interpreter shutdown the CoreAudio callback thread can
+        # touch a freed Python object → segfault.
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+        # Drop the global pipeline references (set by ``init_extensions``)
+        # so the next collect() can finalise llama-cpp + Whisper here,
+        # not during interpreter shutdown.
+        try:
+            from jaeger_os.main import _pipeline
+            for key in (
+                "client", "agent", "thinking_runner",
+                "tts_node", "stt_node", "whisper", "voice_pipeline",
+            ):
+                _pipeline.pop(key, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Force a deterministic finalisation pass. Two collect() rounds
+        # because freeing one wrapper can release the last reference to
+        # another (Kokoro pipeline → audio stream → sounddevice handle).
+        try:
+            import gc
+            gc.collect()
+            gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Brief grace so PortAudio's CoreAudio callback thread finishes
+        # its current frame before we let the Python interpreter start
+        # tearing down its own state.
+        try:
+            import time
+            time.sleep(0.05)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ── Entry point ─────────────────────────────────────────────────────
