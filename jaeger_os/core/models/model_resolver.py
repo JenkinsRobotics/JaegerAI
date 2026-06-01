@@ -79,6 +79,27 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "Auto-downloads (~17.4 GB) on first Deep Think entry."
         ),
     },
+    # ── Deep Think general-purpose model ───────────────────────────
+    # 0.2.6: the 32 GB tier's recommended asleep model returned by
+    # ``host_recommendation`` is ``qwen3-30b-a3b-q4_k_m`` (the non-
+    # coder Qwen3 30B MoE) but the registry only had the coder
+    # variant. That made the wizard claim "will download ~17.3 GB"
+    # for operators who already had Qwen3-30B-A3B-Q4_K_M.gguf in
+    # LM Studio — discovery found the file, but match_to_registry
+    # couldn't pair it to a key. Adding the entry fixes that.
+    "qwen3-30b-a3b-q4_k_m": {
+        "hf_repo": "lmstudio-community/Qwen3-30B-A3B-GGUF",
+        "hf_file": "Qwen3-30B-A3B-Q4_K_M.gguf",
+        "size_gb": 17.3,
+        "role": "deep_think",
+        "verified": True,
+        "description": (
+            "Qwen3 30B MoE (3B active), Q4_K_M. General-purpose "
+            "deep-think / kanban model — same 30B MoE backbone as "
+            "the coder variant but trained without the code-specific "
+            "tuning. Recommended asleep model at the 32 GB tier."
+        ),
+    },
 }
 
 
