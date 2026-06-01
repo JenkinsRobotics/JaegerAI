@@ -1,16 +1,26 @@
 #!/bin/bash
-# JROS launcher — activates the venv and invokes the agent.
+# JROS launcher — entry point for everything you do with the agent.
 #
-# Usage:
-#   ./run.sh                  # interactive TUI
-#   ./run.sh --force          # re-run the first-time wizard
-#   ./run.sh start            # daemonised background agent
-#   ./run.sh status           # daemon status
-#   …all flags forward to src/jaeger_os/run.py
+# AGENT MANAGEMENT
+#   ./run.sh setup [NAME]      Create a new agent (or re-run wizard against
+#                              an existing one). Default name is auto-picked.
+#   ./run.sh list              List every agent installed on this machine.
+#   ./run.sh delete NAME       Remove an agent (prompts to confirm).
 #
-# This script is the supported entry point in the git-clone install model
-# (see scripts/install.sh). The `jaeger` / `jaeger-os` console scripts from
-# the old pip-install era have been retired.
+# LAUNCH
+#   ./run.sh                   Launch the default agent (wizard auto-fires
+#                              if no instance exists yet).
+#   ./run.sh --instance NAME   Launch a specific agent (wizard auto-fires
+#                              if NAME doesn't exist yet).
+#   ./run.sh start             Daemonised background agent.
+#   ./run.sh status            Daemon status.
+#
+# INFO
+#   ./run.sh help              Show this message.
+#   ./run.sh --help            Forward to run.py's full argparse help.
+#
+# Any args not starting with a management subcommand fall through to
+# src/jaeger_os/run.py, so every existing CLI flag still works unchanged.
 
 set -euo pipefail
 
@@ -23,16 +33,147 @@ if [[ ! -d "$VENV" ]]; then
   exit 1
 fi
 
-# Activate venv so child processes (browser, MCP servers) inherit it
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# Put src/ on PYTHONPATH so `jaeger_os` is importable without an
-# `editable install`. Idempotent: only prepend if not already there.
 SRC="$REPO_ROOT/src"
 case ":${PYTHONPATH:-}:" in
   *":$SRC:"*) ;;
   *) export PYTHONPATH="$SRC${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
-exec python "$REPO_ROOT/src/jaeger_os/run.py" "$@"
+# ── Subcommand dispatcher ────────────────────────────────────────────
+#
+# All management subcommands are thin shells around helpers that already
+# exist in jaeger_os.core.instance and jaeger_os.main. We do the dispatch
+# in bash rather than as argparse subparsers in main.py because (a)
+# main.py's CLI is large and turbulent, (b) the launcher script is the
+# natural place for user-facing UX, and (c) the bash form is easy to
+# extend.
+
+cmd_setup() {
+  # Pass the optional NAME via environment to dodge shell-quoting traps.
+  if [[ $# -ge 1 ]]; then
+    export JAEGER_SETUP_NAME="$1"
+  else
+    unset JAEGER_SETUP_NAME 2>/dev/null || true
+  fi
+  exec python - <<'PYEOF'
+import os
+from jaeger_os.core.instance.setup_wizard import run_wizard
+run_wizard(force=True, instance_name=os.environ.get("JAEGER_SETUP_NAME") or None)
+PYEOF
+}
+
+cmd_list() {
+  exec python - <<'PYEOF'
+import sys
+from jaeger_os.main import _cli_list_instances
+sys.exit(_cli_list_instances())
+PYEOF
+}
+
+cmd_delete() {
+  local name="${1:-}"
+  if [[ -z "$name" ]]; then
+    echo "usage: ./run.sh delete NAME" >&2
+    exit 2
+  fi
+
+  # Resolve the runtime instance dir via the same helper main.py uses, so
+  # JAEGER_INSTANCE_DIR overrides etc. are honoured.
+  local instance_dir
+  instance_dir=$(JAEGER_DEL_NAME="$name" python - <<'PYEOF'
+import os
+from jaeger_os.core.instance.instance import resolve_instance_dir
+print(resolve_instance_dir(os.environ["JAEGER_DEL_NAME"]))
+PYEOF
+)
+  local user_dir="$REPO_ROOT/src/jaeger_os/agents/$name"
+
+  local found=0
+  echo "About to delete agent '$name':"
+  if [[ -d "$instance_dir" ]]; then
+    echo "  runtime:      $instance_dir"
+    found=1
+  fi
+  if [[ -d "$user_dir" ]]; then
+    echo "  user content: $user_dir"
+    found=1
+  fi
+  if [[ "$found" -eq 0 ]]; then
+    echo "  (nothing to delete — '$name' is not installed)" >&2
+    exit 1
+  fi
+
+  echo
+  echo "This is permanent. Memory, daemon state, and per-agent content"
+  echo "will be removed. Persona/skills can be reinstated if you have a copy."
+  echo
+  read -r -p "Type the agent name to confirm: " confirm
+  if [[ "$confirm" != "$name" ]]; then
+    echo "Cancelled — name did not match."
+    exit 1
+  fi
+
+  [[ -d "$instance_dir" ]] && rm -rf "$instance_dir"
+  [[ -d "$user_dir"     ]] && rm -rf "$user_dir"
+  echo "✓ deleted '$name'"
+}
+
+cmd_help() {
+  cat <<'EOF'
+JROS launcher — entry point for everything you do with the agent.
+
+AGENT MANAGEMENT
+  ./run.sh setup [NAME]      Create a new agent (or re-run wizard against
+                             an existing one). Default name is auto-picked.
+  ./run.sh list              List every agent installed on this machine.
+  ./run.sh delete NAME       Remove an agent (prompts to confirm).
+
+LAUNCH
+  ./run.sh                   Launch the default agent (wizard auto-fires
+                             if no instance exists yet).
+  ./run.sh --instance NAME   Launch a specific agent (wizard auto-fires
+                             if NAME doesn't exist yet).
+  ./run.sh start             Daemonised background agent.
+  ./run.sh status            Daemon status.
+
+INFO
+  ./run.sh help              Show this message.
+  ./run.sh --help            Forward to run.py's full argparse help.
+
+Examples:
+  ./run.sh setup lilith       # create the lilith agent
+  ./run.sh list               # see what's installed
+  ./run.sh --instance lilith  # launch lilith
+  ./run.sh delete eren        # remove eren after typing the name to confirm
+
+For the full argparse surface (credentials, --doctor, --self-test, etc.):
+  ./run.sh --help
+EOF
+}
+
+case "${1:-}" in
+  setup)
+    shift
+    cmd_setup "$@"
+    ;;
+  list|ls)
+    shift
+    cmd_list "$@"
+    ;;
+  delete|rm)
+    shift
+    cmd_delete "$@"
+    ;;
+  help)
+    shift
+    cmd_help "$@"
+    ;;
+  *)
+    # Default: forward everything to run.py (handles --instance, --help,
+    # bare launch, start/status/daemon, prompts, etc.).
+    exec python "$REPO_ROOT/src/jaeger_os/run.py" "$@"
+    ;;
+esac

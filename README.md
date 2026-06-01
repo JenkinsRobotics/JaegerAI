@@ -106,17 +106,24 @@ Then:
 
 ```bash
 cd ~/jaeger
-./run.sh                # first launch auto-fires the wizard
-                        # (memory tier, model choice, voice),
-                        # then drops you into the TUI
+./run.sh setup           # create your first agent (wizard: memory tier,
+                         # model choice, voice). Default name is auto-picked.
+./run.sh                 # launch the default agent
 ```
 
-Need a specific instance name? Pass `--instance lilith` (or any name) —
-the wizard scaffolds it on first run:
+Or scaffold a named agent:
 
 ```bash
-./run.sh --instance lilith        # creates + launches "lilith"
-./run.sh --instance lilith --force   # re-run the wizard against it later
+./run.sh setup lilith         # create "lilith" via the wizard
+./run.sh --instance lilith    # launch "lilith"
+```
+
+Manage multiple agents:
+
+```bash
+./run.sh list                 # show every installed agent
+./run.sh delete eren          # remove "eren" (asks you to type the name)
+./run.sh help                 # full subcommand cheatsheet
 ```
 
 That's the whole flow. The single install pulls the **entire**
@@ -165,7 +172,8 @@ for the full three-layer model.
 git clone https://github.com/JenkinsRobotics/JROS.git ~/jaeger
 cd ~/jaeger
 ./install.sh
-./run.sh           # first launch auto-fires the wizard
+./run.sh setup     # create your first agent
+./run.sh           # launch it
 ```
 
 ---

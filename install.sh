@@ -74,8 +74,10 @@ echo
 echo "✓ Local install complete"
 echo
 echo "Next steps:"
-echo "  ./run.sh              # launches the agent"
-echo "  ./run.sh --force      # re-run the first-time wizard"
+echo "  ./run.sh setup        # create your first agent (runs the wizard)"
+echo "  ./run.sh              # launch the default agent"
+echo "  ./run.sh list         # list installed agents"
+echo "  ./run.sh help         # full subcommand cheatsheet"
 echo
 echo "Optional — add to your shell rc for global access:"
 echo "  export PATH=\"\$PATH:$REPO_ROOT\""

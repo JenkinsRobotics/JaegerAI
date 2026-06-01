@@ -104,9 +104,12 @@ cat <<EOF
 
 Next steps:
   cd $JAEGER_HOME
-  ./run.sh                # first-time launch auto-fires the wizard
-                          # (memory tier, model choice, voice)
-  ./run.sh --force        # re-run the wizard against an existing instance
+  ./run.sh setup           # create your first agent (wizard: memory tier,
+                           # model choice, voice)
+  ./run.sh setup lilith    # …or name it explicitly
+  ./run.sh                 # launch the default agent
+  ./run.sh list            # see all installed agents
+  ./run.sh help            # subcommand cheatsheet
 
 Useful commands:
   ./run.sh start          # daemonised background agent
