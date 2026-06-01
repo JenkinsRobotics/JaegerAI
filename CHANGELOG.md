@@ -5,6 +5,197 @@ understanding that pre-1.0 minor bumps may carry breaking changes.
 
 ## `0.2.6` — 2026-05-31
 
+**Layout unification + wizard polish.** The biggest single release
+since the 0.2.3 distribution overhaul. Two sibling directories at
+the install root:
+
+```
+~/jaeger/                          ← install root
+├── jaeger_os/                      ← framework code (git-tracked)
+└── .jaeger_os/                     ← operator state (gitignored)
+    └── instances/<name>/            ← each agent, fully self-contained
+```
+
+`ls ~/jaeger/` shows the framework and your data side by side. No
+hidden `~/.jaeger/` dotdir, no `src/` indirection, no separate User
+layer. `git pull` touches only `jaeger_os/`; instances survive every
+upgrade.
+
+### Layout
+
+- **`src/jaeger_os/` → `jaeger_os/`** at the install root. Drop one
+  level of nesting; `cd ~/jaeger && ls` shows the framework
+  directly. `import jaeger_os` still works — `run.sh` exports
+  `PYTHONPATH=$REPO_ROOT`.
+- **Runtime state moves from `~/.jaeger/` to
+  `<install_root>/.jaeger_os/`.** New `install_root()` helper reads
+  `$JAEGER_HOME` (set by `run.sh`) or falls back to
+  `PACKAGE_ROOT.parent`. `user_instances_root()`,
+  `active_instance_path()`, `user_cache_dir()` (model cache),
+  the wizard's `jaeger.env` writer, backups dir, and the local-
+  discovery scan paths all flow through it.
+- **Drop the 0.2.1 User layer entirely.** `UserConfig`,
+  `Config.user`, `resolve_user_dir()`, and the in-package
+  `jaeger_os/agents/` scaffold gone. Personas, custom skills, prompt
+  overlays, files, memory, logs, and credentials all live inside
+  `.jaeger_os/instances/<name>/` in one folder per agent. To share
+  an agent, zip the folder.
+- **Legacy 0.1.0-shape migration code deleted.** Prototype-era;
+  nothing operational depended on it. The 0.2.5 → 0.2.6 transition
+  also has no migration — fresh `./run.sh setup` is the path.
+
+### Sandbox — true isolation
+
+- **`sandbox/` is a full miniature install** rather than a Runtime-
+  layer redirect. The first cut symlinked the framework (live dev
+  edits!) — that was wrong: an agent in the sandbox might edit
+  framework files, and a symlink leaks straight into the parent.
+  Now: real `rsync` copy. Agent edits stay in the sandbox, parent
+  stays clean.
+- **`dev_scripts/dev_env.sh --refresh`** explicitly re-syncs the
+  parent's `jaeger_os/` over the sandbox copy. Sync point is
+  operator-controlled, never implicit.
+- **Verified directly:** writing `__sandbox_marker.py` into
+  `sandbox/jaeger_os/` did NOT touch the parent. `--refresh`
+  removed the marker.
+
+### Wizard polish
+
+The 0.2.3–0.2.5 cycle shipped reactive patches on wizard friction.
+0.2.6 catches up by walking the flow:
+
+- **Banner says "Seven quick steps"** (was "Five"; `_TOTAL_STEPS = 7`
+  was right since 0.2.0, intro never matched). Lists all step names.
+  Adds a "Tip: prompts show a `[default]` in brackets — press Enter
+  to accept" line.
+- **Step 1 role prompt** brackets disambiguated — length hint moved
+  to `(≤256 chars)` so it stops colliding with the `[default]`
+  suffix.
+- **Step 2 redesign — auto-discover GGUFs + separate awake/asleep:**
+  - New `core/models/local_discovery.py` scans `~/.lmstudio/models`,
+    `~/Library/.../LM Studio/models`, `~/.cache/huggingface/hub`,
+    `~/Models`, the in-tree models dir, the operator-state cache,
+    and `$JAEGER_MODEL_SCAN_PATHS`. Found 16 GGUFs on the dev
+    machine cold.
+  - Awake model: separate prompt — recommended / registry /
+    discovered / custom. Recommended annotated `✓ found locally
+    (LM Studio)` or `will download ~N GB`.
+  - Asleep model: separate prompt, same options + "Same as awake
+    — no swap, saves memory".
+  - "Use recommended" + file on disk → auto-symlink into
+    `jaeger_os/models/`; no Hugging Face round-trip.
+  - 12 unit tests for the discovery module.
+- **Step 4 interaction prompt** drops the retired `jaeger` CLI
+  reference. Stale "PyQt6 GUI is landing in 0.2.0 (Group 3)"
+  replaced with "planned for a future release". Voice step's
+  "0.2.0" version pin dropped.
+- **Vision prompt removed.** Moondream2 wired in `core/tools/
+  vision.py` but no test coverage and no bench case in 0.2.x —
+  surfacing it implied a first-class feature it isn't. Hard-coded
+  `warm_vision = False`; flip via `config.yaml` if needed. Returns
+  to the wizard when 0.3.0 lands proper validation.
+- **Subprocess HOME prompt removed.** Power-user feature; ~95% of
+  operators want the default (inherit). Moved to `config.yaml`
+  opt-in via `subprocess.use_instance_home`.
+- **Wizard goes from 7 → 6 steps.**
+- **Step 6 review** now lists Personality + Awake + Asleep models
+  (previously hidden). When awake = asleep: "(same as awake — no
+  swap)".
+- **Post-wizard message.** New `boot_after` param (default `True`
+  for `main.py` auto-fire; `False` from `./run.sh setup`). When
+  `False`: "Done — instance ready to launch." with explicit launch
+  + re-config commands instead of a lying "Booting now…".
+
+### Dev-only folders gain `dev_` prefix
+
+Every top-level dir is now obviously framework-vs-dev:
+
+| Before | After |
+|---|---|
+| `dev docs/` | `dev_docs/` (also kills the space) |
+| `tests/` | `dev_tests/` |
+| `benchmark/` | `dev_benchmark/` |
+| `scripts/install.sh` | `scripts/install.sh` (unchanged — curl URL must hold) |
+| `scripts/run_tests.sh` | `dev_scripts/run_tests.sh` |
+| `scripts/dev_env.sh` | `dev_scripts/dev_env.sh` |
+| `scripts/check_wheel.py` | `dev_scripts/check_wheel.py` |
+| `scripts/generate_agent_contract.py` | `dev_scripts/generate_agent_contract.py` |
+| `dist/` | deleted (leftover from old pip era) |
+
+`scripts/` stays because the curl install URL is hard-baked to
+`…/master/scripts/install.sh` in every doc and every prior release.
+
+Path references touched: `pyproject.toml testpaths`, `daemon/cli.py`
+bench scripts, `daemon/bench_history_verb.py` HISTORY/sweep/flat/
+sanity paths, `daemon/bench_compare_verb.py` sweep_script,
+`dev_scripts/run_tests.sh`, `dev_scripts/generate_agent_contract.py`
+(source + emitted-doc paths), `docs/agent_contract.md` regenerated,
+`.gitignore` patterns swept from `benchmark/**` to `dev_benchmark/**`.
+
+### Retired-CLI string sweep
+
+The 0.2.3 cut from pip-install retired the `jaeger` console scripts.
+Last user-facing strings still pointing at them:
+
+- `main.py` `./run.sh list` empty-state hint
+- `daemon/instance_verbs.py` × 3 empty-state hints + 1 "instance
+  not found" recovery suggestion
+- `plugins/messaging_gateway.py` + `plugins/voice_loop.py` "not
+  initialized" recovery hint
+- `core/runtime/preflight.py` pip-install method advice + missing
+  `config.yaml` check
+
+Subsystem prefix labels (`[jaeger backup]`, `[jaeger update]` in
+log lines) left as-is — module identifiers, not directives.
+
+### Fixed
+
+- **`./run.sh setup` crashed with `EOFError: EOF when reading a
+  line`** on the first wizard prompt (0.2.4 regression). The
+  subcommand invoked Python via a bash heredoc, leaving no terminal
+  stdin for `input()`. All subcommand invocations now use
+  `python -c "..."`.
+- **`./run.sh setup` silently backed up existing instances.** The
+  subcommand passed `force=True`, bypassing the wizard's confirm
+  prompt. Now `force=False` — the wizard prompts.
+
+### Migration
+
+No automated migration. Instances on 0.2.5 lived under
+`~/.jaeger/instances/`; 0.2.6 lives under
+`<install_root>/.jaeger_os/instances/`. Either:
+
+1. Run `./run.sh setup` against a fresh instance (recommended —
+   prototype state, fresh start), or
+2. Manually:
+   ```bash
+   mkdir -p ~/jaeger/.jaeger_os
+   cp -r ~/.jaeger/instances ~/jaeger/.jaeger_os/
+   cp -r ~/.jaeger/models     ~/jaeger/.jaeger_os/ 2>/dev/null || true
+   ```
+   Strip any `user:` block from `config.yaml` (0.2.1-era User layer
+   — gone in 0.2.6, validation will reject it).
+
+### Verification
+
+- Wizard end-to-end dry-runs against the sandbox: defaults-only,
+  custom-answer, and empty-scan paths all wrote correct YAML.
+- Sandbox isolation verified directly (marker file did not leak to
+  parent; `--refresh` removed it).
+- Fast test tier: **1532 passing**, 140 deselected, no regressions.
+
+---
+
+## Earlier 0.2.6 draft notes (rolled into the entry above)
+
+The release initially shipped as wizard-only polish (commit
+`d230f35`) before scope expanded to cover model discovery, layout
+unification, and sandbox restructure. The notes below were the
+original wizard-only draft — kept here for git-archaeology, but
+the entry above is the canonical 0.2.6 changelog.
+
+### Original wizard polish notes
+
 Wizard polish + retired-CLI string sweep. The walk-the-flow release
 the 0.2.3–0.2.5 cycle should have been: every change in this version
 came from running the wizard end-to-end on a real machine and
