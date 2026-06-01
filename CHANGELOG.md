@@ -3,6 +3,145 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.2.3` — 2026-05-31
+
+**Distribution overhaul** — JROS moves from `pip install` to git-clone
++ `./install.sh`, matching the install model used by Hermes-Agent,
+ComfyUI, A1111, and other end-user AI apps. The repo root is now the
+install root; operators see a familiar app layout (`install.sh`,
+`run.sh`, `requirements.txt`) instead of a package buried in
+`site-packages/`.
+
+This is a **distribution release**, not a feature release. The agent
+itself is unchanged from 0.2.2 — same models, same skills, same
+runtime contracts. What changes is how you get it onto a machine
+and how upgrades work.
+
+### Why the move from pip
+
+- **JROS is an app, not a library.** No one writes
+  `import jaeger_os` to add Jaeger as a dependency in their own code
+  — they run it. The pip-package shape was misleading users into
+  thinking JROS was something you `import`.
+- **Operators couldn't find their data.** Per-agent personas, skills,
+  and weights were buried in `site-packages/jaeger_os/` — invisible
+  to the average user, hard to back up, hard to share. Clone-style
+  puts everything in one visible folder.
+- **Upgrades were two-step (`pipx upgrade` + `jaeger update`).** Now
+  it's `git pull && ./install.sh` — one command, no separate
+  framework-vs-instance dance.
+- **Industry convention.** Local AI apps (Hermes-Agent, ComfyUI, A1111,
+  Open-WebUI, LM Studio CLI) all use git-clone. JROS now matches that
+  muscle memory.
+
+### Install — one-line curl
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
+```
+
+Defaults: clones to `~/jaeger/`, creates `.venv/` in-place, installs
+the full runtime, scaffolds `~/.jaeger/instances/`. Override location
+with `JAEGER_HOME`, pin a version with `JAEGER_REF`.
+
+### Upgrade — `git pull && ./install.sh`
+
+Idempotent. Re-runs venv setup only for changed dependencies; leaves
+`src/jaeger_os/agents/` (the User layer) untouched.
+
+### Changed
+
+- **New `src/jaeger_os/run.py` entry point.** The visible "what does
+  `./run.sh` actually invoke" file matches the new install vocabulary
+  (`install.sh` / `run.sh` / `run.py`). It's a thin wrapper —
+  `from jaeger_os.main import main as _main; raise SystemExit(_main())`
+  — and `main.py` keeps holding the real agent code.
+  Inverting the rename (vs. moving the 3500-line file) preserves
+  every `from jaeger_os.main import …` import in tests, benchmarks,
+  and out-of-tree integrations *without* the monkeypatch-across-
+  modules trap a re-export shim would introduce. Importing
+  `jaeger_os.run` also exposes `main` for callers who'd rather use
+  the new module name.
+- **`pyproject.toml` stripped to dev-tooling config only.** The
+  `[build-system]`, `[project]`, `[project.scripts]`, and
+  `[tool.setuptools.*]` sections are gone. JROS no longer builds as
+  a wheel. `[tool.pytest.*]` config preserved.
+- **Runtime deps moved from `pyproject.toml` → `requirements.txt`.**
+  Same dep list; installed by `./install.sh` into the in-tree
+  `.venv/`.
+- **Console scripts retired.** The `jaeger` and `jaeger-os` entries
+  on `$PATH` are gone (they came from `[project.scripts]`). Use
+  `./run.sh` from the clone, or add the clone dir to `$PATH`
+  manually.
+- **`MANIFEST.in` removed.** Only relevant for sdist builds; no
+  longer applicable.
+
+### Added
+
+- **`install.sh`** at repo root — local installer, sets up venv,
+  installs dependencies, scaffolds `agents/`. Idempotent; safe to
+  re-run after `git pull`.
+- **`run.sh`** at repo root — launcher. Activates venv, sets
+  `PYTHONPATH`, execs `src/jaeger_os/run.py "$@"`.
+- **`scripts/install.sh`** — the curl one-liner target. Clones JROS
+  to `$JAEGER_HOME`, runs the local `install.sh`, prints next-step
+  instructions. Supports `JAEGER_HOME`, `JAEGER_REF`, and
+  `JAEGER_REPO_URL` overrides.
+- **`requirements.txt`** — runtime dependencies (the list previously
+  in `pyproject.toml`'s `dependencies`).
+- **`src/jaeger_os/agents/`** — the User layer per-agent workspace
+  root. Gitignored except for the README and `.gitignore` itself —
+  upstream JROS never ships agent content; users populate it
+  manually or via `jaeger create-agent`.
+- **`dev docs/setup.md`** — canonical install / upgrade / uninstall
+  guide. Covers prereqs, the curl one-liner, version pinning,
+  custom install locations, multi-instance setups, developer
+  install, and troubleshooting.
+
+### Layout
+
+```
+~/jaeger/                              ← clone, the "System" layer
+├── install.sh, run.sh                 ← installer + launcher
+├── requirements.txt                   ← runtime deps
+├── scripts/install.sh                 ← curl-one-liner target
+├── src/jaeger_os/
+│   ├── run.py                         ← entry point (thin wrapper)
+│   ├── main.py                        ← the real agent code (unchanged)
+│   ├── core/, plugins/, skills/, prompts/, models/
+│   └── agents/                        ← "User" layer (gitignored)
+│       ├── lilith/
+│       └── eren/
+├── tests/, benchmark/, dev docs/
+└── pyproject.toml                     ← pytest config only
+```
+
+### Migration from 0.2.2
+
+```bash
+# Old install — pipx
+pipx uninstall jaeger-os
+
+# Move existing instance state aside if you want a clean test
+mv ~/.jaeger ~/.jaeger.0.2.2.bak
+
+# Install 0.2.3
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.2.3/scripts/install.sh | bash
+
+# Restore your instance state (the schema is unchanged from 0.2.2)
+mv ~/.jaeger.0.2.2.bak ~/.jaeger
+```
+
+### Result
+
+JROS now installs the way operators expect a local AI app to install.
+The same agent, same skills, same memory — fronted by a one-line
+curl command and a familiar folder layout. The transition preserves
+existing import paths (`jaeger_os.main` shim) and existing instance
+state (`~/.jaeger/` schema unchanged).
+
+---
+
 ## `0.2.2` — 2026-05-31
 
 Patch fix-ups for the 0.2.1 `models/` relocation. `repo_models_dir()`

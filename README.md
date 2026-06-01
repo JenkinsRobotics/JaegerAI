@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.2.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.2.3-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -30,8 +30,8 @@ memory, learned skills) so the same agent code runs on an LED-faced drone or
 a chat-only desktop companion.
 
 Built from real hardware pain, JROS runs on Apple Silicon and Jetson Orin —
-no Docker, no special OS versions, no dependency hell. It is `pip install`
-simple; a virtual environment is enough.
+no Docker, no special OS versions, no dependency hell. **One curl line
+installs the whole stack.**
 
 - 🧠 **Local-first** — runs entirely on-device on an in-process LLM. No cloud account required.
 - 🛠️ **~70 built-in tools across 11 toolset categories** — files (read / write / edit / search), memory, web, code execution, scheduling, background processes, kanban, delegation. A 20-tool CORE is always visible; the rest are reachable via `describe_tool` / `load_toolset` when scoping is enabled.
@@ -43,17 +43,18 @@ simple; a virtual environment is enough.
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.2.0` released.** Refinement + Jaeger-port-enablement
-> cycle. Adds the **sleep-cycle architecture** (awake/asleep model
-> swap with a 1-hour inactivity timer — see
-> [`docs/deep_think_design.md`](docs/deep_think_design.md)) and a
-> **memory-tier-aware setup wizard** that detects the host's unified
-> RAM and recommends data-validated awake + asleep model pairs (12 /
-> 24 / 32 / 64+ GB ladders). Bench corpus bumped to **v1.1** (59 cases
-> with new T1c hallucination, T3 cross-turn, T5 safety tiers) —
-> rankings refreshed against the new corpus and persisted in
-> [`benchmark/HISTORY.md`](benchmark/HISTORY.md). Next major beat:
-> **hardware-node layer** (transport, motors, LEDs) on JP01.
+> **Status — `0.2.3` released.** Distribution overhaul. JROS now
+> installs via a single `curl` line (Hermes-Agent / ComfyUI / A1111
+> style) — `git clone` + `./install.sh`, not `pip install`. The
+> framework is now a runnable app rather than a library: the repo
+> root is your install root, agents live in plain folders, and
+> `git pull && ./install.sh` is the upgrade story. Three-layer
+> architecture from 0.2.1 carries forward — **System** (the package),
+> **Runtime** (`~/.jaeger/instances/`), **User** (`agents/<name>/`).
+> Sleep-cycle architecture (0.2.0) + memory-tier-aware wizard +
+> bench v1.1 (59 cases, safety / hallucination / cross-turn tiers)
+> all unchanged. Next major beat: **hardware-node layer** (transport,
+> motors, LEDs) on JP01.
 
 ---
 
@@ -94,51 +95,68 @@ A Jaeger is the union of **one agent loop** and **a configured set of nodes**.
 
 ## Quick Start
 
-**Recommended — install with [pipx](https://pipx.pypa.io/):**
+**One-line install** — clones JROS to `~/jaeger`, sets up a venv,
+installs the full runtime, scaffolds `~/.jaeger/`:
 
 ```bash
-pipx install jaeger-os         # isolated venv, `jaeger` on PATH
-jaeger setup                   # interactive wizard — identity, model, voice
-jaeger start                   # boot the daemon
-jaeger rich-tui                # talk to the agent
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
 ```
 
-pipx gives each app its own virtual environment, so JROS's heavy
-native deps (llama-cpp, kokoro, whisper) don't fight with whatever
-else lives in your Python. Upgrades are one line:
+Then:
 
 ```bash
-pipx upgrade jaeger-os         # framework upgrade
-jaeger update                  # follow up: backs up + migrates your instances
+cd ~/jaeger
+./run.sh --setup        # first-time wizard (memory tier, model choice)
+./run.sh                # launch the agent
 ```
 
-**Or with plain pip:**
+That's the whole flow. The single install pulls the **entire**
+runtime — local LLM, Kokoro TTS, Whisper STT, vision, the
+external-model pipeline, messaging bridges. Nothing is left behind
+an extra. A GGUF model is fetched from Hugging Face on first run, and
+nothing else phones home.
+
+**Upgrades** — same one-line, idempotent:
 
 ```bash
-pip install jaeger-os          # works, but pollutes your global / current env
+cd ~/jaeger && git pull && ./install.sh
 ```
 
-A plain install (either way) pulls the **entire** runtime — local
-LLM, Kokoro TTS, Whisper STT, vision, the external-model pipeline,
-messaging bridges. Nothing is left behind an extra. First launch
-runs a short setup wizard (identity, config, model); a GGUF model
-is fetched from Hugging Face on first run, and nothing else phones
-home.
+Or re-run the curl command — it detects an existing clone and just
+pulls + re-installs.
 
-**State lives at `~/.jaeger/instances/<name>/`** — never inside the
-framework install. You can `jaeger backup` an instance, move to a
-new machine, `pipx install jaeger-os`, `jaeger restore <archive>`,
-and pick up where you left off. See
-[docs/instance_layout.md](docs/instance_layout.md) for the full
-layout.
-
-**From source (contributors):**
+**Pinning a release** — for reproducible installs:
 
 ```bash
-git clone https://github.com/JenkinsRobotics/JROS.git
-cd JROS
-pip install -e ".[dev]"        # editable install for development
-pytest
+JAEGER_REF=0.2.3 curl -fsSL \
+  https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.2.3/scripts/install.sh | bash
+```
+
+**Custom install location** — override with an env var:
+
+```bash
+JAEGER_HOME=/opt/jaeger curl -fsSL \
+  https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
+```
+
+**Where everything lives** — three layers, cleanly separated:
+
+| Layer | Path | What |
+|---|---|---|
+| **System** | `~/jaeger/` | The framework (this repo, owned by git) |
+| **Runtime** | `~/.jaeger/instances/<name>/` | Memory, daemon socket, logs |
+| **User** | `~/jaeger/src/jaeger_os/agents/<name>/` | Your personas, skills, files |
+
+See [`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md)
+for the full three-layer model.
+
+**Manual install (no curl)** — if you'd rather see every step:
+
+```bash
+git clone https://github.com/JenkinsRobotics/JROS.git ~/jaeger
+cd ~/jaeger
+./install.sh
+./run.sh --setup
 ```
 
 ---
@@ -159,15 +177,25 @@ config file plus a logic node — not a fork of the runtime.
 ## Repo Layout
 
 ```
-JROS/
-├── src/jaeger_os/    the framework package  →  pip install jaeger-os
-├── tests/            the framework test suite
-├── docs/             framework documentation
-├── benchmark/        bench corpus + sweep + sanity probe (dev tooling)
-├── pyproject.toml    packaging — jaeger-os 0.2.0
-├── README.md         this file
-└── LICENSE           Apache-2.0
+JROS/                      ← clone goes here (default ~/jaeger)
+├── install.sh             ← venv + deps; safe to re-run
+├── run.sh                 ← launcher (activates venv, runs run.py)
+├── requirements.txt       ← runtime deps (pip-installed into .venv)
+├── scripts/install.sh     ← the curl one-liner target
+├── src/jaeger_os/         ← the framework package
+│   ├── run.py             ← entry point (thin wrapper around main:main)
+│   ├── agents/            ← per-agent workspaces (gitignored, user-owned)
+│   ├── core/, plugins/, skills/, prompts/  ← framework internals
+│   └── models/            ← downloaded GGUF weights
+├── tests/                 ← framework test suite
+├── benchmark/             ← bench corpus + sweep + sanity probe
+├── dev docs/              ← architecture + setup docs (for JROS devs)
+├── pyproject.toml         ← test/lint config only (no pip packaging)
+└── LICENSE                ← Apache-2.0
 ```
+
+Runtime state — memory, daemon socket, logs — is **outside the repo**
+at `~/.jaeger/instances/<name>/`, so `git pull` never disturbs it.
 
 ---
 
@@ -211,16 +239,17 @@ failure → `DQ` regardless of other scores).
 
 | Doc | What |
 |---|---|
-| [`docs/external_models.md`](docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
-| [`docs/deep_think_design.md`](docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
-| [`docs/marketplace_spec.md`](docs/marketplace_spec.md) | The skill marketplace |
-| [`docs/physical_skills_status.md`](docs/physical_skills_status.md) | Where embodiment / physical skills stand |
-| [`docs/kanban_design.md`](docs/kanban_design.md) | The kanban task board |
-| [`docs/hermes_tool_parity.md`](docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
-| [`docs/BENCHMARK_0.1.0.md`](docs/BENCHMARK_0.1.0.md) | 0.1.0 full verification benchmark |
+| [`dev docs/setup.md`](dev%20docs/setup.md) | Canonical install, upgrade, and uninstall guide |
+| [`dev docs/architecture/system_runtime_user.md`](dev%20docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
+| [`dev docs/external_models.md`](dev%20docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
+| [`dev docs/deep_think_design.md`](dev%20docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
+| [`dev docs/marketplace_spec.md`](dev%20docs/marketplace_spec.md) | The skill marketplace |
+| [`dev docs/physical_skills_status.md`](dev%20docs/physical_skills_status.md) | Where embodiment / physical skills stand |
+| [`dev docs/kanban_design.md`](dev%20docs/kanban_design.md) | The kanban task board |
+| [`dev docs/hermes_tool_parity.md`](dev%20docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
 
 The full JROS spec — architecture, transport, the node standard, the agent
-and skill systems — is being written and will land under `docs/`.
+and skill systems — continues to land under `dev docs/`.
 
 ---
 

@@ -1,0 +1,67 @@
+# JROS runtime dependencies — installed by ./install.sh into .venv.
+#
+# Pinned to lower bounds rather than exact versions so a fresh clone
+# gets the latest patch releases. If a breaking upstream lands and
+# wedges installs we'll pin upper bounds on the affected line.
+#
+# Some packages wrap native code; the local system must have:
+#   - PortAudio (for sounddevice; macOS: `brew install portaudio`)
+#   - a C/C++ toolchain (for llama-cpp-python, pywhispercpp)
+# See README "Prerequisites" for the full system-deps list.
+
+# --- agent core ---
+pydantic>=2.0
+pyyaml>=6.0
+numpy>=1.26
+requests>=2.32
+certifi>=2024.0
+rich>=13.0
+prompt-toolkit>=3.0
+llama-cpp-python>=0.3
+croniter>=2.0
+ddgs>=9.0
+
+# --- voice: Kokoro TTS + Whisper STT + audio I/O ---
+sounddevice>=0.4.6
+scipy>=1.11
+webrtcvad-wheels>=2.0.14
+openwakeword>=0.6
+pywhispercpp>=1.4
+kokoro>=0.9.4
+
+# --- vision: look_at + generate_image ---
+torch>=2.2
+transformers>=4.40
+diffusers>=0.27
+pillow>=10.0
+
+# --- browser automation: the `browser` tool ---
+# After install, fetch the browser binary once:
+#   .venv/bin/playwright install chromium
+playwright>=1.40
+
+# --- semantic episodic memory (search_memory) ---
+sentence-transformers>=3.0
+
+# --- external-model pipeline (LM Studio / OpenAI / Anthropic) ---
+openai>=1.0
+anthropic>=0.40
+
+# --- messaging bridges (Discord / Telegram) ---
+discord.py>=2.4
+python-telegram-bot>=21.0
+
+# --- MCP tool servers ---
+mcp>=0.9
+
+# --- macOS menu-bar tray ---
+# rumps is a pure-Python wrapper over PyObjC. Environment marker keeps
+# Linux/Windows installs from pulling it in.
+rumps>=0.4; sys_platform == 'darwin'
+
+# --- dev tooling (uncomment if doing JROS development) ---
+# pytest>=8.0
+# pytest-asyncio>=0.23
+# pytest-xdist>=3.5
+# mypy>=1.8
+# ruff>=0.4

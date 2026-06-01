@@ -1,138 +1,23 @@
-# Jaeger-OS — the agent framework. Local-first, embodied-AI-ready.
+# JROS — Jaeger-OS.
 #
-# This package is the canonical home of the framework. Distributions
-# (Lilith, ARES, and future Jaegers) pin a version of it and run as
-# configured *instances* — they do not fork the runtime.
-[build-system]
-requires = ["setuptools>=64.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "jaeger-os"
-version = "0.2.2"
-description = "Jaeger-OS — a local-first agentic agent framework for embodied AI."
-readme = "README.md"
-# 3.11 / 3.12 only — several native deps (kokoro, pywhispercpp,
-# llama-cpp-python) don't ship 3.13 wheels yet. pip refuses cleanly on
-# an unsupported Python rather than half-installing.
-requires-python = ">=3.11,<3.13"
-license = { text = "Apache-2.0" }
-authors = [{ name = "Jenkins Robotics" }]
-keywords = ["agent", "llm", "local-first", "robotics", "jaeger", "embodied-ai"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-]
-
-# The whole framework installs with a plain `pip install jaeger-os` —
-# nothing is left behind an extra. That keeps a fresh install fully
-# working (agent + voice + vision + external models + messaging) at the
-# cost of a heavier download. The groupings below may be re-split into
-# optional extras in a later release if the base gets too large.
+# 0.2.3: JROS is no longer distributed as a pip package. Operators
+# clone the repo and run ./install.sh (or use the one-line curl
+# installer in scripts/install.sh). Runtime dependencies are pinned
+# in ../requirements.txt. The README has the full install flow.
 #
-# NOTE: some of these wrap native code. `pip install` cannot provide the
-# system libraries they build against — see "Prerequisites" in README.md
-# (PortAudio for sounddevice, a C/C++ toolchain for llama-cpp-python and
-# pywhispercpp).
-dependencies = [
-    # --- agent core ---
-    # Phase-9 cleanup: pydantic-ai removed. The agent loop lives in
-    # ``jaeger_os.agent`` — a framework-free implementation that talks
-    # to the ``openai`` / ``anthropic`` SDKs and the in-process
-    # ``llama_cpp.Llama`` directly. See docs/agent_refactor_phase_9.md.
-    "pydantic>=2.0",           # config + tool schemas
-    "pyyaml>=6.0",             # identity.yaml / config.yaml
-    "numpy>=1.26",             # embeddings + audio buffers
-    "requests>=2.32",          # web tools + general HTTP
-    "certifi>=2024.0",         # cert bundle
-    "rich>=13.0",              # the TUI — banner, panels, scrollback
-    "prompt-toolkit>=3.0",     # the TUI — input line, autocomplete, status bar
-    "llama-cpp-python>=0.3",   # in-process local LLM (the default brain)
-    "croniter>=2.0",           # scheduled prompts (cron_runner)
-    "ddgs>=9.0",               # web_search default backend
-    # --- voice: Kokoro TTS + Whisper STT + audio I/O ---
-    "sounddevice>=0.4.6",
-    "scipy>=1.11",
-    "webrtcvad-wheels>=2.0.14",
-    "openwakeword>=0.6",
-    "pywhispercpp>=1.4",       # STT (whisper.cpp bindings)
-    "kokoro>=0.9.4",           # TTS (fully offline)
-    # --- vision: look_at + generate_image ---
-    "torch>=2.2",
-    "transformers>=4.40",
-    "diffusers>=0.27",
-    "pillow>=10.0",
-    # --- browser automation: the `browser` tool ---
-    # NOTE: after install, fetch the browser binary once:
-    #   playwright install chromium
-    "playwright>=1.40",
-    # --- semantic episodic memory (search_memory) ---
-    "sentence-transformers>=3.0",
-    # --- external-model pipeline (LM Studio / OpenAI / Anthropic) ---
-    "openai>=1.0",
-    "anthropic>=0.40",
-    # --- messaging bridges (Discord / Telegram) ---
-    "discord.py>=2.4",
-    "python-telegram-bot>=21.0",
-    # --- MCP tool servers ---
-    "mcp>=0.9",
-    # --- macOS menu-bar tray (``jaeger start`` auto-launches it) ---
-    # rumps is a pure-Python wrapper over PyObjC; only the macOS tray
-    # adapter imports it, so the environment marker keeps Linux /
-    # Windows installs from pulling it in.
-    "rumps>=0.4; sys_platform == 'darwin'",
-]
-
-[project.optional-dependencies]
-# Dev tooling — the only extra. Everything needed at runtime is in the
-# base install above.
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    # Parallel test workers — scripts/run_tests.sh picks ``-n auto``
-    # automatically when this is installed.
-    "pytest-xdist>=3.5",
-    "mypy>=1.8",
-    "ruff>=0.4",
-]
-
-[project.scripts]
-jaeger-os = "jaeger_os.main:main"
-jaeger = "jaeger_os.main:main"
-
-[project.urls]
-Homepage = "https://github.com/JenkinsRobotics/JROS"
-Repository = "https://github.com/JenkinsRobotics/JROS"
-Issues = "https://github.com/JenkinsRobotics/JROS/issues"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-# Ship the runtime data files inside the wheel so a fresh `pip install`
-# user gets a working framework — system prompt, plugin manifests,
-# core skills.
+# This file only carries config for dev tooling (pytest, ruff). The
+# package itself is imported by adding `src/` to PYTHONPATH (which
+# run.sh does automatically), not by installing it.
 #
-# INST-10 (0.2.0): the bundled `instance/` skeleton is gone. User
-# state lives exclusively at ``~/.jaeger/instances/<name>/`` and the
-# wizard creates it on first run; nothing about it ships in the
-# wheel. See ``docs/instance_layout.md`` for the user-side layout.
-jaeger_os = [
-    "*.md",
-    "assets/*",
-    "prompts/*",
-    "core/**/*.yaml",
-    "plugins/**/*.yaml",
-    "plugins/**/*.json",
-    "plugins/**/*.md",
-    "skills/**/*",
-]
+# Background on the move from pip:
+#   - JROS is an app, not a library — Hermes-Agent, ComfyUI, A1111 and
+#     the like all use a git-clone + venv install rather than pip.
+#   - Putting weights, models, and per-agent workspaces inside a
+#     site-packages tree was confusing operators about where their
+#     data lived.
+#   - Upgrades via `git pull && ./install.sh` are clearer and faster
+#     than `pip install --upgrade jaeger-os`.
+# See `dev docs/setup.md` for the canonical install / upgrade story.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
