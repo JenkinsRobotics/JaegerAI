@@ -235,44 +235,12 @@ def resolve_instance_dir(name: str | None = None) -> Path:
     return (user_instances_root() / inst).resolve()
 
 
-def resolve_user_dir(
-    instance_name: str | None = None,
-    *,
-    config_override: str | None = None,
-) -> Path:
-    """Pick the on-disk path for this instance's USER layer (0.2.1).
-
-    The User layer is where the operator's persona / skills / prompts /
-    workspace files live. See
-    ``dev docs/architecture/system_runtime_user.md`` for the contract.
-
-    Resolution order (first match wins):
-
-      1. ``JAEGER_USER_DIR`` env var (absolute / ~-expanded path).
-         Useful for tests and one-shot overrides.
-      2. ``config_override`` — the ``user.dir`` field from the
-         instance's ``config.yaml``. The caller is responsible for
-         passing this (e.g. ``boot_for_tui`` extracts it from the
-         loaded config). When None, the default is used.
-      3. Default: ``~/jaeger/agents/<instance_name>/``. Visible (not
-         under ``~/.jaeger/``) so the user can edit content with
-         their normal tools.
-
-    ``instance_name`` defaults to ``default_instance_name()`` (env →
-    sticky → "default"), matching ``resolve_instance_dir``.
-
-    Note: this helper does NOT create the directory. ``mkdir -p`` is
-    the loader's responsibility on first read/write — keeps this
-    helper pure for testing and for callers that just want to know
-    "where would the user dir be" without side effects.
-    """
-    override = os.environ.get("JAEGER_USER_DIR", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    if config_override:
-        return Path(config_override).expanduser().resolve()
-    inst = instance_name or default_instance_name()
-    return (Path.home() / "jaeger" / "agents" / inst).resolve()
+# 0.2.6: ``resolve_user_dir()`` removed along with the User layer.
+# Persona/skills/prompts now live inside the per-instance directory at
+# ``<install_root>/.jaeger_os/instances/<name>/``. See the architecture
+# note in dev docs/architecture/system_runtime_user.md → "0.2.6: two
+# layers, not three" for the rationale (each agent is self-contained;
+# nothing meaningful was shared across the User-layer boundary).
 
 
 # ---------------------------------------------------------------------------

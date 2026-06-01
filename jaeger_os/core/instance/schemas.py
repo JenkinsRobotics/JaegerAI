@@ -401,53 +401,12 @@ class WorkspaceConfig(BaseModel):
     )
 
 
-class UserConfig(BaseModel):
-    """The User layer (0.2.1). Where this agent's user-authored content
-    lives — persona, custom skills, prompt overlays, workspace files.
-
-    See ``dev docs/architecture/system_runtime_user.md`` for the full
-    three-layer model (System / Runtime / User). The short version:
-
-      * **System** layer = JROS package (site-packages or git clone).
-        Updated when JROS releases.
-      * **Runtime** layer = ``~/.jaeger/instances/<name>/``. JROS
-        manages it; content survives upgrades but layout can shift.
-      * **User** layer (this) = ``<user_dir>/``. The user owns it.
-        JROS never modifies it without an explicit user command.
-
-    ``dir`` defaults to ``~/jaeger/agents/<instance_name>/`` — visible
-    (not under ``~/.jaeger/``) so the user can interact with it
-    directly via Finder / Spotlight / their editor. Override with an
-    absolute path or a ``~``-prefixed path; common patterns:
-
-      user:
-        dir: ~/jaeger/agents/lilith            # default-shaped, explicit
-      user:
-        dir: ~/GITHUB/Lilith-AI                # project-repo pattern
-      user:
-        dir: /Volumes/SharedDrive/agents/lilith # shared / NFS
-
-    Inside the user dir, JROS expects (all optional):
-
-      <user_dir>/persona.json                # this agent's persona
-      <user_dir>/skills/                     # user-authored skills
-      <user_dir>/prompts/                    # persona prompt overlays
-      <user_dir>/files/                      # agent ↔ user collab files
-
-    Persona / skills / prompts loaders read from here first, then
-    fall back to the runtime instance dir for backwards compatibility
-    with pre-0.2.1 instances.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    dir: str | None = Field(
-        None, max_length=512,
-        description=(
-            "Override the default ``~/jaeger/agents/<instance_name>/`` "
-            "user-dir location. Absolute path or ``~``-prefixed; null "
-            "= default."
-        ),
-    )
+# 0.2.6: UserConfig removed. The 0.2.1 User layer (separate ``user.dir``
+# for persona / skills / prompts) collapsed into the per-instance dir
+# at ``<install_root>/.jaeger_os/instances/<name>/``. Each agent is
+# self-contained — its persona, skills, prompts, files, memory, logs,
+# and credentials all live under one folder. See dev docs/architecture
+# /system_runtime_user.md → "0.2.6: two layers" for the rationale.
 
 
 class InteractionConfig(BaseModel):
@@ -491,10 +450,10 @@ class Config(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
-    # 0.2.1 — User layer. Persona / skills / prompts read from
-    # <user.dir>/ first, runtime instance dir as fallback. See
-    # dev docs/architecture/system_runtime_user.md for the contract.
-    user: UserConfig = Field(default_factory=UserConfig)
+    # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
+    # (persona, custom skills, prompt overlays, files) lives inside
+    # the runtime instance dir; nothing meaningful was shared across
+    # the User-layer boundary. See dev docs for the rationale.
 
     @field_validator("instance_name")
     @classmethod
