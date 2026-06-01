@@ -159,11 +159,21 @@ def _wants_voice_mode(line: str) -> bool:
     return len(line) <= 80 and bool(_VOICE_TRIGGER_RE.search(line))
 
 
-# Resolve default instance dir the same way jaeger.core.prompts does.
-_DEFAULT_INSTANCE_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "instance" / "default"
-)
+# 0.2.6: the prior _DEFAULT_INSTANCE_DIR hardcoded the pre-0.2.0
+# bundled location at ``jaeger_os/instance/default/`` — a path INST-10
+# removed and that no longer exists. The TUI fell back to it whenever
+# no instance_dir was passed, which made ``./run.sh --instance NAME``
+# silently land in a stale stub. Resolve dynamically through the
+# canonical resolver instead so it tracks JAEGER_HOME +
+# JAEGER_INSTANCE_NAME at call time.
+def _default_instance_dir() -> Path:
+    """Resolve the per-run default instance dir via the canonical
+    resolver. Imported lazily so this module stays cheap to import
+    in banner-only / test contexts."""
+    from jaeger_os.core.instance.instance import (
+        default_instance_name, resolve_instance_dir,
+    )
+    return Path(resolve_instance_dir(default_instance_name()))
 
 
 # ── Permission confirmation ──────────────────────────────────────────
@@ -269,7 +279,7 @@ class JaegerTUI:
         skip_model: bool = False,
     ) -> None:
         self.console = Console()
-        self.instance_dir = instance_dir or _DEFAULT_INSTANCE_DIR
+        self.instance_dir = instance_dir or _default_instance_dir()
         self.model_name = model_name
         self.version = version
         self.session_id = make_session_id()
@@ -1696,26 +1706,32 @@ class JaegerTUI:
 # ── Entry point ─────────────────────────────────────────────────────
 
 
-def run(*, skip_model: bool = False) -> int:
+def run(
+    *,
+    skip_model: bool = False,
+    instance_name: str | None = None,
+) -> int:
     """Public entry: construct + run the Jaeger TUI. Returns exit
     code. ``skip_model=True`` is for banner-only mode.
 
+    0.2.6: ``instance_name`` plumbs the ``--instance NAME`` CLI flag
+    through to ``JaegerTUI(instance_dir=…)``. Before, ``run()`` took
+    no instance arg, so the TUI silently fell back to the (deleted)
+    ``jaeger_os/instance/default/`` bundled path and the auto-wizard
+    fired against ``default`` regardless of what ``--instance`` said.
+
     Enforces TUI singleton via :mod:`.singleton`: if another TUI for
     this instance is already running, surface a friendly message and
-    exit non-zero. The tray's ``Open TUI`` handler does its own
-    pre-check so the user normally never sees this path — it's the
-    belt-and-braces for someone running ``python -m jaeger_os`` by
-    hand while the tray already opened one."""
+    exit non-zero."""
+    from jaeger_os.core.instance.instance import (
+        default_instance_name, resolve_instance_dir,
+    )
+    name = instance_name or default_instance_name()
+    instance_dir = Path(resolve_instance_dir(name))
     if not skip_model:
         try:
-            from pathlib import Path
-
-            from jaeger_os.core.instance.instance import (
-                default_instance_name, resolve_instance_dir,
-            )
             from .singleton import acquire_tui_slot, existing_tui_pid
-            name = default_instance_name()
-            run_dir = Path(resolve_instance_dir(name)) / "run"
+            run_dir = instance_dir / "run"
             existing = existing_tui_pid(run_dir)
             if existing is not None:
                 print(
@@ -1728,7 +1744,10 @@ def run(*, skip_model: bool = False) -> int:
             acquire_tui_slot(run_dir)
         except Exception:  # noqa: BLE001 — slot mgmt must never block boot
             pass
-    return JaegerTUI(skip_model=skip_model).repl()
+    return JaegerTUI(
+        skip_model=skip_model,
+        instance_dir=instance_dir,
+    ).repl()
 
 
 if __name__ == "__main__":
