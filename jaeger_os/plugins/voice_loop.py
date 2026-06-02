@@ -122,6 +122,20 @@ def main() -> int:
                    help="Don't start the cron runner alongside the voice loop.")
     p.add_argument("--no-chimes", action="store_true",
                    help="Disable wake / follow-up audio earcons.")
+    # 0.2.6: --attach mode. When the daemon is running for this
+    # instance (``./run.sh start``), pass --attach to skip the
+    # in-process LLM load and route turns through the daemon's
+    # ``chat.send`` verb instead. Saves one full model in RAM at the
+    # cost of a socket round-trip per turn. Default OFF so existing
+    # standalone behaviour is preserved exactly; the tray's "Open
+    # Voice" launcher will pass --attach when it detects a running
+    # daemon in a later patch.
+    p.add_argument(
+        "--attach", action="store_true",
+        help="Skip in-process LLM load; route turns through a running "
+             "daemon's chat.send verb. Requires the daemon to be up — "
+             "the voice loop exits with a clear error otherwise."
+    )
     args = p.parse_args()
 
     # 0.2.6: invert the --no-wake-word flag into the require_wake_word
@@ -158,18 +172,75 @@ def main() -> int:
     _pipeline["show_latency"] = config.display.show_latency
     _pipeline["show_tool_activity"] = config.display.show_tool_activity
 
-    # ── Load the LLM ─────────────────────────────────────────────────
-    print(f"[voice] loading Gemma in-process ({layout.root.name})...", flush=True)
-    started = time.perf_counter()
-    client = LlamaCppPythonClient(config.model, warmup=True)
-    print(f"[voice] loaded in {time.perf_counter() - started:.1f}s", flush=True)
+    # ── LLM bring-up: either local or via daemon attach ──────────────
+    #
+    # Local (default): same as 0.2.0+. Loads Gemma into this process,
+    # runs init_extensions / prewarm, and each turn calls
+    # ``run_for_voice(client, phrase)``.
+    #
+    # --attach: skips the local model entirely. Each turn calls
+    # ``Client.call('chat.send', ...)`` against the daemon's socket.
+    # Saves ~16 GB RAM when the daemon is also up; round-trips one
+    # socket-RPC per turn (~ms, dwarfed by the LLM decode latency).
+    daemon_client = None
+    client = None  # the local LLM client; populated in non-attach mode
+    if args.attach:
+        from jaeger_os.daemon.client import Client, DaemonNotRunning
+        sock_path = layout.root / "run" / "jaeger.sock"
+        if not sock_path.exists():
+            print(f"[voice] --attach: daemon socket missing at {sock_path}.",
+                  file=sys.stderr)
+            print("        Start the daemon first: ./run.sh start"
+                  f" --instance {instance_name}", file=sys.stderr)
+            return 2
+        try:
+            daemon_client = Client(socket_path=sock_path, call_timeout=600.0)
+            daemon_client.__enter__()
+        except DaemonNotRunning as exc:
+            print(f"[voice] --attach: cannot connect to daemon — {exc}.",
+                  file=sys.stderr)
+            print("        Start the daemon first: ./run.sh start"
+                  f" --instance {instance_name}", file=sys.stderr)
+            return 2
+        print(f"[voice] attached to daemon at {sock_path}", flush=True)
 
-    class _Args:
-        with_memory = True
-        with_mcp = False
-        think = False
-    init_extensions(_Args(), client)
-    prewarm(client)
+        def turn_runner(phrase: str) -> dict[str, Any]:
+            """Route the spoken phrase to the daemon's chat.send.
+            Adapts the response shape to what the loop expects from
+            ``run_for_voice``. ``skipped_final`` from the daemon maps
+            to ``spoke_via_tool`` here — same semantic ("agent already
+            vocalised via a tool call, skip the post-turn speak")."""
+            assert daemon_client is not None
+            resp = daemon_client.call(
+                "chat.send", text=phrase, session_key="voice",
+            )
+            data = getattr(resp, "data", None) or {}
+            return {
+                "text": data.get("text", "") or "",
+                "tool_activity": data.get("tool_activity") or [],
+                "spoke_via_tool": bool(data.get("skipped_final", False)),
+                "elapsed_s": data.get("elapsed_s"),
+                "skipped_final": bool(data.get("skipped_final", False)),
+                "error": data.get("error"),
+            }
+    else:
+        print(f"[voice] loading Gemma in-process ({layout.root.name})...",
+              flush=True)
+        started = time.perf_counter()
+        client = LlamaCppPythonClient(config.model, warmup=True)
+        print(f"[voice] loaded in {time.perf_counter() - started:.1f}s",
+              flush=True)
+
+        class _Args:
+            with_memory = True
+            with_mcp = False
+            think = False
+        init_extensions(_Args(), client)
+        prewarm(client)
+
+        def turn_runner(phrase: str) -> dict[str, Any]:
+            """Local LLM path — the 0.2.0 default."""
+            return run_for_voice(client, phrase, session_key="voice")
 
     # ── AEC + reference buffer ───────────────────────────────────────
     # 0.2.6: barge-in is request-by-default; we attempt to enable AEC,
@@ -244,15 +315,22 @@ def main() -> int:
     stt.start()
 
     # ── Cron runner (optional) ───────────────────────────────────────
+    # In --attach mode the daemon already runs cron; spinning up a
+    # second runner here would fire each scheduled prompt twice.
+    # Skip silently in attach mode.
     llm_lock = threading.Lock()
     _pipeline["llm_lock"] = llm_lock
     cron_runner: CronRunner | None = None
-    if not args.no_cron:
+    if not args.no_cron and not args.attach:
         def _cron_callback(prompt: str, session_key: str | None = None) -> None:
+            assert client is not None  # local mode only
             run_for_voice(client, prompt, session_key=session_key)
         cron_runner = CronRunner(_cron_callback, llm_lock=llm_lock)
         cron_runner.start()
         print("[voice] cron runner started", flush=True)
+    elif args.attach:
+        print("[voice] cron runner skipped (daemon owns the schedules)",
+              flush=True)
 
     mode_msg = f"mode={args.stt_mode}"
     if require_wake_word:
@@ -310,7 +388,9 @@ def main() -> int:
                 stt.set_paused(True)
 
             try:
-                result = run_for_voice(client, phrase, session_key="voice")
+                # 0.2.6: turn_runner is either run_for_voice (local LLM)
+                # or the daemon attach path; both return the same shape.
+                result = turn_runner(phrase)
                 text = (result.get("text") or "").strip()
                 spoke_via_tool = result.get("spoke_via_tool", False)
 
@@ -391,7 +471,16 @@ def main() -> int:
         stt.stop()
         if cron_runner is not None:
             cron_runner.shutdown(wait=False)
-        shutdown_extensions(wait=False)
+        # 0.2.6: release the daemon socket cleanly in attach mode.
+        # Skipping shutdown_extensions there too — the daemon owns the
+        # extensions, this process never initialised them.
+        if daemon_client is not None:
+            try:
+                daemon_client.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            shutdown_extensions(wait=False)
     return 0
 
 
