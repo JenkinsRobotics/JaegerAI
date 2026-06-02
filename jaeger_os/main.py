@@ -3379,6 +3379,39 @@ def main() -> int:
     # other name). Pass the flag through as a CLI arg the TUI's own
     # argparse honours.
     if not " ".join(args.prompt).strip():
+        # 0.2.6: respect the instance's persisted ``interaction.default_mode``.
+        # An operator who picked "voice" in the wizard's Step 4 expects
+        # ``./run.sh --instance NAME`` to bring up the voice loop (wake-word
+        # gated, follow-up window) rather than the keyboard TUI. The TUI
+        # remains the default when default_mode is "tui" (or unreadable).
+        # Explicit ``--voice`` / ``--tui`` flags handled above already
+        # short-circuit this path; this dispatch only fires when the
+        # operator gave neither.
+        _voice_dispatch = False
+        try:
+            _cfg_for_mode = load_yaml(layout.config_path, Config)
+            _voice_dispatch = (
+                getattr(_cfg_for_mode.interaction, "default_mode", "tui")
+                == "voice"
+            )
+        except Exception:  # noqa: BLE001 — config could be partial / missing
+            pass
+        if _voice_dispatch:
+            from .plugins.voice_loop import main as voice_main
+            # voice_loop's argparse honours --instance NAME the same way
+            # the TUI's does. Pre-build argv so the launched process
+            # targets the right operator-state dir.
+            voice_argv = []
+            if args.instance:
+                voice_argv.extend(["--instance", args.instance])
+            # voice_loop.main() reads sys.argv directly via argparse;
+            # patch it for the call so the flags above land.
+            _orig_argv = sys.argv[:]
+            sys.argv = [sys.argv[0], *voice_argv]
+            try:
+                return voice_main()
+            finally:
+                sys.argv = _orig_argv
         from .interfaces.tui.__main__ import main as tui_main
         tui_argv: list[str] = []
         if args.instance:
