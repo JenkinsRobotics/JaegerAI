@@ -1,37 +1,54 @@
 #!/usr/bin/env python3
-"""Voice loop — STT → agent → TTS daemon, with optional barge-in.
+"""Voice loop — STT → agent → TTS daemon.
 
-Three runtime modes selected at startup:
+0.2.6 voice UX (two modes, both default-on):
+
+  Wake-word required (default)
+      Every utterance ignored until the user says "ok jaeger" / "hey
+      jaeger" / "okay jaeger" (with Whisper-mishearing phonetic
+      variants: yeager / yager / jager). After a reply, a 10-second
+      follow-up window opens — within it, the wake gate drops so the
+      user can keep talking without re-prefixing. Same shape as
+      Google Home / Siri / Alexa.
+
+      Opt out with ``--no-wake-word``.
+
+  AEC barge-in (default when speexdsp is installed)
+      Mic stays open during TTS playback; speexdsp echo cancellation
+      removes the agent's own voice from the captured signal so the
+      operator can interrupt at any time (sub-50 ms latency). Same
+      mechanism as Zoom / FaceTime / Teams.
+
+      Auto-falls-back to mic-pause when speexdsp is missing. Pass
+      ``--no-barge-in`` to force mic-pause even when AEC is available.
+
+STT modes:
 
   --stt-mode two_pass    (default)
-      VAD-segmented STT with fast→accurate Whisper cascade. Robust against
-      noise, slightly higher latency on commit.
+      VAD-segmented STT with fast → accurate Whisper cascade
+      (base.en for wake matching, medium.en for the committed
+      command). Robust against background noise, slightly higher
+      latency on commit.
 
   --stt-mode continuous
-      Energy-segmented STT with rolling re-transcription. Lower commit
-      latency, lighter memory footprint, less robust to background noise.
-
-  --barge-in
-      Allows the user to interrupt the AI mid-speech. Non-blocking TTS
-      playback; STT keeps listening during TTS. If AEC is available
-      (speexdsp installed), the AI's own voice is canceled out of the
-      mic input. Without AEC, the mic captures playback bleed-through
-      and the wake-word matcher may misfire — set_paused() is safer
-      when AEC isn't available.
-
-  --no-aec
-      Force passthrough even when speexdsp is installed. Useful for
-      A/B testing or debugging false-cancellation.
+      Energy-segmented STT with rolling re-transcription. Lower
+      commit latency, lighter memory footprint, less robust to
+      background noise.
 
 Run:
+
     python -m jaeger_os.plugins.voice_loop
-    python -m jaeger_os.plugins.voice_loop --stt-mode continuous
-    python -m jaeger_os.plugins.voice_loop --require-wake-word --barge-in
     python -m jaeger_os.plugins.voice_loop --instance work
+    python -m jaeger_os.plugins.voice_loop --no-wake-word
+    python -m jaeger_os.plugins.voice_loop --no-barge-in
+
+Or, when ``config.interaction.default_mode`` is set to ``voice``
+(via the wizard's Step 4), a bare ``./run.sh --instance NAME``
+dispatches here automatically — no flags needed.
 
 This file is NOT a plugin — it's the daemon orchestrator wiring the
 kokoro_tts and whisper_stt plugins to the agent. Same role as
-plugins/messaging_gateway.py. See docs/VOCABULARY.md.
+plugins/messaging_gateway.py.
 """
 
 from __future__ import annotations
@@ -75,10 +92,28 @@ def main() -> int:
         help="Don't gate utterances behind a wake phrase — every spoken "
              "phrase becomes a command. Default is wake-word required."
     )
-    p.add_argument("--barge-in", action="store_true",
-                   help="Allow user to interrupt AI mid-speech (non-blocking TTS).")
-    p.add_argument("--no-aec", action="store_true",
-                   help="Force AEC passthrough even if speexdsp is installed.")
+    # 0.2.6: two voice modes, period.
+    #
+    #   barge-in (default when speexdsp is installed)
+    #     mic stays open during TTS, echo cancellation removes the
+    #     agent's voice from the captured signal, operator can
+    #     interrupt at any time. Same mechanism as Zoom / FaceTime.
+    #
+    #   --no-barge-in (or auto-fallback when speexdsp is missing)
+    #     mic paused for the duration of TTS playback. Safe, no
+    #     self-echo possible, but you can't talk over the agent.
+    #
+    # ``--no-aec`` was a 0.2.0-era A/B-testing knob — it forced the
+    # 'barge-in without AEC' middle path which would self-trigger on
+    # the agent's own voice. Dropped in 0.2.6 because there is no
+    # practical use case for that mode.
+    p.add_argument(
+        "--no-barge-in", dest="no_barge_in", action="store_true",
+        help="Pause the mic during TTS instead of running AEC echo "
+             "cancellation. Safe, but you can't interrupt the agent "
+             "mid-speech. Default: barge-in enabled when speexdsp is "
+             "present, otherwise auto-fallback to this mode."
+    )
     p.add_argument("--fast-model", type=str, default="base.en",
                    help="Whisper fast/continuous model name (default: base.en).")
     p.add_argument("--accurate-model", type=str, default="medium.en",
@@ -93,6 +128,16 @@ def main() -> int:
     # bool the STT layer wants. Default behaviour (no flag passed) is
     # wake-word ON — matches the reference voice_assistant.py UX.
     require_wake_word = not args.no_wake_word
+
+    # 0.2.6: barge-in default. Operator asked for the "video-call"
+    # interruption model — AEC keeps the mic open and subtracts TTS
+    # from the captured signal. We DEFAULT to it when speexdsp is
+    # installed; otherwise we fall back to the safer mic-pause path
+    # rather than running barge-in without AEC (which would
+    # self-trigger on the agent's own voice). ``--no-barge-in``
+    # forces pause mode regardless.
+    barge_in_requested = not args.no_barge_in
+    barge_in_active = False  # resolved below after we know AEC state
 
     os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
 
@@ -126,18 +171,31 @@ def main() -> int:
     init_extensions(_Args(), client)
     prewarm(client)
 
-    # ── AEC + reference buffer (only when barge-in is requested) ─────
+    # ── AEC + reference buffer ───────────────────────────────────────
+    # 0.2.6: barge-in is request-by-default; we attempt to enable AEC,
+    # and only commit to barge-in when AEC is actually available. AEC
+    # is the only safe way to barge-in without self-triggering on the
+    # agent's own voice — without it we fall back to mic-pause so the
+    # operator gets a stable experience instead of a chatty agent that
+    # keeps interrupting itself.
     aec = None
     reference_buffer = None
-    if args.barge_in:
+    if barge_in_requested:
         from ..core.audio import AECWrapper, ReferenceBuffer, aec_available
-        if not args.no_aec and aec_available():
+        if aec_available():
             aec = AECWrapper(sample_rate=16000, frame_ms=10, enabled=True)
-            reference_buffer = ReferenceBuffer(sample_rate=16000, capacity_seconds=2.0)
-            print(f"[voice] AEC enabled ({aec.backend}); barge-in via echo cancellation", flush=True)
+            reference_buffer = ReferenceBuffer(sample_rate=16000,
+                                               capacity_seconds=2.0)
+            barge_in_active = True
+            print(f"[voice] AEC barge-in enabled ({aec.backend}) — "
+                  f"interrupt the agent any time", flush=True)
         else:
-            reason = "user-requested" if args.no_aec else "speexdsp not installed"
-            print(f"[voice] AEC unavailable ({reason}); barge-in via mic-pause heuristic only", flush=True)
+            barge_in_active = False
+            print("[voice] speexdsp not installed (pip install speexdsp) — "
+                  "falling back to mic-pause during TTS. You won't be able "
+                  "to interrupt the agent mid-speech.", flush=True)
+    else:
+        print("[voice] --no-barge-in: mic-pause during TTS", flush=True)
 
     # ── Chimes (wake + follow-up earcons) ────────────────────────────
     from ..core.audio import ChimePlayer
@@ -205,8 +263,9 @@ def main() -> int:
         )
     else:
         mode_msg += ", wake-word disabled (every phrase becomes a command)"
-    if args.barge_in:
-        mode_msg += ", barge-in on"
+    mode_msg += (
+        ", AEC barge-in on" if barge_in_active else ", mic-pause during TTS"
+    )
     print(f"[voice] ready. {mode_msg}. Ctrl-C to quit.", flush=True)
 
     # ── Shutdown handling ────────────────────────────────────────────
@@ -247,7 +306,7 @@ def main() -> int:
             # mic-pause; we now do the same. With barge-in, the mic
             # stays open so the AEC + sustained-voice callback can
             # detect interruption mid-TTS.
-            if not args.barge_in:
+            if not barge_in_active:
                 stt.set_paused(True)
 
             try:
@@ -265,7 +324,7 @@ def main() -> int:
                     continue
 
                 # ── Speak the response ───────────────────────────────
-                if args.barge_in:
+                if barge_in_active:
                     # Install a callback the STT thread fires the moment
                     # it sees sustained voice — sub-50 ms latency, no
                     # polling. Bypasses the main thread entirely so
@@ -314,7 +373,7 @@ def main() -> int:
                 # mode the mic is still paused under the outer try,
                 # which is safer than the prior pause/unpause dance.
                 if stt.require_wake_word and chimes.enabled("followup"):
-                    if args.barge_in:
+                    if barge_in_active:
                         if reference_buffer is not None:
                             chimes.play("followup")
                     else:
@@ -322,7 +381,7 @@ def main() -> int:
 
                 stt.open_followup()
             finally:
-                if not args.barge_in:
+                if not barge_in_active:
                     stt.set_paused(False)
     finally:
         try:
