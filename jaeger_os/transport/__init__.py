@@ -24,11 +24,10 @@ imports from here.  Schemas are transport-free by construction.
 from .bus import Bus, SubscriberFn
 from .codec import encode, decode, is_binary_topic
 from .inproc_bus import InProcBus
-
-# ZMQBus lands at Track A.4 — re-exported from here once it exists.
+from .zmq_bus import ZMQBus, DEFAULT_ENDPOINT as ZMQ_DEFAULT_ENDPOINT
 
 __all__ = [
     "Bus", "SubscriberFn",
     "encode", "decode", "is_binary_topic",
-    "InProcBus",
+    "InProcBus", "ZMQBus", "ZMQ_DEFAULT_ENDPOINT",
 ]
