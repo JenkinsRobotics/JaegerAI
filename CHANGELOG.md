@@ -3,6 +3,145 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.3.0` — 2026-06-06
+
+**0.2.x TUI architecture with 0.3.0 plugin internals.** This release
+deliberately keeps the proven 0.2.6 in-process Rich TUI as the
+operator surface and layers the 0.3.0 plugin work underneath it.
+The Swift desktop app and Python daemon socket protocol from the
+upstream 0.3.0 plan stay in tree as dormant code paths, but are
+not wired into the launcher.  Two architecturally consequential
+0.3.0 efforts are walked back because they introduced more failure
+than they fixed on this hardware:
+
+  - the Swift JaegerOS.app + DaemonClient socket plumbing
+  - the daemon-attached `interfaces/rich_tui/`
+
+What does ship: a working in-process voice loop with two audio
+backends, the v3 skill manifest, persona prefill, the 12B Gemma
+registry, the bench dir-mismatch fix, and a hardened Whisper STT
+path.
+
+### Voice pipeline rebuild
+
+- **Persistent Kokoro output** — one long-lived OutputStream opens
+  at warm time and stays alive for the whole session.  Replaces the
+  per-utterance `sd.play()` + `sd.wait()` path from 0.2.6 which on
+  macOS 26.5 produced PortAudio internal errors mid-session and
+  `Pa_Terminate`-at-exit segfaults.  Chunk-streaming via an enqueue
+  queue → AVAudioPlayerNode (or sd callback) means TTS sounds
+  seamless across chunk boundaries.
+- **Two backends, config-toggled.**
+  - `sounddevice` (default) — PortAudio via the sounddevice wrapper.
+    Output device resolved LIVE via a direct CoreAudio query so it
+    follows the operator's Settings → Sound choice instead of
+    PortAudio's stale cached default.  `JAEGER_AUDIO_OUTPUT` env
+    override (int index or name substring).
+  - `avaudio` — PyObjC AVAudioEngine, direct
+    `scheduleBuffer:completionHandler:` on AVAudioPlayerNode (no
+    worker thread, no callback wrapper).  Apple-native, bypasses
+    PortAudio entirely.  Ports the SessionPlayer pattern from
+    `dev_tools/audio_smoke/voice_assistant_avaudio.py`.
+  - Toggle via `config.voice.audio_backend` or
+    `JAEGER_AUDIO_BACKEND` env var.
+- **Whisper STT hardening** — `is_non_speech_marker()` suppresses
+  `[BLANK_AUDIO]` / `(beep)` / `[music]` etc. in follow-up windows
+  and no-wake-word mode so an open mic doesn't burn turns replying
+  to room noise.  Optional AEC plumbing on `_MicStream` for
+  speexdsp / Apple AEC backends.
+- **`jaeger_os/plugins/avaudio_io/`** — generic PyObjC AVAudioEngine
+  bridge.  Used by `voice_loop.py`'s mic input; TTS bypasses the
+  OutputStream wrapper for direct scheduling.
+- **`dev_tools/audio_smoke/`** — three standalone voice-assistant
+  loops (`legacy`, `persistent`, `avaudio`) for isolating audio
+  regressions from the TUI environment.  Each is a self-contained
+  mic + Whisper + Gemma + Kokoro loop.
+
+### Skill system v3
+
+- **Unified `manifest_v3` schema** (`jros.skill/v3`) — one Pydantic
+  shape covers id, version, origin, package, runtime, domains,
+  embodiment, permissions, capabilities (with per-capability Level
+  bands + scorer reference), dependencies, artifacts, entrypoint,
+  body, provenance.  Reserved enums + hash/uri/size_bytes for the
+  0.4.x content-addressed artifact store.
+- **Capability scoring + persistence** — promotion / demotion rules
+  (3 runs above next-band threshold → bump up; 3 below → bump down).
+  Persists in `<instance>/capabilities/` across reload.  Routing
+  consults the live band.
+- **Flagship v3 skills** — `computer_use@1.0.0` (universal screenshot
+  loop) and `macos_computer@1.0.0` (capability-ladder AppleScript →
+  CDP → Accessibility → screenshot, 10–30× faster on Mac).
+- Old in-memory `registry.py` stripped to an ImportError stub with
+  migration text; every caller now goes through `skill_loader`'s
+  discovery API.  Playbook count unchanged at 87.
+
+### Persona prefill framework
+
+- **`jaeger_os/personas/`** — wizard-time YAML templates that prefill
+  `identity.yaml` + `soul.md` when a new instance is created.  First
+  packaged persona is `jarvis.yaml`.  Zero runtime cost: nothing in
+  the per-turn `assemble.py` path reads from `personas/` at inference.
+- **`core/instance/personas.py`** — loader API used only by the
+  setup wizard.
+- **Setup wizard** offers a persona picker; `none` produces the
+  same bundle as today's wizard (regression-safe).
+
+### Model registry
+
+- **Gemma 4 12B-it Q4_K_M** added to `MODEL_REGISTRY`.  Promoted to
+  the 24 GB tier's asleep pick (Mac Mini sweet spot) — 6.9 GB on
+  disk, leaderboard #1 at 94.9 % routing accuracy with a clean
+  18/18 safety subset on the 2026-06-04 bench.  Qwen3.5-9B retained
+  as an alternate at that tier.  32 GB+ tiers unchanged
+  (Qwen3-30B-A3B MoE stays the asleep pick).
+
+### Bench infra
+
+- **Writer/aggregator dir-mismatch fix** — writers at
+  `dev_benchmark/run_flat_bench.py` and `run_model_sweep.py` now
+  land artifacts under `dev_benchmark/flat/` and
+  `dev_benchmark/sweep/` (was `benchmark/flat/` etc.), matching the
+  aggregator at `jaeger_os/daemon/bench_history_verb.py`.  Six
+  baseline gemma-4-26B-A4B-it-Q4_K_M runs included.
+
+### Launcher
+
+- **`./launch`** (and `./launch.py` under it) — sandbox launcher
+  with a Gundam-style real-verification boot scroll: every row is
+  a check the launcher actually performs (sandbox bundle, library
+  import resolution, legacy daemon stop, instance lock, manifest
+  schema, GGUF model file, avaudio bridge import, Whisper assets,
+  Kokoro package, skill registry walk, TUI module import).  Then
+  `os.execvpe` into the in-process TUI.  Housekeeping flags:
+  `--status`, `--stop`, `--restart`, `--reset-audio`,
+  `--clean-logs`, `--health`, `--no-voice`.
+
+### Documentation
+
+- `docs/agent_contract.md` → `jaeger_os/docs/agent_contract.md`
+  (framework-internal material belongs with the package).  Generator
+  and test paths updated.
+- New: `docs/skill_schema_v3.md` (480 lines — canonical reference
+  for the v3 manifest schema, capability scoring, deferred
+  features).
+- `dev_tools/audio_smoke/README.md` documents the standalone smoke
+  tests' purpose + invocation.
+
+### Skipped from the upstream 0.3.0 plan
+
+- `apps/JaegerOS/` — Swift desktop app (chat window + menu-bar icon
+  + DaemonClient socket protocol + floating pill + Apple Speech +
+  Whisper STT backends + AVSpeechSynth + Kokoro TTS fallback).
+  Stays in tree, archived.  Not wired into install or run.
+- `jaeger_os/interfaces/rich_tui/` — daemon-attached Rich TUI
+  surface.  Stays in tree, archived.  In-process
+  `jaeger_os/interfaces/tui/` is the operator surface.
+- Tray launchers + daemon log rotation + the `./run.sh app`
+  subcommand — all depend on archived surfaces.
+
+---
+
 ## `0.2.6` — 2026-05-31
 
 **Layout unification + wizard polish.** The biggest single release
