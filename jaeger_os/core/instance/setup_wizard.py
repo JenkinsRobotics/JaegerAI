@@ -24,6 +24,10 @@ from jaeger_os.core.instance.instance import (
     default_instance_name,
     resolve_instance_dir,
 )
+from jaeger_os.core.instance.personas import (
+    Persona,
+    list_personas,
+)
 from jaeger_os.core.models.model_resolver import DEFAULT_MODEL, MODEL_REGISTRY
 from jaeger_os.core.instance.schemas import (
     CORE_VERSION,
@@ -94,6 +98,89 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
         print(f"     (pick 1-{len(options)})")
+
+
+def _pick_persona() -> Persona | None:
+    """Offer the operator a starter persona before Step 1.
+
+    Personas are wizard-time templates only (see
+    ``jaeger_os/personas/README.md``).  A picked persona supplies
+    DEFAULTS for the identity questions; the operator can still type
+    over any of them, so picking one never traps you into a shape.
+
+    Returns the chosen ``Persona`` or ``None`` if the operator
+    declined / no personas are installed.  Never raises — a broken
+    persona file is skipped by ``list_personas`` upstream.
+    """
+    available = list_personas()
+    if not available:
+        return None
+    print()
+    print("  Start from a persona template?  Optional — the picked")
+    print("  values become defaults for the next step; you can still")
+    print("  edit any of them.  (Character levels + skill bundles")
+    print("  come later on the Lilith-AI line.)")
+    options: list[tuple[str, str]] = [("none", "Skip — define identity manually")]
+    for p in available:
+        # Keep the label tight so the wizard's choice list stays on
+        # one line per option.
+        label = f"{p.name} — {p.description}"
+        if len(label) > 80:
+            label = label[:77] + "…"
+        options.append((p.id, label))
+    chosen = _ask_choice("Persona", options, default=0)
+    if chosen == "none":
+        return None
+    for p in available:
+        if p.id == chosen:
+            print(f"  ✓ prefilling from persona: {p.name}")
+            return p
+    return None
+
+
+def _initialise_soul_md(
+    root: Path,
+    agent_name: str,
+    *,
+    persona_soul: str | None,
+    role_overflow: str | None,
+) -> None:
+    """Write the initial ``soul.md`` from whatever sources the wizard
+    has — persona template + role-overflow text, in that order.
+
+    Both sources are optional and independent:
+
+      * If a persona was picked AND its YAML has ``soul_md``, write
+        that as the body.
+      * If the operator's role overflowed the 256-char identity cap,
+        append the full text under a "Role (full text from setup)"
+        heading so context isn't lost.
+      * If neither, leave ``soul.md`` absent — the agent's
+        ``update_soul`` tool can create it later.
+
+    The combined behaviour is intentionally simple: persona soul +
+    overflow append cleanly without either clobbering the other.
+    """
+    if not persona_soul and not role_overflow:
+        return
+    soul_path = root / "soul.md"
+    body = _SOUL_OVERFLOW_HEADER
+    if persona_soul:
+        body += persona_soul.strip() + "\n"
+    if role_overflow:
+        if persona_soul:
+            body += "\n"
+        body += (
+            f"# {agent_name}\n\n"
+            "## Role (full text from setup)\n\n"
+            + role_overflow.strip()
+            + "\n"
+        )
+    try:
+        soul_path.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        print(f"     ⚠  couldn't write soul.md ({exc}); identity.yaml "
+              "is still valid")
 
 
 def _banner(line: str) -> None:
@@ -292,10 +379,25 @@ def run_wizard(
             sys.exit(0)
         backup_instance_dir(layout)
 
+    # ── Optional · Persona prefill (0.3.0 framework) ───────────────
+    # Personas are wizard-time templates only — they prefill the
+    # Step 1 defaults so an operator who's happy with a canonical
+    # shape can press Enter through identity instead of typing it
+    # out.  Zero runtime impact: after the wizard finishes, the
+    # instance directory just has the resulting identity.yaml +
+    # soul.md.  The full character-level / skill-bundle / tool-gate
+    # system is deferred to the Lilith-AI line — see
+    # ``jaeger_os/personas/README.md``.
+    persona = _pick_persona()
+    p_id = persona.identity if persona else None
+
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
     print(f"  Who is this Jaeger?  (instance dir: {name})")
-    agent_name = _ask("Agent display name", "Jarvis")
+    agent_name = _ask(
+        "Agent display name",
+        p_id.display_name if p_id else "Jarvis",
+    )
     # WIZ-2: surface the role length cap AND split a too-long role
     # gracefully — first sentence goes into identity.role, the full
     # text into soul.md. Previously a long answer crashed the wizard
@@ -309,7 +411,7 @@ def run_wizard(
     # then default."
     role_raw = _ask(
         f"Role — what does it do?  (≤{_ROLE_MAX_LEN} chars)",
-        "general-purpose agentic assistant",
+        p_id.role if p_id else "general-purpose agentic assistant",
     )
     role, role_overflow = _truncate_role(role_raw)
     if role_overflow:
@@ -317,13 +419,26 @@ def run_wizard(
               f"soul.md; identity.role uses the first sentence.)")
     personality = _ask(
         "Personality (one line)",
-        "Helpful, capable, concise — honest about uncertainty.",
+        p_id.personality if p_id
+        else "Helpful, capable, concise — honest about uncertainty.",
     )
     print("  Voice:")
-    voice_id = _ask_choice("Pick a voice", _VOICES, default=0)
+    # If the persona pinned a voice_id and it matches one of our
+    # offered Kokoro voices, surface it as the default — operator
+    # can still override.  Unknown / missing voice_id falls through
+    # to the existing default-0 behaviour.
+    voice_default_idx = 0
+    if p_id and p_id.voice_id:
+        for i, (vid, _label) in enumerate(_VOICES):
+            if vid == p_id.voice_id:
+                voice_default_idx = i
+                break
+    voice_id = _ask_choice("Pick a voice", _VOICES, default=voice_default_idx)
     identity = Identity(
-        name=agent_name, role=role, personality=personality,
-        voice_tone="clear, even-keeled", voice_id=voice_id,
+        name=agent_name, role=role,
+        personality=personality,
+        voice_tone=(p_id.voice_tone if p_id else "clear, even-keeled"),
+        voice_id=voice_id,
     )
 
     # ── Step 2 · Model ──────────────────────────────────────────────
@@ -439,15 +554,29 @@ def run_wizard(
         print()
         print("     ⚠  voice is experimental.")
         # VOICE-2: probe for speexdsp (acoustic echo cancellation).
-        # Without it the always-on mic feeds back podcast/youtube audio
-        # playing nearby into the agent. We offer one-tap install if
-        # missing; otherwise warn clearly and let the user decide.
+        # AEC keeps the always-on mic from feeding back podcast / YouTube
+        # audio playing nearby.  Two paths exist in 0.3.0:
+        #
+        #   • macOS + ``--audio-backend avaudio`` (default): AVAudioEngine's
+        #     built-in voice-processing AEC + NS + AGC kicks in
+        #     automatically when no speexdsp is wired (see
+        #     ``whisper_stt/_base.py``), so speexdsp is OPTIONAL on Mac.
+        #   • Anywhere else (Linux + portaudio, macOS + ``--audio-backend
+        #     portaudio``): speexdsp is the only AEC available; without
+        #     it, mic-pause-during-TTS is the only echo defence.
+        #
+        # We still offer one-tap install if missing because (a) it's the
+        # only cross-platform AEC and (b) the operator may want to fall
+        # back to portaudio later without breaking AEC.
         if _has_speexdsp():
-            print("        speexdsp detected — echo cancellation will work.")
+            print("        speexdsp detected — echo cancellation will work "
+                  "on every backend.")
         else:
-            print("        speexdsp NOT installed — the always-on mic will")
-            print("        feed background audio (podcasts, YouTube, …) into")
-            print("        the agent. Install it for echo cancellation:")
+            print("        speexdsp NOT installed.  On macOS with the")
+            print("        default AVAudio backend, Apple's voice-processing")
+            print("        AEC will kick in automatically.  On other")
+            print("        platforms (or ``--audio-backend portaudio``)")
+            print("        background audio will leak into the mic.")
             print("            pip install speexdsp")
             if _ask_yn("        Try the install now?", False):
                 _install_speexdsp()
@@ -550,13 +679,18 @@ def run_wizard(
         install_method=install_method,
         install_source=_install_source_for(install_method),
     ))
-    # WIZ-2: persist a long-form role to soul.md so the truncated
-    # identity.role doesn't lose the user's full intent. Only written
-    # when truncation actually happened — short roles leave soul.md
-    # absent (the agent's ``update_soul`` tool will create it later
-    # if it ever needs to).
-    if role_overflow:
-        _write_soul_from_role(layout.root, agent_name, role_overflow)
+    # Write soul.md from the persona template (if any) AND / OR the
+    # role-overflow text (if any).  Both sources are optional and
+    # combine cleanly — see ``_initialise_soul_md``.  Short role +
+    # no persona → soul.md stays absent, identical to the
+    # pre-persona behaviour (the agent's ``update_soul`` tool can
+    # write one later if it ever needs to).
+    _initialise_soul_md(
+        layout.root,
+        agent_name,
+        persona_soul=persona.soul_md if persona else None,
+        role_overflow=role_overflow,
+    )
     # INST-4: populate the per-instance HOME jail if the user opted
     # in. Idempotent; safe to re-run.
     if use_instance_home:
@@ -597,40 +731,21 @@ def run_wizard(
     return layout
 
 
-# ── soul.md overflow writer (WIZ-2) ──────────────────────────────────
+# ── soul.md initial-body writer (0.3.0) ──────────────────────────────
 
 
 _SOUL_OVERFLOW_HEADER = (
     "<!-- soul.md — who this instance is: character, values, voice.\n"
-    "     Auto-generated by the wizard because the role text was\n"
-    "     longer than identity.role's 256-char cap. Edit freely;\n"
-    "     loaded into the system prompt at startup. -->\n\n"
+    "     Auto-generated by the wizard (persona template and / or\n"
+    "     a role longer than identity.role's 256-char cap). Edit\n"
+    "     freely; loaded into the system prompt at startup. -->\n\n"
 )
 
 
-def _write_soul_from_role(root: Path, name: str, full_role: str) -> None:
-    """Drop the user's full role text into ``soul.md`` so the
-    truncated ``identity.role`` doesn't lose context.
-
-    Header mirrors the convention used by ``identity_tools.update_soul``
-    (see ``core/tools/identity_tools.py:_SOUL_HEADER``) so the agent's
-    own self-edits don't fight with the wizard's output. Best-effort —
-    a write failure prints a note and keeps going; the truncated role
-    in ``identity.yaml`` is still a perfectly usable instance.
-    """
-    soul_path = root / "soul.md"
-    body = (
-        _SOUL_OVERFLOW_HEADER
-        + f"# {name}\n\n"
-        + "## Role (full text from setup)\n\n"
-        + full_role.strip()
-        + "\n"
-    )
-    try:
-        soul_path.write_text(body, encoding="utf-8")
-    except OSError as exc:
-        print(f"     ⚠  couldn't write soul.md ({exc}); the truncated "
-              "role is in identity.yaml as-is.", flush=True)
+# Note: ``_write_soul_from_role`` (WIZ-2, 0.2.x) was retired in 0.3.0.
+# Its single role-overflow case is now handled by
+# ``_initialise_soul_md`` defined near the top of this module, which
+# also handles the optional persona-template prefill in one place.
 
 
 # ── speexdsp probe + install (VOICE-2) ───────────────────────────────
