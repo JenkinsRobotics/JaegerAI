@@ -39,10 +39,10 @@ from jaeger_os import topics
 BINARY_TOPICS: frozenset[str] = frozenset({
     topics.SENSE_AUDIO_IN,
     topics.ACT_AUDIO_OUT,
-    # vision frames are also binary at the JPEG/PNG level — but our
-    # current VisionObservation schema carries structured boxes + an
-    # optional scene description, not raw image bytes.  When/if we
-    # add raw-image fields to a vision topic, add it here.
+    # /sense/vision (CameraFrame) carries JPEG/PNG/raw bytes as the
+    # main payload — MessagePack avoids the base64 hop JSON would
+    # require, and the smaller wire form matters at 10-30 fps.
+    topics.SENSE_VISION,
 })
 
 

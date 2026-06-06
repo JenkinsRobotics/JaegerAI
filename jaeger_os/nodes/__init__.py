@@ -23,9 +23,12 @@ The Track B audio_io / stt / tts nodes will all subclass this.
 from .base import Node, NodeState
 from .stt import STTAdapter, STTNode
 from .tts import Synthesizer, TTSNode
+from .vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
 
 __all__ = [
     "Node", "NodeState",
     "TTSNode", "Synthesizer",
     "STTNode", "STTAdapter",
+    "VisionNode", "CameraAdapter",
+    "USBCameraAdapter", "TCPCameraAdapter",
 ]
