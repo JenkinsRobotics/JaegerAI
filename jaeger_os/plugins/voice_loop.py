@@ -187,6 +187,17 @@ def main() -> int:
 
     config: Config = load_yaml(layout.config_path, Config)
     agent_tools.bind(layout)
+
+    # LLM-gated speech: when enabled, the system prompt picks up the
+    # ``VOICE_LLM_GATE_RULE`` block via the JAEGER_VOICE_GATE env var.
+    # Has to land BEFORE ``build_system_prompt`` below so the rule is
+    # baked into the prompt the agent reads on turn 1.
+    voice_gate_active = bool(getattr(config.voice, "llm_gate", False))
+    if voice_gate_active:
+        os.environ["JAEGER_VOICE_GATE"] = "1"
+        print("[voice] LLM-gated speech ON — replies prefixed "
+              "<reply>/<ignore>; <ignore> suppresses TTS", flush=True)
+
     from ..main import _pipeline
     _pipeline["layout"] = layout
     _pipeline["config"] = config
@@ -433,7 +444,22 @@ def main() -> int:
                 text = (result.get("text") or "").strip()
                 spoke_via_tool = result.get("spoke_via_tool", False)
 
-                if not text or spoke_via_tool:
+                # LLM-gate: when config.voice.llm_gate is on, the
+                # system prompt told the agent to begin its reply
+                # with <reply> or <ignore>.  Parse + strip the tag
+                # before we hand the text to TTS.
+                gated_out = False
+                if voice_gate_active and text and not spoke_via_tool:
+                    from jaeger_os.core.voice import parse_gate
+                    should_speak, gated_text = parse_gate(text)
+                    if not should_speak:
+                        print(f"[voice] LLM gate: <ignore> on phrase "
+                              f"{phrase!r} — suppressing TTS", flush=True)
+                        gated_out = True
+                    else:
+                        text = gated_text
+
+                if not text or spoke_via_tool or gated_out:
                     if spoke_via_tool:
                         print("[voice] agent vocalized via tool — skipping "
                               "post-turn speak", flush=True)

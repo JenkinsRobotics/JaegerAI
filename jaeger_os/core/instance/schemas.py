@@ -240,6 +240,22 @@ class VoiceConfig(BaseModel):
             "class).  Override per-run with JAEGER_AUDIO_BACKEND env var."
         ),
     )
+    llm_gate: bool = Field(
+        False,
+        description=(
+            "LLM-gated speech: when True, every reply begins with one "
+            "of two tags — <ignore> if the agent judges the input "
+            "WASN'T addressed to it (TV noise, ambient chatter, "
+            "transcription artifacts on an open mic), or <reply> if "
+            "it was.  The voice loop suppresses TTS on <ignore>.  "
+            "Sits ABOVE the existing STT-level non-speech-marker "
+            "filter as a second line of defence for always-on "
+            "embodied agents.  Pattern absorbed from VoiceLLM "
+            "(dev_docs/library_review/voicellm.md).  Default off so "
+            "the system prompt rule only loads when the operator opts "
+            "in."
+        ),
+    )
 
 
 class ExternalModelConfig(BaseModel):
