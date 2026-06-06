@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.2.3-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.3.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -43,18 +43,41 @@ installs the whole stack.**
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.2.3` released.** Distribution overhaul. JROS now
-> installs via a single `curl` line (Hermes-Agent / ComfyUI / A1111
-> style) — `git clone` + `./install.sh`, not `pip install`. The
-> framework is now a runnable app rather than a library: the repo
-> root is your install root, agents live in plain folders, and
-> `git pull && ./install.sh` is the upgrade story. Three-layer
-> architecture from 0.2.1 carries forward — **System** (the package),
-> **Runtime** (`~/.jaeger/instances/`), **User** (`agents/<name>/`).
-> Sleep-cycle architecture (0.2.0) + memory-tier-aware wizard +
-> bench v1.1 (59 cases, safety / hallucination / cross-turn tiers)
-> all unchanged. Next major beat: **hardware-node layer** (transport,
-> motors, LEDs) on JP01.
+> **Status — `0.3.0` released.** Voice pipeline rebuild + skill
+> system v3 + persona prefill. The 0.2.x in-process Rich TUI stays
+> as the operator surface; the 0.3.0 work layers underneath it:
+>
+> - **Persistent TTS output stream** — one long-lived OutputStream
+>   opens at warm time, stays alive for the session.  Two backends,
+>   config-toggled via `config.voice.audio_backend`:
+>     - `sounddevice` (default) — PortAudio, with the output device
+>       resolved LIVE via CoreAudio so it follows Settings → Sound.
+>     - `avaudio` — PyObjC AVAudioEngine, direct
+>       `scheduleBuffer:completionHandler:` (no PortAudio in the loop).
+> - **Skill system v3** — unified `jros.skill/v3` manifest schema
+>   (id, version, origin, package, runtime, domains, embodiment,
+>   permissions, capabilities with per-capability scoring bands +
+>   levels, dependencies, artifacts, entrypoint, body, provenance).
+>   Capability state persists in `<instance>/capabilities/`; promotion
+>   /demotion rules update the live band the router consults.
+> - **Persona prefill** — wizard-time YAML templates in
+>   `jaeger_os/personas/` prefill `identity.yaml` + `soul.md` when a
+>   new instance is created.  Zero runtime cost on existing instances.
+> - **Whisper STT hardening** — `is_non_speech_marker()` suppresses
+>   `[BLANK_AUDIO]` / `(beep)` / `[music]` in follow-up + no-wake-word
+>   modes.  Optional AEC plumbing on `_MicStream`.
+> - **Gemma 4 12B-it Q4** added to the model registry; promoted to the
+>   24 GB tier asleep pick (Mac Mini sweet spot — leaderboard #1 at
+>   94.9 % routing on the 2026-06-04 bench).
+> - **`./launch`** — sandbox launcher with a real-verification boot
+>   scroll (every row a check the launcher actually performs against
+>   the instance bundle).  Housekeeping flags: `--status`, `--stop`,
+>   `--restart`, `--reset-audio`, `--clean-logs`, `--health`.
+>
+> See `CHANGELOG.md` for the full entry and the explicit "Skipped
+> from the upstream 0.3.0 plan" list (the Swift desktop app + the
+> daemon-attached `rich_tui` surface stay in tree as archived code,
+> not wired into install or run).
 
 ---
 
@@ -144,8 +167,8 @@ pulls + re-installs.
 **Pinning a release** — for reproducible installs:
 
 ```bash
-JAEGER_REF=0.2.3 curl -fsSL \
-  https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.2.3/scripts/install.sh | bash
+JAEGER_REF=0.3.0 curl -fsSL \
+  https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.3.0/scripts/install.sh | bash
 ```
 
 **Custom install location** — override with an env var:
@@ -176,6 +199,72 @@ cd ~/jaeger
 ./run.sh setup     # create your first agent
 ./run.sh           # launch it
 ```
+
+---
+
+## Daily use (0.3.0)
+
+The 0.2.x in-process Rich TUI is still the operator surface in 0.3.0.
+Pick whichever launch path matches what you're doing.
+
+**Run a named agent** — the production-flow:
+
+```bash
+./run.sh --instance lilith        # in-process TUI for the 'lilith' instance
+./run.sh --instance lilith --no-voice   # text-only (no mic, no Kokoro warm)
+```
+
+**Sandbox dev loop** — for working on JROS itself.  The `./launch`
+wrapper boots the in-repo sandbox at `sandbox/.jaeger_os/instances/jros-dev/`
+with a real-verification boot scroll, then hands the terminal to the
+TUI.  Daily flags:
+
+```bash
+./launch                           # boot the sandbox TUI
+./launch --status                  # what's running across modes
+./launch --stop                    # kill a lingering TUI singleton
+./launch --restart                 # stop, then boot
+./launch --health                  # preflight checks and exit
+./launch --reset-audio             # sudo killall coreaudiod
+./launch --clean-logs              # truncate <instance>/run/jaeger.log
+./launch --no-voice                # tell the TUI to skip voice startup
+```
+
+The `./launch` boot scroll runs every check before handing off:
+sandbox bundle, library import resolution, instance manifest schema,
+GGUF model on disk, AVAudioEngine bridge import, Whisper assets,
+Kokoro package, skill registry walk, TUI module import.  A red row
+stops boot with the actual reason.
+
+**Pick the audio backend** — 0.3.0 ships two persistent-stream backends
+for TTS.  Configure once in your instance's `config.yaml`:
+
+```yaml
+voice:
+  audio_backend: sounddevice    # PortAudio (default; macOS Settings-default device live-resolved)
+  # or:
+  # audio_backend: avaudio       # PyObjC AVAudioEngine, direct AVAudioPlayerNode scheduling
+```
+
+Or override per-run without editing the config:
+
+```bash
+JAEGER_AUDIO_BACKEND=avaudio ./launch
+JAEGER_AUDIO_OUTPUT="Mac Studio Speakers" ./launch   # sounddevice device override
+```
+
+**Bench against the model registry leaderboard** — runs the full
+59-case flat bench and updates `dev_benchmark/HISTORY.md`:
+
+```bash
+./dev_benchmark/run_flat_bench.py             # full corpus
+./dev_benchmark/run_flat_bench.py --limit 5   # 5-case smoke
+./dev_benchmark/run_flat_bench.py --tags routing,multistep
+```
+
+The 2026-06-04 leaderboard row for `gemma-4-26B-A4B-it-Q4_K_M` is
+**55/59 (93 %)** at `permissions.mode=allow`; bench history is
+regenerated on every run.
 
 ---
 
