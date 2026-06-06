@@ -59,6 +59,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from typing import Any
 
 from ..main import (
@@ -508,61 +509,83 @@ def main() -> int:
                     continue
 
                 # ── Speak the response ───────────────────────────────
-                # Hoisted out of the barge-in branch so the post-speak
-                # cleanup below (drain_pending / follow-up chime) can
-                # read it on every path.  On the sync path the flag
-                # never flips; on the barge-in path the STT callback
-                # sets it from the VAD thread.
+                # 0.4 Track B.3.2.b: both sync + barge-in paths now go
+                # through the bus.  bus.request(SpeechCommand) blocks
+                # until the TTS node publishes /sense/spoken with the
+                # matching correlation_id — that returns naturally on
+                # completion OR when SpeechStop interrupts the in-
+                # flight speak.  Either way, the result is a SpokenAck
+                # that mirrors the pre-bus speak_result shape (ok,
+                # duration_s, reason).
                 interrupted = {"flag": False}
-                if barge_in_active:
-                    # Install a callback the STT thread fires the moment
-                    # it sees sustained voice — sub-50 ms latency, no
-                    # polling. Bypasses the main thread entirely so
-                    # interruption is snappy.
+                _speech_cid = uuid.uuid4().hex
 
+                if barge_in_active:
+                    # Install an STT-thread callback that publishes
+                    # SpeechStop instead of calling tts.stop() directly.
+                    # Same sub-50ms detection — the publish lands on the
+                    # bus delivery thread which calls synth.stop() in
+                    # the TTS node.
                     def _on_user_speaks() -> None:
                         if not interrupted["flag"]:
                             interrupted["flag"] = True
-                            print("[voice] barge-in detected — stopping TTS",
-                                  flush=True)
-                            tts.stop()
+                            print("[voice] barge-in detected — publishing "
+                                  "SpeechStop", flush=True)
+                            _bus.publish(_topics.SpeechStop(
+                                reason="user interrupted",
+                                node_id="voice_loop",
+                            ))
 
                     stt.set_on_speech_detected(_on_user_speaks)
                     try:
-                        play_result = tts.play_async(text)
-                        if not play_result.get("started"):
-                            # Symmetric with the sync ``speak`` skip
-                            # path below: the operator heard nothing,
-                            # so opening a follow-up window they can't
-                            # perceive would just confuse the flow.
-                            # Back to WAKE; the next thing they say
-                            # will need a wake word.
-                            reason = play_result.get("reason", "unknown")
-                            print(f"[voice] follow-up skipped — TTS "
-                                  f"did not start ({reason})", flush=True)
-                            continue
-                        # Block until TTS naturally ends OR barge-in
-                        # fires (which calls tts.stop() and causes wait
-                        # to return).
-                        tts.wait_until_done()
+                        ack = _bus.request(
+                            _topics.SpeechCommand(
+                                text=text,
+                                node_id="voice_loop",
+                                correlation_id=_speech_cid,
+                            ),
+                            ack_topic=_topics.SENSE_SPOKEN,
+                            timeout_s=180.0,
+                        )
                     finally:
                         stt.set_on_speech_detected(None)
                 else:
-                    # Sync path: TTS runs with mic paused; reference
-                    # voice_assistant's pattern. Followup chime fires
-                    # before unpause so it doesn't bleed in either.
-                    speak_result = tts.speak(text)
-                    if not speak_result.get("spoken", False):
-                        # Kokoro produced no audio (empty text, synth
-                        # failure, drain timeout, …) — the operator
-                        # heard nothing, so opening a follow-up window
-                        # they can't perceive would just confuse the
-                        # flow.  Back to WAKE; the ``finally`` below
-                        # unpauses the mic and we go around.
-                        reason = speak_result.get("reason", "unknown")
+                    # Sync path: TTS runs with mic paused; same bus
+                    # round-trip but no barge-in callback registered.
+                    ack = _bus.request(
+                        _topics.SpeechCommand(
+                            text=text,
+                            node_id="voice_loop",
+                            correlation_id=_speech_cid,
+                        ),
+                        ack_topic=_topics.SENSE_SPOKEN,
+                        timeout_s=180.0,
+                    )
+
+                if ack is None or not ack.ok:
+                    # Three possible flavours:
+                    #  - ack is None: bus.request hit the 180s timeout
+                    #  - ack.ok=False, reason="interrupted": barge-in
+                    #    cut the speech mid-stream
+                    #  - ack.ok=False with a synth-side reason: Kokoro
+                    #    produced no audio (empty text, drain timeout,
+                    #    …) so the operator heard nothing.
+                    # In all cases skip the follow-up chime; the
+                    # operator either heard nothing OR is mid-sentence
+                    # interrupting and shouldn't be talked over.  The
+                    # ``finally`` below unpauses the mic and we go
+                    # around.
+                    if ack is None:
+                        print("[voice] TTS bus timeout — follow-up skipped",
+                              flush=True)
+                    elif interrupted["flag"]:
+                        # barge-in branch already logged
+                        pass
+                    else:
+                        reason = ack.reason or "unknown"
                         print(f"[voice] follow-up skipped — TTS produced "
                               f"no audio ({reason})", flush=True)
-                        continue
+                    continue
 
                 # Drop any phrases that VAD finalized during playback —
                 # otherwise a stale buffered utterance becomes the next
