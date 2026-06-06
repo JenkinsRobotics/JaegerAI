@@ -362,7 +362,40 @@ def main() -> int:
             aec=aec, far_end_buffer=reference_buffer,
             audio_backend=args.audio_backend,
         )
-    stt.start()
+
+    # 0.4 Track B.3.2.a — STT phrase consumption migrates to the bus.
+    # The STTNode wraps the existing WhisperSTTContinuous engine and
+    # publishes committed phrases on /sense/transcript.  voice_loop
+    # subscribes here + drains via _phrase_queue instead of calling
+    # stt.next_phrase() directly.  Engine control methods (set_paused,
+    # open_followup, set_on_speech_detected, drain_pending,
+    # require_wake_word, in_speech) still go through ``stt`` for now
+    # — they're voice-loop-internal coordination and would need
+    # /control/* topics that aren't designed yet.  Track B.3.2.b
+    # handles those when the TTS path migrates.
+    import queue as _queue
+    from jaeger_os import topics as _topics
+    from jaeger_os.nodes import STTNode as _STTNode
+    from jaeger_os.nodes import runtime as _runtime
+    _bus = _runtime.get_bus()
+    _phrase_queue: "_queue.Queue[str]" = _queue.Queue()
+
+    def _on_transcript(msg: _topics.Transcript) -> None:
+        _phrase_queue.put(msg.text)
+
+    _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
+    _stt_node = _STTNode(
+        bus=_bus, adapter=stt, name="stt", install_signal_handlers=False,
+    )
+    _stt_thread = threading.Thread(
+        target=_stt_node.run, name="voice-stt-node", daemon=True,
+    )
+    _stt_thread.start()
+    # The STT node's setup() calls stt.start() (opens the mic +
+    # spawns the Whisper background loop).  Give it a moment so the
+    # subscription is live + the mic is hot before we enter the
+    # phrase-pull loop.
+    time.sleep(0.2)
 
     # ── Cron runner (optional) ───────────────────────────────────────
     # In --attach mode the daemon already runs cron; spinning up a
@@ -409,7 +442,13 @@ def main() -> int:
     # ── Main loop ────────────────────────────────────────────────────
     try:
         while not stop.is_set():
-            phrase = stt.next_phrase(timeout=1.0)
+            # 0.4 Track B.3.2.a: phrases come from the bus subscription
+            # via _phrase_queue instead of polling stt.next_phrase().
+            # Same blocking semantics — wait up to 1.0 s for a phrase.
+            try:
+                phrase = _phrase_queue.get(timeout=1.0)
+            except _queue.Empty:
+                phrase = None
             if not phrase:
                 continue
             print(f"[voice] user: {phrase!r}", flush=True)
@@ -544,7 +583,18 @@ def main() -> int:
                     and interrupted.get("flag", False)
                 )
                 if not barge_in_fired:
+                    # 0.4 Track B.3.2.a: drain BOTH the engine's
+                    # committed-q AND the bus subscription queue.
+                    # Otherwise stale phrases buffered during TTS
+                    # playback would still come through the bus
+                    # subscription after engine.drain_pending()
+                    # already cleared them on its side.
                     stt.drain_pending()
+                    while not _phrase_queue.empty():
+                        try:
+                            _phrase_queue.get_nowait()
+                        except _queue.Empty:
+                            break
 
                 # Follow-up chime — rising two-note tone tells the user
                 # "still listening, no wake word needed for the next
@@ -588,7 +638,20 @@ def main() -> int:
                 shutdown()
         except Exception:
             pass
-        stt.stop()
+        # 0.4 Track B.3.2.a — STT node teardown.  Stopping the node
+        # propagates to stt.stop() through STTNode.teardown(), and
+        # joins the Whisper background thread.  Drop the bus
+        # subscription too so a re-entrant voice_loop in the same
+        # interpreter doesn't accumulate stale subscribers.
+        try:
+            _bus.unsubscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
+        except Exception:
+            pass
+        try:
+            _stt_node.stop()
+            _stt_thread.join(timeout=3.0)
+        except Exception:
+            pass
         if cron_runner is not None:
             cron_runner.shutdown(wait=False)
         # 0.2.6: release the daemon socket cleanly in attach mode.
