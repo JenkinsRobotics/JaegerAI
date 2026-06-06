@@ -21,9 +21,14 @@ All three import from :mod:`jaeger_os.topics`; nothing in topics.py
 imports from here.  Schemas are transport-free by construction.
 """
 
+from .bus import Bus, SubscriberFn
 from .codec import encode, decode, is_binary_topic
+from .inproc_bus import InProcBus
 
-# InProcBus + ZMQBus land at Track A.3 / A.4 — re-exported from here
-# once those modules exist.
+# ZMQBus lands at Track A.4 — re-exported from here once it exists.
 
-__all__ = ["encode", "decode", "is_binary_topic"]
+__all__ = [
+    "Bus", "SubscriberFn",
+    "encode", "decode", "is_binary_topic",
+    "InProcBus",
+]
