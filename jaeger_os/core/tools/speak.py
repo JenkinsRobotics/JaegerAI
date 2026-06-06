@@ -80,6 +80,29 @@ def warm_kokoro() -> dict[str, Any]:
     return synth.warm()
 
 
+def _get_tts() -> KokoroTTS:
+    """Back-compat accessor used by the voice loop's direct-TTS code
+    path (which has its own warm/play_async/stop interactions with
+    Kokoro for barge-in semantics).  Returns the same KokoroTTS
+    instance the TTS node wraps — so direct calls AND bus-routed
+    calls share one synthesizer, one audio device, one warm cost.
+
+    Track B.3.2.b will retire this accessor when the voice loop's
+    TTS calls migrate to ``bus.request(SpeechCommand, ...)`` with a
+    ``/control/speech_stop`` topic for barge-in.
+    """
+    from jaeger_os.nodes import runtime
+    runtime.ensure_tts_node()
+    synth = runtime.get_synth()
+    if synth is None:
+        # Fallback path: construct directly.  Shouldn't happen since
+        # ensure_tts_node() above always materialises a synth, but
+        # if some startup ordering surprise leaves runtime empty we
+        # still want a working KokoroTTS instead of crashing.
+        return KokoroTTS(voice=_resolve_voice(), lang=KOKORO_LANG)
+    return synth
+
+
 def speak(text: str = "", path: str = "") -> dict[str, Any]:
     """Speak aloud through the default audio output via the TTS node.
 
