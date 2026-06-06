@@ -11,6 +11,12 @@
 
 # --- agent core ---
 pydantic>=2.0
+# 0.4 transport schemas (Track A): msgspec.Struct on the hot path —
+# 10× faster than Pydantic for serialization AND native MessagePack
+# support (binary topics: audio_in, audio_out, vision frames).
+# Pydantic stays for config + tool schemas where richer validation
+# earns the overhead.
+msgspec>=0.18
 pyyaml>=6.0
 numpy>=1.26
 requests>=2.32
