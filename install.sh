@@ -2,8 +2,8 @@
 # JROS — local installer (runs from inside the cloned repo).
 #
 # Idempotent — safe to re-run after a `git pull`:
-#   - first run:  creates .venv, installs dependencies, scaffolds agents/
-#   - re-run:     upgrades dependencies, leaves agents/ alone
+#   - first run:  creates .venv, installs dependencies, scaffolds .jaeger_os/
+#   - re-run:     upgrades dependencies, leaves .jaeger_os/ alone
 #
 # Usage:
 #   ./install.sh                  # default — runs all steps
@@ -66,9 +66,6 @@ fi
 
 # 4. Scaffold .jaeger_os/ (idempotent) — operator state root
 mkdir -p "$REPO_ROOT/.jaeger_os/instances"
-
-# 5. Ensure ~/.jaeger/ exists for runtime instance state
-mkdir -p "$HOME/.jaeger/instances"
 
 echo
 echo "✓ Local install complete"
