@@ -79,6 +79,11 @@ dev_benchmark/sweep/
 # for cross-reading hermes-agent during the parity port; never tracked.
 jaeger_os/python_hermes_agent/upstream/
 
+# Swift build artifacts (apps/JaegerOS/ — archived surface)
+apps/JaegerOS/.build/
+apps/JaegerOS/.swiftpm/
+apps/JaegerOS/Package.resolved
+
 # JROS runtime artifacts
 *.pid
 *.log
