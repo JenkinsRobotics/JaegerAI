@@ -228,6 +228,18 @@ class VoiceConfig(BaseModel):
         15.0, ge=2.0, le=120.0,
         description="Length of the no-wake-word follow-up window.",
     )
+    audio_backend: Literal["sounddevice", "avaudio"] = Field(
+        "sounddevice",
+        description=(
+            "Persistent TTS output backend. "
+            "'sounddevice' = PortAudio via sounddevice (default; routes "
+            "to the live macOS system default device, falls back to "
+            "PortAudio's default on other OSes).  "
+            "'avaudio' = PyObjC AVAudioEngine (macOS only; Apple-native, "
+            "bypasses PortAudio and the Pa_Terminate-at-exit segfault "
+            "class).  Override per-run with JAEGER_AUDIO_BACKEND env var."
+        ),
+    )
 
 
 class ExternalModelConfig(BaseModel):
