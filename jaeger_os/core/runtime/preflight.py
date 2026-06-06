@@ -79,12 +79,44 @@ def _check_python_deps() -> list[Check]:
     return out
 
 
-def _check_portaudio() -> Check:
-    """PortAudio backs `sounddevice` (TTS/STT audio I/O) and pip cannot
-    install it. The honest probe is to import sounddevice and see if its
-    native library actually loads."""
+def _check_audio_backend() -> Check:
+    """Audio I/O probe.
+
+    0.3.0: macOS prefers ``avaudio_io`` (PyObjC ``AVAudioEngine``) which
+    requires ``pyobjc-framework-AVFoundation``.  When it's available the
+    PortAudio dep becomes optional — sounddevice is still in
+    ``requirements.txt`` as the cross-platform / fallback path through
+    at least one release, but a missing PortAudio doesn't fail the
+    preflight on macOS when avaudio is healthy.
+
+    Off-macOS we fall through to the legacy PortAudio probe — sounddevice
+    is the only path available there.
+    """
+    # macOS: try avaudio first.
+    if platform.system() == "Darwin":
+        try:
+            import AVFoundation  # noqa: F401 — PyObjC framework
+            # Probe AVAudioEngine class lookup so we know the binding
+            # is functional, not just imported.
+            _engine_cls = AVFoundation.AVAudioEngine
+            assert _engine_cls is not None
+            return Check(
+                "audio I/O", "system", True,
+                "AVAudioEngine ready (PyObjC) — PortAudio not required",
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Fall through to PortAudio check + report the avaudio
+            # status as a soft hint in the failure path.
+            avaudio_hint = (
+                f"avaudio backend unavailable ({exc}); "
+                "install with: pip install pyobjc-framework-AVFoundation"
+            )
+            print(f"[preflight] {avaudio_hint}", file=sys.stderr, flush=True)
+
+    # PortAudio path — the historical 0.2.x probe.
     if not _module_present("sounddevice"):
-        return Check("PortAudio", "system", False, "sounddevice not installed",
+        return Check("audio I/O", "system", False,
+                     "neither AVAudioEngine nor sounddevice available",
                      'pip install "jaeger-os[voice]"',
                      [sys.executable, "-m", "pip", "install", "sounddevice"])
     try:
@@ -92,13 +124,18 @@ def _check_portaudio() -> Check:
     except Exception as exc:  # noqa: BLE001 — native load failure
         has_brew = shutil.which("brew") is not None
         return Check(
-            "PortAudio", "system", False,
+            "audio I/O", "system", False,
             f"sounddevice could not load its native library: {exc}",
             "brew install portaudio" if has_brew
             else "install Homebrew (brew.sh), then: brew install portaudio",
             ["brew", "install", "portaudio"] if has_brew else [],
         )
-    return Check("PortAudio", "system", True, "audio I/O ready")
+    return Check("audio I/O", "system", True, "PortAudio ready (sounddevice)")
+
+
+# Keep the old name as an alias so existing callers (tests, dev tools)
+# don't break.
+_check_portaudio = _check_audio_backend
 
 
 def _check_binaries() -> list[Check]:
