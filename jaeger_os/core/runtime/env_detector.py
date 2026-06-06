@@ -1,9 +1,13 @@
-"""Detect whether Lilith is running on a desktop or inside a JROS robot.
+"""Detect whether the agent is running on a desktop or inside a JROS robot.
 
 The single source of truth for the cognitive/physical skill split. The
-launcher passes the result of :func:`detect_environment` to
-:class:`lilith.core.registry.Registry.discover` to decide whether
-``physical`` skills should load.
+launcher passes the result of :func:`detect_environment` into the
+skill loader (``jaeger_os.core.skills.skill_loader``) which uses it
+alongside the v3 manifest's ``embodiment`` block to decide whether
+``physical``-domain skills should load.  (Earlier scaffolding fed
+this into a Lilith-line ``Registry.discover`` — that registry was
+retired in 0.3.0; see ``jaeger_os/core/skills/registry.py`` for the
+deprecation stub.)
 
 Detection signal (in order):
 
