@@ -136,6 +136,28 @@ def main() -> int:
              "daemon's chat.send verb. Requires the daemon to be up — "
              "the voice loop exits with a clear error otherwise."
     )
+    # 0.3.0: which audio I/O backend to use for mic capture (Whisper
+    # STT) and TTS playback (Kokoro).
+    #
+    #   avaudio    (default on macOS)
+    #       PyObjC AVAudioEngine — Apple-native audio I/O.  Retires
+    #       the wedging-CoreAudio bug class entirely.  Voice
+    #       processing mode (built-in AEC + NS + AGC) is available
+    #       via voice_processing=True in the input stream.
+    #
+    #   portaudio  (default on non-Darwin, escape hatch on macOS)
+    #       Classic sounddevice + PortAudio path — the 0.2.x
+    #       behaviour, unchanged.  Kept as a fallback while operators
+    #       validate avaudio on diverse hardware; 0.4.0 removes it
+    #       on macOS.
+    p.add_argument(
+        "--audio-backend", choices=["portaudio", "avaudio"],
+        default="avaudio" if sys.platform == "darwin" else "portaudio",
+        help="Audio I/O backend. 'avaudio' = PyObjC AVAudioEngine, "
+             "Apple-native (default on macOS — retires the wedging-"
+             "CoreAudio bug class). 'portaudio' = classic sounddevice "
+             "(default off-macOS, available as fallback)."
+    )
     args = p.parse_args()
 
     # 0.2.6: invert the --no-wake-word flag into the require_wake_word
@@ -282,6 +304,16 @@ def main() -> int:
     tts = _get_tts()
     if reference_buffer is not None:
         tts.reference_buffer = reference_buffer
+    # 0.3.0: tell the TTS pipeline which audio backend BEFORE warm() —
+    # warm() opens the PersistentKokoroPlayer against ``audio_backend``,
+    # so setting it later would open the persistent stream against the
+    # default (avaudio on macOS) and ignore an operator's
+    # ``--audio-backend portaudio`` until the first speak() forced a
+    # close+reopen.  Set it here so the player opens against the
+    # requested backend on the very first call.
+    if hasattr(tts, "audio_backend"):
+        tts.audio_backend = args.audio_backend
+        print(f"[voice] audio backend = {args.audio_backend}", flush=True)
     print("[voice] warming Kokoro TTS...", flush=True)
     warm_result = tts.warm()
     if warm_result.get("warmed"):
@@ -295,6 +327,11 @@ def main() -> int:
     # voice_assistant.py canonical UX. Previously the STT default
     # (15s) gave a generous "keep talking" window; 10s feels snappier
     # and matches Google-Home muscle memory.
+    # 0.3.0: thread the audio backend choice down to the mic.  Both
+    # STT classes accept ``audio_backend`` which they pass through
+    # to ``_MicStream`` — when 'avaudio' the mic comes up via
+    # AVAudioEngine (PyObjC), otherwise it comes up via sounddevice
+    # exactly as in 0.2.x.
     if args.stt_mode == "continuous":
         from .whisper_stt import WhisperSTTContinuous
         stt = WhisperSTTContinuous(
@@ -302,6 +339,7 @@ def main() -> int:
             require_wake_word=require_wake_word,
             followup_window_s=10.0,
             aec=aec, far_end_buffer=reference_buffer,
+            audio_backend=args.audio_backend,
         )
     else:
         from .whisper_stt import WhisperSTTTwoPass
@@ -311,6 +349,7 @@ def main() -> int:
             require_wake_word=require_wake_word,
             followup_window_s=10.0,
             aec=aec, far_end_buffer=reference_buffer,
+            audio_backend=args.audio_backend,
         )
     stt.start()
 
@@ -404,12 +443,17 @@ def main() -> int:
                     continue
 
                 # ── Speak the response ───────────────────────────────
+                # Hoisted out of the barge-in branch so the post-speak
+                # cleanup below (drain_pending / follow-up chime) can
+                # read it on every path.  On the sync path the flag
+                # never flips; on the barge-in path the STT callback
+                # sets it from the VAD thread.
+                interrupted = {"flag": False}
                 if barge_in_active:
                     # Install a callback the STT thread fires the moment
                     # it sees sustained voice — sub-50 ms latency, no
                     # polling. Bypasses the main thread entirely so
                     # interruption is snappy.
-                    interrupted = {"flag": False}
 
                     def _on_user_speaks() -> None:
                         if not interrupted["flag"]:
@@ -422,9 +466,15 @@ def main() -> int:
                     try:
                         play_result = tts.play_async(text)
                         if not play_result.get("started"):
-                            print(f"[voice] TTS skipped: "
-                                  f"{play_result.get('reason')}", flush=True)
-                            stt.open_followup()
+                            # Symmetric with the sync ``speak`` skip
+                            # path below: the operator heard nothing,
+                            # so opening a follow-up window they can't
+                            # perceive would just confuse the flow.
+                            # Back to WAKE; the next thing they say
+                            # will need a wake word.
+                            reason = play_result.get("reason", "unknown")
+                            print(f"[voice] follow-up skipped — TTS "
+                                  f"did not start ({reason})", flush=True)
                             continue
                         # Block until TTS naturally ends OR barge-in
                         # fires (which calls tts.stop() and causes wait
@@ -436,13 +486,39 @@ def main() -> int:
                     # Sync path: TTS runs with mic paused; reference
                     # voice_assistant's pattern. Followup chime fires
                     # before unpause so it doesn't bleed in either.
-                    tts.speak(text)
+                    speak_result = tts.speak(text)
+                    if not speak_result.get("spoken", False):
+                        # Kokoro produced no audio (empty text, synth
+                        # failure, drain timeout, …) — the operator
+                        # heard nothing, so opening a follow-up window
+                        # they can't perceive would just confuse the
+                        # flow.  Back to WAKE; the ``finally`` below
+                        # unpauses the mic and we go around.
+                        reason = speak_result.get("reason", "unknown")
+                        print(f"[voice] follow-up skipped — TTS produced "
+                              f"no audio ({reason})", flush=True)
+                        continue
 
                 # Drop any phrases that VAD finalized during playback —
                 # otherwise a stale buffered utterance becomes the next
                 # "user input". Critical in barge-in mode where the mic
                 # stayed open; cheap in sync mode where it's a no-op.
-                stt.drain_pending()
+                #
+                # EXCEPT when barge-in fired: the user's interruption
+                # phrase is what they want the agent to hear next,
+                # NOT a stale buffer.  Draining here would discard the
+                # very phrase that triggered the interrupt, and the
+                # follow-up chime would talk over them while they're
+                # still mid-sentence.  Skip both and let the next
+                # ``next_phrase`` pull the operator's interruption
+                # naturally — same as the sustained-voice callback
+                # promised the operator when it cut TTS.
+                barge_in_fired = (
+                    barge_in_active
+                    and interrupted.get("flag", False)
+                )
+                if not barge_in_fired:
+                    stt.drain_pending()
 
                 # Follow-up chime — rising two-note tone tells the user
                 # "still listening, no wake word needed for the next
@@ -452,7 +528,14 @@ def main() -> int:
                 # only play when AEC will cancel the chime out; in sync
                 # mode the mic is still paused under the outer try,
                 # which is safer than the prior pause/unpause dance.
-                if stt.require_wake_word and chimes.enabled("followup"):
+                # Skip the chime entirely when barge-in fired — beeping
+                # at someone mid-sentence is the opposite of what
+                # "still listening" should feel like.
+                if (
+                    stt.require_wake_word
+                    and chimes.enabled("followup")
+                    and not barge_in_fired
+                ):
                     if barge_in_active:
                         if reference_buffer is not None:
                             chimes.play("followup")
@@ -466,6 +549,17 @@ def main() -> int:
     finally:
         try:
             tts.stop()
+        except Exception:
+            pass
+        # 0.3.0: release the persistent output stream too — without
+        # this, repeated voice_loop invocations within the same
+        # interpreter (tests, daemon re-attach) leak audio device
+        # handles in CoreAudio.  ``shutdown`` is a no-op if the player
+        # was never opened or already closed.
+        try:
+            shutdown = getattr(tts, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
         except Exception:
             pass
         stt.stop()
