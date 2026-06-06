@@ -268,6 +268,109 @@ regenerated on every run.
 
 ---
 
+## Architecture direction (0.4+)
+
+**0.3.0 ships the brain.** 0.4.0 wires the spine — the node-based
+embodied architecture that turns JROS from a Mac-side agent into a
+robot operating framework that drives JP01-class hardware.
+
+The position no one else owns:
+
+> **JROS = ROS + Agentic AI + Mac-first local hardware.**
+> One developer, one Mac, one robot.  Local LLM thinks; dedicated
+> hardware nodes do the perception and action.  Same code laptop or
+> fleet, no Docker, no cloud.
+
+### The 0.4 picture
+
+```
+                   ┌──────────────────────────────────────┐
+                   │           BRAIN NODE  (Mac)           │
+                   │                                       │
+                   │   LLM (Gemma) + agent loop            │
+                   │   In-process: tools, memory, skills,  │
+                   │                permissions, persona   │
+                   │                                       │
+                   │   Tools = networking shims:           │
+                   │     text_to_speech → /act/speech      │
+                   │     listen         → /sense/transcript│
+                   │     vision_analyze → /sense/vision    │
+                   │     computer_use   → /act/motion etc. │
+                   └────────────┬──────────────────────────┘
+                                │ ZMQ pub/sub (or inproc in monolith mode)
+              ┌─────────────────┼──────────────────┐
+              │                 │                  │
+     ┌────────▼─────┐   ┌───────▼──────┐   ┌───────▼──────┐
+     │  audio_in    │   │   audio_out  │   │   vision     │
+     │  (Mac mic)   │   │   (Mac spk)  │   │   (Jetson)   │
+     └──────┬───────┘   └──────▲───────┘   └──────────────┘
+            │                  │
+     ┌──────▼───────┐    ┌─────┴────────┐
+     │   stt        │    │   tts        │   ← own nodes, backend-swappable
+     │  (Whisper)   │    │  (Kokoro)    │     (tomorrow: MLX-TTS, NeuTTS,
+     └──────────────┘    └──────────────┘      Mistral Voxtral STT, …)
+            │
+            ▼ /sense/transcript      ┌─────────────────────────────────┐
+                                     │  Canonical topic namespaces      │
+                                     │    /sense/audio_in   binary mic  │
+                                     │    /sense/transcript  STT text   │
+                                     │    /sense/vision      YOLOv8     │
+                                     │    /sense/proprio     encoder+IMU│
+                                     │    /act/speech        text→TTS   │
+                                     │    /act/audio_out     binary spk │
+                                     │    /act/motion        motor cmd  │
+                                     │    /act/light         LED cmd    │
+                                     └─────────────────────────────────┘
+              ┌─────────────────────────────────┐
+              │                                 │
+     ┌────────▼─────────┐              ┌────────▼────────────┐
+     │  motor_ctrl      │              │   led_ctrl          │
+     │  (ESP32, MC01)   │              │   (Teensy, AVC01)   │
+     └──────────────────┘              └─────────────────────┘
+```
+
+**Key architectural decisions** (locked 2026-06-06):
+
+1. **One brain process, N hardware-bound peripheral nodes.**  Not
+   one-node-per-tool — that's the ROS 2 mistake (extreme
+   granularity).  The brain's tools, memory, and skill registry
+   stay in-process for sub-microsecond function-call latency.
+2. **STT and TTS get their own nodes.**  Voice pipelines evolve;
+   today's Kokoro becomes tomorrow's MLX-TTS without touching the
+   brain.  Same topic contract, swap the subscriber.
+3. **Tool ↔ node contract** — *"A tool does the networking, the
+   node does the execution."*  The agent's tool signatures
+   (`text_to_speech("hi")`, `listen(seconds=5)`) stay identical.
+   What changes is the implementation: in-process call becomes
+   `bus.publish("/act/speech", …)` + correlation-ID wait for the
+   `/sense/spoken` ack.
+4. **The brain doesn't know where its peripherals run.**  Same
+   code laptop or fleet — only the transport changes (`inproc://`
+   → `tcp://` when nodes move across boards).
+
+See [`dev_docs/ROADMAP_0.4.md`](dev_docs/ROADMAP_0.4.md) for the
+full track breakdown.
+
+### How JROS fits next to ROS and Hermes
+
+| | **ROS 2** | **Hermes / agent frameworks** | **JROS** |
+|---|---|---|---|
+| Embodied robotics | ✅ industry standard | ❌ doesn't think about bodies | ✅ Mac → Jetson → Teensy → ESP32 first-class |
+| Local LLM agent | ❌ no agent layer | ❌ assumes cloud | ✅ Gemma local, no internet needed |
+| Mac-native dev | ❌ Linux + Docker | ✅ runs on Mac | ✅ Mac-first since 0.2 |
+| Transport weight | ❌ DDS (~2 GB install) | n/a (single process) | ✅ ZMQ (50 KB) |
+| Learning curve | hard | easy | medium — one Python file per node |
+| One-Mac development | painful | easy | ✅ monolithic mode = same code, no IPC |
+| Multi-board production | ✅ designed for it | ❌ no | ✅ flip a config flag |
+| Operator UX out of the box | ❌ build your own | n/a | ✅ TUI + (Track F) web inspector |
+| Crash isolation per subsystem | ✅ best | ❌ none | ✅ per node when split |
+
+**The pitch in one line:** the only framework where a local LLM
+agent thinks and a dedicated set of hardware nodes act — designed
+for one developer driving one robot from a Mac.
+
+---
+
 ## Reference Jaegers
 
 | Jaeger | Form | Role |
