@@ -66,6 +66,30 @@ _GEMMA_E4B_Q4 = ModelPick(
                   "gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"),
 )
 
+# 0.3.0: dense 12B Gemma 4.  Becomes the 24 GB tier's asleep pick
+# (Mac Mini sweet spot) — fits cleanly alongside the E4B awake model
+# with room for KV cache + host headroom, and leads the routing
+# leaderboard at 94.9% with a clean 18/18 safety subset (the strict
+# safety win that pushed it above Qwen3.5-9B at the 24 GB tier).
+# At 32 GB and above the Qwen3-30B-A3B MoE stays the asleep pick
+# because its 30B/3B-active speed (~3× tok/s) is the more important
+# axis when host RAM allows.
+_GEMMA_12B_Q4 = ModelPick(
+    registry_key="gemma-4-12b-it-q4_k_m",
+    display_name="gemma-4-12B Q4",
+    size_gb=6.9,
+    score_pct=94.9,
+    tokens_per_task=65,
+    notes=("Dense 12B, 6.9 GB on disk.  Leaderboard #1 at 94.9% "
+           "routing with a clean 18/18 safety subset (today's bench, "
+           "2026-06-04).  Slower tok/s than Qwen3.5-9B but stronger "
+           "on safety and honest reasoning — ideal asleep pick on a "
+           "24 GB host where MoE asleep models don't fit."),
+    download_url=("https://huggingface.co/lmstudio-community/"
+                  "gemma-4-12B-it-GGUF/resolve/main/"
+                  "gemma-4-12B-it-Q4_K_M.gguf"),
+)
+
 _GEMMA_26B_A4B_Q4 = ModelPick(
     registry_key="gemma-4-26b-a4b-it-q4_k_m",
     display_name="gemma-4-26B-A4B Q4",
@@ -169,12 +193,18 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
         # 24 GB: Mac Mini sweet spot — both ~5 GB models swap cleanly.
         return TierRecommendation(
             tier_label="24 GB",
-            description=("Sweet spot for the Qwen3.5-9B asleep pairing "
-                         "— both awake + asleep models are ~5 GB, "
-                         "so swap is fast and the host stays "
-                         "responsive."),
+            description=("Mac Mini sweet spot.  gemma-4-E4B awake "
+                         "(5 GB, snappy) + gemma-4-12B asleep "
+                         "(6.9 GB, leaderboard-#1 routing + clean "
+                         "18/18 safety subset on the 2026-06-04 "
+                         "bench).  Both fit alongside the KV cache + "
+                         "host headroom on a 24 GB unified-memory "
+                         "host.  Qwen3.5-9B kept as an alternate for "
+                         "operators who prefer thinking-mode asleep "
+                         "behaviour."),
             awake=_GEMMA_E4B_Q4,
-            asleep=_QWEN_35_9B_Q4,
+            asleep=_GEMMA_12B_Q4,
+            alternates=[_QWEN_35_9B_Q4],
         )
     if tier_gb < 64:
         # 32 GB: room for the MoE awake model + the safety-heavy MoE

@@ -100,6 +100,27 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "tuning. Recommended asleep model at the 32 GB tier."
         ),
     },
+    # ── Deep Think 24 GB tier (Mac Mini) ────────────────────────────
+    # 0.3.0: dense 12B Gemma 4.  Promoted to the 24 GB tier's asleep
+    # pick after taking the routing leaderboard at 94.9% with a
+    # clean 18/18 safety subset on the 2026-06-04 bench.  ~6.9 GB on
+    # disk so it sits comfortably alongside an E4B awake model on a
+    # 24 GB unified-memory host.  At 32 GB and up the Qwen3-30B-A3B
+    # MoE stays the asleep pick because its tok/s headroom under
+    # active load wins.
+    "gemma-4-12b-it-q4_k_m": {
+        "hf_repo": "lmstudio-community/gemma-4-12B-it-GGUF",
+        "hf_file": "gemma-4-12B-it-Q4_K_M.gguf",
+        "size_gb": 6.9,
+        "role": "deep_think",
+        "verified": True,
+        "description": (
+            "Gemma 4 12B (dense), Q4_K_M. Deep-think pick at the "
+            "24 GB tier — leaderboard #1 at 94.9% routing pass with "
+            "an 18/18 safety subset.  Slower tok/s than Qwen3.5-9B "
+            "but stronger on safety and honest reasoning."
+        ),
+    },
 }
 
 
