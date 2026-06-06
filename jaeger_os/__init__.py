@@ -19,4 +19,4 @@ import os as _os
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-__version__ = "0.2.6"
+__version__ = "0.3.0"
