@@ -17,6 +17,12 @@ pydantic>=2.0
 # Pydantic stays for config + tool schemas where richer validation
 # earns the overhead.
 msgspec>=0.18
+# 0.4 multi-process transport (Track A.4): pyzmq pub/sub for nodes
+# split across Python processes (./launch --multiprocess) or across
+# boards (Mac↔Jetson↔Teensy when JP01 wires up).  ~50 KB library,
+# sub-ms local latency, inproc/ipc/tcp modes behind the same Bus
+# interface as InProcBus.
+pyzmq>=26.0
 pyyaml>=6.0
 numpy>=1.26
 requests>=2.32
