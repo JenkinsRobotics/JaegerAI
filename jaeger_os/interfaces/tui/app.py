@@ -1717,10 +1717,24 @@ class JaegerTUI:
         self._client = None
         self._boot = None
 
-        # Stop any TTS playback currently in flight. Kokoro queues audio
-        # through sounddevice; if a stream is still active when we hand
-        # off to interpreter shutdown the CoreAudio callback thread can
-        # touch a freed Python object → segfault.
+        # 0.3.0-refactor step 1: explicitly close the Kokoro persistent
+        # sounddevice OutputStream BEFORE the per-call ``sd.stop()`` /
+        # ``gc.collect()`` dance below.  We own this stream; closing it
+        # deterministically here keeps PortAudio's CoreAudio callback
+        # thread from touching a freed Python object during interpreter
+        # shutdown — the residual cause of the 0.2.6 ``Pa_Terminate``
+        # segfault.
+        try:
+            from jaeger_os.main import _pipeline
+            tts_node = _pipeline.get("tts_node")
+            if tts_node is not None and hasattr(tts_node, "shutdown"):
+                tts_node.shutdown()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+        # Stop any stragglers (per-call sd.play streams used by
+        # play_async's barge-in path; these aren't routed through our
+        # persistent player).
         try:
             import sounddevice as sd
             sd.stop()
