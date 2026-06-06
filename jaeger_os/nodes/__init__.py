@@ -21,5 +21,6 @@ The Track B audio_io / stt / tts nodes will all subclass this.
 """
 
 from .base import Node, NodeState
+from .tts import TTSNode, Synthesizer
 
-__all__ = ["Node", "NodeState"]
+__all__ = ["Node", "NodeState", "TTSNode", "Synthesizer"]
