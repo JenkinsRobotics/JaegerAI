@@ -136,6 +136,18 @@ class ChimePlayer:
                 self.reference_buffer.write(ref_audio)
             except Exception:
                 pass
+        # 0.3.0: prefer avaudio_io.OutputStream on macOS — same
+        # wedging-CoreAudio fix as the rest of the voice pipeline.
+        # Falls back to sounddevice on Linux or if the bridge can't
+        # load.
+        if sys.platform == "darwin":
+            try:
+                self._play_via_avaudio(audio)
+                time.sleep(self.tail_sleep_s)
+                return
+            except Exception as exc:
+                print(f"[chime] avaudio backend unavailable ({exc}); "
+                      "falling back to sounddevice", file=sys.stderr, flush=True)
         try:
             import sounddevice as sd
             sd.play(audio, samplerate=self.sample_rate, device=output_device)
@@ -143,3 +155,47 @@ class ChimePlayer:
             time.sleep(self.tail_sleep_s)
         except Exception as exc:
             print(f"[chime] playback failed: {exc}", file=sys.stderr, flush=True)
+
+    def _play_via_avaudio(self, audio) -> None:
+        """Blocking chime playback through the avaudio_io bridge.
+        Pumps the prebuilt audio buffer through a single OutputStream
+        callback, waits for the finished_callback to fire."""
+        import threading as _threading
+        from jaeger_os.plugins.avaudio_io import (
+            OutputStream as _AVOutputStream,
+            CallbackStop,
+        )
+
+        blocksize = max(64, int(self.sample_rate * 0.02))  # 20 ms-ish
+        cursor = [0]
+        finished = _threading.Event()
+
+        def _cb(outdata, frames, _t, _s):
+            i = cursor[0]
+            end = i + frames
+            if i >= len(audio):
+                outdata.fill(0.0)
+                raise CallbackStop()
+            if end > len(audio):
+                n = len(audio) - i
+                outdata[:n, 0] = audio[i:i + n]
+                outdata[n:, 0] = 0.0
+                cursor[0] = len(audio)
+                raise CallbackStop()
+            outdata[:, 0] = audio[i:end]
+            cursor[0] = end
+
+        stream = _AVOutputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype="float32",
+            blocksize=blocksize,
+            callback=_cb,
+            finished_callback=finished.set,
+        )
+        try:
+            stream.start()
+            timeout = float(len(audio)) / self.sample_rate + 1.0
+            finished.wait(timeout=timeout)
+        finally:
+            stream.close()

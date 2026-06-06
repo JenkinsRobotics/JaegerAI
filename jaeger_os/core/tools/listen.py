@@ -116,12 +116,10 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
         }
     try:
         import numpy as np
-        import sounddevice as sd
     except ImportError as exc:
         return {
             "ok": False,
-            "error": f"audio capture deps missing ({exc}); "
-                     "install with `pip install -e \".[voice]\"`",
+            "error": f"numpy missing ({exc})",
         }
     try:
         whisper = _get_model(model)
@@ -129,17 +127,38 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
         return {"ok": False, "error": f"whisper load failed: {exc}"}
 
     started = time.perf_counter()
-    try:
-        # blocking=True so we don't return until the buffer is full
-        audio = sd.rec(
-            int(seconds * _SAMPLE_RATE),
-            samplerate=_SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocking=True,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"mic capture failed: {exc}"}
+    audio = None
+
+    # 0.3.0: prefer the avaudio_io InputStream on macOS — kills the
+    # PortAudio wedging bug class.  Falls back to sounddevice on
+    # other platforms or if the bridge can't load.
+    import sys as _sys
+    if _sys.platform == "darwin":
+        try:
+            audio = _record_via_avaudio(seconds, np)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[listen] avaudio backend unavailable ({exc}); "
+                  "falling back to sounddevice", file=_sys.stderr, flush=True)
+
+    if audio is None:
+        try:
+            import sounddevice as sd  # type: ignore
+        except ImportError as exc:
+            return {
+                "ok": False,
+                "error": f"audio capture deps missing ({exc}); "
+                         "install with `pip install -e \".[voice]\"`",
+            }
+        try:
+            audio = sd.rec(
+                int(seconds * _SAMPLE_RATE),
+                samplerate=_SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocking=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"mic capture failed: {exc}"}
 
     # pywhispercpp expects a 1D float32 array at 16 kHz.
     samples = np.asarray(audio, dtype="float32").reshape(-1)
@@ -157,3 +176,48 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
         "model": model,
         "elapsed_s": round(elapsed, 3),
     }
+
+
+def _record_via_avaudio(seconds: int, np_module):
+    """Blocking capture via the avaudio_io InputStream — collects
+    ``seconds * _SAMPLE_RATE`` frames into a NumPy array and returns
+    it.  Raises on bridge failure so the caller can fall back to
+    sounddevice."""
+    import threading as _threading
+
+    from jaeger_os.plugins.avaudio_io import InputStream as _AVInputStream
+
+    target = int(seconds * _SAMPLE_RATE)
+    blocksize = 320  # 20 ms @ 16 kHz
+    buf = []
+    captured = [0]
+    done = _threading.Event()
+
+    def _cb(indata, frames, _t, _s):
+        if done.is_set():
+            return
+        buf.append(indata.copy())
+        captured[0] += frames
+        if captured[0] >= target:
+            done.set()
+
+    stream = _AVInputStream(
+        samplerate=_SAMPLE_RATE,
+        channels=1,
+        dtype="float32",
+        blocksize=blocksize,
+        callback=_cb,
+    )
+    try:
+        stream.start()
+        if not done.wait(timeout=seconds + 3.0):
+            raise RuntimeError(
+                f"avaudio capture timed out after {seconds + 3.0:.1f}s"
+            )
+    finally:
+        stream.close()
+
+    if not buf:
+        raise RuntimeError("avaudio capture produced no audio")
+    audio = np_module.concatenate(buf, axis=0)[:target]
+    return audio
