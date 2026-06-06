@@ -1968,12 +1968,21 @@ def warm_plugins(config: Any) -> None:
     if w is None:
         return
     jobs: list[tuple[str, Any]] = []
-    if getattr(w, "tts", False):
-        from .core.tools.speak import warm_kokoro
-        jobs.append(("TTS (Kokoro)", warm_kokoro))
+    # Warm STT BEFORE TTS — Kokoro's persistent player opens an
+    # AVAudioEngine output stream during warm, and on macOS that
+    # consistently hits ``error 2003329396 ('what')`` when fired
+    # immediately after Gemma loads (before any other Metal init has
+    # settled).  The working standalone smoke test
+    # (dev_tools/audio_smoke/voice_assistant_avaudio.py) loads Whisper
+    # first, then opens the AVAudioEngine, and the engine starts
+    # cleanly — so we mirror that order here.  This is an integration-
+    # race fix, not a bridge fix.
     if getattr(w, "stt", False):
         from .core.tools.listen import warm_listen
         jobs.append(("STT (Whisper)", warm_listen))
+    if getattr(w, "tts", False):
+        from .core.tools.speak import warm_kokoro
+        jobs.append(("TTS (Kokoro)", warm_kokoro))
     if getattr(w, "vision", False):
         from .core.tools.vision import warm_vision
         jobs.append(("vision (Moondream2)", warm_vision))
