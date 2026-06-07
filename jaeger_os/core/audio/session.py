@@ -39,8 +39,8 @@ class AudioSessionConfig:
     followup_window_s: float = 10.0
     barge_in: bool = False
     audio_backend: str = "sounddevice"
-    self_speech_filter: bool = False
-    self_speech_threshold: float = 0.85
+    self_speech_filter: bool = True
+    self_speech_threshold: float = 0.75
 
 
 class AudioSession:
@@ -61,8 +61,8 @@ class AudioSession:
         aec: Any = None,
         reference_buffer: Any = None,
         barge_in_live: bool = False,
-        self_speech_filter: bool = False,
-        self_speech_threshold: float = 0.85,
+        self_speech_filter: bool = True,
+        self_speech_threshold: float = 0.75,
     ) -> None:
         self.adapter = adapter
         self.aec = aec

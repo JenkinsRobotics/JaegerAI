@@ -16,8 +16,8 @@ _NON_SPEECH_MARKERS = frozenset({
     "beep", "beeping", "click", "clicking", "computer click",
     "mouse click", "keyboard click", "keyboard clicking",
     "keyboard clacking", "typing sounds", "tapping",
-    "music", "applause", "laughter",
-    "clapping", "paper rustling", "water splashing",
+    "music", "upbeat music", "background music", "applause", "laughter",
+    "clapping", "paper rustling", "scissors snipping", "water splashing",
     "sigh", "sighs", "sniff", "sniffing", "breathing",
     "wind", "wind blowing", "air whooshing", "engine", "engine roaring",
     "engine revving", "motor", "motor noise",
@@ -25,6 +25,7 @@ _NON_SPEECH_MARKERS = frozenset({
 _WRAPPED_MARKER_RE = re.compile(
     r"^\s*[\[\(]([^\]\)]{1,80})[\]\)]\s*[.!,?]*\s*$"
 )
+_WRAPPED_MARKER_TOKEN_RE = re.compile(r"[\[\(]([^\]\)]{1,80})[\]\)]")
 
 
 def is_non_speech_marker(text: str | None) -> bool:
@@ -40,6 +41,14 @@ def is_non_speech_marker(text: str | None) -> bool:
     if m:
         inner = m.group(1).lower().strip(".!?, ")
         return inner in _NON_SPEECH_MARKERS
+    wrapped = _WRAPPED_MARKER_TOKEN_RE.findall(s)
+    if wrapped and _WRAPPED_MARKER_TOKEN_RE.sub("", s).strip(".!?, "):
+        return False
+    if wrapped:
+        return all(
+            marker.lower().strip(".!?, ") in _NON_SPEECH_MARKERS
+            for marker in wrapped
+        )
     lowered = s.lower().strip(".!?, ")
     return lowered in _NON_SPEECH_MARKERS
 

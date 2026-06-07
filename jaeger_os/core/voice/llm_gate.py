@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import re
 
+from .non_speech import is_non_speech_marker
+
 
 GATE_IGNORE = "ignore"
 GATE_REPLY = "reply"
@@ -60,3 +62,23 @@ def parse_gate(text: str | None) -> tuple[bool, str]:
         return False, ""
     # ``<reply>`` — speak the remainder
     return True, rest
+
+
+def should_retry_ignored_followup(
+    phrase: str | None,
+    *,
+    retry_enabled: bool,
+    active_followup: bool,
+) -> bool:
+    """Return whether an ignored phrase deserves one active-followup retry.
+
+    VoiceLLM's active-followup retry is useful for real human follow-ups
+    that the LLM under-classifies as ``<ignore>`` right after a reply.
+    It is actively harmful for known non-speech markers: retrying
+    ``[BLANK_AUDIO]`` or ``(beeping)`` just burns a second LLM turn.
+    """
+    if not retry_enabled or not active_followup:
+        return False
+    if is_non_speech_marker(phrase):
+        return False
+    return True
