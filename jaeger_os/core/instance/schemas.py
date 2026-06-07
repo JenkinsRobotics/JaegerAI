@@ -265,6 +265,21 @@ class VoiceConfig(BaseModel):
             "hearing' model."
         ),
     )
+    pending_queue: bool = Field(
+        False,
+        description=(
+            "Pending-phrase queue: phrases that arrive WHILE the agent "
+            "is processing a turn are NORMALLY drained at turn end ("
+            "they're usually echo / overlap / TV chatter).  When True, "
+            "those mid-turn phrases survive — the next loop iteration "
+            "pulls them as the next turn.  Pattern absorbed from "
+            "VoiceLLM's orchestrator for natural conversational flow ("
+            "'I have a follow-up while you're still talking').  Default "
+            "OFF in 0.4.x — proven-on-the-side-but-not-the-default; "
+            "flip on when you want the more conversational feel and "
+            "have confidence the LLM gate will sort the actual chatter."
+        ),
+    )
 
 
 class ExternalModelConfig(BaseModel):

@@ -194,6 +194,11 @@ def main() -> int:
     # Has to land BEFORE ``build_system_prompt`` below so the rule is
     # baked into the prompt the agent reads on turn 1.
     voice_gate_active = bool(getattr(config.voice, "llm_gate", False))
+    # Pending-queue mode (default OFF): when True, mid-turn phrases
+    # survive the post-turn drain so the next loop iteration picks
+    # them up as the next turn.  Pattern absorbed from VoiceLLM's
+    # orchestrator for natural conversational flow.
+    pending_queue_mode = bool(getattr(config.voice, "pending_queue", False))
     if voice_gate_active:
         os.environ["JAEGER_VOICE_GATE"] = "1"
         print("[voice] LLM-gated speech ON — replies prefixed "
@@ -605,13 +610,18 @@ def main() -> int:
                     barge_in_active
                     and interrupted.get("flag", False)
                 )
-                if not barge_in_fired:
+                if not barge_in_fired and not pending_queue_mode:
                     # 0.4 Track B.3.2.a: drain BOTH the engine's
                     # committed-q AND the bus subscription queue.
                     # Otherwise stale phrases buffered during TTS
                     # playback would still come through the bus
                     # subscription after engine.drain_pending()
                     # already cleared them on its side.
+                    #
+                    # Skipped when ``voice.pending_queue=True`` —
+                    # the operator wants mid-turn phrases preserved
+                    # for the next iteration to pull as the next
+                    # turn (VoiceLLM-style conversational flow).
                     stt.drain_pending()
                     while not _phrase_queue.empty():
                         try:
