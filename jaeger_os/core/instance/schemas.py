@@ -203,10 +203,14 @@ class VoiceConfig(BaseModel):
         description="Mic live from TUI boot. Off (default) = text-only TUI.",
     )
     wake_word: bool = Field(
-        True,
+        False,
         description=(
             "Require a wake phrase ('hey <name>') to address the agent. "
-            "Off = every spoken utterance is sent straight to the agent."
+            "Off (default) = every spoken utterance is sent straight to "
+            "the agent.  The LLM gate (``llm_gate=True``) handles the "
+            "'was that addressed to me?' question more accurately than "
+            "wake-word transcription matching — proven by the VoiceLLM "
+            "reference (2026-06-06)."
         ),
     )
     follow_up: bool = Field(
@@ -217,16 +221,22 @@ class VoiceConfig(BaseModel):
         ),
     )
     barge_in: bool = Field(
-        True,
+        False,
         description=(
             "Allow interrupting the agent mid-sentence by speaking. Uses "
             "echo cancellation (speexdsp) so the open mic doesn't hear the "
-            "agent itself; falls back to mic-pause when speexdsp is absent."
+            "agent itself; falls back to mic-pause when speexdsp is absent.  "
+            "Off (default) = mic-paused-during-TTS — matches the proven "
+            "VoiceLLM reference's self-speech rejection strategy."
         ),
     )
     follow_up_seconds: float = Field(
-        15.0, ge=2.0, le=120.0,
-        description="Length of the no-wake-word follow-up window.",
+        10.0, ge=2.0, le=120.0,
+        description=(
+            "Length of the no-wake-word follow-up window.  Reduced from "
+            "15s to 10s in 0.4.x to match the proven reference (shorter "
+            "window = less time for stale noise between turns)."
+        ),
     )
     audio_backend: Literal["sounddevice", "avaudio"] = Field(
         "sounddevice",
@@ -241,19 +251,18 @@ class VoiceConfig(BaseModel):
         ),
     )
     llm_gate: bool = Field(
-        False,
+        True,
         description=(
-            "LLM-gated speech: when True, every reply begins with one "
-            "of two tags — <ignore> if the agent judges the input "
-            "WASN'T addressed to it (TV noise, ambient chatter, "
-            "transcription artifacts on an open mic), or <reply> if "
-            "it was.  The voice loop suppresses TTS on <ignore>.  "
-            "Sits ABOVE the existing STT-level non-speech-marker "
-            "filter as a second line of defence for always-on "
-            "embodied agents.  Pattern absorbed from VoiceLLM "
-            "(dev_docs/library_review/voicellm.md).  Default off so "
-            "the system prompt rule only loads when the operator opts "
-            "in."
+            "LLM-gated speech: every reply begins with one of two tags "
+            "— <ignore> if the agent judges the input WASN'T addressed "
+            "to it (TV noise, ambient chatter, transcription artifacts "
+            "on an open mic), or <reply> if it was.  The voice loop "
+            "suppresses TTS on <ignore>.  Default ON in 0.4.x — the "
+            "VoiceLLM reference (2026-06-06) proved this is far more "
+            "robust than wake-word transcription matching for always-"
+            "on listening, especially with base.en's accuracy ceiling.  "
+            "Pair with ``wake_word=False`` for the proven 'continuous "
+            "hearing' model."
         ),
     )
 

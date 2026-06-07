@@ -804,6 +804,7 @@ class JaegerTUI:
             barge_in=vc.barge_in,
             follow_up_seconds=vc.follow_up_seconds,
             wake_name=self._resolve_instance_name(),
+            llm_gate=getattr(vc, "llm_gate", True),
         )
         if announce:
             self.console.print("[dim]🎙  bringing the mic online…[/]")
