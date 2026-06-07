@@ -199,6 +199,19 @@ def main() -> int:
     # them up as the next turn.  Pattern absorbed from VoiceLLM's
     # orchestrator for natural conversational flow.
     pending_queue_mode = bool(getattr(config.voice, "pending_queue", False))
+    # Active-follow-up retry (default ON): when the LLM gate returns
+    # <ignore> during the follow-up window, retry the same phrase
+    # once.  Pattern from VoiceLLM — catches LLM under-reaction to
+    # real follow-ups arriving just after a reply.
+    follow_up_retry_active = bool(getattr(config.voice, "follow_up_retry", True))
+    # Self-speech filter (default OFF): drop transcripts too similar
+    # to the agent's last reply (mic picked up our own voice).
+    self_speech_filter_active = bool(getattr(config.voice, "self_speech_filter", False))
+    self_speech_threshold = float(getattr(config.voice, "self_speech_threshold", 0.85))
+    # Track agent's last spoken reply + active-conversation deadline
+    # for the two patterns above.  Updated after each successful reply.
+    _last_reply_text: str = ""
+    _followup_active_until: float = 0.0
     if voice_gate_active:
         os.environ["JAEGER_VOICE_GATE"] = "1"
         print("[voice] LLM-gated speech ON — replies prefixed "
@@ -457,7 +470,27 @@ def main() -> int:
                 phrase = None
             if not phrase:
                 continue
+
+            # ── Self-speech filter (VoiceLLM M3 pattern) ─────────────
+            # When ON, drop phrases too similar to the agent's last
+            # spoken reply.  Belt-and-suspenders on top of mic-pause
+            # for cases where speaker bleed leaks through.
+            if self_speech_filter_active and _last_reply_text:
+                import difflib as _difflib
+                _ratio = _difflib.SequenceMatcher(
+                    None, phrase.lower(), _last_reply_text.lower(),
+                ).ratio()
+                if _ratio >= self_speech_threshold:
+                    print(f"[voice] self-speech filter dropped "
+                          f"(sim={_ratio:.2f}): {phrase!r}", flush=True)
+                    continue
+
             print(f"[voice] user: {phrase!r}", flush=True)
+
+            # Active follow-up window: are we within follow_up_seconds
+            # of the last successful reply?  Used by the retry pattern
+            # below.
+            _in_active_followup = time.time() < _followup_active_until
 
             # Wake chime — brief tone tells the user "heard you, processing".
             # Pause mic during chime so it doesn't get picked up as a phrase
@@ -497,6 +530,26 @@ def main() -> int:
                 if voice_gate_active and text and not spoke_via_tool:
                     from jaeger_os.core.voice import parse_gate
                     should_speak, gated_text = parse_gate(text)
+                    # Active-follow-up retry (VoiceLLM pattern):
+                    # if LLM gated <ignore> during the active
+                    # follow-up window, give it one more try.  The
+                    # agent might have under-reacted to a real
+                    # follow-up arriving on the heels of a reply.
+                    if (
+                        not should_speak
+                        and follow_up_retry_active
+                        and _in_active_followup
+                    ):
+                        print(f"[voice] LLM tried <ignore> on active "
+                              f"follow-up — retrying: {phrase!r}",
+                              flush=True)
+                        result = turn_runner(phrase)
+                        text = (result.get("text") or "").strip()
+                        spoke_via_tool = result.get(
+                            "spoke_via_tool", False,
+                        )
+                        if text and not spoke_via_tool:
+                            should_speak, gated_text = parse_gate(text)
                     if not should_speak:
                         print(f"[voice] LLM gate: <ignore> on phrase "
                               f"{phrase!r} — suppressing TTS", flush=True)
@@ -652,6 +705,15 @@ def main() -> int:
                         chimes.play("followup")
 
                 stt.open_followup()
+                # Update the active-follow-up state for the next
+                # iteration's retry check + the self-speech filter's
+                # reference text.  Both patterns are no-ops when
+                # their config flags are off.
+                _followup_active_until = time.time() + float(
+                    getattr(config.voice, "follow_up_seconds", 10.0)
+                )
+                if text:
+                    _last_reply_text = text
             finally:
                 if not barge_in_active:
                     stt.set_paused(False)
