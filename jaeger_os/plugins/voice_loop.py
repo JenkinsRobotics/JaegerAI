@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """Voice loop — STT → agent → TTS daemon.
 
-0.2.6 voice UX (two modes, both default-on):
+0.4 voice UX defaults follow the proven VoiceLLM pattern:
 
-  Wake-word required (default)
-      Every utterance ignored until the user says "ok jaeger" / "hey
-      jaeger" / "okay jaeger" (with Whisper-mishearing phonetic
-      variants: yeager / yager / jager). After a reply, a 10-second
-      follow-up window opens — within it, the wake gate drops so the
-      user can keep talking without re-prefixing. Same shape as
-      Google Home / Siri / Alexa.
+  Wake-word disabled by default
+      Addressed-to-me detection happens in the LLM via <reply>/<ignore>
+      gate tags instead of brittle Whisper wake-phrase matching.
 
-      Opt out with ``--no-wake-word``.
+      Override with ``--wake-word`` or ``--no-wake-word``.
 
-  AEC barge-in (default when speexdsp is installed)
-      Mic stays open during TTS playback; speexdsp echo cancellation
-      removes the agent's own voice from the captured signal so the
-      operator can interrupt at any time (sub-50 ms latency). Same
-      mechanism as Zoom / FaceTime / Teams.
+  Mic-pause during TTS by default
+      Stable first-run behavior: the mic pauses while the agent speaks
+      unless the operator explicitly enables AEC barge-in.
 
-      Auto-falls-back to mic-pause when speexdsp is missing. Pass
-      ``--no-barge-in`` to force mic-pause even when AEC is available.
+      Override with ``--barge-in`` or ``--no-barge-in``.
 
 STT modes:
 
@@ -39,6 +32,8 @@ Run:
 
     python -m jaeger_os.plugins.voice_loop
     python -m jaeger_os.plugins.voice_loop --instance work
+    python -m jaeger_os.plugins.voice_loop --wake-word
+    python -m jaeger_os.plugins.voice_loop --barge-in
     python -m jaeger_os.plugins.voice_loop --no-wake-word
     python -m jaeger_os.plugins.voice_loop --no-barge-in
 
@@ -82,38 +77,25 @@ def main() -> int:
                    help="Instance name (default: JAEGER_INSTANCE_NAME or 'default').")
     p.add_argument("--stt-mode", choices=["two_pass", "continuous"], default="two_pass",
                    help="Which STT algorithm to use.")
-    # 0.2.6: wake-word required by default. Matches the canonical
-    # Google-Home-style UX in the reference voice_assistant.py: every
-    # utterance is ignored until the user says "ok jaeger" (or any of
-    # the phonetic variants in _ASSISTANT_NAMES). Within the follow-up
-    # window after a reply, the gate drops so the user can keep talking
-    # without re-saying the wake word.
+    p.add_argument(
+        "--wake-word", dest="wake_word", action="store_true",
+        help="Gate utterances behind a wake phrase. Overrides the "
+             "instance voice.wake_word setting."
+    )
     p.add_argument(
         "--no-wake-word", dest="no_wake_word", action="store_true",
         help="Don't gate utterances behind a wake phrase — every spoken "
-             "phrase becomes a command. Default is wake-word required."
+             "phrase reaches the LLM gate. Overrides the instance setting."
     )
-    # 0.2.6: two voice modes, period.
-    #
-    #   barge-in (default when speexdsp is installed)
-    #     mic stays open during TTS, echo cancellation removes the
-    #     agent's voice from the captured signal, operator can
-    #     interrupt at any time. Same mechanism as Zoom / FaceTime.
-    #
-    #   --no-barge-in (or auto-fallback when speexdsp is missing)
-    #     mic paused for the duration of TTS playback. Safe, no
-    #     self-echo possible, but you can't talk over the agent.
-    #
-    # ``--no-aec`` was a 0.2.0-era A/B-testing knob — it forced the
-    # 'barge-in without AEC' middle path which would self-trigger on
-    # the agent's own voice. Dropped in 0.2.6 because there is no
-    # practical use case for that mode.
+    p.add_argument(
+        "--barge-in", dest="barge_in", action="store_true",
+        help="Keep the mic open during TTS and use AEC so the operator "
+             "can interrupt mid-speech. Overrides the instance setting."
+    )
     p.add_argument(
         "--no-barge-in", dest="no_barge_in", action="store_true",
         help="Pause the mic during TTS instead of running AEC echo "
-             "cancellation. Safe, but you can't interrupt the agent "
-             "mid-speech. Default: barge-in enabled when speexdsp is "
-             "present, otherwise auto-fallback to this mode."
+             "cancellation. Overrides the instance setting."
     )
     p.add_argument("--fast-model", type=str, default="base.en",
                    help="Whisper fast/continuous model name (default: base.en).")
@@ -161,21 +143,6 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    # 0.2.6: invert the --no-wake-word flag into the require_wake_word
-    # bool the STT layer wants. Default behaviour (no flag passed) is
-    # wake-word ON — matches the reference voice_assistant.py UX.
-    require_wake_word = not args.no_wake_word
-
-    # 0.2.6: barge-in default. Operator asked for the "video-call"
-    # interruption model — AEC keeps the mic open and subtracts TTS
-    # from the captured signal. We DEFAULT to it when speexdsp is
-    # installed; otherwise we fall back to the safer mic-pause path
-    # rather than running barge-in without AEC (which would
-    # self-trigger on the agent's own voice). ``--no-barge-in``
-    # forces pause mode regardless.
-    barge_in_requested = not args.no_barge_in
-    barge_in_active = False  # resolved below after we know AEC state
-
     os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
 
     # ── Instance + agent setup (mirrors messaging_gateway) ───────────
@@ -188,6 +155,28 @@ def main() -> int:
 
     config: Config = load_yaml(layout.config_path, Config)
     agent_tools.bind(layout)
+
+    if args.wake_word and args.no_wake_word:
+        print("[voice] choose only one of --wake-word / --no-wake-word",
+              file=sys.stderr)
+        return 2
+    if args.barge_in and args.no_barge_in:
+        print("[voice] choose only one of --barge-in / --no-barge-in",
+              file=sys.stderr)
+        return 2
+
+    require_wake_word = bool(getattr(config.voice, "wake_word", False))
+    if args.wake_word:
+        require_wake_word = True
+    elif args.no_wake_word:
+        require_wake_word = False
+
+    barge_in_requested = bool(getattr(config.voice, "barge_in", False))
+    if args.barge_in:
+        barge_in_requested = True
+    elif args.no_barge_in:
+        barge_in_requested = False
+    barge_in_active = False  # resolved below after we know AEC state
 
     # LLM-gated speech: when enabled, the system prompt picks up the
     # ``VOICE_LLM_GATE_RULE`` block via the JAEGER_VOICE_GATE env var.
@@ -394,13 +383,26 @@ def main() -> int:
     # handles those when the TTS path migrates.
     import queue as _queue
     from jaeger_os import topics as _topics
+    from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
     from jaeger_os.nodes import STTNode as _STTNode
     from jaeger_os.nodes import runtime as _runtime
     _bus = _runtime.get_bus()
-    _phrase_queue: "_queue.Queue[str]" = _queue.Queue()
+    _phrase_queue: "_queue.Queue[str]" = _queue.Queue(maxsize=4)
 
     def _on_transcript(msg: _topics.Transcript) -> None:
-        _phrase_queue.put(msg.text)
+        text = (msg.text or "").strip()
+        if is_non_speech_marker(text):
+            print(f"[voice] skipped non-speech transcript: {text!r}",
+                  flush=True)
+            return
+        if _phrase_queue.full():
+            try:
+                dropped = _phrase_queue.get_nowait()
+                print(f"[voice] dropped stale queued phrase: {dropped!r}",
+                      flush=True)
+            except _queue.Empty:
+                pass
+        _phrase_queue.put_nowait(text)
 
     _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
     _stt_node = _STTNode(
@@ -502,16 +504,10 @@ def main() -> int:
                 if reference_buffer is None:
                     stt.set_paused(False)
 
-            # 0.2.6: in non-barge-in mode, keep the mic paused continuously
-            # from agent decode THROUGH TTS playback. Previously the
-            # decode was wrapped in mic-pause but tts.speak() ran with
-            # the mic open, so speaker bleed-through could pollute the
-            # phrase queue and either misfire the follow-up window or
-            # trigger a bogus wake match. The reference
-            # voice_assistant.py wraps the whole speak call in
-            # mic-pause; we now do the same. With barge-in, the mic
-            # stays open so the AEC + sustained-voice callback can
-            # detect interruption mid-TTS.
+            # In non-barge-in mode, keep the mic paused continuously
+            # from agent decode through bus-routed TTS playback. With
+            # barge-in, the mic stays open so the AEC + sustained-voice
+            # callback can detect interruption mid-TTS.
             if not barge_in_active:
                 stt.set_paused(True)
 
@@ -519,7 +515,7 @@ def main() -> int:
                 # 0.2.6: turn_runner is either run_for_voice (local LLM)
                 # or the daemon attach path; both return the same shape.
                 result = turn_runner(phrase)
-                text = (result.get("text") or "").strip()
+                text = clean_voice_reply(result.get("text") or "")
                 spoke_via_tool = result.get("spoke_via_tool", False)
 
                 # LLM-gate: when config.voice.llm_gate is on, the
@@ -544,7 +540,7 @@ def main() -> int:
                               f"follow-up — retrying: {phrase!r}",
                               flush=True)
                         result = turn_runner(phrase)
-                        text = (result.get("text") or "").strip()
+                        text = clean_voice_reply(result.get("text") or "")
                         spoke_via_tool = result.get(
                             "spoke_via_tool", False,
                         )
@@ -592,6 +588,7 @@ def main() -> int:
                             _bus.publish(_topics.SpeechStop(
                                 reason="user interrupted",
                                 node_id="voice_loop",
+                                correlation_id=_speech_cid,
                             ))
 
                     stt.set_on_speech_detected(_on_user_speaks)
@@ -719,18 +716,10 @@ def main() -> int:
                     stt.set_paused(False)
     finally:
         try:
-            tts.stop()
-        except Exception:
-            pass
-        # 0.3.0: release the persistent output stream too — without
-        # this, repeated voice_loop invocations within the same
-        # interpreter (tests, daemon re-attach) leak audio device
-        # handles in CoreAudio.  ``shutdown`` is a no-op if the player
-        # was never opened or already closed.
-        try:
-            shutdown = getattr(tts, "shutdown", None)
-            if callable(shutdown):
-                shutdown()
+            _bus.publish(_topics.SpeechStop(
+                reason="voice loop shutdown",
+                node_id="voice_loop",
+            ))
         except Exception:
             pass
         # 0.4 Track B.3.2.a — STT node teardown.  Stopping the node
@@ -745,6 +734,10 @@ def main() -> int:
         try:
             _stt_node.stop()
             _stt_thread.join(timeout=3.0)
+        except Exception:
+            pass
+        try:
+            _runtime.shutdown()
         except Exception:
             pass
         if cron_runner is not None:

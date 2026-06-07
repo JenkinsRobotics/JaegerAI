@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from typing import Any
 
 from rich.console import Console
@@ -107,7 +108,8 @@ class VoiceController:
             os.environ["JAEGER_VOICE_GATE"] = "1"
 
         self._stt: Any = None
-        self._tts: Any = None
+        self._tts: Any = None  # backend reference for AEC wiring only
+        self._bus: Any = None
         self._aec: Any = None
         self._ref: Any = None
         self._chimes: Any = None
@@ -146,9 +148,6 @@ class VoiceController:
             )
             return False
 
-        from jaeger_os.core.tools.speak import _get_tts
-        self._tts = _get_tts()
-
         # AEC + reference buffer — only when barge-in is wanted AND the
         # speexdsp echo canceller is importable.
         if self.barge_in:
@@ -167,6 +166,15 @@ class VoiceController:
             except Exception:  # noqa: BLE001
                 self._aec = self._ref = None
                 self._barge_in_live = False
+
+        # 0.4.x node contract: the controller owns mic/orchestration, but
+        # TTS execution belongs to the TTS node. Keep a backend reference
+        # only for AEC reference-buffer wiring; speech/stop commands below
+        # go over the bus, matching the VoiceLLM node discipline.
+        from jaeger_os.nodes import runtime
+        runtime.ensure_tts_node()
+        self._bus = runtime.get_bus()
+        self._tts = runtime.get_synth()
 
         try:
             self._stt = WhisperSTTTwoPass(
@@ -187,7 +195,7 @@ class VoiceController:
 
         # Feed TTS playback into the AEC reference so the open mic can
         # cancel the agent's own voice during barge-in.
-        if self._ref is not None:
+        if self._ref is not None and self._tts is not None:
             self._tts.reference_buffer = self._ref
 
         # Wake / follow-up earcons — only meaningful with wake gating.
@@ -200,7 +208,8 @@ class VoiceController:
             self._chimes = None
 
         try:
-            self._tts.warm()  # idempotent — usually already warm from boot
+            from jaeger_os.core.tools.speak import warm_kokoro
+            warm_kokoro()  # idempotent — usually already warm from boot
         except Exception:  # noqa: BLE001
             pass
 
@@ -216,14 +225,24 @@ class VoiceController:
                 self._stt.stop()
             except Exception:  # noqa: BLE001
                 pass
-        if self._tts is not None:
+        if self._bus is not None:
             try:
-                self._tts.stop()
+                from jaeger_os import topics
+                self._bus.publish(topics.SpeechStop(
+                    reason="voice controller stopped",
+                    node_id="tui_voice",
+                ))
             except Exception:  # noqa: BLE001
                 pass
+        if self._tts is not None:
             if self._ref is not None:
-                self._tts.reference_buffer = None
+                try:
+                    self._tts.reference_buffer = None
+                except Exception:  # noqa: BLE001
+                    pass
         self._stt = None
+        self._bus = None
+        self._tts = None
         self._aec = self._ref = self._chimes = None
         self._barge_in_live = False
 
@@ -251,7 +270,11 @@ class VoiceController:
         VoiceLLM's behaviour for background noise + ambient chatter).
         ``<reply>`` strips the tag and speaks the remainder.
         """
-        if not text or self._tts is None or self._stt is None:
+        if not text or self._bus is None or self._stt is None:
+            return False
+        from jaeger_os.core.voice import clean_voice_reply
+        text = clean_voice_reply(text)
+        if not text:
             return False
 
         if self.llm_gate:
@@ -266,20 +289,27 @@ class VoiceController:
 
         if self._barge_in_live:
             interrupted = {"flag": False}
+            speech_cid = uuid.uuid4().hex
 
             def _on_speech() -> None:
                 if not interrupted["flag"]:
                     interrupted["flag"] = True
-                    self._tts.stop()
+                    self._publish_speech_stop(
+                        speech_cid, reason="user interrupted",
+                    )
 
             self._stt.set_on_speech_detected(_on_speech)
             try:
-                started = self._tts.play_async(text)
-                if not started.get("started"):
-                    return False
-                self._tts.wait_until_done()
+                ack = self._request_speech(text, speech_cid)
             finally:
                 self._stt.set_on_speech_detected(None)
+            if ack is None or not getattr(ack, "ok", False):
+                if ack is None:
+                    self.console.print("[dim](TTS node timeout)[/]")
+                elif not interrupted["flag"]:
+                    reason = getattr(ack, "reason", None) or "unknown"
+                    self.console.print(f"[dim](couldn't speak: {reason})[/]")
+                return interrupted["flag"]
             # Drop phrases VAD finalized during playback (echo / tail) so
             # a stale utterance doesn't become the next turn.
             try:
@@ -291,12 +321,48 @@ class VoiceController:
         # No echo cancellation — pause the mic so it doesn't hear the agent.
         self._stt.set_paused(True)
         try:
-            self._tts.speak(text)
+            ack = self._request_speech(text, uuid.uuid4().hex)
+            if ack is None:
+                self.console.print("[dim](TTS node timeout)[/]")
+            elif not getattr(ack, "ok", False):
+                reason = getattr(ack, "reason", None) or "unknown"
+                self.console.print(f"[dim](couldn't speak: {reason})[/]")
         except Exception as exc:  # noqa: BLE001
             self.console.print(f"[dim](couldn't speak: {exc})[/]")
         finally:
             self._stt.set_paused(False)
         return False
+
+    def _request_speech(self, text: str, correlation_id: str) -> Any:
+        """Publish speech intent and wait for the TTS node ack."""
+        from jaeger_os import topics
+
+        return self._bus.request(
+            topics.SpeechCommand(
+                text=text,
+                node_id="tui_voice",
+                correlation_id=correlation_id,
+            ),
+            ack_topic=topics.SENSE_SPOKEN,
+            timeout_s=180.0,
+        )
+
+    def _publish_speech_stop(
+        self,
+        correlation_id: str | None = None,
+        *,
+        reason: str = "interrupted",
+    ) -> None:
+        """Interrupt speech via the bus instead of calling Kokoro directly."""
+        if self._bus is None:
+            return
+        from jaeger_os import topics
+
+        self._bus.publish(topics.SpeechStop(
+            reason=reason,
+            node_id="tui_voice",
+            correlation_id=correlation_id,
+        ))
 
     def chime(self, kind: str) -> None:
         """Play a wake / follow-up earcon. Pauses the mic around it when

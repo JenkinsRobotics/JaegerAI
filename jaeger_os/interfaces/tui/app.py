@@ -54,6 +54,41 @@ _TURN_UNSAFE_SLASH = frozenset({
     "download", "deepthink",
 })
 
+_VOICE_BATCH_HEADER = (
+    "Voice input heard while I was busy. Treat these snippets as one "
+    "combined turn:"
+)
+
+
+def _split_coalesced_voice(text: str) -> list[str]:
+    """Return the original voice snippets from a coalesced prompt."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    if not raw.startswith(_VOICE_BATCH_HEADER):
+        return [raw]
+    out = []
+    for line in raw.splitlines()[1:]:
+        line = line.strip()
+        if line.startswith("- "):
+            out.append(line[2:].strip())
+    return [p for p in out if p]
+
+
+def _format_coalesced_voice(phrases: list[str]) -> str:
+    """Format one or more voice snippets as a single model turn."""
+    clean = []
+    for phrase in phrases:
+        p = (phrase or "").strip()
+        if p:
+            clean.append(p)
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+    bullets = "\n".join(f"- {p}" for p in clean)
+    return f"{_VOICE_BATCH_HEADER}\n{bullets}"
+
 
 def _kfmt(n: int) -> str:
     """Compact token count — Hermes's ``format_token_count_compact``
@@ -300,6 +335,7 @@ class JaegerTUI:
         # Turns run on a background thread so the input line stays live.
         self._turn_queue: queue.Queue = queue.Queue()
         self._turn_running = threading.Event()   # set while a turn executes
+        self._voice_queue_lock = threading.Lock()
         self._worker_stop = threading.Event()    # signals the worker to exit
         self._worker: threading.Thread | None = None
         self._turn_started_at = 0.0              # for the live toolbar timer
@@ -906,6 +942,7 @@ class JaegerTUI:
         """A spoken turn: run the unified turn, render the same
         hermes-style chrome a typed turn gets, then speak the reply
         (barge-in aware) and open the follow-up window."""
+        from jaeger_os.core.voice import clean_voice_reply
         from jaeger_os.main import _DEFAULT_SESSION_KEY, run_for_voice
 
         self._render_turn_header(user_text, source="voice")
@@ -915,9 +952,8 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        self._render_answer(result.get("text") or "",
-                            error=result.get("error"))
-        text = (result.get("text") or "").strip()
+        text = clean_voice_reply(result.get("text") or "")
+        self._render_answer(text, error=result.get("error"))
         v = self._voice
         if v is not None and v.running:
             if text and not result.get("spoke_via_tool"):
@@ -1440,6 +1476,9 @@ class JaegerTUI:
         turn, queue after it, or steer it."""
         self._last_activity = time.monotonic()
         self._idle_fired = False
+        if source == "voice" and self._turn_running.is_set():
+            self._coalesce_pending_voice_turn(text)
+            return
         if not self._turn_running.is_set():
             self._turn_queue.put((source, text))
             return
@@ -1456,6 +1495,42 @@ class JaegerTUI:
             self.console.print(
                 "[dim]⨯ interrupting — your new message is up next.[/]")
             self._turn_queue.put((source, text))
+
+    def _coalesce_pending_voice_turn(self, text: str) -> None:
+        """Merge voice phrases heard during a busy turn into one next turn.
+
+        Voice is a live stream, unlike typed input. If the model is busy
+        and the mic commits five phrases, replaying those as five stale
+        turns makes the assistant lag behind reality. Keep at most one
+        pending voice turn and append newer phrases to it.
+        """
+        phrase = (text or "").strip()
+        if not phrase:
+            return
+        with self._voice_queue_lock:
+            with self._turn_queue.not_empty:
+                merged: list[str] = []
+                kept = []
+                while self._turn_queue.queue:
+                    item = self._turn_queue.queue.popleft()
+                    if (
+                        isinstance(item, tuple)
+                        and len(item) == 2
+                        and item[0] == "voice"
+                    ):
+                        merged.extend(_split_coalesced_voice(item[1]))
+                    else:
+                        kept.append(item)
+                merged.append(phrase)
+                for item in kept:
+                    self._turn_queue.queue.append(item)
+                self._turn_queue.queue.append((
+                    "voice", _format_coalesced_voice(merged),
+                ))
+                self._turn_queue.not_empty.notify()
+        self.console.print(
+            "[dim]🎙 coalesced — will handle latest voice batch next.[/]"
+        )
 
     def _submit_steer(self, text: str) -> None:
         """Steer the running turn — stop it at the next tool-call
@@ -1495,6 +1570,12 @@ class JaegerTUI:
             except Exception:  # noqa: BLE001
                 phrase = None
             if not phrase:
+                continue
+            from jaeger_os.core.voice import is_non_speech_marker
+            if is_non_speech_marker(phrase):
+                self.console.print(
+                    f"[dim][skipped — non-speech: {phrase!r}][/]"
+                )
                 continue
             if is_exit_phrase(phrase):
                 self.console.print(

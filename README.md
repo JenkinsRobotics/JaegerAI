@@ -294,7 +294,7 @@ The position no one else owns:
                    │   Tools = networking shims:           │
                    │     text_to_speech → /act/speech      │
                    │     listen         → /sense/transcript│
-                   │     vision_analyze → /sense/vision    │
+                   │     vision_analyze → /sense/vision_analysis │
                    │     computer_use   → /act/motion etc. │
                    └────────────┬──────────────────────────┘
                                 │ ZMQ pub/sub (or inproc in monolith mode)
@@ -314,7 +314,8 @@ The position no one else owns:
                                      │  Canonical topic namespaces      │
                                      │    /sense/audio_in   binary mic  │
                                      │    /sense/transcript  STT text   │
-                                     │    /sense/vision      YOLOv8     │
+                                     │    /sense/camera_frame raw frames│
+                                     │    /sense/vision_analysis scene  │
                                      │    /sense/proprio     encoder+IMU│
                                      │    /act/speech        text→TTS   │
                                      │    /act/audio_out     binary spk │
