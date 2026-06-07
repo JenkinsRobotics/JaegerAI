@@ -15,7 +15,7 @@ call now routes through a typed Bus.
 
 ### Architecture
 - **Topics SSOT.** `jaeger_os/topics.py` defines 11 typed topics
-  (`/sense/audio_in`, `/sense/transcript`, `/sense/vision`,
+  (`/sense/audio_in`, `/sense/transcript`, `/sense/camera_frame`,
   `/sense/touch`, `/sense/proprio`, `/sense/spoken`, `/act/speech`,
   `/act/audio_out`, `/act/motion`, `/act/light`,
   `/act/speech_stop`) as `msgspec.Struct` schemas with a common
@@ -45,8 +45,9 @@ call now routes through a typed Bus.
   `WhisperSTTContinuous` so the existing 0.3.0 voice-mode
   features (wake word, follow-up window, mic-pause, AEC) carry
   over.
-- **Vision** (`/sense/vision` raw camera frames; no YOLO/no
-  scene description — inference is a future downstream node).
+- **Vision** (`/sense/camera_frame` raw camera frames; no YOLO/no
+  scene description — inference is a future downstream
+  `/sense/vision_analysis` topic).
   Two universal backends: `USBCameraAdapter` (cv2.VideoCapture)
   + `TCPCameraAdapter` (generic 4-byte-length-prefix protocol).
 - **Motor + Light** (Track C skeletons): universal Protocols +
@@ -1411,4 +1412,3 @@ carried 22 incremental commits from `Alpha 0.1` through
 `Alpha 20`. That branch was deleted at release time; commits
 remain reachable in the local reflog (~90 days) and via SHA if
 audit is ever needed.
-
