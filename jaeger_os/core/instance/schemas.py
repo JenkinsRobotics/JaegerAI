@@ -76,8 +76,23 @@ class ModelConfig(BaseModel):
     # In-process llama-cpp-python is the only adapter Jaeger M1 supports.
     # M2 may add OpenAI-compatible HTTP endpoints; the discriminator stays here
     # so we don't have to migrate config files later.
-    backend: Literal["llama_cpp_python"] = "llama_cpp_python"
-    model_path: Path = Field(..., description="Absolute path to the GGUF weights")
+    # llama_cpp_python = GGUF via llama.cpp (default; broadest model
+    #   support, the JROS 0.3.0 + 0.4.0 reference path).
+    # mlx_lm = Apple-Silicon-native MLX backend (1.5–2× faster
+    #   per-token on M-series; model_path points at an MLX model
+    #   directory, NOT a GGUF — e.g.
+    #   ``~/.lmstudio/models/mlx-community/Qwen3.5-9B-MLX-4bit/``).
+    #   Dispatcher already routes to MlxClient in main.py; this
+    #   Literal just makes the option config-visible.  Added 0.4.x.
+    backend: Literal["llama_cpp_python", "mlx_lm"] = "llama_cpp_python"
+    model_path: Path = Field(
+        ...,
+        description=(
+            "Absolute path to model weights.  For llama_cpp_python: "
+            "the GGUF file.  For mlx_lm: the model directory "
+            "containing config.json + weight shards."
+        ),
+    )
     ctx: int = Field(8192, ge=512, le=131_072)
     gpu_layers: int = Field(-1, description="-1 = offload all, 0 = CPU-only")
     n_batch: int = 512
@@ -278,6 +293,48 @@ class VoiceConfig(BaseModel):
             "OFF in 0.4.x — proven-on-the-side-but-not-the-default; "
             "flip on when you want the more conversational feel and "
             "have confidence the LLM gate will sort the actual chatter."
+        ),
+    )
+    follow_up_retry: bool = Field(
+        True,
+        description=(
+            "Active-follow-up retry: when the LLM gate returns "
+            "<ignore> DURING an active follow-up window (just had a "
+            "real exchange within ``follow_up_seconds``), retry the "
+            "same phrase ONCE with a hint that the conversation is "
+            "active.  Catches the case where the LLM under-reacts to "
+            "a real follow-up that arrived just after a reply.  "
+            "Pattern absorbed from VoiceLLM's orchestrator; default ON "
+            "in 0.4.x because it materially improves the conversational "
+            "feel without changing the gate's overall ignore-vs-reply "
+            "semantics."
+        ),
+    )
+    self_speech_filter: bool = Field(
+        False,
+        description=(
+            "Self-speech rejection via similarity filter.  Compares "
+            "each new transcribed phrase to the agent's most recent "
+            "spoken reply using ``difflib.SequenceMatcher.ratio()``; "
+            "drops the phrase if similarity exceeds "
+            "``self_speech_threshold``.  Defence-in-depth on TOP of "
+            "mic-pause-during-TTS — catches the case where the mic "
+            "still picks up the agent's own voice through the air "
+            "(speaker bleed when mic-pause flickers).  Pattern "
+            "absorbed from VoiceLLM's M3 orchestrator.  Default OFF "
+            "in 0.4.x — JROS's mic-pause + LLM gate already cover "
+            "this; flip on if you observe the agent talking to "
+            "itself."
+        ),
+    )
+    self_speech_threshold: float = Field(
+        0.85, ge=0.5, le=1.0,
+        description=(
+            "Similarity ratio (0–1) above which a transcribed phrase "
+            "is treated as the agent's own voice and dropped.  Only "
+            "consulted when ``self_speech_filter=True``.  0.85 is "
+            "the VoiceLLM reference value — high enough to avoid "
+            "false positives on similar-sounding genuine user input."
         ),
     )
 
