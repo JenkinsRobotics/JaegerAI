@@ -20,6 +20,7 @@ Settings (see :class:`jaeger_os.core.instance.schemas.VoiceConfig`):
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -79,11 +80,12 @@ class VoiceController:
         self,
         console: Console,
         *,
-        wake_word: bool = True,
+        wake_word: bool = False,
         follow_up: bool = True,
-        barge_in: bool = True,
-        follow_up_seconds: float = 15.0,
+        barge_in: bool = False,
+        follow_up_seconds: float = 10.0,
         wake_name: str | None = None,
+        llm_gate: bool = True,
     ) -> None:
         self.console = console
         self.wake_word = wake_word
@@ -91,6 +93,18 @@ class VoiceController:
         self.barge_in = barge_in
         self.follow_up_seconds = follow_up_seconds
         self.wake_name = wake_name
+        # 0.4.x: when llm_gate is on, the system prompt instructs the
+        # agent to begin replies with <ignore>/<reply>; this controller
+        # parses the leading tag, suppresses speech on <ignore>, and
+        # strips the tag on <reply>.  Matches the VoiceLLM reference's
+        # gating strategy that handles 'was that addressed to me?'
+        # far more reliably than wake-word transcription matching.
+        self.llm_gate = llm_gate
+        if llm_gate:
+            # Same env var the standalone voice_loop sets — the system
+            # prompt's assemble_prompt() conditionally includes the
+            # VOICE_LLM_GATE_RULE block when this is "1".
+            os.environ["JAEGER_VOICE_GATE"] = "1"
 
         self._stt: Any = None
         self._tts: Any = None
@@ -229,9 +243,26 @@ class VoiceController:
     def speak(self, text: str) -> bool:
         """Voice a reply. With live barge-in the mic stays open and the
         user can cut the agent off mid-sentence; otherwise the mic is
-        paused for the duration. Returns True if the user barged in."""
+        paused for the duration. Returns True if the user barged in.
+
+        When ``llm_gate`` is on (default), the leading <ignore>/<reply>
+        tag the system prompt requires is parsed here.  ``<ignore>``
+        suppresses TTS entirely (the operator hears nothing — matches
+        VoiceLLM's behaviour for background noise + ambient chatter).
+        ``<reply>`` strips the tag and speaks the remainder.
+        """
         if not text or self._tts is None or self._stt is None:
             return False
+
+        if self.llm_gate:
+            from jaeger_os.core.voice import parse_gate
+            should_speak, gated_text = parse_gate(text)
+            if not should_speak:
+                self.console.print(
+                    "[dim]🤫 LLM gate: <ignore> — not addressed to me.[/]"
+                )
+                return False
+            text = gated_text or text
 
         if self._barge_in_live:
             interrupted = {"flag": False}
