@@ -5,7 +5,7 @@ messages on ``/sense/camera_frame`` at whatever rate the adapter
 produces frames.  The node itself is hardware-agnostic — the
 adapter handles the actual capture (USB / TCP / future modes).
 
-Symmetric in shape with :class:`STTNode`: a polling source node
+Symmetric in shape with :class:`AudioSessionNode`: a polling source node
 that owns the hardware adapter, runs the adapter's loop on its
 own ``tick()``, and publishes typed messages to the bus.
 
@@ -33,7 +33,7 @@ class VisionNode(Node):
     The adapter is dependency-injected — production callers pass
     :class:`USBCameraAdapter` or :class:`TCPCameraAdapter`; tests
     pass a mock that returns canned frames.  Same Protocol-based
-    design as the STT node uses for WhisperSTTContinuous.
+    design as the audio session node uses for Whisper STT.
     """
 
     def __init__(

@@ -13,6 +13,9 @@ Two operations
   TTS node so ``/act/speech`` has a subscriber.  Idempotent — safe
   to call from any tool's first invocation OR from ``warm_kokoro``
   during boot prewarm.
+* :func:`ensure_audio_session_node` starts the one mic/AEC/STT owner
+  for monolithic voice mode, so TUI and other consumers read
+  ``/sense/transcript`` instead of opening their own mic.
 
 Track A.7 (the ZMQ broker) will add a multi-process variant: the
 runtime asks the operator's ``--mode`` choice and either returns
@@ -34,6 +37,8 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from jaeger_os.core.audio import AudioSession, AudioSessionConfig
+from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
 from jaeger_os.nodes.tts import Synthesizer, TTSNode
 from jaeger_os.transport import Bus, InProcBus
@@ -44,6 +49,9 @@ _bus: Optional[Bus] = None
 _tts_node: Optional[TTSNode] = None
 _tts_thread: Optional[threading.Thread] = None
 _synth = None  # KokoroTTS instance owned by the node
+_audio_session_node: Optional[AudioSessionNode] = None
+_audio_session_thread: Optional[threading.Thread] = None
+_audio_session: Optional[AudioSession] = None
 
 
 def _default_bus_factory() -> Bus:
@@ -80,10 +88,46 @@ def _default_thread_factory(node: TTSNode) -> threading.Thread:
     )
 
 
+def _default_audio_session_factory(
+    config: AudioSessionConfig,
+) -> AudioSession:
+    return AudioSession.build(config, tts_synth=get_synth())
+
+
+def _default_audio_session_node_factory(
+    *,
+    bus: Bus,
+    session: AudioSession,
+) -> AudioSessionNode:
+    return AudioSessionNode(
+        bus=bus,
+        session=session,
+        name="audio_session",
+        install_signal_handlers=False,
+    )
+
+
+def _default_audio_thread_factory(node: AudioSessionNode) -> threading.Thread:
+    return threading.Thread(
+        target=node.run,
+        name="brain-audio-session-node",
+        daemon=True,
+    )
+
+
 _bus_factory: Callable[[], Bus] = _default_bus_factory
 _synth_factory: Callable[[], Synthesizer] = _default_synth_factory
 _tts_node_factory: Callable[..., TTSNode] = _default_tts_node_factory
 _thread_factory: Callable[[TTSNode], threading.Thread] = _default_thread_factory
+_audio_session_factory: Callable[[AudioSessionConfig], AudioSession] = (
+    _default_audio_session_factory
+)
+_audio_session_node_factory: Callable[..., AudioSessionNode] = (
+    _default_audio_session_node_factory
+)
+_audio_thread_factory: Callable[[AudioSessionNode], threading.Thread] = (
+    _default_audio_thread_factory
+)
 
 
 def get_bus() -> Bus:
@@ -136,6 +180,32 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     return node
 
 
+def ensure_audio_session_node(
+    *,
+    config: AudioSessionConfig,
+) -> AudioSessionNode:
+    """Make sure exactly one audio session node owns the mic.
+
+    The session factory receives the already-running TTS synth so
+    monolithic AEC can share its ``reference_buffer`` directly.  This is
+    intentional 0.4.0 coupling pending multiprocess reference transport.
+    """
+    global _audio_session_node, _audio_session_thread, _audio_session
+    ensure_tts_node()
+    bus = get_bus()
+    with _lock:
+        if _audio_session_node is None:
+            _audio_session = _audio_session_factory(config)
+            _audio_session_node = _audio_session_node_factory(
+                bus=bus,
+                session=_audio_session,
+            )
+            _audio_session_thread = _audio_thread_factory(_audio_session_node)
+            _audio_session_thread.start()
+            _wait_for_node_running(_audio_session_node, timeout_s=5.0)
+        return _audio_session_node
+
+
 def _wait_for_node_running(node: TTSNode, *, timeout_s: float) -> None:
     """Wait until ``node.setup()`` has completed.
 
@@ -164,17 +234,47 @@ def get_synth():
     return _synth
 
 
+def get_audio_session() -> AudioSession | None:
+    """Return the monolithic audio session, if started."""
+    return _audio_session
+
+
+def shutdown_audio_session_node() -> None:
+    """Stop only the audio session node, leaving TTS/bus alive."""
+    global _audio_session_node, _audio_session_thread, _audio_session
+    with _lock:
+        audio_node = _audio_session_node
+        audio_thread = _audio_session_thread
+        _audio_session_node = None
+        _audio_session_thread = None
+        _audio_session = None
+    if audio_node is not None:
+        audio_node.stop()
+        if audio_thread is not None:
+            audio_thread.join(timeout=3.0)
+
+
 def shutdown() -> None:
     """Stop the TTS node, close the bus.  Idempotent."""
     global _bus, _tts_node, _tts_thread, _synth
+    global _audio_session_node, _audio_session_thread, _audio_session
     with _lock:
+        audio_node = _audio_session_node
+        audio_thread = _audio_session_thread
         node = _tts_node
         thread = _tts_thread
         bus = _bus
+        _audio_session_node = None
+        _audio_session_thread = None
+        _audio_session = None
         _tts_node = None
         _tts_thread = None
         _bus = None
         _synth = None
+    if audio_node is not None:
+        audio_node.stop()
+        if audio_thread is not None:
+            audio_thread.join(timeout=3.0)
     if node is not None:
         node.stop()
         if thread is not None:

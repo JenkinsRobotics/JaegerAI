@@ -13,6 +13,8 @@ Current contents:
     from for AEC's far-end reference
   • chimes.py — pre-synthesized wake / follow-up earcons the voice loop
     plays as audible feedback
+  • session.py — shared mic/AEC/STT session wrapper used by the
+    audio-session node and TUI voice path
 
 AEC + ReferenceBuffer are used together to enable barge-in: TTS publishes
 its playback audio to the ReferenceBuffer; the STT mic-capture pulls those
@@ -26,5 +28,9 @@ from __future__ import annotations
 from .aec import AECWrapper, aec_available
 from .reference_buffer import ReferenceBuffer
 from .chimes import ChimePlayer
+from .session import AudioSession, AudioSessionConfig, STTAdapter
 
-__all__ = ["AECWrapper", "aec_available", "ReferenceBuffer", "ChimePlayer"]
+__all__ = [
+    "AECWrapper", "aec_available", "ReferenceBuffer", "ChimePlayer",
+    "AudioSession", "AudioSessionConfig", "STTAdapter",
+]

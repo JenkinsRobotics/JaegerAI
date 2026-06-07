@@ -17,20 +17,20 @@ its own subprocess and connects to a shared :class:`ZMQBus`
 endpoint.  The Node class is the same in both modes — the
 distinction is which Bus the supervisor hands it.
 
-The Track B audio_io / stt / tts nodes will all subclass this.
+The Track B audio_session / tts nodes will all subclass this.
 """
 
 from .base import Node, NodeState
+from .audio_session import AudioSessionNode, STTAdapter, STTNode
 from .light import LightAdapter, LightNode, SerialLightAdapter
 from .motor import MotorAdapter, MotorNode, SerialMotorAdapter
-from .stt import STTAdapter, STTNode
 from .tts import Synthesizer, TTSNode
 from .vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
 
 __all__ = [
     "Node", "NodeState",
     "TTSNode", "Synthesizer",
-    "STTNode", "STTAdapter",
+    "AudioSessionNode", "STTNode", "STTAdapter",
     "VisionNode", "CameraAdapter",
     "USBCameraAdapter", "TCPCameraAdapter",
     "MotorNode", "MotorAdapter", "SerialMotorAdapter",
