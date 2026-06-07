@@ -91,7 +91,20 @@ def _default_thread_factory(node: TTSNode) -> threading.Thread:
 def _default_audio_session_factory(
     config: AudioSessionConfig,
 ) -> AudioSession:
-    return AudioSession.build(config, tts_synth=get_synth())
+    # Wire the brain's LLM client + lock through so the node-owned
+    # LLM gate (operator-locked 2026-06-07) can classify phrases
+    # inside the session.  When the brain hasn't loaded yet (rare —
+    # only voice-only configurations during early boot), the gate
+    # degrades to deterministic filters and accepts unknown phrases.
+    from jaeger_os.main import _pipeline
+    llm_client = _pipeline.get("client")
+    llm_lock = _pipeline.get("llm_lock")
+    return AudioSession.build(
+        config,
+        tts_synth=get_synth(),
+        llm_client=llm_client,
+        llm_lock=llm_lock,
+    )
 
 
 def _default_audio_session_node_factory(
