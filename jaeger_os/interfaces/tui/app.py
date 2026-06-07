@@ -55,8 +55,10 @@ _TURN_UNSAFE_SLASH = frozenset({
 })
 
 _VOICE_BATCH_HEADER = (
-    "Voice input heard while I was busy. Treat these snippets as one "
-    "combined turn:"
+    "Candidate voice input heard while I was busy. Decide with the "
+    "voice gate whether these snippets were addressed to you. If they "
+    "look like TV, ads, background conversation, or unrelated fragments, "
+    "reply <ignore>:"
 )
 
 
@@ -841,6 +843,9 @@ class JaegerTUI:
             follow_up_seconds=vc.follow_up_seconds,
             wake_name=self._resolve_instance_name(),
             llm_gate=getattr(vc, "llm_gate", True),
+            pending_turn_max_age_s=getattr(
+                vc, "pending_turn_max_age_s", 3.0,
+            ),
         )
         if announce:
             self.console.print("[dim]🎙  bringing the mic online…[/]")
@@ -941,20 +946,61 @@ class JaegerTUI:
     def _run_voice_turn(self, client: Any, user_text: str) -> None:
         """A spoken turn: run the unified turn, render the same
         hermes-style chrome a typed turn gets, then speak the reply
-        (barge-in aware) and open the follow-up window."""
-        from jaeger_os.core.voice import clean_voice_reply
+        (barge-in aware) and open the follow-up window.
+
+        Single-pass gate (operator-locked 2026-06-07): the primary
+        agent's system prompt teaches it to emit ``<ignore>`` or
+        ``<reply>`` as the first tokens of its response.  We parse
+        the response post-hoc with ``parse_gate()`` and suppress
+        speech / rendering when ``<ignore>`` is detected.  No
+        separate gate LLM call — the deterministic filters in
+        AudioSession are the first agent; this LLM turn is the
+        second."""
+        import os as _os
+        from jaeger_os.core.voice import (
+            clean_voice_reply,
+            is_non_speech_marker,
+            parse_gate,
+        )
         from jaeger_os.main import _DEFAULT_SESSION_KEY, run_for_voice
 
         self._render_turn_header(user_text, source="voice")
         started = time.perf_counter()
-        result = run_for_voice(client, user_text,
-                               session_key=_DEFAULT_SESSION_KEY)
+        # Toggle the follow-up addressed_hint for the prompt assembler
+        # — strict default-ignore when idle, permissive default-reply
+        # when we're inside the follow-up window after a recent reply.
+        v = self._voice
+        in_followup = bool(v is not None and v.running
+                           and getattr(v, "in_followup_window", lambda: False)())
+        if in_followup:
+            _os.environ["JAEGER_VOICE_ACTIVE_FOLLOWUP"] = "1"
+        else:
+            _os.environ.pop("JAEGER_VOICE_ACTIVE_FOLLOWUP", None)
+        result = run_for_voice(
+            client,
+            user_text,
+            session_key=_DEFAULT_SESSION_KEY,
+        )
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        text = clean_voice_reply(result.get("text") or "")
+        raw_text = (result.get("text") or "").strip()
+        # Single-pass gate: parse the leading <ignore>/<reply> tag.
+        # parse_gate is lenient — no tag defaults to speak — so a
+        # forgetful model doesn't silence a legitimate reply.
+        should_speak, gated_text = parse_gate(raw_text)
+        if not should_speak:
+            self.console.print(
+                "[dim]🤫 voice gate: ignored (model emitted <ignore>)[/]"
+            )
+            return
+        text = clean_voice_reply(gated_text)
+        if text and is_non_speech_marker(text):
+            self.console.print(
+                f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]"
+            )
+            return
         self._render_answer(text, error=result.get("error"))
-        v = self._voice
         if v is not None and v.running:
             if text and not result.get("spoke_via_tool"):
                 v.speak(text)

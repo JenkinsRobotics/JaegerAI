@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import time
 import uuid
 from typing import Any
 
@@ -87,6 +88,7 @@ class VoiceController:
         follow_up_seconds: float = 10.0,
         wake_name: str | None = None,
         llm_gate: bool = True,
+        pending_turn_max_age_s: float = 3.0,
     ) -> None:
         self.console = console
         self.wake_word = wake_word
@@ -94,6 +96,7 @@ class VoiceController:
         self.barge_in = barge_in
         self.follow_up_seconds = follow_up_seconds
         self.wake_name = wake_name
+        self.pending_turn_max_age_s = pending_turn_max_age_s
         # 0.4.x: when llm_gate is on, the system prompt instructs the
         # agent to begin replies with <ignore>/<reply>; this controller
         # parses the leading tag, suppresses speech on <ignore>, and
@@ -112,9 +115,16 @@ class VoiceController:
         self._bus: Any = None
         self._ref: Any = None
         self._chimes: Any = None
-        self._transcripts: "queue.Queue[str]" = queue.Queue(maxsize=8)
+        self._transcripts: "queue.Queue[tuple[str, float]]" = queue.Queue(
+            maxsize=8,
+        )
         self._on_transcript: Any = None
         self._running = False
+        # G5: timestamp tracking for in_followup_window().  Used by the
+        # TUI's voice-turn handler to set JAEGER_VOICE_ACTIVE_FOLLOWUP
+        # so the addressed_hint prompt block triggers during
+        # conversation continuation.
+        self._followup_active_until: float = 0.0
         # True only when barge-in is on AND echo cancellation is live —
         # without AEC an open mic hears the agent, so we fall back to
         # pausing the mic during playback.
@@ -205,12 +215,15 @@ class VoiceController:
             text = (getattr(msg, "text", "") or "").strip()
             if not text:
                 return
+            from jaeger_os.core.voice import is_non_speech_marker
+            if is_non_speech_marker(text):
+                return
             if self._transcripts.full():
                 try:
                     self._transcripts.get_nowait()
                 except queue.Empty:
                     pass
-            self._transcripts.put_nowait(text)
+            self._transcripts.put_nowait((text, time.time()))
 
         return _on_transcript
 
@@ -254,8 +267,14 @@ class VoiceController:
         if self._audio_session is None:
             return None
         try:
-            phrase = self._transcripts.get(timeout=timeout)
+            phrase, queued_at = self._transcripts.get(timeout=timeout)
         except queue.Empty:
+            return None
+        age_s = time.time() - queued_at
+        if age_s > self.pending_turn_max_age_s:
+            self.console.print(
+                f"[dim]🎙  dropped stale voice input after {age_s:.1f}s.[/]"
+            )
             return None
         return (phrase or "").strip() or None
 
@@ -276,6 +295,9 @@ class VoiceController:
         from jaeger_os.core.voice import clean_voice_reply
         text = clean_voice_reply(text)
         if not text:
+            return False
+        from jaeger_os.core.voice import is_non_speech_marker
+        if is_non_speech_marker(text):
             return False
 
         if self.llm_gate:
@@ -389,11 +411,30 @@ class VoiceController:
         """Open the no-wake-word follow-up window after a reply. No-op
         unless both wake gating and the follow-up setting are on."""
         if self._audio_session is None or not (self.wake_word and self.follow_up):
+            # Still record the timestamp — the addressed_hint gate (G5)
+            # uses this even when wake gating is off, so the LLM gate
+            # gets the "permissive in conversation" signal.
+            import time
+            self._followup_active_until = time.time() + self.follow_up_seconds
             return
+        import time
+        self._followup_active_until = time.time() + self.follow_up_seconds
         try:
             self._audio_session.open_followup()
         except Exception:  # noqa: BLE001
             pass
+
+    def in_followup_window(self) -> bool:
+        """True when we're inside the post-reply follow-up window.
+
+        Used by the TUI's voice-turn handler (G5) to set the
+        ``JAEGER_VOICE_ACTIVE_FOLLOWUP`` env var, which triggers the
+        addressed_hint prompt block.  Tracks elapsed time since the
+        last ``open_followup()`` call against ``follow_up_seconds``.
+        """
+        import time
+        until = getattr(self, "_followup_active_until", 0.0)
+        return time.time() < until
 
     # ── turn interruption ────────────────────────────────────────────
     def arm_interrupt(self, cancel_event: Any) -> None:
