@@ -1461,6 +1461,42 @@ def _statusbar(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     return SlashResult()
 
 
+def _quiet(ctx: SlashContext, args: str) -> SlashResult:
+    """Toggle visibility of voice-activity prints (the [heard] /
+    [skipped] / gate-status lines).  When quiet, the agent
+    conversation stays clean; voice activity is hidden but the
+    gate decisions still happen.  Operator-requested 2026-06-07
+    to make the conversation pane easier to follow during TV /
+    movie noise testing.
+
+    /quiet         → toggle
+    /quiet on      → hide voice activity
+    /quiet off     → show voice activity (default)
+    """
+    tui = ctx.tui
+    if tui is None:
+        ctx.console.print("[yellow]/quiet needs the TUI.[/]")
+        return SlashResult()
+    arg = (args or "").strip().lower()
+    if arg == "on":
+        tui._quiet_voice = True
+    elif arg == "off":
+        tui._quiet_voice = False
+    elif arg == "":
+        tui._quiet_voice = not getattr(tui, "_quiet_voice", False)
+    else:
+        ctx.console.print(
+            "[yellow]Usage:[/] /quiet · /quiet on│off"
+        )
+        return SlashResult()
+    state = "hidden" if tui._quiet_voice else "shown"
+    ctx.console.print(
+        f"[dim]Voice activity {state} "
+        f"({len(getattr(tui, '_voice_activity_log', []))} recent events buffered).[/]"
+    )
+    return SlashResult()
+
+
 def _busy(ctx: SlashContext, args: str) -> SlashResult:
     """Show or set what Enter does while the agent is mid-turn.
 
@@ -1877,6 +1913,7 @@ REGISTRY: tuple[SlashCommand, ...] = (
     SlashCommand("status",    "show session info — model, instance, uptime, context, mic", _status),
     SlashCommand("peek",      "peek into the running turn — healthy, stuck, or looping?", _peek),
     SlashCommand("statusbar", "toggle the bottom status bar", _statusbar),
+    SlashCommand("quiet",     "hide voice-activity prints — `/quiet on│off`", _quiet),
     SlashCommand("busy",      "set what Enter does mid-turn: interrupt│queue│steer", _busy),
     SlashCommand("steer",     "`/steer <msg>` — steer the running turn (or run it now)", _steer),
     SlashCommand("usage",     "session usage — turns, timing, context estimate", _usage),
