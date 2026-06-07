@@ -314,17 +314,18 @@ def resolve_model_path(
 def _resolve_registered(
     key: str, *, auto_download: bool, progress: bool,
 ) -> str:
-    """For a registry-key reference, find the file in user cache OR
-    the repo's models/ dir, downloading if necessary."""
+    """For a registry-key reference, find the file in user cache,
+    repo ./models/, or LM Studio's standard layout — downloading
+    only if none of those have it."""
     entry = MODEL_REGISTRY[key]
     filename = entry["hf_file"]
 
-    # User cache (production location).
+    # 1. User cache (JROS's production location).
     cached = user_cache_dir() / key / filename
     if cached.exists():
         return str(cached.resolve())
 
-    # Repo's ./models/<file> (dev convenience — likely a symlink to
+    # 2. Repo's ./models/<file> (dev convenience — likely a symlink to
     # LM Studio's own cache).
     repo_models = repo_models_dir()
     if repo_models is not None:
@@ -332,10 +333,25 @@ def _resolve_registered(
         if repo_path.exists():
             return str(repo_path.resolve())
 
+    # 3. LM Studio's standard layout:
+    # ~/.lmstudio/models/<hf_repo>/<hf_file>.  Operators who already
+    # downloaded the model via LM Studio shouldn't have to re-download
+    # it for JROS.  Added 2026-06-06 after an operator hit this
+    # exactly — 7 GB redundant download while the file sat right
+    # there on disk.
+    lmstudio_repo = entry.get("hf_repo")
+    if lmstudio_repo:
+        lmstudio_path = (
+            pathlib.Path.home() / ".lmstudio" / "models"
+            / lmstudio_repo / filename
+        )
+        if lmstudio_path.exists():
+            return str(lmstudio_path.resolve())
+
     if not auto_download:
         raise FileNotFoundError(
-            f"Model {key!r} not in user cache or repo ./models/, and "
-            f"auto_download=False."
+            f"Model {key!r} not in user cache, repo ./models/, or "
+            f"LM Studio cache; auto_download=False."
         )
 
     # Download into the user cache.
