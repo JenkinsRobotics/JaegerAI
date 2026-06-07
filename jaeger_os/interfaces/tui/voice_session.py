@@ -6,10 +6,9 @@ so the user can talk or type at any moment. The REPL polls
 :meth:`VoiceController.poll` alongside stdin; whichever produces input
 first becomes the turn.
 
-The controller owns the STT (VAD-segmented two-pass Whisper), the AEC +
-reference buffer that make true barge-in possible, the wake/follow-up
-earcons, and the shared Kokoro TTS. It reuses the TUI's already-booted
-model — no second model load.
+The controller owns TUI orchestration. The mic/STT/AEC session lives in
+the runtime's AudioSessionNode, and the TUI consumes ``/sense/transcript``
+from the bus so there is one mic owner in the process.
 
 Settings (see :class:`jaeger_os.core.instance.schemas.VoiceConfig`):
   • wake_word  — require "hey <name>" before the agent answers
@@ -21,6 +20,7 @@ Settings (see :class:`jaeger_os.core.instance.schemas.VoiceConfig`):
 from __future__ import annotations
 
 import os
+import queue
 import re
 import uuid
 from typing import Any
@@ -107,12 +107,13 @@ class VoiceController:
             # VOICE_LLM_GATE_RULE block when this is "1".
             os.environ["JAEGER_VOICE_GATE"] = "1"
 
-        self._stt: Any = None
+        self._audio_session: Any = None
         self._tts: Any = None  # backend reference for AEC wiring only
         self._bus: Any = None
-        self._aec: Any = None
         self._ref: Any = None
         self._chimes: Any = None
+        self._transcripts: "queue.Queue[str]" = queue.Queue(maxsize=8)
+        self._on_transcript: Any = None
         self._running = False
         # True only when barge-in is on AND echo cancellation is live —
         # without AEC an open mic hears the agent, so we fall back to
@@ -140,63 +141,46 @@ class VoiceController:
         """Build + start the mic. Returns True on success, False (with a
         printed reason) if speech deps are missing or the mic won't open."""
         try:
-            from jaeger_os.plugins.whisper_stt import WhisperSTTTwoPass
-        except Exception as exc:  # noqa: BLE001
+            from jaeger_os import topics
+            from jaeger_os.core.audio import AudioSessionConfig
+            from jaeger_os.nodes import runtime
+
+            runtime.ensure_tts_node()
+            runtime.ensure_audio_session_node(
+                config=AudioSessionConfig(
+                    stt_mode="two_pass",
+                    require_wake_word=self.wake_word,
+                    wake_phrases=_wake_phrases(self.wake_name),
+                    followup_window_s=self.follow_up_seconds,
+                    barge_in=self.barge_in,
+                ),
+            )
+            self._bus = runtime.get_bus()
+            self._tts = runtime.get_synth()
+            self._audio_session = runtime.get_audio_session()
+            if self._audio_session is None:
+                raise RuntimeError("audio session did not initialize")
+            self._ref = getattr(self._audio_session, "reference_buffer", None)
+            self._barge_in_live = bool(
+                getattr(self._audio_session, "barge_in_live", False)
+            )
+            self._on_transcript = self._make_transcript_handler()
+            self._bus.subscribe(topics.SENSE_TRANSCRIPT, self._on_transcript)
+        except ImportError as exc:
             self.console.print(
                 f"[red]Voice unavailable[/] — speech deps missing ({exc}).\n"
                 "[dim]Install them with[/] [bold]pip install -e \".[voice]\"[/]."
             )
+            self._audio_session = None
             return False
-
-        # AEC + reference buffer — only when barge-in is wanted AND the
-        # speexdsp echo canceller is importable.
-        if self.barge_in:
-            try:
-                from jaeger_os.core.audio import (
-                    AECWrapper, ReferenceBuffer, aec_available,
-                )
-                if aec_available():
-                    self._aec = AECWrapper(
-                        sample_rate=16000, frame_ms=10, enabled=True,
-                    )
-                    self._ref = ReferenceBuffer(
-                        sample_rate=16000, capacity_seconds=2.0,
-                    )
-                    self._barge_in_live = True
-            except Exception:  # noqa: BLE001
-                self._aec = self._ref = None
-                self._barge_in_live = False
-
-        # 0.4.x node contract: the controller owns mic/orchestration, but
-        # TTS execution belongs to the TTS node. Keep a backend reference
-        # only for AEC reference-buffer wiring; speech/stop commands below
-        # go over the bus, matching the VoiceLLM node discipline.
-        from jaeger_os.nodes import runtime
-        runtime.ensure_tts_node()
-        self._bus = runtime.get_bus()
-        self._tts = runtime.get_synth()
-
-        try:
-            self._stt = WhisperSTTTwoPass(
-                require_wake_word=self.wake_word,
-                wake_phrases=_wake_phrases(self.wake_name),
-                followup_window_s=self.follow_up_seconds,
-                aec=self._aec,
-                far_end_buffer=self._ref,
-            )
         except Exception as exc:  # noqa: BLE001
             self.console.print(
                 f"[red]Couldn't start the microphone:[/] {exc}\n"
                 "[dim]Check microphone permissions for your terminal in "
                 "System Settings → Privacy & Security.[/]"
             )
-            self._stt = None
+            self._audio_session = None
             return False
-
-        # Feed TTS playback into the AEC reference so the open mic can
-        # cancel the agent's own voice during barge-in.
-        if self._ref is not None and self._tts is not None:
-            self._tts.reference_buffer = self._ref
 
         # Wake / follow-up earcons — only meaningful with wake gating.
         try:
@@ -213,16 +197,33 @@ class VoiceController:
         except Exception:  # noqa: BLE001
             pass
 
-        self._stt.start()
         self._running = True
         return True
+
+    def _make_transcript_handler(self):
+        def _on_transcript(msg: Any) -> None:
+            text = (getattr(msg, "text", "") or "").strip()
+            if not text:
+                return
+            if self._transcripts.full():
+                try:
+                    self._transcripts.get_nowait()
+                except queue.Empty:
+                    pass
+            self._transcripts.put_nowait(text)
+
+        return _on_transcript
 
     def stop(self) -> None:
         """Tear the mic down. Idempotent."""
         self._running = False
-        if self._stt is not None:
+        if self._bus is not None and self._on_transcript is not None:
             try:
-                self._stt.stop()
+                from jaeger_os import topics
+                self._bus.unsubscribe(
+                    topics.SENSE_TRANSCRIPT,
+                    self._on_transcript,
+                )
             except Exception:  # noqa: BLE001
                 pass
         if self._bus is not None:
@@ -234,27 +235,27 @@ class VoiceController:
                 ))
             except Exception:  # noqa: BLE001
                 pass
-        if self._tts is not None:
-            if self._ref is not None:
-                try:
-                    self._tts.reference_buffer = None
-                except Exception:  # noqa: BLE001
-                    pass
-        self._stt = None
+        try:
+            from jaeger_os.nodes import runtime
+            runtime.shutdown_audio_session_node()
+        except Exception:  # noqa: BLE001
+            pass
+        self._audio_session = None
         self._bus = None
         self._tts = None
-        self._aec = self._ref = self._chimes = None
+        self._ref = self._chimes = None
+        self._on_transcript = None
         self._barge_in_live = False
 
     # ── input ────────────────────────────────────────────────────────
     def poll(self, timeout: float = 0.25) -> str | None:
         """Return the next committed spoken phrase, or None within
         ``timeout``. Wake-word gating (when on) is handled inside the STT."""
-        if self._stt is None:
+        if self._audio_session is None:
             return None
         try:
-            phrase = self._stt.next_phrase(timeout=timeout)
-        except Exception:  # noqa: BLE001
+            phrase = self._transcripts.get(timeout=timeout)
+        except queue.Empty:
             return None
         return (phrase or "").strip() or None
 
@@ -270,7 +271,7 @@ class VoiceController:
         VoiceLLM's behaviour for background noise + ambient chatter).
         ``<reply>`` strips the tag and speaks the remainder.
         """
-        if not text or self._bus is None or self._stt is None:
+        if not text or self._bus is None or self._audio_session is None:
             return False
         from jaeger_os.core.voice import clean_voice_reply
         text = clean_voice_reply(text)
@@ -298,11 +299,11 @@ class VoiceController:
                         speech_cid, reason="user interrupted",
                     )
 
-            self._stt.set_on_speech_detected(_on_speech)
+            self._audio_session.set_on_speech_detected(_on_speech)
             try:
                 ack = self._request_speech(text, speech_cid)
             finally:
-                self._stt.set_on_speech_detected(None)
+                self._audio_session.set_on_speech_detected(None)
             if ack is None or not getattr(ack, "ok", False):
                 if ack is None:
                     self.console.print("[dim](TTS node timeout)[/]")
@@ -313,13 +314,14 @@ class VoiceController:
             # Drop phrases VAD finalized during playback (echo / tail) so
             # a stale utterance doesn't become the next turn.
             try:
-                self._stt.drain_pending()
+                self._audio_session.drain_pending()
             except Exception:  # noqa: BLE001
                 pass
+            self._audio_session.remember_reply(text)
             return interrupted["flag"]
 
         # No echo cancellation — pause the mic so it doesn't hear the agent.
-        self._stt.set_paused(True)
+        self._audio_session.set_paused(True)
         try:
             ack = self._request_speech(text, uuid.uuid4().hex)
             if ack is None:
@@ -330,7 +332,8 @@ class VoiceController:
         except Exception as exc:  # noqa: BLE001
             self.console.print(f"[dim](couldn't speak: {exc})[/]")
         finally:
-            self._stt.set_paused(False)
+            self._audio_session.set_paused(False)
+        self._audio_session.remember_reply(text)
         return False
 
     def _request_speech(self, text: str, correlation_id: str) -> Any:
@@ -367,28 +370,28 @@ class VoiceController:
     def chime(self, kind: str) -> None:
         """Play a wake / follow-up earcon. Pauses the mic around it when
         there is no AEC reference to absorb the tone."""
-        if self._chimes is None or self._stt is None:
+        if self._chimes is None or self._audio_session is None:
             return
         if not self._chimes.enabled(kind):
             return
         pause = self._ref is None
         if pause:
-            self._stt.set_paused(True)
+            self._audio_session.set_paused(True)
         try:
             self._chimes.play(kind)
         except Exception:  # noqa: BLE001
             pass
         finally:
             if pause:
-                self._stt.set_paused(False)
+                self._audio_session.set_paused(False)
 
     def open_followup(self) -> None:
         """Open the no-wake-word follow-up window after a reply. No-op
         unless both wake gating and the follow-up setting are on."""
-        if self._stt is None or not (self.wake_word and self.follow_up):
+        if self._audio_session is None or not (self.wake_word and self.follow_up):
             return
         try:
-            self._stt.open_followup()
+            self._audio_session.open_followup()
         except Exception:  # noqa: BLE001
             pass
 
@@ -397,16 +400,16 @@ class VoiceController:
         """While a turn runs, let sustained user speech set ``cancel_event``
         — so the user can cut in and 'get its attention' mid-thought, not
         just mid-sentence. Pair with :meth:`disarm_interrupt` in a finally."""
-        if self._stt is not None:
+        if self._audio_session is not None:
             try:
-                self._stt.set_on_speech_detected(cancel_event.set)
+                self._audio_session.set_on_speech_detected(cancel_event.set)
             except Exception:  # noqa: BLE001
                 pass
 
     def disarm_interrupt(self) -> None:
         """Stop letting speech cancel the turn (back to normal listening)."""
-        if self._stt is not None:
+        if self._audio_session is not None:
             try:
-                self._stt.set_on_speech_detected(None)
+                self._audio_session.set_on_speech_detected(None)
             except Exception:  # noqa: BLE001
                 pass

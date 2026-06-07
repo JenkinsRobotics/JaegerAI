@@ -372,7 +372,7 @@ def main() -> int:
         )
 
     # 0.4 Track B.3.2.a — STT phrase consumption migrates to the bus.
-    # The STTNode wraps the existing WhisperSTTContinuous engine and
+    # The AudioSessionNode wraps the existing Whisper engine and
     # publishes committed phrases on /sense/transcript.  voice_loop
     # subscribes here + drains via _phrase_queue instead of calling
     # stt.next_phrase() directly.  Engine control methods (set_paused,
@@ -384,9 +384,18 @@ def main() -> int:
     import queue as _queue
     from jaeger_os import topics as _topics
     from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
-    from jaeger_os.nodes import STTNode as _STTNode
+    from jaeger_os.core.audio import AudioSession as _AudioSession
+    from jaeger_os.nodes import AudioSessionNode as _AudioSessionNode
     from jaeger_os.nodes import runtime as _runtime
     _bus = _runtime.get_bus()
+    _audio_session = _AudioSession(
+        adapter=stt,
+        aec=aec,
+        reference_buffer=reference_buffer,
+        barge_in_live=barge_in_active,
+        self_speech_filter=self_speech_filter_active,
+        self_speech_threshold=self_speech_threshold,
+    )
     _phrase_queue: "_queue.Queue[str]" = _queue.Queue(maxsize=4)
 
     def _on_transcript(msg: _topics.Transcript) -> None:
@@ -405,8 +414,11 @@ def main() -> int:
         _phrase_queue.put_nowait(text)
 
     _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
-    _stt_node = _STTNode(
-        bus=_bus, adapter=stt, name="stt", install_signal_handlers=False,
+    _stt_node = _AudioSessionNode(
+        bus=_bus,
+        session=_audio_session,
+        name="audio_session",
+        install_signal_handlers=False,
     )
     _stt_thread = threading.Thread(
         target=_stt_node.run, name="voice-stt-node", daemon=True,
@@ -723,7 +735,7 @@ def main() -> int:
         except Exception:
             pass
         # 0.4 Track B.3.2.a — STT node teardown.  Stopping the node
-        # propagates to stt.stop() through STTNode.teardown(), and
+        # propagates to stt.stop() through AudioSessionNode.teardown(), and
         # joins the Whisper background thread.  Drop the bus
         # subscription too so a re-entrant voice_loop in the same
         # interpreter doesn't accumulate stale subscribers.
