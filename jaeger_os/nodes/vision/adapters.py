@@ -153,7 +153,6 @@ class USBCameraAdapter:
 
     def _capture_loop(self) -> None:
         period_s = 1.0 / max(0.1, self._target_fps)
-        cv2 = self._cv2
         while not self._stop_event.is_set():
             t0 = time.perf_counter()
             ok, frame = self._cap.read()

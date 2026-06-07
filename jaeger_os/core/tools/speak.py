@@ -29,7 +29,7 @@ from ._common import SandboxError, _require_layout, _resolve_under
 # Re-export plugin constants so existing imports keep working.
 from ...plugins.kokoro_tts import (
     KOKORO_LANG,
-    KOKORO_SAMPLE_RATE,
+    KOKORO_SAMPLE_RATE as KOKORO_SAMPLE_RATE,
     KOKORO_VOICE,
     KokoroTTS,
 )
@@ -81,15 +81,12 @@ def warm_kokoro() -> dict[str, Any]:
 
 
 def _get_tts() -> KokoroTTS:
-    """Back-compat accessor used by the voice loop's direct-TTS code
-    path (which has its own warm/play_async/stop interactions with
-    Kokoro for barge-in semantics).  Returns the same KokoroTTS
-    instance the TTS node wraps — so direct calls AND bus-routed
-    calls share one synthesizer, one audio device, one warm cost.
+    """Back-compat accessor for backend setup around the TTS node.
 
-    Track B.3.2.b will retire this accessor when the voice loop's
-    TTS calls migrate to ``bus.request(SpeechCommand, ...)`` with a
-    ``/control/speech_stop`` topic for barge-in.
+    The speech execution path is bus-routed now.  A few voice
+    coordinators still need the wrapped KokoroTTS instance for
+    non-execution configuration such as AEC reference-buffer wiring,
+    audio backend selection, and warm status reporting.
     """
     from jaeger_os.nodes import runtime
     runtime.ensure_tts_node()

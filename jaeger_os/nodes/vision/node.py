@@ -1,7 +1,7 @@
 """node.py — VisionNode.
 
 Wraps a :class:`CameraAdapter` and publishes :class:`CameraFrame`
-messages on ``/sense/vision`` at whatever rate the adapter
+messages on ``/sense/camera_frame`` at whatever rate the adapter
 produces frames.  The node itself is hardware-agnostic — the
 adapter handles the actual capture (USB / TCP / future modes).
 
@@ -14,13 +14,11 @@ Threading
 The adapter's ``next_frame()`` MAY block up to its own internal
 timeout (default 1 s).  ``tick()`` polls with a short timeout so
 ``stop()`` stays responsive.  Inference / analysis nodes that
-subscribe to ``/sense/vision`` are responsible for not falling
+subscribe to ``/sense/camera_frame`` are responsible for not falling
 behind — backpressure here is the Bus's queue, not the camera.
 """
 
 from __future__ import annotations
-
-from typing import Any
 
 from jaeger_os import topics
 from jaeger_os.nodes.base import Node
@@ -30,7 +28,7 @@ from jaeger_os.transport import Bus
 
 class VisionNode(Node):
     """Poll a :class:`CameraAdapter` for frames; publish
-    :class:`CameraFrame` on ``/sense/vision``.
+    :class:`CameraFrame` on ``/sense/camera_frame``.
 
     The adapter is dependency-injected — production callers pass
     :class:`USBCameraAdapter` or :class:`TCPCameraAdapter`; tests
@@ -62,7 +60,9 @@ class VisionNode(Node):
 
     def setup(self) -> None:
         self.adapter.start()
-        self._log(f"adapter started; will publish {topics.SENSE_VISION}")
+        self._log(
+            f"adapter started; will publish {topics.SENSE_CAMERA_FRAME}"
+        )
 
     def tick(self) -> None:
         frame = self.adapter.next_frame(timeout=self._poll_timeout_s)

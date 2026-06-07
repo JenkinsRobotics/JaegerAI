@@ -18,11 +18,17 @@ from __future__ import annotations
 
 import queue
 import threading
-import time
-from typing import Any
 
 from jaeger_os import topics
 from jaeger_os.transport.bus import Bus, SubscriberFn
+
+
+class InProcBusOverflowError(RuntimeError):
+    """Raised when the in-process delivery queue is full.
+
+    This preserves the Bus contract that ``publish()`` must not block:
+    overflow is surfaced synchronously instead of hanging the publisher.
+    """
 
 
 class InProcBus(Bus):
@@ -35,8 +41,8 @@ class InProcBus(Bus):
       blocking subscriber will back-pressure the entire Bus.
       Subscribers that need to do work should hand off to their
       own thread / queue.
-    * :meth:`publish` is thread-safe and non-blocking up to the
-      queue's ``maxsize`` (default 2048, matches VoiceLLM).
+    * :meth:`publish` is thread-safe and non-blocking. If the queue
+      is full it raises :class:`InProcBusOverflowError` immediately.
     * :meth:`subscribe` / :meth:`unsubscribe` are thread-safe via
       a coarse-grained lock — these are setup / teardown operations,
       not hot-path.
@@ -68,11 +74,12 @@ class InProcBus(Bus):
         during shutdown and we don't want a flurry of errors then)."""
         if self._closed:
             return
-        # ``put`` will raise queue.Full on overflow.  At our scale
-        # 2048 messages of headroom is plenty; raising loudly
-        # surfaces real publisher misbehaviour (a runaway loop) at
-        # development time.
-        self._q.put(msg)
+        try:
+            self._q.put_nowait(msg)
+        except queue.Full as exc:
+            raise InProcBusOverflowError(
+                f"in-process bus queue full while publishing {msg.topic}"
+            ) from exc
 
     def subscribe(self, topic: str, callback: SubscriberFn) -> None:
         with self._subs_lock:

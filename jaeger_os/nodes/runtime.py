@@ -32,9 +32,10 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional
+from typing import Any, Callable, Optional
 
-from jaeger_os.nodes.tts import TTSNode
+from jaeger_os.nodes.base import NodeState
+from jaeger_os.nodes.tts import Synthesizer, TTSNode
 from jaeger_os.transport import Bus, InProcBus
 
 
@@ -43,6 +44,46 @@ _bus: Optional[Bus] = None
 _tts_node: Optional[TTSNode] = None
 _tts_thread: Optional[threading.Thread] = None
 _synth = None  # KokoroTTS instance owned by the node
+
+
+def _default_bus_factory() -> Bus:
+    return InProcBus()
+
+
+def _default_synth_factory() -> Synthesizer:
+    # Late import — speak.py imports from this module, so a module-level
+    # import would be circular.
+    from jaeger_os.plugins.kokoro_tts import KOKORO_LANG, KokoroTTS
+    from jaeger_os.core.tools.speak import _resolve_voice
+
+    return KokoroTTS(voice=_resolve_voice(), lang=KOKORO_LANG)
+
+
+def _default_tts_node_factory(
+    *,
+    bus: Bus,
+    synthesizer: Synthesizer,
+) -> TTSNode:
+    return TTSNode(
+        bus=bus,
+        synthesizer=synthesizer,
+        name="tts",
+        install_signal_handlers=False,
+    )
+
+
+def _default_thread_factory(node: TTSNode) -> threading.Thread:
+    return threading.Thread(
+        target=node.run,
+        name="brain-tts-node",
+        daemon=True,
+    )
+
+
+_bus_factory: Callable[[], Bus] = _default_bus_factory
+_synth_factory: Callable[[], Synthesizer] = _default_synth_factory
+_tts_node_factory: Callable[..., TTSNode] = _default_tts_node_factory
+_thread_factory: Callable[[TTSNode], threading.Thread] = _default_thread_factory
 
 
 def get_bus() -> Bus:
@@ -54,7 +95,7 @@ def get_bus() -> Bus:
     global _bus
     with _lock:
         if _bus is None:
-            _bus = InProcBus()
+            _bus = _bus_factory()
         return _bus
 
 
@@ -69,51 +110,50 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     """
     global _tts_node, _tts_thread, _synth
     bus = get_bus()
+    synth_to_warm: Any = None
     with _lock:
         if _tts_node is None:
-            # Late import — speak.py imports from this module, so a
-            # module-level import would be circular.
-            from jaeger_os.plugins.kokoro_tts import KOKORO_LANG, KokoroTTS
-            from jaeger_os.core.tools.speak import _resolve_voice
-
-            voice = _resolve_voice()
-            _synth = KokoroTTS(voice=voice, lang=KOKORO_LANG)
-            _tts_node = TTSNode(
-                bus=bus,
-                synthesizer=_synth,
-                name="tts",
-                install_signal_handlers=False,
-            )
-            _tts_thread = threading.Thread(
-                target=_tts_node.run,
-                name="brain-tts-node",
-                daemon=True,
-            )
+            _synth = _synth_factory()
+            _tts_node = _tts_node_factory(bus=bus, synthesizer=_synth)
+            _tts_thread = _thread_factory(_tts_node)
             _tts_thread.start()
-            # Brief delay so the node's setup() registers the /act/speech
-            # subscriber before any tool gets a chance to publish.  Without
-            # this the first speak() can race the subscription install.
-            time.sleep(0.1)
+            _wait_for_node_running(_tts_node, timeout_s=2.0)
         if warm and _synth is not None:
-            # Warm OUTSIDE the lock — Kokoro weight-load is several
-            # seconds; holding _lock that long would block any other
-            # caller of ensure_tts_node.  Re-grab to atomically mark
-            # "warmed once".
-            # Actually we're inside the lock here; release for the
-            # warm and re-acquire isn't worth the complexity — at
-            # boot there's only one caller anyway.
-            try:
-                _synth.warm()
-            except Exception:  # noqa: BLE001
-                # Warm failure is non-fatal — the first speak() will
-                # warm lazily.  Log but proceed.
-                import sys
-                print(
-                    "[runtime] kokoro warm at ensure_tts_node failed; "
-                    "first speak() will pay the load tax",
-                    file=sys.stderr, flush=True,
-                )
-        return _tts_node
+            synth_to_warm = _synth
+        node = _tts_node
+    if warm and synth_to_warm is not None:
+        try:
+            synth_to_warm.warm()
+        except Exception:  # noqa: BLE001
+            # Warm failure is non-fatal — the first speak() will
+            # warm lazily.  Log but proceed.
+            import sys
+            print(
+                "[runtime] kokoro warm at ensure_tts_node failed; "
+                "first speak() will pay the load tax",
+                file=sys.stderr, flush=True,
+            )
+    return node
+
+
+def _wait_for_node_running(node: TTSNode, *, timeout_s: float) -> None:
+    """Wait until ``node.setup()`` has completed.
+
+    ``Node.run()`` sets state to RUNNING only after setup returns, so
+    observing RUNNING means the TTS subscriber is installed.  This
+    replaces the old fixed sleep which could race slow test or dev
+    machines.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if node.state == NodeState.RUNNING:
+            return
+        if node.state == NodeState.FAILED:
+            raise RuntimeError(
+                f"TTS node failed during setup: {node.health().get('error')}"
+            )
+        time.sleep(0.01)
+    raise TimeoutError("TTS node did not reach RUNNING state")
 
 
 def get_synth():

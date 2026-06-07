@@ -14,7 +14,8 @@ JROS philosophy on vision (operator-locked 2026-06-06):
   hardware.  The library doesn't ship JP01-only code paths.
 * No inference (YOLO, Moondream, etc.) lives in this package.
   Inference is a SEPARATE downstream node that subscribes to
-  ``/sense/vision`` and publishes its own analysis topic.  This
+  ``/sense/camera_frame`` and publishes ``/sense/vision_analysis``.
+  This
   package is the eyes; the brain (or future inference nodes) is
   what interprets what those eyes see.
 """

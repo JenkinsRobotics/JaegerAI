@@ -29,13 +29,14 @@ from .broker import (
 )
 from .bus import Bus, SubscriberFn
 from .codec import encode, decode, is_binary_topic
-from .inproc_bus import InProcBus
+from .inproc_bus import InProcBus, InProcBusOverflowError
 from .zmq_bus import ZMQBus, DEFAULT_ENDPOINT as ZMQ_DEFAULT_ENDPOINT
 
 __all__ = [
     "Bus", "SubscriberFn",
     "encode", "decode", "is_binary_topic",
-    "InProcBus", "ZMQBus", "ZMQ_DEFAULT_ENDPOINT",
+    "InProcBus", "InProcBusOverflowError",
+    "ZMQBus", "ZMQ_DEFAULT_ENDPOINT",
     "Broker", "make_bus_for_node",
     "DEFAULT_XSUB_ENDPOINT", "DEFAULT_XPUB_ENDPOINT",
 ]

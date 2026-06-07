@@ -6,7 +6,7 @@ so the JSON-vs-MessagePack pick lives in ONE place.
 
 Topic → wire format
 -------------------
-* **Binary topics** (audio frames, vision frames, anything carrying
+* **Binary topics** (audio frames, camera frames, anything carrying
   raw ``bytes`` payloads) → **MessagePack**.  msgspec encodes bytes
   natively (no base64 hop), and MessagePack is ~30-50 % smaller on
   the wire for binary content.
@@ -39,10 +39,10 @@ from jaeger_os import topics
 BINARY_TOPICS: frozenset[str] = frozenset({
     topics.SENSE_AUDIO_IN,
     topics.ACT_AUDIO_OUT,
-    # /sense/vision (CameraFrame) carries JPEG/PNG/raw bytes as the
+    # /sense/camera_frame (CameraFrame) carries JPEG/PNG/raw bytes as the
     # main payload — MessagePack avoids the base64 hop JSON would
     # require, and the smaller wire form matters at 10-30 fps.
-    topics.SENSE_VISION,
+    topics.SENSE_CAMERA_FRAME,
 })
 
 
