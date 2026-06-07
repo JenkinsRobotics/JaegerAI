@@ -619,65 +619,26 @@ def main() -> int:
                     stt.open_followup()
                     continue
 
-                # LLM-gate: when config.voice.llm_gate is on, the
-                # system prompt told the agent to begin its reply
-                # with <reply> or <ignore>.  Parse + strip the tag
-                # before we hand the text to TTS.
+                # 2026-06-07 architectural change (operator-locked):
+                # the LLM gate now lives INSIDE the AudioSession node.
+                # By the time ``phrase`` reaches this loop, the gate
+                # has already classified it as <reply> and only
+                # confirmed user input arrives.  The brain doesn't
+                # know about <ignore>/<reply> tags anymore — its
+                # system prompt no longer carries
+                # VOICE_LLM_GATE_RULE — so the reply is just the
+                # response text, ready to be spoken.
+                #
+                # Active-follow-up retry was a band-aid for the old
+                # post-hoc parse model where the brain occasionally
+                # under-reacted to genuine follow-ups during a
+                # conversation.  The in-node gate uses
+                # AudioSession.in_followup_window() to inject the
+                # addressed_hint clause into its OWN gate prompt
+                # at classification time — so it now decides
+                # permissively during conversation continuation
+                # without needing a second LLM turn.  Net win.
                 gated_out = False
-                if voice_gate_active and text and not spoke_via_tool:
-                    from jaeger_os.core.voice import (
-                        parse_gate,
-                        should_retry_ignored_followup,
-                    )
-                    should_speak, gated_text = parse_gate(text)
-                    # Active-follow-up retry (VoiceLLM pattern):
-                    # if LLM gated <ignore> during the active
-                    # follow-up window, give it one more try.  The
-                    # agent might have under-reacted to a real
-                    # follow-up arriving on the heels of a reply.
-                    if (
-                        not should_speak
-                        and should_retry_ignored_followup(
-                            phrase,
-                            retry_enabled=follow_up_retry_active,
-                            active_followup=_in_active_followup,
-                        )
-                    ):
-                        print(f"[voice] LLM tried <ignore> on active "
-                              f"follow-up — retrying: {phrase!r}",
-                              flush=True)
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="retry",
-                            reply=gated_text,
-                            reason="active_followup",
-                        )
-                        result = turn_runner(phrase)
-                        text = clean_voice_reply(result.get("text") or "")
-                        spoke_via_tool = result.get(
-                            "spoke_via_tool", False,
-                        )
-                        if text and not spoke_via_tool:
-                            should_speak, gated_text = parse_gate(text)
-                    if not should_speak:
-                        print(f"[voice] LLM gate: <ignore> on phrase "
-                              f"{phrase!r} — suppressing TTS", flush=True)
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="ignore",
-                            reply=gated_text,
-                        )
-                        gated_out = True
-                    else:
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="reply",
-                            reply=gated_text,
-                        )
-                        text = gated_text
 
                 if not text or spoke_via_tool or gated_out:
                     if spoke_via_tool:
