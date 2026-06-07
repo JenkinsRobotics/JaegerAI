@@ -2989,6 +2989,22 @@ def boot_for_tui(
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
         _pipeline["show_help_on_start"] = False
+        # CRITICAL ORDERING (operator-found regression 2026-06-07):
+        # VOICE_LLM_GATE_RULE is conditionally injected by the prompt
+        # assembler based on the JAEGER_VOICE_GATE env var.  If the
+        # operator's config.voice.llm_gate is on, set the env var
+        # BEFORE build_system_prompt so the gate rule is baked into
+        # the cached system prompt that every turn (text OR voice)
+        # will use.  voice_loop already does this; the TUI path was
+        # missing it — the env var was being set in VoiceController.
+        # __init__ which runs only at /voice on, AFTER the prompt was
+        # already cached without the rule.  Result: TUI voice mode
+        # had no gate semantically and the model treated TV/movie
+        # audio as real conversation.  This matches VoiceLLM's
+        # pattern of having the gate rule in the system prompt from
+        # boot, not toggled mid-session.
+        if getattr(config.voice, "llm_gate", False):
+            os.environ["JAEGER_VOICE_GATE"] = "1"
         _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
         _pipeline["with_memory"] = with_memory
         # Phase-7: optional toolset restriction at boot. ``JAEGER_TOOLSETS=...``
@@ -3471,6 +3487,14 @@ def main() -> int:
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
         _pipeline["show_help_on_start"] = config.display.show_help_on_start
+        # CRITICAL ORDERING — see boot_for_tui above for the full
+        # rationale.  In short: VOICE_LLM_GATE_RULE is conditionally
+        # injected by the assembler based on JAEGER_VOICE_GATE, so the
+        # env var MUST be set before build_system_prompt or the cached
+        # prompt won't have the gate and the LLM will respond to TV
+        # audio as if it were real input.
+        if getattr(config.voice, "llm_gate", False):
+            os.environ["JAEGER_VOICE_GATE"] = "1"
         _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
 
         # Log rotation at startup — idempotent, never blocks the boot.
