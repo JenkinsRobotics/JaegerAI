@@ -327,6 +327,21 @@ class JaegerTUI:
         self._voice: Any = None  # VoiceController — the always-on mic, or None
         self._ptk_session: Any = None  # prompt_toolkit PromptSession (lazy)
         self._statusbar_on = True  # bottom status bar visible (/statusbar)
+        # G4 minimal (operator-locked 2026-06-07): the conversation pane
+        # gets drowned by [heard] / [skipped] / gate-status prints during
+        # noisy environments (TV / movies playing in background).
+        # `/quiet on` mutes those prints; `_voice_activity_log` keeps the
+        # last N events buffered so `/quiet` status reporting can show
+        # what was muted.  Full split-screen Live + Layout deferred —
+        # see dev_docs/0.4.0_voice_gate_unification_prompt.md G4 section.
+        self._quiet_voice = False  # /quiet toggle
+        from collections import deque as _deque
+        self._voice_activity_log: _deque = _deque(maxlen=30)
+        # Aggregation: consecutive non-speech skips collapse to one
+        # entry with a counter ("[skipped — 5 non-speech events]")
+        # instead of N lines of the same skip.
+        self._last_voice_event_was_non_speech = False
+        self._consecutive_non_speech_count = 0
         self._started_at = time.perf_counter()
         self._context_tokens = 0
         self._context_max = 8192
@@ -540,6 +555,59 @@ class JaegerTUI:
         Read live from identity.yaml so a mid-session `set_name` shows
         up immediately; falls back to 'Jaeger'."""
         return self._resolve_instance_name() or "Jaeger"
+
+    def _log_voice(self, message: str, *, kind: str = "info") -> None:
+        """Route a voice-activity message through the /quiet filter +
+        consecutive-non-speech aggregation, then maybe print it.
+
+        ``kind`` classifies the event:
+          ``"heard"``       — STT finalized a phrase (white)
+          ``"skipped"``     — non-speech marker dropped (dim, aggregated)
+          ``"gate_accept"`` — LLM gate let it through (green)
+          ``"gate_ignore"`` — LLM gate suppressed (yellow)
+          ``"info"``        — coalesce note, self-speech-filter, etc.
+
+        Consecutive ``"skipped"`` events collapse to one line with a
+        counter — the operator explicitly asked not to see "a long
+        continouse skipped list of status."
+        """
+        # Track in the buffer regardless of /quiet — operator might
+        # flip quiet off and want to know what they missed.
+        self._voice_activity_log.append((kind, message))
+        if self._quiet_voice:
+            return
+
+        # Aggregate consecutive skips.  Print the FIRST skip immediately,
+        # subsequent ones increment an inline counter line that we
+        # re-print as a single replacement.  Without raw terminal
+        # control we approximate this by just printing a count when
+        # the streak ends OR every 5 skips so the user knows skips
+        # are still happening.
+        if kind == "skipped":
+            self._consecutive_non_speech_count += 1
+            if not self._last_voice_event_was_non_speech:
+                # First in a streak — show it normally.
+                self.console.print(message)
+                self._last_voice_event_was_non_speech = True
+            elif self._consecutive_non_speech_count % 5 == 0:
+                # Every 5th in a streak — show a count summary.
+                self.console.print(
+                    f"[dim](+{self._consecutive_non_speech_count} "
+                    f"non-speech events skipped)[/]"
+                )
+            return
+
+        # Non-skip event: if we were in a non-speech streak, flush a
+        # final count summary before rendering.
+        if self._last_voice_event_was_non_speech and \
+                self._consecutive_non_speech_count > 1:
+            self.console.print(
+                f"[dim](… {self._consecutive_non_speech_count} non-speech "
+                "events skipped)[/]"
+            )
+        self._last_voice_event_was_non_speech = False
+        self._consecutive_non_speech_count = 0
+        self.console.print(message)
 
     def _render_turn_header(self, user_text: str, *, source: str = "text") -> None:
         """The hermes-style turn separator — the user's message framed
@@ -990,14 +1058,16 @@ class JaegerTUI:
         # forgetful model doesn't silence a legitimate reply.
         should_speak, gated_text = parse_gate(raw_text)
         if not should_speak:
-            self.console.print(
-                "[dim]🤫 voice gate: ignored (model emitted <ignore>)[/]"
+            self._log_voice(
+                "[dim]🤫 voice gate: ignored (model emitted <ignore>)[/]",
+                kind="gate_ignore",
             )
             return
         text = clean_voice_reply(gated_text)
         if text and is_non_speech_marker(text):
-            self.console.print(
-                f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]"
+            self._log_voice(
+                f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]",
+                kind="gate_ignore",
             )
             return
         self._render_answer(text, error=result.get("error"))
@@ -1574,8 +1644,9 @@ class JaegerTUI:
                     "voice", _format_coalesced_voice(merged),
                 ))
                 self._turn_queue.not_empty.notify()
-        self.console.print(
-            "[dim]🎙 coalesced — will handle latest voice batch next.[/]"
+        self._log_voice(
+            "[dim]🎙 coalesced — will handle latest voice batch next.[/]",
+            kind="info",
         )
 
     def _submit_steer(self, text: str) -> None:
@@ -1619,8 +1690,9 @@ class JaegerTUI:
                 continue
             from jaeger_os.core.voice import is_non_speech_marker
             if is_non_speech_marker(phrase):
-                self.console.print(
-                    f"[dim][skipped — non-speech: {phrase!r}][/]"
+                self._log_voice(
+                    f"[dim][skipped — non-speech: {phrase!r}][/]",
+                    kind="skipped",
                 )
                 continue
             if is_exit_phrase(phrase):
