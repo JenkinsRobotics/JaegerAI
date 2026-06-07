@@ -310,8 +310,18 @@ class VoiceConfig(BaseModel):
             "semantics."
         ),
     )
+    pending_turn_max_age_s: float = Field(
+        3.0, ge=0.5, le=30.0,
+        description=(
+            "Maximum age for a queued voice phrase before it is dropped "
+            "instead of processed as a delayed turn.  Mirrors the "
+            "VoiceLLM realtime policy: the voice loop should not lag "
+            "behind the room by answering stale TV chatter, clicks, or "
+            "old follow-ups after a long agent turn."
+        ),
+    )
     self_speech_filter: bool = Field(
-        False,
+        True,
         description=(
             "Self-speech rejection via similarity filter.  Compares "
             "each new transcribed phrase to the agent's most recent "
@@ -321,20 +331,19 @@ class VoiceConfig(BaseModel):
             "mic-pause-during-TTS — catches the case where the mic "
             "still picks up the agent's own voice through the air "
             "(speaker bleed when mic-pause flickers).  Pattern "
-            "absorbed from VoiceLLM's M3 orchestrator.  Default OFF "
-            "in 0.4.x — JROS's mic-pause + LLM gate already cover "
-            "this; flip on if you observe the agent talking to "
-            "itself."
+            "absorbed from VoiceLLM's M3 orchestrator.  Default ON "
+            "so always-on voice has the same defence-in-depth as the "
+            "reference implementation."
         ),
     )
     self_speech_threshold: float = Field(
-        0.85, ge=0.5, le=1.0,
+        0.75, ge=0.5, le=1.0,
         description=(
             "Similarity ratio (0–1) above which a transcribed phrase "
             "is treated as the agent's own voice and dropped.  Only "
-            "consulted when ``self_speech_filter=True``.  0.85 is "
-            "the VoiceLLM reference value — high enough to avoid "
-            "false positives on similar-sounding genuine user input."
+            "consulted when ``self_speech_filter=True``.  0.75 is "
+            "the VoiceLLM reference value — aggressive enough to catch "
+            "speaker bleed without relying on exact transcript matches."
         ),
     )
 

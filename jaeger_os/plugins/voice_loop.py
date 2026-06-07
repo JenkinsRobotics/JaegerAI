@@ -49,6 +49,7 @@ plugins/messaging_gateway.py.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -193,10 +194,13 @@ def main() -> int:
     # once.  Pattern from VoiceLLM — catches LLM under-reaction to
     # real follow-ups arriving just after a reply.
     follow_up_retry_active = bool(getattr(config.voice, "follow_up_retry", True))
-    # Self-speech filter (default OFF): drop transcripts too similar
+    pending_turn_max_age_s = float(
+        getattr(config.voice, "pending_turn_max_age_s", 3.0)
+    )
+    # Self-speech filter (default ON): drop transcripts too similar
     # to the agent's last reply (mic picked up our own voice).
-    self_speech_filter_active = bool(getattr(config.voice, "self_speech_filter", False))
-    self_speech_threshold = float(getattr(config.voice, "self_speech_threshold", 0.85))
+    self_speech_filter_active = bool(getattr(config.voice, "self_speech_filter", True))
+    self_speech_threshold = float(getattr(config.voice, "self_speech_threshold", 0.75))
     # Track agent's last spoken reply + active-conversation deadline
     # for the two patterns above.  Updated after each successful reply.
     _last_reply_text: str = ""
@@ -396,22 +400,66 @@ def main() -> int:
         self_speech_filter=self_speech_filter_active,
         self_speech_threshold=self_speech_threshold,
     )
-    _phrase_queue: "_queue.Queue[str]" = _queue.Queue(maxsize=4)
+    _phrase_queue: "_queue.Queue[tuple[str, float]]" = _queue.Queue(maxsize=4)
+    _gate_log_path = layout.logs_dir / "voice_gate_eval.jsonl"
+
+    def _log_gate_event(
+        event: str,
+        phrase: str,
+        *,
+        decision: str,
+        reply: str = "",
+        age_s: float | None = None,
+        reason: str = "",
+    ) -> None:
+        """Best-effort VoiceLLM-style gate/eval trace."""
+        try:
+            layout.logs_dir.mkdir(parents=True, exist_ok=True)
+            rec: dict[str, Any] = {
+                "ts": time.time(),
+                "event": event,
+                "decision": decision,
+                "phrase": phrase,
+            }
+            if reply:
+                rec["reply"] = reply
+            if age_s is not None:
+                rec["age_s"] = round(age_s, 3)
+            if reason:
+                rec["reason"] = reason
+            with _gate_log_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=True) + "\n")
+        except Exception:
+            pass
 
     def _on_transcript(msg: _topics.Transcript) -> None:
         text = (msg.text or "").strip()
         if is_non_speech_marker(text):
             print(f"[voice] skipped non-speech transcript: {text!r}",
                   flush=True)
+            _log_gate_event(
+                "transcript",
+                text,
+                decision="ignore",
+                reason="non_speech_marker",
+            )
             return
         if _phrase_queue.full():
             try:
-                dropped = _phrase_queue.get_nowait()
+                dropped, _dropped_at = _phrase_queue.get_nowait()
                 print(f"[voice] dropped stale queued phrase: {dropped!r}",
                       flush=True)
+                _log_gate_event(
+                    "queue",
+                    dropped,
+                    decision="drop",
+                    age_s=time.time() - _dropped_at,
+                    reason="queue_full",
+                )
             except _queue.Empty:
                 pass
-        _phrase_queue.put_nowait(text)
+        _phrase_queue.put_nowait((text, time.time()))
+        _log_gate_event("transcript", text, decision="queued")
 
     _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
     _stt_node = _AudioSessionNode(
@@ -479,10 +527,22 @@ def main() -> int:
             # via _phrase_queue instead of polling stt.next_phrase().
             # Same blocking semantics — wait up to 1.0 s for a phrase.
             try:
-                phrase = _phrase_queue.get(timeout=1.0)
+                phrase, phrase_queued_at = _phrase_queue.get(timeout=1.0)
             except _queue.Empty:
                 phrase = None
             if not phrase:
+                continue
+            phrase_age_s = time.time() - phrase_queued_at
+            if phrase_age_s > pending_turn_max_age_s:
+                print(f"[voice] dropped stale phrase after "
+                      f"{phrase_age_s:.1f}s: {phrase!r}", flush=True)
+                _log_gate_event(
+                    "queue",
+                    phrase,
+                    decision="drop",
+                    age_s=phrase_age_s,
+                    reason="max_age",
+                )
                 continue
 
             # ── Self-speech filter (VoiceLLM M3 pattern) ─────────────
@@ -497,6 +557,12 @@ def main() -> int:
                 if _ratio >= self_speech_threshold:
                     print(f"[voice] self-speech filter dropped "
                           f"(sim={_ratio:.2f}): {phrase!r}", flush=True)
+                    _log_gate_event(
+                        "pre_gate",
+                        phrase,
+                        decision="ignore",
+                        reason=f"self_speech:{_ratio:.2f}",
+                    )
                     continue
 
             print(f"[voice] user: {phrase!r}", flush=True)
@@ -505,6 +571,17 @@ def main() -> int:
             # of the last successful reply?  Used by the retry pattern
             # below.
             _in_active_followup = time.time() < _followup_active_until
+            # Plumb the follow-up state to the system prompt assembler
+            # so VOICE_FOLLOWUP_HINT_RULE (rules.py) gets appended
+            # during conversation continuation.  Toggled per turn so
+            # the gate is strict when idle and permissive when in the
+            # follow-up window.  VoiceLLM parity:
+            # plugins/llm_core/node.py:93-103.
+            if voice_gate_active:
+                if _in_active_followup:
+                    os.environ["JAEGER_VOICE_ACTIVE_FOLLOWUP"] = "1"
+                else:
+                    os.environ.pop("JAEGER_VOICE_ACTIVE_FOLLOWUP", None)
 
             # Wake chime — brief tone tells the user "heard you, processing".
             # Pause mic during chime so it doesn't get picked up as a phrase
@@ -529,6 +606,18 @@ def main() -> int:
                 result = turn_runner(phrase)
                 text = clean_voice_reply(result.get("text") or "")
                 spoke_via_tool = result.get("spoke_via_tool", False)
+                if is_non_speech_marker(text):
+                    print(f"[voice] model returned non-speech marker "
+                          f"{text!r} — suppressing TTS", flush=True)
+                    _log_gate_event(
+                        "model_reply",
+                        phrase,
+                        decision="ignore",
+                        reply=text,
+                        reason="non_speech_marker_reply",
+                    )
+                    stt.open_followup()
+                    continue
 
                 # LLM-gate: when config.voice.llm_gate is on, the
                 # system prompt told the agent to begin its reply
@@ -536,7 +625,10 @@ def main() -> int:
                 # before we hand the text to TTS.
                 gated_out = False
                 if voice_gate_active and text and not spoke_via_tool:
-                    from jaeger_os.core.voice import parse_gate
+                    from jaeger_os.core.voice import (
+                        parse_gate,
+                        should_retry_ignored_followup,
+                    )
                     should_speak, gated_text = parse_gate(text)
                     # Active-follow-up retry (VoiceLLM pattern):
                     # if LLM gated <ignore> during the active
@@ -545,12 +637,22 @@ def main() -> int:
                     # follow-up arriving on the heels of a reply.
                     if (
                         not should_speak
-                        and follow_up_retry_active
-                        and _in_active_followup
+                        and should_retry_ignored_followup(
+                            phrase,
+                            retry_enabled=follow_up_retry_active,
+                            active_followup=_in_active_followup,
+                        )
                     ):
                         print(f"[voice] LLM tried <ignore> on active "
                               f"follow-up — retrying: {phrase!r}",
                               flush=True)
+                        _log_gate_event(
+                            "llm_gate",
+                            phrase,
+                            decision="retry",
+                            reply=gated_text,
+                            reason="active_followup",
+                        )
                         result = turn_runner(phrase)
                         text = clean_voice_reply(result.get("text") or "")
                         spoke_via_tool = result.get(
@@ -561,8 +663,20 @@ def main() -> int:
                     if not should_speak:
                         print(f"[voice] LLM gate: <ignore> on phrase "
                               f"{phrase!r} — suppressing TTS", flush=True)
+                        _log_gate_event(
+                            "llm_gate",
+                            phrase,
+                            decision="ignore",
+                            reply=gated_text,
+                        )
                         gated_out = True
                     else:
+                        _log_gate_event(
+                            "llm_gate",
+                            phrase,
+                            decision="reply",
+                            reply=gated_text,
+                        )
                         text = gated_text
 
                 if not text or spoke_via_tool or gated_out:
@@ -723,6 +837,7 @@ def main() -> int:
                 )
                 if text:
                     _last_reply_text = text
+                    _audio_session.remember_reply(text)
             finally:
                 if not barge_in_active:
                     stt.set_paused(False)
