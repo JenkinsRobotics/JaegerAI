@@ -3,6 +3,125 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.4.0` — 2026-06-06
+
+**Node architecture.** JROS becomes node-shaped: the brain stays
+one process; each peripheral subsystem (TTS, STT, vision, motors,
+lights) is its own bus-addressable node behind a clean adapter
+Protocol.  Built around the operator-locked contract — *"a tool
+does the networking, the node does the execution"* — so the
+agent's tool surface is unchanged while every audio/vision/hardware
+call now routes through a typed Bus.
+
+### Architecture
+- **Topics SSOT.** `jaeger_os/topics.py` defines 11 typed topics
+  (`/sense/audio_in`, `/sense/transcript`, `/sense/vision`,
+  `/sense/touch`, `/sense/proprio`, `/sense/spoken`, `/act/speech`,
+  `/act/audio_out`, `/act/motion`, `/act/light`,
+  `/act/speech_stop`) as `msgspec.Struct` schemas with a common
+  envelope (topic, topic_v, t_emit_ns, seq, node_id,
+  correlation_id).  msgspec chosen over Pydantic for the
+  transport hot path — 10× faster + native MessagePack.
+- **Codec.** `jaeger_os/transport/codec.py` picks JSON for text
+  topics (debuggable in `tcpdump`/Wireshark) and MessagePack for
+  binary topics (audio frames, camera frames).
+- **In-process Bus.** Adapted from VoiceLLM's pattern; the default
+  transport when `./launch` runs monolithic mode.
+- **ZMQ Bus + XPUB↔XSUB broker.** `jaeger_os/transport/zmq_bus.py`
+  + `jaeger_os/transport/broker.py` give the same Bus interface
+  over pub/sub for the `--mode multiprocess` future.
+- **Node base class.** Four-phase lifecycle (setup → tick →
+  teardown → health), SIGTERM / SIGUSR1 / SIGINT handling, log
+  routing, exception isolation.
+- **Per-subsystem packages.** `jaeger_os/nodes/{tts,stt,vision,motor,light}/`
+  each carry a `node.py` (the bus-addressable node) and an
+  `adapters.py` (the hardware/engine interface).  Same shape
+  across every subsystem.
+
+### Nodes
+- **TTS** (`/act/speech` → Kokoro → `/sense/spoken`) with
+  barge-in via `/act/speech_stop`.
+- **STT** (Whisper → `/sense/transcript`).  Wraps
+  `WhisperSTTContinuous` so the existing 0.3.0 voice-mode
+  features (wake word, follow-up window, mic-pause, AEC) carry
+  over.
+- **Vision** (`/sense/vision` raw camera frames; no YOLO/no
+  scene description — inference is a future downstream node).
+  Two universal backends: `USBCameraAdapter` (cv2.VideoCapture)
+  + `TCPCameraAdapter` (generic 4-byte-length-prefix protocol).
+- **Motor + Light** (Track C skeletons): universal Protocols +
+  reference `SerialMotorAdapter` / `SerialLightAdapter` with
+  ASCII line wire formats.  Board-specific firmware adapters
+  land at instance level when JP01 / other hardware wires up.
+
+### Brain integration
+- **Agent's `text_to_speech` tool** now publishes `SpeechCommand`
+  on the bus and waits for the matching `SpokenAck` —
+  unconditional, no flag.
+- **Voice loop** fully migrated: STT phrases ride
+  `/sense/transcript`; TTS calls go through
+  `bus.request(SpeechCommand)`; barge-in publishes
+  `SpeechStop` (which the TTS node forwards to
+  `synthesizer.stop()`).
+- **`runtime.py`** holds the brain-side singletons (one InProcBus,
+  one TTS node + one Kokoro instance shared across the agent +
+  voice loop).
+
+### Operator-facing
+- `./launch --node-test` runs the Track A verification gate.
+- `./launch --tts-test` (audio gate) speaks a test phrase through
+  the node end-to-end.
+- `./launch --tts-boot-test` (autonomous) verifies Kokoro loads +
+  the TTS node lifecycle is clean without producing audio.
+- `./launch --mode {monolithic,multiprocess}` flag wired (monolithic
+  is default + operational; multiprocess infrastructure shipped via
+  the broker; full operator wire-up lands in a 0.4.x patch).
+
+### Architectural decisions locked
+- STT and TTS get their own nodes (not embedded in the brain) so
+  audio pipelines can evolve without touching the agent loop.
+- JROS library stays universal: hardware-specific wire formats live
+  at INSTANCE level, never in the library.  Track C ships generic
+  ASCII serial protocols as the reference; per-board adapters
+  (JP01-MC01, JP01-AVC01, etc.) plug in at integration time.
+
+### Test surface
+- 1824 tests pass (was 1675 at 0.3.0; +149 new).
+- New test packages: `dev_tests/jaeger_os/transport/` (codec,
+  InProcBus, ZMQBus, broker), `dev_tests/jaeger_os/nodes/`
+  (base, runtime, tts, stt, vision, motor, light).
+- Verification gates: `./launch --node-test` (cross-mode echo
+  round-trip), `./launch --tts-boot-test` (Kokoro + node lifecycle).
+
+### What stays the same as 0.3.0
+- `./launch` boots the same in-process TUI; nothing in the
+  operator surface changed.
+- Same Gemma 4 26B-A4B-it Q4 default, same skill v3 system,
+  same persona prefill, same memory engine.
+- Bench routing pass rate (5/5 routing smoke) — no agent-loop
+  regression from the node infrastructure.
+
+### Known incomplete (slipping to 0.4.x)
+- `--mode multiprocess` end-to-end operator workflow.  Broker
+  infrastructure is in (6 tests pass) but the launch.py
+  spawning + node-wiring at-runtime is a separate patch.
+- `audio_io` node split (Track B.4) — STT currently owns the
+  mic via WhisperSTTContinuous; TTS owns the speaker via the
+  persistent Kokoro player.  Works fine; refactor lands when we
+  want to relocate audio (e.g. Mac mic via wireless to Jetson
+  STT).
+- Voice control topics (`/control/mic_pause`,
+  `/control/stt_followup_open`) — voice loop still calls these
+  engine methods on the direct `stt` reference for now.  Will
+  migrate when a second consumer appears.
+- Per-instance hardware adapters (JP01-MC01 ESP32 motor,
+  JP01-AVC01 Teensy LED, JP01-VCC01 Jetson camera).  Universal
+  shapes are in; instance integration when the operator wires
+  the boards.
+- Track D (supervisor + health bench), Track E (sim mode),
+  Track F (operator UX / topic inspector) — design-locked,
+  implementation pending in 0.4.x.
+
 ## `0.3.0` — 2026-06-06
 
 **0.2.x TUI architecture with 0.3.0 plugin internals.** This release
