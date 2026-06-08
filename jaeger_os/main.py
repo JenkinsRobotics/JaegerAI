@@ -2258,10 +2258,17 @@ def _run_turn_via_jaeger_agent(
         or any(f"▸ {t}(" in line for t in _SPOKEN_TOOLS)
         for line in tool_activity
     )
+    # Note: the gate-prefix strip + clean_voice_reply pass happens
+    # at the agent's runtime_bridge layer (drive_one_turn) so this
+    # function — which calls drive_one_turn upstream — sees the
+    # already-cleaned answer.  We just pass voice_gate_ignored
+    # through to consumers via the result dict.
+    voice_gate_ignored = bool(result.get("voice_gate_ignored", False))
     return {
         "text": answer, "error": None, "tool_activity": tool_activity,
         "first_decision": first_decision, "skipped_final": skipped,
         "spoke_via_tool": spoke_via_tool,
+        "voice_gate_ignored": voice_gate_ignored,
         "elapsed_s": elapsed, "report": report,
     }
 
@@ -2306,12 +2313,17 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
     path and the messaging bridges (which pass channel-specific
-    session_keys like "telegram:12345" so each chat keeps its context)."""
+    session_keys like "telegram:12345" so each chat keeps its context).
+
+    ``voice_gate_ignored`` is True when the brain emitted ``<ignore>``
+    as its response prefix.  Voice consumers should suppress TTS and
+    rendering for ignored turns."""
     out = _run_turn(client, user_text, session_key=session_key or "voice")
     return {
         "text": out["text"], "tool_activity": out["tool_activity"],
         "spoke_via_tool": out["spoke_via_tool"], "elapsed_s": out["elapsed_s"],
         "skipped_final": out["skipped_final"], "error": out["error"],
+        "voice_gate_ignored": out.get("voice_gate_ignored", False),
     }
 
 

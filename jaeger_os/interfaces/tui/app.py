@@ -1058,7 +1058,6 @@ class JaegerTUI:
         from jaeger_os.core.voice import (
             clean_voice_reply,
             is_non_speech_marker,
-            parse_gate,
         )
         from jaeger_os.main import _DEFAULT_SESSION_KEY, run_for_voice
 
@@ -1072,18 +1071,16 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        raw_text = (result.get("text") or "").strip()
-        # Single-pass gate parse: the brain's response prefix is the
-        # gate decision.  parse_gate is lenient — missing tag
-        # defaults to speak — so a forgetful model still answers.
-        should_speak, gated_text = parse_gate(raw_text)
-        if not should_speak:
+        # _run_turn now strips the <reply> tag and exposes
+        # voice_gate_ignored=True when the brain emitted <ignore>.
+        # No need to re-parse here; just honor the flag.
+        if result.get("voice_gate_ignored"):
             self._log_voice(
                 "[dim]🤫 voice gate: ignored (brain emitted <ignore>)[/]",
                 kind="gate_ignore",
             )
             return
-        text = clean_voice_reply(gated_text)
+        text = clean_voice_reply(result.get("text") or "")
         if text and is_non_speech_marker(text):
             self._log_voice(
                 f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]",
