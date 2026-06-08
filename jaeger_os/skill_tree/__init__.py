@@ -34,6 +34,7 @@ from .schema import (
     SkillStatus,
 )
 from .registry import SkillTreeRegistry
+from .xp_emitter import XpEmitter, award_xp
 
 __all__ = [
     "SkillNode",
@@ -41,4 +42,6 @@ __all__ = [
     "XpAward",
     "SkillStatus",
     "SkillTreeRegistry",
+    "XpEmitter",
+    "award_xp",
 ]
