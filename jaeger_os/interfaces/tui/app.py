@@ -334,7 +334,13 @@ class JaegerTUI:
         # last N events buffered so `/quiet` status reporting can show
         # what was muted.  Full split-screen Live + Layout deferred —
         # see dev_docs/0.4.0_voice_gate_unification_prompt.md G4 section.
-        self._quiet_voice = False  # /quiet toggle
+        # Default ON: most operators don't want to see "[skipped —
+        # non-speech: '(wind blowing)']" / "[skipped — non-speech:
+        # '[BLANK_AUDIO]']" cluttering the conversation pane during
+        # noisy environments.  /quiet off reveals voice activity for
+        # debug.  Operator-flipped 2026-06-07 after live testing
+        # showed background-noise spam dominated the UI.
+        self._quiet_voice = True  # /quiet toggle (default hidden)
         from collections import deque as _deque
         self._voice_activity_log: _deque = _deque(maxlen=30)
         # Aggregation: consecutive non-speech skips collapse to one
@@ -1016,20 +1022,38 @@ class JaegerTUI:
         hermes-style chrome a typed turn gets, then speak the reply
         (barge-in aware) and open the follow-up window.
 
-        2026-06-07 architectural change (operator-locked):
-        The gate now lives INSIDE the AudioSession node.  By the time
-        ``user_text`` reaches this method, the audio session's LLM
-        gate has already classified the phrase as <reply>; rejected
-        phrases never become a /sense/transcript and so never enter
-        the TUI's turn queue.  The brain therefore treats every voice
-        turn as confirmed user input — no special parsing, no
-        <ignore>/<reply> tag in the response, same code path as
-        typed input.  See
-        ``jaeger_os/core/audio/session.py:_classify_phrase_llm``.
+        2026-06-07 perf-corrected single-pass gate:
+        AudioSession owns the FAST deterministic filters (non-speech
+        marker + self-speech) — phrases that fail those are dropped
+        before they ever reach this method.  The LLM <ignore>/<reply>
+        gate runs INSIDE the brain's normal turn — it's the response
+        prefix.  We parse the leading tag here with parse_gate().
+        ``<ignore>`` → suppress speech + rendering;
+        ``<reply>foo`` → strip tag, render + speak ``foo``.
+
+        Why this isn't separate gate calls: a separate gate prompt
+        would invalidate the brain's KV cache and trigger a cold
+        prefill on every turn (measured 50× slowdown in
+        dev_benchmark/voice_gate_latency.py).  Single-pass is one
+        LLM call per phrase; the gate decision is the response's
+        first 30 chars.
         """
+        # Toggle the follow-up addressed_hint env var BEFORE the
+        # turn runs so the prompt assembler appends the permissive
+        # clause when we're in conversation continuation.
+        import os as _os
+        v = self._voice
+        in_followup = bool(v is not None and v.running
+                           and getattr(v, "in_followup_window", lambda: False)())
+        if in_followup:
+            _os.environ["JAEGER_VOICE_ACTIVE_FOLLOWUP"] = "1"
+        else:
+            _os.environ.pop("JAEGER_VOICE_ACTIVE_FOLLOWUP", None)
+
         from jaeger_os.core.voice import (
             clean_voice_reply,
             is_non_speech_marker,
+            parse_gate,
         )
         from jaeger_os.main import _DEFAULT_SESSION_KEY, run_for_voice
 
@@ -1043,7 +1067,18 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        text = clean_voice_reply(result.get("text") or "")
+        raw_text = (result.get("text") or "").strip()
+        # Single-pass gate parse: the brain's response prefix is the
+        # gate decision.  parse_gate is lenient — missing tag
+        # defaults to speak — so a forgetful model still answers.
+        should_speak, gated_text = parse_gate(raw_text)
+        if not should_speak:
+            self._log_voice(
+                "[dim]🤫 voice gate: ignored (brain emitted <ignore>)[/]",
+                kind="gate_ignore",
+            )
+            return
+        text = clean_voice_reply(gated_text)
         if text and is_non_speech_marker(text):
             self._log_voice(
                 f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]",
