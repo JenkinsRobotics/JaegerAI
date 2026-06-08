@@ -281,6 +281,42 @@ def _first_decision_from(messages: list[Message]) -> dict[str, Any] | None:
     return None
 
 
+def _strip_voice_gate_prefix(answer: str) -> tuple[str, bool]:
+    """Strip the brain's leading ``<reply>`` tag (so text-mode
+    consumers get a clean response) and detect ``<ignore>``
+    (returning empty text + a flag).
+
+    Channel-control artifacts (e.g. Gemma's ``<|channel|>thought``
+    leaks) are cleaned first so the gate tag lands at the start of
+    the cleaned text before we look for it.
+
+    Returns: ``(cleaned_text, voice_gate_ignored)``.
+
+    Active only when JAEGER_VOICE_GATE=1 at brain boot — the gate
+    rule won't be in the system prompt otherwise, and the brain
+    won't emit the tag for the assembler to strip."""
+    if not answer:
+        return "", False
+    import os as _os
+    if _os.environ.get("JAEGER_VOICE_GATE") != "1":
+        return answer, False
+    try:
+        from jaeger_os.core.voice import clean_voice_reply
+    except Exception:  # noqa: BLE001
+        return answer, False
+    import re as _re
+    cleaned = clean_voice_reply(answer)
+    if not cleaned:
+        return "", False
+    _reply_re = _re.compile(r"^\s*<\s*reply\s*>\s*", _re.IGNORECASE)
+    _ignore_re = _re.compile(r"^\s*<\s*ignore\s*>", _re.IGNORECASE)
+    if _reply_re.match(cleaned):
+        return _reply_re.sub("", cleaned, count=1).strip(), False
+    if _ignore_re.match(cleaned):
+        return "", True
+    return cleaned, False
+
+
 def drive_one_turn(
     agent: JaegerAgent,
     user_text: str,
@@ -329,9 +365,21 @@ def drive_one_turn(
         }
     elapsed = time.perf_counter() - started
 
+    # 2026-06-07 (bench-caught): when JAEGER_VOICE_GATE=1 the brain's
+    # system prompt instructs it to prefix every response with
+    # <reply> or <ignore>.  The brain doesn't know whether this turn
+    # was typed or spoken — it dutifully tags every response.  We
+    # strip the tag here at the unified output layer so every
+    # consumer (bench harness, run_command, run_for_voice, daemon,
+    # messaging bridges) sees clean text by default.  Voice
+    # consumers pull voice_gate_ignored from the returned dict to
+    # detect <ignore>.
+    answer, voice_gate_ignored = _strip_voice_gate_prefix(answer)
+
     new_messages = agent.messages[pre_len:]
     return {
         "answer": answer,
+        "voice_gate_ignored": voice_gate_ignored,
         "tool_activity": _tool_activity_lines(new_messages),
         "first_decision": _first_decision_from(new_messages),
         "elapsed_s": elapsed,
