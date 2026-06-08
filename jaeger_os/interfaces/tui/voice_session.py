@@ -89,6 +89,7 @@ class VoiceController:
         wake_name: str | None = None,
         llm_gate: bool = True,
         pending_turn_max_age_s: float = 3.0,
+        on_voice_activity: "Any | None" = None,
     ) -> None:
         self.console = console
         self.wake_word = wake_word
@@ -97,6 +98,14 @@ class VoiceController:
         self.follow_up_seconds = follow_up_seconds
         self.wake_name = wake_name
         self.pending_turn_max_age_s = pending_turn_max_age_s
+        # Callback the TUI registers so /sense/gate_decision events
+        # (deterministic filter decisions from AudioSession — non-speech,
+        # self-speech, deterministic_pass) render in the operator's
+        # voice activity log alongside the brain-side <ignore>/<reply>
+        # decisions.  Signature: ``(message: str, kind: str) -> None``.
+        # When None, gate-decision events are not surfaced.
+        self._on_voice_activity = on_voice_activity
+        self._on_gate_decision: Any = None
         # 0.4.x: when llm_gate is on, the system prompt instructs the
         # agent to begin replies with <ignore>/<reply>; this controller
         # parses the leading tag, suppresses speech on <ignore>, and
@@ -176,6 +185,17 @@ class VoiceController:
             )
             self._on_transcript = self._make_transcript_handler()
             self._bus.subscribe(topics.SENSE_TRANSCRIPT, self._on_transcript)
+            # Subscribe to the audio session's gate-decision events so
+            # the operator sees what the deterministic filters
+            # (non-speech, self-speech) are rejecting in their
+            # voice-activity log.  Only wires when the TUI provided a
+            # callback — voice_loop / non-TUI consumers don't need it.
+            if self._on_voice_activity is not None:
+                self._on_gate_decision = self._make_gate_decision_handler()
+                self._bus.subscribe(
+                    topics.SENSE_GATE_DECISION,
+                    self._on_gate_decision,
+                )
         except ImportError as exc:
             self.console.print(
                 f"[red]Voice unavailable[/] — speech deps missing ({exc}).\n"
@@ -227,6 +247,45 @@ class VoiceController:
 
         return _on_transcript
 
+    def _make_gate_decision_handler(self):
+        """Build a handler that forwards AudioSession's GateDecision
+        events to the TUI's voice-activity log.  Runs on the bus
+        delivery thread; must not block."""
+        def _on_gate_decision(msg: Any) -> None:
+            try:
+                accepted = bool(getattr(msg, "accepted", False))
+                reason = str(getattr(msg, "reason", "") or "")
+                phrase = str(getattr(msg, "text", "") or "")
+                # Truncate long phrases so the activity log stays tidy.
+                if len(phrase) > 60:
+                    phrase = phrase[:57] + "..."
+                if accepted:
+                    # Deterministic-pass means the phrase reached the
+                    # brain; the brain's <ignore>/<reply> decision is
+                    # logged separately by _run_voice_turn.  Don't
+                    # double-log accept events at this layer.
+                    return
+                if reason == "non_speech":
+                    line = (f"[dim][skipped — non-speech: "
+                            f"{phrase!r}][/]")
+                    kind = "skipped"
+                elif reason == "self_speech":
+                    line = (f"[dim]🤫 self-speech filter dropped: "
+                            f"{phrase!r}[/]")
+                    kind = "gate_ignore"
+                else:
+                    line = (f"[dim]🤫 voice gate ({reason}): "
+                            f"{phrase!r}[/]")
+                    kind = "gate_ignore"
+                cb = self._on_voice_activity
+                if cb is not None:
+                    cb(line, kind=kind)
+            except Exception:  # noqa: BLE001
+                # Logging must never break the audio loop.
+                pass
+
+        return _on_gate_decision
+
     def stop(self) -> None:
         """Tear the mic down. Idempotent."""
         self._running = False
@@ -236,6 +295,15 @@ class VoiceController:
                 self._bus.unsubscribe(
                     topics.SENSE_TRANSCRIPT,
                     self._on_transcript,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        if self._bus is not None and self._on_gate_decision is not None:
+            try:
+                from jaeger_os import topics
+                self._bus.unsubscribe(
+                    topics.SENSE_GATE_DECISION,
+                    self._on_gate_decision,
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -258,6 +326,7 @@ class VoiceController:
         self._tts = None
         self._ref = self._chimes = None
         self._on_transcript = None
+        self._on_gate_decision = None
         self._barge_in_live = False
 
     # ── input ────────────────────────────────────────────────────────

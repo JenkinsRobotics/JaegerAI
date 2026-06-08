@@ -920,6 +920,11 @@ class JaegerTUI:
             pending_turn_max_age_s=getattr(
                 vc, "pending_turn_max_age_s", 3.0,
             ),
+            # Forward AudioSession's GateDecision events through the
+            # TUI's voice-activity log so /quiet + non-speech
+            # aggregation apply uniformly.  The node publishes the
+            # decisions; this is the operator-facing render path.
+            on_voice_activity=self._log_voice,
         )
         if announce:
             self.console.print("[dim]🎙  bringing the mic online…[/]")
