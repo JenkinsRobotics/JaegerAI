@@ -34,6 +34,7 @@ from .schema import (
     SkillStatus,
 )
 from .registry import SkillTreeRegistry
+from .seed import default_catalog, seed_default_tree
 from .xp_emitter import XpEmitter, award_xp
 
 __all__ = [
@@ -44,4 +45,6 @@ __all__ = [
     "SkillTreeRegistry",
     "XpEmitter",
     "award_xp",
+    "default_catalog",
+    "seed_default_tree",
 ]
