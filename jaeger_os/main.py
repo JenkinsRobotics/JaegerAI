@@ -1911,18 +1911,28 @@ def _get_agent(client: Any) -> object:
 def prewarm(client: Any) -> None:
     """Prime the KV cache so the first user-facing turn isn't cold.
 
-    Two-pass warmup (operator-flagged 2026-06-07 after live test
-    showed 26 s first-message lag in voice mode):
+    Two-pass warmup (operator-locked default 2026-06-08 — boot
+    takes longer but first user turn is instant):
 
       Pass 1 — system-prompt only.  Lightweight, ~5 s on a 12B
         model.  Warms the brain's system prompt + persona/skill
         index block.
 
-      Pass 2 — system prompt + full tool schemas.  Heavier, ~15-25 s
-        on a 12B model.  Warms the ~14K-token tool-schema prefix the
-        agent's decide step prepends to every turn.  Without this,
-        the first user message pays the cold-prefill cost (~20-30 s
-        per the operator's report).
+      Pass 2 — system prompt + full tool schemas.  Heavier, ~60 s
+        on 12B-class hardware (~10K extra tokens of tool
+        descriptions).  Warms the tool-schema prefix the agent's
+        decide step prepends to every turn.  Without this, the
+        first user message pays a cold-prefill cost (~26 s in
+        live test) — the operator's first "Hey, can you hear me?"
+        sits silently for half a minute.
+
+      The full prewarm trades ~60 s of boot for an instant first
+      turn.  Worth it for interactive voice mode where the
+      operator wants the agent to react immediately when they
+      first speak.
+
+      Operators who want fast boot (and accept slow first turn)
+      can set ``JAEGER_FAST_BOOT=1`` to skip Pass 2.
 
     The previous Phase-8 fix skipped Pass 2 because the full
     JaegerAgent loop tripped a stale-call detector mid-prefill and
@@ -1963,17 +1973,20 @@ def prewarm(client: Any) -> None:
         p1_elapsed = time.perf_counter() - p1_start
 
         # Pass 2 — system prompt + tool schemas (~10K extra tokens).
-        # OPT-IN via JAEGER_PREWARM_TOOLS=1 because the standalone
-        # tool-schema prefill (~60 s on 12B-class hardware) is
-        # actually SLOWER than letting the agent loop do it
-        # interleaved at first turn (~26 s).  The agent loop
-        # parallelises decision + prefill in ways a one-shot warm
-        # call can't.  Pass 2 only earns its keep when the operator's
-        # first interaction is more than a minute after boot — e.g.
-        # voice mode in a kitchen-corner robot waiting for someone
-        # to walk by.
+        # OPERATOR-LOCKED DEFAULT 2026-06-08: prefer instant first
+        # turn over fast boot.  The 60 s prewarm pays for itself
+        # the moment the operator says "Hey, can you hear me?" —
+        # without it the first message sits silently for ~26 s on
+        # 12B-class hardware while the model cold-prefills the
+        # tool schemas (the previous default).
+        #
+        # JAEGER_FAST_BOOT=1 skips Pass 2 for operators / scenarios
+        # that prefer the old fast-boot tradeoff (e.g. CI sanity
+        # runs, bench scripts where boot time matters more than
+        # first-turn latency).
         p2_elapsed = 0.0
-        if os.environ.get("JAEGER_PREWARM_TOOLS") == "1":
+        skip_pass2 = os.environ.get("JAEGER_FAST_BOOT") == "1"
+        if not skip_pass2:
             try:
                 tools = _openai_tools_for_prewarm(agent)
             except Exception as exc:  # noqa: BLE001
@@ -2006,11 +2019,13 @@ def prewarm(client: Any) -> None:
     total = time.perf_counter() - started
     if p2_elapsed > 0:
         print(f"[jaeger] agent prewarmed in {total:.1f}s "
-              f"(system {p1_elapsed:.1f}s + tools {p2_elapsed:.1f}s)",
+              f"(system {p1_elapsed:.1f}s + tools {p2_elapsed:.1f}s) "
+              f"— first turn will be instant",
               flush=True)
     else:
         print(f"[jaeger] agent prewarmed in {total:.1f}s "
-              f"(system-prompt only; first turn will pay tool prefill)",
+              f"(system-prompt only — JAEGER_FAST_BOOT=1 set; "
+              f"first turn will pay ~26 s tool prefill)",
               flush=True)
 
 
