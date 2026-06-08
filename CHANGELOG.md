@@ -123,6 +123,76 @@ call now routes through a typed Bus.
   Track F (operator UX / topic inspector) — design-locked,
   implementation pending in 0.4.x.
 
+### Late-cycle voice work (2026-06-07, all on the `0.4.0` branch)
+
+After the headline node-architecture work, live testing surfaced
+concrete problems that drove a coordinated voice-pipeline cleanup
+before main merge:
+
+- **Voice gate timing fix.**  `JAEGER_VOICE_GATE=1` is now set in
+  `boot_for_tui` and the CLI launch path BEFORE
+  `build_system_prompt`, so `VOICE_LLM_GATE_RULE` is baked into
+  the cached prompt at boot.  Previously the env var was only
+  set when `VoiceController.__init__` ran at `/voice on`, after
+  the prompt was cached — the TUI's brain never had the gate
+  rule and politely tried to answer TV/movie fragments.
+- **VoiceLLM-style anti-junk prompt.**  Strengthened the gate
+  rule with "default to `<ignore>` when uncertain" framing and
+  explicit examples from the operator's actual test corpus
+  (`Princess.`, `Hi there`, `Bye.`, movie quotes, ad copy).
+- **`addressed_hint` context during follow-up window.**
+  `JAEGER_VOICE_ACTIVE_FOLLOWUP=1` toggled per turn — strict
+  default-ignore when idle, permissive default-reply during
+  conversation continuation.
+- **Node-owned deterministic filters in AudioSession.**  Non-speech
+  marker filter + self-speech filter live INSIDE the
+  AudioSession node and publish `/sense/gate_decision` events so
+  the operator's voice-activity log shows what the node is
+  filtering.  The semantic LLM gate stays as the brain's
+  response prefix (single-pass) because a separate gate LLM
+  call invalidated the brain's KV-cache prefill and tanked
+  voice latency 50× in real testing (measured at
+  `dev_benchmark/voice_gate_latency.py`).
+- **TUI `/quiet` toggle (default ON).**  Voice-activity prints
+  (gate decisions, non-speech skips, coalesce notes) hide by
+  default; `/quiet off` reveals them for debugging.
+  Aggregates consecutive non-speech events into a single
+  "+N non-speech events skipped" line.  Full Rich `Live + Layout`
+  split-screen deferred to 0.5 streaming mode.
+- **STT debug prints gated behind `JAEGER_STT_VERBOSE=1`.**  The
+  `[heard]` / `[skipped]` / `[mic heard …]` prints from
+  `whisper_stt` bypassed the TUI's Console + `/quiet` filter
+  entirely; now silent by default.
+- **`SENSE_USER_SPEECH_START` topic.**  Low-latency event the
+  audio session emits when STT detects sustained user speech
+  during agent reply.  Drives barge-in; distinct from
+  `SENSE_TRANSCRIPT`.
+- **`SENSE_GATE_DECISION` topic.**  Audit trail of every phrase
+  the audio session processed — accepted (`deterministic_pass`)
+  or rejected (`non_speech` / `self_speech`).
+- **`/sense/vision` renamed to `/sense/camera_frame`.**  Raw
+  camera frames shouldn't squat on the future-inference topic
+  namespace.  Old name kept as alias for one release.
+
+### Performance benchmark
+
+`dev_benchmark/voice_gate_latency.py` — focused latency probe
+that caught the KV-cache thrashing regression.  Verifies the
+single-pass gate stays warm (~0.79s brain turn after prewarm)
+and detects if anyone reintroduces a separate gate-call path
+that would thrash the cache.
+
+### Architectural mental model (operator-locked 2026-06-07)
+
+> "nodes are like add-on to the brain[.] the agentic agent is
+> like the conscious system[,] but there are parts of the
+> brain that run unconsciously and do a lot of offloading to
+> save active bandwidth"
+
+Codified going forward for vision (attention filter), motor
+(safety reflex), light (power management), and future sensor
+nodes.
+
 ## `0.3.0` — 2026-06-06
 
 **0.2.x TUI architecture with 0.3.0 plugin internals.** This release
