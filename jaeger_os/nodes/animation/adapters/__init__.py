@@ -14,8 +14,17 @@ Levels in this package:
   L6 — GENERATIVE  (deferred — adapter slot reserved)
 """
 
+from .bitmap_adapter import BitmapAdapter
+from .gif_adapter import GifAdapter
 from .image_adapter import ImageAdapter
+from .math_adapter import MathAdapter, MathScript
+from .sprite_adapter import SpriteAdapter
 
 __all__ = [
+    "BitmapAdapter",
+    "GifAdapter",
     "ImageAdapter",
+    "MathAdapter",
+    "MathScript",
+    "SpriteAdapter",
 ]
