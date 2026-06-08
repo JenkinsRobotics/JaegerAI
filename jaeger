@@ -1,0 +1,20 @@
+#!/bin/bash
+# jaeger — operator console shim.
+#
+# Same pattern as ./launch — sidesteps pyenv shims by picking the
+# repo's .venv interpreter directly.  Runs ``python -m jaeger_os.cli``
+# with whatever arguments the operator passed.
+#
+# Subcommands: skills | instances | personality | status | roadmap
+# See jaeger_os/cli/__init__.py for the full surface.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_PY="$REPO_ROOT/.venv/bin/python"
+
+if [ ! -x "$VENV_PY" ]; then
+  echo "[jaeger] $VENV_PY not found — run ./install.sh first" >&2
+  exit 1
+fi
+
+exec "$VENV_PY" -m jaeger_os.cli "$@"
