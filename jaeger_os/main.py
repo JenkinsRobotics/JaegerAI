@@ -1911,11 +1911,26 @@ def _get_agent(client: Any) -> object:
 def prewarm(client: Any) -> None:
     """Prime the KV cache so the first user-facing turn isn't cold.
 
-    The first agent call against a freshly-loaded model pays a ~1 s
-    prefill cost to tokenize the (long) v2 system prompt + the tool
-    schema. By running a single trivial turn at startup, we shift that
-    cost from "what time is it" to the load phase — where the user
-    already accepts a wait. Idempotent. Mirrors python_pydantic_ai.prewarm.
+    Two-pass warmup (operator-flagged 2026-06-07 after live test
+    showed 26 s first-message lag in voice mode):
+
+      Pass 1 — system-prompt only.  Lightweight, ~5 s on a 12B
+        model.  Warms the brain's system prompt + persona/skill
+        index block.
+
+      Pass 2 — system prompt + full tool schemas.  Heavier, ~15-25 s
+        on a 12B model.  Warms the ~14K-token tool-schema prefix the
+        agent's decide step prepends to every turn.  Without this,
+        the first user message pays the cold-prefill cost (~20-30 s
+        per the operator's report).
+
+    The previous Phase-8 fix skipped Pass 2 because the full
+    JaegerAgent loop tripped a stale-call detector mid-prefill and
+    corrupted the cache.  We sidestep that by calling
+    ``llama.create_chat_completion`` directly with the ``tools=``
+    kwarg — the agent loop's stale-call detector never sees it.
+
+    Idempotent.  Mirrors python_pydantic_ai.prewarm.
     """
     if _pipeline.get("prewarmed"):
         return
@@ -1926,36 +1941,121 @@ def prewarm(client: Any) -> None:
         return
     started = time.perf_counter()
     try:
-        # Phase-8 fix: prewarm hits the raw client.chat directly instead
-        # of going through the full JaegerAgent loop. The full loop
-        # renders all registered tool schemas (~9K tokens) which is a
-        # 20-30s prefill on a cold model — long enough to trip the
-        # stale-call detector and abandon the worker thread, which
-        # corrupts llama-cpp's KV cache and breaks the FIRST real turn
-        # with ``llama_decode -3``. The lightweight version below
-        # primes the cache safely without the tool surface.
-        _get_agent(client)  # still wires the tool registry + skills
+        agent = _get_agent(client)  # wires the tool registry + skills
         llama = getattr(client, "llm", None)
-        if llama is not None and hasattr(llama, "create_chat_completion"):
-            # In-process llama-cpp path. Use ONE-token max + no tools so
-            # the prefill is bounded.
-            llama.create_chat_completion(
-                messages=[
-                    {"role": "system", "content": _pipeline["system_prompt"]},
-                    {"role": "user", "content": "ready"},
-                ],
-                max_tokens=1,
-                temperature=0.0,
-            )
-        else:
+        if llama is None or not hasattr(llama, "create_chat_completion"):
             # HTTP-backed external client — the connectivity check
-            # already covered the cold-start. Nothing to do here.
-            pass
-    except Exception as exc:
+            # already covered the cold-start.
+            _pipeline["prewarmed"] = True
+            return
+
+        # Pass 1 — system prompt only.  Quick prime so the brain
+        # responds fast even if Pass 2 hasn't finished yet.
+        p1_start = time.perf_counter()
+        llama.create_chat_completion(
+            messages=[
+                {"role": "system", "content": _pipeline["system_prompt"]},
+                {"role": "user", "content": "ready"},
+            ],
+            max_tokens=1,
+            temperature=0.0,
+        )
+        p1_elapsed = time.perf_counter() - p1_start
+
+        # Pass 2 — system prompt + tool schemas (~10K extra tokens).
+        # OPT-IN via JAEGER_PREWARM_TOOLS=1 because the standalone
+        # tool-schema prefill (~60 s on 12B-class hardware) is
+        # actually SLOWER than letting the agent loop do it
+        # interleaved at first turn (~26 s).  The agent loop
+        # parallelises decision + prefill in ways a one-shot warm
+        # call can't.  Pass 2 only earns its keep when the operator's
+        # first interaction is more than a minute after boot — e.g.
+        # voice mode in a kitchen-corner robot waiting for someone
+        # to walk by.
+        p2_elapsed = 0.0
+        if os.environ.get("JAEGER_PREWARM_TOOLS") == "1":
+            try:
+                tools = _openai_tools_for_prewarm(agent)
+            except Exception as exc:  # noqa: BLE001
+                tools = None
+                print(f"[jaeger] prewarm pass 2 skipped: "
+                      f"couldn't enumerate tools ({exc})", flush=True)
+            if tools:
+                p2_start = time.perf_counter()
+                try:
+                    llama.create_chat_completion(
+                        messages=[
+                            {"role": "system",
+                             "content": _pipeline["system_prompt"]},
+                            {"role": "user", "content": "ready"},
+                        ],
+                        tools=tools,
+                        tool_choice="auto",
+                        max_tokens=1,
+                        temperature=0.0,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[jaeger] prewarm pass 2 failed "
+                          f"(continuing): "
+                          f"{type(exc).__name__}: {exc}", flush=True)
+                p2_elapsed = time.perf_counter() - p2_start
+    except Exception as exc:  # noqa: BLE001
         print(f"[jaeger] prewarm skipped: {exc}", flush=True)
         return
     _pipeline["prewarmed"] = True
-    print(f"[jaeger] agent prewarmed in {time.perf_counter() - started:.1f}s", flush=True)
+    total = time.perf_counter() - started
+    if p2_elapsed > 0:
+        print(f"[jaeger] agent prewarmed in {total:.1f}s "
+              f"(system {p1_elapsed:.1f}s + tools {p2_elapsed:.1f}s)",
+              flush=True)
+    else:
+        print(f"[jaeger] agent prewarmed in {total:.1f}s "
+              f"(system-prompt only; first turn will pay tool prefill)",
+              flush=True)
+
+
+def _openai_tools_for_prewarm(agent: Any) -> list[dict[str, Any]] | None:
+    """Render the agent's tool list as OpenAI-format schemas so
+    llama-cpp can warm the tool-prefix KV cache.  Returns None if
+    the agent's tools can't be enumerated cleanly.
+
+    The agent returned by ``_get_agent`` is the registration sentinel
+    — not a live JaegerAgent.  We fall back to the registered tool
+    registry (the same source the live agent reads from when it
+    actually builds its tool list at turn 0)."""
+    out: list[dict[str, Any]] = []
+    # Live JaegerAgent path — used when the caller has constructed
+    # one already (rare; the sentinel returns from _get_agent in
+    # most code paths).
+    tools = getattr(agent, "tools", None)
+    if tools and not callable(tools):
+        for tool in tools:
+            schema = getattr(tool, "to_openai_schema", None)
+            if callable(schema):
+                try:
+                    out.append(schema())
+                except Exception:  # noqa: BLE001
+                    continue
+        if out:
+            return out
+    # Registry path — pull from the shared registry the agent reads
+    # from at turn 0.  This matches what the live agent will see.
+    try:
+        from jaeger_os.agent.schemas.tool_registry import get_tools
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        registered = get_tools()
+    except Exception:  # noqa: BLE001
+        return None
+    for tool in registered or ():
+        schema = getattr(tool, "to_openai_schema", None)
+        if callable(schema):
+            try:
+                out.append(schema())
+            except Exception:  # noqa: BLE001
+                continue
+    return out or None
 
 
 def warm_plugins(config: Any) -> None:
