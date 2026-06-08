@@ -13,6 +13,7 @@ Runner ties to the bus separately so the schema module stays
 test-friendly and tool-friendly without a live Bus.
 """
 
+from .runner import TimelineRunner, parse_timeline_json
 from .schema import (
     Timeline,
     TimelineClip,
@@ -25,6 +26,8 @@ __all__ = [
     "Timeline",
     "TimelineClip",
     "TimelineTrack",
+    "TimelineRunner",
     "load_timeline",
+    "parse_timeline_json",
     "save_timeline",
 ]
