@@ -86,7 +86,7 @@ outside the sandbox. See `core/tools.py` for the implementation.
 Two distinct kinds, both follow the same `<name>_v<N>/` versioned-folder
 contract with `SKILL.md` + Python module + `tests/smoke_test.py`:
 
-- **Core skills** (`jaeger_os/skills/`) ship with the framework. Read-only.
+- **Core skills** (`jaeger_os/agent/skills/`) ship with the framework. Read-only.
 - **Instance skills** (`<instance>/skills/`) are agent-authored. Writable.
 
 On name collision, **instance wins over core** (override-via-versioning).
