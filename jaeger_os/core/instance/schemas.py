@@ -6,7 +6,7 @@ the schemas exist so a typo doesn't silently corrupt runtime state.
 
   identity.yaml   → Identity   (name, role, personality, voice tone)
   config.yaml     → Config     (model endpoint, runtime knobs)
-  manifest.json   → Manifest   (core_version pin, instance_name, created_at)
+  manifest.json   → Manifest   (schema_version pin, instance_name, created_at)
 
 The setup wizard writes all three; the agent loop reads them; the agent
 itself is forbidden from editing identity/config/manifest by the
@@ -23,23 +23,23 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # Bumped whenever the on-disk shape of identity.yaml / config.yaml
-# changes in a way that needs a migration. Stored in manifest.json
-# on instance creation; mismatch with the installed core triggers
-# the per-instance migration runner (see
-# ``core/instance/migrations.py``).
+# (or any other instance-side file) changes in a way that needs a
+# migration.  Stored in manifest.json on instance creation; mismatch
+# with the installed framework triggers the per-instance migration
+# runner (see ``core/instance/migrations.py``).
 #
-# 0.2.0 bumped this 1.0.0 → 1.1.0 alongside INST-10 (layout move
-# from ``~/.jaeger/<name>/`` to ``~/.jaeger/instances/<name>/``) and
-# WIZ-3 (new ``interaction`` config field). The layout move itself
-# is a pre-resolver bootstrap in
-# ``core/instance/legacy_migrations.py``; the per-instance
-# ``v1_0_0_to_v1_1_0.py`` finishes the job by explicitly writing
-# the ``interaction`` field on already-existing configs.
+# Naming convention (2026-06-09): SCHEMA_VERSION mirrors the
+# framework version it ships with — ``0.X.Y``.  The previous
+# two-version scheme (framework 0.4.0 + schema 1.2.0) was confusing
+# overhead and got unified.  Per ``feedback-no-back-compat-pre-1.0``
+# the pre-1.0 legacy migration chain (v1_0_0 → v1_1_0 → v1_2_0) was
+# deleted at the same time.
 #
-# 0.2.0 then bumped this 1.1.0 → 1.2.0 alongside Group 9 (SQLite
-# memory backend, DB-1..DB-7). ``v1_1_0_to_v1_2_0.py`` triggers the
-# lazy importers and renames legacy JSON/JSONL files to ``.legacy``.
-CORE_VERSION = "1.2.0"
+# Future migrations are named for the framework version they ship
+# with — e.g. ``v0_5_0_to_v0_6_0.py``.  Releases that don't change
+# schema simply don't ship a migration file; the runner bumps the
+# manifest at boot.
+SCHEMA_VERSION = "0.5.0"
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +590,7 @@ class Manifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_name: str
-    core_version: str = CORE_VERSION
+    schema_version: str = SCHEMA_VERSION
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
     last_started_at: str | None = None
 

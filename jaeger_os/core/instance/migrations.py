@@ -2,7 +2,7 @@
 
 Walks `jaeger_os/migrations/` for modules named
 `v<FROM>_to_v<TO>.py`, sorts them by version order, and applies any whose
-FROM matches the instance's current manifest core_version. The instance's
+FROM matches the instance's current manifest schema_version. The instance's
 manifest is updated after each successful migration; on failure the runner
 raises and the agent refuses to start.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.instance.instance import InstanceLayout
-from jaeger_os.core.instance.schemas import CORE_VERSION, Manifest, dump_json, load_json
+from jaeger_os.core.instance.schemas import SCHEMA_VERSION, Manifest, dump_json, load_json
 
 
 # core/instance/ is two levels deeper than the framework package; migrations/ sits at the framework root, so reach two levels up.
@@ -74,13 +74,13 @@ def _load(path: Path) -> Any:
 
 
 def run_pending_migrations(layout: InstanceLayout) -> list[str]:
-    """Apply migrations until the instance manifest matches CORE_VERSION.
+    """Apply migrations until the instance manifest matches SCHEMA_VERSION.
 
     Returns the list of applied migration names. Raises on any failure
     (the agent loop should treat that as refuse-to-start)."""
     manifest = load_json(layout.manifest_path, Manifest)
-    current = manifest.core_version
-    target = CORE_VERSION
+    current = manifest.schema_version
+    target = SCHEMA_VERSION
     if current == target:
         return []
 
@@ -112,7 +112,7 @@ def run_pending_migrations(layout: InstanceLayout) -> list[str]:
         print(f"[jaeger-migrate] {mig['name']}: {mig['from_str']} → {mig['to_str']}", flush=True)
         mod = _load(mig["path"])
         mod.migrate(layout)
-        manifest = manifest.model_copy(update={"core_version": mig["to_str"]})
+        manifest = manifest.model_copy(update={"schema_version": mig["to_str"]})
         dump_json(layout.manifest_path, manifest)
         applied.append(mig["name"])
 
