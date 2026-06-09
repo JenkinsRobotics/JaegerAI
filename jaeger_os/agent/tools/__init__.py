@@ -77,6 +77,9 @@ from .speak import (
     warm_kokoro,
 )
 
+# Avatar (0.5 — AnimationNode driving)
+from .avatar import play_timeline, set_avatar_state, warm_avatar
+
 # Vision
 from .vision import generate_image, look_at
 
