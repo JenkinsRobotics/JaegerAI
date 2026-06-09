@@ -15,8 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 from ._common import _require_layout
-from jaeger_os.core.skills.skill_benchmark import benchmark_skill as _benchmark_skill
-from jaeger_os.core.skills.skill_package import package_skill as _package_skill
+from jaeger_os.agent.skill_registry.skill_benchmark import benchmark_skill as _benchmark_skill
+from jaeger_os.agent.skill_registry.skill_package import package_skill as _package_skill
 
 
 def package_skill(name: str) -> dict[str, Any]:

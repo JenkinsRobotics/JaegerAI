@@ -13,7 +13,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
-from jaeger_os.core.skills import playbook_skills as _pb
+from jaeger_os.agent.skill_registry import playbook_skills as _pb
 
 # Cap a single skill's instructions so one huge SKILL.md can't blow the
 # context window. Skills run long but rarely past this.
@@ -97,7 +97,7 @@ def skill(action: str, name: str = "", query: str = "",
     if act in ("curate", "curation", "cleanup"):
         # Read-only dry run — surfaces stale / unused agent-authored
         # skills. Archiving is a deliberate, separate step (curator A2).
-        from jaeger_os.core.skills.curator import run_curation
+        from jaeger_os.agent.skill_registry.curator import run_curation
         return run_curation(apply=False)
 
     if act in ("list", "all", ""):
@@ -166,7 +166,7 @@ def skill(action: str, name: str = "", query: str = "",
         # Expand {{date}} / {{instance_name}} / {{skill_folder}} … template
         # placeholders before the model sees the body (audit A6).
         try:
-            from jaeger_os.core.skills.skill_preprocessing import preprocess_skill
+            from jaeger_os.agent.skill_registry.skill_preprocessing import preprocess_skill
             content = preprocess_skill(
                 content, skill_name=s.name, skill_folder=folder)
         except Exception:  # noqa: BLE001 — never let preprocessing break view
@@ -199,7 +199,7 @@ def skill(action: str, name: str = "", query: str = "",
             # JAEGER_TOOLSET_SCOPING is off; when on, the tools are
             # visible on the agent's very next step.
             try:
-                from jaeger_os.core.skills.toolsets import (
+                from jaeger_os.agent.skill_registry.toolsets import (
                     active_toolset_names, enable_toolset,
                 )
                 loaded_now: list[str] = []
