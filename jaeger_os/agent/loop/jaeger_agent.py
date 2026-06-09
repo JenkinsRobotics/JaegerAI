@@ -227,7 +227,7 @@ class JaegerAgent:
         # turn lifecycle; Phase-9 has to do it here or a *legitimate*
         # next-turn read of the same file returns an empty-stub result.
         try:
-            from jaeger_os.core.tools.files import reset_read_tracker
+            from jaeger_os.agent.tools.files import reset_read_tracker
             reset_read_tracker()
         except Exception:  # noqa: BLE001 — never break a turn over a reset
             pass

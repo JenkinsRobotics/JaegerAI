@@ -30,7 +30,7 @@ _MAX_CHARS = 20_000
 
 
 def _default_read_file(path: str) -> str:
-    from jaeger_os.core.tools._common import _resolve_read
+    from jaeger_os.agent.tools._common import _resolve_read
 
     p = _resolve_read(path)
     if not p.exists() or not p.is_file():
@@ -39,7 +39,7 @@ def _default_read_file(path: str) -> str:
 
 
 def _default_fetch_url(url: str) -> str:
-    from jaeger_os.core.tools.web import web_fetch
+    from jaeger_os.agent.tools.web import web_fetch
 
     res = web_fetch(url)
     if not res.get("ok"):

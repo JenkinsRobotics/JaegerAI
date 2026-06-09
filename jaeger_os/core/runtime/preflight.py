@@ -468,7 +468,7 @@ def _check_tool_registry() -> list[Check]:
     The CORE / LEAN_CORE names are the *agent-facing* names produced
     by ``@register_tool_from_function`` wrappers in
     ``jaeger_os.main.boot_for_tui``, not the function symbols in
-    ``jaeger_os.core.tools.__init__``. So we need the LIVE agent
+    ``jaeger_os.agent.tools.__init__``. So we need the LIVE agent
     registry, which only exists after a boot.
 
     When no agent is booted (the common case — doctor is meant to be

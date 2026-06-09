@@ -883,7 +883,7 @@ def _download(ctx: SlashContext, args: str) -> SlashResult:
 def _plugins(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List bundled plugins (discord, telegram, whisper_stt, etc.)
     with install + credential status, so the user knows what's ready."""
-    from jaeger_os.core.tools.plugins import list_plugins
+    from jaeger_os.agent.tools.plugins import list_plugins
     result = list_plugins()
     plugins = result.get("plugins") or []
     if not plugins:
@@ -1558,7 +1558,7 @@ def _steer(ctx: SlashContext, args: str) -> SlashResult:
 def _stop(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """Stop every running background process."""
     try:
-        from jaeger_os.core import tools as _jt
+        from jaeger_os.agent import tools as _jt
         listing = _jt.list_background()
     except Exception as exc:  # noqa: BLE001
         ctx.console.print(f"[red]Couldn't list background processes:[/] {exc}")
@@ -1572,7 +1572,7 @@ def _stop(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     if not procs:
         ctx.console.print("[dim]No background processes running.[/]")
         return SlashResult()
-    from jaeger_os.core import tools as _jt
+    from jaeger_os.agent import tools as _jt
     stopped = 0
     for p in procs:
         pid = ((p.get("id") or p.get("process_id") or p.get("pid")

@@ -42,7 +42,7 @@ def _build_vars(skill_name: str, skill_folder: Path | None) -> dict[str, str]:
     # Instance paths — only when an instance is bound (skipped in tests
     # / standalone use).
     try:
-        from jaeger_os.core.tools._common import _require_layout
+        from jaeger_os.agent.tools._common import _require_layout
 
         layout = _require_layout()
         vars_["instance_name"] = layout.root.name

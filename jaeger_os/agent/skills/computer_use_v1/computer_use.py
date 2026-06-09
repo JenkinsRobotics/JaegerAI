@@ -129,7 +129,7 @@ def _osascript(script: str, timeout: float = 20.0) -> tuple[bool, str]:
 
 def screenshot(path: str = "screen.png") -> dict[str, Any]:
     """Capture the screen to a PNG under the instance's skills/ directory."""
-    from jaeger_os.core.tools._common import (  # lazy — keep module import-clean
+    from jaeger_os.agent.tools._common import (  # lazy — keep module import-clean
         SandboxError, _require_layout, _resolve_under,
     )
     if not _IS_MAC:

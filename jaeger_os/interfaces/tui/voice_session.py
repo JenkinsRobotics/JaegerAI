@@ -222,7 +222,7 @@ class VoiceController:
             self._chimes = None
 
         try:
-            from jaeger_os.core.tools.speak import warm_kokoro
+            from jaeger_os.agent.tools.speak import warm_kokoro
             warm_kokoro()  # idempotent — usually already warm from boot
         except Exception:  # noqa: BLE001
             pass
