@@ -39,7 +39,7 @@ from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from .core import credentials as creds
 from jaeger_os.core.runtime import log_rotation
 from jaeger_os.core.memory import memory as mem
-from jaeger_os.core.prompts import prompts as prompt_module
+from jaeger_os.agent.prompts import prompts as prompt_module
 from jaeger_os.core.runtime import tool_interrupt
 from .core import tools as jaeger_tools
 from jaeger_os.core.background.cron_runner import CronRunner
@@ -3291,7 +3291,7 @@ def run_daemon(*, instance_name: str | None = None,
 
     from jaeger_os.core.background.deep_think import queue_for_layout
     from jaeger_os.core.models.model_resolver import DEFAULT_CODER_MODEL, DEFAULT_MODEL
-    from jaeger_os.core.prompts.reflection import reflect_on_task, save_reflection
+    from jaeger_os.agent.prompts.reflection import reflect_on_task, save_reflection
 
     print("[jaeger-daemon] booting…", flush=True)
     boot = boot_for_tui(instance_name=instance_name, with_memory=True,
