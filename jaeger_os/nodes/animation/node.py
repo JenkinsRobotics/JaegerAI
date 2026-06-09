@@ -89,9 +89,14 @@ class AnimationNode(Node):
     def setup(self) -> None:
         self.bus.subscribe(topics.ACT_ANIMATION, self._on_command)
         self.bus.subscribe(topics.ACT_ANIMATION_STOP, self._on_stop)
+        # 0.5 lip-sync: forward /sense/tts_chunk amplitudes to the
+        # active adapter (MathScripts read amplitude_param at
+        # render time).
+        self.bus.subscribe(topics.SENSE_TTS_CHUNK, self._on_tts_chunk)
         self._log(
             f"subscribed to {topics.ACT_ANIMATION} + "
-            f"{topics.ACT_ANIMATION_STOP}"
+            f"{topics.ACT_ANIMATION_STOP} + "
+            f"{topics.SENSE_TTS_CHUNK}"
         )
 
     def tick(self) -> None:
@@ -114,6 +119,10 @@ class AnimationNode(Node):
             self.bus.unsubscribe(topics.ACT_ANIMATION_STOP, self._on_stop)
         except Exception:  # noqa: BLE001
             pass
+        try:
+            self.bus.unsubscribe(topics.SENSE_TTS_CHUNK, self._on_tts_chunk)
+        except Exception:  # noqa: BLE001
+            pass
         if self._active is not None:
             try:
                 self._active.close()
@@ -134,6 +143,23 @@ class AnimationNode(Node):
                 f"animation queue full; dropped {msg.adapter!r} "
                 f"clip {msg.asset_path!r}"
             )
+
+    def _on_tts_chunk(self, msg: topics.TopicMessage) -> None:
+        """Forward TTS amplitude to the active adapter.  Best-effort —
+        no errors propagate; if the adapter doesn't support
+        runtime params, the chunk is silently dropped."""
+        if not isinstance(msg, topics.TtsChunk):
+            return
+        active = self._active
+        if active is None:
+            return
+        setter = getattr(active, "set_runtime_param", None)
+        if setter is None:
+            return
+        try:
+            setter("amplitude", float(msg.amplitude))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_stop(self, msg: topics.TopicMessage) -> None:
         assert isinstance(msg, topics.AnimationStop)
