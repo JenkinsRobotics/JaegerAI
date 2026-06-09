@@ -864,7 +864,7 @@ class JaegerTUI:
         # Expand @file / @url references — the header above shows the
         # concise original; the agent receives the inlined content (A4).
         try:
-            from jaeger_os.core.prompts.context_refs import expand_references
+            from jaeger_os.agent.prompts.context_refs import expand_references
             agent_text = expand_references(user_text)
         except Exception:  # noqa: BLE001 — never let expansion break a turn
             agent_text = user_text
@@ -1178,7 +1178,7 @@ class JaegerTUI:
             DEFAULT_CODER_MODEL,
             DEFAULT_MODEL,
         )
-        from jaeger_os.core.prompts.reflection import reflect_on_task, save_reflection
+        from jaeger_os.agent.prompts.reflection import reflect_on_task, save_reflection
 
         # The pipeline must be booted (config/lock/layout) before we can
         # swap models — _ensure_agent does that on first use.
@@ -1235,7 +1235,7 @@ class JaegerTUI:
                     # other auto-prompts (idle board pickup, cron),
                     # so the full set of "things the framework sends
                     # as the user" is one read.
-                    from jaeger_os.core.prompts import deep_think_directive
+                    from jaeger_os.agent.prompts import deep_think_directive
                     directive = deep_think_directive(task.description)
                     run_command(self._client, directive,
                                 session_key=f"deepthink_{task.id}")
@@ -1574,7 +1574,7 @@ class JaegerTUI:
         try:
             from jaeger_os.core.background.board import has_actionable_work
             from jaeger_os.core.instance.instance import InstanceLayout
-            from jaeger_os.core.prompts import AUTO_BOARD_PROMPT
+            from jaeger_os.agent.prompts import AUTO_BOARD_PROMPT
             layout = InstanceLayout(root=self.instance_dir)
             if not has_actionable_work(layout):
                 return False
