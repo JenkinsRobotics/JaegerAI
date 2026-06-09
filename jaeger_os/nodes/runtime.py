@@ -62,7 +62,7 @@ def _default_synth_factory() -> Synthesizer:
     # Late import — speak.py imports from this module, so a module-level
     # import would be circular.
     from jaeger_os.plugins.kokoro_tts import KOKORO_LANG, KokoroTTS
-    from jaeger_os.core.tools.speak import _resolve_voice
+    from jaeger_os.agent.tools.speak import _resolve_voice
 
     return KokoroTTS(voice=_resolve_voice(), lang=KOKORO_LANG)
 
@@ -161,7 +161,7 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
 
     ``warm=True`` calls ``synth.warm()`` before returning so the
     Kokoro pipeline is preloaded — call this from
-    :func:`jaeger_os.core.tools.speak.warm_kokoro` at boot so the
+    :func:`jaeger_os.agent.tools.speak.warm_kokoro` at boot so the
     first user-facing ``text_to_speech`` doesn't pay the 5-7 s
     weight-load tax.
     """
