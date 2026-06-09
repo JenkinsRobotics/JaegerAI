@@ -36,7 +36,9 @@ _PERSONA_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 # Built-in persona directory — ships with the package.  Operators
 # can drop additional YAML files here; per-instance overrides live
 # on the Lilith line and aren't part of v1.
-_PERSONAS_DIR = Path(__file__).resolve().parent.parent.parent / "personas"
+_PERSONAS_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "agent" / "personas"
+)
 
 # The only schema string the v1 loader accepts.  Bumped if/when the
 # format gains breaking fields (character levels etc. will likely
