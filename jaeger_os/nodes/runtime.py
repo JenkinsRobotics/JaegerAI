@@ -38,7 +38,7 @@ import time
 from typing import Any, Callable, Optional
 
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
-from jaeger_os.nodes.animation import AnimationNode
+from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
 from jaeger_os.nodes.animation import bridge as animation_bridge
 from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
@@ -57,6 +57,7 @@ _audio_session: Optional[AudioSession] = None
 _animation_node: Optional[AnimationNode] = None
 _animation_thread: Optional[threading.Thread] = None
 _animation_bridge: Optional[animation_bridge.FrameBridge] = None
+_avatar_auto_driver: Optional[AvatarAutoStateDriver] = None
 
 
 def _default_bus_factory() -> Bus:
@@ -334,6 +335,16 @@ def ensure_animation_node(
         thread.start()
         _wait_for_node_running(node, timeout_s=2.0)
 
+        # 0.5 auto-state driver — flips Lilith's face to
+        # "speaking" when TTS starts + back to "neutral" when
+        # done.  Without this the avatar wouldn't react to TTS
+        # unless the brain explicitly fired set_avatar_state
+        # each turn.
+        global _avatar_auto_driver
+        auto_driver = AvatarAutoStateDriver(bus=bus)
+        auto_driver.start()
+        _avatar_auto_driver = auto_driver
+
         _animation_node = node
         _animation_thread = thread
         _animation_bridge = bridge_instance
@@ -342,15 +353,21 @@ def ensure_animation_node(
 
 
 def shutdown_animation_node() -> None:
-    """Stop only the AnimationNode + bridge.  Idempotent."""
+    """Stop only the AnimationNode + bridge + auto-state driver.
+    Idempotent."""
     global _animation_node, _animation_thread, _animation_bridge
+    global _avatar_auto_driver
     with _lock:
         node = _animation_node
         thread = _animation_thread
         bridge_instance = _animation_bridge
+        driver = _avatar_auto_driver
         _animation_node = None
         _animation_thread = None
         _animation_bridge = None
+        _avatar_auto_driver = None
+    if driver is not None:
+        driver.stop()
     if node is not None:
         node.stop()
         if thread is not None:
@@ -393,12 +410,14 @@ def shutdown() -> None:
     global _bus, _tts_node, _tts_thread, _synth
     global _audio_session_node, _audio_session_thread, _audio_session
     global _animation_node, _animation_thread, _animation_bridge
+    global _avatar_auto_driver
     with _lock:
         audio_node = _audio_session_node
         audio_thread = _audio_session_thread
         anim_node = _animation_node
         anim_thread = _animation_thread
         anim_bridge = _animation_bridge
+        auto_driver = _avatar_auto_driver
         node = _tts_node
         thread = _tts_thread
         bus = _bus
@@ -408,10 +427,13 @@ def shutdown() -> None:
         _animation_node = None
         _animation_thread = None
         _animation_bridge = None
+        _avatar_auto_driver = None
         _tts_node = None
         _tts_thread = None
         _bus = None
         _synth = None
+    if auto_driver is not None:
+        auto_driver.stop()
     if audio_node is not None:
         audio_node.stop()
         if audio_thread is not None:
