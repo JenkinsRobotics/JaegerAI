@@ -30,7 +30,7 @@ Security note
 This adapter executes arbitrary Python.  Production use should
 restrict ``asset_path`` to a sandbox (e.g.,
 ``<instance>/avatar/scripts/``).  0.5.x followup wires this through
-``jaeger_os.core.tools._common._resolve_under``; the standalone
+``jaeger_os.agent.tools._common._resolve_under``; the standalone
 adapter trusts its caller for now.
 """
 

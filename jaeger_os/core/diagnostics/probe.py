@@ -55,7 +55,7 @@ def _check_layout() -> tuple[bool, str]:
     read-only filesystem (USB drive, NixOS store accidentally
     selected as instance root) breaks every later check, so this
     runs first and gives a decisive failure when it bites."""
-    from jaeger_os.core.tools._common import _require_layout
+    from jaeger_os.agent.tools._common import _require_layout
     layout = _require_layout()
     for attr in ("logs_dir", "memory_dir", "skills_dir"):
         d = getattr(layout, attr, None)
@@ -72,7 +72,7 @@ def _check_file_sandbox() -> tuple[bool, str]:
     """Write + read + delete a probe file via the real sandbox path
     resolver. Catches a broken ``_resolve_under`` rule or a permission
     glitch on the skills/ directory."""
-    from jaeger_os.core.tools._common import _require_layout
+    from jaeger_os.agent.tools._common import _require_layout
     layout = _require_layout()
     probe = layout.skills_dir / f"_health_probe_{uuid.uuid4().hex[:8]}.txt"
     body = "ok"
@@ -97,14 +97,14 @@ def _check_memory() -> tuple[bool, str]:
     on the SQLite ``facts`` table or a broken InstanceLayout binding
     (the memory store reads layout.memory_dir at every call).
 
-    NB on the import shape: ``from jaeger_os.core.tools import memory``
+    NB on the import shape: ``from jaeger_os.agent.tools import memory``
     resolves to the ``memory()`` umbrella *function* (re-exported from
     ``core.tools.__init__``) rather than the submodule of the same
     name — Python's name resolution picks the function attribute over
     the submodule because both live on the package. Importing the
     individual verbs explicitly avoids the shadowing.
     """
-    from jaeger_os.core.tools.memory import remember, recall, forget
+    from jaeger_os.agent.tools.memory import remember, recall, forget
     key = f"_health_probe_{uuid.uuid4().hex[:8]}"
     sentinel = "alive"
     try:
@@ -126,7 +126,7 @@ def _check_memory() -> tuple[bool, str]:
 def _check_time() -> tuple[bool, str]:
     """get_time returns a timestamp-ish string. Catches a broken
     ``time_and_math`` import or a recent rename."""
-    from jaeger_os.core.tools import get_time
+    from jaeger_os.agent.tools import get_time
     out = get_time()
     text = out if isinstance(out, str) else \
         (out.get("time") if isinstance(out, dict) else str(out))
@@ -138,7 +138,7 @@ def _check_time() -> tuple[bool, str]:
 def _check_calculate() -> tuple[bool, str]:
     """calculator answers 2+2 = 4. Round-trip through the same tool
     the agent uses, not a private eval."""
-    from jaeger_os.core.tools import calculate
+    from jaeger_os.agent.tools import calculate
     out = calculate(expression="2+2")
     body = str(out.get("result") if isinstance(out, dict) else out)
     if "4" not in body:
@@ -158,7 +158,7 @@ def _check_tool_registry() -> tuple[bool, str]:
       2. **Legacy pydantic-ai agent** — ``agent._function_toolset.tools``
          (still in the codebase but no longer the active loop).
       3. **No agent booted** — return ok with a "not checked" message
-         rather than scan ``dir(jaeger_os.core.tools)``: the Python
+         rather than scan ``dir(jaeger_os.agent.tools)``: the Python
          function names there don't match the agent-facing names
          CORE uses (e.g. ``read_file`` vs ``file_read``), so a naive
          scan would always false-negative.
@@ -209,7 +209,7 @@ def _check_skills_loaded() -> tuple[bool, str]:
     which is a confusing failure mode — the agent boots fine but says
     "I have no skills" mid-conversation."""
     from jaeger_os.agent.skill_registry.skill_loader import discover_skills
-    from jaeger_os.core.tools._common import _require_layout
+    from jaeger_os.agent.tools._common import _require_layout
     layout = _require_layout()
     try:
         skills = list(discover_skills(layout))
@@ -383,7 +383,7 @@ def _check_agent_sandbox_write() -> tuple[bool, str]:
     work."""
     try:
         from jaeger_os.main import _pipeline, run_command
-        from jaeger_os.core.tools._common import _require_layout
+        from jaeger_os.agent.tools._common import _require_layout
     except Exception as exc:  # noqa: BLE001
         return False, f"could not import agent: {exc}"
     client = _pipeline.get("client")

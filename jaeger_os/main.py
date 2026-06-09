@@ -41,7 +41,7 @@ from jaeger_os.core.runtime import log_rotation
 from jaeger_os.core.memory import memory as mem
 from jaeger_os.agent.prompts import prompts as prompt_module
 from jaeger_os.core.runtime import tool_interrupt
-from .core import tools as jaeger_tools
+from .agent import tools as jaeger_tools
 from jaeger_os.core.background.cron_runner import CronRunner
 from jaeger_os.core.instance.instance import (
     CoreVersionMismatch,
@@ -1250,7 +1250,7 @@ def _register_builtins(client: Any) -> None:
         return t.todo(todos=todos, merge=merge)
 
     # NB: ``describe_tool`` and ``load_toolset`` are NOT redefined here.
-    # Both are owned by :mod:`jaeger_os.core.tools.meta` and registered
+    # Both are owned by :mod:`jaeger_os.agent.tools.meta` and registered
     # at module-import time. The pre-Phase-9 pattern of wrapping each
     # built-in tool inside this closure created two copies (one in
     # ``meta.py`` and one here) that could drift; the meta module is
@@ -3161,7 +3161,7 @@ def boot_for_tui(
         # can't reach for ``send_message`` when Discord isn't set
         # up. The wiring is idempotent + best-effort.
         try:
-            from jaeger_os.core.tools.availability import wire_availability_checks
+            from jaeger_os.agent.tools.availability import wire_availability_checks
             wired = wire_availability_checks(agent)
             if wired:
                 print(f"[jaeger] availability wired for {wired} plugin-backed tool(s)",
