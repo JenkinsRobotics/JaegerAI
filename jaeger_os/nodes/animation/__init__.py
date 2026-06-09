@@ -23,11 +23,13 @@ See ``dev_docs/library_review/mochi_demo.md`` for the vendoring
 audit + per-adapter origin.
 """
 
+from .auto_state import AvatarAutoStateDriver
 from .base import AnimationAdapter, FrameBuffer
 from .node import AnimationNode
 
 __all__ = [
     "AnimationAdapter",
-    "FrameBuffer",
     "AnimationNode",
+    "AvatarAutoStateDriver",
+    "FrameBuffer",
 ]
