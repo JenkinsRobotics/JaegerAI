@@ -3,6 +3,69 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.5.0` — in progress (branch `origin/0.5.0`)
+
+**The identity statement.**  JROS = Hermes-in-`agent/` +
+ROS-in-`nodes/` + a shared `transport/` that lets them talk.
+
+### Animation + avatar
+- L1-L4 animation adapters vendored from operator's Mochi engine
+  (Apache 2.0): `image`, `bitmap`, `sprite`, `gif`, `math`.
+- `AnimationNode` + `FrameBridge` WebSocket bridge ship frames to
+  the Swift app at `apps/JROS-Avatar/` (in-tree).
+- End-to-end animation pipeline proven: agent → bus → adapter →
+  bridge → WebSocket client, with byte-perfect frame delivery and
+  XP awarded.
+
+### Timeline + skill tree + personality
+- `TimelineRunner` — wall-clock multi-track scheduler dispatching
+  per-track on `/act/animation`, `/act/speech`, etc.
+- `SkillTreeRegistry` — XP-driven progression with prereqs +
+  level-up + mastery cascade.  `XpEmitter` wires it to the bus.
+  `seed_default_tree` registers the default catalog (animation,
+  voice, vision, motor, light, core).
+- `Personality` module — structured persona (HEXACO + SPECIAL +
+  Expression + Domains + speech patterns).  `compose_block`
+  produces the system-prompt fragment the brain reads every turn.
+
+### Operator CLI (terminal-first)
+- New `./jaeger` console: `skills`, `instances`, `personality`,
+  `status`, `roadmap` subcommands.  Every operation the eventual
+  Swift operator console will do is reachable from a terminal
+  first.
+
+### Agent-folder reorganisation (`agent/` is the conscious node)
+The folder layout was reorganised to reflect the operator-locked
+conscious/unconscious model.  Every cognitive subsystem moves
+under `jaeger_os/agent/`:
+
+  - `core/tools/`      → `agent/tools/`        (30 tool modules)
+  - `core/prompts/`    → `agent/prompts/`      (system prompt assembly)
+  - `core/skills/`     → `agent/skill_registry/` (v3 loader)
+  - `core/runners/`    → `agent/runners/`      (ThinkingRunner)
+  - `jaeger_os/skills/`   → `agent/skills/`    (v3 bundles)
+  - `jaeger_os/personas/` → `agent/personas/`
+  - `jaeger_os/prompts/`  → `agent/prompt_assets/`
+
+`core/` shrinks to only what's genuinely shared by both sides:
+`audio/`, `background/`, `bench/`, `diagnostics/`, `instance/`,
+`memory/`, `models/`, `runtime/`, `safety/`, `voice/`,
+`credentials.py`.
+
+The "skills" naming overload is resolved:
+  - `agent/skills/`         = v3 playbooks (workflows agent loads)
+  - `agent/skill_registry/` = loader for the above
+  - `skill_tree/`           = XP progression across BOTH agent
+                               skills AND node capabilities
+
+No behaviour change — pure structural; tests still 2015 green,
+smoke gates PASS.  See `dev_docs/0.5.0_agent_reorg_plan.md` for
+the destination map + execution rationale.
+
+### Tests
+- 2015 Python tests + 4 Swift tests passing
+- 131 net new Python tests over the 0.4.0 baseline of 1884
+
 ## `0.4.0` — 2026-06-06
 
 **Node architecture.** JROS becomes node-shaped: the brain stays
