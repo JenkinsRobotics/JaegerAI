@@ -1831,7 +1831,7 @@ def _config(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 def _skills(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List the skills currently loaded — each skill is a tool bundle."""
     try:
-        from jaeger_os.core.skills import toolsets as _ts
+        from jaeger_os.agent.skill_registry import toolsets as _ts
         summaries = dict(_ts._SKILL_SUMMARY)
         members = dict(_ts._SKILL_TOOLSETS)
     except Exception as exc:  # noqa: BLE001

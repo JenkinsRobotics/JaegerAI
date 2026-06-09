@@ -163,7 +163,7 @@ def _check_tool_registry() -> tuple[bool, str]:
          CORE uses (e.g. ``read_file`` vs ``file_read``), so a naive
          scan would always false-negative.
     """
-    from jaeger_os.core.skills.toolsets import CORE
+    from jaeger_os.agent.skill_registry.toolsets import CORE
 
     registered: set[str] = set()
     source = "none"
@@ -208,7 +208,7 @@ def _check_skills_loaded() -> tuple[bool, str]:
     means the instance was created but never had its scaffold synced,
     which is a confusing failure mode — the agent boots fine but says
     "I have no skills" mid-conversation."""
-    from jaeger_os.core.skills.skill_loader import discover_skills
+    from jaeger_os.agent.skill_registry.skill_loader import discover_skills
     from jaeger_os.core.tools._common import _require_layout
     layout = _require_layout()
     try:

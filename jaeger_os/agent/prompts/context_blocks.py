@@ -67,7 +67,7 @@ def build_skill_index_block() -> str:
     knows what specialized procedures exist without a discovery
     round-trip. Empty string when no skills are discovered."""
     try:
-        from jaeger_os.core.skills.playbook_skills import build_skill_index
+        from jaeger_os.agent.skill_registry.playbook_skills import build_skill_index
         return build_skill_index() or ""
     except Exception:  # noqa: BLE001 — skill discovery must never break boot
         return ""
@@ -83,7 +83,7 @@ def build_toolset_catalog() -> str:
     surface is visible and the catalog would just duplicate what the
     adapter already sends)."""
     try:
-        from jaeger_os.core.skills.toolsets import (
+        from jaeger_os.agent.skill_registry.toolsets import (
             _scoping_enabled, all_toolsets, TOOLSET_SUMMARY,
         )
     except Exception:  # noqa: BLE001
@@ -126,7 +126,7 @@ def build_runtime_tail() -> str:
     flag — one block instead of two parallel ones, so a rule edit
     in the base block doesn't have to be duplicated."""
     try:
-        from jaeger_os.core.skills.toolsets import _scoping_enabled
+        from jaeger_os.agent.skill_registry.toolsets import _scoping_enabled
         scoped = _scoping_enabled()
     except Exception:  # noqa: BLE001
         scoped = False

@@ -61,7 +61,7 @@ from jaeger_os.core.safety.permissions import (
 )
 from jaeger_os.core.instance.schemas import CORE_VERSION, Config
 from jaeger_os.core.instance.schemas import load_yaml
-from jaeger_os.core.skills.skill_loader import load_and_register
+from jaeger_os.agent.skill_registry.skill_loader import load_and_register
 from jaeger_os.core.instance.setup_wizard import run_wizard
 
 
@@ -1470,7 +1470,7 @@ def _register_builtins(client: Any) -> None:
         the skill is NOT registered and you must fix the skill (not the
         test) before retrying. Returns the names of skills newly
         registered this call."""
-        from jaeger_os.core.skills.skill_loader import load_and_register, _REGISTERED_KEYS
+        from jaeger_os.agent.skill_registry.skill_loader import load_and_register, _REGISTERED_KEYS
         cfg = _pipeline["config"]
         before = {(n, v, z) for (n, v, z) in _REGISTERED_KEYS}
         # Phase-9 sentinel: ``load_and_register`` only needs an object
@@ -2676,7 +2676,7 @@ def self_test(layout: InstanceLayout) -> int:
 
     # Skill discovery
     try:
-        from jaeger_os.core.skills.skill_loader import discover_skills
+        from jaeger_os.agent.skill_registry.skill_loader import discover_skills
         discovered = discover_skills(layout)
         names = [f"{s.name}_v{s.version}({s.zone})" for s in discovered]
         print(f"== skill discovery == {names or '(none yet — core skills/ empty)'}")

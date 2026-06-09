@@ -169,7 +169,7 @@ class JaegerAgent:
 
         Recomputed on every access so a mid-session ``load_toolset``
         call (which mutates the shared visibility state in
-        :mod:`jaeger_os.core.skills.toolsets`) takes effect on the
+        :mod:`jaeger_os.agent.skill_registry.toolsets`) takes effect on the
         next turn without rebuilding the agent. The full set the agent
         can dispatch + validate against lives in ``self._all_tools`` —
         ``describe_tool`` reads from there so the model can peek at a
@@ -178,7 +178,7 @@ class JaegerAgent:
             # Caller passed ``tools=[...]`` explicitly — honour it.
             return list(self._all_tools)
         try:
-            from jaeger_os.core.skills.toolsets import tool_visible
+            from jaeger_os.agent.skill_registry.toolsets import tool_visible
         except Exception:  # noqa: BLE001
             return list(self._all_tools)
         return [t for t in self._all_tools if tool_visible(t.name)]

@@ -478,7 +478,7 @@ def _check_tool_registry() -> list[Check]:
     """
     out: list[Check] = []
     try:
-        from jaeger_os.core.skills.toolsets import CORE, LEAN_CORE, tool_visible
+        from jaeger_os.agent.skill_registry.toolsets import CORE, LEAN_CORE, tool_visible
     except Exception as exc:  # noqa: BLE001
         out.append(Check(
             "tools.registry", "runtime", False,
@@ -542,7 +542,7 @@ def _check_skills_health(layout: object) -> list[Check]:
     a confusing skill-loader stacktrace later."""
     out: list[Check] = []
     try:
-        from jaeger_os.core.skills.skill_loader import discover_skills
+        from jaeger_os.agent.skill_registry.skill_loader import discover_skills
         skills = list(discover_skills(layout))
     except Exception as exc:  # noqa: BLE001
         out.append(Check(

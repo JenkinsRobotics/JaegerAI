@@ -801,7 +801,7 @@ class JaegerTUI:
             # visible tool. Cheap enough to recompute per refresh.
             try:
                 from jaeger_os.agent.schemas.tool_registry import get_tools
-                from jaeger_os.core.skills.toolsets import tool_visible
+                from jaeger_os.agent.skill_registry.toolsets import tool_visible
                 import json as _json2
                 for t in get_tools():
                     if tool_visible(t.name) and hasattr(t, "to_openai_schema"):
