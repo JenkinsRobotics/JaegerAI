@@ -323,7 +323,7 @@ def main() -> int:
     )
 
     # ── Warm TTS (and wire the reference buffer if barge-in is on) ───
-    from ..core.tools.speak import _get_tts
+    from ..agent.tools.speak import _get_tts
     tts = _get_tts()
     if reference_buffer is not None:
         tts.reference_buffer = reference_buffer

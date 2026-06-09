@@ -552,6 +552,27 @@ class InteractionConfig(BaseModel):
     default_mode: Literal["tui", "gui", "voice"] = "tui"
 
 
+class AvatarConfig(BaseModel):
+    """0.5: AnimationNode + FrameBridge configuration.
+
+    Controls whether the avatar pipeline auto-starts at boot.
+    When ``enabled=True`` (default), ``main.py``'s prewarm phase
+    spins up the AnimationNode + WebSocket bridge so the brain's
+    ``set_avatar_state`` tool works without manual setup.
+
+    Disable via ``./launch --no-avatar`` for headless / minimal
+    boots that don't need the renderer (CI smoke runs, scripted
+    benches, etc.).
+    """
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    bridge_host: str = "127.0.0.1"
+    bridge_port: int = Field(8765, ge=1024, le=65535)
+    # Default emotion the wizard suggests; AnimationNode will publish
+    # this on boot when set_avatar_state hasn't been called yet.
+    default_emotion: str = "neutral"
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -562,6 +583,7 @@ class Config(BaseModel):
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     deep_think: DeepThinkConfig = Field(default_factory=DeepThinkConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    avatar: AvatarConfig = Field(default_factory=lambda: AvatarConfig())
     external_model: ExternalModelConfig = Field(default_factory=ExternalModelConfig)
     warmup: WarmupConfig = Field(default_factory=WarmupConfig)
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)

@@ -2093,14 +2093,19 @@ def warm_plugins(config: Any) -> None:
     # cleanly — so we mirror that order here.  This is an integration-
     # race fix, not a bridge fix.
     if getattr(w, "stt", False):
-        from .core.tools.listen import warm_listen
+        from .agent.tools.listen import warm_listen
         jobs.append(("STT (Whisper)", warm_listen))
     if getattr(w, "tts", False):
-        from .core.tools.speak import warm_kokoro
+        from .agent.tools.speak import warm_kokoro
         jobs.append(("TTS (Kokoro)", warm_kokoro))
     if getattr(w, "vision", False):
-        from .core.tools.vision import warm_vision
+        from .agent.tools.vision import warm_vision
         jobs.append(("vision (Moondream2)", warm_vision))
+    # 0.5: avatar prewarm (AnimationNode + FrameBridge).
+    avatar_cfg = getattr(_pipeline.get("config"), "avatar", None)
+    if avatar_cfg is not None and getattr(avatar_cfg, "enabled", True):
+        from .agent.tools.avatar import warm_avatar
+        jobs.append(("avatar (animation node + bridge)", warm_avatar))
     for name, fn in jobs:
         started = time.perf_counter()
         try:
