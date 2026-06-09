@@ -84,7 +84,7 @@ def _visible_tool_groups() -> tuple[dict[str, list[str]], int, int]:
     # Lazy import — the boot panel renders before the agent is built
     # and we don't want a top-level import dragging in the skill
     # loader at status-module import time.
-    from jaeger_os.core.skills.toolsets import CORE, _scoping_enabled
+    from jaeger_os.agent.skill_registry.toolsets import CORE, _scoping_enabled
 
     total = sum(len(v) for v in TOOL_GROUPS.values())
     if not _scoping_enabled():

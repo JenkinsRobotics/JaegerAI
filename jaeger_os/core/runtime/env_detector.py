@@ -2,7 +2,7 @@
 
 The single source of truth for the cognitive/physical skill split. The
 launcher passes the result of :func:`detect_environment` into the
-skill loader (``jaeger_os.core.skills.skill_loader``) which uses it
+skill loader (``jaeger_os.agent.skill_registry.skill_loader``) which uses it
 alongside the v3 manifest's ``embodiment`` block to decide whether
 ``physical``-domain skills should load.  (Earlier scaffolding fed
 this into a Lilith-line ``Registry.discover`` — that registry was
