@@ -56,7 +56,7 @@ jaeger_os/
     └── <name>/            one dir per instance (default: `default/`)
         ├── identity.yaml      wizard-owned
         ├── config.yaml        wizard-owned
-        ├── manifest.json      core_version pin
+        ├── manifest.json      schema_version pin
         ├── credentials/       0600 secrets (off-limits to agent)
         ├── skills/            agent's writable scratchpad
         ├── memory/            facts.json, episodic.jsonl, schedules.jsonl

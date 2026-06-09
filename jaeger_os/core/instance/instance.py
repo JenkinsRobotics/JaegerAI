@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.instance.schemas import (
-    CORE_VERSION,
+    SCHEMA_VERSION,
     Config,
     Identity,
     Manifest,
@@ -393,10 +393,10 @@ class CoreVersionMismatch(RuntimeError):
 
 def check_manifest(layout: InstanceLayout) -> Manifest:
     manifest = load_json(layout.manifest_path, Manifest)
-    if manifest.core_version != CORE_VERSION:
+    if manifest.schema_version != SCHEMA_VERSION:
         raise CoreVersionMismatch(
             f"instance {manifest.instance_name!r} was created against core "
-            f"{manifest.core_version!r}, but installed core is {CORE_VERSION!r}. "
+            f"{manifest.schema_version!r}, but installed core is {SCHEMA_VERSION!r}. "
             "Run `python main.py jaeger_os --migrate` to apply pending "
             "migrations, or back up the instance and re-run the wizard."
         )

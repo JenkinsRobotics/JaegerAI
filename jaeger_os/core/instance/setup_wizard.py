@@ -30,7 +30,7 @@ from jaeger_os.core.instance.personas import (
 )
 from jaeger_os.core.models.model_resolver import DEFAULT_MODEL, MODEL_REGISTRY
 from jaeger_os.core.instance.schemas import (
-    CORE_VERSION,
+    SCHEMA_VERSION,
     Config,
     DisplayConfig,
     DistributionConfig,
@@ -659,7 +659,7 @@ def run_wizard(
         # via ``/voice on`` in the TUI.
         voice=VoiceConfig(enabled=voice_enable_choice),
     )
-    manifest = Manifest(instance_name=name, core_version=CORE_VERSION)
+    manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION)
 
     layout.root.mkdir(parents=True, exist_ok=True)
     layout.ensure_dirs()

@@ -6,7 +6,7 @@ Lifecycle, in order:
   1. Resolve the instance dir (JAEGER_INSTANCE_DIR / ~/.jaeger/<name>/).
   2. Run the setup wizard if no valid instance is on disk.
   3. Take the exclusive lockfile (refuses to start if another copy holds it).
-  4. Verify manifest.json's core_version matches; refuse-to-start if not.
+  4. Verify manifest.json's schema_version matches; refuse-to-start if not.
   5. Bind tools + memory to the instance layout.
   6. Load the in-process Gemma model.
   7. Build the PydanticAI agent with the v2 system prompt + identity.
@@ -59,7 +59,7 @@ from jaeger_os.core.safety.permissions import (
     install_policy,
     requires_tier,
 )
-from jaeger_os.core.instance.schemas import CORE_VERSION, Config
+from jaeger_os.core.instance.schemas import SCHEMA_VERSION, Config
 from jaeger_os.core.instance.schemas import load_yaml
 from jaeger_os.agent.skill_registry.skill_loader import load_and_register
 from jaeger_os.core.instance.setup_wizard import run_wizard
@@ -664,7 +664,7 @@ def write_log(entry: dict[str, Any]) -> None:
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
     entry = {
         "framework": "jaeger_os",
-        "core_version": CORE_VERSION,
+        "schema_version": SCHEMA_VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         **entry,
     }
@@ -3512,7 +3512,7 @@ def main() -> int:
             from jaeger_os.core.instance.migrations import run_pending_migrations
             applied = run_pending_migrations(layout)
             if applied:
-                print(f"[jaeger] applied {len(applied)} migration(s) to reach core {CORE_VERSION}: "
+                print(f"[jaeger] applied {len(applied)} migration(s) to reach core {SCHEMA_VERSION}: "
                       + ", ".join(applied), flush=True)
             manifest = check_manifest(layout)  # must pass now
         except Exception as exc:

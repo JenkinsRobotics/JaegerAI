@@ -155,10 +155,10 @@ def package_skill(layout: Any, skill_name: str) -> dict[str, Any]:
         pass
 
     # Core version for the install-time compat check.
-    core_version = ""
+    schema_version = ""
     try:
-        from jaeger_os.core.instance.schemas import CORE_VERSION
-        core_version = str(CORE_VERSION)
+        from jaeger_os.core.instance.schemas import SCHEMA_VERSION
+        schema_version = str(SCHEMA_VERSION)
     except Exception:  # noqa: BLE001
         pass
 
@@ -178,7 +178,7 @@ def package_skill(layout: Any, skill_name: str) -> dict[str, Any]:
         "kind": frontmatter.get("kind", "agent_authored"),
         "permission_tier": frontmatter.get("permission_tier", 0),
         "dependencies": _extract_dependencies(frontmatter),
-        "jaeger_core_version": core_version,
+        "jaeger_schema_version": schema_version,
         "smoke_test": smoke,
         "entry_files": rel_files,
         "packaged_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
