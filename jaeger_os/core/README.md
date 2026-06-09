@@ -18,7 +18,7 @@
 | [`tools/`](tools/) | Tool implementations — files, memory, web, code, packages, background processes, board, browser, computer-use, etc. Each tool is a function the agent's tool registry wraps. |
 | [`memory.py`](memory.py) | `facts.json` reader/writer + episodic-log appender + semantic search over episodic history. |
 | [`permissions.py`](permissions.py) | The `@requires_tier(...)` decorator + tier model + confirmation routing. |
-| [`skill_loader.py`](skill_loader.py) | Discovers skills under `<instance>/skills/` and `src/jaeger_os/skills/`, runs smoke tests, registers passers. |
+| [`skill_loader.py`](skill_loader.py) | Discovers skills under `<instance>/skills/` and `src/jaeger_os/agent/skills/`, runs smoke tests, registers passers. |
 | [`skills_guard.py`](skills_guard.py) | Static scan for prompt-injection / exfiltration / destructive patterns in skill source. Used before activation. |
 | [`self_modification_audit.py`](self_modification_audit.py) | Phase-10 path classifier + JSONL audit writer (`audit_write` / `audit_unsandboxed_call`). |
 | [`migrations.py`](migrations.py) | Per-release schema-migration runner. Reads modules from `src/jaeger_os/migrations/` and applies them in order. |
