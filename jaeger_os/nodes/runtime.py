@@ -38,6 +38,8 @@ import time
 from typing import Any, Callable, Optional
 
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
+from jaeger_os.nodes.animation import AnimationNode
+from jaeger_os.nodes.animation import bridge as animation_bridge
 from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
 from jaeger_os.nodes.tts import Synthesizer, TTSNode
@@ -52,6 +54,9 @@ _synth = None  # KokoroTTS instance owned by the node
 _audio_session_node: Optional[AudioSessionNode] = None
 _audio_session_thread: Optional[threading.Thread] = None
 _audio_session: Optional[AudioSession] = None
+_animation_node: Optional[AnimationNode] = None
+_animation_thread: Optional[threading.Thread] = None
+_animation_bridge: Optional[animation_bridge.FrameBridge] = None
 
 
 def _default_bus_factory() -> Bus:
@@ -239,6 +244,121 @@ def _wait_for_node_running(node: TTSNode, *, timeout_s: float) -> None:
     raise TimeoutError("TTS node did not reach RUNNING state")
 
 
+def ensure_animation_node(
+    *,
+    bridge_host: str = "127.0.0.1",
+    bridge_port: int = 8765,
+    enable_bridge: bool = True,
+) -> AnimationNode:
+    """Make sure an AnimationNode is running on the bus.  Idempotent.
+
+    Spawns the FrameBridge WebSocket server alongside so connected
+    renderers (the Swift app at ``apps/JROS-Avatar/``, an OBS browser
+    source, debug tools) receive frames.  Pass ``enable_bridge=False``
+    to skip the WS server — useful in headless tests and for the
+    ``--no-avatar`` boot flag.
+
+    Adapter registration: registers all L1-L4 vendored adapters
+    (image, bitmap, sprite, gif, math) so the brain's
+    ``set_avatar_state`` tool can route to any of them.
+    """
+    global _animation_node, _animation_thread, _animation_bridge
+    bus = get_bus()
+    with _lock:
+        if _animation_node is not None:
+            return _animation_node
+
+        # Start the bridge first so the node's frame_callback can
+        # plug into it.  Bridge runs on a daemon thread; failures
+        # are non-fatal (animation still works, just no renderer
+        # receives frames).
+        bridge_instance: animation_bridge.FrameBridge | None = None
+        if enable_bridge:
+            try:
+                bridge_instance = animation_bridge.FrameBridge(
+                    host=bridge_host, port=bridge_port,
+                )
+                bridge_instance.start()
+            except Exception:  # noqa: BLE001
+                bridge_instance = None
+
+        # Build the registry once so XP grants land on the same
+        # tree the CLI + Swift app read.
+        skill_registry: Any | None = None
+        try:
+            from jaeger_os.skill_tree import (
+                SkillTreeRegistry, seed_default_tree,
+            )
+            from jaeger_os.core.instance.instance import (
+                InstanceLayout, default_instance_name,
+                resolve_instance_dir,
+            )
+            layout = InstanceLayout(
+                root=resolve_instance_dir(default_instance_name()),
+            )
+            skill_registry = SkillTreeRegistry.for_instance(layout)
+            seed_default_tree(skill_registry)
+        except Exception:  # noqa: BLE001
+            skill_registry = None
+
+        frame_callback = (
+            bridge_instance.publish_frame if bridge_instance else None
+        )
+
+        node = AnimationNode(
+            bus=bus,
+            skill_registry=skill_registry,
+            frame_callback=frame_callback,
+        )
+
+        # Register the L1-L4 adapter set so the brain can route
+        # to any of them by name.
+        try:
+            from jaeger_os.nodes.animation.adapters import (
+                BitmapAdapter, GifAdapter, ImageAdapter,
+                MathAdapter, SpriteAdapter,
+            )
+            node.register_adapter("image", ImageAdapter())
+            node.register_adapter("bitmap", BitmapAdapter())
+            node.register_adapter("sprite", SpriteAdapter())
+            node.register_adapter("gif", GifAdapter())
+            node.register_adapter("math", MathAdapter())
+        except Exception:  # noqa: BLE001
+            pass
+
+        thread = threading.Thread(
+            target=node.run,
+            name="brain-animation-node",
+            daemon=True,
+        )
+        thread.start()
+        _wait_for_node_running(node, timeout_s=2.0)
+
+        _animation_node = node
+        _animation_thread = thread
+        _animation_bridge = bridge_instance
+
+    return _animation_node
+
+
+def shutdown_animation_node() -> None:
+    """Stop only the AnimationNode + bridge.  Idempotent."""
+    global _animation_node, _animation_thread, _animation_bridge
+    with _lock:
+        node = _animation_node
+        thread = _animation_thread
+        bridge_instance = _animation_bridge
+        _animation_node = None
+        _animation_thread = None
+        _animation_bridge = None
+    if node is not None:
+        node.stop()
+        if thread is not None:
+            thread.join(timeout=3.0)
+    if bridge_instance is not None:
+        bridge_instance.stop()
+
+
 def get_synth():
     """Expose the KokoroTTS instance the TTS node wraps.
 
@@ -268,18 +388,26 @@ def shutdown_audio_session_node() -> None:
 
 
 def shutdown() -> None:
-    """Stop the TTS node, close the bus.  Idempotent."""
+    """Stop the TTS, audio session, animation node, close the bus.
+    Idempotent."""
     global _bus, _tts_node, _tts_thread, _synth
     global _audio_session_node, _audio_session_thread, _audio_session
+    global _animation_node, _animation_thread, _animation_bridge
     with _lock:
         audio_node = _audio_session_node
         audio_thread = _audio_session_thread
+        anim_node = _animation_node
+        anim_thread = _animation_thread
+        anim_bridge = _animation_bridge
         node = _tts_node
         thread = _tts_thread
         bus = _bus
         _audio_session_node = None
         _audio_session_thread = None
         _audio_session = None
+        _animation_node = None
+        _animation_thread = None
+        _animation_bridge = None
         _tts_node = None
         _tts_thread = None
         _bus = None
@@ -288,6 +416,12 @@ def shutdown() -> None:
         audio_node.stop()
         if audio_thread is not None:
             audio_thread.join(timeout=3.0)
+    if anim_node is not None:
+        anim_node.stop()
+        if anim_thread is not None:
+            anim_thread.join(timeout=3.0)
+    if anim_bridge is not None:
+        anim_bridge.stop()
     if node is not None:
         node.stop()
         if thread is not None:
