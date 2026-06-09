@@ -2102,8 +2102,13 @@ def warm_plugins(config: Any) -> None:
         from .agent.tools.vision import warm_vision
         jobs.append(("vision (Moondream2)", warm_vision))
     # 0.5: avatar prewarm (AnimationNode + FrameBridge).
+    # Skipped when ``--no-avatar`` is on the command line OR
+    # ``config.avatar.enabled = false`` in the instance config.
     avatar_cfg = getattr(_pipeline.get("config"), "avatar", None)
-    if avatar_cfg is not None and getattr(avatar_cfg, "enabled", True):
+    avatar_cli_disabled = "--no-avatar" in sys.argv[1:]
+    if (avatar_cfg is not None
+            and getattr(avatar_cfg, "enabled", True)
+            and not avatar_cli_disabled):
         from .agent.tools.avatar import warm_avatar
         jobs.append(("avatar (animation node + bridge)", warm_avatar))
     for name, fn in jobs:
@@ -3058,6 +3063,19 @@ def parse_args() -> argparse.Namespace:
                          "background. No TUI, no interactive input. Runs "
                          "until SIGTERM/SIGINT. See deploy/ for the launchd "
                          "plist."))
+    p.add_argument("--stream", action="store_true",
+                   help=("0.5: streaming mode for OBS / video capture.  "
+                         "Auto-enables voice mode + ensures the avatar "
+                         "pipeline is up + prints connection info for "
+                         "the Swift renderer.  Same flag surface as "
+                         "--voice; just tuned for the YouTube/Twitch "
+                         "use case."))
+    p.add_argument("--no-avatar", action="store_true",
+                   help=("Disable the AnimationNode + FrameBridge auto-"
+                         "start.  Use for headless CI / smoke runs that "
+                         "don't need the renderer.  Equivalent to setting "
+                         "config.avatar.enabled = false in the "
+                         "instance's config.yaml."))
     return p.parse_args()
 
 
@@ -3415,6 +3433,21 @@ def main() -> int:
     from jaeger_os.daemon.cli import dispatch as _daemon_dispatch, is_daemon_subcommand as _is_daemon
     if _is_daemon(sys.argv[1:]):
         return _daemon_dispatch(sys.argv[1:])
+    # --stream: 0.5 streaming mode for OBS / YouTube use case.
+    # Auto-enables --voice, prints the WebSocket URL the Swift
+    # renderer connects to, and otherwise behaves like --voice.
+    if "--stream" in sys.argv[1:]:
+        sys.argv.remove("--stream")
+        print(
+            "[jaeger] streaming mode — open the Swift renderer at:\n"
+            "          apps/JROS-Avatar (swift run JROSAvatar)\n"
+            "        connect URL:\n"
+            "          ws://127.0.0.1:8765/frames",
+            flush=True,
+        )
+        # Fall through into the --voice path below.
+        if "--voice" not in sys.argv[1:]:
+            sys.argv.append("--voice")
     # If --voice is present, peel it off and delegate to the voice_loop
     # daemon. Voice_loop has its own argparse for STT mode, barge-in, AEC,
     # wake-word, chimes, model names, etc. — every flag the user types
