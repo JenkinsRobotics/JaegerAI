@@ -47,15 +47,32 @@ from ._common import SandboxError, _require_layout, _resolve_under
 #
 # When the per-instance file exists it WINS — defaults are just the
 # safety net so the tool never fails on a fresh instance.
-_DEFAULT_EXPRESSIONS: dict[str, dict[str, str]] = {
-    "neutral":  {"adapter": "math", "asset": "faces/neutral.py"},
-    "happy":    {"adapter": "math", "asset": "faces/happy.py"},
-    "sad":      {"adapter": "math", "asset": "faces/sad.py"},
-    "focused":  {"adapter": "math", "asset": "faces/focused.py"},
-    "thinking": {"adapter": "math", "asset": "faces/thinking.py"},
-    "speaking": {"adapter": "math", "asset": "faces/speaking.py"},
-    "listening":{"adapter": "math", "asset": "faces/listening.py"},
+_DEFAULT_EXPRESSIONS: dict[str, dict[str, Any]] = {
+    "neutral":   {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "neutral"}},
+    "happy":     {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "happy"}},
+    "sad":       {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "sad"}},
+    "focused":   {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "focused"}},
+    "thinking":  {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "thinking"}},
+    "speaking":  {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "speaking"}},
+    "listening": {"adapter": "math", "asset": "faces/lilith_face.py",
+                   "params": {"emotion": "listening"}},
 }
+
+
+# Framework default face scripts ship under this path.  The avatar
+# tool falls back here when the instance's ``avatar/`` directory
+# doesn't contain the asset — so a fresh instance has a working
+# face out of the box without the wizard having to copy files.
+_FRAMEWORK_AVATAR_DEFAULTS = (
+    Path(__file__).resolve().parent.parent  # agent/
+    / "personas" / "lilith" / "avatar"
+)
 
 
 # Timeout for the optional ack wait (when ``wait=True``).  Most
@@ -113,11 +130,14 @@ def set_avatar_state(
             "reason": f"unknown emotion: {emotion!r}",
         }
 
-    # Resolve the asset under <instance>/avatar/ so framework code
-    # can't reach outside the operator's sandbox.
+    # Resolve the asset.  Prefer the instance's <instance>/avatar/
+    # if the operator has authored their own; fall back to the
+    # framework defaults shipped with the lilith persona.  Both
+    # paths are sandbox-checked.
+    asset_rel = mapping["asset"]
     avatar_dir = layout.root / "avatar"
     try:
-        asset_path = _resolve_under(avatar_dir, mapping["asset"])
+        instance_path = _resolve_under(avatar_dir, asset_rel)
     except SandboxError as exc:
         return {
             "ok": False,
@@ -125,11 +145,24 @@ def set_avatar_state(
             "reason": f"asset outside sandbox: {exc}",
         }
 
+    if instance_path.exists():
+        resolved_path = str(instance_path)
+    else:
+        # Framework default — already under the package; no
+        # sandbox check needed (this is framework code, not
+        # operator-writable).
+        fallback = _FRAMEWORK_AVATAR_DEFAULTS / asset_rel
+        if fallback.exists():
+            resolved_path = str(fallback)
+        else:
+            resolved_path = str(instance_path)  # let the node report missing
+
     return _publish_animation(
         adapter=mapping["adapter"],
-        asset_path=str(asset_path) if asset_path.exists() else mapping["asset"],
+        asset_path=resolved_path,
         duration_ms=int(hold_ms),
         emotion=emotion,
+        params=mapping.get("params", {}),
         wait=wait,
     )
 
@@ -248,6 +281,7 @@ def _publish_animation(
     asset_path: str,
     duration_ms: int,
     emotion: str,
+    params: dict | None = None,
     wait: bool,
 ) -> dict[str, Any]:
     """Publish an :class:`AnimationCommand` on the bus.  If ``wait``,
@@ -263,7 +297,7 @@ def _publish_animation(
         adapter=adapter,
         asset_path=asset_path,
         duration_ms=duration_ms,
-        params={},
+        params=dict(params or {}),
         node_id="brain",
         correlation_id=cid,
     )
