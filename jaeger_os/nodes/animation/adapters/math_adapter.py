@@ -60,6 +60,12 @@ class MathScript:
       :meth:`on_event` runs when a Timeline clip carries an event tag
     """
 
+    # Default runtime params — present on every MathScript so the
+    # AnimationNode's set_runtime_param can update them without
+    # the script having to opt in.  Subclasses can override
+    # initial values in on_enter.
+    amplitude_param: float = 0.0
+
     def __init__(self, width: int, height: int) -> None:
         self.width = width
         self.height = height
@@ -126,6 +132,24 @@ class MathAdapter:
             self._script = None
             raise
         self._start_t = None
+
+    def set_runtime_param(self, key: str, value: Any) -> None:
+        """Push a real-time parameter update to the running
+        MathScript.  Lip-sync uses this to feed amplitude from
+        :class:`jaeger_os.topics.TtsChunk` events into the script
+        between frames.
+
+        The script reads the value at its next ``render_into``
+        call.  No-op if the script isn't open.
+        """
+        if self._script is None:
+            return
+        # Map well-known runtime params to the conventional
+        # attribute names MathScripts use.
+        if key == "amplitude":
+            setattr(self._script, "amplitude_param", float(value))
+        else:
+            setattr(self._script, f"{key}_param", value)
 
     def close(self) -> None:
         self._script = None
