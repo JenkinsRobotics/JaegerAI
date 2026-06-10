@@ -2477,7 +2477,7 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_thinking:
         try:
-            from .core.runners import thinking_runner
+            from .agent.runners import thinking_runner
             lock = _pipeline.get("llm_lock") or threading.Lock()
             _pipeline["llm_lock"] = lock
             # Per-instance log path keeps thinking output out of the framework
