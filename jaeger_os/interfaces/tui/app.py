@@ -535,10 +535,18 @@ class JaegerTUI:
         cancel = begin_turn_cancel_scope()
         # Voice turn: sustained user speech during the turn trips the
         # cancel flag, so the user can talk over a long 'ruminating'.
-        armed = (source == "voice" and self._voice is not None
-                 and self._voice.running)
-        if armed:
-            self._voice.arm_interrupt(cancel)
+        # Capture the voice session at arm time — if voice gets toggled
+        # off mid-turn (operator typed /voice off, audio session crashed,
+        # etc.) we still need to disarm the SAME object we armed.
+        armed_voice = (
+            self._voice if (
+                source == "voice"
+                and self._voice is not None
+                and self._voice.running
+            ) else None
+        )
+        if armed_voice is not None:
+            armed_voice.arm_interrupt(cancel)
         try:
             if source == "voice":
                 self._run_voice_turn(client, user_text)
@@ -551,8 +559,13 @@ class JaegerTUI:
             request_turn_cancel()
             self.console.print("\n[yellow]⨯ stopped — back to you.[/]")
         finally:
-            if armed:
-                self._voice.disarm_interrupt()
+            if armed_voice is not None:
+                try:
+                    armed_voice.disarm_interrupt()
+                except Exception:  # noqa: BLE001
+                    # Voice session can be torn down mid-turn (operator
+                    # toggle / audio crash); disarm is best-effort.
+                    pass
 
     # ── Turn chrome (hermes-style) ──────────────────────────────────
 
