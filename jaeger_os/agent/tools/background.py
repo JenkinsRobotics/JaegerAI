@@ -21,7 +21,7 @@ from typing import Any
 
 from ._common import _require_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
-from jaeger_os.core.background import processes as _proc
+from jaeger_os.agent.background import processes as _proc
 
 
 @requires_tier(

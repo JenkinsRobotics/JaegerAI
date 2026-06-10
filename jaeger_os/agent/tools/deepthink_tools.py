@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from ._common import _require_layout
-from jaeger_os.core.background.deep_think import queue_for_layout
+from jaeger_os.agent.background.deep_think import queue_for_layout
 
 
 def propose_deep_think_task(description: str) -> dict[str, Any]:

@@ -1172,7 +1172,7 @@ class JaegerTUI:
         the in-progress task is flipped back to ``pending`` so it
         resumes next time, and the realtime model is reloaded."""
         from jaeger_os.main import run_command, switch_model
-        from jaeger_os.core.background.deep_think import queue_for_layout
+        from jaeger_os.agent.background.deep_think import queue_for_layout
         from jaeger_os.core.instance.instance import InstanceLayout
         from jaeger_os.core.models.model_resolver import (
             DEFAULT_CODER_MODEL,
@@ -1539,7 +1539,7 @@ class JaegerTUI:
         True when DT was started (so the caller skips the board path).
         Quietly returns False when nothing approved is pending."""
         try:
-            from jaeger_os.core.background.deep_think import queue_for_layout
+            from jaeger_os.agent.background.deep_think import queue_for_layout
             from jaeger_os.core.instance.instance import InstanceLayout
             queue_ = queue_for_layout(InstanceLayout(root=self.instance_dir))
             if queue_.next_pending() is None:
@@ -1572,7 +1572,7 @@ class JaegerTUI:
         lives in ``core/prompts/synthetic.py`` — one place to find
         every framework-injected message."""
         try:
-            from jaeger_os.core.background.board import has_actionable_work
+            from jaeger_os.agent.background.board import has_actionable_work
             from jaeger_os.core.instance.instance import InstanceLayout
             from jaeger_os.agent.prompts import AUTO_BOARD_PROMPT
             layout = InstanceLayout(root=self.instance_dir)

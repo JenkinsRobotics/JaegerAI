@@ -42,7 +42,7 @@ from jaeger_os.core.memory import memory as mem
 from jaeger_os.agent.prompts import prompts as prompt_module
 from jaeger_os.core.runtime import tool_interrupt
 from .agent import tools as jaeger_tools
-from jaeger_os.core.background.cron_runner import CronRunner
+from jaeger_os.agent.background.cron_runner import CronRunner
 from jaeger_os.core.instance.instance import (
     CoreVersionMismatch,
     InstanceLayout,
@@ -3312,7 +3312,7 @@ def run_daemon(*, instance_name: str | None = None,
     """
     import signal as _signal
 
-    from jaeger_os.core.background.deep_think import queue_for_layout
+    from jaeger_os.agent.background.deep_think import queue_for_layout
     from jaeger_os.core.models.model_resolver import DEFAULT_CODER_MODEL, DEFAULT_MODEL
     from jaeger_os.agent.prompts.reflection import reflect_on_task, save_reflection
 
