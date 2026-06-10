@@ -5,6 +5,7 @@ GUI can do is reachable from the terminal first.  GUI is a VIEW;
 CLI is the API.  This package is the API layer.
 
 Subcommands:
+  avatar        render an animated demo of Lilith's face + open it
   skills        view the skill tree + per-skill detail
   instances     list / show / switch the active instance
   personality   view + adjust the active persona's stats
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     import sys
 
     from . import (
+        avatar_cmd,
         instances_cmd,
         personality_cmd,
         roadmap_cmd,
@@ -54,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         dest="subcommand",
         metavar="<subcommand>",
     )
+    avatar_cmd.register(subparsers)
     skills_cmd.register(subparsers)
     instances_cmd.register(subparsers)
     personality_cmd.register(subparsers)
