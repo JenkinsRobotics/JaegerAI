@@ -1,6 +1,6 @@
 """Rich rendering for the kanban board — the visual side of ``/board``.
 
-The data layer (:mod:`jaeger_os.core.background.board`) stays presentation-free; this
+The data layer (:mod:`jaeger_os.agent.background.board`) stays presentation-free; this
 module owns the layout decisions: five side-by-side panels (one per
 column), each holding stacked card snippets that wrap to the panel width.
 
@@ -18,7 +18,7 @@ from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
-from jaeger_os.core.background.board import COLUMNS, Card
+from jaeger_os.agent.background.board import COLUMNS, Card
 
 
 # Same column-tint as the legacy vertical view, kept stable so the eye

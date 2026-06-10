@@ -66,7 +66,7 @@ from ..main import (
     shutdown_extensions,
 )
 from ..agent import tools as agent_tools
-from jaeger_os.core.background.cron_runner import CronRunner
+from jaeger_os.agent.background.cron_runner import CronRunner
 from jaeger_os.core.instance.instance import InstanceLayout, default_instance_name, resolve_instance_dir
 from jaeger_os.core.instance.schemas import Config, load_yaml
 from jaeger_os.agent.prompts.prompts import build_system_prompt

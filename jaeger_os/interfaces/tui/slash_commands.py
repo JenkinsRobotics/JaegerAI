@@ -1099,7 +1099,7 @@ def _goal(ctx: SlashContext, args: str) -> SlashResult:
 
 def _deep_think_queue(ctx: SlashContext):
     """Build the DeepThinkQueue for the active instance."""
-    from jaeger_os.core.background.deep_think import queue_for_layout
+    from jaeger_os.agent.background.deep_think import queue_for_layout
     from jaeger_os.core.instance.instance import InstanceLayout
     import pathlib
     layout = InstanceLayout(root=pathlib.Path(str(ctx.instance_dir)))
@@ -1218,7 +1218,7 @@ def _board_for_ctx(ctx: SlashContext):
     """Build the kanban Board for the active instance."""
     import pathlib
 
-    from jaeger_os.core.background.board import board_for_layout
+    from jaeger_os.agent.background.board import board_for_layout
     from jaeger_os.core.instance.instance import InstanceLayout
     layout = InstanceLayout(root=pathlib.Path(str(ctx.instance_dir)))
     return board_for_layout(layout)
@@ -1232,7 +1232,7 @@ def _board(ctx: SlashContext, args: str) -> SlashResult:
        ``/board block <id>``       mark a card blocked
        ``/board move <id> <col>``  move a card to any column
     """
-    from jaeger_os.core.background.board import COLUMNS
+    from jaeger_os.agent.background.board import COLUMNS
 
     parts = args.strip().split(None, 2)
     sub = parts[0].lower() if parts else ""

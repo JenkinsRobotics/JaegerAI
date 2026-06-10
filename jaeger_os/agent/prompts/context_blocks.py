@@ -110,7 +110,7 @@ def build_board_block(layout: InstanceLayout) -> str:
     block tells it what's available to do. Empty when nothing's
     actionable so quiet instances stay quiet."""
     try:
-        from jaeger_os.core.background.board import board_digest
+        from jaeger_os.agent.background.board import board_digest
         return board_digest(layout) or ""
     except Exception:  # noqa: BLE001
         return ""
