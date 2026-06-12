@@ -18,7 +18,6 @@ import fcntl
 import json
 import os
 import re
-import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -383,6 +382,41 @@ def load_recent_turns(n: int = 5, session_key: str | None = None) -> list[dict[s
             messages.append({"role": "user", "content": user})
             messages.append({"role": "assistant", "content": decision})
     return messages
+
+
+def recent_qa_pairs(
+    n: int = 6, session_key: str | None = None,
+) -> list[dict[str, str]]:
+    """Return the last ``n`` (user, answer) pairs as
+    ``[{"user": ..., "answer": ...}, ...]``, oldest first.
+
+    Unlike :func:`load_recent_turns` (which returns ``decision_raw``
+    for the legacy replay contract), this reads the human-facing
+    ``answer`` column — the right source for the cross-restart
+    session digest, where the point is what was SAID, not the raw
+    routing decision."""
+    if n <= 0:
+        return []
+    from jaeger_os.core.memory import sqlite_store
+    conn = sqlite_store.connection()
+    if session_key is None:
+        rows = conn.execute(
+            "SELECT user, answer FROM episodic "
+            "WHERE user IS NOT NULL AND answer IS NOT NULL "
+            "ORDER BY id DESC LIMIT ?", (n,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT user, answer FROM episodic "
+            "WHERE session_key = ? "
+            "AND user IS NOT NULL AND answer IS NOT NULL "
+            "ORDER BY id DESC LIMIT ?",
+            (session_key, n),
+        ).fetchall()
+    return [
+        {"user": row["user"], "answer": row["answer"]}
+        for row in reversed(rows)
+    ]
 
 
 def _lazy_import_episodic_from_jsonl() -> None:

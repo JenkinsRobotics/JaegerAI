@@ -21,6 +21,7 @@ when sharing one across adapters / instances).
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,11 @@ from jaeger_os.agent.dialects import (
     strip_think_blocks,
     textify_tool_history,
 )
-from jaeger_os.agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
+from jaeger_os.agent.loop.interrupt import (
+    AgentInterrupted,
+    CallProgress,
+    StaleCallTimeout,
+)
 from jaeger_os.agent.schemas.message_types import Message
 from jaeger_os.agent.schemas.tool_schema import ToolDef
 from .openai import OpenAIAdapter
@@ -85,9 +90,19 @@ class _LlamaChatFacade:
     OpenAI client API. ``models.list`` is stubbed for health checks.
     """
 
-    def __init__(self, llama: Any, abort_flag: Any = None) -> None:
+    def __init__(
+        self,
+        llama: Any,
+        abort_flag: Any = None,
+        progress: Any = None,
+    ) -> None:
         self._llama = llama
         self._abort_flag = abort_flag
+        # Per-token progress beacon (a ``CallProgress``). Touched from
+        # the logits processor on every decoded token so the stale
+        # watchdog measures token GAPS, not total generation time — a
+        # slow-but-healthy decode is no longer killed at the cap.
+        self._progress = progress
         self.chat = self
         self.completions = self
         # ``models.list`` is what :meth:`OpenAIAdapter.health_check`
@@ -153,8 +168,11 @@ class _LlamaChatFacade:
         if self._abort_flag is not None and "logits_processor" not in kwargs:
             import llama_cpp
             flag = self._abort_flag
+            beacon = self._progress
 
             def _abort_proc(input_ids: Any, scores: Any) -> Any:
+                if beacon is not None:
+                    beacon.touch()
                 if flag.is_set():
                     raise _AbortGeneration()
                 return scores
@@ -172,12 +190,15 @@ class _LlamaChatFacade:
         text response into the chat-completion dict the parent's
         ``parse_response`` expects."""
         # Re-attach the abort flag's logits_processor (same cooperative-
-        # cancellation contract as the structured path).
+        # cancellation + progress contract as the structured path).
         if self._abort_flag is not None and "logits_processor" not in kwargs:
             import llama_cpp
             flag = self._abort_flag
+            beacon = self._progress
 
             def _abort_proc(input_ids: Any, scores: Any) -> Any:
+                if beacon is not None:
+                    beacon.touch()
                 if flag.is_set():
                     raise _AbortGeneration()
                 return scores
@@ -321,6 +342,9 @@ class LocalLlamaAdapter(OpenAIAdapter):
     ) -> None:
         # Skip OpenAIAdapter's network kwargs entirely — we never talk
         # to an HTTP endpoint. Pass the bits that DO apply via super().
+        # ``stream_transport=False``: the facade's ``create`` is a
+        # blocking in-process call with no chunk stream to aggregate;
+        # progress comes from the per-token logits processor instead.
         super().__init__(
             provider="local-llama",
             model=model,
@@ -329,6 +353,7 @@ class LocalLlamaAdapter(OpenAIAdapter):
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
+            stream_transport=False,
             client=None,
         )
         self.model_path = Path(model_path).expanduser() if model_path else None
@@ -344,6 +369,11 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # Cached tool dialect ("chatml" / "mistral" / "llama3" / …),
         # resolved lazily on first ``format_messages``.
         self._tool_family: str | None = None
+        # Rendered tool-prose cache keyed by (family, tool names).
+        # ``render_tools_for`` serialises every schema to JSON each
+        # call — identical work every turn while the visible toolset
+        # is stable. Tiny dict; cleared if it somehow grows.
+        self._tools_prose_cache: dict[tuple, str] = {}
         # Cached reasoning flag (model emits <think> deliberation).
         self._is_reasoning: bool | None = None
         # Cloud-style ``thinking`` toggle. ``None`` = use the model's
@@ -362,6 +392,13 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # cleanly at the next token rather than being abandoned mid-flight
         # (which corrupts the shared model's KV cache → cascade failures).
         self._abort_flag = threading.Event()
+        # Per-token progress beacon, touched by the facade's logits
+        # processor on every decoded token. Lets the stall watchdog
+        # measure token GAPS (true wedge detection) instead of total
+        # generation time. One per adapter — calls on one adapter are
+        # serialised by the caller's llm_lock, and the underlying
+        # ``Llama`` is single-decode anyway.
+        self._progress = CallProgress()
 
     # ── tool presentation ───────────────────────────────────────────
 
@@ -489,7 +526,13 @@ class LocalLlamaAdapter(OpenAIAdapter):
         if not (self.inject_tools_prose and tools):
             return self._apply_thinking_toggle(kwargs)
         family = self._resolve_tool_family()
-        addition = render_tools_for(family, tools)
+        cache_key = (family, tuple(t.name for t in tools))
+        addition = self._tools_prose_cache.get(cache_key)
+        if addition is None:
+            if len(self._tools_prose_cache) > 8:
+                self._tools_prose_cache.clear()
+            addition = render_tools_for(family, tools)
+            self._tools_prose_cache[cache_key] = addition
         if not addition:
             # gemma/unknown → structured channel only — but they're
             # ALSO hybrid thinking (gemma-4 has ``enable_thinking`` in
@@ -568,7 +611,9 @@ class LocalLlamaAdapter(OpenAIAdapter):
                 model_path=str(self.model_path),
                 **self.llama_kwargs,
             )
-        self._client = _LlamaChatFacade(self._llama, self._abort_flag)
+        self._client = _LlamaChatFacade(
+            self._llama, self._abort_flag, self._progress,
+        )
         return self._client
 
     # ── in-process call (override the inherited HTTP version) ───────
@@ -591,20 +636,30 @@ class LocalLlamaAdapter(OpenAIAdapter):
         every subsequent call (the 2026-05-28 Hermes-3 full-corpus
         cascade — one stalled case poisoned 42 more).
 
-        New posture — cooperative abort:
+        New posture — cooperative abort, for BOTH bail-out causes:
 
-          * Generation polls ``self._abort_flag`` via llama-cpp's
-            ``stopping_criteria`` (wired in the facade). When the stall
-            watchdog fires, ``interruptible_call`` calls ``on_abandon``
-            → we SET the flag → the decode stops cleanly at the next
-            token, the worker returns, and the shared model is left in a
-            normal post-generation state. ``join_on_abandon`` waits for
-            that to happen before control returns, so the NEXT call
-            starts from a clean instance. No zombie, no cascade.
+          * Generation polls ``self._abort_flag`` via the facade's
+            logits processor. When the stall watchdog fires OR the
+            operator interrupts (voice barge-in, Ctrl-C),
+            ``interruptible_call`` fires ``on_abandon`` → we SET the
+            flag → the decode stops cleanly at the next token, the
+            worker returns, and the shared model is left in a normal
+            post-generation state. ``join_on_abandon`` waits for that
+            before control returns, so the NEXT call starts from a
+            clean instance. No zombie, no cascade.
 
-          * The interrupt event is still uncancellable here — Ctrl-C
-            tear-down is handled at the loop boundary — but the abort
-            flag means even an abandoned stall no longer corrupts state.
+          * The real interrupt event is wired through (an earlier
+            revision swapped in an uncancellable dummy, which meant a
+            barge-in mid-decode did NOTHING until the generation ran
+            to completion — minutes of dead air on a reasoning model).
+            The cooperative abort makes interrupting exactly as safe
+            as the stall path, so there's no reason left to block it.
+
+          * The facade's logits processor also touches the per-token
+            progress beacon, so ``stale_timeout`` measures the gap
+            since the LAST token — a wedged prefill or stuck decode
+            still trips it, while a slow healthy generation no longer
+            gets killed at the cap.
         """
         # Reasoning models legitimately deliberate for minutes; raise
         # the watchdog floor so it doesn't fire mid-think.
@@ -621,19 +676,30 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # worker still stops at its next token instead of running on as
         # a zombie that corrupts the shared KV cache.
         self._abort_flag.clear()
-        uncancellable_event = threading.Event()
+        # Re-arm the beacon: restart the no-progress timer AND clear
+        # the first-touch mark so this call's TTFT is its own, not the
+        # previous generation's.
+        self._progress.reset()
+        started = time.perf_counter()
         try:
-            return super().call(
+            out = super().call(
                 formatted,
-                uncancellable_event,
+                interrupt_event,
                 stale_timeout=stale_timeout,
                 on_heartbeat=on_heartbeat,
-                # Stop generation cleanly on stall; wait briefly for the
-                # worker to finish so the shared model stays usable.
+                # Stop generation cleanly on stall/interrupt; wait
+                # briefly for the worker to finish so the shared model
+                # stays usable.
                 on_abandon=self._abort_flag.set,
                 join_on_abandon=_ABORT_JOIN_S,
+                progress=self._progress,
                 **kwargs,
             )
+            # First logits-processor touch = first sampled token →
+            # real TTFT (≈ prefill time on the local backend).
+            if self._progress.first is not None:
+                self.last_ttft_s = max(0.0, self._progress.first - started)
+            return out
         except (StaleCallTimeout, AgentInterrupted):
             # The decode was aborted mid-generation. Even after the
             # worker stops, llama-cpp's internal batch/KV state is left
@@ -700,6 +766,17 @@ class LocalLlamaAdapter(OpenAIAdapter):
         if "<think>" in text:
             stripped = strip_think_blocks(text)
             message["content"] = stripped or None
+            # Thinking-budget exhaustion: the whole output allowance
+            # went into deliberation and nothing surfaced after the
+            # think block. Deterministic — a "continue" nudge just
+            # buys more thinking, so tag it for the loop to surface
+            # plainly instead of retrying.
+            if (
+                not stripped
+                and message.get("finish_reason") == "length"
+                and not (message.get("tool_calls") or [])
+            ):
+                message["finish_reason"] = "thinking_exhausted"
             text = stripped
         # Cheap pre-filter: skip the drift parser only when the text
         # can't possibly hold a tool call. A tool call always contains
@@ -755,8 +832,6 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # llama-cpp's chat handlers vary per-model on parallel tool
         # calling; the drift parser handles the multi-call case from
         # text either way. Report only what the wire format guarantees.
-        if feature == "streaming":
-            return self.streaming
         return False
 
     def health_check(self) -> dict[str, Any]:

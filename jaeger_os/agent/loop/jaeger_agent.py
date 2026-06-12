@@ -17,6 +17,7 @@ constructs its own ``JaegerAgent``.
 
 from __future__ import annotations
 
+import re as _re
 import threading
 import time
 from typing import Any
@@ -29,11 +30,12 @@ from jaeger_os.agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
 from jaeger_os.agent.loop.loop_backstop import (
     call_signature,
     loop_halt_reason,
+    loop_warning,
     semantic_failure_signature,
 )
 from jaeger_os.agent.schemas.message_types import Message, ToolCall
-from jaeger_os.agent.schemas.tool_registry import get_tool, get_tools, has_tool
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.agent.schemas.tool_registry import get_tools
+from jaeger_os.agent.schemas.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_os.agent.util.context_guard import ContextGuard, ContextOverflow
 
 
@@ -79,16 +81,24 @@ class JaegerAgent:
         # filters this per access through :func:`tool_visible` so a
         # mid-session ``load_toolset`` call expands what the model sees
         # on the very next turn — without rebuilding the agent.
+        # Beta gating: tools marked ``beta=True`` (still stabilising —
+        # avatar / animation while Mochi is the testbed) are excluded
+        # from the catalogue entirely unless dev mode is on, so a
+        # half-tested tool can't break a daily-driver session. An
+        # explicit ``tools=[...]`` list bypasses the gate — the caller
+        # picked those ToolDefs deliberately.
         if tools is not None:
             self._all_tools: list[ToolDef] = list(tools)
             self._tools_filter_locked = True   # explicit list = caller knows best
         elif toolsets is not None:
             from jaeger_os.agent.schemas.toolsets import resolve_toolsets
             wanted = resolve_toolsets(set(toolsets))
-            self._all_tools = [t for t in get_tools() if t.name in wanted]
+            self._all_tools = _exclude_beta(
+                [t for t in get_tools() if t.name in wanted]
+            )
             self._tools_filter_locked = False
         else:
-            self._all_tools = get_tools()
+            self._all_tools = _exclude_beta(get_tools())
             self._tools_filter_locked = False
         # Per-agent dispatch map. ``_dispatch_one_tool`` previously
         # resolved by name against the *global* registry — so an agent
@@ -96,8 +106,9 @@ class JaegerAgent:
         # still happily dispatch any other globally registered tool
         # the model named. Building the map from ``_all_tools`` here
         # binds dispatch to the agent's *intended* set.
-        # The map is recomputed on demand whenever the visible set
-        # shifts (see ``_refresh_dispatch_map``).
+        # The map is rebuilt at the top of every turn (see
+        # ``_refresh_tool_catalog``) so tools registered mid-session
+        # become dispatchable without rebuilding the agent.
         self._dispatch_by_name: dict[str, ToolDef] = {
             t.name: t for t in self._all_tools
         }
@@ -124,14 +135,41 @@ class JaegerAgent:
         # None default disables the guard (legacy callers / tests).
         self.context_guard: ContextGuard | None = context_guard
 
+        # Mid-turn steering (Hermes ``/steer`` pattern): user text that
+        # arrives WHILE a turn is running queues here and is injected as
+        # a real user message before the next model step — guidance
+        # lands without killing the in-flight work. Survives across
+        # turns: a steer that misses the last model step of one turn
+        # delivers at the top of the next.
+        self._steer_queue: list[str] = []
+        self._steer_lock = threading.Lock()
+        self._turn_active = False
+
         # Running state — fresh per agent, never reused across instances.
         self.messages: list[Message] = []
+        # The Message objects appended during the CURRENT turn, in
+        # order. Tracked by object (not index) because the context
+        # guard can rebind ``self.messages`` to a head-trimmed copy
+        # mid-turn — an index recorded at turn start goes stale the
+        # moment that happens. ``runtime_bridge.drive_one_turn`` reads
+        # ``last_turn_messages`` for the per-turn slice.
+        self._turn_messages: list[Message] = []
         self._interrupt_event = threading.Event()
 
         # Loop-backstop counters. Reset at the start of every turn so a
         # spinning previous turn can't carry over and trip the new one.
         self._call_signature_counts: dict[str, int] = {}
         self._failure_signature_counts: dict[str, int] = {}
+        # (tool, path) → first error line, for file mutations that
+        # failed and were never superseded by a later success on the
+        # same target. Drives the verifier footer on the final answer.
+        self._failed_mutations: dict[tuple[str, str], str] = {}
+        # Last result hash per call signature, for READ tools only.
+        # Identical read calls whose results CHANGE are legitimate
+        # polling (``check_background`` every few seconds) — only a
+        # repeat with the SAME result counts toward the identical-call
+        # halt. Write-side tools keep the strict pre-dispatch count.
+        self._read_result_hashes: dict[str, str] = {}
 
         # Diagnostic surface — populated by the most recent ``run_turn``.
         # ``last_halt_reason`` is None on a clean finish; a string when
@@ -160,6 +198,10 @@ class JaegerAgent:
         # the totals. Reset to 0 at the start of every ``run_turn``.
         self.last_prompt_tokens: int = 0
         self.last_completion_tokens: int = 0
+        # Real time-to-first-token of the turn's FIRST model call (the
+        # routing decision — the latency the operator feels in voice).
+        # None when no adapter reported one.
+        self.last_ttft_s: float | None = None
 
     # ── tool visibility ─────────────────────────────────────────────
 
@@ -209,17 +251,48 @@ class JaegerAgent:
         backstop (identical-call / semantic-failure / runaway-total),
         on ``max_iterations``, or when the model returns a turn with no
         tool calls.
+
+        **Exception contract.** ``self.messages`` is left well-formed
+        on EVERY exit path — including raises. A transcript with a
+        dangling assistant ``tool_calls`` (no matching tool results)
+        or an orphaned user message makes cloud providers 400 on every
+        subsequent call, turning one bad turn into a permanently mute
+        session. So:
+
+          * pre-flight :class:`ContextOverflow` (nothing reached the
+            model yet) rolls the user message back off the history and
+            re-raises — the caller surfaces it, the next turn starts
+            from the pre-turn transcript;
+          * mid-turn ``ContextOverflow`` degrades to a clean halt —
+            un-dispatched tool calls get synthetic "not executed"
+            results, an explanatory assistant message is appended, and
+            its text is returned (no raise);
+          * any other exception repairs the transcript the same way,
+            appends a ``[turn failed: …]`` assistant note, then
+            re-raises for the caller to surface.
         """
         # Fresh per-turn state. Counters from a previous turn would
         # falsely trip the backstop on the second message of a session.
         self._call_signature_counts.clear()
         self._failure_signature_counts.clear()
+        self._read_result_hashes.clear()
         self._interrupt_event.clear()
+        self._turn_messages = []
+        self._post_tool_nudge_used = False
+        self._nudge_pending = False
+        self._failed_mutations.clear()
         self.last_halt_reason = None
         self.last_iteration_count = 0
         self.last_skip_final = False
         self.last_prompt_tokens = 0
         self.last_completion_tokens = 0
+        self.last_ttft_s = None
+
+        # Pick up tools registered since construction (a skill
+        # activated mid-session) so they're visible AND dispatchable
+        # without rebuilding the agent. No-op for explicit ``tools=``
+        # agents.
+        self._refresh_tool_catalog()
 
         # Per-turn dedupe trackers in tool modules (file_read's
         # "unchanged since last read" suppression in particular). The
@@ -232,8 +305,57 @@ class JaegerAgent:
         except Exception:  # noqa: BLE001 — never break a turn over a reset
             pass
 
-        self.messages.append({"role": "user", "content": user_message})
+        self._append_message({"role": "user", "content": user_message})
+        self._turn_active = True
+        try:
+            return self._run_turn_inner(user_message)
+        except ContextOverflow:
+            if len(self._turn_messages) <= 1:
+                # Pre-flight refusal — the model never saw this turn.
+                # Roll the user message back so a too-big prompt isn't
+                # sticky: with it left in place, every later turn
+                # re-fails on the same un-trimmable history.
+                self._pop_message()
+                raise
+            # Mid-turn: tool results already landed, the in-flight turn
+            # itself outgrew the window. Halt cleanly instead of
+            # raising — side effects happened, the operator deserves an
+            # answer that says so rather than a backtrace.
+            self._discard_pending_nudge()
+            self._close_dangling_tool_calls("context overflow mid-turn")
+            self.last_halt_reason = "context_overflow"
+            note = (
+                "[I had to stop mid-task: the conversation plus tool "
+                "results no longer fit the model's context window. "
+                "The work done so far is recorded above.]"
+            )
+            self._append_message({"role": "assistant", "content": note})
+            return note
+        except AgentInterrupted:
+            # Belt-and-braces: ``_one_model_step`` converts interrupts
+            # to a halt internally, but a stray raise (custom adapter)
+            # must not leave the transcript broken.
+            self.last_halt_reason = "interrupted"
+            return self._halt_turn()
+        except Exception as exc:
+            # Adapter chain exhausted, dispatch-layer crash, anything
+            # unexpected: repair the transcript so the NEXT turn can
+            # format cleanly, leave a visible failure note, then let
+            # the caller surface the error.
+            self._discard_pending_nudge()
+            self._close_dangling_tool_calls(
+                f"turn failed ({type(exc).__name__})"
+            )
+            if self.last_halt_reason is None:
+                self.last_halt_reason = f"error: {type(exc).__name__}"
+            note = f"[turn failed: {type(exc).__name__}: {exc}]"
+            self._append_message({"role": "assistant", "content": note[:500]})
+            raise
+        finally:
+            self._turn_active = False
 
+    def _run_turn_inner(self, user_message: str) -> str:
+        """The actual loop body — see :meth:`run_turn` for the contract."""
         tool_calls_made = 0
         for iteration in range(1, self.max_iterations + 1):
             self.last_iteration_count = iteration
@@ -242,6 +364,10 @@ class JaegerAgent:
                 self.last_halt_reason = "interrupted"
                 break
 
+            # Deliver any mid-turn steering before the model step so
+            # the very next call sees the user's course correction.
+            self._drain_steers()
+
             # 1-3: format → call → parse, with Phase-8 retry on length
             # truncation (max-tokens hit). Truncated tool calls get one
             # silent retry; truncated text gets up to 3 continuation
@@ -249,20 +375,72 @@ class JaegerAgent:
             # final assistant message after the retry chain settles.
             assistant_msg = self._one_model_step_with_length_retry()
 
+            # The post-tool nudge (below) is synthetic — once the model
+            # has seen it, take it back off the history so the visible
+            # transcript carries only real turns.
+            self._discard_pending_nudge()
+
             if self._interrupt_event.is_set():
                 self.last_halt_reason = "interrupted"
-                return self._final_text_or_halt()
+                return self._halt_turn()
 
             # 4: append. The model can hold both text and tool_calls in
             # the same message (e.g. "I'll check that — call X"), so we
             # always append before deciding next steps.
-            self.messages.append(assistant_msg)
+            tool_calls = assistant_msg.get("tool_calls") or []
+            final_text = assistant_msg.get("content") or ""
+            if not tool_calls and not final_text.strip():
+                # Reasoning budget exhausted: the model spent its whole
+                # output allowance inside <think> and never surfaced an
+                # answer. Deterministic provider/model limit — nudging
+                # or retrying produces the same outcome, so surface it
+                # plainly instead (Hermes thinking-exhaustion pattern).
+                if assistant_msg.get("finish_reason") == "thinking_exhausted":
+                    note = (
+                        "[the model spent its entire output budget "
+                        "thinking and never reached an answer — ask "
+                        "more narrowly, or raise model.max_tokens]"
+                    )
+                    exhausted = {**assistant_msg, "content": note}
+                    self._append_message(exhausted)
+                    self.callbacks.on_step(iteration, exhausted)
+                    self.last_halt_reason = "thinking_exhausted"
+                    return note
+                # A genuinely empty response (whitespace text, no
+                # calls). Right after a tool batch this is the classic
+                # weak-local-model stall — one synthetic nudge usually
+                # unsticks it (Hermes pattern). Only once per turn.
+                prev = self._turn_messages[-1] if self._turn_messages else None
+                if (
+                    not self._post_tool_nudge_used
+                    and prev is not None
+                    and prev.get("role") == "tool"
+                ):
+                    self._post_tool_nudge_used = True
+                    self._nudge_pending = True
+                    self._append_message({
+                        "role": "user", "content": self._POST_TOOL_NUDGE,
+                    })
+                    self.callbacks.on_thinking(
+                        "[empty response after tool results — nudging once]"
+                    )
+                    continue
+                # No nudge available: an empty assistant message poisons
+                # the transcript — Anthropic rejects empty text blocks
+                # on every later call — so store a placeholder while
+                # returning "" to the caller (nothing speakable
+                # happened).
+                assistant_msg = {**assistant_msg, "content": "[empty response]"}
+                self._append_message(assistant_msg)
+                self.callbacks.on_step(iteration, assistant_msg)
+                self.last_halt_reason = "empty_response"
+                return ""
+            self._append_message(assistant_msg)
             self.callbacks.on_step(iteration, assistant_msg)
 
-            tool_calls = assistant_msg.get("tool_calls") or []
             if not tool_calls:
                 # 5: model produced a final answer.
-                return assistant_msg.get("content") or ""
+                return self._apply_mutation_footer(final_text)
 
             # 5a: skip-final short-circuit. When the FIRST iteration
             # returns exactly one tool call to a deterministic tool, the
@@ -296,12 +474,66 @@ class JaegerAgent:
                     user_message,
                 )
 
-            # 6: dispatch every tool call, append each result.
+            # 6: dispatch every tool call, append each result. Identical
+            # READ calls within the same batch dedupe to one dispatch —
+            # models occasionally emit the same read twice in one
+            # message; recomputing wastes a call and re-bloats context.
+            # Write-side duplicates dispatch as asked (a double ``speak``
+            # may be intentional).
+            #
+            # 6a: ALL-READ batches (>1 call, every tool explicitly
+            # ``side_effect="read"``, none interactive) execute
+            # CONCURRENTLY — wall-clock becomes the slowest call
+            # instead of the sum (Hermes tool_executor pattern, gated
+            # to the provably safe subset). Anything else stays
+            # sequential.
+            if self._batch_is_parallel_safe(tool_calls):
+                tool_calls_made += len(tool_calls)
+                self._dispatch_parallel(tool_calls)
+                if self._interrupt_event.is_set():
+                    self.last_halt_reason = "interrupted"
+                    return self._halt_turn()
+                halt = loop_halt_reason(
+                    tool_calls_made,
+                    self._call_signature_counts,
+                    self._failure_signature_counts,
+                )
+                if halt:
+                    self.last_halt_reason = halt
+                    return self._halt_turn()
+                continue
+
+            seen_in_batch: dict[str, str] = {}
             for tc in tool_calls:
                 tool_calls_made += 1
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
-                    return self._final_text_or_halt()
+                    return self._halt_turn()
+
+                dup_sig = call_signature(
+                    tc.get("name") or "", tc.get("arguments") or {},
+                )
+                tdef = self._dispatch_by_name.get(tc.get("name") or "")
+                if (
+                    tdef is not None
+                    and getattr(tdef, "side_effect", "") == "read"
+                    and dup_sig in seen_in_batch
+                ):
+                    self._append_message({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id") or "",
+                        "name": tc.get("name") or "",
+                        "content": _stringify({
+                            "ok": True,
+                            "duplicate_of": seen_in_batch[dup_sig],
+                            "note": (
+                                "identical call deduplicated this "
+                                "iteration — see that result"
+                            ),
+                        }),
+                    })
+                    continue
+                seen_in_batch[dup_sig] = tc.get("id") or "(first)"
 
                 self._dispatch_one_tool(tc)
 
@@ -316,15 +548,18 @@ class JaegerAgent:
                 )
                 if halt:
                     self.last_halt_reason = halt
-                    return self._final_text_or_halt()
+                    return self._halt_turn()
 
         # Fell out of the for-loop: max_iterations exhausted with the
-        # model still trying to use tools.
+        # model still trying to use tools. Spend ONE toolless grace
+        # call asking the model to wrap up — a spoken summary of what
+        # happened beats "[halted: hit max_iterations]" every time.
         if self.last_halt_reason is None:
             self.last_halt_reason = (
                 f"hit max_iterations={self.max_iterations} without a final answer"
             )
-        return self._final_text_or_halt()
+            return self._wind_down_summary()
+        return self._halt_turn()
 
     def interrupt(self) -> None:
         """Signal the loop to bail at the next safe point. Idempotent —
@@ -333,6 +568,42 @@ class JaegerAgent:
         can't kill the next turn."""
         self._interrupt_event.set()
         self.callbacks.on_interrupt()
+
+    def steer(self, text: str) -> bool:
+        """Inject user guidance into the RUNNING turn without killing
+        it. The text lands as a real user message before the next model
+        step — "actually use metric units", "skip the third file" —
+        steering the in-flight work instead of restarting it.
+
+        Returns ``True`` when a turn is active and the steer was
+        queued; ``False`` when no turn is running (the caller should
+        deliver the text as an ordinary message instead). Thread-safe —
+        this is called from the voice/TUI thread while ``run_turn``
+        owns the worker thread."""
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return False
+        if not self._turn_active:
+            return False
+        with self._steer_lock:
+            self._steer_queue.append(cleaned)
+        self.touch_activity("steer queued")
+        return True
+
+    def _drain_steers(self) -> None:
+        """Move queued steer texts into the conversation as user
+        messages. Called at the top of every loop iteration, so a steer
+        is seen by the very next model step."""
+        with self._steer_lock:
+            if not self._steer_queue:
+                return
+            items = list(self._steer_queue)
+            self._steer_queue.clear()
+        for text in items:
+            self._append_message({"role": "user", "content": text})
+            self.callbacks.on_thinking(
+                f"[mid-turn steer injected: {text[:80]}]"
+            )
 
     def reset_interrupt(self) -> None:
         """Clear the interrupt event manually. ``run_turn`` does this on
@@ -367,6 +638,176 @@ class JaegerAgent:
 
     # ── internals ───────────────────────────────────────────────────
 
+    # ── turn bookkeeping ────────────────────────────────────────────
+
+    @property
+    def last_turn_messages(self) -> list[Message]:
+        """The ``Message`` objects produced by the most recent turn, in
+        order (user message included). Stable across mid-turn context
+        trims — callers must NOT slice ``self.messages`` by a length
+        recorded at turn start, because the context guard rebinds the
+        list to a head-trimmed copy when the prompt outgrows the
+        window."""
+        return list(self._turn_messages)
+
+    def _append_message(self, msg: Message) -> None:
+        """Append to the conversation AND the per-turn record. Every
+        in-turn append goes through here so the two stay in lockstep."""
+        self.messages.append(msg)
+        self._turn_messages.append(msg)
+
+    def _pop_message(self) -> None:
+        """Remove the most recent in-turn message from both records.
+        Used by the length-retry path (synthetic nudge turns) and the
+        pre-flight overflow rollback."""
+        if self._turn_messages:
+            tail = self._turn_messages.pop()
+            # The same object is the conversation tail unless something
+            # exotic mutated history mid-turn; guard rather than assume.
+            if self.messages and self.messages[-1] is tail:
+                self.messages.pop()
+            elif tail in self.messages:
+                self.messages.remove(tail)
+
+    def _close_dangling_tool_calls(self, reason: str) -> None:
+        """Append synthetic tool results for any tool calls in this
+        turn that never got one.
+
+        An assistant message whose ``tool_calls`` lack matching tool
+        results is a transcript poison pill: OpenAI and Anthropic both
+        400 on the NEXT call, and since the broken pair sits at the
+        recent end of history (the trim drops oldest-first), every
+        subsequent turn fails identically until restart. This runs on
+        every early exit — interrupt, backstop halt, exception — so
+        the next turn always formats cleanly.
+
+        Only the LAST assistant message can be partially serviced
+        (dispatch is sequential within an iteration), and its results
+        land in call order, so the un-serviced calls are exactly the
+        tail beyond the appended result count.
+        """
+        last_assistant: Message | None = None
+        results_after = 0
+        for msg in self._turn_messages:
+            role = msg.get("role")
+            if role == "assistant" and (msg.get("tool_calls") or []):
+                last_assistant = msg
+                results_after = 0
+            elif role == "tool" and last_assistant is not None:
+                results_after += 1
+        if last_assistant is None:
+            return
+        pending = (last_assistant.get("tool_calls") or [])[results_after:]
+        for tc in pending:
+            self._append_message({
+                "role": "tool",
+                "tool_call_id": tc.get("id") or "",
+                "name": tc.get("name") or "",
+                "content": _stringify({
+                    "ok": False,
+                    "error": f"not executed — {reason}",
+                    "error_type": "cancelled",
+                    "retryable": False,
+                }),
+            })
+
+    def _apply_mutation_footer(self, text: str) -> str:
+        """Append a verifier footer when file mutations failed this
+        turn and were never superseded — the model may still CLAIM the
+        edits landed, and the operator deserves the contradiction in
+        the same breath (Hermes file-mutation-verifier pattern)."""
+        if not self._failed_mutations or not text:
+            return text
+        notes = "; ".join(
+            f"{tool}({path or '?'}): {err}"
+            for (tool, path), err in list(self._failed_mutations.items())[:4]
+        )
+        return (
+            f"{text}\n\n[file-ops warning: "
+            f"{len(self._failed_mutations)} file operation(s) did NOT "
+            f"land — {notes}. Verify before trusting any claim of "
+            f"success above.]"
+        )
+
+    def _halt_turn(self) -> str:
+        """Common early-exit path: repair the transcript (synthetic
+        results for un-dispatched tool calls), then hand back the best
+        available text for this turn."""
+        self._discard_pending_nudge()
+        self._close_dangling_tool_calls(
+            self.last_halt_reason or "turn halted"
+        )
+        return self._final_text_or_halt()
+
+    def _discard_pending_nudge(self) -> None:
+        """Remove the synthetic post-tool nudge from history once the
+        model has answered it (or the turn is bailing). The nudge is
+        plumbing, not user-authored content — it must never persist."""
+        if not self._nudge_pending:
+            return
+        self._nudge_pending = False
+        tail = self._turn_messages[-1] if self._turn_messages else None
+        if tail is not None and tail.get("content") == self._POST_TOOL_NUDGE:
+            self._pop_message()
+
+    def _wind_down_summary(self) -> str:
+        """Iteration budget exhausted: ask the model — WITHOUT tools —
+        to summarise progress in one short reply. The synthetic prompt
+        comes back off the history; the summary stays as the turn's
+        final assistant message. Any failure degrades to the plain
+        halt path."""
+        self._close_dangling_tool_calls(self.last_halt_reason or "budget")
+        self._append_message({
+            "role": "user", "content": self._WIND_DOWN_PROMPT,
+        })
+        self.callbacks.on_thinking(
+            "[iteration budget exhausted — asking the model to wrap up]"
+        )
+        prev_locked = self._tools_filter_locked
+        prev_tools = self._all_tools
+        self._tools_filter_locked = True
+        self._all_tools = []
+        try:
+            msg = self._one_model_step()
+        except Exception:  # noqa: BLE001 — grace call is best-effort
+            msg = None
+        finally:
+            self._tools_filter_locked = prev_locked
+            self._all_tools = prev_tools
+            self._pop_message()  # the synthetic wind-down prompt
+        text = ((msg or {}).get("content") or "").strip()
+        if text:
+            text = self._apply_mutation_footer(text)
+            summary = {"role": "assistant", "content": text}
+            self._append_message(summary)
+            self.callbacks.on_step(self.last_iteration_count + 1, summary)
+            return text
+        return self._halt_turn()
+
+    def _refresh_tool_catalog(self) -> None:
+        """Pick up tools registered AFTER this agent was built (skill
+        installed / activated mid-session) so they become visible and
+        dispatchable on the next turn. Honours the construction
+        contract: an explicit ``tools=[...]`` allowlist never grows;
+        a ``toolsets=`` agent re-resolves its categories; a default
+        agent tracks the full registry. Beta tools stay excluded
+        outside dev mode (re-checked per turn, so flipping
+        ``JAEGER_DEV_MODE`` doesn't need an agent rebuild)."""
+        if self._tools_filter_locked:
+            return
+        try:
+            if self.toolsets:
+                from jaeger_os.agent.schemas.toolsets import resolve_toolsets
+                wanted = resolve_toolsets(set(self.toolsets))
+                self._all_tools = _exclude_beta(
+                    [t for t in get_tools() if t.name in wanted]
+                )
+            else:
+                self._all_tools = _exclude_beta(get_tools())
+            self._dispatch_by_name = {t.name: t for t in self._all_tools}
+        except Exception:  # noqa: BLE001 — a registry hiccup must not kill the turn
+            pass
+
     # ── retry policy constants ──────────────────────────────────────
     #
     # Max number of "continue from where you stopped" nudges allowed
@@ -383,6 +824,25 @@ class JaegerAgent:
         "Your previous response was cut off because it hit the output "
         "token limit. Continue from exactly where you stopped — no "
         "preamble, no restatement, just the next characters."
+    )
+    # One-shot recovery for the "silent after tool results" failure mode
+    # (weak local models — Qwen, GLM — routinely return empty content
+    # right after a tool batch). The nudge is synthetic and removed from
+    # history once the model answers; it never persists.
+    _POST_TOOL_NUDGE = (
+        "Your last response was empty. Read the tool results above and "
+        "continue the task — produce your answer now, or make the next "
+        "tool call if more work is needed."
+    )
+    # Wind-down grace call at iteration exhaustion (Hermes pattern):
+    # instead of handing the user a bare \"[halted: hit max_iterations]\",
+    # spend ONE extra toolless call asking the model to wrap up. The
+    # synthetic prompt is removed from history; the summary stays.
+    _WIND_DOWN_PROMPT = (
+        "You have reached the tool-call budget for this turn. Stop "
+        "using tools now. In one short reply: summarise what you "
+        "accomplished, what remains undone, and the single next step "
+        "you would take."
     )
 
     def _one_model_step_with_length_retry(self) -> Message:
@@ -437,8 +897,8 @@ class JaegerAgent:
             accumulated_text.append(partial)
             # Stash the partial as a real assistant message so the
             # next call sees it, then nudge as a user turn.
-            self.messages.append({"role": "assistant", "content": partial})
-            self.messages.append({
+            self._append_message({"role": "assistant", "content": partial})
+            self._append_message({
                 "role": "user", "content": self._LENGTH_CONTINUE_NUDGE,
             })
             self.callbacks.on_thinking(
@@ -446,12 +906,16 @@ class JaegerAgent:
                 f"{retries + 1}/{self._MAX_LENGTH_CONTINUE_RETRIES}]"
             )
             retries += 1
-            msg = self._one_model_step()
-            # Trim the synthetic nudge turns back off the history so
-            # the visible transcript only carries the final stitched
-            # message — the nudges aren't user-authored content.
-            self.messages.pop()  # the nudge user turn
-            self.messages.pop()  # the partial assistant turn
+            try:
+                msg = self._one_model_step()
+            finally:
+                # Trim the synthetic nudge turns back off the history
+                # so the visible transcript only carries the final
+                # stitched message — the nudges aren't user-authored
+                # content. In a ``finally`` so an adapter exception
+                # can't leave the synthetic turns stuck in history.
+                self._pop_message()  # the nudge user turn
+                self._pop_message()  # the partial assistant turn
 
         if accumulated_text:
             stitched = "".join(accumulated_text) + (msg.get("content") or "")
@@ -473,40 +937,69 @@ class JaegerAgent:
         self.last_activity_ts = time.time()
         self.last_activity_desc = desc
 
-    def _accumulate_usage(self, raw: Any) -> None:
+    def _accumulate_usage(self, raw: Any) -> int:
         """Extract token usage from an adapter's raw response and add
-        to the per-turn counters. Best-effort: adapters that don't
-        report usage just contribute zero. Three known shapes:
+        to the per-turn counters. Returns THIS call's prompt-token
+        count (0 when unavailable) so the context guard can calibrate
+        its estimator from real usage. Best-effort: adapters that
+        don't report usage just contribute zero. Known shapes:
 
           * OpenAI / llama-cpp:
               ``raw["usage"] = {"prompt_tokens": N, "completion_tokens": N}``
-          * Anthropic:
-              ``raw["usage"] = {"input_tokens": N, "output_tokens": N}``
-          * Local-llama umbrella + others: no usage field → no-op
+          * Anthropic (typed object or dict):
+              ``usage = {"input_tokens": N, "output_tokens": N,
+                         "cache_read_input_tokens": N,
+                         "cache_creation_input_tokens": N}``
+
+        Anthropic reports CACHED prompt tokens separately from
+        ``input_tokens`` — ignoring them undercounted the real prompt
+        size by whatever the cache served, which skewed both the cost
+        telemetry and the guard calibration.
 
         Never raises — token-counting is observability, not control
         flow, so a malformed response must not break the turn.
         """
-        if not isinstance(raw, dict):
-            return
-        usage = raw.get("usage")
-        if not isinstance(usage, dict):
-            return
+        usage: Any = None
+        if isinstance(raw, dict):
+            usage = raw.get("usage")
+        else:
+            usage = getattr(raw, "usage", None)
+        if usage is None:
+            return 0
+
+        def _get(key: str) -> Any:
+            if isinstance(usage, dict):
+                return usage.get(key)
+            return getattr(usage, key, None)
+
         # OpenAI / llama-cpp style.
-        p = usage.get("prompt_tokens")
-        c = usage.get("completion_tokens")
-        # Anthropic style.
+        p = _get("prompt_tokens")
+        c = _get("completion_tokens")
+        # Anthropic style — input_tokens EXCLUDES cache reads/writes;
+        # fold them back in so the count reflects the full prompt.
         if p is None:
-            p = usage.get("input_tokens")
+            p = _get("input_tokens")
+            for cache_key in (
+                "cache_read_input_tokens", "cache_creation_input_tokens",
+            ):
+                extra = _get(cache_key)
+                try:
+                    if p is not None and extra:
+                        p = int(p) + int(extra)
+                except (TypeError, ValueError):
+                    pass
         if c is None:
-            c = usage.get("output_tokens")
+            c = _get("output_tokens")
+        per_call_prompt = 0
         try:
             if p is not None:
-                self.last_prompt_tokens += int(p)
+                per_call_prompt = int(p)
+                self.last_prompt_tokens += per_call_prompt
             if c is not None:
                 self.last_completion_tokens += int(c)
         except (TypeError, ValueError):
-            return
+            return 0
+        return per_call_prompt
 
     # ── stale-call timeout (Phase-8) ───────────────────────────────
     # When a provider's HTTP socket is open but no bytes are flowing,
@@ -516,86 +1009,176 @@ class JaegerAgent:
     # to disable and rely on SDK timeouts only.
     stale_call_timeout_s: float | None = 30.0
 
-    def _one_model_step(self) -> Message:
-        """Format → call → parse, with adapter fallback on hard errors.
+    # Per-adapter retry caps by error class (Hermes error-classifier
+    # pattern, scaled down for a voice agent where long waits are dead
+    # air). AUTH / NOT_FOUND never retry the same adapter — the result
+    # is deterministic; the fallback chain is the recovery. UNKNOWN is
+    # conservative: straight to fallback, as before.
+    _RATE_LIMIT_RETRIES = 2
+    _TRANSIENT_RETRIES = 1
 
-        The primary adapter is tried first; on a raised exception we walk
-        the fallback list in order. ``AgentInterrupted`` short-circuits
-        the chain — that's the operator cancelling, not a backend
-        failure. ``StaleCallTimeout`` is treated like any other
-        adapter exception — the fallback chain gets a chance.
+    def _one_model_step(self) -> Message:
+        """Format → call → parse, with classified retry + adapter
+        fallback.
+
+        The primary adapter is tried first. A raised exception is
+        classified (``cloud_errors.classify_exception``): RATE_LIMIT
+        and TRANSIENT retry the SAME adapter with jittered backoff
+        (the previous behaviour — any exception → next adapter — turned
+        a 2-second 429 blip into a provider switch); AUTH / NOT_FOUND /
+        UNKNOWN move straight to the next adapter. Backoff sleeps wait
+        on the interrupt event, so a barge-in cuts the wait short.
+        ``AgentInterrupted`` short-circuits the chain — that's the
+        operator cancelling, not a backend failure. ``StaleCallTimeout``
+        moves to the next adapter without retry — the stale window was
+        already burned once.
         """
         adapters = [self.primary_adapter, *self.fallback_adapters]
-        # Pre-flight context guard. Trim oldest history until the
-        # prompt fits the server's ctx window; if even max trimming
-        # can't fit, the guard raises ``ContextOverflow`` and we
-        # surface that to the caller without hitting the model.
-        if self.context_guard is not None:
-            try:
-                trim = self.context_guard.trim_to_fit(
-                    self.messages,
-                    system_prompt=self.system_prompt,
-                    tools=self.tools,
-                )
-            except ContextOverflow:
-                raise
-            if trim.dropped_count > 0:
+
+        def _pre_flight_trim() -> None:
+            # Pre-flight context guard. Prune/digest/drop history until
+            # the prompt fits the ctx window; if even max compaction
+            # can't fit, the guard raises ``ContextOverflow`` and we
+            # surface that to the caller without hitting the model.
+            # Called once up front AND again after a reactive
+            # ``tighten()`` so the retry actually sends a smaller
+            # prompt.
+            if self.context_guard is None:
+                return
+            trim = self.context_guard.trim_to_fit(
+                self.messages,
+                system_prompt=self.system_prompt,
+                tools=self.tools,
+            )
+            if trim.dropped_count > 0 or trim.pruned_count > 0:
                 self.callbacks.on_thinking(
-                    f"[context-guard] trimmed {trim.dropped_count} old "
+                    f"[context-guard] pruned {trim.pruned_count} tool "
+                    f"result(s), dropped {trim.dropped_count} old "
                     f"message(s) to fit ctx budget"
                 )
                 self.messages = trim.messages
 
+        _pre_flight_trim()
+
+        # Scrub lone surrogates before the wire sees the transcript —
+        # one poisoned paste otherwise crashes json.dumps in the SDK on
+        # every later call.
+        _scrub_surrogates_in_messages(self.messages)
+
         last_exc: Exception | None = None
+        # One reactive-compaction retry per model step: when a SERVER
+        # rejects the prompt as too large (our estimator was too
+        # optimistic), tighten the estimator and retry — re-running the
+        # pre-flight trim with pessimistic numbers drops more history.
+        # Walking the fallback chain with the same oversized prompt is
+        # pointless; tightening fixes the actual cause.
+        overflow_tightened = False
         for adapter in adapters:
-            try:
-                formatted = adapter.format_messages(
-                    self.messages, self.tools, self.system_prompt,
-                )
-                raw = adapter.call(
-                    formatted,
-                    self._interrupt_event,
-                    stale_timeout=self.stale_call_timeout_s,
-                    on_heartbeat=self._on_call_heartbeat,
-                )
-                self._accumulate_usage(raw)
-                return adapter.parse_response(raw)
-            except AgentInterrupted:
-                # Interrupt propagates — handled by ``run_turn`` via the
-                # event check at the top of the next iteration. Set the
-                # halt reason here so observers (TUI status, latency log,
-                # voice loop's "cancel actually took effect" check) can
-                # distinguish a user cancel from a clean finish even
-                # though run_turn returns whatever text was assembled.
-                self._interrupt_event.set()
-                self.last_halt_reason = "interrupted"
-                return {"role": "assistant", "content": None}
-            except StaleCallTimeout as exc:
-                # Model stalled past the wall-clock budget. For
-                # in-process backends the worker thread is still
-                # running (we cannot safely cancel llama.cpp mid-decode
-                # — see LocalLlamaAdapter.call), so the next adapter in
-                # the fallback chain will inherit a degraded Llama
-                # instance. We still propagate via the fallback chain
-                # so an HTTP fallback (if configured) can pick up; if
-                # this was the last adapter the message reaches the
-                # caller with a clean ``stalled`` halt reason rather
-                # than a generic exception.
-                last_exc = exc
-                self.last_halt_reason = "stalled"
-                self.callbacks.on_thinking(
-                    f"[adapter {adapter.describe()} stalled after "
-                    f"{self.stale_call_timeout_s:.0f}s; "
-                    f"try ``jaeger kill`` from another terminal "
-                    f"if the TUI feels stuck]"
-                )
-                continue
-            except Exception as exc:  # noqa: BLE001 — adapter chain absorbs
-                last_exc = exc
-                self.callbacks.on_thinking(
-                    f"[adapter {adapter.describe()} failed: {type(exc).__name__}]"
-                )
-                continue
+            attempt = 0
+            while True:
+                try:
+                    formatted = adapter.format_messages(
+                        self.messages, self.tools, self.system_prompt,
+                    )
+                    raw = adapter.call(
+                        formatted,
+                        self._interrupt_event,
+                        stale_timeout=self.stale_call_timeout_s,
+                        on_heartbeat=self._on_call_heartbeat,
+                        # Token-level deltas for live consumers (TTS
+                        # sentence-chunking, TUI streaming). None when
+                        # nobody is listening so adapters skip the
+                        # per-chunk callback cost entirely.
+                        on_delta=(
+                            self.callbacks.on_stream_delta
+                            if self.callbacks.stream_delta is not None
+                            else None
+                        ),
+                    )
+                    if self.last_ttft_s is None:
+                        adapter_ttft = getattr(adapter, "last_ttft_s", None)
+                        if adapter_ttft:
+                            self.last_ttft_s = float(adapter_ttft)
+                    per_call_prompt = self._accumulate_usage(raw)
+                    if self.context_guard is not None and per_call_prompt:
+                        try:
+                            self.context_guard.observed_call(
+                                per_call_prompt,
+                                self.messages,
+                                system_prompt=self.system_prompt,
+                                tools=self.tools,
+                            )
+                        except Exception:  # noqa: BLE001 — calibration is best-effort
+                            pass
+                    return adapter.parse_response(raw)
+                except AgentInterrupted:
+                    # Interrupt propagates — handled by ``run_turn`` via
+                    # the event check at the top of the next iteration.
+                    # Set the halt reason here so observers (TUI status,
+                    # latency log, voice loop's "cancel actually took
+                    # effect" check) can distinguish a user cancel from a
+                    # clean finish even though run_turn returns whatever
+                    # text was assembled.
+                    self._interrupt_event.set()
+                    self.last_halt_reason = "interrupted"
+                    return {"role": "assistant", "content": None}
+                except StaleCallTimeout as exc:
+                    # Model stalled past the no-progress budget. For
+                    # in-process backends the abort flag has already
+                    # stopped the decode and reset the context (see
+                    # LocalLlamaAdapter.call); an HTTP fallback (if
+                    # configured) picks up next. If this was the last
+                    # adapter, the caller sees a clean ``stalled`` halt
+                    # reason rather than a generic exception.
+                    last_exc = exc
+                    self.last_halt_reason = "stalled"
+                    self.callbacks.on_thinking(
+                        f"[adapter {adapter.describe()} stalled after "
+                        f"{self.stale_call_timeout_s:.0f}s; "
+                        f"try ``jaeger kill`` from another terminal "
+                        f"if the TUI feels stuck]"
+                    )
+                    break  # next adapter — the stale window was burned
+                except Exception as exc:  # noqa: BLE001 — adapter chain absorbs
+                    last_exc = exc
+                    if (
+                        not overflow_tightened
+                        and self.context_guard is not None
+                        and _looks_like_overflow(exc)
+                    ):
+                        overflow_tightened = True
+                        self.context_guard.tighten()
+                        self.callbacks.on_thinking(
+                            "[server rejected the prompt as too large — "
+                            "tightening the context estimator and "
+                            "re-trimming]"
+                        )
+                        _pre_flight_trim()
+                        continue  # same adapter, freshly trimmed prompt
+                    kind = _classify_adapter_error(exc)
+                    cap = {
+                        "rate_limit": self._RATE_LIMIT_RETRIES,
+                        "transient": self._TRANSIENT_RETRIES,
+                    }.get(kind, 0)
+                    if attempt < cap and not self._interrupt_event.is_set():
+                        attempt += 1
+                        delay = _retry_delay(kind, attempt)
+                        self.callbacks.on_thinking(
+                            f"[adapter {adapter.describe()} "
+                            f"{kind.lower().replace('_', ' ')} — retry "
+                            f"{attempt}/{cap} in {delay:.1f}s]"
+                        )
+                        # Wait ON the interrupt event so a barge-in cuts
+                        # the backoff short instead of sleeping through.
+                        if self._interrupt_event.wait(delay):
+                            self.last_halt_reason = "interrupted"
+                            return {"role": "assistant", "content": None}
+                        continue
+                    self.callbacks.on_thinking(
+                        f"[adapter {adapter.describe()} failed: "
+                        f"{type(exc).__name__} ({kind.lower()})]"
+                    )
+                    break  # next adapter
         # Every adapter raised — surface the last exception so the
         # caller (REPL, daemon) can decide what to do.
         assert last_exc is not None
@@ -607,13 +1190,95 @@ class JaegerAgent:
         messages so the model can self-correct on the next turn rather
         than crashing the whole loop.
 
-        Fires the ``before_tool_call`` / ``after_tool_call`` hooks
-        around the dispatch — the integration seams for
-        :mod:`jaeger_os.core.tool_guardrails` (warn one step before the
-        backstop trips) and :mod:`jaeger_os.core.tool_result_budget`
-        (persist oversized payloads out of the context window). Both
-        currently live in the legacy loop and migrate here in Phase 6.
+        Split into prepare → execute → finish so the parallel path
+        (:meth:`_dispatch_parallel`) can run EXECUTE concurrently for
+        all-read batches while prepare and finish stay serial and
+        ordered (callbacks, backstop counters, and appends are not
+        thread-safe and must observe batch order).
         """
+        prep = self._prepare_dispatch(tc)
+        content = self._execute_prepared(prep)
+        self._finish_dispatch(prep, content)
+
+    def _batch_is_parallel_safe(self, tool_calls: list[ToolCall]) -> bool:
+        """A batch may run concurrently only when EVERY call resolves to
+        a tool explicitly classified ``side_effect="read"`` and not
+        interactive. Unclassified tools are treated as write-side —
+        conservative by construction."""
+        if len(tool_calls) < 2:
+            return False
+        for tc in tool_calls:
+            tool_def = self._dispatch_by_name.get(tc.get("name") or "")
+            if tool_def is None:
+                return False
+            if getattr(tool_def, "side_effect", "") != "read":
+                return False
+            if getattr(tool_def, "interactive", False):
+                return False
+        return True
+
+    def _dispatch_parallel(self, tool_calls: list[ToolCall]) -> None:
+        """Execute an all-read batch concurrently.
+
+        Prepare and finish stay SERIAL and in batch order (callbacks,
+        backstop counters, and the transcript are order-sensitive);
+        only the tool functions themselves run on the pool. Duplicate
+        signatures execute once — later twins reuse the first result
+        via a duplicate marker, same as the sequential path.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        preps = [self._prepare_dispatch(tc) for tc in tool_calls]
+        first_by_sig: dict[str, int] = {}
+        unique_idx: list[int] = []
+        for i, prep in enumerate(preps):
+            if prep["sig"] not in first_by_sig:
+                first_by_sig[prep["sig"]] = i
+                unique_idx.append(i)
+
+        contents: dict[int, Any] = {}
+        with ThreadPoolExecutor(
+            max_workers=min(4, len(unique_idx)),
+            thread_name_prefix="jaeger-tool",
+        ) as pool:
+            futures = {
+                i: pool.submit(self._execute_prepared, preps[i])
+                for i in unique_idx
+            }
+            for i, fut in futures.items():
+                try:
+                    contents[i] = fut.result()
+                except Exception as exc:  # noqa: BLE001 — belt: execute() shouldn't raise
+                    contents[i] = {
+                        "ok": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "error_type": "tool_error",
+                        "retryable": True,
+                    }
+
+        for i, prep in enumerate(preps):
+            owner = first_by_sig[prep["sig"]]
+            if owner == i:
+                self._finish_dispatch(prep, contents[owner])
+            else:
+                self._append_message({
+                    "role": "tool",
+                    "tool_call_id": prep["call_id"],
+                    "name": prep["name"],
+                    "content": _stringify({
+                        "ok": True,
+                        "duplicate_of": preps[owner]["call_id"] or "(first)",
+                        "note": (
+                            "identical call deduplicated this "
+                            "iteration — see that result"
+                        ),
+                    }),
+                })
+
+    def _prepare_dispatch(self, tc: ToolCall) -> dict[str, Any]:
+        """Serial pre-dispatch step: name normalisation, backstop
+        pre-count for write-side tools, start callback, pre-dispatch
+        guardrail hook."""
         name = tc.get("name") or ""
         args = tc.get("arguments") or {}
         call_id = tc.get("id") or ""
@@ -645,19 +1310,46 @@ class JaegerAgent:
             except Exception:  # noqa: BLE001
                 pass
 
-        # Backstop bookkeeping — counted *before* dispatch so a tight
-        # loop trips the ceiling immediately rather than after one
-        # extra wasted call.
+        # Backstop bookkeeping. Write-side tools are counted *before*
+        # dispatch so a tight loop trips the ceiling immediately rather
+        # than after one extra wasted call. READ tools defer to the
+        # post-dispatch result-hash check in ``_finish_dispatch`` —
+        # re-issuing the same read while the answer is CHANGING is
+        # legitimate polling, not a loop, so only a same-result repeat
+        # counts.
         sig = call_signature(name, args)
-        self._call_signature_counts[sig] = self._call_signature_counts.get(sig, 0) + 1
+        tool_def = dispatch_map.get(name)
+        is_read_tool = (
+            tool_def is not None
+            and getattr(tool_def, "side_effect", "") == "read"
+        )
+        if not is_read_tool:
+            self._call_signature_counts[sig] = (
+                self._call_signature_counts.get(sig, 0) + 1
+            )
 
         started = time.perf_counter()
         self.callbacks.on_tool_progress(name, "start", args)
         # Pre-dispatch hook — guardrail returns optional guidance text.
         guidance = self.callbacks.on_before_tool_call(name, args)
+        return {
+            "name": name,
+            "args": args,
+            "call_id": call_id,
+            "sig": sig,
+            "tool_def": tool_def,
+            "is_read": is_read_tool,
+            "guidance": guidance,
+            "started": started,
+        }
 
+    def _execute_prepared(self, prep: dict[str, Any]) -> Any:
+        """The actual tool call — the only part safe to run off-thread
+        for read-only tools. Exceptions become error-result dicts."""
+        name = prep["name"]
+        args = prep["args"]
         try:
-            tool_def = dispatch_map.get(name)
+            tool_def = prep["tool_def"]
             if tool_def is None:
                 content: Any = {
                     "ok": False,
@@ -704,6 +1396,19 @@ class JaegerAgent:
             }
             if required_tier:
                 content["required_tier"] = str(required_tier)
+        return content
+
+    def _finish_dispatch(self, prep: dict[str, Any], content: Any) -> None:
+        """Serial post-dispatch step: truncation, hooks, observability,
+        backstop counting, warning injection, append. Must run in batch
+        order — counters and the transcript are order-sensitive."""
+        name = prep["name"]
+        args = prep["args"]
+        call_id = prep["call_id"]
+        sig = prep["sig"]
+        is_read_tool = prep["is_read"]
+        guidance = prep["guidance"]
+        started = prep["started"]
 
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it
@@ -744,6 +1449,19 @@ class JaegerAgent:
             content, _ok, _err, round(elapsed, 6),
         )
 
+        # File-mutation verifier bookkeeping: remember failures per
+        # (tool, path); a later SUCCESS on the same target supersedes.
+        # Un-superseded failures surface in the final-answer footer.
+        if name in _MUTATION_TOOLS:
+            target = ""
+            if isinstance(args, dict):
+                target = str(args.get("path") or args.get("file") or "")
+            mkey = (name, target)
+            if _ok:
+                self._failed_mutations.pop(mkey, None)
+            else:
+                self._failed_mutations[mkey] = (_err or "failed")[:120]
+
         # Failure-signature tracking — only meaningful when the tool
         # returns an explicit failure dict. Successful calls drop out
         # of this counter via ``semantic_failure_signature``'s None
@@ -754,7 +1472,32 @@ class JaegerAgent:
                 self._failure_signature_counts.get(fail_sig, 0) + 1
             )
 
-        self.messages.append({
+        # Deferred identical-call counting for READ tools: a repeat
+        # only counts when the result is byte-identical to the last
+        # one (no progress). A changed result resets the streak.
+        if is_read_tool:
+            result_hash = _hash_result(content)
+            if self._read_result_hashes.get(sig) == result_hash:
+                self._call_signature_counts[sig] = (
+                    self._call_signature_counts.get(sig, 0) + 1
+                )
+            else:
+                self._read_result_hashes[sig] = result_hash
+                self._call_signature_counts[sig] = 1
+
+        # Warn-before-halt: when this call is one step from tripping
+        # the backstop, ride guidance on the result so the model can
+        # change course instead of dying at the halt. Never blocks.
+        warning = loop_warning(
+            self._call_signature_counts,
+            self._failure_signature_counts,
+            sig=sig,
+            fail_sig=fail_sig,
+        )
+        if warning:
+            content = _merge_guidance(content, warning)
+
+        self._append_message({
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
@@ -786,18 +1529,30 @@ class JaegerAgent:
                 f"[skip-final finalizer failed: {type(exc).__name__}; "
                 f"raw result: {tool_result}]"
             )
-        self.messages.append({"role": "assistant", "content": answer})
+        self._append_message({"role": "assistant", "content": answer})
         self.callbacks.on_step(self.last_iteration_count + 1, self.messages[-1])
         return answer
 
     def _final_text_or_halt(self) -> str:
-        """Return the most recent assistant text, falling back to the
-        halt reason when no text exists. Used when the loop bails
-        without a clean final answer (interrupt, backstop, budget)."""
-        for msg in reversed(self.messages):
+        """Return the most recent assistant text FROM THIS TURN, falling
+        back to the halt reason when no text exists. Scanning all of
+        ``self.messages`` here re-surfaced the PREVIOUS turn's answer
+        when a turn was interrupted before its first model response —
+        the voice loop would then speak the old answer again."""
+        for msg in reversed(self._turn_messages):
             if msg.get("role") == "assistant" and msg.get("content"):
                 return msg["content"]  # type: ignore[return-value]
         return f"[halted: {self.last_halt_reason or 'no response'}]"
+
+
+def _exclude_beta(tools: list[ToolDef]) -> list[ToolDef]:
+    """Drop ``beta=True`` tools unless dev mode is on. The single
+    chokepoint for the beta gate — both the constructor and the
+    per-turn catalogue refresh route through here, so a beta tool is
+    neither visible to the model nor dispatchable outside dev mode."""
+    if dev_mode_enabled():
+        return tools
+    return [t for t in tools if not t.beta]
 
 
 _MULTISTEP_PATTERNS = (
@@ -854,14 +1609,110 @@ def _stringify(content: Any) -> str:
 def _merge_guidance(content: Any, guidance: str) -> Any:
     """Attach guardrail guidance to a tool result without losing the
     original payload. Dict gains a ``loop_guard`` key; string appends
-    the guidance; anything else is wrapped. Mirrors
-    :func:`jaeger_os.core.tool_guardrails.merge_guidance` so the two
-    paths stay byte-compatible during migration."""
+    the guidance; anything else is wrapped. A second merge on the same
+    dict concatenates rather than overwriting, so the pre-dispatch
+    hook's guidance and the backstop warning can coexist."""
     if isinstance(content, dict):
-        return {**content, "loop_guard": guidance}
+        existing = content.get("loop_guard")
+        merged = f"{existing}\n\n{guidance}" if existing else guidance
+        return {**content, "loop_guard": merged}
     if isinstance(content, str):
         return f"{content}\n\n{guidance}"
     return {"result": content, "loop_guard": guidance}
+
+
+# File-mutating tools whose failures must not be paper-overable: a
+# model that ran ``write_file`` (failed) then says "I've updated the
+# file!" is the worst kind of wrong — confidently so. The loop tracks
+# un-superseded failures and appends a verifier footer to the final
+# answer (Hermes file-mutation-verifier pattern).
+_MUTATION_TOOLS = frozenset({
+    "write_file", "patch", "append_file", "delete_file",
+})
+
+# Server-side context-overflow signatures (LM Studio / Ollama /
+# llama.cpp-server / cloud wordings). When one of these comes back the
+# estimator was too optimistic — tighten it and retry, instead of
+# walking the fallback chain with the same oversized prompt.
+_OVERFLOW_HINTS = (
+    "context window", "context length", "maximum context",
+    "tokens to keep", "input is too long", "too many tokens",
+    "exceeds the maximum",
+)
+
+
+def _looks_like_overflow(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(h in text for h in _OVERFLOW_HINTS)
+
+
+# Lone UTF-16 surrogates (U+D800–U+DFFF) are invalid in UTF-8 and crash
+# ``json.dumps`` inside provider SDKs. They arrive from clipboard pastes
+# (Word, Google Docs) and from byte-level local reasoning models, then
+# sit in history detonating EVERY subsequent call — a permanent-mute
+# class. Scrubbed to U+FFFD before each model call; fast no-op when the
+# transcript is clean.
+_SURROGATE_RE = _re.compile(r"[\ud800-\udfff]")
+
+
+def _scrub_surrogates_in_messages(messages: list[Message]) -> None:
+    """Replace lone surrogates across every string the wire can carry —
+    content, tool names, stringified args. In-place: once scrubbed, the
+    history stays clean."""
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str) and _SURROGATE_RE.search(content):
+            msg["content"] = _SURROGATE_RE.sub("�", content)
+        for tc in (msg.get("tool_calls") or []):
+            name = tc.get("name")
+            if isinstance(name, str) and _SURROGATE_RE.search(name):
+                tc["name"] = _SURROGATE_RE.sub("�", name)
+            args = tc.get("arguments")
+            if isinstance(args, dict):
+                for k, v in list(args.items()):
+                    if isinstance(v, str) and _SURROGATE_RE.search(v):
+                        args[k] = _SURROGATE_RE.sub("�", v)
+            elif isinstance(args, str) and _SURROGATE_RE.search(args):
+                tc["arguments"] = _SURROGATE_RE.sub("�", args)
+
+
+def _classify_adapter_error(exc: BaseException) -> str:
+    """Classify an adapter exception for the retry policy. Delegates to
+    :mod:`jaeger_os.core.runtime.cloud_errors` (HTTP status + class-name
+    heuristics); degrades to ``UNKNOWN`` if the classifier itself is
+    unavailable or chokes — UNKNOWN means "no retry, next adapter",
+    which is the pre-classification behaviour."""
+    try:
+        from jaeger_os.core.runtime.cloud_errors import classify_exception
+        return classify_exception(exc)
+    except Exception:  # noqa: BLE001 — classification must never mask the error
+        return "unknown"
+
+
+def _retry_delay(kind: str, attempt: int) -> float:
+    """Jittered backoff sized for a VOICE agent — long waits are dead
+    air, so the caps are far below Hermes' server-side defaults. Rate
+    limits get room to clear (~2-8s); transient blips retry almost
+    immediately (~1-2s)."""
+    from jaeger_os.agent.util.retry_utils import jittered_backoff
+    if kind == "rate_limit":
+        return jittered_backoff(attempt, base_delay=2.0, max_delay=8.0)
+    return jittered_backoff(attempt, base_delay=1.0, max_delay=3.0)
+
+
+def _hash_result(content: Any) -> str:
+    """Stable hash of a tool result for the read-tool no-progress
+    check. JSON-canonicalised when possible so dict key order doesn't
+    fake progress."""
+    import hashlib
+    try:
+        import json
+        canonical = json.dumps(
+            content, sort_keys=True, default=str, ensure_ascii=False,
+        )
+    except Exception:  # noqa: BLE001
+        canonical = str(content)
+    return hashlib.sha256(canonical.encode("utf-8", "replace")).hexdigest()
 
 
 def _default_skip_final_finalizer(

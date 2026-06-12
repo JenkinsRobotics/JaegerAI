@@ -11,6 +11,7 @@ repeated calls don't reload weights.
 
 from __future__ import annotations
 
+import threading as _threading
 import time
 from typing import Any
 
@@ -25,26 +26,33 @@ _MAX_SECONDS = 60
 
 # Cache the Whisper model across calls — first call pays the load cost
 # (~3-5s for medium.en), subsequent calls are decode-only.
+# The lock makes load + swap atomic: with multi-instance agents
+# (delegate sub-agents, deep think) two concurrent ``listen`` calls
+# could otherwise race the cache — one swapping in a different model
+# while the other is mid-transcribe.
 _cached_model: Any = None
 _cached_model_name: str | None = None
+_model_lock = _threading.Lock()
 
 
 def _get_model(name: str) -> Any:
     """Lazy-load + memoize the Whisper model. Re-loads when the caller
-    asks for a different model name (rare; usually one model per session)."""
+    asks for a different model name (rare; usually one model per session).
+    Thread-safe — see ``_model_lock``."""
     global _cached_model, _cached_model_name
-    if _cached_model is not None and _cached_model_name == name:
+    with _model_lock:
+        if _cached_model is not None and _cached_model_name == name:
+            return _cached_model
+        from pywhispercpp.model import Model
+        _cached_model = Model(
+            name,
+            print_realtime=False,
+            print_progress=False,
+            single_segment=False,
+            no_context=True,
+        )
+        _cached_model_name = name
         return _cached_model
-    from pywhispercpp.model import Model
-    _cached_model = Model(
-        name,
-        print_realtime=False,
-        print_progress=False,
-        single_segment=False,
-        no_context=True,
-    )
-    _cached_model_name = name
-    return _cached_model
 
 
 def warm_listen() -> dict[str, Any]:

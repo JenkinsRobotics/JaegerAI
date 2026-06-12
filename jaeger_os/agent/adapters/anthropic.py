@@ -21,14 +21,19 @@ import threading
 import time
 from typing import Any
 
-from jaeger_os.agent.loop.interrupt import interruptible_call
+from jaeger_os.agent.loop.interrupt import (
+    AgentInterrupted,
+    CallProgress,
+    interruptible_call,
+)
 from jaeger_os.agent.schemas.message_types import Message, ToolCall
 from jaeger_os.agent.schemas.tool_schema import ToolDef
 from .base import ProviderAdapter
 
-# Features Anthropic supports. Streaming is off-by-default for v1 (the
-# agent loop uses callbacks for live updates); flip it on when the TUI's
-# voice path lands and needs token-level latency.
+# Features Anthropic supports. Token-level streaming is used at the
+# TRANSPORT level inside ``call`` (progress + cancellation), but the
+# loop-facing contract is still one whole message per call — so
+# "streaming" stays out of the declared feature set.
 _FEATURES: frozenset[str] = frozenset({"caching", "parallel_tools", "reasoning"})
 
 
@@ -134,6 +139,9 @@ class AnthropicAdapter(ProviderAdapter):
         # surface usage to the agent loop set this on every successful
         # call.
         self.last_usage: dict[str, Any] | None = None
+        # Real time-to-first-token of the most recent streamed call;
+        # None when the call didn't stream or nothing arrived.
+        self.last_ttft_s: float | None = None
 
     # ── client lifecycle ────────────────────────────────────────────
 
@@ -289,27 +297,111 @@ class AnthropicAdapter(ProviderAdapter):
         *,
         stale_timeout: float | None = None,
         on_heartbeat: Any = None,
+        on_delta: Any = None,
         **kwargs: Any,
     ) -> Any:
-        """Run one ``messages.create`` request, interrupt-aware.
+        """Run one request, interrupt-aware, streamed at the transport
+        level.
 
         Caller kwargs win over the formatted defaults — that's how the
         agent loop overrides ``max_tokens`` / ``temperature`` per turn
         without rebuilding the payload.
 
-        Phase-8: ``stale_timeout`` / ``on_heartbeat`` propagate through
-        :func:`interruptible_call` so the agent loop can detect hung
-        provider sockets and surface "still waiting" status to the TUI.
-        Both default to ``None`` — adapters used directly in tests get
-        the legacy behaviour."""
+        Why streaming under the hood while returning one whole message:
+
+          * **The stale detector becomes honest.** A non-streaming
+            ``create`` produces zero observable progress until the full
+            answer lands, so ``stale_timeout`` could only measure total
+            elapsed time — killing every answer that takes longer than
+            the cap (a 4K-token reply comfortably exceeds the 30s HTTP
+            default). With events flowing, ``CallProgress`` is touched
+            per chunk and the timeout means what it says: silence.
+          * **The SDK's read timeout stops killing long answers** —
+            bytes flow continuously instead of one burst at the end.
+          * **Interrupts actually cancel the request.** The worker
+            checks the event between chunks and closes the stream, so
+            the server stops generating instead of billing an answer
+            nobody will read.
+
+        Falls back to plain ``create`` when the client doesn't expose
+        ``messages.stream`` (injected test stubs, exotic gateways) —
+        the stale timeout then measures total elapsed time, as before.
+        """
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
-        return interruptible_call(
-            lambda: client.messages.create(**api_kwargs),
+        self.last_ttft_s = None
+        stream_api = getattr(getattr(client, "messages", None), "stream", None)
+        if stream_api is None:
+            return interruptible_call(
+                lambda: client.messages.create(**api_kwargs),
+                interrupt_event,
+                stale_timeout=stale_timeout,
+                on_heartbeat=on_heartbeat,
+            )
+
+        progress = CallProgress()
+
+        def _streamed() -> Any:
+            with stream_api(**api_kwargs) as stream:
+                try:
+                    for event in stream:
+                        progress.touch()
+                        if on_delta is not None:
+                            # Text deltas only — tool-call argument
+                            # fragments are not speakable.
+                            delta = getattr(event, "delta", None)
+                            if (
+                                getattr(event, "type", "") == "content_block_delta"
+                                and getattr(delta, "type", "") == "text_delta"
+                            ):
+                                piece = getattr(delta, "text", "")
+                                if piece:
+                                    on_delta(piece)
+                        if interrupt_event.is_set():
+                            # Exiting the ``with`` closes the HTTP
+                            # stream — the provider stops generating
+                            # immediately.
+                            raise AgentInterrupted(
+                                "interrupted mid-stream"
+                            )
+                except AgentInterrupted:
+                    raise
+                except Exception:
+                    # Partial-stream recovery (Hermes pattern): if the
+                    # connection died mid-answer but TEXT had already
+                    # arrived and no tool call was in flight, hand back
+                    # the snapshot instead of burning a retry on words
+                    # the user may have already heard. Tool-use streams
+                    # re-raise — half a tool call must never dispatch.
+                    snap = getattr(stream, "current_message_snapshot", None)
+                    blocks = getattr(snap, "content", None) or []
+                    has_text = any(
+                        getattr(b, "type", "") == "text"
+                        and (getattr(b, "text", "") or "").strip()
+                        for b in blocks
+                    )
+                    has_tool = any(
+                        getattr(b, "type", "") == "tool_use" for b in blocks
+                    )
+                    if snap is not None and has_text and not has_tool:
+                        return snap
+                    raise
+                return stream.get_final_message()
+
+        started = time.perf_counter()
+        raw = interruptible_call(
+            _streamed,
             interrupt_event,
             stale_timeout=stale_timeout,
             on_heartbeat=on_heartbeat,
+            progress=progress,
         )
+        # Real time-to-first-token, from the progress beacon's first
+        # touch — feeds the turn's latency report (previously a
+        # hardcoded 0.0).
+        if progress.first is not None:
+            self.last_ttft_s = max(0.0, progress.first - started)
+        return raw
 
     def parse_response(self, raw: Any) -> Message:
         """Decode an ``anthropic.types.Message`` to internal ``Message``.

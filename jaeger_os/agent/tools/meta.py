@@ -105,7 +105,7 @@ def describe_tool(name: str) -> dict[str, Any]:
         "parameters": function.get("parameters", {}),
         "toolset": declared or "(unclassified)",
         "permission_tier": getattr(tool, "permission_tier", "") or "READ_ONLY",
-        "side_effect": getattr(tool, "side_effect", "read"),
+        "side_effect": getattr(tool, "side_effect", "") or "(unclassified)",
         "available": tool.is_available() if hasattr(tool, "is_available")
                      else True,
         "requires_env": list(getattr(tool, "requires_env", ()) or ()),
@@ -113,6 +113,7 @@ def describe_tool(name: str) -> dict[str, Any]:
         "examples": list(getattr(tool, "examples", ()) or ()),
         "interactive": bool(getattr(tool, "interactive", False)),
         "dangerous": bool(getattr(tool, "dangerous", False)),
+        "beta": bool(getattr(tool, "beta", False)),
     }
 
 

@@ -40,7 +40,7 @@ that's the whole surface.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from jaeger_os.agent.schemas.message_types import Message
@@ -122,18 +122,56 @@ class TrimResult:
     messages: list[Message]
     dropped_count: int
     estimated_tokens: int
+    # How many old tool results had their bodies pruned to one-liners
+    # (stage 1) before any whole-message drop was considered.
+    pruned_count: int = 0
+    # True when dropped turns were folded into a digest message rather
+    # than silently deleted (stage 2).
+    digested: bool = False
 
 
 # ── the guard ──────────────────────────────────────────────────────
 
 
-class ContextGuard:
-    """Stateless helper around a :class:`ContextBudget`. Construct once
-    per :class:`JaegerAgent`; methods are pure-of-side-effects on the
-    inputs (messages are not mutated in place)."""
+# Marker prefix for the stage-2 digest message. Detection on
+# re-compaction keys off this exact prefix, so older digests are folded
+# into the new one instead of stacking up.
+DIGEST_PREFIX = "[EARLIER CONTEXT — REFERENCE ONLY]"
 
-    def __init__(self, budget: ContextBudget) -> None:
+# Tool-result bodies above this many chars are eligible for stage-1
+# pruning once their turn leaves the protected tail.
+_PRUNE_RESULT_OVER_CHARS = 240
+
+# Token reserve subtracted from the budget while dropping groups, so
+# the digest message that replaces them always fits.
+_DIGEST_RESERVE_TOKENS = 450
+_DIGEST_MAX_CHARS = 1_200
+
+
+class ContextGuard:
+    """Helper around a :class:`ContextBudget`. Construct once per
+    :class:`JaegerAgent`; methods never mutate the input message list
+    (replaced messages are fresh dicts). Holds two pieces of per-agent
+    state: the calibrated chars-per-token ratio (see
+    :meth:`observed_call`) and nothing else."""
+
+    def __init__(
+        self,
+        budget: ContextBudget,
+        summarizer: Any = None,
+    ) -> None:
         self.budget = budget
+        # Live chars-per-token ratio. Starts at the configured
+        # conservative default; tightened toward the model's REAL
+        # tokenizer by ``observed_call`` as actual usage arrives.
+        self._ratio: float = budget.chars_per_token or 3.0
+        # Optional LLM digest: a ``Callable[[str], str]`` that turns a
+        # serialized span of dropped turns into a dense summary. When
+        # set, stage-2 compaction prefers it over the deterministic
+        # digest, falling back on ANY failure. Costs a model call
+        # (seconds) — wire it ONLY where latency is free (deep think),
+        # never on the voice path.
+        self.summarizer = summarizer
 
     # ── estimator ──────────────────────────────────────────────────
 
@@ -142,11 +180,64 @@ class ContextGuard:
         (real tokenizers give fewer tokens than this for English)."""
         if not text:
             return 0
-        ratio = self.budget.chars_per_token or 3.0
+        ratio = self._ratio or 3.0
         # +1 captures the per-message overhead a real chat-template
         # tokeniser adds (``<|im_start|>...``, etc.). One token per
         # text-bearing chunk is a fine first approximation.
         return int(len(text) / ratio) + 1
+
+    def observed_call(
+        self,
+        prompt_tokens: int,
+        messages: list[Message],
+        *,
+        system_prompt: str,
+        tools: list[ToolDef],
+    ) -> None:
+        """Calibrate the estimator from REAL provider usage.
+
+        The char heuristic deliberately overestimates (~15-25%) so we
+        trim early rather than overflow. With actual ``prompt_tokens``
+        from the API response we can measure the model's true
+        chars-per-token and shrink that overestimate — fewer needless
+        trims and compactions per session — while keeping a 10%%
+        conservative bias and hard clamps so one weird payload can't
+        swing the estimator into under-counting. EMA-smoothed; cheap
+        (one char-count walk per model call)."""
+        if not prompt_tokens or prompt_tokens <= 0:
+            return
+        chars = len(system_prompt or "")
+        for m in messages:
+            content = m.get("content")
+            if isinstance(content, str):
+                chars += len(content)
+            for tc in (m.get("tool_calls") or []):
+                args = tc.get("arguments")
+                chars += len(str(tc.get("name") or "")) + len(str(args or ""))
+        if tools:
+            try:
+                chars += len(json.dumps(
+                    [t.to_openai_schema() for t in tools
+                     if hasattr(t, "to_openai_schema")],
+                    ensure_ascii=False,
+                ))
+            except Exception:  # noqa: BLE001
+                pass
+        if chars < 800:
+            return  # too small a sample to calibrate from
+        raw_ratio = chars / float(prompt_tokens)
+        # 10% conservative discount + hard clamps, then smooth.
+        target = max(2.0, min(raw_ratio * 0.9, 5.0))
+        self._ratio = 0.5 * self._ratio + 0.5 * target
+
+    def tighten(self, factor: float = 0.85) -> None:
+        """Reactive correction: a SERVER just rejected a prompt this
+        estimator thought fit, so the ratio was too optimistic. Shrink
+        it (more chars-per-token pessimism → bigger token estimates →
+        the next trim drops more). :meth:`observed_call` relaxes it
+        back toward reality from subsequent real usage, so one bad
+        rejection doesn't permanently over-trim."""
+        self._ratio = max(2.0, self._ratio * factor)
 
     def estimate_messages_tokens(
         self,
@@ -205,11 +296,27 @@ class ContextGuard:
         system_prompt: str,
         tools: list[ToolDef],
     ) -> TrimResult:
-        """Drop oldest non-system messages until the estimate fits the
-        budget. Preserves the most recent user message and any
-        assistant/tool chain that comes after it (the in-flight turn).
+        """Make the prompt fit the budget, least-destructively first.
 
-        Raises :class:`ContextOverflow` if even the keep-set is too big.
+        Three stages (Hermes ``context_compressor`` pattern, sized for
+        a local-first agent — every stage is deterministic, no LLM
+        call, sub-millisecond):
+
+          1. **Prune** — old tool-result bodies (outside the in-flight
+             turn) are replaced with one-line stubs. When the result
+             was spilled to disk by :meth:`truncate_oversized_result`,
+             the stub keeps the artifact path so the model can still
+             ``read_file`` it. Usually this alone fits the prompt and
+             NO conversation turns are lost.
+          2. **Digest + drop** — oldest message groups are dropped as
+             before, but folded into one ``DIGEST_PREFIX`` reference
+             message (user asks, tools used, errors seen) instead of
+             vanishing. A previous digest is merged, never stacked.
+          3. **Refuse** — :class:`ContextOverflow` when even that
+             can't fit.
+
+        Preserves the most recent user message and everything after it
+        (the in-flight turn) verbatim, always.
         """
         budget = self.budget.prompt_budget
         system_tokens = self.estimate_text_tokens(system_prompt or "")
@@ -231,29 +338,60 @@ class ContextGuard:
                               dropped_count=0,
                               estimated_tokens=total)
 
-        # Drop droppable messages from the head until we fit or run out.
+        # ── stage 1: prune old tool-result bodies ──────────────────
+        kept, pruned = self._prune_old_tool_results(messages, keep_start)
+        estimate = system_tokens + tools_tokens + sum(
+            self._estimate_message(m) for m in kept
+        )
+        if estimate <= budget:
+            return TrimResult(messages=kept,
+                              dropped_count=0,
+                              estimated_tokens=estimate,
+                              pruned_count=pruned)
+
+        # ── stage 2: drop oldest groups into a digest ──────────────
         # Drop in *groups* so an assistant-with-tool_calls and its
         # matching tool-result messages are removed together. Orphaning
-        # a tool result (assistant gone but tool message remains) makes
-        # OpenAI's API 400 and confuses Hermes-XML parsers; orphaning
-        # an assistant tool_calls (tool results gone but assistant
-        # references their ids) wastes tokens on dangling call ids the
-        # model will retry.
-        kept: list[Message] = list(messages)
-        dropped = 0
-        floor = len(messages) - keep_start  # never trim below this length
+        # either side makes OpenAI's API 400 and confuses Hermes-XML
+        # parsers. An existing digest at the head is folded into the
+        # new one rather than dropped or duplicated. While dropping,
+        # reserve room for the digest message itself.
+        prior_digest = ""
+        if (
+            kept
+            and kept[0].get("role") == "user"
+            and str(kept[0].get("content") or "").startswith(DIGEST_PREFIX)
+        ):
+            prior_digest = str(kept[0].get("content") or "")
+            kept = kept[1:]
 
+        floor = len(messages) - keep_start  # never trim below this length
+        dropped_msgs: list[Message] = []
+        # Reserve room for the digest message itself while dropping —
+        # scaled to the budget so tiny windows (unit tests, severely
+        # constrained models) still resolve instead of dropping to the
+        # floor chasing an unaffordable reserve.
+        digest_reserve = min(_DIGEST_RESERVE_TOKENS, max(0, budget // 4))
+
+        digest_affordable = True
         while True:
             estimate = system_tokens + tools_tokens + sum(
                 self._estimate_message(m) for m in kept
             )
-            if estimate <= budget:
-                return TrimResult(messages=kept,
-                                  dropped_count=dropped,
-                                  estimated_tokens=estimate)
-            # Hit the undroppable floor — even with everything droppable
-            # removed the prompt won't fit. Surface a typed error.
+            reserve = digest_reserve if (
+                digest_affordable and (dropped_msgs or prior_digest)
+            ) else 0
+            if estimate + reserve <= budget:
+                break
+            # Hit the undroppable floor. If the prompt fits WITHOUT the
+            # digest reserve, the window is simply too tight to afford
+            # a digest — fall back to plain dropping rather than
+            # refusing a prompt that would have fit before. Otherwise
+            # surface the typed error.
             if len(kept) <= floor:
+                if estimate <= budget:
+                    digest_affordable = False
+                    break
                 raise ContextOverflow(
                     estimated=estimate,
                     budget=budget,
@@ -261,12 +399,7 @@ class ContextGuard:
                     tools_tokens=tools_tokens,
                     latest_user_tokens=latest_user_tokens,
                 )
-            # Compute the size of the next "group" at the head — usually
-            # 1 message, but an assistant with tool_calls pulls in
-            # subsequent tool messages with matching call ids.
             group_n = self._head_group_size(kept)
-            # Don't cross the floor; cap the drop at what's safely
-            # droppable.
             group_n = min(group_n, len(kept) - floor)
             if group_n <= 0:
                 # Defensive — shouldn't happen given the floor check
@@ -278,8 +411,98 @@ class ContextGuard:
                     tools_tokens=tools_tokens,
                     latest_user_tokens=latest_user_tokens,
                 )
+            dropped_msgs.extend(kept[:group_n])
             kept = kept[group_n:]
-            dropped += group_n
+
+        digested = False
+        digest_cap = min(_DIGEST_MAX_CHARS, int(digest_reserve * self._ratio))
+        if (dropped_msgs or prior_digest) and digest_affordable and digest_cap >= 80:
+            digest = _build_digest(dropped_msgs, prior_digest)[:digest_cap]
+            llm_digest = self._try_llm_digest(
+                dropped_msgs, prior_digest, digest_cap,
+            )
+            if llm_digest:
+                digest = llm_digest
+            kept = [{"role": "user", "content": digest}, *kept]
+            digested = True
+            estimate = system_tokens + tools_tokens + sum(
+                self._estimate_message(m) for m in kept
+            )
+
+        return TrimResult(messages=kept,
+                          dropped_count=len(dropped_msgs),
+                          estimated_tokens=estimate,
+                          pruned_count=pruned,
+                          digested=digested)
+
+    def _try_llm_digest(
+        self,
+        dropped: list[Message],
+        prior_digest: str,
+        digest_cap: int,
+    ) -> str | None:
+        """LLM-written digest of the dropped span, when a summarizer is
+        wired (deep think only — costs seconds). Returns ``None`` on
+        any failure so the deterministic digest stands in; compaction
+        must never break a turn over a summarizer hiccup."""
+        if self.summarizer is None or not dropped:
+            return None
+        lines: list[str] = []
+        if prior_digest:
+            body = prior_digest.split("\n", 1)[-1].strip()
+            if body:
+                lines.append(f"[EARLIER DIGEST]: {body[:600]}")
+        for msg in dropped:
+            role = str(msg.get("role") or "?").upper()
+            content = msg.get("content")
+            text = content if isinstance(content, str) else ""
+            for tc in (msg.get("tool_calls") or []):
+                text += f" [called {tc.get('name')}({tc.get('arguments')})]"
+            text = " ".join(text.split())[:500]
+            if text:
+                lines.append(f"{role}: {text}")
+        serialized = "\n".join(lines)[:6_000]
+        prompt = (
+            "Compress this span of an agent conversation into a dense "
+            "factual digest (max ~150 words): the user's asks, what was "
+            "done, key results/decisions, errors hit, anything still "
+            "open. No preamble, no commentary — output ONLY the "
+            "digest.\n\n" + serialized
+        )
+        try:
+            out = self.summarizer(prompt)
+        except Exception:  # noqa: BLE001 — fall back to the deterministic digest
+            return None
+        text = str(out or "").strip()
+        if not text:
+            return None
+        if not text.startswith(DIGEST_PREFIX):
+            text = (
+                DIGEST_PREFIX + " Older turns were compacted. Treat the "
+                "LATEST user message as the source of truth.\n" + text
+            )
+        return text[:digest_cap]
+
+    def _prune_old_tool_results(
+        self, messages: list[Message], keep_start: int,
+    ) -> tuple[list[Message], int]:
+        """Stage 1: replace large tool-result bodies OUTSIDE the
+        in-flight turn with one-line stubs. Returns ``(new_list,
+        pruned_count)``; input list and its dicts are not mutated."""
+        out: list[Message] = []
+        pruned = 0
+        for i, msg in enumerate(messages):
+            if i >= keep_start or msg.get("role") != "tool":
+                out.append(msg)
+                continue
+            body = msg.get("content")
+            if not isinstance(body, str) or len(body) <= _PRUNE_RESULT_OVER_CHARS:
+                out.append(msg)
+                continue
+            stub = _result_stub(msg.get("name") or "tool", body)
+            out.append({**msg, "content": stub})
+            pruned += 1
+        return out, pruned
 
     @staticmethod
     def _head_group_size(messages: list[Message]) -> int:
@@ -420,7 +643,9 @@ class ContextGuard:
         if out_dir is None:
             return None
         try:
-            import pathlib, uuid, time as _t
+            import pathlib
+            import time as _t
+            import uuid
             d = pathlib.Path(out_dir)
             d.mkdir(parents=True, exist_ok=True)
             # Filename is timestamp + short uuid — easy for the model
@@ -453,9 +678,110 @@ class ContextGuard:
             return str(result)
 
 
+def _result_stub(tool_name: str, body: str) -> str:
+    """One-line replacement for a pruned tool-result body. Keeps the
+    artifact path when the result was spilled to disk, so the model
+    can still ``read_file`` the full payload later — the reference
+    survives even though the bytes leave the window."""
+    artifact = ""
+    error_line = ""
+    try:
+        parsed = json.loads(body)
+        if isinstance(parsed, dict):
+            if parsed.get("artifact_path"):
+                artifact = f"; full result on disk: {parsed['artifact_path']}"
+            if parsed.get("ok") is False and parsed.get("error"):
+                error_line = (
+                    f"; FAILED: {str(parsed['error']).splitlines()[0][:120]}"
+                )
+    except (ValueError, TypeError):
+        pass
+    return (
+        f"[{tool_name} result pruned for context — was {len(body)} chars"
+        f"{error_line}{artifact}]"
+    )
+
+
+def _build_digest(dropped: list[Message], prior_digest: str) -> str:
+    """Deterministic digest of dropped turns — no LLM call, so it adds
+    zero latency to a voice turn. Captures the bones (user asks, tools
+    used, errors hit) so the model retains orientation instead of
+    total amnesia about the dropped span. A previous digest's body is
+    carried forward in compressed form, never stacked verbatim."""
+    user_asks: list[str] = []
+    tool_counts: dict[str, int] = {}
+    errors: list[str] = []
+    assistant_said = 0
+    last_assistant = ""
+
+    for msg in dropped:
+        role = msg.get("role")
+        content = msg.get("content")
+        text = content if isinstance(content, str) else ""
+        if role == "user":
+            line = " ".join(text.split())[:110]
+            if line and not line.startswith(DIGEST_PREFIX):
+                user_asks.append(line)
+        elif role == "assistant":
+            if text.strip():
+                assistant_said += 1
+                last_assistant = " ".join(text.split())[:110]
+            for tc in (msg.get("tool_calls") or []):
+                name = tc.get("name") or "?"
+                tool_counts[name] = tool_counts.get(name, 0) + 1
+        elif role == "tool":
+            if "FAILED:" in text or '"ok": false' in text.lower():
+                errors.append(" ".join(text.split())[:110])
+
+    parts: list[str] = [
+        DIGEST_PREFIX + " Older turns were compacted to fit the "
+        "context window. This is a lossy digest — treat the LATEST "
+        "user message as the source of truth and do not re-answer "
+        "anything already settled here.",
+    ]
+    if prior_digest:
+        # Carry the previous digest's body (sans its own preamble),
+        # squeezed — repeated compactions converge instead of growing.
+        body = prior_digest.split("\n", 1)[-1].strip()
+        if body:
+            parts.append("Earlier still: " + " ".join(body.split())[:300])
+    if user_asks:
+        parts.append("User asked: " + " | ".join(user_asks[-6:]))
+    if tool_counts:
+        tools_line = ", ".join(
+            f"{name}×{n}" if n > 1 else name
+            for name, n in sorted(tool_counts.items())
+        )
+        parts.append(f"Tools used: {tools_line}")
+    if assistant_said:
+        parts.append(
+            f"Assistant replied {assistant_said}×; most recent gist: "
+            f"{last_assistant}"
+        )
+    if errors:
+        parts.append("Errors hit: " + " | ".join(errors[-3:]))
+
+    digest = "\n".join(parts)
+    return digest[:_DIGEST_MAX_CHARS]
+
+
+def oldest_group_size(messages: list[Message]) -> int:
+    """How many messages at the head of ``messages`` must be dropped
+    TOGETHER to keep the transcript well-formed — an assistant message
+    with ``tool_calls`` pulls its matching tool results along.
+
+    Public wrapper over the trim rule so history clamps outside this
+    module (the per-session clamp in ``main.py``) can't orphan a tool
+    result from its call: an orphaned pair makes OpenAI / Anthropic
+    400 on every subsequent request."""
+    return ContextGuard._head_group_size(messages)
+
+
 __all__ = [
     "ContextBudget",
     "ContextGuard",
     "ContextOverflow",
+    "DIGEST_PREFIX",
     "TrimResult",
+    "oldest_group_size",
 ]

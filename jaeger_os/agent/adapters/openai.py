@@ -33,7 +33,11 @@ import threading
 import time
 from typing import Any
 
-from jaeger_os.agent.loop.interrupt import interruptible_call
+from jaeger_os.agent.loop.interrupt import (
+    AgentInterrupted,
+    CallProgress,
+    interruptible_call,
+)
 from jaeger_os.agent.schemas.message_types import Message, ToolCall
 from jaeger_os.agent.schemas.tool_schema import ToolDef
 from .base import ProviderAdapter
@@ -163,9 +167,13 @@ class OpenAIAdapter(ProviderAdapter):
       * ``max_tokens`` / ``temperature`` / ``top_p`` — request defaults.
         Callers override per-``call`` via kwargs.
       * ``timeout_s`` — SDK-level HTTP timeout.
-      * ``streaming`` — feature flag. Off in v1; flipped when the voice
-        path needs TTFT latency. The flag is exposed via :meth:`supports`
-        so the agent loop can react.
+      * ``stream_transport`` — stream the response at the transport
+        level and aggregate to one message (default on). Keeps the
+        stale detector + SDK read-timeout honest on long generations
+        and lets an interrupt actually cancel the request. Turn off
+        for backends whose ``create`` can't stream (the in-process
+        llama facade does this) or for test stubs that return a
+        canned non-stream response.
       * ``client`` — inject a pre-built SDK client for testing.
 
     The adapter is intentionally thin — no retry / no fallback / no
@@ -185,7 +193,7 @@ class OpenAIAdapter(ProviderAdapter):
         temperature: float = 0.0,
         top_p: float = 0.95,
         timeout_s: float = 60.0,
-        streaming: bool = False,
+        stream_transport: bool = True,
         client: Any = None,
     ) -> None:
         self.provider = provider
@@ -196,7 +204,7 @@ class OpenAIAdapter(ProviderAdapter):
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.timeout_s = float(timeout_s)
-        self.streaming = bool(streaming)
+        self.stream_transport = bool(stream_transport)
         self._client = client
 
         # The adapter's ``name`` shows up in the active-brain status line
@@ -207,6 +215,9 @@ class OpenAIAdapter(ProviderAdapter):
         # Most-recent usage payload — feeds the budget logic and the
         # ``/runtime`` panel. Populated by ``parse_response``.
         self.last_usage: dict[str, Any] | None = None
+        # Real time-to-first-token of the most recent streamed call;
+        # None when the call didn't stream or nothing arrived.
+        self.last_ttft_s: float | None = None
 
     # ── client lifecycle ────────────────────────────────────────────
 
@@ -302,30 +313,72 @@ class OpenAIAdapter(ProviderAdapter):
         on_heartbeat: Any = None,
         on_abandon: Any = None,
         join_on_abandon: float = 0.0,
+        progress: CallProgress | None = None,
+        on_delta: Any = None,
         **kwargs: Any,
     ) -> Any:
         """Run one ``chat.completions.create`` request, interrupt-aware.
 
         Caller kwargs override formatted defaults — same contract as
-        :class:`AnthropicAdapter`. Streaming is gated by
-        ``self.streaming`` so the adapter never accidentally streams
-        when the loop expects a full response.
+        :class:`AnthropicAdapter`. ``progress`` lets a subclass with
+        its own progress source (the in-process llama facade touches
+        it per decoded token) feed the stale detector on the
+        non-streamed path.
 
-        Phase-8: ``stale_timeout`` and ``on_heartbeat`` are forwarded
-        to :func:`interruptible_call` so the agent loop can detect
-        hung providers + drive a "still waiting" TUI."""
+        With ``stream_transport`` on (the default), the request is
+        streamed and re-aggregated into the plain chat-completion
+        shape ``parse_response`` already reads. Three wins, same as
+        the Anthropic adapter: the stale detector measures real
+        silence instead of total elapsed time (a long healthy answer
+        is no longer killed at the 30s HTTP default), the SDK read
+        timeout sees continuous bytes, and an interrupt closes the
+        stream so the server stops generating."""
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
-        if self.streaming and "stream" not in api_kwargs:
-            api_kwargs["stream"] = True
-        return interruptible_call(
-            lambda: client.chat.completions.create(**api_kwargs),
+        self.last_ttft_s = None
+        if not self.stream_transport:
+            return interruptible_call(
+                lambda: client.chat.completions.create(**api_kwargs),
+                interrupt_event,
+                stale_timeout=stale_timeout,
+                on_heartbeat=on_heartbeat,
+                on_abandon=on_abandon,
+                join_on_abandon=join_on_abandon,
+                progress=progress,
+            )
+
+        api_kwargs["stream"] = True
+        # ``stream_options`` is an OpenAI extension; compat servers
+        # (LM Studio, Ollama, Gemini-compat) may reject the unknown
+        # field, so only the real endpoint gets it. Without it the
+        # final usage block is absent and token accounting falls back
+        # to the loop's whitespace estimate — acceptable.
+        if self.provider == "openai" and "stream_options" not in api_kwargs:
+            api_kwargs["stream_options"] = {"include_usage": True}
+        progress = progress or CallProgress()
+        beacon = progress
+
+        def _streamed() -> Any:
+            stream = client.chat.completions.create(**api_kwargs)
+            return _aggregate_chat_stream(
+                stream, interrupt_event, beacon, on_delta,
+            )
+
+        started = time.perf_counter()
+        raw = interruptible_call(
+            _streamed,
             interrupt_event,
             stale_timeout=stale_timeout,
             on_heartbeat=on_heartbeat,
             on_abandon=on_abandon,
             join_on_abandon=join_on_abandon,
+            progress=progress,
         )
+        # Real time-to-first-token from the beacon's first touch —
+        # feeds the turn's latency report (previously hardcoded 0.0).
+        if beacon.first is not None:
+            self.last_ttft_s = max(0.0, beacon.first - started)
+        return raw
 
     def parse_response(self, raw: Any) -> Message:
         """Decode a chat-completions response to internal ``Message``.
@@ -378,8 +431,9 @@ class OpenAIAdapter(ProviderAdapter):
     # ── capabilities + health ───────────────────────────────────────
 
     def supports(self, feature: str) -> bool:
-        if feature == "streaming":
-            return self.streaming
+        # Transport-level streaming is an implementation detail of
+        # ``call`` — the loop still receives one whole message, so
+        # "streaming" (token-level delivery to the loop) stays False.
         return feature in _FEATURES
 
     def health_check(self) -> dict[str, Any]:
@@ -416,6 +470,121 @@ def _get(obj: Any, name: str) -> Any:
     if isinstance(obj, dict):
         return obj.get(name)
     return getattr(obj, name, None)
+
+
+def _aggregate_chat_stream(
+    stream: Any,
+    interrupt_event: threading.Event,
+    progress: CallProgress,
+    on_delta: Any = None,
+) -> dict[str, Any]:
+    """Drain a chat-completions stream into the non-streaming response
+    shape ``parse_response`` reads.
+
+    Runs on the worker thread inside :func:`interruptible_call`:
+    touches ``progress`` per chunk (feeding the stale detector) and
+    checks the interrupt event between chunks so a cancel closes the
+    HTTP stream promptly — the server stops generating instead of
+    completing an answer nobody will read.
+
+    Handles both typed SDK chunks and plain dicts. Tool-call deltas
+    arrive fragmented (id/name first, argument string in pieces,
+    keyed by ``index``) and are reassembled here; the JSON ``arguments``
+    string stays a string — ``_from_openai_tool_calls`` decodes and
+    repairs it downstream exactly as in the non-streamed path.
+    """
+    content_parts: list[str] = []
+    calls_by_index: dict[int, dict[str, Any]] = {}
+    finish_reason: Any = None
+    usage: Any = None
+    try:
+        try:
+            for chunk in stream:
+                progress.touch()
+                if interrupt_event.is_set():
+                    raise AgentInterrupted("interrupted mid-stream")
+                chunk_usage = _get(chunk, "usage")
+                if chunk_usage is not None:
+                    usage = chunk_usage
+                choices = _get(chunk, "choices") or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                finish_reason = _get(choice, "finish_reason") or finish_reason
+                delta = _get(choice, "delta")
+                if delta is None:
+                    continue
+                piece = _get(delta, "content")
+                if piece:
+                    content_parts.append(piece)
+                    if on_delta is not None:
+                        on_delta(piece)
+                for tc in _get(delta, "tool_calls") or []:
+                    idx = _get(tc, "index")
+                    idx = 0 if idx is None else int(idx)
+                    slot = calls_by_index.setdefault(
+                        idx, {"id": "", "name": "", "arguments": []},
+                    )
+                    if _get(tc, "id"):
+                        slot["id"] = _get(tc, "id")
+                    fn = _get(tc, "function")
+                    if fn is not None:
+                        if _get(fn, "name"):
+                            slot["name"] = _get(fn, "name")
+                        args_piece = _get(fn, "arguments")
+                        if args_piece:
+                            slot["arguments"].append(args_piece)
+        except AgentInterrupted:
+            raise
+        except Exception:
+            # Partial-stream recovery (Hermes pattern): the connection
+            # died mid-answer. If TEXT already arrived and no tool call
+            # was being assembled, return what we have — the words may
+            # already be on screen / spoken, and a retry would produce
+            # a different answer. A half-assembled tool call re-raises:
+            # truncated arguments must never dispatch.
+            if content_parts and not calls_by_index:
+                finish_reason = "partial_stream"
+            else:
+                raise
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception:  # noqa: BLE001 — closing is best-effort
+                pass
+
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": "".join(content_parts) or None,
+    }
+    if calls_by_index:
+        message["tool_calls"] = [
+            {
+                "id": slot["id"],
+                "type": "function",
+                "function": {
+                    "name": slot["name"],
+                    "arguments": "".join(slot["arguments"]),
+                },
+            }
+            for _, slot in sorted(calls_by_index.items())
+        ]
+    out: dict[str, Any] = {
+        "choices": [{
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason,
+        }],
+    }
+    if usage is not None:
+        out["usage"] = {
+            "prompt_tokens": _get(usage, "prompt_tokens"),
+            "completion_tokens": _get(usage, "completion_tokens"),
+            "total_tokens": _get(usage, "total_tokens"),
+        }
+    return out
 
 
 __all__ = ["OpenAIAdapter", "KNOWN_PROVIDERS"]

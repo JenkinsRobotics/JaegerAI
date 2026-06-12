@@ -50,6 +50,55 @@ class StaleCallTimeout(Exception):
     backend instead of treating it like a user cancel."""
 
 
+class CallProgress:
+    """Worker-side progress beacon for the stale detector.
+
+    Without one of these, ``interruptible_call`` can only measure
+    *total elapsed time* — which falsely kills long-but-healthy
+    generations (a 4K-token answer takes minutes on a slow backend).
+    An adapter that can observe progress (a streamed chunk arriving,
+    a token decoded) constructs a ``CallProgress``, passes it to
+    :func:`interruptible_call`, and calls :meth:`touch` from inside
+    the worker each time bytes flow. The stale timer then measures
+    time since the LAST touch — a true no-progress detector.
+
+    Thread contract: ``touch`` is called from the worker thread,
+    ``last`` is read from the polling thread. A single float store is
+    atomic under the GIL; no lock needed.
+    """
+
+    __slots__ = ("_last", "_first")
+
+    def __init__(self) -> None:
+        self._last = time.perf_counter()
+        self._first: float | None = None
+
+    def touch(self) -> None:
+        now = time.perf_counter()
+        self._last = now
+        if self._first is None:
+            self._first = now
+
+    def reset(self) -> None:
+        """Re-arm for a fresh call: restart the no-progress timer and
+        clear the first-touch mark (adapters reuse one beacon across
+        calls — without the reset, TTFT would report the previous
+        call's first token)."""
+        self._last = time.perf_counter()
+        self._first = None
+
+    @property
+    def last(self) -> float:
+        return self._last
+
+    @property
+    def first(self) -> float | None:
+        """perf_counter timestamp of the FIRST progress touch this
+        call, or None if nothing has flowed yet. ``first - call_start``
+        is the time-to-first-token."""
+        return self._first
+
+
 def interruptible_call(
     fn: Callable[[], T],
     interrupt_event: threading.Event,
@@ -59,6 +108,7 @@ def interruptible_call(
     on_heartbeat: Callable[[float], None] | None = None,
     on_abandon: Callable[[], None] | None = None,
     join_on_abandon: float = 0.0,
+    progress: CallProgress | None = None,
 ) -> T:
     """Run ``fn()`` on a daemon thread while the main thread polls the
     interrupt event + heartbeat + stale timer.
@@ -71,6 +121,13 @@ def interruptible_call(
     ``on_heartbeat(elapsed_s)`` fires on every poll tick while the
     call is in flight — useful for surfacing "still waiting" status
     to the TUI / gateway. Pass ``None`` to disable.
+
+    ``progress`` (when provided) changes what "stale" means: the
+    timer measures seconds since the worker's most recent
+    ``progress.touch()`` instead of seconds since the call started.
+    Adapters that stream (HTTP chunks, per-token decode) should pass
+    one — otherwise a long healthy generation is indistinguishable
+    from a hung socket and gets killed at ``stale_timeout``.
 
     **Cancellation contract.** For an HTTP / SDK call, abandoning the
     thread is safe — the socket eventually closes and the request is
@@ -119,11 +176,18 @@ def interruptible_call(
         if interrupt_event.is_set():
             _abandon(AgentInterrupted("agent loop was interrupted"))
         elapsed = time.perf_counter() - started
-        if stale_timeout is not None and elapsed > stale_timeout:
-            _abandon(StaleCallTimeout(
-                f"no response after {elapsed:.1f}s "
-                f"(stale_timeout={stale_timeout:.0f}s)"
-            ))
+        if stale_timeout is not None:
+            since_progress = (
+                time.perf_counter() - progress.last
+                if progress is not None
+                else elapsed
+            )
+            if since_progress > stale_timeout:
+                _abandon(StaleCallTimeout(
+                    f"no progress for {since_progress:.1f}s "
+                    f"({elapsed:.1f}s total, "
+                    f"stale_timeout={stale_timeout:.0f}s)"
+                ))
         if on_heartbeat is not None:
             try:
                 on_heartbeat(elapsed)
@@ -136,4 +200,9 @@ def interruptible_call(
     return box["value"]  # type: ignore[no-any-return]
 
 
-__all__ = ["AgentInterrupted", "StaleCallTimeout", "interruptible_call"]
+__all__ = [
+    "AgentInterrupted",
+    "CallProgress",
+    "StaleCallTimeout",
+    "interruptible_call",
+]

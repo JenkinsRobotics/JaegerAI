@@ -342,11 +342,112 @@ def repair_arguments(raw: str) -> tuple[dict[str, Any], bool]:
         if coerced is not None:
             return coerced, True
 
+    # Hermes-adoption passes — truncated and control-char-laced JSON.
+    # A length-cut tool call ends mid-structure (``{"path": "x", "con``);
+    # balancing the brackets often recovers everything before the cut.
+    # Some llama.cpp builds also emit literal control chars inside
+    # string values ALONGSIDE other malformations, where the
+    # strict=False pass above wasn't enough on its own.
+    balanced = _balance_brackets(cleaned)
+    for candidate in (
+        balanced,
+        _escape_ctrl_in_json_strings(balanced),
+    ):
+        if candidate == cleaned:
+            continue
+        try:
+            parsed = json.loads(candidate, strict=False)
+        except json.JSONDecodeError:
+            continue
+        coerced = _coerce_args_dict(parsed)
+        if coerced is not None:
+            return coerced, True
+
     loose = parse_gemma_args(s)
     if loose:
         return loose, True
 
     return {}, False
+
+
+def _balance_brackets(raw: str) -> str:
+    """Close unterminated structures in a truncated JSON blob.
+
+    Closes an unterminated string first (odd count of unescaped double
+    quotes), strips a trailing comma left by the cut, then appends the
+    missing ``}`` / ``]`` in nesting order. Returns the input unchanged
+    when nothing is missing — the caller validates with ``json.loads``
+    and discards on failure, so this never has to be perfect."""
+    if not raw or (raw.count("{") == 0 and raw.count("[") == 0):
+        return raw
+    out = raw.rstrip()
+    # Unterminated string: odd count of unescaped double quotes.
+    unescaped = 0
+    i = 0
+    while i < len(out):
+        ch = out[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == '"':
+            unescaped += 1
+        i += 1
+    if unescaped % 2 == 1:
+        out += '"'
+    out = out.rstrip()
+    if out.endswith(","):
+        out = out[:-1]
+    # Close remaining open structures in proper nesting order.
+    stack: list[str] = []
+    in_str = False
+    i = 0
+    while i < len(out):
+        ch = out[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == '"':
+            in_str = not in_str
+        elif not in_str:
+            if ch in "{[":
+                stack.append(ch)
+            elif ch in "}]" and stack:
+                stack.pop()
+        i += 1
+    for opener in reversed(stack):
+        out += "}" if opener == "{" else "]"
+    return out
+
+
+def _escape_ctrl_in_json_strings(raw: str) -> str:
+    """Escape literal control characters (0x00–0x1F) inside JSON string
+    values as ``\\uXXXX``. Pass-through outside strings and for
+    already-escaped sequences."""
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(raw)
+    while i < n:
+        ch = raw[i]
+        if in_string:
+            if ch == "\\" and i + 1 < n:
+                out.append(ch)
+                out.append(raw[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+                out.append(ch)
+            elif ord(ch) < 0x20:
+                out.append(f"\\u{ord(ch):04x}")
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                in_string = True
+            out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 # Explicit alias map: pre-rename / pre-consolidation tool names →

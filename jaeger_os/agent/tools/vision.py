@@ -13,6 +13,7 @@ adjustment is sandbox: paths must resolve inside <instance>/skills/.
 from __future__ import annotations
 
 import os
+import threading as _threading
 import time
 from typing import Any
 
@@ -24,10 +25,19 @@ from jaeger_os.core.runtime.tool_interrupt import is_interrupted
 # Image generation (SDXL-Turbo on MPS)
 # ---------------------------------------------------------------------------
 _imagegen_state: dict[str, Any] = {"pipeline": None, "model_id": None}
+# Atomic load/swap for the shared pipeline — multi-instance agents
+# (delegate sub-agents, deep think) can dispatch concurrently, and a
+# racing reload mid-inference corrupts results silently.
+_imagegen_lock = _threading.Lock()
 
 
 def _ensure_imagegen_pipeline() -> tuple[Any, str]:
     model_id = os.environ.get("IMAGE_GEN_MODEL_ID", "stabilityai/sdxl-turbo")
+    with _imagegen_lock:
+        return _ensure_imagegen_pipeline_locked(model_id)
+
+
+def _ensure_imagegen_pipeline_locked(model_id: str) -> tuple[Any, str]:
     if _imagegen_state["pipeline"] is not None and _imagegen_state["model_id"] == model_id:
         return _imagegen_state["pipeline"], model_id
 
@@ -112,10 +122,16 @@ def generate_image(
 # look_at — Moondream2 VLM on CPU (Metal-safe)
 # ---------------------------------------------------------------------------
 _vision_state: dict[str, Any] = {"model": None, "tokenizer": None, "model_id": None}
+_vision_lock = _threading.Lock()
 
 
 def _ensure_vision_model() -> tuple[Any, Any, str]:
     model_id = os.environ.get("VISION_MODEL_ID", "vikhyatk/moondream2")
+    with _vision_lock:
+        return _ensure_vision_model_locked(model_id)
+
+
+def _ensure_vision_model_locked(model_id: str) -> tuple[Any, Any, str]:
     if _vision_state["model"] is not None and _vision_state["model_id"] == model_id:
         return _vision_state["model"], _vision_state["tokenizer"], model_id
 

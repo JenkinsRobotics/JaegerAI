@@ -30,6 +30,9 @@ certifi>=2024.0
 rich>=13.0
 prompt-toolkit>=3.0
 llama-cpp-python>=0.3
+# Apple-Silicon-native MLX backend (config ``model.backend: mlx_lm``,
+# ``/model use mlx <name>``). Marker-gated so Linux installs skip it.
+mlx-lm>=0.21; sys_platform == "darwin" and platform_machine == "arm64"
 croniter>=2.0
 ddgs>=9.0
 

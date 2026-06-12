@@ -217,6 +217,7 @@ class HermesXMLAdapter(ProviderAdapter):
         *,
         stale_timeout: float | None = None,
         on_heartbeat: Any = None,
+        on_delta: Any = None,  # consumed: text-completion runners don't stream
         **kwargs: Any,
     ) -> Any:
         """Invoke the runner with the assembled prompt, interrupt-aware.
