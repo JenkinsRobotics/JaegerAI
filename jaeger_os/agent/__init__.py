@@ -45,7 +45,7 @@ from jaeger_os.agent.schemas.tool_registry import (
     register_tool_instance,
     unregister_tool,
 )
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.agent.schemas.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_os.agent.schemas.toolsets import (
     JAEGER_TOOLSETS,
     list_toolsets,
@@ -57,7 +57,7 @@ __all__ = [
     # message types
     "Message", "Role", "ToolCall",
     # tools
-    "ToolDef",
+    "ToolDef", "dev_mode_enabled",
     "register_tool", "register_tool_from_function", "register_tool_instance",
     "unregister_tool", "get_tool", "get_tools", "has_tool", "clear_registry",
     # adapters

@@ -826,7 +826,7 @@ def _register_builtins(client: Any) -> None:
     """
     t = jaeger_tools
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="time", operation="get_time",
                    summary="read the current time")
     def get_time(timezone: str | None = None) -> dict:
@@ -838,7 +838,7 @@ def _register_builtins(client: Any) -> None:
         timezone (e.g. 'Asia/Shanghai')."""
         return t.get_time(timezone=timezone)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="math", operation="calculate",
                    summary="evaluate an arithmetic expression")
     def calculate(expression: str) -> dict:
@@ -847,7 +847,7 @@ def _register_builtins(client: Any) -> None:
         For "square root of N" call calculate("sqrt(N)")."""
         return t.calculate(expression=expression)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="host", operation="system_status",
                    summary="read machine + instance dir status")
     def system_status() -> dict:
@@ -895,7 +895,7 @@ def _register_builtins(client: Any) -> None:
         """Delete a file from the skills/ directory."""
         return t.delete_file(path=path)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_file",
                    summary="read a workspace file")
     def read_file(path: str, offset: int = 0, limit: int | None = None) -> dict:
@@ -907,7 +907,7 @@ def _register_builtins(client: Any) -> None:
         first line, `limit` the line count (default: the whole file)."""
         return t.file_read(path=path, offset=offset, limit=limit)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="list_skill_dir",
                    summary="list contents of the skills directory")
     def list_skill_dir(path: str = ".") -> dict:
@@ -917,7 +917,7 @@ def _register_builtins(client: Any) -> None:
         Use for "list files", "show files", "what's in <dir>"."""
         return t.list_skill_dir(path=path)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_files",
                    summary="search file contents under the skills directory")
     def search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
@@ -944,7 +944,7 @@ def _register_builtins(client: Any) -> None:
         not this."""
         return t.remember(key=key, value=value, category=category)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="recall",
                    summary="recall a fact by key")
     def recall(key: str) -> dict:
@@ -978,7 +978,7 @@ def _register_builtins(client: Any) -> None:
         durable facts about YOURSELF go here, not in remember()."""
         return t.update_soul(content=content)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="list_facts",
                    summary="list every stored fact")
     def list_facts() -> dict:
@@ -1015,14 +1015,14 @@ def _register_builtins(client: Any) -> None:
         """Cancel a previously-scheduled prompt by name."""
         return t.cancel_schedule(name=name)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def web_search(query: str, max_results: int = 5) -> dict:
         """Web search (multi-backend, no API key). Returns titles + URLs
         + snippets. Use this to FIND relevant pages, then web_extract to
         actually READ one."""
         return t.web_search(query=query, max_results=max_results)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def web_extract(url: str, max_chars: int = 8000) -> dict:
         """Fetch a web page and return its readable text. This is the
         research tool — web_search finds which pages matter, web_extract
@@ -1031,7 +1031,7 @@ def _register_builtins(client: Any) -> None:
         before writing code for an unfamiliar task."""
         return t.web_fetch(url=url, max_chars=max_chars)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def get_weather(location: str) -> dict:
         """Look up current weather via wttr.in (no API key)."""
         return t.get_weather(location=location)
@@ -1096,7 +1096,7 @@ def _register_builtins(client: Any) -> None:
         for code that depends on installed libraries."""
         return t.run_in_venv(code=code, timeout_s=timeout_s)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def list_models() -> dict:
         """List the LLM models in the registry with role (realtime /
         coder) and cache status. Read-only — use this to tell the user
@@ -1121,7 +1121,14 @@ def _register_builtins(client: Any) -> None:
         instance config; survives restarts."""
         return t.model_location(action=action, path=path)
 
-    @register_tool_from_function
+    # Skill-tree / marketplace tools — BETA while the 0.5.x skill tree
+    # evolution is in flight (marketplace repo isn't live, most skill
+    # folders are placeholders, XP wiring is animation-only). Dev-mode
+    # only (JAEGER_DEV_MODE=1 / --dev) so the daily-driver agent can't
+    # wander into half-built skill plumbing. The PLAYBOOK machinery
+    # (``skill``, ``reload_skills``, ``list_skill_dir``) is the proven
+    # 0.1.0 path and stays un-gated.
+    @register_tool_from_function(beta=True)
     def package_skill(name: str) -> dict:
         """Bundle a skill you built into a portable, shareable .zip with
         a generated manifest (name, version, deps, smoke-test status).
@@ -1131,7 +1138,7 @@ def _register_builtins(client: Any) -> None:
         yet — see docs/marketplace_spec.md)."""
         return t.package_skill(name=name)
 
-    @register_tool_from_function
+    @register_tool_from_function(beta=True)
     def benchmark_skill(name: str) -> dict:
         """Run a skill's scored benchmark (tests/benchmark.py) and track
         the delta vs. its last run. Use this when revising a skill:
@@ -1149,7 +1156,7 @@ def _register_builtins(client: Any) -> None:
         user decides."""
         return t.propose_deep_think_task(description=description)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def list_deep_think_queue() -> dict:
         """Read the Deep Think task queue with status counts. Read-only."""
         return t.list_deep_think_queue()
@@ -1187,7 +1194,7 @@ def _register_builtins(client: Any) -> None:
         return t.browser(action=action, url=url, element=element,
                          text=text, direction=direction, key=key)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def skill(action: str, name: str = "", query: str = "",
               file: str = "") -> dict:
         """Discover and read playbook skills — experienced procedures
@@ -1198,7 +1205,7 @@ def _register_builtins(client: Any) -> None:
         one. See ``describe_tool("skill")`` for the full contract."""
         return t.skill(action=action, name=name, query=query, file=file)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def board_view(column: str = "", tag: str = "") -> dict:
         """Read the kanban task board — what work is queued (ready),
         in_progress, blocked, or done. Optionally filter by `column` or
@@ -1267,13 +1274,13 @@ def _register_builtins(client: Any) -> None:
         check_background, end with stop_background."""
         return t.start_background(code=code, name=name)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def list_background() -> dict:
         """List every background process with live status (running /
         exited / stopped, exit code, elapsed)."""
         return t.list_background()
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def check_background(process_id: str, lines: int = 20) -> dict:
         """Status of one background process + the last `lines` lines of
         its output (default 20, max 2000 — raise it for fuller output).
@@ -1286,7 +1293,7 @@ def _register_builtins(client: Any) -> None:
         """Terminate a running background process by id."""
         return t.stop_background(process_id=process_id)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def pending_background() -> dict:
         """Drain the queue of background tasks that finished since the
         last check. Each completion is surfaced at most once. Returns
@@ -1333,7 +1340,7 @@ def _register_builtins(client: Any) -> None:
         """
         return creds.get_credential_tool_result(_pipeline["layout"], name=name)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def list_credentials() -> dict:
         """List the names of every credential currently stored. Values
         are never returned by this tool — use get_credential(name) for
@@ -1356,6 +1363,29 @@ def _register_builtins(client: Any) -> None:
         file). `path` is sandbox-resolved and wins over `text` when both
         are given. Supports minimal SSML: <break time="200ms"/>, <breath/>."""
         return t.speak(text=text, path=path)
+
+    # Avatar / animation tools — BETA while Mochi is the animation
+    # testbed. ``beta=True`` keeps them out of the agent's catalogue
+    # (invisible to the model, undispatchable) unless the process runs
+    # with JAEGER_DEV_MODE=1, so an unstable animation path can't
+    # break a daily-driver session. Promote by dropping the flag.
+    @register_tool_from_function(beta=True)
+    def set_avatar_state(
+        emotion: str = "neutral", hold_ms: int = 0, wait: bool = False,
+    ) -> dict:
+        """Switch the avatar's face expression. emotion is one of
+        "neutral", "happy", "sad", "focused", "thinking", "speaking",
+        "listening" (operator can add more via avatar/expressions.json).
+        hold_ms holds the state for that long (0 = until replaced);
+        wait=True blocks until the animation node acknowledges."""
+        return t.set_avatar_state(emotion=emotion, hold_ms=hold_ms, wait=wait)
+
+    @register_tool_from_function(beta=True)
+    def play_timeline(name: str = "", wait: bool = False) -> dict:
+        """Play a multi-track avatar animation timeline stored at
+        <instance>/timelines/<name>.json. wait=True blocks until the
+        timeline completes; default runs it in the background."""
+        return t.play_timeline(name=name, wait=wait)
 
     @register_tool_from_function
     def vision_analyze(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
@@ -1398,7 +1428,7 @@ def _register_builtins(client: Any) -> None:
         targets are sandbox-resolved under <instance>/skills/."""
         return t.open_on_host(target=target, kind=kind)
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def search_memory(query: str, k: int = 5) -> dict:
         """Semantic search over this instance's episodic conversation log.
         Use when `recall` (exact key) misses — e.g. "what did we talk
@@ -1499,7 +1529,7 @@ def _register_builtins(client: Any) -> None:
             "total_registered": len(after),
         }
 
-    @register_tool_from_function
+    @register_tool_from_function(side_effect="read")
     def list_plugins() -> dict:
         """Enumerate the bundled jaeger_os plugins (discord, telegram,
         imessage, whisper_stt, kokoro_tts, mcp) with install + credential
@@ -1850,6 +1880,229 @@ def request_turn_cancel() -> None:
             agent.interrupt()
         except Exception:  # noqa: BLE001 — cancel must be best-effort
             pass
+
+
+# ── memory: facts snapshot + background review ──────────────────────
+# The Hermes lesson (memory comparison, 2026-06-12): JROS RECORDED
+# everything but the agent only knew what it thought to search for.
+# Two fixes: (1) a bounded known-facts block frozen into each session's
+# system prompt — high attention, prefix-cache stable; (2) a periodic
+# background review that promotes things the user said in passing
+# ("call me Jon", "I prefer short answers") into durable facts.
+
+_FACTS_SNAPSHOT_MAX_CHARS = 1_400
+# Review cadence in user turns. 0 disables. Env-overridable until a
+# config.yaml field earns its keep.
+_MEMORY_REVIEW_EVERY = max(
+    0, int(os.environ.get("JAEGER_MEMORY_REVIEW_EVERY", "8") or 0),
+)
+_MEMORY_REVIEW_MAX_FACTS = 5
+
+_MEMORY_REVIEW_PROMPT = """\
+Review this conversation excerpt for DURABLE facts about the user or
+standing preferences worth remembering across sessions — name, likes,
+corrections ("stop doing X"), preferences ("keep answers short"),
+projects, people, places. Ignore one-off task details.
+
+Output ONLY a JSON array (possibly empty), each item:
+{{"key": "<short_snake_case>", "value": "<the fact>", "category": "user"}}
+
+Conversation:
+{transcript}
+"""
+
+
+def _facts_snapshot_block(max_chars: int = _FACTS_SNAPSHOT_MAX_CHARS) -> str:
+    """Render the curated facts store as a bounded system-prompt block.
+
+    Computed ONCE per session agent (at construction) so the system
+    prompt stays byte-stable across turns — local prefix caching and
+    Anthropic cache markers both depend on that. Facts learned
+    mid-session surface in the NEXT session's snapshot (same contract
+    as Hermes' MEMORY.md freeze)."""
+    try:
+        by_cat = mem.list_facts_by_category()
+    except Exception:  # noqa: BLE001 — no memory bound (tests, early boot)
+        return ""
+    if not by_cat:
+        return ""
+    # User-identity / preference categories lead — they shape behaviour.
+    lead = ("user", "identity", "preference", "preferences")
+    order = sorted(by_cat.keys(), key=lambda c: (c not in lead, c))
+    lines = [
+        "## Known facts (from persistent memory — use them, don't re-ask)",
+    ]
+    used = len(lines[0])
+    for cat in order:
+        for key, value in by_cat[cat].items():
+            line = f"- {key}: {value}".replace("\n", " ")[:200]
+            if used + len(line) > max_chars:
+                lines.append("- … (more in memory — recall/search_memory)")
+                return "\n".join(lines)
+            lines.append(line)
+            used += len(line)
+    return "\n".join(lines)
+
+
+# Cross-restart session continuity. The clean-slate rule stands —
+# prior sessions are NOT replayed into context (raw replay bled stale,
+# already-finished tasks into new sessions; see _get_session_history).
+# What a restart SHOULD preserve is orientation: what was being talked
+# about, what was answered. So a freshly built session agent is seeded
+# with one bounded REFERENCE-ONLY digest of that session's recent
+# episodic turns — same lossy-digest philosophy as context compaction,
+# same explicit "latest user message is the source of truth" framing
+# that prevents the stale-task bleed the clean-slate rule fixed.
+_SESSION_RESUME_TURNS = 6
+_SESSION_RESUME_MAX_CHARS = 900
+
+
+def _session_resume_enabled() -> bool:
+    return (os.environ.get("JAEGER_SESSION_RESUME", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
+def _previous_session_digest(session_key: str) -> str:
+    """Bounded digest of this session key's most recent episodic turns,
+    or ``""`` when there's nothing to resume (fresh instance, store
+    unbound, background session)."""
+    if not _session_resume_enabled():
+        return ""
+    if session_key.startswith(("deepthink", "bench")):
+        return ""
+    try:
+        pairs = mem.recent_qa_pairs(
+            _SESSION_RESUME_TURNS, session_key=session_key,
+        )
+    except Exception:  # noqa: BLE001 — store unbound (tests, early boot)
+        return ""
+    if not pairs:
+        return ""
+    lines = [
+        "[PREVIOUS SESSION — REFERENCE ONLY] Earlier conversation "
+        "(before a restart), digested for orientation. Do NOT resume "
+        "old tasks from it unprompted — the latest user message is "
+        "the source of truth.",
+    ]
+    used = len(lines[0])
+    for pair in pairs:
+        q = " ".join(str(pair.get("user") or "").split())[:120]
+        a = " ".join(str(pair.get("answer") or "").split())[:120]
+        line = f"- user: {q} → you: {a}"
+        if used + len(line) > _SESSION_RESUME_MAX_CHARS:
+            break
+        lines.append(line)
+        used += len(line)
+    if len(lines) == 1:
+        return ""
+    return "\n".join(lines)
+
+
+def _maybe_spawn_memory_review(client: Any, session_key: str) -> None:
+    """Every ``_MEMORY_REVIEW_EVERY`` user turns, promote conversational
+    signals into durable facts on a background thread. Skips entirely
+    for background sessions (deep think / bench) — they aren't the
+    operator talking."""
+    if _MEMORY_REVIEW_EVERY <= 0:
+        return
+    if session_key.startswith(("deepthink", "bench")):
+        return
+    n = int(_pipeline.get("turns_since_memory_review") or 0) + 1
+    if n < _MEMORY_REVIEW_EVERY:
+        _pipeline["turns_since_memory_review"] = n
+        return
+    _pipeline["turns_since_memory_review"] = 0
+    threading.Thread(
+        target=_memory_review_worker,
+        args=(client, session_key),
+        daemon=True,
+        name="memory-review",
+    ).start()
+
+
+def _memory_review_worker(client: Any, session_key: str) -> None:
+    """One bounded model call → up to ``_MEMORY_REVIEW_MAX_FACTS`` new
+    facts. Polite by construction: takes ``llm_lock`` ONLY if it's free
+    right now (never queues behind — and so never delays — a live voice
+    turn); on contention, re-arms to retry after the next turn. All
+    failures are swallowed — review is maintenance, not control flow."""
+    lock = _pipeline.get("llm_lock")
+    acquired = lock.acquire(blocking=False) if lock is not None else True
+    if not acquired:
+        _pipeline["turns_since_memory_review"] = _MEMORY_REVIEW_EVERY - 1
+        return
+    try:
+        turns = mem.load_recent_turns(
+            _MEMORY_REVIEW_EVERY, session_key=session_key,
+        )
+        if not turns:
+            return
+        transcript = "\n".join(
+            f"{m['role'].upper()}: {m['content'][:400]}" for m in turns
+        )[:6_000]
+        raw = client.chat(
+            [{"role": "user", "content": _MEMORY_REVIEW_PROMPT.format(
+                transcript=transcript)}],
+            max_tokens=300,
+            temperature=0.2,
+        )
+        import json as _json
+        text = str(raw or "").strip()
+        start, end = text.find("["), text.rfind("]")
+        if start < 0 or end <= start:
+            return
+        items = _json.loads(text[start:end + 1])
+        if not isinstance(items, list):
+            return
+        saved = 0
+        for item in items[:_MEMORY_REVIEW_MAX_FACTS]:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "").strip()[:60]
+            value = str(item.get("value") or "").strip()[:300]
+            category = str(item.get("category") or "user").strip()[:40]
+            if not key or not value:
+                continue
+            try:
+                if mem.recall(key) == value:
+                    continue  # already known, unchanged
+                mem.remember(key, value, category)
+                saved += 1
+            except Exception:  # noqa: BLE001 — one bad fact never stops the rest
+                continue
+        if saved:
+            try:
+                mem.record_audit_event(
+                    event="memory_review",
+                    payload={"saved": saved},
+                    session_key=session_key,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001 — background maintenance must never crash
+        pass
+    finally:
+        if lock is not None and acquired:
+            lock.release()
+
+
+def steer_active_turn(text: str) -> bool:
+    """Inject user guidance into the RUNNING turn without cancelling it.
+
+    The counterpart to :func:`request_turn_cancel` — cancel kills the
+    in-flight work, steer redirects it. The text lands as a real user
+    message before the agent's next model step ("actually use metric
+    units", "skip the third file"). Returns ``True`` when an active
+    turn accepted the steer; ``False`` when no turn is running — the
+    caller should then deliver the text as an ordinary message
+    instead. Safe to call from any thread (voice loop, TUI, daemon)."""
+    agent = _pipeline.get("active_jaeger_agent")
+    if agent is not None and hasattr(agent, "steer"):
+        try:
+            return bool(agent.steer(text))
+        except Exception:  # noqa: BLE001 — steering must never crash the caller
+            return False
+    return False
 
 
 # Per-(client, system_prompt, mcp_specs) cache so a single set of skill
@@ -2282,16 +2535,55 @@ def _run_turn_via_jaeger_agent(
         # in config.yaml. ``None`` lets ``build_jaeger_agent`` pick a
         # backend-appropriate default (120s for in-process, 30s for HTTP).
         _stall_s = getattr(getattr(_cfg, "model", None), "stall_timeout_s", None)
+        # Deep Think sessions get LLM-written compaction digests — the
+        # work loop runs in the background, so the extra model call per
+        # compaction is free there. Voice / chat sessions keep the
+        # deterministic digest (zero added latency).
+        _summarizer = None
+        if key.startswith("deepthink"):
+            def _summarizer(prompt_text: str) -> str:
+                out = client.chat(
+                    [
+                        {"role": "system", "content": (
+                            "You compress agent conversation history "
+                            "into a dense factual digest. Output ONLY "
+                            "the digest."
+                        )},
+                        {"role": "user", "content": prompt_text},
+                    ],
+                    max_tokens=400,
+                    temperature=0.2,
+                )
+                return str(out or "")
+        # Session system prompt = base prompt + frozen facts snapshot.
+        # Frozen at construction so the prompt stays byte-stable across
+        # turns (prefix-cache friendly); new facts land next session.
+        _session_prompt = _pipeline["system_prompt"]
+        _facts_block = _facts_snapshot_block()
+        if _facts_block:
+            _session_prompt = f"{_session_prompt}\n\n{_facts_block}"
         _jaeger_agents_by_session[key] = build_jaeger_agent(
             client,
-            system_prompt=_pipeline["system_prompt"],
+            system_prompt=_session_prompt,
             toolsets=_pipeline.get("toolsets"),
             skip_final_tools=SKIP_FINAL_TOOLS,
             callbacks=_status_cb,
             ctx_window=_ctx,
             artifact_dir=_artifact_dir,
             stale_call_timeout_s=_stall_s,
+            context_summarizer=_summarizer,
         )
+        # Cross-restart continuity: seed the brand-new agent with a
+        # digest of this session's pre-restart turns (orientation, not
+        # task state — see _previous_session_digest). Seeded as a
+        # user/assistant pair so the transcript stays alternating.
+        _resume_digest = _previous_session_digest(key)
+        if _resume_digest:
+            _jaeger_agents_by_session[key].messages.extend([
+                {"role": "user", "content": _resume_digest},
+                {"role": "assistant",
+                 "content": "Noted — picking up from the earlier session."},
+            ])
     jaeger_agent = _jaeger_agents_by_session[key]
 
     lock = _pipeline["llm_lock"]
@@ -2340,7 +2632,10 @@ def _run_turn_via_jaeger_agent(
     report = LatencyReport(
         total=elapsed,
         tool_calls=len(tool_activity),
-        decision=_loop_time, decision_ttft=0.0,
+        decision=_loop_time,
+        # Real TTFT from the turn's first model call (streamed cloud +
+        # per-token local beacons) — no longer a hardcoded 0.0.
+        decision_ttft=float(result.get("ttft_s") or 0.0),
         tool=_tool_time, final=0.0, final_ttft=0.0,
     )
 
@@ -2357,14 +2652,30 @@ def _run_turn_via_jaeger_agent(
     # Trim per-session message history at the legacy limit so an
     # apples-to-apples L3 multi-turn bench measures the same memory
     # window. The factor of two accounts for tool-result pairs that
-    # the legacy path counted as one slot.
-    overflow = len(jaeger_agent.messages) - _MAX_HISTORY_MESSAGES * 2
-    if overflow > 0:
-        del jaeger_agent.messages[:overflow]
+    # the legacy path counted as one slot. Dropping happens in GROUPS
+    # (assistant tool_calls + their tool results together) — a blind
+    # ``del messages[:overflow]`` can strand a tool result whose
+    # assistant call was deleted, and both cloud APIs 400 on that
+    # orphan for every later turn in the session.
+    if len(jaeger_agent.messages) > _MAX_HISTORY_MESSAGES * 2:
+        from jaeger_os.agent.util.context_guard import oldest_group_size
+        msgs = jaeger_agent.messages
+        drop = 0
+        while len(msgs) - drop > _MAX_HISTORY_MESSAGES * 2 and drop < len(msgs):
+            group = oldest_group_size(msgs[drop:])
+            if group <= 0:
+                break
+            drop += group
+        if drop > 0:
+            del msgs[:drop]
 
     runner = _pipeline["thinking_runner"]
     if runner is not None:
         runner.queue(user_text, run_id=os.environ.get("BENCH_RUN_ID"))
+
+    # Memory review cadence — counts only completed operator turns;
+    # the worker self-gates on llm_lock so it never delays a live turn.
+    _maybe_spawn_memory_review(client, key)
 
     set_agent_status("ready")
     # ``spoke_via_tool`` tells the voice loop "the model already spoke
@@ -3076,7 +3387,17 @@ def parse_args() -> argparse.Namespace:
                          "don't need the renderer.  Equivalent to setting "
                          "config.avatar.enabled = false in the "
                          "instance's config.yaml."))
-    return p.parse_args()
+    p.add_argument("--dev", action="store_true",
+                   help=("Dev mode: expose tools marked beta=True "
+                         "(set_avatar_state, play_timeline, …) to the "
+                         "agent.  Outside dev mode beta tools are "
+                         "invisible AND undispatchable so a half-tested "
+                         "tool can't break a session.  Equivalent to "
+                         "JAEGER_DEV_MODE=1."))
+    args = p.parse_args()
+    if getattr(args, "dev", False):
+        os.environ["JAEGER_DEV_MODE"] = "1"
+    return args
 
 
 @dataclass

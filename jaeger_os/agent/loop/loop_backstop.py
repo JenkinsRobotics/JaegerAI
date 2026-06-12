@@ -8,6 +8,13 @@ human-readable halt reason. The counter thresholds are the same as the
 pre-refactor pydantic-ai loop in ``main.py`` — kept identical so the
 benchmark suite can compare apples to apples across the refactor.
 
+Hermes-adoption (2026-06): the backstop now also WARNS the model one
+step before it halts. A cold halt teaches the model nothing — the turn
+just dies; an in-result warning ("this looks like a loop; change
+strategy, don't abandon tools") lets it self-correct and finish the
+task. Warning thresholds sit below the halt thresholds; the halt rules
+are unchanged.
+
 Stateless on purpose: callers own the dicts and pass them in. That keeps
 the agent loop's per-turn state visible at the call site and the helpers
 trivially unit-testable.
@@ -23,6 +30,12 @@ from typing import Any
 MAX_TOOL_CALLS = 24
 MAX_IDENTICAL_CALLS = 4
 MAX_SEMANTIC_FAILURES = 2
+
+# Warn-before-halt thresholds (Hermes ``tool_guardrails`` pattern).
+# A warning never blocks execution — it rides on the tool result so the
+# model sees the pattern while it can still change course.
+WARN_IDENTICAL_CALLS = 2      # halt at 4 — warn from the 2nd repeat
+WARN_SEMANTIC_FAILURES = 1    # halt at 2 — warn on the 1st repeat
 
 
 def call_signature(tool_name: str, args: Any) -> str:
@@ -67,6 +80,47 @@ def semantic_failure_signature(
     return f"{tool_name}|{target}|{first_line}"
 
 
+def loop_warning(
+    call_signatures: dict[str, int],
+    failure_signatures: dict[str, int] | None = None,
+    *,
+    sig: str | None = None,
+    fail_sig: str | None = None,
+) -> str | None:
+    """Return guidance text when the CURRENT call (identified by its
+    ``sig`` / ``fail_sig``) is one step from tripping the backstop, else
+    ``None``.
+
+    The text is appended to the tool result so the model sees it in
+    band. Phrasing matters: weak models that get warned about loops
+    tend to abandon tools entirely and free-associate an answer — the
+    guidance explicitly tells them to keep using tools, diagnose, and
+    vary the approach (the Hermes recovery-hint lesson).
+    """
+    if fail_sig is not None:
+        n = (failure_signatures or {}).get(fail_sig, 0)
+        if n >= WARN_SEMANTIC_FAILURES:
+            tool = fail_sig.split("|", 1)[0]
+            return (
+                f"[loop warning: {tool} hit the same failure {n} time(s) "
+                f"this turn — one more identical failure halts the turn. "
+                f"Do not abandon tools; inspect the error above, fix the "
+                f"arguments or pick a different tool, and avoid retrying "
+                f"the exact same call.]"
+            )
+    if sig is not None:
+        n = call_signatures.get(sig, 0)
+        if n >= WARN_IDENTICAL_CALLS:
+            tool = sig.split("|", 1)[0]
+            return (
+                f"[loop warning: {tool} was called {n} times with "
+                f"identical arguments — at {MAX_IDENTICAL_CALLS} the turn "
+                f"halts. The result above is what this call produces; use "
+                f"it, change the arguments, or choose a different tool.]"
+            )
+    return None
+
+
 def loop_halt_reason(
     tool_calls_made: int,
     call_signatures: dict[str, int],
@@ -99,7 +153,10 @@ __all__ = [
     "MAX_TOOL_CALLS",
     "MAX_IDENTICAL_CALLS",
     "MAX_SEMANTIC_FAILURES",
+    "WARN_IDENTICAL_CALLS",
+    "WARN_SEMANTIC_FAILURES",
     "call_signature",
     "semantic_failure_signature",
     "loop_halt_reason",
+    "loop_warning",
 ]

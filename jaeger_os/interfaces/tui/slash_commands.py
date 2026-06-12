@@ -543,6 +543,20 @@ def _model_list(ctx: SlashContext) -> SlashResult:
                 f"[dim]{m.get('source', '')}[/]")
         ctx.console.print("  [dim]switch:  /model use local <name>[/]")
 
+    # MLX models — Apple-Silicon-native, loaded in-process by the MLX
+    # backend. Directories (config.json + safetensors), not files.
+    local_mlx = found.get("local_mlx", [])
+    if local_mlx:
+        ctx.console.print(
+            f"\n[bold]Local MLX models[/] [dim]· {len(local_mlx)} on disk, "
+            "loadable in-process (Apple Silicon)[/]")
+        for m in local_mlx:
+            sz = f"{m['size_gb']} GB" if m.get("size_gb") else ""
+            ctx.console.print(
+                f"  [green]●[/] {m['name']:42s} {sz:9s} "
+                f"[dim]{m.get('source', '')}[/]")
+        ctx.console.print("  [dim]switch:  /model use mlx <name>[/]")
+
     # Local Ollama + LM Studio servers (the troubleshooting A/B targets).
     for label, key, switch in (("Ollama", "ollama", "ollama"),
                                ("LM Studio", "lmstudio", "lmstudio")):
@@ -580,7 +594,8 @@ def _model_list(ctx: SlashContext) -> SlashResult:
             "(e.g. qwen3.5:397b — prompts for an API key, once)[/]")
 
     ctx.console.print(
-        "\n[dim]switch · on-device:[/]  /model use local"
+        "\n[dim]switch · on-device:[/]  /model use local  ·  "
+        "/model use mlx <name>"
         "  ·  /model use ollama <name>  ·  /model use lmstudio <name>"
         "\n[dim]switch · cloud API:[/]  /model use ollama-cloud <model>"
         "  ·  /model use openai <model>  ·  /model use anthropic <model>"
@@ -646,9 +661,9 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         return SlashResult()
     if not args:
         ctx.console.print(
-            "[yellow]Usage:[/] /model use local [name] | ollama <name> | "
-            "lmstudio <name> | ollama-cloud <model> | openai <model> | "
-            "anthropic <model> | gemini <model>")
+            "[yellow]Usage:[/] /model use local [name] | mlx <name> | "
+            "ollama <name> | lmstudio <name> | ollama-cloud <model> | "
+            "openai <model> | anthropic <model> | gemini <model>")
         return SlashResult()
 
     from jaeger_os.main import _pipeline
@@ -662,6 +677,10 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
 
     if target in ("local", "llama-cpp", "llamacpp", "jaeger"):
         cfg.external_model.enabled = False
+        # Explicitly land back on the GGUF engine — without this,
+        # switching mlx → local would keep ``backend: mlx_lm`` pointed
+        # at a .gguf file and fail to load.
+        cfg.model.backend = "llama_cpp_python"
         if wanted:
             # Pick a specific .gguf — match the discovered list by name
             # (or take a literal path / registry key), then point the
@@ -677,6 +696,36 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
             summary = f"local · {Path(chosen).name}"
         else:
             summary = f"local · {Path(str(cfg.model.model_path)).name}"
+    elif target in ("mlx", "mlx-lm", "mlx_lm"):
+        # In-process Apple-Silicon MLX backend. MLX models are
+        # DIRECTORIES (config.json + safetensors), discovered from the
+        # same roots as GGUF (LM Studio, HF cache, repo models/,
+        # custom dirs).
+        from jaeger_os.core.models.model_discovery import discover_local_mlx
+        mlx_models = discover_local_mlx()
+        if not wanted:
+            if len(mlx_models) == 1:
+                wanted = mlx_models[0]["name"]
+            else:
+                ctx.console.print(
+                    "[yellow]Pick a model:[/] /model use mlx <name>")
+                for m in mlx_models:
+                    sz = f"  {m['size_gb']} GB" if m.get("size_gb") else ""
+                    ctx.console.print(f"  - {m['name']}{sz}")
+                if not mlx_models:
+                    ctx.console.print(
+                        "  [dim](no MLX models found — download one with "
+                        "LM Studio, e.g. mlx-community/…)[/]")
+                return SlashResult()
+        chosen = wanted
+        for m in mlx_models:
+            if wanted in (m["name"], m["path"]):
+                chosen = m["path"]
+                break
+        cfg.external_model.enabled = False
+        cfg.model.backend = "mlx_lm"
+        cfg.model.model_path = chosen
+        summary = f"local · mlx · {Path(chosen).name}"
     elif target in ("ollama", "lmstudio", "lm-studio"):
         provider = "ollama" if target == "ollama" else "lmstudio"
         from jaeger_os.core.models.model_discovery import (
@@ -735,8 +784,9 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         summary = f"external · {provider} · {wanted}"
     else:
         ctx.console.print(
-            f"[yellow]Unknown target {target!r}[/] — use local / ollama / "
-            "lmstudio / ollama-cloud / openai / anthropic / gemini.")
+            f"[yellow]Unknown target {target!r}[/] — use local / mlx / "
+            "ollama / lmstudio / ollama-cloud / openai / anthropic / "
+            "gemini.")
         return SlashResult()
 
     # Persist to config.yaml, then reboot so make_client rebuilds the brain.
@@ -763,7 +813,10 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     # brain is the local gguf the fallback loaded.
     from jaeger_os.main import _pipeline as _pl
     active_client = _pl.get("client")
-    targeted_external = target not in ("local", "llama-cpp", "llamacpp", "jaeger")
+    targeted_external = target not in (
+        "local", "llama-cpp", "llamacpp", "jaeger",
+        "mlx", "mlx-lm", "mlx_lm",
+    )
     actually_local = getattr(active_client, "kind", "local") == "local"
     if targeted_external and actually_local:
         local_name = Path(str(cfg.model.model_path)).name

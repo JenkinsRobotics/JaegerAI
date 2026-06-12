@@ -30,7 +30,7 @@ import shutil
 import tempfile
 import time
 from contextlib import redirect_stdout
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -62,6 +62,17 @@ class BenchRow:
     # estimate in that case.
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Loop-health telemetry (v1.2) — straight from the turn result so
+    # every bench run systematically measures the agent loop, not just
+    # the answers. ``ttft_s`` is the REAL time-to-first-token of the
+    # turn's first model call (None when the adapter couldn't report
+    # one); ``halt_reason`` is non-None when a backstop/interrupt cut
+    # the turn short; ``iterations`` is the loop's step count;
+    # ``skipped_final`` marks the fast skip-final path.
+    ttft_s: float | None = None
+    halt_reason: str | None = None
+    iterations: int = 0
+    skipped_final: bool = False
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -120,10 +131,11 @@ def _drive_one(
     client: Any, prompt: str, *,
     agent_cache: dict[str, Any],
     session_key: str,
-) -> tuple[list[str], str, float, str | None, int, int]:
+) -> tuple[list[str], str, float, str | None, int, int, dict[str, Any]]:
     """Run one turn through a session-bound :class:`JaegerAgent`. Returns
     ``(tools_called, answer, elapsed_s, error, prompt_tokens,
-    completion_tokens)``.
+    completion_tokens, loop_meta)`` — ``loop_meta`` carries the turn's
+    loop-health telemetry (ttft_s / halt_reason / iterations / skipped).
 
     Token counts come from the adapter's ``usage`` field — real
     tokenizer counts on llama-cpp / OpenAI / Anthropic. Adapters that
@@ -193,7 +205,13 @@ def _drive_one(
     answer = out.get("answer", "") or ""
     prompt_tokens = int(out.get("prompt_tokens") or 0)
     completion_tokens = int(out.get("completion_tokens") or 0)
-    return tools, answer, elapsed, error, prompt_tokens, completion_tokens
+    meta: dict[str, Any] = {
+        "ttft_s": out.get("ttft_s"),
+        "halt_reason": out.get("halt_reason"),
+        "iterations": int(out.get("iterations") or 0),
+        "skipped_final": bool(out.get("skipped", False)),
+    }
+    return tools, answer, elapsed, error, prompt_tokens, completion_tokens, meta
 
 
 # ── Scoring ─────────────────────────────────────────────────────────
@@ -260,6 +278,33 @@ def _score(case: BenchCase, tools: list[str], answer: str,
 
 
 # ── Filtering / running ─────────────────────────────────────────────
+
+
+def _loop_health_metrics(rows: list[BenchRow]) -> dict[str, Any]:
+    """Aggregate the v1.2 loop-health fields across a run."""
+    ttfts = sorted(r.ttft_s for r in rows if r.ttft_s)
+    halt_reasons: dict[str, int] = {}
+    for r in rows:
+        if r.halt_reason:
+            # Group parameterised reasons ("hit max_iterations=24 …")
+            # by their first word so the histogram stays readable.
+            key = str(r.halt_reason).split("=")[0].strip()[:60]
+            halt_reasons[key] = halt_reasons.get(key, 0) + 1
+    iters = [r.iterations for r in rows if r.iterations > 0]
+    out: dict[str, Any] = {
+        "halt_reasons": halt_reasons,
+        "halted_turns": sum(halt_reasons.values()),
+        "avg_iterations": round(sum(iters) / len(iters), 2) if iters else 0.0,
+        "skip_final_turns": sum(1 for r in rows if r.skipped_final),
+    }
+    if ttfts:
+        out["ttft_avg_s"] = round(sum(ttfts) / len(ttfts), 3)
+        out["ttft_p50_s"] = round(_percentile(ttfts, 50), 3)
+        out["ttft_p95_s"] = round(_percentile(ttfts, 95), 3)
+        out["ttft_reported"] = len(ttfts)
+    else:
+        out["ttft_reported"] = 0
+    return out
 
 
 def _filter_cases(cases: list[BenchCase], *,
@@ -424,13 +469,18 @@ def run_bench(
     with snapshot_ctx:
         for idx, case in enumerate(selected):
             session_key = case.session or f"bench_{case.id}"
-            tools, answer, elapsed, error, ptok, ctok = _drive_one(
+            tools, answer, elapsed, error, ptok, ctok, meta = _drive_one(
                 client, case.prompt,
                 agent_cache=agent_cache, session_key=session_key,
             )
             row = _score(case, tools, answer, error, elapsed)
             row.prompt_tokens = ptok
             row.completion_tokens = ctok
+            ttft = meta.get("ttft_s")
+            row.ttft_s = round(float(ttft), 3) if ttft else None
+            row.halt_reason = meta.get("halt_reason")
+            row.iterations = int(meta.get("iterations") or 0)
+            row.skipped_final = bool(meta.get("skipped_final", False))
             rows.append(row)
             for cleanup_prompt in (case.cleanup_after or []):
                 cleanup_queue.append((f"{session_key}_cleanup", cleanup_prompt))
@@ -648,6 +698,15 @@ def summarise(rows: list[BenchRow]) -> dict[str, Any]:
                 else "whitespace-split estimate; install an adapter "
                      "that reports usage for real counts"
             ),
+            # Loop-health telemetry (v1.2). TTFT percentiles use only
+            # rows where the adapter reported one (streamed cloud /
+            # per-token local). ``halt_reasons`` counts every turn a
+            # backstop, interrupt, or budget cut short — a healthy
+            # corpus run should be nearly empty here; growth is a loop
+            # regression even when pass-rate holds. ``avg_iterations``
+            # catches routing inefficiency (more steps for the same
+            # answers).
+            **_loop_health_metrics(rows),
         },
         "suites": suites,
         "by_tag": by_tag,

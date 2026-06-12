@@ -446,7 +446,7 @@ def main() -> int:
             return
         if _phrase_queue.full():
             try:
-                dropped, _dropped_at = _phrase_queue.get_nowait()
+                dropped, _dropped_at, _dropped_timing = _phrase_queue.get_nowait()
                 print(f"[voice] dropped stale queued phrase: {dropped!r}",
                       flush=True)
                 _log_gate_event(
@@ -458,7 +458,10 @@ def main() -> int:
                 )
             except _queue.Empty:
                 pass
-        _phrase_queue.put_nowait((text, time.time()))
+        _phrase_queue.put_nowait((text, time.time(), {
+            "speech_end": float(getattr(msg, "speech_end_pc", 0.0) or 0.0),
+            "stt_done": float(getattr(msg, "stt_done_pc", 0.0) or 0.0),
+        }))
         _log_gate_event("transcript", text, decision="queued")
 
     _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
@@ -527,9 +530,12 @@ def main() -> int:
             # via _phrase_queue instead of polling stt.next_phrase().
             # Same blocking semantics — wait up to 1.0 s for a phrase.
             try:
-                phrase, phrase_queued_at = _phrase_queue.get(timeout=1.0)
+                phrase, phrase_queued_at, phrase_timing = _phrase_queue.get(
+                    timeout=1.0,
+                )
             except _queue.Empty:
                 phrase = None
+                phrase_timing = {}
             if not phrase:
                 continue
             phrase_age_s = time.time() - phrase_queued_at
@@ -679,13 +685,32 @@ def main() -> int:
                         )
                         text = gated_text
 
+                # Farewell mirror check (VoiceLLM port): BOTH sides
+                # must read as goodbye — user phrase AND reply — so a
+                # stray "goodbye" inside a story never closes the loop.
+                from jaeger_os.core.voice import is_farewell
+                _farewell_close = (
+                    bool(text)
+                    and is_farewell(phrase)
+                    and is_farewell(text)
+                )
+
                 if not text or spoke_via_tool or gated_out:
                     if spoke_via_tool:
                         print("[voice] agent vocalized via tool — skipping "
                               "post-turn speak", flush=True)
+                    # Ignored turns do NOT re-arm the wake-free
+                    # follow-up window (VoiceLLM hardening port):
+                    # re-arming after an <ignore> kept soliciting
+                    # ambient noise, each artifact paying a full LLM
+                    # turn just to be ignored again.
+                    if gated_out:
+                        print("[voice] ignored turn — follow-up window "
+                              "not re-armed", flush=True)
+                    else:
+                        stt.open_followup()
                     # NB: the ``finally`` below will unpause the mic
                     # before we continue around the loop.
-                    stt.open_followup()
                     continue
 
                 # ── Speak the response ───────────────────────────────
@@ -697,6 +722,27 @@ def main() -> int:
                 # flight speak.  Either way, the result is a SpokenAck
                 # that mirrors the pre-bus speak_result shape (ok,
                 # duration_s, reason).
+                # Honest voice latency (VoiceLLM metrics port): the
+                # user stopped talking at ``speech_end``; we are about
+                # to start talking NOW. This is the number the
+                # operator actually feels — everything else is a
+                # component of it.
+                _speech_end = float(phrase_timing.get("speech_end") or 0.0)
+                if _speech_end:
+                    _stt_s = max(0.0, float(
+                        phrase_timing.get("stt_done") or _speech_end,
+                    ) - _speech_end)
+                    _agent_s = float(result.get("elapsed_s") or 0.0)
+                    _e2e_s = max(0.0, time.perf_counter() - _speech_end)
+                    print(f"[voice-latency] stt={_stt_s:.2f}s "
+                          f"agent={_agent_s:.2f}s "
+                          f"speech-end→speak={_e2e_s:.2f}s", flush=True)
+                    _log_gate_event(
+                        "latency", phrase, decision="ok",
+                        reason=(f"stt={_stt_s:.3f};agent={_agent_s:.3f};"
+                                f"e2e={_e2e_s:.3f}"),
+                    )
+
                 interrupted = {"flag": False}
                 _speech_cid = uuid.uuid4().hex
 
@@ -820,6 +866,7 @@ def main() -> int:
                     stt.require_wake_word
                     and chimes.enabled("followup")
                     and not barge_in_fired
+                    and not _farewell_close
                 ):
                     if barge_in_active:
                         if reference_buffer is not None:
@@ -827,14 +874,27 @@ def main() -> int:
                     else:
                         chimes.play("followup")
 
-                stt.open_followup()
-                # Update the active-follow-up state for the next
-                # iteration's retry check + the self-speech filter's
-                # reference text.  Both patterns are no-ops when
-                # their config flags are off.
-                _followup_active_until = time.time() + float(
-                    getattr(config.voice, "follow_up_seconds", 10.0)
-                )
+                # Farewell exchange (VoiceLLM port): when the user said
+                # goodbye AND the reply acknowledged it, don't re-open
+                # the follow-up window — the robot was soliciting a
+                # reply into an empty room, transcribing scissors. STT
+                # stays on; the next real utterance resumes normally.
+                if _farewell_close:
+                    print("[voice] farewell exchange — follow-up window "
+                          "suppressed", flush=True)
+                    _log_gate_event(
+                        "farewell", phrase,
+                        decision="suppress_followup", reply=text,
+                    )
+                else:
+                    stt.open_followup()
+                    # Update the active-follow-up state for the next
+                    # iteration's retry check + the self-speech filter's
+                    # reference text.  Both patterns are no-ops when
+                    # their config flags are off.
+                    _followup_active_until = time.time() + float(
+                        getattr(config.voice, "follow_up_seconds", 10.0)
+                    )
                 if text:
                     _last_reply_text = text
                     _audio_session.remember_reply(text)

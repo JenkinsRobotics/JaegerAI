@@ -111,6 +111,21 @@ def _adapter_for_client(
             max_tokens=_resolve_local_max_tokens(),
         )
 
+    # In-process MLX (config ``model.backend: mlx_lm`` →
+    # ``MlxClient``): reuse the client's already-loaded model+tokenizer
+    # pair so the weights never load twice. Previously this client
+    # shape fell through to the RuntimeError below — the MLX backend
+    # could not reach the agent loop at all.
+    mlx_model = getattr(client, "_mlx_model", None)
+    if mlx_model is not None:
+        from jaeger_os.agent.adapters.mlx import MLXAdapter
+        return MLXAdapter(
+            model=mlx_model,
+            tokenizer=getattr(client, "_tokenizer", None),
+            model_name=getattr(client, "model_name", "mlx"),
+            defaults={"max_tokens": _resolve_local_max_tokens()},
+        )
+
     ext = getattr(client, "ext", None)
     if ext is not None:
         provider = getattr(ext, "provider", "openai")
@@ -182,6 +197,7 @@ def build_jaeger_agent(
     ctx_window: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
+    context_summarizer: Any = None,
 ) -> JaegerAgent:
     """Construct a :class:`JaegerAgent` wired against the provided
     JROS client. The skip-final finalizer is the legacy bounded-chat
@@ -211,17 +227,38 @@ def build_jaeger_agent(
     from jaeger_os.agent.util.context_guard import ContextBudget, ContextGuard
 
     adapter = _adapter_for_client(client, system_prompt=system_prompt)
-    guard = (
-        ContextGuard(ContextBudget(ctx_window=ctx_window, artifact_dir=artifact_dir))
-        if ctx_window else None
-    )
+    guard = None
+    if ctx_window:
+        budget = ContextBudget(ctx_window=ctx_window, artifact_dir=artifact_dir)
+        # Scale the per-tool-result cap to the window. The dataclass
+        # default (24K chars ≈ 8K tokens) EXCEEDS the entire prompt
+        # budget at ctx=8192 — one big ``run_shell`` dump would blow
+        # the window in a single result and crash the turn with a
+        # mid-flight overflow. Cap a single result at ~¼ of the
+        # prompt budget instead, floored so tiny test windows still
+        # keep something useful.
+        per_result_cap = int(
+            budget.prompt_budget * budget.chars_per_token / 4
+        )
+        per_result_cap = max(2_000, per_result_cap)
+        if per_result_cap < budget.max_tool_result_chars:
+            budget = ContextBudget(
+                ctx_window=ctx_window,
+                artifact_dir=artifact_dir,
+                max_tool_result_chars=per_result_cap,
+            )
+        # ``context_summarizer`` upgrades stage-2 compaction from the
+        # deterministic digest to an LLM-written one. Costs a model
+        # call — callers wire it ONLY for latency-free contexts
+        # (deep think), never the voice path.
+        guard = ContextGuard(budget, summarizer=context_summarizer)
     # Default stall timeout depends on the backend. HTTP adapters do
     # well with 30s (the SDK is usually streaming or about to error
     # out). In-process llama.cpp on Metal can sit in a long prefill
     # for 60-90s on a cold load of a big model, so the default for
     # the local backend is more generous. The caller can override.
     if stale_call_timeout_s is None:
-        if adapter.__class__.__name__ == "LocalLlamaAdapter":
+        if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
             # Cold prefill on a 30B Q4 can take ~60s; allow headroom
             # for an unusual prompt without false-positive stall
             # alarms during legitimate slow decodes. The pathological
@@ -338,7 +375,6 @@ def drive_one_turn(
     from jaeger_os.agent.util.context_guard import ContextOverflow
     from jaeger_os.core.runtime.cloud_errors import friendly_overflow_text
 
-    pre_len = len(agent.messages)
     started = time.perf_counter()
     try:
         answer = agent.run_turn(user_text)
@@ -376,7 +412,13 @@ def drive_one_turn(
     # detect <ignore>.
     answer, voice_gate_ignored = _strip_voice_gate_prefix(answer)
 
-    new_messages = agent.messages[pre_len:]
+    # The per-turn slice comes from the agent's own bookkeeping, NOT
+    # from ``messages[pre_len:]`` — the context guard can rebind
+    # ``agent.messages`` to a head-trimmed copy mid-turn, which made a
+    # length recorded at turn start overshoot and silently drop this
+    # turn's messages from the slice (history extension then lost the
+    # turn entirely).
+    new_messages = agent.last_turn_messages
     return {
         "answer": answer,
         "voice_gate_ignored": voice_gate_ignored,
@@ -392,6 +434,9 @@ def drive_one_turn(
         # whitespace-split estimate in that case).
         "prompt_tokens": agent.last_prompt_tokens,
         "completion_tokens": agent.last_completion_tokens,
+        # Real time-to-first-token of the turn's first model call —
+        # None when no adapter reported one (test stubs, plain create).
+        "ttft_s": agent.last_ttft_s,
     }
 
 

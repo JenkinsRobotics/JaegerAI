@@ -109,7 +109,13 @@ UMBRELLA_EQUIVALENTS: dict[str, set[str]] = {
 #            destructive/injection/credential). Old 1.0 runs are
 #            archived in the leaderboard (visible in a separate
 #            section, not ranked against 1.1 runs).
-BENCHMARK_VERSION = "1.1"
+# 1.2 (2026-06-12): +6 cases — deep ordered chains (4 tools), parallel
+#            all-read batches (tag ``parallel``; latency trend shows
+#            the concurrent-dispatch win), and a cross-SESSION memory
+#            pair exercising the facts-snapshot path. Rows gained
+#            loop-health telemetry (ttft_s / halt_reason / iterations /
+#            skipped_final) — see runner._loop_health_metrics.
+BENCHMARK_VERSION = "1.2"
 
 
 # ── The flat case list ──────────────────────────────────────────────
@@ -507,6 +513,74 @@ CASES: list[BenchCase] = [
               answer_contains_all=["Tokyo"],
               cleanup_after=["/tmp/bench_tokyo_weather.txt"],
               tags=["multiturn", "cross_turn", "files"]),
+
+    # ── v1.2: Deep ordered chains (4 tools) ─────────────────────────
+    # The old multistep ceiling was 2-3 tools; real workflows chain
+    # more. Ordered=True so a model that skips a step or reorders
+    # destructively fails loudly.
+    BenchCase(id="ms_chain_hours_file",
+              prompt="Do these steps in order: get the current time, "
+                     "calculate 365*24, write a file named bench_hours.txt "
+                     "in skills/ containing that result, then read the "
+                     "file back to confirm its contents.",
+              expected_tools=["get_time", "calculate", "write_file",
+                              "read_file"],
+              ordered=True,
+              answer_contains_any=["8760"],
+              cleanup_after=["delete bench_hours.txt"],
+              tags=["multistep", "files", "code"]),
+    BenchCase(id="ms_chain_status_report",
+              prompt="In order: check system status, list the skills "
+                     "directory, then write bench_status.txt summarising "
+                     "both, then read it back to verify.",
+              expected_tools=["system_status", "list_skill_dir",
+                              "write_file", "read_file"],
+              ordered=True,
+              answer_contains_any=["bench_status", "summar", "wrote",
+                                   "verified", "saved"],
+              cleanup_after=["delete bench_status.txt"],
+              tags=["multistep", "files"]),
+
+    # ── v1.2: Parallel all-read batches ─────────────────────────────
+    # Three independent reads in one ask. Routing is scored as an
+    # unordered set; the latency TREND across runs shows the
+    # concurrent-dispatch win (all-read batches execute on a pool —
+    # wall-clock ≈ slowest call, not the sum). A model that does them
+    # in separate iterations still passes routing; it just shows up
+    # slower + higher avg_iterations.
+    BenchCase(id="par_three_reads",
+              prompt="In one go: tell me the current time, the system "
+                     "status, and the result of 17*23.",
+              expected_tools=["get_time", "system_status", "calculate"],
+              answer_contains_any=["391"],
+              tags=["routing", "parallel"]),
+    BenchCase(id="par_two_reads",
+              prompt="Answer both at once: what time is it, and what is "
+                     "99*101?",
+              expected_tools=["get_time", "calculate"],
+              answer_contains_any=["9999"],
+              tags=["routing", "parallel"]),
+
+    # ── v1.2: Cross-SESSION memory (facts snapshot) ─────────────────
+    # The store and the recall run in DIFFERENT sessions — the second
+    # agent is built fresh AFTER the fact lands, so the known-facts
+    # snapshot in its system prompt (or an explicit recall) must
+    # surface it. This is the end-to-end test of "the robot actually
+    # KNOWS what it remembered", not just "the row exists in SQLite".
+    # Hermetic mode restores the facts store after the run.
+    BenchCase(id="mem_snapshot_store", session="mem_snap_write",
+              prompt="Remember that my favorite color is teal.",
+              expected_tools=["remember"],
+              tags=["memory"]),
+    BenchCase(id="mem_snapshot_recall", session="mem_snap_read",
+              prompt="What's my favorite color?",
+              # No expected_tools on purpose: answering from the
+              # system-prompt snapshot WITHOUT a tool call is the
+              # ideal path; recall()/memory() is equally valid.
+              answer_contains_any=["teal"],
+              hallucination_signals=["I don't know your favorite",
+                                     "you haven't told me"],
+              tags=["memory", "cross_turn"]),
 ]
 
 
