@@ -26,16 +26,25 @@ _WRAPPED_MARKER_RE = re.compile(
     r"^\s*[\[\(]([^\]\)]{1,80})[\]\)]\s*[.!,?]*\s*$"
 )
 _WRAPPED_MARKER_TOKEN_RE = re.compile(r"[\[\(]([^\]\)]{1,80})[\]\)]")
+# Whisper also hallucinates music/sound descriptions wrapped in ♪ or
+# asterisks ("♪ music ♪", "*coughs*") on noise and silence — those
+# wrappers never occur in real dictated speech, so the whole phrase is
+# an artifact regardless of the inner words (VoiceLLM ingress-hardening
+# port; each one previously paid a full LLM turn just to be ignored).
+_SOUND_WRAPPED_RE = re.compile(r"^\s*[♪*].*[♪*]\s*[.!,?]*\s*$")
 
 
 def is_non_speech_marker(text: str | None) -> bool:
     """True when ``text`` is a known non-speech transcript marker.
 
     The check strips ``[...]`` / ``(...)`` wrappers before matching, so
-    real wrapped answers like ``(yes)`` are still accepted.
+    real wrapped answers like ``(yes)`` are still accepted. ♪- and
+    *-wrapped phrases are artifacts unconditionally.
     """
     s = (text or "").strip()
     if not s:
+        return True
+    if _SOUND_WRAPPED_RE.match(s):
         return True
     m = _WRAPPED_MARKER_RE.match(s)
     if m:

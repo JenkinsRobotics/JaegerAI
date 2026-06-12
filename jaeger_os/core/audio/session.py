@@ -209,6 +209,14 @@ class AudioSession:
     def stop(self) -> None:
         self.adapter.stop()
 
+    @property
+    def last_phrase_timing(self) -> dict[str, float]:
+        """Speech-side timing of the most recent committed phrase
+        (``speech_end`` / ``stt_done`` perf_counter stamps), read from
+        the STT adapter. Empty when the adapter doesn't report timing
+        (continuous mode, test stubs)."""
+        return dict(getattr(self.adapter, "last_phrase_timing", {}) or {})
+
     def next_phrase(self, timeout: float | None = 1.0) -> str | None:
         """Return the next user phrase that passes deterministic
         filters, or ``None`` if nothing useful is ready.
