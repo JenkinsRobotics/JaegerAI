@@ -11,14 +11,19 @@ Six tiers:
     1  WRITE_LOCAL      Writes that need confirmation (edit a file, send a draft)
     2  EXTERNAL_EFFECT  API calls with side effects (post content, financial moves)
     3  HARDWARE         Hardware/safety-critical (motor control, e-stop)
-                        Empty in Lilith; reserved for JROS. Always denied here.
+                        Routes through confirmation like 1/2/4 — JROS is the
+                        robot OS, so this tier is live here. The fail-safe
+                        default (DenyAllProvider) still refuses it when no
+                        real provider is wired. Until 0.5.0 it was
+                        hard-denied ("reserved for JROS"), a leftover from
+                        this layer's Lilith-on-a-laptop origin.
     4  PRIVILEGED       Privileged system ops (modify Lilith's config, install skills)
     5  DEV_BYPASS       Full bypass; explicit human override only
 
 Policy modes (one-way door):
 
-    NORMAL      Tier 0 auto-allows; tier 1/2/4 route through confirmation;
-                tier 3 always denies; tier 5 requires human override.
+    NORMAL      Tier 0 auto-allows; tier 1/2/3/4 route through confirmation;
+                tier 5 requires human override.
     READ_ONLY   Only tier 0 is allowed. Anything else denies.
     PAUSED      Nothing is allowed. Even reads are blocked.
 
@@ -327,9 +332,12 @@ class PermissionPolicy:
             mode == READ_ONLY    → only tier 0 allowed
             mode == NORMAL:
                 tier 0           → allow
-                tier 3 (HARDWARE)→ deny (reserved for JROS)
                 tier 5 (DEV_BYPASS)→ HumanOverrideRequired
-                tier 1, 2, 4     → confirmation provider decides
+                tier 1, 2, 3, 4  → confirmation provider decides
+                                   (tier 3 HARDWARE additionally fails
+                                   closed at the capability layer while
+                                   the system e-stop is latched — see
+                                   jaeger_os.hardware.safety)
 
         Raises:
             PermissionDenied
@@ -352,12 +360,6 @@ class PermissionPolicy:
         if request.tier == PermissionTier.READ_ONLY:
             return
 
-        if request.tier == PermissionTier.HARDWARE:
-            raise PermissionDenied(
-                f"tier 3 (HARDWARE) is reserved for JROS — not available in "
-                f"Lilith. {request.skill}.{request.operation} cannot run here."
-            )
-
         if request.tier == PermissionTier.DEV_BYPASS:
             raise HumanOverrideRequired(
                 f"tier 5 (DEV_BYPASS) requires explicit human override; "
@@ -365,7 +367,10 @@ class PermissionPolicy:
                 f"({request.skill}.{request.operation})"
             )
 
-        # Tiers 1, 2, 4 — confirmation provider decides.
+        # Tiers 1, 2, 3, 4 — confirmation provider decides. HARDWARE
+        # (3) rides the same flow: with no real provider wired the
+        # DenyAllProvider default refuses it, and the capability layer
+        # independently fails closed while the e-stop latch is engaged.
         approved = self.confirmation.confirm(request)
         if not approved:
             raise PermissionDenied(
