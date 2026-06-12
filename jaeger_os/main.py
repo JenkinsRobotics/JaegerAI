@@ -22,11 +22,9 @@ sibling modules under `jaeger_os/`.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import re
-import select
 import sys
 import threading
 import time
@@ -2364,6 +2362,17 @@ def warm_plugins(config: Any) -> None:
             and not avatar_cli_disabled):
         from .agent.tools.avatar import warm_avatar
         jobs.append(("avatar (animation node + bridge)", warm_avatar))
+    # 0.5: hardware package boot (config.hardware.package, e.g. "jp01").
+    # Best-effort like every warm job: a dead link degrades that
+    # controller's tools (check_fn hides them), it never blocks boot.
+    hw_cfg = getattr(_pipeline.get("config"), "hardware", None)
+    hw_package = (getattr(hw_cfg, "package", "") or "").strip()
+    if hw_cfg is not None and getattr(hw_cfg, "enabled", True) and hw_package:
+        def _boot_hw(pkg: str = hw_package) -> None:
+            from jaeger_os.hardware.boot import boot_hardware
+            from jaeger_os.nodes import runtime as nodes_runtime
+            boot_hardware(pkg, bus=nodes_runtime.get_bus())
+        jobs.append((f"hardware ({hw_package} package)", _boot_hw))
     for name, fn in jobs:
         started = time.perf_counter()
         try:
@@ -3221,8 +3230,8 @@ def _cli_create_instance(name: str, *, force: bool = False) -> int:
     ))
     dump_json(layout.manifest_path, Manifest(instance_name=name))
     print(f"[jaeger] created instance {name!r} at {layout.root}")
-    print(f"         identity.yaml + config.yaml + manifest.json populated with defaults.")
-    print(f"         edit identity.yaml / config.yaml to customize, then launch with:")
+    print("         identity.yaml + config.yaml + manifest.json populated with defaults.")
+    print("         edit identity.yaml / config.yaml to customize, then launch with:")
     print(f"           python -m jaeger_os --instance {name}")
     return 0
 
@@ -3252,7 +3261,7 @@ def _cli_delete_instance(name: str, *, force: bool = False) -> int:
                 return 1
         # If stdin isn't a TTY (piped/scripted), require --force explicitly.
         else:
-            print(f"[jaeger] non-interactive delete refused; pass --force.", file=sys.stderr)
+            print("[jaeger] non-interactive delete refused; pass --force.", file=sys.stderr)
             return 2
 
     import shutil
@@ -3280,7 +3289,7 @@ def _cli_clear_instance(name: str, *, force: bool = False) -> int:
                 print("[jaeger] aborted.")
                 return 1
         else:
-            print(f"[jaeger] non-interactive clear refused; pass --force.", file=sys.stderr)
+            print("[jaeger] non-interactive clear refused; pass --force.", file=sys.stderr)
             return 2
 
     import shutil
@@ -3308,7 +3317,7 @@ def _cli_clear_instance(name: str, *, force: bool = False) -> int:
                 print(f"[jaeger] couldn't clear {entry}: {exc}", file=sys.stderr)
         cleared.append("logs/")
     print(f"[jaeger] cleared {name!r}: {', '.join(cleared) or '(nothing to clear)'}")
-    print(f"         preserved: identity.yaml, config.yaml, manifest.json, credentials/, skills/")
+    print("         preserved: identity.yaml, config.yaml, manifest.json, credentials/, skills/")
     return 0
 
 

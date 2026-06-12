@@ -573,6 +573,22 @@ class AvatarConfig(BaseModel):
     default_emotion: str = "neutral"
 
 
+class HardwareConfig(BaseModel):
+    """Hardware package selection (docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
+
+    ``package`` names a directory under ``jaeger_os/hardware/packages/``
+    (e.g. ``"jp01"``); empty string = no robot attached (the default —
+    JROS boots exactly as before). When set, boot loads the package's
+    topology, opens its links (simulated controllers get mock wires),
+    runs its nodes on the bus, and registers its capability tools —
+    which stay ``beta``-gated (visible only under ``JAEGER_DEV_MODE=1``)
+    until each capability is hardware-walked.
+    """
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    package: str = ""
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -590,6 +606,7 @@ class Config(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
+    hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across
