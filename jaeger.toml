@@ -1,0 +1,116 @@
+# JROS — Jaeger app format manifest (format 0.1)
+#
+# Phase J3 (additive, descriptive). main.py still boots through
+# launch.py and its own bus/supervisor singletons; this manifest is
+# not consumed at runtime until J5 — and J5 stays gated on the
+# daemon-arch plan returning, since the Tier-1 process model is its
+# jurisdiction.
+#
+# Migration plan: docs/JROS_APP_FRAMEWORK_PLAN.md §3.1 (JROS map).
+# Factory paths name the callables J5 will introduce — declared here
+# so the topology is complete now and J5 is a wiring exercise, not a
+# redesign. Until then, every "(planned)" factory string passes the
+# manifest validator (non-empty) but is never resolved.
+#
+# JROS keeps the existing `jaeger_os/` package; the format chassis
+# arrived next to it at `jaeger_os/app/` in J2. Both surfaces coexist
+# until J5 collapses them.
+
+[app]
+name = "jros"
+version = "0.5.0"
+requires_framework = ">=0.1"
+mode = "fused"                # split mode is the daemon-arch plan's
+                              # jurisdiction; today JROS boots fused
+                              # (one process, TUI in the foreground)
+event_loop = "tui"            # JROS owns a Rich-based TUI as its main
+                              # surface. Format 0.1 implements "qt"
+                              # and "none" runtime; "tui" is reserved
+                              # in the spec — J5 will either add tui
+                              # support to the chassis or flip this
+                              # to "none" and have JROS own the loop
+ui = "tui"
+single_instance = true        # process_slot.py already enforces this;
+                              # the chassis slot mechanism is the same
+                              # PID-file pattern
+autostart = false             # autostart belongs to split mode + a
+                              # LaunchAgent (J5 + daemon-arch territory)
+shell_quits_core = false      # plan §1.1: Lilith keeps running when
+                              # the windows close. Today JROS is fused
+                              # so this is informational; meaningful
+                              # only once split mode lands
+config = "config.yaml"        # not present at root today — JROS uses
+                              # per-instance configs in
+                              # sandbox/.jaeger_os/instances/<name>/.
+                              # J5 decides whether to surface a root
+                              # config.yaml or keep instance-routed
+
+# Bus — InProcBus for fused mode. JROS today uses
+# jaeger_os/transport/inproc_bus.py; the chassis copy at
+# jaeger_os/app/bus/inproc.py is functionally the same pattern,
+# unused until J5.
+[bus]
+backend = "inproc"
+
+# ── Nodes ─────────────────────────────────────────────────────────
+# JROS's nodes today are constructed by jaeger_os/main.py's _warm()
+# routine and the lazy singletons in jaeger_os/nodes/runtime.py
+# (ensure_tts_node, ensure_audio_session_node, ensure_animation_node).
+# Phase J5 reframes them as [[node]] entries supervised by the chassis.
+# Until then these declarations describe the topology — every
+# `factory` ends in `(planned)` and is not resolved at boot.
+
+[[node]]
+id = "hardware_jp01"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.hardware.boot:boot_hardware"   # (planned — J5)
+args = { package = "jp01" }
+restart = "on_failure"
+config_key = "hardware"
+enabled = true
+
+[[node]]
+id = "animation"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.software.animation:ensure_animation_node"  # (planned — J5; runtime singleton ports to factory)
+restart = "on_failure"
+config_key = "animation"
+enabled = true
+
+[[node]]
+id = "tts"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.software.tts:ensure_tts_node"             # (planned — J5)
+restart = "on_failure"
+config_key = "tts"
+enabled = true
+
+[[node]]
+id = "audio_session"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.software.audio_session:ensure_audio_session_node"  # (planned — J5)
+restart = "on_failure"
+config_key = "audio_session"
+enabled = true
+
+# ── Surfaces ──────────────────────────────────────────────────────
+# JROS's existing surfaces — the TUI is the main; tray + voice window
+# + the Swift avatar app are additional. The Swift avatar is an
+# external surface (separate process) that attaches over the
+# animation bridge; declared here so the topology is complete but
+# implemented outside the chassis' Qt-or-TUI dichotomy.
+
+[[surface]]
+id = "tui"
+main = true
+factory = "jaeger_os.interfaces.tui:run_surface"                     # (planned — J5)
+enabled = true
+
+[[surface]]
+id = "tray"
+factory = "jaeger_os.interfaces.tray.macos:run_surface"              # (planned — J5)
+enabled = true
