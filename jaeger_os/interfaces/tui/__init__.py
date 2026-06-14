@@ -20,6 +20,28 @@ of which framework they're driving.
 
 from __future__ import annotations
 
+from typing import Any
+
 from .app import JaegerTUI, run
 
-__all__ = ["JaegerTUI", "run"]
+__all__ = ["JaegerTUI", "run", "run_surface"]
+
+
+def run_surface(ctx: Any, spec: Any) -> Any:
+    """Chassis Surface factory (jaeger.toml ``[[surface]] tui``).
+
+    J5A stub — declared so the format-0.1 manifest validator's
+    ``factory`` field resolves to a callable. The chassis (today)
+    only dispatches ``event_loop = "qt" | "none"``; JROS's TUI is
+    its own loop launched directly by launch.py. J5B routes the
+    manifest to ``event_loop = "none"`` so the chassis boots
+    instance/bus/supervisor + atexit teardown, then returns control
+    so JROS keeps owning the TUI loop.
+    """
+    raise NotImplementedError(
+        "JROS TUI surface is launched directly by launch.py; the "
+        "format-0.1 chassis sets event_loop = 'none' and returns "
+        "after boot, leaving the TUI loop to JROS. This stub exists "
+        "so jaeger.toml's [[surface]] tui factory resolves; it is "
+        "never invoked at boot."
+    )
