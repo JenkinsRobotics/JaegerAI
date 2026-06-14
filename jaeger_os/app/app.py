@@ -86,8 +86,15 @@ class JaegerApp:
         """Phases 1-6. Separated from run() so headless tests can
         boot, poke, and shut down without an event loop."""
         self._acquire_instance()
-        cfg_path = self.root / self.spec.config
-        self.config = load_config(cfg_path) if cfg_path.exists() else {}
+        # Empty config = "" → "this app doesn't use a chassis-loaded
+        # config" (JROS uses per-instance configs under sandbox/,
+        # not a root-level config.yaml). Skip loading without falling
+        # into root / "" → root/ → exists() → load_config(dir) → fail.
+        if self.spec.config:
+            cfg_path = self.root / self.spec.config
+            self.config = load_config(cfg_path) if cfg_path.exists() else {}
+        else:
+            self.config = {}
         self._build_bus()
         self.health = HealthCache(self.bus)
         self._start_nodes()
