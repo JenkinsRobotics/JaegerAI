@@ -108,3 +108,6 @@ sandbox/
 # 0.2.6 — operator state lives at <install_root>/.jaeger_os/
 # (instances/, agents/, models/, jaeger.env, backups/). Always ignored.
 .jaeger_os/
+
+# Chassis runtime: PID slot + child registry
+.run/
