@@ -1,12 +1,25 @@
 # JROS — Jaeger app format manifest (format 0.1)
 #
-# J5B (2026-06-14) finalizes the manifest to fused-mode shape after
-# the operator decision (2026-06-14) to drop the daemon-arch plan
-# and converge on Mochi/CC01's fused-mode pattern. The daemon-arch
-# brief (docs/JROS_DAEMON_ARCH_BRIEF.md) is preserved as a
-# "considered, deferred" artifact — split mode + persistent core +
-# Tier-1 daemon are reserved for a future format version when JROS
-# actually needs them (e.g. JP01 real-time motor PID).
+# ─────────────────────────────────────────────────────────────────
+#  PATTERN 1 + TRAY target (Jenkins Robotics standard, 2026-06-14)
+# ─────────────────────────────────────────────────────────────────
+#  Long-term: JROS is a Pattern 1 + Tray Qt app — tray as the
+#  always-on persistent surface (Lilith's "I'm here"), chat /
+#  avatar / settings as on-demand windows, menu bar persists when
+#  windows close, Cmd+Q quits. Same shape as ChatGPT desktop,
+#  Claude desktop, Slack.
+#
+#  Today (J5B state, 2026-06-14): event_loop = "none" with the TUI
+#  in foreground. JROS still uses the Rich/prompt_toolkit TUI as
+#  its main surface; the chassis owns slot + atexit. The Qt tray
+#  + windows transition is a future migration — set shell_quits_core
+#  = false NOW so when event_loop flips to "qt", the Pattern 1
+#  behavior takes effect automatically.
+#
+# J5B (2026-06-14) finalized the manifest after the operator
+# decision to drop the daemon-arch plan and converge on Mochi/CC01's
+# fused-mode pattern. The daemon-arch brief is archived at
+# docs/archive/JROS_DAEMON_ARCH_BRIEF.md.
 #
 # Conformance vs. integration:
 #   * J1-J4 + J5A landed format-0.1 CONFORMANCE — chassis copy at
@@ -46,11 +59,14 @@ single_instance = true        # JROS's process_slot.py (active) and
                               # process_slot.py stays the active path.
 autostart = false             # launches like a normal Mac app via
                               # Login Items if the operator wants it
-shell_quits_core = true       # fused mode = window/terminal close
-                              # quits everything (same as Mochi + CC01
-                              # + Hermes). Split mode's "Lilith keeps
-                              # running" was operator-aspirational and
-                              # is reserved for a future format
+shell_quits_core = false      # PATTERN 1: when JROS flips to
+                              # event_loop = "qt" in the future, this
+                              # makes Lilith persist across window
+                              # closes (macOS-canonical, same as
+                              # ChatGPT desktop / Claude desktop).
+                              # Today (event_loop = "none"), the flag
+                              # is informational — the chassis only
+                              # consults it inside _run_qt().
 config = ""                   # JROS uses per-instance configs in
                               # sandbox/.jaeger_os/instances/<name>/;
                               # no root config.yaml. Empty string =
