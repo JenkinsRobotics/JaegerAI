@@ -1,0 +1,50 @@
+# JROS windowed app (Pattern 1) — the Jaeger app format, [core] role.
+# ─────────────────────────────────────────────────────────────────
+#  Bare ``./launch`` boots THIS via the chassis JaegerApp.run():
+#    init_core → AgentCore loads the model on the MAIN thread (Metal-
+#    safe) → Qt chat window + menu-bar tray attach over the bus →
+#    qt.exec() owns the main loop → quit drains the turn, then cleans up.
+#
+#  ``./launch --tui`` is Pattern 0 (the in-process Rich/prompt_toolkit
+#  TUI); it does NOT use a chassis manifest — JROS owns that loop
+#  directly. The full descriptive topology (hardware/animation/tts/
+#  audio nodes, parked) lives in jaeger.toml. This manifest is the
+#  focused windowed shape: one core, two surfaces. "A different shape
+#  is a different manifest" (manifest.py) — like jaeger.sim.toml.
+
+[app]
+name = "jros-windowed"
+version = "0.5.0"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "qt"             # the chassis _run_qt() owns the main loop
+ui = "pyside6"
+single_instance = false       # JROS's own process_slot.py (via
+                              # boot_for_tui) is the single-instance
+                              # mechanism; don't double-lock with the
+                              # chassis slot (jaeger.toml documents this).
+shell_quits_core = false      # tray persists when the chat window closes
+                              # (macOS-canonical: ChatGPT/Claude desktop)
+config = ""                   # JROS uses per-instance configs under
+                              # sandbox/; no root config.yaml.
+
+[bus]
+backend = "inproc"            # fused mode, one process — the chassis
+                              # InProcBus the surfaces + bridge share.
+
+# ── core: the Tier-1 agent/model brain (main-thread init, not
+#    supervised). The model boot + AgentBridge live here. ───────────
+[core]
+factory = "jaeger_os.agent.loop.agent_core:make_core"
+config_key = "agent"
+
+# ── surfaces: ONE shell process; the window + tray are objects in it.
+#    Both speak the bus only (jaeger_os.core.messages). ──────────────
+[[surface]]
+id = "chat_window"
+main = true                   # owns the Qt event loop
+factory = "jaeger_os.interfaces.rich_tui.window:make_surface"
+
+[[surface]]
+id = "tray"
+factory = "jaeger_os.interfaces.tray.qt:make_surface"

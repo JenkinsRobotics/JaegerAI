@@ -1,20 +1,22 @@
 # JROS — Jaeger app format manifest (format 0.1)
 #
 # ─────────────────────────────────────────────────────────────────
-#  PATTERN 1 + TRAY target (Jenkins Robotics standard, 2026-06-14)
+#  WINDOWED APP + TRAY target (Jenkins Robotics standard, 2026-06-14)
 # ─────────────────────────────────────────────────────────────────
-#  Long-term: JROS is a Pattern 1 + Tray Qt app — tray as the
+#  Long-term: JROS is a windowed-app + tray Qt app — tray as the
 #  always-on persistent surface (Lilith's "I'm here"), chat /
 #  avatar / settings as on-demand windows, menu bar persists when
 #  windows close, Cmd+Q quits. Same shape as ChatGPT desktop,
 #  Claude desktop, Slack.
 #
-#  Today (J5B state, 2026-06-14): event_loop = "none" with the TUI
-#  in foreground. JROS still uses the Rich/prompt_toolkit TUI as
-#  its main surface; the chassis owns slot + atexit. The Qt tray
-#  + windows transition is a future migration — set shell_quits_core
-#  = false NOW so when event_loop flips to "qt", the Pattern 1
-#  behavior takes effect automatically.
+#  This manifest is the DESCRIPTIVE / parked full-topology manifest:
+#  event_loop = "none", the Rich/prompt_toolkit TUI in foreground
+#  (Pattern 0, `./launch --tui`), all nodes/surfaces parked while
+#  JROS's own runtime owns them. The windowed app (Pattern 1, a bare
+#  `./launch`) is BUILT (2026-06-15) and lives in its own manifest,
+#  `jaeger.windowed.toml` — event_loop = "qt", a Tier-1 [core]
+#  (jaeger_os.agent.loop.agent_core:AgentCore), chat window + tray.
+#  "A different shape is a different manifest" — the two coexist.
 #
 # J5B (2026-06-14) finalized the manifest after the operator
 # decision to drop the daemon-arch plan and converge on Mochi/CC01's
@@ -59,7 +61,7 @@ single_instance = true        # JROS's process_slot.py (active) and
                               # process_slot.py stays the active path.
 autostart = false             # launches like a normal Mac app via
                               # Login Items if the operator wants it
-shell_quits_core = false      # PATTERN 1: when JROS flips to
+shell_quits_core = false      # WINDOWED APP: when JROS flips to
                               # event_loop = "qt" in the future, this
                               # makes Lilith persist across window
                               # closes (macOS-canonical, same as

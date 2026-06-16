@@ -69,10 +69,15 @@ python-telegram-bot>=21.0
 # --- MCP tool servers ---
 mcp>=0.9
 
-# --- macOS menu-bar tray ---
+# --- macOS menu-bar tray (CLI/TUI-era) ---
 # rumps is a pure-Python wrapper over PyObjC. Environment marker keeps
 # Linux/Windows installs from pulling it in.
 rumps>=0.4; sys_platform == 'darwin'
+
+# --- windowed app (PySide6 shell: Qt tray + rich_tui chat window) ---
+# The bare ``./launch`` surface. Cross-platform Qt; the Qt tray replaces
+# the rumps one as the windowed app supersedes the CLI/TUI default.
+pyside6>=6.5
 
 # --- dev tooling (uncomment if doing JROS development) ---
 # pytest>=8.0

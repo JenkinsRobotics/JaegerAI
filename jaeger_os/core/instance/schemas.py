@@ -556,16 +556,20 @@ class AvatarConfig(BaseModel):
     """0.5: AnimationNode + FrameBridge configuration.
 
     Controls whether the avatar pipeline auto-starts at boot.
-    When ``enabled=True`` (default), ``main.py``'s prewarm phase
-    spins up the AnimationNode + WebSocket bridge so the brain's
-    ``set_avatar_state`` tool works without manual setup.
 
-    Disable via ``./launch --no-avatar`` for headless / minimal
-    boots that don't need the renderer (CI smoke runs, scripted
-    benches, etc.).
+    **Default OFF (2026-06-14):** the avatar / animation node (the
+    Lilith face) is a beta, dev-mode feature — its ``set_avatar_state``
+    /timeline tools are ``beta``-gated (visible only under
+    ``JAEGER_DEV_MODE=1``) and the MathScript renderer is still a
+    prototype. So the daily-driver agent does NOT warm the AnimationNode
+    by default. Set ``avatar.enabled = true`` in the instance config to
+    spin up the AnimationNode + WebSocket bridge when developing it;
+    promote to default-on once the renderer is stable.
+
+    ``./launch --no-avatar`` also forces it off regardless of config.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = True
+    enabled: bool = False
     bridge_host: str = "127.0.0.1"
     bridge_port: int = Field(8765, ge=1024, le=65535)
     # Default emotion the wizard suggests; AnimationNode will publish

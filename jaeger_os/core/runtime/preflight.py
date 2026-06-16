@@ -313,60 +313,6 @@ def _check_instance_config(layout: object) -> list[Check]:
     return out
 
 
-def _check_daemon(layout: object) -> list[Check]:
-    """Daemon lifecycle health — socket exists, PID alive, protocol
-    answers a ping. Reports ``daemon`` as PASS=running, FAIL=expected
-    running but couldn't reach, or simply notes ``not running`` (which
-    is FINE for a TUI-only workflow — we don't mark it as a failure)."""
-    out: list[Check] = []
-    root = getattr(layout, "root", None)
-    if root is None:
-        return out
-    try:
-        import pathlib
-        from jaeger_os.daemon.lifecycle import Lifecycle, LifecyclePaths
-        paths = LifecyclePaths(run_dir=pathlib.Path(root) / "run")
-        lifecycle = Lifecycle(paths=paths)
-        status = lifecycle.status()
-    except Exception as exc:  # noqa: BLE001
-        out.append(Check(
-            "daemon", "daemon", True,
-            f"not checked: {type(exc).__name__}",
-        ))
-        return out
-
-    if not status.get("running"):
-        # Daemon down is not a FAIL — the TUI-only flow doesn't need
-        # it. Report as PASS with a "down" note so the user knows the
-        # current state without seeing a red X.
-        out.append(Check(
-            "daemon", "daemon", True,
-            f"not running ({status.get('reason', 'no pid')})",
-        ))
-        return out
-
-    pid = status.get("pid")
-    out.append(Check("daemon.pid", "daemon", True, f"running (pid={pid})"))
-
-    # Probe the protocol — a live PID file with a dead socket is the
-    # classic "stale lock" failure mode.
-    try:
-        from jaeger_os.daemon.client import Client
-        client = Client(socket_path=paths.socket_path)
-        live = client.ping()
-        out.append(Check(
-            "daemon.protocol", "daemon", True,
-            f"ping ok (uptime={live.get('uptime_s', 0):.1f}s)",
-        ))
-    except Exception as exc:  # noqa: BLE001 — protocol unreachable
-        out.append(Check(
-            "daemon.protocol", "daemon", False,
-            f"socket present but ping failed: {type(exc).__name__}: {exc}",
-            "run `jaeger stop && jaeger start` to clear stale state",
-        ))
-    return out
-
-
 def _check_memory_integrity(layout: object) -> list[Check]:
     """The on-disk memory files (facts.json, schedules.json,
     board.json) drive most of the agent's behaviour. A corrupted
@@ -565,7 +511,7 @@ def _check_skills_health(layout: object) -> list[Check]:
 
 
 def check_instance(layout: object) -> list[Check]:
-    """Full doctor including environment + instance config + daemon
+    """Full doctor including environment + instance config
     + memory integrity + tool registry + skills health. Use this
     when ``--doctor`` runs against an explicit instance, the bare
     :func:`check_environment` when no instance is bound (pre-setup).
@@ -576,7 +522,6 @@ def check_instance(layout: object) -> list[Check]:
     return (
         check_environment()
         + _check_instance_config(layout)
-        + _check_daemon(layout)
         + _check_memory_integrity(layout)
         + _check_tool_registry()
         + _check_plugin_manifests()

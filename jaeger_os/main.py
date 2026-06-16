@@ -3544,34 +3544,6 @@ def boot_for_tui(
     return TUIBootResult(client=client, layout=layout, cleanup=cleanup)
 
 
-def boot_for_daemon(
-    *,
-    instance_name: str | None = None,
-    with_memory: bool = True,
-    warmup: bool = True,
-) -> TUIBootResult:
-    """Boot the jaeger pipeline for the daemon's child process.
-
-    The daemon's boot is **the same** as the TUI's — instance resolve →
-    manifest gate → lock → bind tools → load model → build agent →
-    prewarm. The only difference is the caller: the daemon owns the
-    instance lock for its whole lifetime; clients (TUI / attach / GUI)
-    just open the socket. This function exists as a named entry point
-    so the lifecycle factory in ``daemon/cli.py`` doesn't have to
-    import ``boot_for_tui`` (and so we can swap the daemon's boot
-    without touching the TUI's path if they diverge later).
-
-    Returns the same :class:`TUIBootResult`; the daemon doesn't need
-    a separate result type — it just keeps ``client`` + ``layout``
-    alive and calls ``cleanup()`` on shutdown.
-    """
-    return boot_for_tui(
-        instance_name=instance_name,
-        with_memory=with_memory,
-        warmup=warmup,
-    )
-
-
 def switch_model(new_model: str, *, warmup: bool = True) -> Any:
     """Swap the resident LLM to a different model — SAME instance.
 
@@ -3760,9 +3732,9 @@ def main() -> int:
     # start — operators who want to keep an old instance can copy
     # it across manually.
 
-    from jaeger_os.daemon.cli import dispatch as _daemon_dispatch, is_daemon_subcommand as _is_daemon
-    if _is_daemon(sys.argv[1:]):
-        return _daemon_dispatch(sys.argv[1:])
+    from jaeger_os.cli.verbs.dispatch import dispatch as _verb_dispatch, is_daemon_subcommand as _is_verb
+    if _is_verb(sys.argv[1:]):
+        return _verb_dispatch(sys.argv[1:])
     # --stream: 0.5 streaming mode for OBS / YouTube use case.
     # Auto-enables --voice, prints the WebSocket URL the Swift
     # renderer connects to, and otherwise behaves like --voice.

@@ -75,9 +75,11 @@ installs the whole stack.**
 >   `--restart`, `--reset-audio`, `--clean-logs`, `--health`.
 >
 > See `CHANGELOG.md` for the full entry and the explicit "Skipped
-> from the upstream 0.3.0 plan" list (the Swift desktop app + the
-> daemon-attached `rich_tui` surface stay in tree as archived code,
-> not wired into install or run).
+> from the upstream 0.3.0 plan" list. The Swift desktop app stays in
+> tree as archived code. The multi-process daemon scaffold was removed
+> 2026-06-14 when JROS converged on fused mode; the `rich_tui` surface
+> is parked in tree (GUI design preserved) for the windowed-app
+> rework — neither is wired into install or run yet.
 
 ---
 
@@ -395,7 +397,7 @@ JROS/                       ← clone goes here (default ~/jaeger)
 ├── scripts/install.sh      ← curl one-liner target (user-facing)
 ├── jaeger_os/              ← framework code (git-tracked)
 │   ├── run.py, main.py     ← entry points
-│   ├── core/, plugins/, skills/, prompts/, assets/, daemon/, interfaces/
+│   ├── core/, cli/, plugins/, skills/, prompts/, assets/, interfaces/
 │   ├── migrations/         ← per-version migration scripts
 │   └── models/             ← downloaded GGUF weights (gitignored except README)
 ├── .jaeger_os/             ← operator state (gitignored)
