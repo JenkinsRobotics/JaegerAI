@@ -33,6 +33,16 @@ class BusSpec:
 
 
 @dataclasses.dataclass
+class CoreSpec:
+    """The Tier-1 core (a singleton, optional). Built on the main thread,
+    after the bus and before nodes/surfaces. Not supervised, no restart."""
+    factory: str = ""          # "pkg.mod:fn" returning a Core
+    config_key: str = ""
+    enabled: bool = True
+    args: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass
 class NodeSpec:
     id: str
     tier: int = 3
@@ -66,6 +76,7 @@ class AppSpec:
     shell_quits_core: bool = True
     config: str = "config.yaml"
     bus: BusSpec = dataclasses.field(default_factory=BusSpec)
+    core: CoreSpec = dataclasses.field(default_factory=CoreSpec)
     nodes: list[NodeSpec] = dataclasses.field(default_factory=list)
     surfaces: list[SurfaceSpec] = dataclasses.field(default_factory=list)
 
@@ -97,7 +108,7 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
         raise FileNotFoundError(f"no manifest at {p}")
     raw = tomllib.loads(p.read_text(encoding="utf-8"))
 
-    _check_keys(raw, {"app", "bus", "node", "surface"}, "top level")
+    _check_keys(raw, {"app", "bus", "core", "node", "surface"}, "top level")
     app_raw = raw.get("app") or {}
     _check_keys(app_raw, {
         "name", "version", "requires_framework", "mode", "event_loop",
@@ -141,6 +152,20 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
     )
     _refuse(spec.bus.backend in _BUS_BACKENDS,
             f"[bus] backend {spec.bus.backend!r} not in {_BUS_BACKENDS}")
+
+    if "core" in raw:
+        core_raw = raw.get("core") or {}
+        _check_keys(core_raw, {"factory", "config_key", "enabled", "args"},
+                    "[core]")
+        spec.core = CoreSpec(
+            factory=str(core_raw.get("factory", "")),
+            config_key=str(core_raw.get("config_key", "")),
+            enabled=bool(core_raw.get("enabled", True)),
+            args=dict(core_raw.get("args") or {}),
+        )
+        if spec.core.enabled:
+            _refuse(bool(spec.core.factory),
+                    "[core] an enabled core needs `factory`")
 
     for n_raw in raw.get("node") or []:
         _check_keys(n_raw, {
@@ -200,4 +225,5 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
     return spec
 
 
-__all__ = ["AppSpec", "BusSpec", "NodeSpec", "SurfaceSpec", "load_manifest"]
+__all__ = ["AppSpec", "BusSpec", "CoreSpec", "NodeSpec", "SurfaceSpec",
+           "load_manifest"]

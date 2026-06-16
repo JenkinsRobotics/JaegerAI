@@ -33,9 +33,12 @@ from .app import JaegerApp
 from .bus.api import Bus, MessageRegistry, RawMessage
 from .bus.inproc import InProcBus
 from .config import load_config
+from .core import Core, CoreMainThreadError
 from .health import HealthCache, NodeHealth
 from .logging import LogLine, log
-from .manifest import AppSpec, BusSpec, NodeSpec, SurfaceSpec, load_manifest
+from .manifest import (
+    AppSpec, BusSpec, CoreSpec, NodeSpec, SurfaceSpec, load_manifest,
+)
 from .node import FrameNode, Node, NodeState
 from .supervisor import NodeHandle, Supervisor
 
@@ -47,9 +50,11 @@ __all__ = [
     "FRAMEWORK_FORMAT",
     "JaegerApp",
     "Node", "FrameNode", "NodeState",
+    "Core", "CoreMainThreadError",
     "Supervisor", "NodeHandle",
     "Bus", "InProcBus", "MessageRegistry", "RawMessage",
-    "AppSpec", "NodeSpec", "SurfaceSpec", "BusSpec", "load_manifest",
+    "AppSpec", "NodeSpec", "SurfaceSpec", "BusSpec", "CoreSpec",
+    "load_manifest",
     "load_config",
     "NodeHealth", "HealthCache",
     "LogLine", "log",

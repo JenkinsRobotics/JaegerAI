@@ -27,6 +27,7 @@ from typing import Any
 from .bus.api import Bus, MessageRegistry
 from .bus.inproc import InProcBus
 from .config import load_config, slice_for
+from .core import Core
 from .health import HealthCache
 from .logging import log
 from .manifest import AppSpec, NodeSpec, load_manifest
@@ -62,16 +63,21 @@ class JaegerApp:
         *,
         registry: MessageRegistry | None = None,
     ) -> None:
-        self.root = pathlib.Path(manifest_path)
-        if self.root.is_file():
-            self.root = self.root.parent
-        self.spec: AppSpec = load_manifest(self.root)
+        # A file path is honored verbatim (an app may carry more than one
+        # manifest — e.g. jaeger.sim.toml, jaeger.windowed.toml); a dir
+        # path resolves to its default jaeger.toml. ``root`` is always the
+        # containing directory (config + .run/ slot live there).
+        manifest_path = pathlib.Path(manifest_path)
+        self.root = (manifest_path.parent if manifest_path.is_file()
+                     else manifest_path)
+        self.spec: AppSpec = load_manifest(manifest_path)
         self.registry = registry or MessageRegistry()
         self.config: dict[str, Any] = {}
         self.bus: Bus | None = None
         self.health: HealthCache | None = None
         self.supervisor: Supervisor | None = None
         self.surfaces = SurfaceManager()
+        self.core: Core | None = None
         self._broker: Any = None
         self._run_dir = self.root / ".run"
         self._slot_file = self._run_dir / f"{self.spec.name}.pid"
@@ -97,6 +103,7 @@ class JaegerApp:
             self.config = {}
         self._build_bus()
         self.health = HealthCache(self.bus)
+        self._init_core()
         self._start_nodes()
         self._install_signals()
         atexit.register(self.shutdown)
@@ -135,6 +142,11 @@ class JaegerApp:
             pass
         if self.supervisor is not None:
             self.supervisor.stop_all()
+        if self.core is not None:
+            try:
+                self.core.stop()
+            except Exception:  # noqa: BLE001
+                pass
         if self._broker is not None:
             try:
                 self._broker.stop()
@@ -189,6 +201,19 @@ class JaegerApp:
             self.bus = ZmqBus(self.registry, xsub=xsub, xpub=xpub)
         else:
             self.bus = InProcBus()
+
+    def _init_core(self) -> None:
+        """Boot the Tier-1 core (manifest ``[core]``) on the MAIN thread,
+        after the bus and BEFORE nodes/surfaces. Identity-critical: NOT
+        supervised, no restart. Skipped when no ``[core]`` is declared.
+        ``Core.__init__`` asserts the main thread."""
+        core_spec = self.spec.core
+        if not core_spec.enabled or not core_spec.factory:
+            return
+        cfg = slice_for(self.config, core_spec.config_key)
+        fn = resolve_ref(core_spec.factory)
+        self.core = fn(self.bus, {**core_spec.args, **cfg})
+        self.core.setup()
 
     def _start_nodes(self) -> None:
         self.supervisor = Supervisor(health=self.health, bus=self.bus)
