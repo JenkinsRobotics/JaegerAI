@@ -1,38 +1,56 @@
 #!/bin/bash
-# JROS — one-line installer.
+# JROS — one-line installer (builds a CLEAN, product-only install).
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
 #
-# Pin to a specific release:
-#   JAEGER_REF=0.2.3 curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.2.3/scripts/install.sh | bash
+# Pin to a branch / release:
+#   JAEGER_REF=0.5.0 curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.5.0/scripts/install.sh | bash
 #
 # Custom install location:
 #   JAEGER_HOME=/opt/jaeger curl -fsSL .../install.sh | bash
 #
 # What this does:
 #   1. Verify prereqs (git, python 3.11/3.12).
-#   2. Clone JROS to $JAEGER_HOME (default ~/jaeger).
-#   3. Run the in-repo ./install.sh — creates .venv, installs deps,
-#      scaffolds <install_root>/.jaeger_os/ for instance state.
-#   4. Print next-step instructions.
+#   2. Fetch the JROS repo into a cache ($JAEGER_SRC, default
+#      ~/.cache/jaeger-src) — the full dev tree stays there.
+#   3. Copy ONLY the product (jaeger_os/ + entry scripts + manifests) into
+#      $JAEGER_HOME — so the install dir is clean: no dev_tests/, no
+#      benchmarks, no dev launcher, no .git.
+#   4. Run the in-repo ./install.sh in $JAEGER_HOME — .venv, deps, and
+#      scaffolds $JAEGER_HOME/.jaeger_os/ for instance state.
+#   5. Print next steps.
 #
-# Idempotent: re-running on an existing clone runs `git pull` and
-# re-invokes the local installer.
+# Re-running refreshes the product from the latest ref while leaving the
+# install's .venv/ and .jaeger_os/ instance state untouched.
 
 set -euo pipefail
 
 JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
 JAEGER_REF="${JAEGER_REF:-master}"
 REPO_URL="${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JROS.git}"
+JAEGER_SRC="${JAEGER_SRC:-$HOME/.cache/jaeger-src}"
+
+# The product allowlist — exactly what an end-user install contains.
+# Everything else in the repo (dev_tests/ dev_benchmark/ dev_scripts/
+# dev_tools/ dev_docs/ sandbox/ launch.py launch apps/ docs/ scripts/) is
+# dev-only and never copied. jaeger_os/ is self-contained — it imports
+# none of the dev tree at runtime.
+PRODUCT=(
+  jaeger_os
+  install.sh run.sh jaeger
+  requirements.txt pyproject.toml
+  jaeger.toml jaeger.windowed.toml
+  README.md LICENSE CHANGELOG.md
+)
 
 cat <<EOF
 ╔══════════════════════════════════════════════╗
 ║  JROS — Jaeger-OS one-line installer         ║
 ╚══════════════════════════════════════════════╝
-  install location: $JAEGER_HOME
+  install location: $JAEGER_HOME   (clean: jaeger_os/ + .jaeger_os/)
+  source cache:     $JAEGER_SRC
   ref:              $JAEGER_REF
-  repo:             $REPO_URL
 
 EOF
 
@@ -42,12 +60,9 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-# Python: prefer an explicit 3.12 / 3.11 binary if one is on PATH, fall back
-# to ``python3`` only as a last resort. macOS users often have
-# ``python3 → 3.13`` from Xcode CLT or the python.org installer while
-# their actual workable interpreter is ``python3.12`` from Homebrew.
-# Hitting the wrong one is the most common install-time failure, so
-# search explicitly rather than trusting ``python3``.
+# Python: prefer an explicit 3.12 / 3.11 binary, fall back to python3.
+# macOS often has python3 → 3.13 (Xcode/python.org) while the workable
+# interpreter is python3.12 from Homebrew; search explicitly.
 PY="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"
 if [[ -z "$PY" ]]; then
   echo "✗ No python3.12 / python3.11 / python3 found on PATH" >&2
@@ -55,7 +70,6 @@ if [[ -z "$PY" ]]; then
   echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
   exit 1
 fi
-
 PY_VERSION=$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 case "$PY_VERSION" in
   3.11|3.12) ;;
@@ -63,36 +77,43 @@ case "$PY_VERSION" in
     echo "✗ Python $PY_VERSION at $PY is not supported (need 3.11 or 3.12)" >&2
     echo "  hint: macOS — 'brew install python@3.12'" >&2
     echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
-    echo "  after install, re-run this curl line — the script searches for" >&2
-    echo "  python3.12 / python3.11 explicitly before falling back to python3." >&2
     exit 1
     ;;
 esac
 echo "✓ prereqs OK (git, $PY → python$PY_VERSION)"
-# Export so the in-repo install.sh picks up the same interpreter.
-export PY
+export PY   # the in-repo install.sh picks up the same interpreter
 
-# 2. Clone (or update existing)
-if [[ -d "$JAEGER_HOME/.git" ]]; then
-  echo "→ existing clone found at $JAEGER_HOME — updating"
-  cd "$JAEGER_HOME"
-  git fetch origin --tags
-  git checkout "$JAEGER_REF"
-  # `git pull` fails on a detached HEAD (tag checkout), which is fine
-  # — the checkout above already moved us to the right ref.
-  git pull --ff-only origin "$JAEGER_REF" 2>/dev/null || true
+# 2. Fetch the repo into the source cache (full dev tree lives here, not
+#    in the install dir).
+if [[ -d "$JAEGER_SRC/.git" ]]; then
+  echo "→ updating source cache at $JAEGER_SRC"
+  git -C "$JAEGER_SRC" fetch origin --tags --quiet
+  git -C "$JAEGER_SRC" checkout "$JAEGER_REF" --quiet
+  git -C "$JAEGER_SRC" pull --ff-only origin "$JAEGER_REF" --quiet 2>/dev/null || true
 else
-  if [[ -e "$JAEGER_HOME" ]]; then
-    echo "✗ $JAEGER_HOME exists but is not a git repo — refusing to overwrite" >&2
-    echo "  move it aside or set JAEGER_HOME to a different path" >&2
+  if [[ -e "$JAEGER_SRC" ]]; then
+    echo "✗ $JAEGER_SRC exists but is not a git repo — move it aside or set JAEGER_SRC" >&2
     exit 1
   fi
-  echo "→ cloning JROS to $JAEGER_HOME"
-  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_HOME"
-  cd "$JAEGER_HOME"
+  echo "→ cloning JROS into the source cache ($JAEGER_SRC)"
+  mkdir -p "$(dirname "$JAEGER_SRC")"
+  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_SRC" --quiet
 fi
 
-# 3. Run the local installer (venv + deps + scaffolding)
+# 3. Assemble the clean install dir from the product allowlist. Refreshes
+#    each product item; never touches .venv/ or .jaeger_os/ in the install.
+echo "→ assembling clean install at $JAEGER_HOME"
+mkdir -p "$JAEGER_HOME"
+for item in "${PRODUCT[@]}"; do
+  if [[ -e "$JAEGER_SRC/$item" ]]; then
+    rm -rf "$JAEGER_HOME/$item"
+    cp -R "$JAEGER_SRC/$item" "$JAEGER_HOME/$item"
+  fi
+done
+# Drop any stray bytecode the copy carried along.
+find "$JAEGER_HOME/jaeger_os" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+# 4. Run the in-repo installer in the clean dir (.venv + deps + scaffold).
 echo "→ running local installer..."
 bash "$JAEGER_HOME/install.sh"
 
@@ -102,26 +123,19 @@ cat <<EOF
 ║  ✓ JROS installed at $JAEGER_HOME            ║
 ╚══════════════════════════════════════════════╝
 
+Your install is clean — jaeger_os/ plus the entry scripts; instance state
+lives under .jaeger_os/. (The full dev tree stays in the cache,
+$JAEGER_SRC — delete it any time.)
+
 Next steps:
   cd $JAEGER_HOME
-  ./run.sh setup           # create your first agent (wizard: memory tier,
-                           # model choice, voice)
+  ./run.sh setup           # create your first agent (wizard: memory, model, voice)
   ./run.sh setup lilith    # …or name it explicitly
-  ./run.sh                 # launch the default agent
+  ./run.sh --instance lilith   # launch it (opens the windowed app; --tui for the terminal)
   ./run.sh list            # see all installed agents
   ./run.sh help            # subcommand cheatsheet
 
-Useful commands:
-  ./run.sh start          # daemonised background agent
-  ./run.sh status         # daemon status
-  git pull && ./install.sh   # upgrade JROS
-
-Each agent is self-contained at:
-  $JAEGER_HOME/.jaeger_os/instances/<name>/
-    (identity, persona, config, memory, skills, prompts, workspace,
-    logs, credentials — all per agent)
-
-Optional — add JROS to your PATH:
-  echo 'export PATH="\$PATH:$JAEGER_HOME"' >> ~/.zshrc
+Upgrade later:
+  JAEGER_REF=$JAEGER_REF curl -fsSL $REPO_URL/raw/$JAEGER_REF/scripts/install.sh | bash
 
 EOF
