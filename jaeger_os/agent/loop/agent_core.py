@@ -41,14 +41,18 @@ class AgentCore(Core):
     pipeline's ``llm_lock`` inside the turn serializes model access."""
 
     def __init__(self, *, bus: Any, instance_name: str | None = None,
-                 with_memory: bool = True, warmup: bool = True,
+                 with_memory: bool = True, warmup: bool = False,
                  **_: Any) -> None:
         super().__init__(bus=bus)            # asserts the OS main thread
         print("[jros] booting the windowed app — loading the agent…",
               file=sys.stderr, flush=True)
         from jaeger_os.main import boot_for_tui
         # instance_name=None → boot_for_tui resolves default_instance_name()
-        # (JAEGER_INSTANCE_NAME), which launch.py sets in the sandbox env.
+        # (JAEGER_INSTANCE_NAME), set by main.py (run.sh) or launch.py (dev).
+        # warmup defaults OFF: warmup pre-loads the voice models (whisper /
+        # kokoro) too, and the windowed app is a text-chat surface with no
+        # voice — warming them is wasted work and the Metal-OOM risk seen in
+        # benchmarking. The LLM still loads; only the first turn is cold.
         self.boot = boot_for_tui(
             instance_name=instance_name, with_memory=with_memory,
             warmup=warmup)
