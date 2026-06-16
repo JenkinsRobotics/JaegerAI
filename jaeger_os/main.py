@@ -3719,6 +3719,24 @@ def run_daemon(*, instance_name: str | None = None,
     return 0
 
 
+def _windowed_available() -> bool:
+    """Whether the Pattern-1 windowed app can run here. Needs PySide6 and a
+    display. Honours ``JAEGER_NO_GUI`` and ``QT_QPA_PLATFORM=offscreen`` as
+    headless escape hatches (``--tui`` is handled separately). macOS / Windows
+    GUI sessions are assumed to have a display; Linux needs X11 / Wayland."""
+    if (os.environ.get("JAEGER_NO_GUI")
+            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"):
+        return False
+    try:
+        import PySide6  # noqa: F401
+    except Exception:  # noqa: BLE001 — PySide6 optional / absent
+        return False
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY")
+                    or os.environ.get("WAYLAND_DISPLAY"))
+    return True
+
+
 def main() -> int:
     # Daemon subcommands — ``jaeger start | stop | status | restart`` —
     # peel off BEFORE argparse so they don't collide with the positional
@@ -3904,6 +3922,16 @@ def main() -> int:
                 return voice_main()
             finally:
                 sys.argv = _orig_argv
+        # 0.5: the windowed app (Pattern 1 — PySide6 chat window + tray) is
+        # the default interactive surface. Fall back to the TUI when there's
+        # no display (headless / SSH) or PySide6 is absent; ``--tui`` (handled
+        # above) opts into the terminal explicitly. The instance is threaded
+        # via the env the windowed core resolves through.
+        if _windowed_available():
+            if args.instance:
+                os.environ["JAEGER_INSTANCE_NAME"] = args.instance
+            from .core.windowed import main as windowed_main
+            return windowed_main()
         from .interfaces.tui.__main__ import main as tui_main
         tui_argv: list[str] = []
         if args.instance:
