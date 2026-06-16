@@ -23,6 +23,13 @@ msgspec>=0.18
 # sub-ms local latency, inproc/ipc/tcp modes behind the same Bus
 # interface as InProcBus.
 pyzmq>=26.0
+# Animation/avatar frame bridge (nodes/software/animation/bridge.py) serves
+# frames over a WebSocket; the TTS path reaches it. Directly imported via
+# websockets.asyncio.server (the new asyncio API, websockets >= 13). It
+# arrives transitively through openai/mcp today, but a direct import must be
+# a direct dependency — a fresh install proved it can otherwise go missing
+# (TTS failed with "websockets is missing").
+websockets>=13.0
 pyyaml>=6.0
 numpy>=1.26
 requests>=2.32
