@@ -597,9 +597,13 @@ def run_wizard(
     # ``warmup.vision: true`` in config.yaml. Returns to the wizard
     # when 0.3.0 lands proper vision validation.
     _step(5, "Warm-up")
-    print("  Pre-load components at boot so they're instant on first use.")
-    warm_tts = _ask_yn("Warm Text-to-Speech (Kokoro)?", True)
-    warm_stt = _ask_yn("Warm Speech-to-Text (Whisper)?", True)
+    print("  Every system (TTS, STT, …) warms at startup so it's instant on")
+    print("  first use — no per-node toggle (warming a node never opens the")
+    print("  mic; voice MODE stays the separate choice above). When setup")
+    print("  finishes it will download + warm + verify all systems, so")
+    print("  \"ready\" means all systems go. Vision (heavy VLM) stays opt-in.")
+    warm_tts = True
+    warm_stt = True
     warm_vision = False
 
     # Subprocess HOME isolation (was a Step 6 in 0.2.5) is a power-user
@@ -710,9 +714,23 @@ def run_wizard(
     # going in).
     _write_env_file(layout.root, name)
 
-    _banner(f"{agent_name} is ready")
+    # Prepare — download + warm + verify every system, so "ready" means all
+    # systems go (the operator's rule). One-time; later launches are fast
+    # since weights are cached. LOUD + best-effort: failures are shown, never
+    # hidden, and the operator decides whether to proceed (the instance is
+    # already created, so we report rather than hard-block).
+    all_go = _prepare_and_verify(name)
+
+    if all_go:
+        _banner(f"{agent_name} is ready — all systems go")
+    else:
+        _banner(f"{agent_name} created — some systems need attention")
     print()
     print(f"  Instance: {layout.root}")
+    if not all_go:
+        print("  ⚠ Some systems did not come up (see the readiness report above).")
+        print("    Launch and run `diagnostics` to inspect, or re-run setup once")
+        print("    the cause is fixed.")
     _print_env_hint(name)
     if boot_after:
         print("  Booting now…")
@@ -729,6 +747,49 @@ def run_wizard(
         print(f"  Re-config: ./run.sh setup {name}")
     print()
     return layout
+
+
+def _prepare_and_verify(name: str) -> bool:
+    """Download + warm + verify every system for the freshly-created
+    instance, so setup completes only when all systems are go (the
+    operator's rule). Boots the instance once (loads the model + warms
+    TTS/STT/vision/… via ``warm_plugins`` → the readiness registry, which
+    prints the loud per-system summary), reads the readiness report, then
+    tears the boot down. Returns True when no applicable system is offline.
+
+    Best-effort: any error here is reported but never fatal — the instance
+    is already written, so we'd rather say "some systems need attention"
+    than crash setup."""
+    # Escape hatch: tests + CI (and operators who want a fast, verify-later
+    # setup) skip the heavy verify boot. Real setup runs it.
+    import os
+    if os.environ.get("JAEGER_SKIP_PREPARE"):
+        print("  (JAEGER_SKIP_PREPARE set — skipping the verify boot)")
+        return True
+    print()
+    print("  Preparing systems — loading the model + downloading/warming")
+    print("  voice (and vision, if enabled). One-time; later launches reuse")
+    print("  the cached weights…")
+    try:
+        from jaeger_os.main import _pipeline, boot_for_tui
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠ could not start the prepare boot: "
+              f"{type(exc).__name__}: {exc}")
+        return False
+    boot = None
+    try:
+        boot = boot_for_tui(instance_name=name, warmup=True)
+        report = _pipeline.get("readiness") or {}
+        return bool(report.get("all_go", False))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠ prepare/verify failed: {type(exc).__name__}: {exc}")
+        return False
+    finally:
+        if boot is not None:
+            try:
+                boot.cleanup()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 # ── soul.md initial-body writer (0.3.0) ──────────────────────────────
