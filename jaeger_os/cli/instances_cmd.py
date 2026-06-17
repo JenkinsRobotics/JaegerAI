@@ -36,11 +36,30 @@ def register(subparsers: Any) -> None:
     )
     show.set_defaults(_handler=run_show)
 
-    sw = sub.add_parser(
-        "switch", help="set the active instance",
-    )
+    create = sub.add_parser("create", help="create a new instance (wizard)")
+    create.add_argument("name", nargs="?", help="instance name (optional)")
+    create.set_defaults(_handler=run_create)
+
+    edit = sub.add_parser(
+        "edit", help="reconfigure an existing instance (re-run the wizard)")
+    edit.add_argument("name", help="instance name to edit")
+    edit.set_defaults(_handler=run_edit)
+
+    delete = sub.add_parser("delete", help="delete an instance")
+    delete.add_argument("name", help="instance name to delete")
+    delete.add_argument("--yes", action="store_true",
+                        help="skip the type-to-confirm prompt")
+    delete.set_defaults(_handler=run_delete)
+
+    sd = sub.add_parser(
+        "set-default", help="set the agent a bare `jaeger` runs")
+    sd.add_argument("name", help="instance name to make the default")
+    sd.set_defaults(_handler=run_set_default)
+
+    # ``switch`` kept as a back-compat alias of ``set-default``.
+    sw = sub.add_parser("switch", help="alias of set-default")
     sw.add_argument("name", help="instance name to make active")
-    sw.set_defaults(_handler=run_switch)
+    sw.set_defaults(_handler=run_set_default)
 
 
 # ── list ──────────────────────────────────────────────────────────
@@ -143,33 +162,91 @@ def _print_instance_summary(layout) -> None:
     print()
 
 
-# ── switch ────────────────────────────────────────────────────────
+# ── set-default (a.k.a. switch) ────────────────────────────────────
 
-def run_switch(args: Any) -> int:
-    """Switch the active instance by writing to the standard
-    pointer file.  Implementation detail: the
-    :func:`default_instance_name` resolver reads JAEGER_INSTANCE_NAME
-    env var, then a ``~/.jaeger_os/active_instance`` file, then
-    falls back to ``default``.
+def run_set_default(args: Any) -> int:
+    """Set the sticky-default instance a bare ``jaeger`` runs.
 
-    We write the file so the change persists; env var takes
-    precedence at boot if also set."""
+    Writes the canonical ``<install_root>/.jaeger_os/active_instance``
+    pointer AND rewrites the sourceable ``jaeger.env`` pin — the wizard
+    leaves ``JAEGER_INSTANCE_NAME`` pointed at whatever instance was
+    created last, which (if sourced) overrides the pointer. Setting both
+    keeps them in agreement."""
     target = args.name.strip()
     if not target:
         print(c.red("instance name cannot be empty"))
         return 1
-
     instances = {p.name: p for p in c.list_known_instances()}
     if target not in instances:
         print(c.red(f"no instance named {target!r}"))
-        known = ", ".join(sorted(instances.keys())) or "(none)"
-        print(c.dim(f"known: {known}"))
+        print(c.dim(f"known: {', '.join(sorted(instances)) or '(none)'}"))
         return 1
 
-    # Write the pointer file alongside the standard instance root.
-    pointer = Path.home() / ".jaeger_os" / "active_instance"
-    pointer.parent.mkdir(parents=True, exist_ok=True)
-    pointer.write_text(target + "\n")
-    print(c.green(f"switched to {target!r}"))
-    print(c.dim(f"pointer: {pointer}"))
+    from jaeger_os.core.instance.instance import write_active_instance
+    write_active_instance(target)
+    try:
+        from jaeger_os.core.instance.setup_wizard import _write_env_file
+        _write_env_file(instances[target], target)
+    except Exception:  # noqa: BLE001 — env pin is a convenience
+        pass
+    print(c.green(f"default agent → {target!r}"))
+    print(c.dim(f"`jaeger` now runs {target!r}; "
+                f"`jaeger --instance NAME` for others."))
+    return 0
+
+
+# back-compat: ``switch`` is an alias of ``set-default``.
+run_switch = run_set_default
+
+
+# ── create / edit (the wizard) ─────────────────────────────────────
+
+def run_create(args: Any) -> int:
+    """Create a new instance via the setup wizard."""
+    name = getattr(args, "name", None)
+    from jaeger_os.core.instance.setup_wizard import run_wizard
+    run_wizard(force=False, instance_name=name, boot_after=False)
+    return 0
+
+
+def run_edit(args: Any) -> int:
+    """Reconfigure an existing instance — re-runs the wizard against it.
+    Keeps the instance's memory/skills; rewrites identity + config."""
+    name = args.name.strip()
+    known = {p.name for p in c.list_known_instances()}
+    if name not in known:
+        print(c.red(f"no instance named {name!r}"))
+        print(c.dim(f"known: {', '.join(sorted(known)) or '(none)'}"))
+        return 1
+    from jaeger_os.core.instance.setup_wizard import run_wizard
+    run_wizard(force=True, instance_name=name, boot_after=False)
+    return 0
+
+
+# ── delete ─────────────────────────────────────────────────────────
+
+def run_delete(args: Any) -> int:
+    """Delete an instance directory. Type-to-confirm unless ``--yes``."""
+    import shutil
+
+    name = args.name.strip()
+    instances = {p.name: p for p in c.list_known_instances()}
+    if name not in instances:
+        print(c.red(f"no instance named {name!r}"))
+        print(c.dim(f"known: {', '.join(sorted(instances)) or '(none)'}"))
+        return 1
+    inst_dir = instances[name]
+    if not getattr(args, "yes", False):
+        print(c.yellow(f"  about to delete instance {name!r}:"))
+        print(c.dim(f"    {inst_dir}"))
+        if input(f"  type {name!r} to confirm: ").strip() != name:
+            print(c.dim("  cancelled"))
+            return 1
+    shutil.rmtree(inst_dir, ignore_errors=True)
+    from jaeger_os.core.instance.instance import (
+        read_active_instance, write_active_instance,
+    )
+    if read_active_instance() == name:
+        write_active_instance(None)   # don't leave a dangling default
+    print(c.green(f"deleted {name!r}"))
     return 0
