@@ -1,12 +1,19 @@
 #!/bin/bash
-# jaeger — operator console shim.
+# jaeger — the operator command (the one thing you run).
 #
-# Same pattern as ./launch — sidesteps pyenv shims by picking the
-# repo's .venv interpreter directly.  Runs ``python -m jaeger_os.cli``
-# with whatever arguments the operator passed.
+# Dispatches:
+#   jaeger                      run the ACTIVE agent (no --instance needed)
+#   jaeger --instance NAME      run a specific agent
+#   jaeger --tui | --voice ...  run the agent in that mode
+#   jaeger instances ...        manage agents: list / create / edit /
+#                               delete / set-default / show
+#   jaeger skills|personality|status|roadmap|avatar    operator console
+#   jaeger setup [name]         alias of `jaeger instances create`
+#   jaeger doctor               environment + readiness check
 #
-# Subcommands: skills | instances | personality | status | roadmap
-# See jaeger_os/cli/__init__.py for the full surface.
+# Management subcommands go to the console (jaeger_os.cli); everything
+# else runs the agent (jaeger_os.run). Picks the repo's .venv interpreter
+# directly to sidestep pyenv shims (same pattern as ./launch).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,4 +24,16 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 
-exec "$VENV_PY" -m jaeger_os.cli "$@"
+case "${1:-}" in
+  instances|skills|personality|status|roadmap|avatar)
+    exec "$VENV_PY" -m jaeger_os.cli "$@" ;;
+  setup)
+    shift; exec "$VENV_PY" -m jaeger_os.cli instances create "$@" ;;
+  doctor)
+    shift; exec "$VENV_PY" -m jaeger_os.run --doctor "$@" ;;
+  help|--help|-h)
+    exec "$VENV_PY" -m jaeger_os.cli --help ;;
+  *)
+    # bare, --instance, --tui, --voice, a one-shot prompt, … → run the agent
+    exec "$VENV_PY" -m jaeger_os.run "$@" ;;
+esac
