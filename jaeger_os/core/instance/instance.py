@@ -171,7 +171,8 @@ def default_instance_name() -> str:
     # "default" itself, or any ambiguity, falls through to the literal — and
     # a truly-fresh install (zero instances) still triggers first-boot setup.
     inst_root = operator_state_root() / "instances"
-    names = ([p.name for p in inst_root.iterdir() if p.is_dir()]
+    names = ([p.name for p in inst_root.iterdir()
+              if p.is_dir() and ".bak." not in p.name]   # ignore wizard backups
              if inst_root.exists() else [])
     if "default" not in names and len(names) == 1:
         return names[0]
