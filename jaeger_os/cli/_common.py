@@ -60,25 +60,34 @@ def get_active_instance_layout() -> Any:
 
 
 def list_known_instances() -> list[Path]:
-    """Enumerate instance directories under the standard locations.
+    """Enumerate instance directories.
 
-    Looks at the sandbox in-repo path + the user-home pattern that
-    operator state uses.  Returns one Path per instance root.
+    Scans the **canonical** operator-state root (the install's
+    ``.jaeger_os/instances/`` — what the wizard and resolver use), plus the
+    dev sandbox and legacy ``~/.jaeger_os`` so a dev checkout and old
+    installs still list. Wizard backups (``<name>.bak.<ts>``) are hidden.
+    Returns one Path per instance root.
     """
     candidates: list[Path] = []
 
-    repo_root = Path(__file__).resolve().parents[2]
-    sandbox = repo_root / "sandbox" / ".jaeger_os" / "instances"
-    if sandbox.exists():
-        for child in sandbox.iterdir():
-            if child.is_dir() and (child / "manifest.json").exists():
+    def _scan(root: Path) -> None:
+        if not root.exists():
+            return
+        for child in root.iterdir():
+            if (child.is_dir() and (child / "manifest.json").exists()
+                    and ".bak." not in child.name):
                 candidates.append(child)
 
-    home = Path.home() / ".jaeger_os" / "instances"
-    if home.exists():
-        for child in home.iterdir():
-            if child.is_dir() and (child / "manifest.json").exists():
-                candidates.append(child)
+    # The canonical location first — install_root/.jaeger_os/instances.
+    try:
+        from jaeger_os.core.instance.instance import user_instances_root
+        _scan(user_instances_root())
+    except Exception:  # noqa: BLE001 — fall back to the legacy scans
+        pass
+
+    repo_root = Path(__file__).resolve().parents[2]
+    _scan(repo_root / "sandbox" / ".jaeger_os" / "instances")
+    _scan(Path.home() / ".jaeger_os" / "instances")
 
     # De-dup by absolute path while preserving order.
     seen: set[Path] = set()

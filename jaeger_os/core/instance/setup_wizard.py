@@ -543,7 +543,7 @@ def run_wizard(
     interaction_mode = _ask_choice(
         "Pick a mode",
         [
-            ("tui", "Type — open a TUI when I run ./run.sh  (recommended)"),
+            ("tui", "Type — terminal TUI is my default surface  (recommended)"),
             ("gui", "Floating window — PyQt6 chat bubble"),
             ("voice", "Voice — always-on mic + spoken responses  (experimental)"),
         ],
@@ -587,7 +587,7 @@ def run_wizard(
     elif interaction_mode == "gui":
         print()
         print("     ⚠  the PyQt6 GUI is planned for a future release;")
-        print("        for now ./run.sh will fall back to the TUI when invoked.")
+        print("        for now `jaeger` will fall back to the TUI when invoked.")
 
     # ── Step 5 · Warm-up ────────────────────────────────────────────
     # Vision (Moondream2) is wired in code (core/tools/vision.py) but
@@ -741,10 +741,10 @@ def run_wizard(
         print("  Done — instance ready to launch.")
         print()
         if name == default_instance_name():
-            print("  Launch:    ./run.sh")
+            print("  Launch:    ./jaeger")
         else:
-            print(f"  Launch:    ./run.sh --instance {name}")
-        print(f"  Re-config: ./run.sh setup {name}")
+            print(f"  Launch:    ./jaeger --instance {name}")
+        print(f"  Re-config: ./jaeger instances edit {name}")
     print()
     return layout
 

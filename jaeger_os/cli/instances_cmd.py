@@ -18,10 +18,9 @@ def register(subparsers: Any) -> None:
         "instances",
         help="list / switch JROS instances",
         description=(
-            "Enumerate the operator's local instances + show which "
-            "one is active.  ``jaeger instances switch <name>`` "
-            "rewrites the active-instance pointer; subsequent "
-            "``./launch`` boots that instance."
+            "Enumerate the operator's local instances + show which one "
+            "is active. ``jaeger instances set-default <name>`` rewrites "
+            "the active-instance pointer; a bare ``jaeger`` then runs it."
         ),
     )
     parser.set_defaults(_handler=run_list)
@@ -70,9 +69,7 @@ def run_list(args: Any) -> int:
     active_root = active.root.resolve() if active is not None else None
     if not instances:
         print(c.red("no instances found"))
-        print(c.dim(
-            "Run ./launch and the setup wizard will create one."
-        ))
+        print(c.dim("Run `jaeger setup [name]` to create one."))
         return 1
     print()
     print(f"  {c.bold('Known instances')}")
