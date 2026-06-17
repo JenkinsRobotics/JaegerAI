@@ -71,10 +71,10 @@ echo
 echo "✓ Local install complete"
 echo
 echo "Next steps:"
-echo "  ./run.sh setup        # create your first agent (runs the wizard)"
-echo "  ./run.sh              # launch the default agent"
-echo "  ./run.sh list         # list installed agents"
-echo "  ./run.sh help         # full subcommand cheatsheet"
+echo "  ./jaeger setup [name] # create an agent (the wizard)"
+echo "  ./jaeger              # run the active agent"
+echo "  ./jaeger instances    # manage agents (list/create/delete/set-default)"
+echo "  ./jaeger doctor       # environment + readiness check"
 echo
 echo "Optional — add to your shell rc for global access:"
 echo "  export PATH=\"\$PATH:$REPO_ROOT\""

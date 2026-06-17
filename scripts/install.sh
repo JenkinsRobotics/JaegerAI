@@ -30,6 +30,8 @@ JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
 JAEGER_REF="${JAEGER_REF:-master}"
 REPO_URL="${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JROS.git}"
 JAEGER_SRC="${JAEGER_SRC:-$HOME/.cache/jaeger-src}"
+# Raw URL for the upgrade hint (github.com → raw.githubusercontent.com, no .git).
+RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com#; s#\.git$##')/$JAEGER_REF/scripts/install.sh"
 
 # The product allowlist — exactly what an end-user install contains.
 # Everything else in the repo (dev_tests/ dev_benchmark/ dev_scripts/
@@ -129,13 +131,12 @@ $JAEGER_SRC — delete it any time.)
 
 Next steps:
   cd $JAEGER_HOME
-  ./run.sh setup           # create your first agent (wizard: memory, model, voice)
-  ./run.sh setup lilith    # …or name it explicitly
-  ./run.sh --instance lilith   # launch it (opens the windowed app; --tui for the terminal)
-  ./run.sh list            # see all installed agents
-  ./run.sh help            # subcommand cheatsheet
+  ./jaeger setup [name]    # create an agent (the wizard)
+  ./jaeger                 # run the active agent (windowed app; --tui for terminal)
+  ./jaeger instances       # manage agents: list / create / edit / delete / set-default
+  ./jaeger doctor          # environment + readiness check
 
 Upgrade later:
-  JAEGER_REF=$JAEGER_REF curl -fsSL $REPO_URL/raw/$JAEGER_REF/scripts/install.sh | bash
+  curl -fsSL $RAW_URL | JAEGER_HOME=$JAEGER_HOME JAEGER_REF=$JAEGER_REF bash
 
 EOF
