@@ -51,6 +51,19 @@ openwakeword>=0.6
 pywhispercpp>=1.4
 kokoro>=0.9.4
 
+# macOS audio + accessibility frameworks (pyobjc) — macOS only. The avaudio
+# TTS/STT backend (core/runtime/preflight) prefers AVFoundation; the core
+# macos_computer skill drives the UI through Quartz + ApplicationServices.
+# A fresh install pulled these only transitively, so a clean macOS install
+# hit "No module named 'AVFoundation'". Marked darwin so non-macOS installs
+# skip them cleanly.
+pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
+# Acoustic echo cancellation for duplex voice (core/audio/aec.py — guarded
+# import; declared so the full voice path ships).
+speexdsp>=0.1.1
+
 # --- vision: look_at + generate_image ---
 torch>=2.2
 transformers>=4.40
