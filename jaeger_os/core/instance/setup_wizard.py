@@ -345,20 +345,26 @@ def run_wizard(
     ``False`` — its caller exits cleanly after the wizard and there
     is no boot, so claiming "Booting now…" would be a lie.
     """
-    name = instance_name or default_instance_name()
-    layout = InstanceLayout(root=resolve_instance_dir(name))
+    from jaeger_os.core.instance.instance import operator_state_root
+    # One name, not two: when no instance name is given (the common
+    # ``jaeger setup`` path), the agent's name from Step 1 names its folder.
+    # Defer the layout until we have that name. An explicit name (dev /
+    # ``--instance``) resolves up front as before.
+    name = instance_name
+    layout = InstanceLayout(root=resolve_instance_dir(name)) if name else None
 
     _banner("Welcome to Jaeger-OS")
     print()
-    # Show the install destination LOUDLY before anything else. The
-    # wizard never asks "where should this live?" — the path was set
-    # by the install (``curl … install.sh | bash`` → ~/jaeger/,
-    # ``JAEGER_HOME=/x`` override, ``source dev_env.sh`` redirect, …).
-    # Surfacing it explicitly here means an operator who didn't mean
-    # to land in the current install (e.g. accidentally inside the
-    # sandbox shell) can bail before typing anything.
-    print("  This agent will live at:")
-    print(f"    {layout.root}/")
+    # Show the install destination LOUDLY before anything else — the path was
+    # set by the install, never asked here. An operator who didn't mean to
+    # land in this install (e.g. inside the sandbox shell) can bail now.
+    if layout is not None:
+        print("  This agent will live at:")
+        print(f"    {layout.root}/")
+    else:
+        print("  This agent will live under:")
+        print(f"    {operator_state_root() / 'instances'}/")
+        print("  …in a folder named from the agent's name (you'll set it in Step 1).")
     print()
     print("  Install location set by the install — to put an agent")
     print("  somewhere else, cancel (Ctrl-C), re-install with a")
@@ -371,7 +377,7 @@ def run_wizard(
     print()
     print("  Tip: prompts show a [default] in brackets — press Enter to accept.")
 
-    if layout.exists():
+    if layout is not None and layout.exists():
         if not force and not _ask_yn(
             "\n  This instance already exists. Back it up and start fresh?", False
         ):
@@ -393,7 +399,7 @@ def run_wizard(
 
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
-    print(f"  Who is this Jaeger?  (instance dir: {name})")
+    print("  Who is this Jaeger? Their name also names the instance folder.")
     agent_name = _ask(
         "Agent display name",
         p_id.display_name if p_id else "Jarvis",
@@ -414,6 +420,25 @@ def run_wizard(
         p_id.role if p_id else "general-purpose agentic assistant",
     )
     role, role_overflow = _truncate_role(role_raw)
+
+    # Unified name: derive the instance folder from the agent's name when one
+    # wasn't given explicitly. Slug → a clean folder name; a collision triggers
+    # the same back-up prompt as an explicit name.
+    if layout is None:
+        import re as _re
+        name = (_re.sub(r"[^a-z0-9_-]+", "-", agent_name.strip().lower())
+                .strip("-_") or "agent")
+        layout = InstanceLayout(root=resolve_instance_dir(name))
+        print()
+        print(f"  → this agent's folder: {layout.root}/")
+        if layout.exists():
+            if not force and not _ask_yn(
+                "    A folder with that name exists. Back it up and start fresh?",
+                False,
+            ):
+                print("  Setup cancelled.")
+                sys.exit(0)
+            backup_instance_dir(layout)
     if role_overflow:
         print(f"     (role > {_ROLE_MAX_LEN} chars — saved full text to "
               f"soul.md; identity.role uses the first sentence.)")
@@ -713,6 +738,15 @@ def run_wizard(
     # user clearly already knows what they're doing (env var was set
     # going in).
     _write_env_file(layout.root, name)
+
+    # Make this the default agent a bare `jaeger` runs? Default YES — you set
+    # up an agent in order to run it. Writes the sticky active-instance pointer
+    # so a bare `jaeger` resolves here without an --instance flag.
+    if _ask_yn("\n  Make this the default agent (a bare `jaeger` runs it)?",
+               True):
+        from jaeger_os.core.instance.instance import write_active_instance
+        write_active_instance(name)
+        print(f"  ✓ a bare `jaeger` now runs {name!r}.")
 
     # Prepare — download + warm + verify every system, so "ready" means all
     # systems go (the operator's rule). One-time; later launches are fast
