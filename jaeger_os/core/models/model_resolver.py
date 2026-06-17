@@ -125,10 +125,12 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
 
 
 # The awake-mode model: loaded when the user is actively conversing.
-# Optimised for low Tokens/task + snappy per-turn latency. gemma-4-26B-A4B
-# Q4 wins on the current bench corpus (1.1) with 91.5% score, 65 tok/task,
-# 4m bench, 7.1 peak load.
-DEFAULT_MODEL = "gemma-4-26b-a4b-it-q4_k_m"
+# gemma-4-12B (dense, 6.9 GB) is the awake default: leaderboard #1 (94.9%)
+# on the bench corpus AND light enough to co-load with voice (Whisper +
+# Kokoro ~3 GB) on a 32 GB / ~26 GB-GPU host. The 26B-A4B MoE scores
+# slightly lower awake and OOMs the GPU when voice is co-loaded there — it's
+# reserved for 64+ GB hosts and the deep-think (asleep) role.
+DEFAULT_MODEL = "gemma-4-12b-it-q4_k_m"
 DEFAULT_AWAKE_MODEL = DEFAULT_MODEL   # explicit alias for sleep-cycle code
 
 # The asleep-mode model: loaded when the agent goes into deep-think mode
