@@ -854,6 +854,26 @@ def _register_builtins(client: Any) -> None:
         "list the workspace", "show files", or "what files are here"."""
         return t.system_status()
 
+    @register_tool_from_function(side_effect="read")
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="diagnostics",
+                   summary="probe live health of every subsystem")
+    def diagnostics() -> dict:
+        """Live health of every subsystem — TTS, STT, vision, avatar,
+        hardware — as online/offline + the exact reason. Use this to answer
+        "what's working / what's broken / can you speak" with FACTS from a
+        real probe, NEVER a guess. Returns a fresh live probe plus the
+        boot-time readiness report (what warmed at startup)."""
+        from jaeger_os.core.runtime import readiness
+        cfg = _pipeline.get("config")
+        probe = readiness.probe_all(cfg)
+        return {
+            "all_go": readiness.all_go(probe),
+            "summary": readiness.summarize(probe),
+            "live": [s.as_dict() for s in probe],
+            "boot_readiness": _pipeline.get("readiness"),
+        }
+
     @register_tool_from_function
     @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                    operation="write_file",
@@ -2325,63 +2345,24 @@ def _openai_tools_for_prewarm(agent: Any) -> list[dict[str, Any]] | None:
 
 
 def warm_plugins(config: Any) -> None:
-    """Boot-time plugin warmup — per ``config.warmup``, pre-load TTS /
-    STT / vision so the Jaeger is fully operational the instant boot
-    finishes, not on first use. Each warm is timed and best-effort: a
-    failure prints a warning and never blocks boot. Robots run TTS/STT
-    constantly, so those default on (see :class:`WarmupConfig`)."""
-    w = getattr(config, "warmup", None)
-    if w is None:
-        return
-    jobs: list[tuple[str, Any]] = []
-    # Warm STT BEFORE TTS — Kokoro's persistent player opens an
-    # AVAudioEngine output stream during warm, and on macOS that
-    # consistently hits ``error 2003329396 ('what')`` when fired
-    # immediately after Gemma loads (before any other Metal init has
-    # settled).  The working standalone smoke test
-    # (dev_tools/audio_smoke/voice_assistant_avaudio.py) loads Whisper
-    # first, then opens the AVAudioEngine, and the engine starts
-    # cleanly — so we mirror that order here.  This is an integration-
-    # race fix, not a bridge fix.
-    if getattr(w, "stt", False):
-        from .agent.tools.listen import warm_listen
-        jobs.append(("STT (Whisper)", warm_listen))
-    if getattr(w, "tts", False):
-        from .agent.tools.speak import warm_kokoro
-        jobs.append(("TTS (Kokoro)", warm_kokoro))
-    if getattr(w, "vision", False):
-        from .agent.tools.vision import warm_vision
-        jobs.append(("vision (Moondream2)", warm_vision))
-    # 0.5: avatar prewarm (AnimationNode + FrameBridge).
-    # Skipped when ``--no-avatar`` is on the command line OR
-    # ``config.avatar.enabled = false`` in the instance config.
-    avatar_cfg = getattr(_pipeline.get("config"), "avatar", None)
-    avatar_cli_disabled = "--no-avatar" in sys.argv[1:]
-    if (avatar_cfg is not None
-            and getattr(avatar_cfg, "enabled", True)
-            and not avatar_cli_disabled):
-        from .agent.tools.avatar import warm_avatar
-        jobs.append(("avatar (animation node + bridge)", warm_avatar))
-    # 0.5: hardware package boot (config.hardware.package, e.g. "jp01").
-    # Best-effort like every warm job: a dead link degrades that
-    # controller's tools (check_fn hides them), it never blocks boot.
-    hw_cfg = getattr(_pipeline.get("config"), "hardware", None)
-    hw_package = (getattr(hw_cfg, "package", "") or "").strip()
-    if hw_cfg is not None and getattr(hw_cfg, "enabled", True) and hw_package:
-        def _boot_hw(pkg: str = hw_package) -> None:
-            from jaeger_os.hardware.boot import boot_hardware
-            from jaeger_os.nodes import runtime as nodes_runtime
-            boot_hardware(pkg, bus=nodes_runtime.get_bus())
-        jobs.append((f"hardware ({hw_package} package)", _boot_hw))
-    for name, fn in jobs:
-        started = time.perf_counter()
-        try:
-            fn()
-            print(f"[jaeger] warmed {name} in "
-                  f"{time.perf_counter() - started:.1f}s", flush=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[jaeger] warm {name} skipped: "
-                  f"{type(exc).__name__}: {exc}", flush=True)
+    """Boot-time warmup — warm EVERY applicable backend (TTS, STT, vision,
+    avatar, hardware) so the agent is fully operational the instant boot
+    finishes, not on first use. Warming a node is decoupled from voice
+    *mode* (active listening): TTS/STT warm so the tools are instant
+    without opening the mic. The per-system registry (warm order, the
+    STT-before-TTS AVAudioEngine race, applicability) lives in
+    :mod:`jaeger_os.core.runtime.readiness`. A loud readiness summary is
+    printed — a failed system is SHOWN, never silently skipped — and the
+    report is stashed in ``_pipeline['readiness']`` so the agent and the
+    ``diagnostics`` tool report ground truth instead of guessing."""
+    from jaeger_os.core.runtime import readiness
+    statuses = readiness.warm_all(config)
+    print(readiness.summarize(statuses), flush=True)
+    _pipeline["readiness"] = {
+        "warmed": [s.as_dict() for s in statuses],
+        "all_go": readiness.all_go(statuses),
+        "ts": time.time(),
+    }
 
 
 def _confirmation_provider(config: Any, layout: Any = None) -> Any:
