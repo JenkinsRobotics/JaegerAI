@@ -207,21 +207,23 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
             alternates=[_QWEN_35_9B_Q4],
         )
     if tier_gb < 64:
-        # 32 GB: room for the MoE awake model + the safety-heavy MoE
-        # asleep model. Swap (not co-load) — both ~16-17 GB fit
-        # individually with KV cache, but co-load is ~38 GB which
-        # exceeds 32 GB.
+        # 32 GB: gemma-4-12B dense awake (leaderboard #1) leaves headroom for
+        # voice (Whisper + Kokoro ~3 GB) CO-LOADED with the awake model. The
+        # 26B-A4B awake is NOT recommended here — on a 32 GB host (e.g. M1
+        # Max, ~26 GB GPU working set) the 26B + voice + 32K KV cache OOMs
+        # the GPU. It stays a power-user alternate (text-only) and the
+        # 64+ GB awake pick. Qwen3-30B-A3B asleep swaps in for deep-think.
         return TierRecommendation(
             tier_label="32 GB",
-            description=("Unlocks the MoE pairing: gemma-4-26B-A4B Q4 "
-                         "awake + Qwen3-30B-A3B Q4 asleep. Swap "
-                         "(not co-load) since combined ~38 GB exceeds "
-                         "the host budget — wake-up is a ~10-20s "
-                         "unload+load cycle, comfortably under the "
-                         "1-min target."),
-            awake=_GEMMA_26B_A4B_Q4,
+            description=("gemma-4-12B Q4 awake (dense, leaderboard #1, "
+                         "6.9 GB) — leaves room to CO-LOAD voice (Whisper "
+                         "+ Kokoro), which the 26B-A4B does not on a 32 GB "
+                         "/ ~26 GB-GPU host (OOM). Qwen3-30B-A3B Q4 asleep "
+                         "for deep-think (swap, not co-load). 26B-A4B "
+                         "available as a text-only alternate."),
+            awake=_GEMMA_12B_Q4,
             asleep=_QWEN_30B_A3B_Q4,
-            alternates=[_QWEN_35_9B_Q4],
+            alternates=[_GEMMA_26B_A4B_Q4, _QWEN_35_9B_Q4],
         )
     # 64+ GB: plenty of room — same picks, but can optionally co-load
     # for instant mode transitions if the operator wires that up.
