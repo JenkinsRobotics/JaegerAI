@@ -9,7 +9,7 @@ Categories
               prereq edges from the levels:
                 image → bitmap → sprite → gif → video
                 sprite → math
-  voice       tts, stt, gate, lip-sync, barge-in (matches the
+  voice       tts, stt, lip-sync, barge-in (matches the
               0.4 shipped pieces)
   vision      camera_frame (the 0.4 base), inference (locked)
   motor       command, safety (both locked until JP01 wires)
@@ -140,14 +140,6 @@ _VOICE_NODES: tuple[SkillNode, ...] = (
         description="Whisper-based transcription.  Shipped at 0.3+.",
         category="voice",
         xp_to_mastery=500,
-    ),
-    SkillNode(
-        id="voice.gate",
-        name="Voice gate",
-        description="Single-pass <ignore>/<reply> classifier.  Shipped at 0.4.",
-        category="voice",
-        prerequisites=("voice.stt",),
-        xp_to_mastery=1000,
     ),
     SkillNode(
         id="voice.lip_sync",

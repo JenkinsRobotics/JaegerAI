@@ -13,10 +13,7 @@ ripple through the codebase.
   • AgentCallbacks           — observability hooks
   • AgentInterrupted         — raised when an interrupt fires mid-call
   • interruptible_call       — the cancel-aware call wrapper
-  • JaegerAgent              — the loop itself (skeleton in Phase 1)
-
-See ``docs/agent_refactor_phase_0.md`` for the migration plan and the
-mapping from current pydantic-ai code onto these primitives.
+  • JaegerAgent              — the loop itself
 """
 
 from __future__ import annotations
@@ -34,7 +31,7 @@ from jaeger_os.agent.loop.interrupt import AgentInterrupted, StaleCallTimeout, i
 from jaeger_os.agent.util.retry_utils import jittered_backoff, retry_with_backoff
 from jaeger_os.agent.loop.jaeger_agent import JaegerAgent, SkipFinalFinalizer
 from jaeger_os.agent.schemas.message_types import Message, Role, ToolCall
-from jaeger_os.agent.util.prompt_builder import build_system_prompt
+from jaeger_os.agent.prompts.prompts import build_system_prompt
 from jaeger_os.agent.schemas.tool_registry import (
     clear_registry,
     get_tool,
@@ -46,7 +43,7 @@ from jaeger_os.agent.schemas.tool_registry import (
     unregister_tool,
 )
 from jaeger_os.agent.schemas.tool_schema import ToolDef, dev_mode_enabled
-from jaeger_os.agent.schemas.toolsets import (
+from jaeger_os.agent.schemas.tool_bundles import (
     JAEGER_TOOLSETS,
     list_toolsets,
     resolve_toolsets,

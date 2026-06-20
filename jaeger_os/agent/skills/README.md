@@ -6,7 +6,7 @@ their own smoke test, and they can be overridden at runtime by the
 agent writing a higher-versioned copy under `instance/<name>/skills/`.
 
 For atomic, single-function capabilities like `get_time` or `file_write`,
-see [`../core/tools/`](../core/tools/) — those are TOOLS, not skills.
+see [`../tools/`](../tools/) — those are TOOLS, not skills.
 
 ## The v2 skill contract
 
@@ -49,7 +49,7 @@ Folder names end in `_v<N>` (e.g. `weather_v1/`, `weather_v2/`):
 | [`computer_use/`](computer_use/) | Universal cross-OS computer control via the screenshot loop. Portable but slow; use as a fallback when the platform doesn't expose a faster object surface, or for canvas/game UIs without semantic objects. |
 
 (The collection is intentionally small — Jaeger ships the agent's
-primitive surface as TOOLS in [`../core/tools/`](../core/tools/), not as
+primitive surface as TOOLS in [`../tools/`](../tools/), not as
 skills. Skills are for composed, larger capabilities.)
 
 A minimal **copy-me template** for authoring a new skill — the

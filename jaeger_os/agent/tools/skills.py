@@ -199,7 +199,7 @@ def skill(action: str, name: str = "", query: str = "",
             # JAEGER_TOOLSET_SCOPING is off; when on, the tools are
             # visible on the agent's very next step.
             try:
-                from jaeger_os.agent.skill_registry.toolsets import (
+                from jaeger_os.agent.skill_registry.toolset_scoping import (
                     active_toolset_names, enable_toolset,
                 )
                 loaded_now: list[str] = []

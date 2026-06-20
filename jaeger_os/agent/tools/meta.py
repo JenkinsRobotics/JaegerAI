@@ -65,7 +65,7 @@ def describe_tool(name: str) -> dict[str, Any]:
     ``{ok: False, error}`` for an unknown name.
     """
     from jaeger_os.agent.schemas.tool_registry import get_tool, has_tool
-    from jaeger_os.agent.skill_registry.toolsets import (
+    from jaeger_os.agent.skill_registry.toolset_scoping import (
         CORE, TOOLSETS, _SKILL_TOOLSETS,
     )
 
@@ -134,7 +134,7 @@ def load_toolset(name: str = "") -> dict[str, Any]:
     every tool is already visible. The active-set tracking still works
     so this is harmless to call regardless of the scoping mode.
     """
-    from jaeger_os.agent.skill_registry.toolsets import (
+    from jaeger_os.agent.skill_registry.toolset_scoping import (
         active_toolset_names, all_toolsets, enable_toolset,
     )
     clean = (name or "").strip().lower()

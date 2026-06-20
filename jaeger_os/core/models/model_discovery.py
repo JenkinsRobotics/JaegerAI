@@ -71,7 +71,7 @@ def _config_extra_dirs() -> list[str]:
     try:
         from jaeger_os.main import _pipeline
         cfg = _pipeline.get("config")
-        return [str(d) for d in (getattr(cfg.model, "extra_gguf_dirs", [])
+        return [str(d) for d in (cfg.model.extra_gguf_dirs
                                  or [])]
     except Exception:  # noqa: BLE001
         return []

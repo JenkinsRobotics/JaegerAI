@@ -103,7 +103,14 @@ def _canonical_model_name(
     *,
     name: str | None = None,
 ) -> str:
-    """Collapse GGUF path/name casing drift to the registry key."""
+    """Collapse GGUF path/name casing drift to a single canonical slug.
+
+    The slug is ALWAYS dash-normalised (``q4_k_m`` → ``q4-k-m``), whether
+    it came from a registry-key match or the raw name. Registry keys use
+    underscores; if we returned them verbatim while raw names got dashed,
+    the SAME model would show up twice on the leaderboard under two
+    spellings (the duplicate-row bug). Normalising both paths the same
+    way keeps one row per model."""
     raw_name = name or ""
     if model_path:
         p = pathlib.Path(str(model_path))
@@ -117,9 +124,9 @@ def _canonical_model_name(
         for key, info in MODEL_REGISTRY.items():
             hf_file = str(info.get("hf_file", ""))
             if filename and hf_file.lower() == filename:
-                return key
+                return key.replace("_", "-")
             if raw_name and pathlib.Path(hf_file).stem.lower() == raw_name.lower():
-                return key
+                return key.replace("_", "-")
     except Exception:  # noqa: BLE001 — history rendering should not fail
         pass
 

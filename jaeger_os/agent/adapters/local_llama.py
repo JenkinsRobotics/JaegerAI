@@ -339,6 +339,7 @@ class LocalLlamaAdapter(OpenAIAdapter):
         temperature: float = 0.0,
         top_p: float = 0.95,
         enable_thinking: bool | None = None,
+        executor: Any = None,
     ) -> None:
         # Skip OpenAIAdapter's network kwargs entirely — we never talk
         # to an HTTP endpoint. Pass the bits that DO apply via super().
@@ -360,6 +361,13 @@ class LocalLlamaAdapter(OpenAIAdapter):
         self.llama_kwargs = {**_LLAMA_DEFAULTS, **(llama_kwargs or {})}
         # Either an already-built Llama, or built on first use.
         self._llama = llama
+        # Persistent single-thread executor. When set, every generation runs
+        # on it (via OpenAIAdapter.call → interruptible_call) instead of a
+        # fresh daemon thread per call — uniform with MLX and a natural
+        # serialization guard on the shared llama-cpp instance. The live
+        # runtime passes one by default (runtime_bridge); the param stays
+        # optional (None → fresh thread) for tests / other callers.
+        self._executor = executor
         # Override the diagnostic name so /runtime shows the right label.
         self.name = "local-llama"
         # Whether to embed the tool catalogue in the system prompt using

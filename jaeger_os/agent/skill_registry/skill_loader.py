@@ -615,7 +615,7 @@ def load_and_register(
             register(capturing)
             if capturing.captured:
                 try:
-                    from jaeger_os.agent.skill_registry.toolsets import register_skill_toolset
+                    from jaeger_os.agent.skill_registry.toolset_scoping import register_skill_toolset
                     register_skill_toolset(skill.name, capturing.captured,
                                            summary=_skill_summary(skill))
                 except Exception:  # noqa: BLE001

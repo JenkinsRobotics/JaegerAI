@@ -182,7 +182,7 @@ class DeepThinkConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     coder_model: str = Field(
-        "qwen3-coder-30b-a3b-q4_k_m",
+        "gemma-4-26b-a4b-it-q4_k_m",
         description="Model swapped in for Deep Think skill authoring.",
     )
     auto_idle_minutes: int = Field(
@@ -193,6 +193,32 @@ class DeepThinkConfig(BaseModel):
             "free time to work its own queue. Default 30. 0 = OFF: Deep "
             "Think only starts via /deepthink start."
         ),
+    )
+
+
+class RuntimeConfig(BaseModel):
+    """Per-format inference-engine selection — JROS's equivalent of LM
+    Studio's Settings → Runtime panel.
+
+    Each model FORMAT (detected from the weights on disk: a ``.gguf``
+    file vs an MLX directory) maps to a chosen ENGINE. ``"auto"`` lets
+    :func:`jaeger_os.core.models.engine_registry.resolve_engine` pick the
+    best installed engine for the format (and, for MLX, route the
+    ``*_unified`` builds that only ``mlx-vlm`` can load).
+
+    Engine ids come from the registry:
+      • GGUF →  ``llama-cpp-python``
+      • MLX  →  ``mlx-lm`` (text) · ``mlx-vlm`` (multimodal / unified)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    gguf_engine: str = Field(
+        "auto",
+        description="Engine for GGUF models: 'auto' | 'llama-cpp-python'.",
+    )
+    mlx_engine: str = Field(
+        "auto",
+        description="Engine for MLX models: 'auto' | 'mlx-lm' | 'mlx-vlm'.",
     )
 
 
@@ -212,20 +238,26 @@ class VoiceConfig(BaseModel):
     persisted back to config.yaml.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # ``ignore`` (not ``forbid``): the LLM voice gate was removed
+    # 2026-06-16, dropping the ``llm_gate`` / ``pending_queue`` /
+    # ``follow_up_retry`` / ``pending_turn_max_age_s`` fields.  Tolerate
+    # those stale keys in existing config.yaml files instead of failing
+    # to load.
+    model_config = ConfigDict(extra="ignore")
     enabled: bool = Field(
         False,
         description="Mic live from TUI boot. Off (default) = text-only TUI.",
     )
     wake_word: bool = Field(
-        False,
+        True,
         description=(
             "Require a wake phrase ('hey <name>') to address the agent. "
-            "Off (default) = every spoken utterance is sent straight to "
-            "the agent.  The LLM gate (``llm_gate=True``) handles the "
-            "'was that addressed to me?' question more accurately than "
-            "wake-word transcription matching — proven by the VoiceLLM "
-            "reference (2026-06-06)."
+            "On (default) = the wake phrase is the addressed-to-me gate "
+            "for the always-on mic; without it every VAD-segmented "
+            "utterance (incl. TV / ambient chatter) would be sent to the "
+            "agent.  This replaced the in-brain LLM <reply>/<ignore> gate "
+            "(removed 2026-06-16 — it shared the model with tool-calling "
+            "and suppressed it).  Disable for push-to-talk / quiet rooms."
         ),
     )
     follow_up: bool = Field(
@@ -263,61 +295,6 @@ class VoiceConfig(BaseModel):
             "'avaudio' = PyObjC AVAudioEngine (macOS only; Apple-native, "
             "bypasses PortAudio and the Pa_Terminate-at-exit segfault "
             "class).  Override per-run with JAEGER_AUDIO_BACKEND env var."
-        ),
-    )
-    llm_gate: bool = Field(
-        True,
-        description=(
-            "LLM-gated speech: every reply begins with one of two tags "
-            "— <ignore> if the agent judges the input WASN'T addressed "
-            "to it (TV noise, ambient chatter, transcription artifacts "
-            "on an open mic), or <reply> if it was.  The voice loop "
-            "suppresses TTS on <ignore>.  Default ON in 0.4.x — the "
-            "VoiceLLM reference (2026-06-06) proved this is far more "
-            "robust than wake-word transcription matching for always-"
-            "on listening, especially with base.en's accuracy ceiling.  "
-            "Pair with ``wake_word=False`` for the proven 'continuous "
-            "hearing' model."
-        ),
-    )
-    pending_queue: bool = Field(
-        False,
-        description=(
-            "Pending-phrase queue: phrases that arrive WHILE the agent "
-            "is processing a turn are NORMALLY drained at turn end ("
-            "they're usually echo / overlap / TV chatter).  When True, "
-            "those mid-turn phrases survive — the next loop iteration "
-            "pulls them as the next turn.  Pattern absorbed from "
-            "VoiceLLM's orchestrator for natural conversational flow ("
-            "'I have a follow-up while you're still talking').  Default "
-            "OFF in 0.4.x — proven-on-the-side-but-not-the-default; "
-            "flip on when you want the more conversational feel and "
-            "have confidence the LLM gate will sort the actual chatter."
-        ),
-    )
-    follow_up_retry: bool = Field(
-        True,
-        description=(
-            "Active-follow-up retry: when the LLM gate returns "
-            "<ignore> DURING an active follow-up window (just had a "
-            "real exchange within ``follow_up_seconds``), retry the "
-            "same phrase ONCE with a hint that the conversation is "
-            "active.  Catches the case where the LLM under-reacts to "
-            "a real follow-up that arrived just after a reply.  "
-            "Pattern absorbed from VoiceLLM's orchestrator; default ON "
-            "in 0.4.x because it materially improves the conversational "
-            "feel without changing the gate's overall ignore-vs-reply "
-            "semantics."
-        ),
-    )
-    pending_turn_max_age_s: float = Field(
-        3.0, ge=0.5, le=30.0,
-        description=(
-            "Maximum age for a queued voice phrase before it is dropped "
-            "instead of processed as a delayed turn.  Mirrors the "
-            "VoiceLLM realtime policy: the voice loop should not lag "
-            "behind the room by answering stale TV chatter, clicks, or "
-            "old follow-ups after a long agent turn."
         ),
     )
     self_speech_filter: bool = Field(
@@ -598,6 +575,7 @@ class Config(BaseModel):
 
     instance_name: str = Field(..., min_length=1, max_length=64)
     model: ModelConfig
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)

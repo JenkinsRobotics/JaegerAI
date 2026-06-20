@@ -11,6 +11,9 @@ Subcommands:
   personality   view + adjust the active persona's stats
   status        runtime snapshot
   roadmap       view current roadmap progress
+  prompt        inspect the system prompt the LLM receives (per fragment)
+  config        view effective settings + defaults + descriptions
+  runtime       inspect + select inference engines (the Runtime panel)
 
 Each subcommand has:
   - A ``register(subparsers)`` function that adds argparse args
@@ -38,9 +41,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from . import (
         avatar_cmd,
+        config_cmd,
         instances_cmd,
         personality_cmd,
+        prompt_cmd,
         roadmap_cmd,
+        runtime_cmd,
         skills_cmd,
         status_cmd,
     )
@@ -62,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     personality_cmd.register(subparsers)
     status_cmd.register(subparsers)
     roadmap_cmd.register(subparsers)
+    prompt_cmd.register(subparsers)
+    config_cmd.register(subparsers)
+    runtime_cmd.register(subparsers)
 
     args = parser.parse_args(argv)
     if args.subcommand is None:

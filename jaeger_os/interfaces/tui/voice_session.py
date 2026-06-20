@@ -87,7 +87,6 @@ class VoiceController:
         barge_in: bool = False,
         follow_up_seconds: float = 10.0,
         wake_name: str | None = None,
-        llm_gate: bool = True,
         pending_turn_max_age_s: float = 3.0,
         on_voice_activity: "Any | None" = None,
     ) -> None:
@@ -101,23 +100,10 @@ class VoiceController:
         # Callback the TUI registers so /sense/gate_decision events
         # (deterministic filter decisions from AudioSession — non-speech,
         # self-speech, deterministic_pass) render in the operator's
-        # voice activity log alongside the brain-side <ignore>/<reply>
-        # decisions.  Signature: ``(message: str, kind: str) -> None``.
-        # When None, gate-decision events are not surfaced.
+        # voice activity log.  Signature: ``(message: str, kind: str) ->
+        # None``.  When None, gate-decision events are not surfaced.
         self._on_voice_activity = on_voice_activity
         self._on_gate_decision: Any = None
-        # 0.4.x: when llm_gate is on, the system prompt instructs the
-        # agent to begin replies with <ignore>/<reply>; this controller
-        # parses the leading tag, suppresses speech on <ignore>, and
-        # strips the tag on <reply>.  Matches the VoiceLLM reference's
-        # gating strategy that handles 'was that addressed to me?'
-        # far more reliably than wake-word transcription matching.
-        self.llm_gate = llm_gate
-        if llm_gate:
-            # Same env var the standalone voice_loop sets — the system
-            # prompt's assemble_prompt() conditionally includes the
-            # VOICE_LLM_GATE_RULE block when this is "1".
-            os.environ["JAEGER_VOICE_GATE"] = "1"
 
         self._audio_session: Any = None
         self._tts: Any = None  # backend reference for AEC wiring only
@@ -129,10 +115,8 @@ class VoiceController:
         )
         self._on_transcript: Any = None
         self._running = False
-        # G5: timestamp tracking for in_followup_window().  Used by the
-        # TUI's voice-turn handler to set JAEGER_VOICE_ACTIVE_FOLLOWUP
-        # so the addressed_hint prompt block triggers during
-        # conversation continuation.
+        # Timestamp tracking for in_followup_window() — the no-wake-word
+        # follow-up window after a reply.
         self._followup_active_until: float = 0.0
         # True only when barge-in is on AND echo cancellation is live —
         # without AEC an open mic hears the agent, so we fall back to
@@ -261,9 +245,8 @@ class VoiceController:
                     phrase = phrase[:57] + "..."
                 if accepted:
                     # Deterministic-pass means the phrase reached the
-                    # brain; the brain's <ignore>/<reply> decision is
-                    # logged separately by _run_voice_turn.  Don't
-                    # double-log accept events at this layer.
+                    # brain and ran as a normal turn.  Don't double-log
+                    # accept events at this layer.
                     return
                 if reason == "non_speech":
                     line = (f"[dim][skipped — non-speech: "
@@ -353,11 +336,10 @@ class VoiceController:
         user can cut the agent off mid-sentence; otherwise the mic is
         paused for the duration. Returns True if the user barged in.
 
-        When ``llm_gate`` is on (default), the leading <ignore>/<reply>
-        tag the system prompt requires is parsed here.  ``<ignore>``
-        suppresses TTS entirely (the operator hears nothing — matches
-        VoiceLLM's behaviour for background noise + ambient chatter).
-        ``<reply>`` strips the tag and speaks the remainder.
+        The reply is the agent's normal output — the brain is
+        transport-agnostic, so there is no <reply>/<ignore> gate to
+        parse.  Non-speech markers are dropped; otherwise the text is
+        spoken.
         """
         if not text or self._bus is None or self._audio_session is None:
             return False
@@ -368,16 +350,6 @@ class VoiceController:
         from jaeger_os.core.voice import is_non_speech_marker
         if is_non_speech_marker(text):
             return False
-
-        if self.llm_gate:
-            from jaeger_os.core.voice import parse_gate
-            should_speak, gated_text = parse_gate(text)
-            if not should_speak:
-                self.console.print(
-                    "[dim]🤫 LLM gate: <ignore> — not addressed to me.[/]"
-                )
-                return False
-            text = gated_text or text
 
         if self._barge_in_live:
             interrupted = {"flag": False}
@@ -480,9 +452,8 @@ class VoiceController:
         """Open the no-wake-word follow-up window after a reply. No-op
         unless both wake gating and the follow-up setting are on."""
         if self._audio_session is None or not (self.wake_word and self.follow_up):
-            # Still record the timestamp — the addressed_hint gate (G5)
-            # uses this even when wake gating is off, so the LLM gate
-            # gets the "permissive in conversation" signal.
+            # Record the timestamp for in_followup_window() even when
+            # wake gating is off.
             import time
             self._followup_active_until = time.time() + self.follow_up_seconds
             return
@@ -496,10 +467,8 @@ class VoiceController:
     def in_followup_window(self) -> bool:
         """True when we're inside the post-reply follow-up window.
 
-        Used by the TUI's voice-turn handler (G5) to set the
-        ``JAEGER_VOICE_ACTIVE_FOLLOWUP`` env var, which triggers the
-        addressed_hint prompt block.  Tracks elapsed time since the
-        last ``open_followup()`` call against ``follow_up_seconds``.
+        Tracks elapsed time since the last ``open_followup()`` call
+        against ``follow_up_seconds``.
         """
         import time
         until = getattr(self, "_followup_active_until", 0.0)

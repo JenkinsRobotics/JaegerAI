@@ -1,11 +1,11 @@
-# core/tools/ — built-in tools (atomic functions, organized by category)
+# agent/tools/ — built-in tools (atomic functions, organized by category)
 
 This is the framework's primitive tool surface. **Tools are individual
 Python functions**, grouped into category files (one `.py` per category)
 and registered onto the agent via `@agent.tool_plain` from main.py.
 
 This is intentionally NOT a "skills" folder. Skills (the v2-contract
-versioned-folder kind) live at the framework root in [`../../skills/`](../../skills/)
+versioned-folder kind) live in [`../skills/`](../skills/)
 and at runtime in `instance/<name>/skills/`.
 
 ## How to add a new tool
@@ -13,7 +13,7 @@ and at runtime in `instance/<name>/skills/`.
 Add a function to the appropriate category file:
 
 ```python
-# core/tools/web.py  (for a new web-related primitive)
+# agent/tools/web.py  (for a new web-related primitive)
 def my_new_tool(arg: str) -> dict[str, Any]:
     """Short one-line docstring — this is what the LLM sees."""
     ...

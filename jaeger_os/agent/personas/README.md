@@ -20,7 +20,7 @@ before it's written.
 Personas exist **only at wizard time**.  After setup completes, the
 instance directory contains a plain `identity.yaml` + `soul.md` with
 the operator-confirmed values.  Nothing in the runtime prompt
-assembler ([jaeger_os/core/prompts/assemble.py](../core/prompts/assemble.py))
+assembler ([jaeger_os/agent/prompts/assemble.py](../prompts/assemble.py))
 reads from this directory, looks up persona IDs, or loads anything at
 turn time.  The prefill literally just hands defaults to the wizard
 prompts — same execution path as if the operator had typed the same

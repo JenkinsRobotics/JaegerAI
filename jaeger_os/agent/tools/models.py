@@ -109,7 +109,7 @@ def model_location(action: str, path: str = "") -> dict[str, Any]:
     if cfg is None:
         return {"ok": False, "error": "no active instance config"}
 
-    dirs = list(getattr(cfg.model, "extra_gguf_dirs", []) or [])
+    dirs = list(cfg.model.extra_gguf_dirs or [])
 
     if act in ("list", "show", ""):
         return {"ok": True, "action": "list", "extra_gguf_dirs": dirs}

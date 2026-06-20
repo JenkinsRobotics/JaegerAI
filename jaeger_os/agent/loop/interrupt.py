@@ -109,9 +109,17 @@ def interruptible_call(
     on_abandon: Callable[[], None] | None = None,
     join_on_abandon: float = 0.0,
     progress: CallProgress | None = None,
+    executor: Any = None,
 ) -> T:
-    """Run ``fn()`` on a daemon thread while the main thread polls the
+    """Run ``fn()`` on a worker thread while the main thread polls the
     interrupt event + heartbeat + stale timer.
+
+    ``executor`` (a single-thread ``ThreadPoolExecutor``): when given,
+    ``fn`` runs on THAT persistent thread instead of a fresh daemon
+    thread. Required for thread-affine backends like MLX, whose GPU
+    streams are pinned to the thread that created them — load, warmup,
+    and every generation must share one thread. On abandon we drain the
+    in-flight future (the single thread must be free for the next call).
 
     Returns ``fn``'s result on success; re-raises any exception from
     inside ``fn``; raises :class:`AgentInterrupted` if the interrupt
@@ -156,9 +164,24 @@ def interruptible_call(
         except BaseException as exc:  # noqa: BLE001 — re-raised below
             box["error"] = exc
 
-    thread = threading.Thread(target=_worker, daemon=True)
     started = time.perf_counter()
-    thread.start()
+    if executor is not None:
+        # Thread-affine backend (MLX): run on the caller's single thread.
+        future = executor.submit(_worker)
+        _is_running = lambda: not future.done()
+
+        def _wait(timeout: float) -> None:
+            try:
+                future.result(timeout=timeout)
+            except Exception:  # noqa: BLE001 — timeout/completion; box holds errors
+                pass
+    else:
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        _is_running = thread.is_alive
+
+        def _wait(timeout: float) -> None:
+            thread.join(timeout=timeout)
 
     def _abandon(exc: BaseException) -> None:
         """Signal the worker to stop, optionally wait for it to finish,
@@ -169,10 +192,15 @@ def interruptible_call(
             except Exception:  # noqa: BLE001 — abort-signal bugs never mask the raise
                 pass
             if join_on_abandon > 0:
-                thread.join(timeout=join_on_abandon)
+                _wait(join_on_abandon)
+        elif executor is not None:
+            # No separate abort flag for MLX — the interrupt_event (polled
+            # inside the generation) stops it; drain so the pinned thread is
+            # free for the next call.
+            _wait(stale_timeout if stale_timeout else 30.0)
         raise exc
 
-    while thread.is_alive():
+    while _is_running():
         if interrupt_event.is_set():
             _abandon(AgentInterrupted("agent loop was interrupted"))
         elapsed = time.perf_counter() - started
@@ -193,7 +221,7 @@ def interruptible_call(
                 on_heartbeat(elapsed)
             except Exception:  # noqa: BLE001 — heartbeat bugs never break the call
                 pass
-        thread.join(timeout=poll_interval)
+        _wait(poll_interval)
 
     if "error" in box:
         raise box["error"]

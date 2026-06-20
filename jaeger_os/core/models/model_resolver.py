@@ -51,15 +51,43 @@ from typing import Any
 #                  jaeger_os.main.switch_model when the robot enters
 #                  Deep Think; swapped back out on wake.
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    # ── Light tier (real-time, tight hosts) ─────────────────────────
+    # Snappy small awake model — the light/real-time default. Fastest
+    # in the library (3m47s bench, 100% routing on the corpus 1.1
+    # leaderboard; 88.1% overall Score) and small enough (5.3 GB) to
+    # co-load with voice on any tier.
+    "gemma-4-e4b-it-q4_k_m": {
+        "hf_repo": "lmstudio-community/gemma-4-E4B-it-GGUF",
+        "hf_file": "gemma-4-E4B-it-Q4_K_M.gguf",
+        "size_gb": 5.3,
+        "role": "realtime",
+        "verified": True,
+        "description": (
+            "Gemma 4 E4B (effective 4B), Q4_K_M. Light/real-time "
+            "default — fastest in the library (3m47s bench, 100% "
+            "routing; 88.1% overall Score, corpus 1.1). Co-loads with "
+            "voice on any tier."
+        ),
+    },
+    # ── Heavy tier / Deep Think default ─────────────────────────────
+    # corpus 1.1 leaderboard: 93.2% overall Score, 100% routing, 5/5
+    # safety, 4m47s bench. A 4B-active MoE, so it decodes fast despite
+    # the 26B footprint. Now the Deep Think (asleep) default, replacing
+    # Qwen3-30B-A3B: they TIE on Score (93.2%) but the 26B runs ~5×
+    # faster (4m47s vs 24m29s) with better routing + safety. Fits as a
+    # swap (not voice co-load) on a 32 GB host.
     "gemma-4-26b-a4b-it-q4_k_m": {
         "hf_repo": "lmstudio-community/gemma-4-26B-A4B-it-GGUF",
         "hf_file": "gemma-4-26B-A4B-it-Q4_K_M.gguf",
         "size_gb": 15.7,
-        "role": "realtime",
+        "role": "deep_think",
+        "verified": True,
         "description": (
-            "Gemma 4 26B MoE (4B active), Q4_K_M quantization. "
-            "Default jaeger realtime model — best quality/speed "
-            "tradeoff on Apple Silicon."
+            "Gemma 4 26B MoE (4B active), Q4_K_M. Heavy / Deep Think "
+            "default — 93.2% Score, 100% routing, 5/5 safety, 4m47s "
+            "(corpus 1.1). Ties the prior Qwen3-30B-A3B deep-think pick "
+            "on Score but runs ~5× faster. Best quality/speed tradeoff "
+            "on Apple Silicon."
         ),
     },
     # ── Deep Think coder model ──────────────────────────────────────
@@ -133,19 +161,22 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
 DEFAULT_MODEL = "gemma-4-12b-it-q4_k_m"
 DEFAULT_AWAKE_MODEL = DEFAULT_MODEL   # explicit alias for sleep-cycle code
 
-# The asleep-mode model: loaded when the agent goes into deep-think mode
-# (1 hour user inactivity + kanban queue not empty). Optimised for ACCURACY
-# and LOW SYSTEM IMPACT — runs in the background while user is away.
+# The asleep-mode (deep-think) model: loaded when the agent goes into
+# deep-think mode (user inactivity + kanban queue not empty). Optimised
+# for usable work per unit time — runs in the background while the user
+# is away, but the user still waits on the result on wake.
 #
-# Default: Qwen3.5-9B Q4 — current data-validated best (93.2% score, 5.2 GB
-# VRAM, peak load 2.4 = gentlest model measured). Override per instance via
-# config (``sleep_cycle.asleep_model``) when the kanban workload is heavily
-# code-specialised — in that case ``qwen3-coder-30b-a3b-instruct-q3_k_l``
-# (88.1% / 78 tok/task / never reasoning mode) is the appropriate swap.
+# Default: gemma-4-26B-A4B Q4 — corpus 1.1 leaderboard: 93.2% overall
+# Score, 100% routing, 5/5 safety, 4m47s bench. A 4B-active MoE, so it
+# decodes fast despite the 26B footprint. It replaced the prior
+# Qwen3-30B-A3B deep-think pick: they TIE on Score (93.2%) but the 26B
+# runs ~5× faster (4m47s vs 24m29s) with better routing + safety —
+# more usable work per window. Fits as a swap (not co-load) on a 32 GB
+# host; the 35B tier OOMs at 32K context.
 #
-# ``DEFAULT_CODER_MODEL`` kept as a back-compat alias — older daemon code
-# uses that name; new code should prefer ``DEFAULT_ASLEEP_MODEL``.
-DEFAULT_ASLEEP_MODEL = "qwen3.5-9b-q4_k_m"
+# ``DEFAULT_CODER_MODEL`` kept as an alias — older daemon code uses that
+# name; new code should prefer ``DEFAULT_ASLEEP_MODEL``.
+DEFAULT_ASLEEP_MODEL = "gemma-4-26b-a4b-it-q4_k_m"
 DEFAULT_CODER_MODEL = DEFAULT_ASLEEP_MODEL
 
 
