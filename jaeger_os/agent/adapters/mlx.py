@@ -118,12 +118,26 @@ class MLXAdapter(ProviderAdapter):
         defaults: dict[str, Any] | None = None,
         inject_tool_instructions: bool = True,
         stop_sequences: tuple[str, ...] = (),
+        mlx_executor: Any = None,
+        is_vlm: bool = False,
+        vlm_config: Any = None,
     ) -> None:
         self._model = model
         self._tokenizer = tokenizer
         self.model_path = model_path
+        # mlx-vlm path: the multimodal/unified MLX models that text-only
+        # mlx-lm can't load. ``_tokenizer`` is then an mlx-vlm processor
+        # and generation runs through ``mlx_vlm`` (separate, incompatible
+        # ``stream_generate`` + chat-template entry points). ``vlm_config``
+        # is the model's loaded config.json, needed by mlx-vlm's template.
+        self._is_vlm = bool(is_vlm)
+        self._vlm_config = vlm_config
         self.model_name = model_name or (model_path or "mlx")
         self._explicit_runner = runner
+        # Single-worker executor that owns the MLX thread (model load +
+        # warmup + every generation). MLX pins GPU streams per-thread, so
+        # decode MUST run here, not on a fresh interruptible_call thread.
+        self._mlx_executor = mlx_executor
         self.defaults = {**_MLX_DEFAULTS, **(defaults or {})}
         self.inject_tool_instructions = bool(inject_tool_instructions)
         self.extra_stop_sequences = tuple(stop_sequences)
@@ -229,8 +243,19 @@ class MLXAdapter(ProviderAdapter):
         """The model's OWN chat template when a tokenizer is available
         (production); a plain ChatML rendering otherwise (injected
         test runners)."""
+        # mlx-vlm models render through mlx-vlm's own chat-template helper
+        # (the processor + config.json), not a bare tokenizer call.
+        if self._is_vlm and self._tokenizer is not None:
+            try:
+                from mlx_vlm.prompt_utils import apply_chat_template as _vlm_tpl
+                return _vlm_tpl(
+                    self._tokenizer, self._vlm_config, wire,
+                    add_generation_prompt=True, num_images=0,
+                )
+            except Exception:  # noqa: BLE001 — fall through to generic render
+                pass
         tok = self._tokenizer
-        if tok is not None and hasattr(tok, "apply_chat_template"):
+        if tok is not None and not self._is_vlm and hasattr(tok, "apply_chat_template"):
             try:
                 return tok.apply_chat_template(
                     wire, add_generation_prompt=True, tokenize=False,
@@ -326,14 +351,27 @@ class MLXAdapter(ProviderAdapter):
             gen_kwargs["sampler"] = sampler
 
         def _stream() -> dict[str, Any]:
-            from mlx_lm import stream_generate
+            # mlx-vlm and mlx-lm both yield ``GenerationResult`` objects
+            # with ``.text`` / ``.finish_reason`` / token counts, so the
+            # scanner loop below is identical — only the generator source
+            # and its kwargs differ. mlx-vlm doesn't take the mlx-lm
+            # ``sampler`` object, so the VLM path passes plain kwargs.
+            if self._is_vlm:
+                from mlx_vlm import stream_generate as _stream_gen
+                vlm_kwargs: dict[str, Any] = {}
+                if raw_params.get("max_tokens") is not None:
+                    vlm_kwargs["max_tokens"] = raw_params["max_tokens"]
+                if raw_params.get("temp") is not None:
+                    vlm_kwargs["temperature"] = raw_params["temp"]
+                chunk_iter = _stream_gen(model, tokenizer, prompt=prompt, **vlm_kwargs)
+            else:
+                from mlx_lm import stream_generate as _stream_gen
+                chunk_iter = _stream_gen(model, tokenizer, prompt=prompt, **gen_kwargs)
             pieces: list[str] = []
             pending = ""
             finish: str | None = None
             usage: dict[str, Any] = {}
-            for chunk in stream_generate(
-                model, tokenizer, prompt=prompt, **gen_kwargs,
-            ):
+            for chunk in chunk_iter:
                 piece = getattr(chunk, "text", "") or ""
                 progress.touch()
                 if piece:
@@ -383,6 +421,7 @@ class MLXAdapter(ProviderAdapter):
             stale_timeout=stale_timeout,
             on_heartbeat=on_heartbeat,
             progress=progress,
+            executor=self._mlx_executor,
         )
         if progress.first is not None:
             self.last_ttft_s = max(0.0, progress.first - started)

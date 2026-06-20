@@ -256,8 +256,8 @@ class DeepThinkState:
     dreaming' state. Owned by the TUI / runtime, not persisted."""
 
     mode: Mode = "realtime"
-    realtime_model: str = "gemma-4-26b-a4b-it-q4_k_m"
-    coder_model: str = "qwen3-coder-30b-a3b-q4_k_m"
+    realtime_model: str = "gemma-4-12b-it-q4_k_m"
+    coder_model: str = "gemma-4-26b-a4b-it-q4_k_m"
     entered_at: float | None = None
     current_task_id: str | None = None
     tasks_completed_this_session: int = 0

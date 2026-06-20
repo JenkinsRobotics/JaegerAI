@@ -17,7 +17,19 @@ from pathlib import Path
 
 from jaeger_os.core.instance.instance import InstanceLayout
 
-from .rules import RUNTIME_TAIL_BASE, RUNTIME_TOOLSET_SCOPED, RUNTIME_TOOLSET_UNSCOPED
+from ._doc import load_prompt_doc
+from .rules import RUNTIME_TOOLSET_SCOPED, RUNTIME_TOOLSET_UNSCOPED
+
+# The consolidated framework agent prompt (what you are + how you work +
+# memory + files + tools + output style). One editable document; replaced
+# the four scattered rule constants in 2026-06-17.
+_FRAMEWORK_PROMPT_PATH = Path(__file__).parent / "framework_agent.md"
+
+
+def load_framework_prompt() -> str:
+    """The framework-owned standing instructions, from
+    ``framework_agent.md``. Same for every instance/mode."""
+    return load_prompt_doc(_FRAMEWORK_PROMPT_PATH)
 
 
 # ── soul.md ─────────────────────────────────────────────────────────
@@ -83,7 +95,7 @@ def build_toolset_catalog() -> str:
     surface is visible and the catalog would just duplicate what the
     adapter already sends)."""
     try:
-        from jaeger_os.agent.skill_registry.toolsets import (
+        from jaeger_os.agent.skill_registry.toolset_scoping import (
             _scoping_enabled, all_toolsets, TOOLSET_SUMMARY,
         )
     except Exception:  # noqa: BLE001
@@ -120,22 +132,20 @@ def build_board_block(layout: InstanceLayout) -> str:
 
 
 def build_runtime_tail() -> str:
-    """The file-access + behavior block that closes the static prompt.
-    Splices the right toolset note (scoped vs. unscoped) into the
-    Behavior section based on the live ``JAEGER_TOOLSET_SCOPING``
-    flag — one block instead of two parallel ones, so a rule edit
-    in the base block doesn't have to be duplicated."""
+    """The DYNAMIC tail: which tool-surface note applies this turn.
+
+    The static file-access / behavior / output rules moved into
+    ``framework_agent.md``; what's left here is the one bit that varies
+    at runtime — scoped (lean CORE set + ``describe_tool`` / ``load_toolset``)
+    vs. unscoped (full surface visible) — keyed on the live
+    ``JAEGER_TOOLSET_SCOPING`` flag."""
     try:
-        from jaeger_os.agent.skill_registry.toolsets import _scoping_enabled
+        from jaeger_os.agent.skill_registry.toolset_scoping import _scoping_enabled
         scoped = _scoping_enabled()
     except Exception:  # noqa: BLE001
         scoped = False
     note = RUNTIME_TOOLSET_SCOPED if scoped else RUNTIME_TOOLSET_UNSCOPED
-    return RUNTIME_TAIL_BASE.strip().replace(
-        "Behavior:\n",
-        "Behavior:\n" + note.strip() + "\n",
-        1,
-    )
+    return "Tool surface:\n" + note.strip()
 
 
 # ── v2 self-improvement contract (config-gated) ─────────────────────
@@ -146,10 +156,10 @@ def build_runtime_tail() -> str:
 # rollback, smoke tests) but adds ~900 words otherwise and was
 # costing 3/23 on the routing bench. Config-gated via
 # ``skills.include_self_improvement_contract``.
-_V2_CONTRACT_PATH = (
-    Path(__file__).resolve().parent.parent.parent
-    / "prompts" / "agent_system_prompt.md"
-)
+# Lives alongside framework_agent.md / three_laws.md in this folder.
+# (Was a broken path into a non-existent jaeger_os/prompts/ — the contract
+# silently never loaded even when the config flag was on. Fixed 2026-06-17.)
+_V2_CONTRACT_PATH = Path(__file__).parent / "agent_system_prompt.md"
 
 
 def load_v2_self_improvement(layout: InstanceLayout) -> str:

@@ -847,56 +847,115 @@ def _models(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     return _model_list(ctx)
 
 
-def _runtime(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
-    """One-screen inventory of the local inference engines available to
-    this machine — the same view LM Studio's Settings → Runtime panel
-    gives: engine, version, install/reach state, the model formats it
-    loads. Echoes ``core.runtimes.discover_runtimes`` so adding a new
-    engine to the inventory is a one-line change there, not here."""
+def _runtime(ctx: SlashContext, args: str) -> SlashResult:
+    """The Runtime panel — inference-engine inventory AND per-format
+    selection (JROS's equivalent of LM Studio's Settings → Runtime).
+
+       /runtime                       show selections + engines
+       /runtime use gguf llama-cpp-python
+       /runtime use mlx  mlx-vlm      pick the MLX engine
+       /runtime use mlx  auto         reset a format to auto
+
+    The selector echoes ``core.models.engine_registry`` so adding a new
+    engine is a one-line change there, not here."""
+    parts = args.split()
+    if parts and parts[0].lower() in ("use", "set"):
+        return _runtime_use(ctx, parts[1:])
+    return _runtime_show(ctx)
+
+
+def _runtime_load_config(ctx: SlashContext) -> Any:
+    """Load the active instance's typed Config, or None on failure."""
+    try:
+        from jaeger_os.core.instance.schemas import Config, load_yaml
+        cfg_path = Path(str(ctx.instance_dir)) / "config.yaml"
+        return load_yaml(cfg_path, Config)
+    except Exception as exc:  # noqa: BLE001
+        ctx.console.print(f"[yellow]Could not load config: {exc}[/]")
+        return None
+
+
+def _runtime_show(ctx: SlashContext) -> SlashResult:
     from rich.table import Table
 
-    from jaeger_os.core.models.runtimes import discover_runtimes
+    from jaeger_os.core.models import engine_registry as er
 
-    with ctx.console.status("[dim]probing runtimes…[/]"):
-        runtimes = discover_runtimes()
+    cfg = _runtime_load_config(ctx)
+    rt = getattr(cfg, "runtime", None)
+    model_path = cfg.model.model_path if cfg is not None else ""
 
     ctx.console.print()
-    ctx.console.print("[bold]Engines & Frameworks[/]")
+    ctx.console.print("[bold]Runtime — inference engine selection[/]")
     ctx.console.print()
 
+    # Per-format selection (the two dropdowns).
+    sel_table = Table(show_header=True, header_style="dim", box=None, padding=(0, 2))
+    sel_table.add_column("Format", no_wrap=True)
+    sel_table.add_column("Engine", no_wrap=True)
+    sel_table.add_column("", no_wrap=True)
+    for fmt in ("gguf", "mlx"):
+        sel = er.runtime_selection(rt, fmt)
+        shown = sel if sel != "auto" else "[dim]auto[/]"
+        resolved = ""
+        if model_path and er.detect_format(model_path) == fmt:
+            eng = er.resolve_engine(model_path, rt)
+            resolved = f"[dim]→ this instance loads via {eng.display_name}[/]"
+        sel_table.add_row(fmt.upper(), f"[cyan]{shown}[/]", resolved)
+    ctx.console.print(sel_table)
+    ctx.console.print()
+
+    # The engine list, marking the currently-selected engine per format.
+    selected_ids = {er.resolve_engine_id_for_selection(rt, f) for f in ("gguf", "mlx")}
+    ctx.console.print("[bold]Engines[/]")
     table = Table(show_header=True, header_style="dim", box=None, padding=(0, 2))
+    table.add_column("", no_wrap=True)
     table.add_column("Engine", no_wrap=True)
     table.add_column("Version", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Formats", no_wrap=True)
     table.add_column("Notes")
-
-    available_count = 0
-    for rt in runtimes:
-        if rt.available:
-            available_count += 1
-            status = "[green]✓ available[/]"
-            version = rt.version or "—"
-            notes = rt.description
+    for spec in er.all_engines():
+        mark = "[cyan]●[/]" if spec.id in selected_ids else "[dim]○[/]"
+        if spec.available():
+            status, version = "[green]✓ installed[/]", (spec.version() or "—")
+            notes = spec.description
         else:
-            status = "[dim]✗ not installed[/]"
-            version = "[dim]—[/]"
-            notes = f"[dim]{rt.install_hint or rt.description}[/]"
-        table.add_row(
-            f"[bold]{rt.display_name}[/]",
-            version,
-            status,
-            ", ".join(rt.formats),
-            notes,
-        )
-
+            status, version = "[dim]✗ not installed[/]", "[dim]—[/]"
+            notes = f"[dim]{spec.install_hint}[/]"
+        table.add_row(mark, f"[bold]{spec.display_name}[/]", version, status,
+                      ", ".join(spec.formats), notes)
     ctx.console.print(table)
     ctx.console.print()
-    ctx.console.print(
-        f"[dim]{available_count} of {len(runtimes)} runtimes available. "
-        "GGUF runs in-process via llama-cpp-python; MLX requires the "
-        "``mlx-lm`` wheel; Ollama / LM Studio are HTTP servers.[/]"
-    )
+    ctx.console.print("[dim]set one with:  /runtime use <gguf|mlx> <engine|auto>[/]")
+    return SlashResult()
+
+
+def _runtime_use(ctx: SlashContext, rest: list[str]) -> SlashResult:
+    from jaeger_os.core.instance.schemas import dump_yaml
+    from jaeger_os.core.models import engine_registry as er
+
+    if len(rest) < 2:
+        ctx.console.print("[red]Usage: /runtime use <gguf|mlx> <engine|auto>[/]")
+        return SlashResult()
+    fmt, engine = rest[0].lower(), rest[1].lower()
+    cfg = _runtime_load_config(ctx)
+    if cfg is None:
+        return SlashResult()
+    try:
+        engine = er.set_runtime_engine(cfg.runtime, fmt, engine)
+    except ValueError as exc:
+        ctx.console.print(f"[red]{exc}[/]")
+        return SlashResult()
+    dump_yaml(Path(str(ctx.instance_dir)) / "config.yaml", cfg)
+
+    spec = er.get_engine(engine) if engine != "auto" else None
+    ctx.console.print(f"[green]✓ {fmt.upper()} engine → {engine}[/]")
+    if spec is not None and not spec.available():
+        ctx.console.print(
+            f"[yellow]  ⚠ {spec.display_name} is not installed — "
+            f"{spec.install_hint}[/]")
+    ctx.console.print("[dim]  Takes effect on the next model load "
+                      "(/reboot to apply now).[/]")
     return SlashResult()
 
 
@@ -1868,7 +1927,7 @@ def _config(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     ctx.console.print(f"  context      {m.ctx} tokens")
     ctx.console.print(f"  permissions  {getattr(perms, 'mode', 'confirm')}")
     ctx.console.print(
-        f"  busy input   {getattr(cfg.display, 'busy_input_mode', 'interrupt')}")
+        f"  busy input   {cfg.display.busy_input_mode}")
     ctx.console.print(
         f"  voice        {'on' if cfg.voice.enabled else 'off'}  "
         f"[dim]wake={cfg.voice.wake_word} "
@@ -1884,7 +1943,7 @@ def _config(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 def _skills(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List the skills currently loaded — each skill is a tool bundle."""
     try:
-        from jaeger_os.agent.skill_registry import toolsets as _ts
+        from jaeger_os.agent.skill_registry import toolset_scoping as _ts
         summaries = dict(_ts._SKILL_SUMMARY)
         members = dict(_ts._SKILL_TOOLSETS)
     except Exception as exc:  # noqa: BLE001

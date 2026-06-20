@@ -6,9 +6,14 @@ validated awake + asleep model picks for that tier — plus download
 URLs for the recommended GGUFs so the operator can pull them with one
 prompt at first-run.
 
-The picks are sourced from the bench corpus 1.1 leaderboard captured
-in ``benchmark/HISTORY.md``. Refresh the constants below when re-
-benching shifts the rankings.
+The picks track the corpus 1.1 overall-Score leaderboard in
+``dev_benchmark/HISTORY.md`` (Score = passed/total across deep-think +
+real-time + multi-turn + safety, mode=auto). The gemma 4 family leads
+every tier — E4B (light, fastest), 12B (medium, #1 Score), 26B-A4B
+(heavy / deep-think: ties Qwen3-30B-A3B on Score but ~5× faster) — so
+the slower Qwen deep-think picks were pruned. ``score_pct`` below is the
+HISTORY overall Score, NOT a single routing run. Refresh when a
+re-bench regenerates HISTORY.md.
 """
 
 from __future__ import annotations
@@ -32,7 +37,7 @@ class ModelPick:
     registry_key: str          # matches MODEL_REGISTRY in model_resolver
     display_name: str          # human-friendly, e.g. "gemma-4-26B-A4B Q4"
     size_gb: float             # on-disk size; rough swap budget signal
-    score_pct: float           # latest bench corpus 1.1 score
+    score_pct: float           # corpus 1.1 overall Score (HISTORY.md)
     tokens_per_task: int       # verbosity — lower = faster per turn
     notes: str = ""            # one-liner trade-off
     download_url: str = ""     # HF or direct link; empty if not downloadable
@@ -48,7 +53,7 @@ class TierRecommendation:
     alternates: list[ModelPick] = field(default_factory=list)
 
 
-# ── Model catalogue (data-validated 2026-05-31, corpus 1.1) ─────────
+# ── Model catalogue (data-validated 2026-06-19 routing sweep) ───────
 #
 # Picks track the leaderboard. If you change these, also refresh the
 # bench numbers in ``docs/deep_think_design.md`` so the wizard and the
@@ -57,11 +62,13 @@ class TierRecommendation:
 _GEMMA_E4B_Q4 = ModelPick(
     registry_key="gemma-4-e4b-it-q4_k_m",
     display_name="gemma-4-E4B Q4",
-    size_gb=5.0,
-    score_pct=89.8,
+    size_gb=5.3,
+    score_pct=88.1,
     tokens_per_task=76,
-    notes=("Snappy realtime — 76 tok/task, ~4m bench. Best small awake "
-           "model in the library."),
+    notes=("Light/real-time default. 88.1% overall Score (corpus 1.1) "
+           "but the FASTEST model in the library — 3m47s bench, 100% "
+           "routing, 76 tok/task. Small enough (5.3 GB) to co-load with "
+           "voice on any tier. The speed pick where latency matters most."),
     download_url=("https://huggingface.co/lmstudio-community/"
                   "gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"),
 )
@@ -79,12 +86,12 @@ _GEMMA_12B_Q4 = ModelPick(
     display_name="gemma-4-12B Q4",
     size_gb=6.9,
     score_pct=94.9,
-    tokens_per_task=65,
-    notes=("Dense 12B, 6.9 GB on disk.  Leaderboard #1 at 94.9% "
-           "routing with a clean 18/18 safety subset (today's bench, "
-           "2026-06-04).  Slower tok/s than Qwen3.5-9B but stronger "
-           "on safety and honest reasoning — ideal asleep pick on a "
-           "24 GB host where MoE asleep models don't fit."),
+    tokens_per_task=67,
+    notes=("Dense 12B, 6.9 GB on disk. Medium / real-time default — "
+           "leaderboard #1 at 94.9% overall Score (corpus 1.1), 18/18 "
+           "deep-think, 98.1% routing. Light enough to co-load with voice "
+           "(Whisper + Kokoro) on a 32 GB host where the 26B-A4B would "
+           "OOM the GPU."),
     download_url=("https://huggingface.co/lmstudio-community/"
                   "gemma-4-12B-it-GGUF/resolve/main/"
                   "gemma-4-12B-it-Q4_K_M.gguf"),
@@ -94,40 +101,17 @@ _GEMMA_26B_A4B_Q4 = ModelPick(
     registry_key="gemma-4-26b-a4b-it-q4_k_m",
     display_name="gemma-4-26B-A4B Q4",
     size_gb=15.6,
-    score_pct=91.5,
-    tokens_per_task=65,
-    notes=("MoE 4B active — 91.5% score at 65 tok/task. The "
-           "speed-and-quality champion for awake mode."),
+    score_pct=93.2,
+    tokens_per_task=66,
+    notes=("MoE 4B active — heavy / Deep Think default. 93.2% overall "
+           "Score (corpus 1.1), 100% routing, 5/5 safety, 4m47s bench. "
+           "Ties the prior Qwen3-30B-A3B deep-think pick on Score but "
+           "runs 5× faster (4m47s vs 24m29s) with better routing + safety "
+           "— more usable work per window. Fits as a swap on a 32 GB host; "
+           "the 35B tier OOMs at 32K context."),
     download_url=("https://huggingface.co/lmstudio-community/"
                   "gemma-4-26B-A4B-it-GGUF/resolve/main/"
                   "gemma-4-26B-A4B-it-Q4_K_M.gguf"),
-)
-
-_QWEN_35_9B_Q4 = ModelPick(
-    registry_key="qwen3.5-9b-q4_k_m",
-    display_name="Qwen3.5-9B Q4",
-    size_gb=5.2,
-    score_pct=93.2,
-    tokens_per_task=203,
-    notes=("Highest deep-think tier score (17/18). Lowest peak load "
-           "(2.4) measured anywhere. Gentle on the host while asleep."),
-    download_url=("https://huggingface.co/lmstudio-community/"
-                  "Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf"),
-)
-
-_QWEN_30B_A3B_Q4 = ModelPick(
-    registry_key="qwen3-30b-a3b-q4_k_m",
-    display_name="Qwen3-30B-A3B Q4",
-    size_gb=17.3,
-    score_pct=93.2,
-    tokens_per_task=660,
-    notes=("MoE 3B active. Same overall score as Qwen3.5-9B Q4 but "
-           "+1 safety case (4/5 vs 3/5) and 2.5× faster bench. "
-           "Pick this for asleep mode when the kanban includes "
-           "safety-sensitive tool calls."),
-    download_url=("https://huggingface.co/lmstudio-community/"
-                  "Qwen3-30B-A3B-GGUF/resolve/main/"
-                  "Qwen3-30B-A3B-Q4_K_M.gguf"),
 )
 
 _QWEN_4B_THINKING_Q3 = ModelPick(
@@ -153,10 +137,10 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
 
     Below 12 GB the wizard should refuse to recommend a local model
     (too tight even for swap). 12 GB only supports a single small
-    model — no swap, no asleep. 24 GB is the sweet spot for the
-    Qwen3.5-9B asleep pairing. 32 GB unlocks the gemma-4-26B-A4B awake
-    pick. 64+ GB unlocks Qwen3-30B-A3B as the safety-heavy asleep
-    swap.
+    model — no swap, no asleep. 24 GB swaps gemma-4-E4B awake against
+    gemma-4-12B asleep. 32 GB co-loads gemma-4-12B awake with voice and
+    swaps in gemma-4-26B-A4B for deep-think. 64+ GB runs gemma-4-26B-A4B
+    in both modes (no swap).
     """
     if tier_gb < 12:
         # Under-spec: still assign both modes for code-path symmetry,
@@ -190,52 +174,47 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
             asleep=_QWEN_4B_THINKING_Q3,
         )
     if tier_gb < 32:
-        # 24 GB: Mac Mini sweet spot — both ~5 GB models swap cleanly.
+        # 24 GB: Mac Mini sweet spot — both gemmas swap cleanly.
         return TierRecommendation(
             tier_label="24 GB",
             description=("Mac Mini sweet spot.  gemma-4-E4B awake "
-                         "(5 GB, snappy) + gemma-4-12B asleep "
-                         "(6.9 GB, leaderboard-#1 routing + clean "
-                         "18/18 safety subset on the 2026-06-04 "
-                         "bench).  Both fit alongside the KV cache + "
-                         "host headroom on a 24 GB unified-memory "
-                         "host.  Qwen3.5-9B kept as an alternate for "
-                         "operators who prefer thinking-mode asleep "
-                         "behaviour."),
+                         "(5.3 GB, fastest) + gemma-4-12B asleep "
+                         "(6.9 GB, #1 Score 94.9%).  Both fit alongside "
+                         "the KV cache + host headroom on a 24 GB "
+                         "unified-memory host (swap, not co-load)."),
             awake=_GEMMA_E4B_Q4,
             asleep=_GEMMA_12B_Q4,
-            alternates=[_QWEN_35_9B_Q4],
         )
     if tier_gb < 64:
-        # 32 GB: gemma-4-12B dense awake (leaderboard #1) leaves headroom for
-        # voice (Whisper + Kokoro ~3 GB) CO-LOADED with the awake model. The
+        # 32 GB: gemma-4-12B dense awake leaves headroom for voice
+        # (Whisper + Kokoro ~3 GB) CO-LOADED with the awake model. The
         # 26B-A4B awake is NOT recommended here — on a 32 GB host (e.g. M1
         # Max, ~26 GB GPU working set) the 26B + voice + 32K KV cache OOMs
-        # the GPU. It stays a power-user alternate (text-only) and the
-        # 64+ GB awake pick. Qwen3-30B-A3B asleep swaps in for deep-think.
+        # the GPU. It swaps in for deep-think (asleep), where voice isn't
+        # co-loaded so the 16 GB footprint fits.
         return TierRecommendation(
             tier_label="32 GB",
-            description=("gemma-4-12B Q4 awake (dense, leaderboard #1, "
+            description=("gemma-4-12B Q4 awake (dense, #1 Score 94.9%, "
                          "6.9 GB) — leaves room to CO-LOAD voice (Whisper "
                          "+ Kokoro), which the 26B-A4B does not on a 32 GB "
-                         "/ ~26 GB-GPU host (OOM). Qwen3-30B-A3B Q4 asleep "
-                         "for deep-think (swap, not co-load). 26B-A4B "
-                         "available as a text-only alternate."),
+                         "/ ~26 GB-GPU host (OOM). gemma-4-26B-A4B Q4 asleep "
+                         "for deep-think (swap, not co-load) — 93.2% Score, "
+                         "100% route, 5/5 safety, ~5× faster than Qwen "
+                         "deep-think."),
             awake=_GEMMA_12B_Q4,
-            asleep=_QWEN_30B_A3B_Q4,
-            alternates=[_GEMMA_26B_A4B_Q4, _QWEN_35_9B_Q4],
+            asleep=_GEMMA_26B_A4B_Q4,
         )
-    # 64+ GB: plenty of room — same picks, but can optionally co-load
-    # for instant mode transitions if the operator wires that up.
+    # 64+ GB: plenty of room — gemma-4-26B-A4B in both modes (no swap),
+    # so mode transitions are instant. The 35B tier OOMs at 32K context
+    # even here on the measured hardware, so 26B-A4B is the heavy ceiling.
     return TierRecommendation(
         tier_label="64+ GB",
-        description=("Plenty of unified memory. Same awake/asleep "
-                     "pairing as 32 GB — but co-load becomes "
-                     "viable if you want zero-latency mode "
-                     "transitions instead of swap."),
+        description=("Plenty of unified memory. gemma-4-26B-A4B Q4 in "
+                     "both awake and deep-think modes — same model, no "
+                     "swap, instant mode transitions. 93.2% Score, 100% "
+                     "route, 5/5 safety on the corpus 1.1 leaderboard."),
         awake=_GEMMA_26B_A4B_Q4,
-        asleep=_QWEN_30B_A3B_Q4,
-        alternates=[_QWEN_35_9B_Q4],
+        asleep=_GEMMA_26B_A4B_Q4,
     )
 
 

@@ -163,7 +163,7 @@ def _check_tool_registry() -> tuple[bool, str]:
          CORE uses (e.g. ``read_file`` vs ``file_read``), so a naive
          scan would always false-negative.
     """
-    from jaeger_os.agent.skill_registry.toolsets import CORE
+    from jaeger_os.agent.skill_registry.toolset_scoping import CORE
 
     registered: set[str] = set()
     source = "none"

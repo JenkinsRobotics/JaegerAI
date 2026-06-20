@@ -345,6 +345,7 @@ class OpenAIAdapter(ProviderAdapter):
                 on_abandon=on_abandon,
                 join_on_abandon=join_on_abandon,
                 progress=progress,
+                executor=getattr(self, "_executor", None),
             )
 
         api_kwargs["stream"] = True
@@ -373,6 +374,7 @@ class OpenAIAdapter(ProviderAdapter):
             on_abandon=on_abandon,
             join_on_abandon=join_on_abandon,
             progress=progress,
+            executor=getattr(self, "_executor", None),
         )
         # Real time-to-first-token from the beacon's first touch —
         # feeds the turn's latency report (previously hardcoded 0.0).

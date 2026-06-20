@@ -60,7 +60,7 @@ def _resolve_local_max_tokens() -> int:
         cfg = _pipeline.get("config")
         if cfg is None:
             return 4096
-        return int(getattr(cfg.model, "max_tokens", 4096))
+        return int(cfg.model.max_tokens)
     except Exception:  # noqa: BLE001 — never block adapter construction
         return 4096
 
@@ -109,6 +109,12 @@ def _adapter_for_client(
             llama=llm,
             enable_thinking=_resolve_thinking_env(),
             max_tokens=_resolve_local_max_tokens(),
+            # Run GGUF generation on the client's persistent single thread
+            # (uniform with MLX; serializes decode on the shared llama-cpp
+            # instance). A 4-round A/B (2026-06-18) confirmed no throughput
+            # cost vs. the old fresh-thread-per-call path — so it's the
+            # default. Both local backends now share one inference-worker model.
+            executor=getattr(client, "_executor", None),
         )
 
     # In-process MLX (config ``model.backend: mlx_lm`` →
@@ -124,6 +130,13 @@ def _adapter_for_client(
             tokenizer=getattr(client, "_tokenizer", None),
             model_name=getattr(client, "model_name", "mlx"),
             defaults={"max_tokens": _resolve_local_max_tokens()},
+            # MLX is thread-affine — generation must run on the SAME thread
+            # the model loaded on (the client's single-worker executor).
+            mlx_executor=getattr(client, "_executor", None),
+            # mlx-vlm clients (multimodal / unified models) route generation
+            # through mlx-vlm instead of mlx-lm; the adapter detects this.
+            is_vlm=getattr(client, "is_vlm", False),
+            vlm_config=getattr(client, "_config", None),
         )
 
     ext = getattr(client, "ext", None)
@@ -318,42 +331,6 @@ def _first_decision_from(messages: list[Message]) -> dict[str, Any] | None:
     return None
 
 
-def _strip_voice_gate_prefix(answer: str) -> tuple[str, bool]:
-    """Strip the brain's leading ``<reply>`` tag (so text-mode
-    consumers get a clean response) and detect ``<ignore>``
-    (returning empty text + a flag).
-
-    Channel-control artifacts (e.g. Gemma's ``<|channel|>thought``
-    leaks) are cleaned first so the gate tag lands at the start of
-    the cleaned text before we look for it.
-
-    Returns: ``(cleaned_text, voice_gate_ignored)``.
-
-    Active only when JAEGER_VOICE_GATE=1 at brain boot — the gate
-    rule won't be in the system prompt otherwise, and the brain
-    won't emit the tag for the assembler to strip."""
-    if not answer:
-        return "", False
-    import os as _os
-    if _os.environ.get("JAEGER_VOICE_GATE") != "1":
-        return answer, False
-    try:
-        from jaeger_os.core.voice import clean_voice_reply
-    except Exception:  # noqa: BLE001
-        return answer, False
-    import re as _re
-    cleaned = clean_voice_reply(answer)
-    if not cleaned:
-        return "", False
-    _reply_re = _re.compile(r"^\s*<\s*reply\s*>\s*", _re.IGNORECASE)
-    _ignore_re = _re.compile(r"^\s*<\s*ignore\s*>", _re.IGNORECASE)
-    if _reply_re.match(cleaned):
-        return _reply_re.sub("", cleaned, count=1).strip(), False
-    if _ignore_re.match(cleaned):
-        return "", True
-    return cleaned, False
-
-
 def drive_one_turn(
     agent: JaegerAgent,
     user_text: str,
@@ -401,17 +378,6 @@ def drive_one_turn(
         }
     elapsed = time.perf_counter() - started
 
-    # 2026-06-07 (bench-caught): when JAEGER_VOICE_GATE=1 the brain's
-    # system prompt instructs it to prefix every response with
-    # <reply> or <ignore>.  The brain doesn't know whether this turn
-    # was typed or spoken — it dutifully tags every response.  We
-    # strip the tag here at the unified output layer so every
-    # consumer (bench harness, run_command, run_for_voice, daemon,
-    # messaging bridges) sees clean text by default.  Voice
-    # consumers pull voice_gate_ignored from the returned dict to
-    # detect <ignore>.
-    answer, voice_gate_ignored = _strip_voice_gate_prefix(answer)
-
     # The per-turn slice comes from the agent's own bookkeeping, NOT
     # from ``messages[pre_len:]`` — the context guard can rebind
     # ``agent.messages`` to a head-trimmed copy mid-turn, which made a
@@ -421,7 +387,6 @@ def drive_one_turn(
     new_messages = agent.last_turn_messages
     return {
         "answer": answer,
-        "voice_gate_ignored": voice_gate_ignored,
         "tool_activity": _tool_activity_lines(new_messages),
         "first_decision": _first_decision_from(new_messages),
         "elapsed_s": elapsed,

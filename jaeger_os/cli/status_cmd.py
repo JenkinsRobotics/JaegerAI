@@ -62,7 +62,6 @@ def run_status(args: Any) -> int:
         if config.voice.enabled:
             print(c.kv("Voice",   c.green("enabled") +
                                   c.dim(f"  wake={config.voice.wake_word}"
-                                        f"  gate={config.voice.llm_gate}"
                                         f"  barge_in={config.voice.barge_in}")))
         else:
             print(c.kv("Voice",   c.dim("disabled")))

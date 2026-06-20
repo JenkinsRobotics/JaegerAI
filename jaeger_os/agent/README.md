@@ -11,26 +11,25 @@
 
 ## What's in here
 
-| File / dir | Purpose |
+Organised by subfolder (the top-level `.py` files moved into these
+during the `core/ → agent/` reorg):
+
+| Dir / file | Purpose |
 |---|---|
-| [`jaeger_agent.py`](jaeger_agent.py) | The loop. `run_turn` drives format → call → parse → dispatch with skip-final, length-retry, halt backstop, stale-call detection. |
-| [`adapters/`](adapters/) | One file per backend: `anthropic`, `openai`, `hermes_xml`, `local_llama`, `mlx`. All implement the `ProviderAdapter` ABC defined in [`adapters/base.py`](adapters/base.py). |
-| [`tool_registry.py`](tool_registry.py) | Process-wide `name → ToolDef` map. `@register_tool` decorator + `register_tool_instance` runtime path. |
-| [`tool_schema.py`](tool_schema.py) | `ToolDef` — one tool, three on-wire renderers (Anthropic / OpenAI / Hermes-XML), Pydantic-validated dispatch. |
-| [`toolsets.py`](toolsets.py) | Hermes-style toolset groups + the `resolve_toolsets` resolver. Lets a session expose only `default` / `essentials` / `robot` / etc. instead of all ~80 tools. |
-| [`drift_parser.py`](drift_parser.py) | Recovers `<tool_call>` blocks Gemma/Qwen emit as plain text. Three dialects: Gemma brace args, Gemma paren kwargs, Qwen XML, plus the Hermes JSON envelope. |
-| [`arg_coercion.py`](arg_coercion.py) | Pre-validation coercion: `"5"` → `5`, bare scalar → `[scalar]` when schema expects array. Catches the common open-weight-model arg-drift cases. |
-| [`schema_sanitizer.py`](schema_sanitizer.py) | Strips JSON-Schema shapes llama-cpp's grammar generator chokes on. |
-| [`callbacks.py`](callbacks.py) | `AgentCallbacks` — observation hooks the loop fires (tool_progress, step, heartbeat, before/after_tool_call). |
-| [`interrupt.py`](interrupt.py) | `interruptible_call` + `StaleCallTimeout`. Daemon-thread pattern with cancel-event polling. |
-| [`loop_backstop.py`](loop_backstop.py) | The three counters that guarantee a turn terminates: identical-call, semantic-failure, runaway-total. |
-| [`retry_utils.py`](retry_utils.py) | `jittered_backoff` + `retry_with_backoff`. For cloud-adapter transient-error retries. |
-| [`runtime_bridge.py`](runtime_bridge.py) | `build_jaeger_agent(client, ...)` — picks the right adapter from a JROS client and constructs a configured `JaegerAgent`. Used by `main.py`'s turn entry. |
-| [`message_types.py`](message_types.py) | The internal `Message` + `ToolCall` TypedDicts. OpenAI-shaped; adapters translate to/from this. |
-| [`prompt_builder.py`](prompt_builder.py) | Phase-1 stub for system-prompt assembly. Defers to `core/prompts.py` today. |
+| [`loop/`](loop/) | The turn loop: `jaeger_agent.py` (`run_turn` — format → call → parse → dispatch, skip-final, length-retry, halt backstop, stale-call detection), `callbacks.py`, `interrupt.py`, `loop_backstop.py`, `runtime_bridge.py` (picks the adapter for a JROS client), `agent_core.py` (the chassis `[core]` role). |
+| [`adapters/`](adapters/) | One file per backend: `anthropic`, `openai`, `hermes_xml`, `local_llama`, `mlx`. All implement the `ProviderAdapter` ABC in [`adapters/base.py`](adapters/base.py). |
+| [`schemas/`](schemas/) | Type homes: `tool_registry.py` (process-wide `name → ToolDef` map), `tool_schema.py` (`ToolDef` + three on-wire renderers), `toolsets.py` (`JAEGER_TOOLSETS` + `resolve_toolsets`), `message_types.py` (internal OpenAI-shaped `Message`/`ToolCall`). |
+| [`dialects/`](dialects/) | The drift parser — recovers `<tool_call>` blocks Gemma/Qwen emit as plain text (Gemma brace/paren args, Qwen XML, Hermes JSON envelope). |
+| [`parsing/`](parsing/) | `arg_coercion.py` (`"5"` → `5`, bare scalar → `[scalar]`) + `schema_sanitizer.py` (strips JSON-Schema shapes llama-cpp's grammar chokes on). |
+| [`prompts/`](prompts/) | System-prompt assembly: `assemble.py` (the `PROMPT_FRAGMENTS` registry + `assemble_prompt`/`iter_fragments`), `context_blocks.py` (dynamic blocks), `framework_agent.md` + `three_laws.md` + `agent_system_prompt.md` (the prompt docs), `rules.py` (the two dynamic toolset notes), `prompts.py` (`build_system_prompt` entry). See `jaeger prompt`. |
+| [`safety.py`](safety.py) | Agent-side safety — the Three Laws contract (`prompts/three_laws.md`) the brain reads + the LLM-as-judge `safety_review`. The deterministic pillars (permission gating, audit log) stay in `core/safety/`. |
+| [`skill_registry/`](skill_registry/) | The skill loader / manifest / curator + toolset scoping (`CORE`, `TOOLSETS`, `tool_visible`). |
+| [`skills/`](skills/) | The curated skill-bundle library (versioned `SKILL.md` folders). |
+| [`background/`](background/) | Autonomous / background work: `board.py` (kanban), `cron_runner.py`, `deep_think.py` (skill-dev mode), `processes.py`, `thinking_runner.py` (the opt-in `--think` CoT sidecar). |
+| [`personas/`](personas/) | Persona prefill defaults for the setup wizard (NOT read at turn time). |
+| [`util/`](util/) | `context_guard.py` (context-window guard), `retry_utils.py` (cloud-adapter backoff). |
 
 ## Phase notes
 
-The agent layer was built in Phases 1-9 (see `/docs/agent_refactor_phase_*.md`).
 Phase 9 removed pydantic-ai entirely — nothing here imports the old
 framework any more. Adapters speak the SDK directly.

@@ -25,9 +25,9 @@ Future candidates:
 
 ## What does NOT live here
 
-- **`thinking_runner`** — that's a Runner (framework-internal background work), not an external integration. Lives in `core/runners/`.
-- **`cron_runner`** — same reason. Lives in `core/cron_runner.py`.
-- **Tools that ship with the framework** — atomic LLM-callable functions live in `core/tools/`.
+- **`thinking_runner`** — that's a Runner (framework-internal background work), not an external integration. Lives in `agent/background/thinking_runner.py`.
+- **`cron_runner`** — same reason. Lives in `agent/background/cron_runner.py`.
+- **Tools that ship with the framework** — atomic LLM-callable functions live in `agent/tools/`.
 - **Skills** (novel composite capabilities — authored, learned, or trained) — live in `skills/` (framework zone) or `<instance>/skills/` (instance zone).
 
 See [docs/VOCABULARY.md](../../docs/VOCABULARY.md) for the full decision tree.

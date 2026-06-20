@@ -11,6 +11,7 @@ actually construct an :class:`MlxClient` without ``mlx-lm`` on the venv.
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -49,16 +50,27 @@ class MlxClient:
                 "*.safetensors, not single files like GGUF."
             )
 
+        # MLX pins each GPU stream to the thread that created it, so the
+        # model, its warmup, and EVERY generation must share one thread.
+        # This single-worker executor IS that thread; the agent loop's
+        # ``interruptible_call`` routes MLX generation through it too (see
+        # MLXAdapter), so load/warmup/decode never cross threads.
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mlx",
+        )
+
         self.model_name = resolved.name
         print(f"[jaeger] loading MLX model {self.model_name}…", flush=True)
         started = time.perf_counter()
-        self._mlx_model, self._tokenizer = load(str(resolved))
+        self._mlx_model, self._tokenizer = self._executor.submit(
+            load, str(resolved),
+        ).result()
         print(
             f"[jaeger] loaded in {time.perf_counter() - started:.1f}s.",
             flush=True,
         )
         if warmup:
-            self._warmup()
+            self._executor.submit(self._warmup).result()
 
     def describe(self) -> str:
         return f"local · mlx · {self.model_name}"
@@ -107,5 +119,7 @@ class MlxClient:
             kwargs["temp"] = temperature
         del top_p  # mlx-lm samplers vary by version; skip until stable
         started = time.perf_counter()
-        text = generate(self._mlx_model, self._tokenizer, **kwargs)
+        text = self._executor.submit(
+            generate, self._mlx_model, self._tokenizer, **kwargs,
+        ).result()
         return _ChatResult(text=text or "", elapsed_s=time.perf_counter() - started)

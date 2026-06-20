@@ -55,10 +55,7 @@ _TURN_UNSAFE_SLASH = frozenset({
 })
 
 _VOICE_BATCH_HEADER = (
-    "Candidate voice input heard while I was busy. Decide with the "
-    "voice gate whether these snippets were addressed to you. If they "
-    "look like TV, ads, background conversation, or unrelated fragments, "
-    "reply <ignore>:"
+    "Several things were said while I was busy:"
 )
 
 
@@ -194,6 +191,31 @@ def _wants_voice_mode(line: str) -> bool:
     """True when a typed line is a request to enter voice conversation."""
     line = (line or "").strip()
     return len(line) <= 80 and bool(_VOICE_TRIGGER_RE.search(line))
+
+
+_SPEAK_OUTPUT_RE = re.compile(
+    r"\b("
+    r"speak(?:\s+me)?"
+    r"|say"
+    r"|read(?:\s+me)?"
+    r"|narrate"
+    r"|out\s+loud"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _wants_spoken_output(line: str) -> bool:
+    """True when a typed prompt explicitly asks to hear the answer.
+
+    This is a deterministic backstop for model routing. The system prompt
+    still tells the agent to call ``text_to_speech`` itself; when it forgets
+    and returns plain text, the TUI can still honor the user's request.
+    """
+    text = (line or "").strip()
+    if not text:
+        return False
+    return bool(_SPEAK_OUTPUT_RE.search(text))
 
 
 # 0.2.6: the prior _DEFAULT_INSTANCE_DIR hardcoded the pre-0.2.0
@@ -814,7 +836,7 @@ class JaegerTUI:
             # visible tool. Cheap enough to recompute per refresh.
             try:
                 from jaeger_os.agent.schemas.tool_registry import get_tools
-                from jaeger_os.agent.skill_registry.toolsets import tool_visible
+                from jaeger_os.agent.skill_registry.toolset_scoping import tool_visible
                 import json as _json2
                 for t in get_tools():
                     if tool_visible(t.name) and hasattr(t, "to_openai_schema"):
@@ -886,8 +908,33 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        self._render_answer(result.get("text") or "",
-                            error=result.get("error"))
+        text = result.get("text") or ""
+        error = result.get("error")
+        self._render_answer(text, error=error)
+        if (text and not error and not result.get("spoke_via_tool")
+                and _wants_spoken_output(user_text)):
+            self._speak_text_turn_fallback(text)
+
+    def _speak_text_turn_fallback(self, text: str) -> None:
+        """Speak a typed-turn answer when the model missed the TTS tool.
+
+        ``text_to_speech`` remains the canonical agent action. This fallback
+        covers routing misses such as "speak me a joke" where the model
+        answers in text only, leaving the user with silence.
+        """
+        try:
+            from jaeger_os.agent.tools.speak import speak
+            result = speak(text=text)
+        except Exception as exc:  # noqa: BLE001
+            self.console.print(
+                f"[dim](couldn't speak the answer: {exc})[/]"
+            )
+            return
+        if not result.get("spoken"):
+            reason = result.get("reason") or "unknown TTS error"
+            self.console.print(
+                f"[dim](couldn't speak the answer: {reason})[/]"
+            )
 
     # ── Voice conversation ──────────────────────────────────────────
 
@@ -929,7 +976,6 @@ class JaegerTUI:
             barge_in=vc.barge_in,
             follow_up_seconds=vc.follow_up_seconds,
             wake_name=self._resolve_instance_name(),
-            llm_gate=getattr(vc, "llm_gate", True),
             pending_turn_max_age_s=getattr(
                 vc, "pending_turn_max_age_s", 3.0,
             ),
@@ -1040,34 +1086,11 @@ class JaegerTUI:
         hermes-style chrome a typed turn gets, then speak the reply
         (barge-in aware) and open the follow-up window.
 
-        2026-06-07 perf-corrected single-pass gate:
-        AudioSession owns the FAST deterministic filters (non-speech
-        marker + self-speech) — phrases that fail those are dropped
-        before they ever reach this method.  The LLM <ignore>/<reply>
-        gate runs INSIDE the brain's normal turn — it's the response
-        prefix.  We parse the leading tag here with parse_gate().
-        ``<ignore>`` → suppress speech + rendering;
-        ``<reply>foo`` → strip tag, render + speak ``foo``.
-
-        Why this isn't separate gate calls: a separate gate prompt
-        would invalidate the brain's KV cache and trigger a cold
-        prefill on every turn (measured 50× slowdown in
-        dev_benchmark/voice_gate_latency.py).  Single-pass is one
-        LLM call per phrase; the gate decision is the response's
-        first 30 chars.
+        The brain is transport-agnostic — a spoken turn runs the exact
+        same agent turn as a typed one.  Ambient filtering already
+        happened upstream: AudioSession's deterministic non-speech and
+        self-speech filters drop junk before it reaches this method.
         """
-        # Toggle the follow-up addressed_hint env var BEFORE the
-        # turn runs so the prompt assembler appends the permissive
-        # clause when we're in conversation continuation.
-        import os as _os
-        v = self._voice
-        in_followup = bool(v is not None and v.running
-                           and getattr(v, "in_followup_window", lambda: False)())
-        if in_followup:
-            _os.environ["JAEGER_VOICE_ACTIVE_FOLLOWUP"] = "1"
-        else:
-            _os.environ.pop("JAEGER_VOICE_ACTIVE_FOLLOWUP", None)
-
         from jaeger_os.core.voice import (
             clean_voice_reply,
             is_non_speech_marker,
@@ -1084,15 +1107,6 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
-        # _run_turn now strips the <reply> tag and exposes
-        # voice_gate_ignored=True when the brain emitted <ignore>.
-        # No need to re-parse here; just honor the flag.
-        if result.get("voice_gate_ignored"):
-            self._log_voice(
-                "[dim]🤫 voice gate: ignored (brain emitted <ignore>)[/]",
-                kind="gate_ignore",
-            )
-            return
         text = clean_voice_reply(result.get("text") or "")
         if text and is_non_speech_marker(text):
             self._log_voice(

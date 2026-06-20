@@ -1,37 +1,37 @@
 """The single assembly entry point for every prompt-building path.
 
-Before consolidation, FIVE codepaths built the agent's system prompt:
-the main turn, sub-agent delegation, Deep Think, the idle-board
-worker, and cron. Each had its own assembly logic; rules drifted
-between them. This module is the single source of truth: every
-codepath now calls :func:`assemble_prompt` with a ``mode``.
+Before consolidation, FIVE codepaths built the agent's system prompt; each
+had its own logic and rules drifted between them. This module is the single
+source of truth: every codepath calls :func:`assemble_prompt` with a ``mode``.
+
+The assembly is a **declared registry** — :data:`PROMPT_FRAGMENTS`. Each
+fragment names itself, its kind, and its source, and declares which modes
+include it. Nothing reaches the model that isn't a fragment in that list, so
+``jaeger prompt show`` (and :func:`iter_fragments`) can enumerate every rule
+the LLM receives and where it came from. This is what makes a hidden,
+conditional injection (like the old voice gate) structurally impossible.
+
+Fragment kinds:
+  * ``safety``    — the Three Laws contract (``agent/prompts/three_laws.md``)
+  * ``framework`` — framework-owned standing instructions
+    (``agent/prompts/framework_agent.md``)
+  * ``instance``  — per-instance identity / soul / personality / contracts
+  * ``dynamic``   — generated each turn (skill index, board, tool catalog,
+    toolset note)
 
 Modes:
-
-  * ``"agent"``      — the live TUI turn. Full prompt: identity +
-    runs-on-Jaeger + soul + rules + skill index + (optional v2
-    contract) + runtime tail + board digest + tool catalog.
-  * ``"subagent"``   — a delegated child. Same scaffold MINUS the
-    board digest and v2 contract (the child is task-scoped; the
-    parent owns the standing TODO list). Caller supplies ``goal``
-    and optional ``context`` which become the child's task brief.
-  * ``"deep_think"`` — autonomous skill development. Full agent
-    prompt; the task brief is the synthetic user-role message, not
-    part of the system prompt.
-  * ``"idle_board"`` — the idle worker. Identical to ``"agent"``;
-    listed as a mode so the call site is self-documenting (the
-    diff vs. agent is in the user-role message, not the system
-    prompt).
-  * ``"cron"``       — a scheduled fire. Same as ``"agent"``; ditto.
-
-All modes get the Three Laws wrap at the end. The wrap is
-idempotent so a caller that already wrapped its own prompt (a
-nested sub-agent, say) doesn't double the block.
+  * ``"agent"``      — the live TUI turn. Full prompt.
+  * ``"subagent"``   — a delegated child: framework scaffold + a focused brief,
+    MINUS soul/personality/skill-index/board/v2 (the parent owns those).
+  * ``"deep_think"`` — autonomous skill development. Full agent prompt.
+  * ``"idle_board"`` / ``"cron"`` — same as ``"agent"`` (the diff is in the
+    user-role message, not the system prompt).
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Callable, Literal
 
 from jaeger_os.core.instance.instance import InstanceLayout
 
@@ -40,32 +40,188 @@ from .context_blocks import (
     build_runtime_tail,
     build_skill_index_block,
     build_toolset_catalog,
+    load_framework_prompt,
     load_identity,
     load_soul,
     load_v2_self_improvement,
 )
-from .rules import (
-    JAEGER_OS_CONTEXT,
-    MANDATORY_TOOL_RULES,
-    OPERATING_DISCIPLINE,
-    TOOL_USAGE_RULES,
-)
-
 
 PromptMode = Literal["agent", "subagent", "deep_think", "idle_board", "cron"]
 
 
-# Subagent-specific opener. Mirrors the hermes upstream pattern but
-# uses the same rules/identity scaffold the parent uses, so the child
-# isn't a different agent — it's the same agent running on a focused
-# brief.
+# Subagent-specific opener. Same rules/identity scaffold the parent uses, so
+# the child isn't a different agent — it's the same agent on a focused brief.
 _SUBAGENT_PREAMBLE = (
-    "You are a focused sub-agent spawned by the parent Jaeger to "
-    "complete a single task. Work the task end-to-end with real tool "
-    "calls, then summarise the result so the parent can use it. "
-    "Be terse; the parent reads your final message, not your "
-    "intermediate thinking."
+    "You are a focused sub-agent spawned by the parent Jaeger to complete a "
+    "single task. Work the task end-to-end with real tool calls, then "
+    "summarise the result so the parent can use it. Be terse; the parent "
+    "reads your final message, not your intermediate thinking."
 )
+
+
+# ── mode predicates ───────────────────────────────────────────────────
+def _all(_mode: PromptMode) -> bool:
+    return True
+
+
+def _non_subagent(mode: PromptMode) -> bool:
+    return mode != "subagent"
+
+
+def _agent_only(mode: PromptMode) -> bool:
+    return mode == "agent"
+
+
+def _subagent_only(mode: PromptMode) -> bool:
+    return mode == "subagent"
+
+
+@dataclass(frozen=True)
+class FragmentContext:
+    """Everything a fragment builder needs to render its text."""
+
+    layout: InstanceLayout
+    mode: PromptMode
+    goal: str = ""
+    context: str = ""
+
+
+@dataclass(frozen=True)
+class PromptFragment:
+    """One declared piece of the system prompt.
+
+    ``source`` and ``note`` exist for the inspector — they let
+    ``jaeger prompt show`` cite where each fragment comes from and why it did
+    or didn't fire this turn.
+    """
+
+    name: str
+    kind: str  # "safety" | "framework" | "instance" | "dynamic"
+    source: str
+    build: Callable[[FragmentContext], str]
+    include: Callable[[PromptMode], bool] = field(default=_all)
+    note: str = ""
+
+
+# ── fragment builders that need more than a one-liner ─────────────────
+def _three_laws(_ctx: FragmentContext) -> str:
+    # Imported lazily so a prompt build never hard-depends on the safety
+    # module at import time.
+    from jaeger_os.agent.safety import THREE_LAWS_PROMPT_BLOCK
+
+    return THREE_LAWS_PROMPT_BLOCK
+
+
+def _personality_block(ctx: FragmentContext) -> str:
+    # A broken personality file must NEVER take down the boot — the operator
+    # just gets the prompt without it and can fix the file at leisure.
+    try:
+        from pathlib import Path
+
+        personality_path = Path(ctx.layout.root) / "personality.json"
+        if not personality_path.exists():
+            return ""
+        from jaeger_os.personality import compose_block, load_personality
+
+        return compose_block(load_personality(personality_path)) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+# ── the registry: order here IS the prompt order ──────────────────────
+PROMPT_FRAGMENTS: list[PromptFragment] = [
+    PromptFragment(
+        "three_laws", "safety", "agent/prompts/three_laws.md",
+        _three_laws, _all,
+        "inviolable safety contract — first thing the model sees, every mode",
+    ),
+    PromptFragment(
+        "subagent_preamble", "framework", "(generated)",
+        lambda c: _SUBAGENT_PREAMBLE, _subagent_only, "sub-agents only",
+    ),
+    PromptFragment(
+        "subagent_task", "instance", "(caller-supplied goal)",
+        lambda c: f"Task:\n{c.goal.strip()}" if c.goal else "",
+        _subagent_only, "sub-agents, when a goal is supplied",
+    ),
+    PromptFragment(
+        "subagent_context", "instance", "(caller-supplied context)",
+        lambda c: f"Context:\n{c.context.strip()}" if c.context else "",
+        _subagent_only, "sub-agents, when context is supplied",
+    ),
+    PromptFragment(
+        "identity", "instance", "<instance>/identity.yaml",
+        lambda c: load_identity(c.layout), _all,
+        "who this agent is — every mode",
+    ),
+    PromptFragment(
+        "soul", "instance", "<instance>/soul.md",
+        lambda c: load_soul(c.layout), _non_subagent,
+        "voice / persona — skipped for sub-agents",
+    ),
+    PromptFragment(
+        "personality", "instance", "<instance>/personality.json",
+        _personality_block, _non_subagent,
+        "structured persona block, if personality.json is present",
+    ),
+    PromptFragment(
+        "framework", "framework", "agent/prompts/framework_agent.md",
+        lambda c: load_framework_prompt(), _all,
+        "standing framework instructions — every mode",
+    ),
+    PromptFragment(
+        "skill_index", "dynamic", "(generated: skill library)",
+        lambda c: build_skill_index_block(), _non_subagent,
+        "available playbooks — skipped for sub-agents",
+    ),
+    PromptFragment(
+        "v2_contract", "instance", "agent/prompts/agent_system_prompt.md",
+        lambda c: load_v2_self_improvement(c.layout), _agent_only,
+        "self-improvement contract — main agent only, config-gated",
+    ),
+    PromptFragment(
+        "runtime_tail", "dynamic", "(generated: toolset scoping)",
+        lambda c: build_runtime_tail(), _all,
+        "scoped vs. unscoped tool-surface note — every mode",
+    ),
+    PromptFragment(
+        "board_digest", "dynamic", "(generated: kanban board)",
+        lambda c: build_board_block(c.layout), _non_subagent,
+        "actionable cards — skipped for sub-agents",
+    ),
+    PromptFragment(
+        "tool_catalog", "dynamic", "(generated: toolset catalog)",
+        lambda c: build_toolset_catalog(), _all,
+        "loadable toolsets, under lean-surface scoping",
+    ),
+]
+
+
+def iter_fragments(
+    layout: InstanceLayout,
+    *,
+    mode: PromptMode = "agent",
+    goal: str = "",
+    context: str = "",
+) -> list[tuple[PromptFragment, str]]:
+    """Render every applicable fragment. Returns ``(fragment, text)`` pairs
+    for fragments that apply to ``mode`` and produced non-empty text.
+
+    The single source of truth for what the model receives — used by both
+    :func:`assemble_prompt` and the ``jaeger prompt show`` inspector.
+    """
+    ctx = FragmentContext(layout=layout, mode=mode, goal=goal, context=context)
+    rendered: list[tuple[PromptFragment, str]] = []
+    for frag in PROMPT_FRAGMENTS:
+        if not frag.include(mode):
+            continue
+        try:
+            text = (frag.build(ctx) or "").strip()
+        except Exception:  # noqa: BLE001 — a broken fragment must never crash boot
+            text = ""
+        if text:
+            rendered.append((frag, text))
+    return rendered
 
 
 def assemble_prompt(
@@ -75,163 +231,24 @@ def assemble_prompt(
     goal: str = "",
     context: str = "",
 ) -> str:
-    """Build a system prompt for ``mode``. Returns the assembled
-    string, wrapped with the Three Laws block.
+    """Build a system prompt for ``mode`` from the fragment registry.
 
-    See module docstring for what each mode includes / excludes.
-    ``goal`` and ``context`` are only consulted in ``"subagent"``
-    mode; ignored otherwise.
+    The Three Laws is fragment #1, so it leads every assembled prompt. See the
+    module docstring for what each mode includes / excludes. ``goal`` and
+    ``context`` are only consulted in ``"subagent"`` mode.
     """
-    parts: list[str] = []
-
-    if mode == "subagent":
-        # Child gets a focused brief at the very top so the model
-        # treats the rest as backdrop, not the primary instruction.
-        parts.append(_SUBAGENT_PREAMBLE)
-        if goal:
-            parts.append(f"Task:\n{goal.strip()}")
-        if context:
-            parts.append(f"Context:\n{context.strip()}")
-
-    # Identity — every mode gets it. A sub-agent is still THIS agent;
-    # the brief shape, not the identity, differs.
-    ident = load_identity(layout)
-    if ident:
-        parts.append(ident)
-
-    parts.append(JAEGER_OS_CONTEXT.strip())
-
-    # soul.md right after the structured identity so it reads as
-    # "...and here is how I speak". Skipped for sub-agents — their
-    # task is scoped and the voice doc would just dilute the brief.
-    if mode != "subagent":
-        soul = load_soul(layout)
-        if soul:
-            parts.append(soul)
-
-        # 0.5: structured personality block, when present.  Per
-        # operator's prior work in Lilith-AI, persisted at
-        # <instance>/personality.json with HEXACO + SPECIAL +
-        # Expression sliders + knowledge domain weights + speech
-        # patterns.  ``compose_block`` turns those structured
-        # 0..1 values into language ("very high directness",
-        # "moderate sarcasm", etc.).
-        try:
-            from pathlib import Path
-            personality_path = Path(layout.root) / "personality.json"
-            if personality_path.exists():
-                from jaeger_os.personality import (
-                    compose_block,
-                    load_personality,
-                )
-                personality = load_personality(personality_path)
-                block = compose_block(personality)
-                if block:
-                    parts.append(block)
-        except Exception:  # noqa: BLE001
-            # A broken personality file must NEVER take down the
-            # boot — operator gets the legacy identity prompt; they
-            # can fix the file at leisure.
-            pass
-
-    parts.append(MANDATORY_TOOL_RULES.strip())
-    parts.append(OPERATING_DISCIPLINE.strip())
-    parts.append(TOOL_USAGE_RULES.strip())
-
-    # Voice-mode LLM gate (opt-in via ``config.voice.llm_gate``).
-    # ``voice_loop.py`` exports JAEGER_VOICE_GATE=1 at boot when the
-    # config flag is on; we read the env var here so the prompt
-    # assembler doesn't have to depend on the voice config schema.
-    # Sub-agents skip — they speak through the agent surface, not the
-    # mic.
-    # Voice-mode LLM gate (opt-in via ``config.voice.llm_gate``).
-    #
-    # Why this rides the BRAIN's system prompt — not a separate
-    # gate call (2026-06-07 perf regression discovered live + bench-
-    # confirmed in dev_benchmark/voice_gate_latency.py):
-    #
-    # We briefly tried a node-owned gate where AudioSession would
-    # make a separate ``client.chat()`` call with its own gate prompt
-    # to classify phrases before publishing /sense/transcript.  That
-    # is architecturally cleaner (node owns its full domain), but
-    # llama-cpp uses a SINGLE KV-cache slot — switching between two
-    # different system prompts (gate ~800 tokens, brain ~14K tokens)
-    # invalidated the prefill each time.  Result: 50× slowdown on
-    # voice turns (0.39s warm brain → 19.79s after-gate brain) per
-    # `dev_benchmark/voice_gate_latency.py`.
-    #
-    # The fix matches VoiceLLM's actual approach — single-pass:
-    #   * Brain's system prompt carries the gate rule from boot
-    #     (this block, when JAEGER_VOICE_GATE=1 at prewarm time)
-    #   * Brain's response begins with <ignore> or <reply>
-    #   * Voice consumer (TUI / voice_loop) parses the leading tag
-    #     and suppresses speech on <ignore>
-    #   * Deterministic filters in AudioSession still own their
-    #     domain (non-speech markers, self-speech, etc.) — they
-    #     reject obvious junk BEFORE it reaches the brain so the
-    #     gate only has to decide on borderline cases
-    #
-    # JAEGER_VOICE_GATE=1 must be set BEFORE build_system_prompt so
-    # the rule is baked into the cached prompt at boot — both
-    # boot paths in main.py do this; see beee2f6 for the regression
-    # this prevents.  voice_loop/voice_session also set it
-    # defensively at construction time as a safety net.
-    import os as _os
-    if mode != "subagent" and _os.environ.get("JAEGER_VOICE_GATE") == "1":
-        from .rules import VOICE_LLM_GATE_RULE
-        parts.append(VOICE_LLM_GATE_RULE.strip())
-        # Active follow-up addressed_hint — strict default-ignore
-        # when idle, permissive default-reply when we're inside the
-        # follow-up window after a recent reply.  voice_loop /
-        # voice_session toggle JAEGER_VOICE_ACTIVE_FOLLOWUP per turn.
-        if _os.environ.get("JAEGER_VOICE_ACTIVE_FOLLOWUP") == "1":
-            from .rules import VOICE_FOLLOWUP_HINT_RULE
-            parts.append(VOICE_FOLLOWUP_HINT_RULE.strip())
-
-    # Skill index — sub-agents don't need it (they were given a
-    # specific task; ranging across the skill library would expand
-    # scope). Every other mode benefits from knowing what playbooks
-    # exist.
-    if mode != "subagent":
-        skill_block = build_skill_index_block()
-        if skill_block:
-            parts.append(skill_block)
-
-    # v2 self-improvement contract — opt-in, only the main agent
-    # path. Sub-agents and Deep Think have their own narrower
-    # contracts (the sub-agent brief; the DT directive).
-    if mode == "agent":
-        v2 = load_v2_self_improvement(layout)
-        if v2:
-            parts.append(v2)
-
-    parts.append(build_runtime_tail())
-
-    # Board digest — the standing TODO list. Sub-agents skip it
-    # (they have one task); every other mode sees what's actionable.
-    if mode != "subagent":
-        board = build_board_block(layout)
-        if board:
-            parts.append(board)
-
-    # Tool catalog only appears under lean-surface scoping. Same
-    # filter for every mode — the catalog tells the model what it
-    # CAN load, regardless of why it's running.
-    catalog = build_toolset_catalog()
-    if catalog:
-        parts.append(catalog)
-
-    assembled = "\n\n".join(parts)
-
-    # Three Laws — prepended LAST so they're the first thing the
-    # model sees. ``with_three_laws`` is idempotent; a nested call
-    # that already wrapped its own prompt won't double the block.
-    try:
-        from jaeger_os.core.safety.safety_rules import with_three_laws
-        assembled = with_three_laws(assembled)
-    except Exception:  # noqa: BLE001 — never break boot over a safety wrap
-        pass
-    return assembled
+    return "\n\n".join(
+        text for _, text in iter_fragments(
+            layout, mode=mode, goal=goal, context=context,
+        )
+    )
 
 
-__all__ = ["assemble_prompt", "PromptMode"]
+__all__ = [
+    "assemble_prompt",
+    "iter_fragments",
+    "PromptFragment",
+    "FragmentContext",
+    "PromptMode",
+    "PROMPT_FRAGMENTS",
+]

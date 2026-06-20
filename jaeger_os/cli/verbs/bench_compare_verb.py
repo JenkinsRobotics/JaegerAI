@@ -273,7 +273,7 @@ def _config_extra_gguf_dirs(*, instance_name: str | None) -> list[str]:
         if not layout.config_path.exists():
             return []
         cfg = load_yaml(layout.config_path, Config)
-        extras = getattr(cfg.model, "extra_gguf_dirs", None) or []
+        extras = cfg.model.extra_gguf_dirs or []
         return [str(d) for d in extras]
     except Exception:  # noqa: BLE001
         return []
@@ -295,7 +295,7 @@ def _current_model_path(*, instance_name: str | None) -> str | None:
         if not layout.config_path.exists():
             return None
         cfg = load_yaml(layout.config_path, Config)
-        return getattr(cfg.model, "model_path", None)
+        return cfg.model.model_path
     except Exception:  # noqa: BLE001
         return None
 

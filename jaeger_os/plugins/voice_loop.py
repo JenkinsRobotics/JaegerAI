@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Voice loop — STT → agent → TTS daemon.
 
-0.4 voice UX defaults follow the proven VoiceLLM pattern:
+The agent brain is transport-agnostic: a spoken turn is just text in /
+text out (STT → agent → TTS), identical to a typed turn. Ambient-speech
+filtering for the always-on mic lives HERE in the input layer — never in
+the brain prompt (the LLM <reply>/<ignore> gate was removed 2026-06-16
+because it shared the model with tool-calling and suppressed it).
 
-  Wake-word disabled by default
-      Addressed-to-me detection happens in the LLM via <reply>/<ignore>
-      gate tags instead of brittle Whisper wake-phrase matching.
+  Wake word (recommended for always-on rooms)
+      Deterministic Whisper wake-phrase match gates which utterances
+      become a turn. Without it, every VAD-segmented utterance is
+      treated as addressed to the agent.
 
       Override with ``--wake-word`` or ``--no-wake-word``.
 
@@ -158,49 +163,27 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    require_wake_word = bool(getattr(config.voice, "wake_word", False))
+    require_wake_word = bool(config.voice.wake_word)
     if args.wake_word:
         require_wake_word = True
     elif args.no_wake_word:
         require_wake_word = False
 
-    barge_in_requested = bool(getattr(config.voice, "barge_in", False))
+    barge_in_requested = bool(config.voice.barge_in)
     if args.barge_in:
         barge_in_requested = True
     elif args.no_barge_in:
         barge_in_requested = False
     barge_in_active = False  # resolved below after we know AEC state
 
-    # LLM-gated speech: when enabled, the system prompt picks up the
-    # ``VOICE_LLM_GATE_RULE`` block via the JAEGER_VOICE_GATE env var.
-    # Has to land BEFORE ``build_system_prompt`` below so the rule is
-    # baked into the prompt the agent reads on turn 1.
-    voice_gate_active = bool(getattr(config.voice, "llm_gate", False))
-    # Pending-queue mode (default OFF): when True, mid-turn phrases
-    # survive the post-turn drain so the next loop iteration picks
-    # them up as the next turn.  Pattern absorbed from VoiceLLM's
-    # orchestrator for natural conversational flow.
-    pending_queue_mode = bool(getattr(config.voice, "pending_queue", False))
-    # Active-follow-up retry (default ON): when the LLM gate returns
-    # <ignore> during the follow-up window, retry the same phrase
-    # once.  Pattern from VoiceLLM — catches LLM under-reaction to
-    # real follow-ups arriving just after a reply.
-    follow_up_retry_active = bool(getattr(config.voice, "follow_up_retry", True))
-    pending_turn_max_age_s = float(
-        getattr(config.voice, "pending_turn_max_age_s", 3.0)
-    )
     # Self-speech filter (default ON): drop transcripts too similar
     # to the agent's last reply (mic picked up our own voice).
-    self_speech_filter_active = bool(getattr(config.voice, "self_speech_filter", True))
-    self_speech_threshold = float(getattr(config.voice, "self_speech_threshold", 0.75))
-    # Track agent's last spoken reply + active-conversation deadline
-    # for the two patterns above.  Updated after each successful reply.
+    self_speech_filter_active = bool(config.voice.self_speech_filter)
+    self_speech_threshold = float(config.voice.self_speech_threshold)
+    # Drop phrases that sat in the queue too long (queue hygiene).
+    pending_turn_max_age_s = 3.0
+    # Track the agent's last spoken reply for the self-speech filter.
     _last_reply_text: str = ""
-    _followup_active_until: float = 0.0
-    if voice_gate_active:
-        os.environ["JAEGER_VOICE_GATE"] = "1"
-        print("[voice] LLM-gated speech ON — replies prefixed "
-              "<reply>/<ignore>; <ignore> suppresses TTS", flush=True)
 
     from ..main import _pipeline
     _pipeline["layout"] = layout
@@ -512,22 +495,6 @@ def main() -> int:
 
             print(f"[voice] user: {phrase!r}", flush=True)
 
-            # Active follow-up window: are we within follow_up_seconds
-            # of the last successful reply?  Used by the retry pattern
-            # below.
-            _in_active_followup = time.time() < _followup_active_until
-            # Plumb the follow-up state to the system prompt assembler
-            # so VOICE_FOLLOWUP_HINT_RULE (rules.py) gets appended
-            # during conversation continuation.  Toggled per turn so
-            # the gate is strict when idle and permissive when in the
-            # follow-up window.  VoiceLLM parity:
-            # plugins/llm_core/node.py:93-103.
-            if voice_gate_active:
-                if _in_active_followup:
-                    os.environ["JAEGER_VOICE_ACTIVE_FOLLOWUP"] = "1"
-                else:
-                    os.environ.pop("JAEGER_VOICE_ACTIVE_FOLLOWUP", None)
-
             # Wake chime — brief tone tells the user "heard you, processing".
             # Pause mic during chime so it doesn't get picked up as a phrase
             # (skipped when AEC is on; the reference buffer handles it).
@@ -563,66 +530,6 @@ def main() -> int:
                     stt.open_followup()
                     continue
 
-                # 2026-06-07 single-pass gate (perf-corrected after
-                # KV-cache thrashing bench).  The brain's response
-                # begins with <reply> or <ignore> per
-                # VOICE_LLM_GATE_RULE in its system prompt.  We
-                # parse that here, strip the tag, and either speak
-                # the remainder or suppress entirely.  AudioSession
-                # owns the deterministic filters; the brain's
-                # response prefix is the semantic gate.
-                gated_out = False
-                if voice_gate_active and text and not spoke_via_tool:
-                    from jaeger_os.core.voice import (
-                        parse_gate,
-                        should_retry_ignored_followup,
-                    )
-                    should_speak, gated_text = parse_gate(text)
-                    if (
-                        not should_speak
-                        and should_retry_ignored_followup(
-                            phrase,
-                            retry_enabled=follow_up_retry_active,
-                            active_followup=_in_active_followup,
-                        )
-                    ):
-                        print(f"[voice] LLM tried <ignore> on active "
-                              f"follow-up — retrying: {phrase!r}",
-                              flush=True)
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="retry",
-                            reply=gated_text,
-                            reason="active_followup",
-                        )
-                        result = turn_runner(phrase)
-                        text = clean_voice_reply(result.get("text") or "")
-                        spoke_via_tool = result.get(
-                            "spoke_via_tool", False,
-                        )
-                        if text and not spoke_via_tool:
-                            should_speak, gated_text = parse_gate(text)
-                    if not should_speak:
-                        print(f"[voice] LLM gate: <ignore> on phrase "
-                              f"{phrase!r} — suppressing TTS",
-                              flush=True)
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="ignore",
-                            reply=gated_text,
-                        )
-                        gated_out = True
-                    else:
-                        _log_gate_event(
-                            "llm_gate",
-                            phrase,
-                            decision="reply",
-                            reply=gated_text,
-                        )
-                        text = gated_text
-
                 # Farewell mirror check (VoiceLLM port): BOTH sides
                 # must read as goodbye — user phrase AND reply — so a
                 # stray "goodbye" inside a story never closes the loop.
@@ -633,18 +540,10 @@ def main() -> int:
                     and is_farewell(text)
                 )
 
-                if not text or spoke_via_tool or gated_out:
+                if not text or spoke_via_tool:
                     if spoke_via_tool:
                         print("[voice] agent vocalized via tool — skipping "
                               "post-turn speak", flush=True)
-                    # Ignored turns do NOT re-arm the wake-free
-                    # follow-up window (VoiceLLM hardening port):
-                    # re-arming after an <ignore> kept soliciting
-                    # ambient noise, each artifact paying a full LLM
-                    # turn just to be ignored again.
-                    if gated_out:
-                        print("[voice] ignored turn — follow-up window "
-                              "not re-armed", flush=True)
                     else:
                         stt.open_followup()
                     # NB: the ``finally`` below will unpause the mic
@@ -770,18 +669,13 @@ def main() -> int:
                     barge_in_active
                     and interrupted.get("flag", False)
                 )
-                if not barge_in_fired and not pending_queue_mode:
+                if not barge_in_fired:
                     # 0.4 Track B.3.2.a: drain BOTH the engine's
                     # committed-q AND the bus subscription queue.
                     # Otherwise stale phrases buffered during TTS
                     # playback would still come through the bus
                     # subscription after engine.drain_pending()
                     # already cleared them on its side.
-                    #
-                    # Skipped when ``voice.pending_queue=True`` —
-                    # the operator wants mid-turn phrases preserved
-                    # for the next iteration to pull as the next
-                    # turn (VoiceLLM-style conversational flow).
                     stt.drain_pending()
                     while not _phrase_queue.empty():
                         try:
@@ -826,13 +720,6 @@ def main() -> int:
                     )
                 else:
                     stt.open_followup()
-                    # Update the active-follow-up state for the next
-                    # iteration's retry check + the self-speech filter's
-                    # reference text.  Both patterns are no-ops when
-                    # their config flags are off.
-                    _followup_active_until = time.time() + float(
-                        getattr(config.voice, "follow_up_seconds", 10.0)
-                    )
                 if text:
                     _last_reply_text = text
                     _audio_session.remember_reply(text)

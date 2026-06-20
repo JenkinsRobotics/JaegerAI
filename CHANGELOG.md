@@ -8,6 +8,27 @@ understanding that pre-1.0 minor bumps may carry breaking changes.
 **The identity statement.**  JROS = Hermes-in-`agent/` +
 ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 
+### Voice — transport-agnostic agent
+- **Removed the in-brain LLM voice gate** (`<reply>`/`<ignore>`).  It
+  was injected into the agent's system prompt so the brain could judge
+  whether always-on-mic speech was addressed to it — but that made one
+  model do two jobs (gatekeeping AND tool-calling), and the gate
+  framing suppressed tool routing.  Observed: `gemma-4-26B-A4B` routed
+  0/3 tool prompts with the gate on, 3/3 with it off; the repo-wide
+  routing regression vs. history traced to this leak (it was injected
+  even in text-only sessions — `voice.enabled=false` but
+  `voice.llm_gate=true` by default).
+- The agent is now **transport-agnostic**: keyboard and mic produce
+  identical behaviour (same prompt, same tools).  Voice = STT in /
+  TTS out.  Ambient-speech filtering lives in the voice INPUT layer
+  (VAD + wake word), never in the brain prompt.
+- Dropped `config.voice.{llm_gate,pending_queue,follow_up_retry,`
+  `pending_turn_max_age_s}`; deleted `core/voice/llm_gate.py`,
+  `VOICE_LLM_GATE_RULE`/`VOICE_FOLLOWUP_HINT_RULE`, and
+  `dev_benchmark/voice_gate_latency.py`.  `VoiceConfig` is now
+  `extra="ignore"` so existing config.yaml files with the stale keys
+  still load.
+
 ### Animation + avatar
 - L1-L4 animation adapters vendored from operator's Mochi engine
   (Apache 2.0): `image`, `bitmap`, `sprite`, `gif`, `math`.
@@ -30,9 +51,39 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 
 ### Operator CLI (terminal-first)
 - New `./jaeger` console: `skills`, `instances`, `personality`,
-  `status`, `roadmap` subcommands.  Every operation the eventual
-  Swift operator console will do is reachable from a terminal
-  first.
+  `status`, `roadmap`, `prompt`, `config`, `runtime` subcommands.
+  Every operation the eventual Swift operator console will do is
+  reachable from a terminal first.
+- `jaeger prompt` / `jaeger config` — inspect the exact assembled
+  system prompt (per fragment) and the effective settings + defaults.
+- `jaeger runtime` — the inference-engine panel (see Models below).
+
+### Models — inference engines + tier defaults
+- **Inference engines are now a first-class, swappable layer** (JROS's
+  equivalent of LM Studio's Settings → Runtime panel).  `core/models/
+  engine_registry.py` maps each model FORMAT (GGUF / MLX, detected from
+  the weights on disk) to a selectable ENGINE; `config.runtime`
+  (`gguf_engine` / `mlx_engine`, default `auto`) is the per-format
+  choice.  Surfaced via `jaeger runtime` (CLI) and `/runtime` (TUI):
+  list engines + versions + install state, `use <fmt> <engine>` to
+  pick, `auto` to reset.  `make_client` resolves the engine from the
+  model + selection instead of a flat `model.backend`.
+- Engines: `llama-cpp-python` (GGUF, Metal), `mlx-lm` (MLX text),
+  `mlx-vlm` (MLX multimodal / `*_unified` builds that mlx-lm can't
+  load — e.g. `gemma-4-12B-it` MLX).  New `MlxVlmClient` + an `is_vlm`
+  path in `MLXAdapter` route generation through mlx-vlm.
+- **GGUF stays the default — now data-backed.**  A clean same-machine
+  A/B (gemma-4-26B-A4B, identical weights, both routing 6/6) measured
+  GGUF at **0.53 s/turn** vs MLX at **2.57 s/turn** (~5× faster; the
+  gap is MLX's Metal prefill, decode tok/s was near-equal).  MLX is
+  kept for *coverage* (the 12B-unified loads only there), not speed.
+- **Tier defaults** (`host_recommendation` / `model_resolver`): light
+  `gemma-4-E4B`, medium `gemma-4-12B` (default), heavy / Deep Think
+  `gemma-4-26B-A4B` — the latter replacing Qwen3-30B-A3B (ties on
+  Score, ~5× faster, better safety).  `score_pct` re-aligned to the
+  canonical corpus-1.1 leaderboard in `dev_benchmark/HISTORY.md`.
+- Fixed `_canonical_model_name` dash/underscore split that
+  double-counted models on the leaderboard.
 
 ### Agent-folder reorganisation (`agent/` is the conscious node)
 The folder layout was reorganised to reflect the operator-locked

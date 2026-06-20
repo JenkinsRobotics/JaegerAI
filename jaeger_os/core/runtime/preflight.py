@@ -424,7 +424,7 @@ def _check_tool_registry() -> list[Check]:
     """
     out: list[Check] = []
     try:
-        from jaeger_os.agent.skill_registry.toolsets import CORE, LEAN_CORE, tool_visible
+        from jaeger_os.agent.skill_registry.toolset_scoping import CORE, LEAN_CORE, tool_visible
     except Exception as exc:  # noqa: BLE001
         out.append(Check(
             "tools.registry", "runtime", False,

@@ -320,7 +320,7 @@ def _parse_toolsets_env() -> frozenset[str] | None:
     # Validate eagerly via ``resolve_toolsets`` — its KeyError carries
     # the offending name. Catch it here so we can decorate the error
     # with the env-var context.
-    from jaeger_os.agent.schemas.toolsets import resolve_toolsets
+    from jaeger_os.agent.schemas.tool_bundles import resolve_toolsets
     try:
         resolve_toolsets(names)
     except KeyError as exc:
@@ -2684,17 +2684,10 @@ def _run_turn_via_jaeger_agent(
         or any(f"▸ {t}(" in line for t in _SPOKEN_TOOLS)
         for line in tool_activity
     )
-    # Note: the gate-prefix strip + clean_voice_reply pass happens
-    # at the agent's runtime_bridge layer (drive_one_turn) so this
-    # function — which calls drive_one_turn upstream — sees the
-    # already-cleaned answer.  We just pass voice_gate_ignored
-    # through to consumers via the result dict.
-    voice_gate_ignored = bool(result.get("voice_gate_ignored", False))
     return {
         "text": answer, "error": None, "tool_activity": tool_activity,
         "first_decision": first_decision, "skipped_final": skipped,
         "spoke_via_tool": spoke_via_tool,
-        "voice_gate_ignored": voice_gate_ignored,
         "elapsed_s": elapsed, "report": report,
     }
 
@@ -2741,15 +2734,14 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     path and the messaging bridges (which pass channel-specific
     session_keys like "telegram:12345" so each chat keeps its context).
 
-    ``voice_gate_ignored`` is True when the brain emitted ``<ignore>``
-    as its response prefix.  Voice consumers should suppress TTS and
-    rendering for ignored turns."""
+    The brain is transport-agnostic — a spoken turn is the same agent
+    turn as a typed one; the dict just carries the text + tool activity
+    for the voice consumer to speak."""
     out = _run_turn(client, user_text, session_key=session_key or "voice")
     return {
         "text": out["text"], "tool_activity": out["tool_activity"],
         "spoke_via_tool": out["spoke_via_tool"], "elapsed_s": out["elapsed_s"],
         "skipped_final": out["skipped_final"], "error": out["error"],
-        "voice_gate_ignored": out.get("voice_gate_ignored", False),
     }
 
 
@@ -2778,7 +2770,7 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_thinking:
         try:
-            from .agent.runners import thinking_runner
+            from .agent.background import thinking_runner
             lock = _pipeline.get("llm_lock") or threading.Lock()
             _pipeline["llm_lock"] = lock
             # Per-instance log path keeps thinking output out of the framework
@@ -2861,6 +2853,15 @@ class LlamaCppPythonClient:
         started = time.perf_counter()
         self.llm = Llama(**kwargs)
         print(f"[jaeger] loaded in {time.perf_counter() - started:.1f}s.", flush=True)
+        from concurrent.futures import ThreadPoolExecutor
+        # Persistent single-thread worker for generation (the default — the
+        # adapter routes every decode here via runtime_bridge): one thread
+        # instead of a fresh one per call, uniform with MlxClient and a
+        # natural serialization guard on the shared llama-cpp instance.
+        # A 4-round A/B confirmed it costs nothing vs. fresh-thread-per-call.
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="llama",
+        )
         if warmup:
             self.llm.create_chat_completion(
                 messages=[{"role": "user", "content": "hi"}],
@@ -2928,14 +2929,20 @@ def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
         except Exception as exc:  # noqa: BLE001
             print(f"[jaeger] external model error ({type(exc).__name__}: {exc}); "
                   "falling back to the local model.", flush=True)
-    # Local backend selection. ``config.model.backend`` selects which
-    # in-process engine loads the weights — llama-cpp-python for GGUF
-    # (the default), mlx for Apple-Silicon-optimised MLX models.
-    backend = (getattr(config.model, "backend", "") or "llama_cpp_python").lower()
-    if backend in ("mlx", "mlx-lm", "mlx_lm"):
-        from jaeger_os.core.models.mlx_client import MlxClient
-        return MlxClient(config.model.model_path, warmup=warmup)
-    return LlamaCppPythonClient(config.model, warmup=warmup)
+    # Local engine selection (the Runtime panel). The model FORMAT is
+    # detected from the weights on disk (a ``.gguf`` file vs an MLX
+    # directory); the ENGINE is the operator's per-format choice in
+    # ``config.runtime`` (``"auto"`` lets the registry pick the best
+    # installed engine — and route MLX ``*_unified`` builds to mlx-vlm).
+    from jaeger_os.core.models.engine_registry import resolve_engine
+    engine = resolve_engine(config.model.model_path,
+                            getattr(config, "runtime", None))
+    if not engine.available():
+        raise RuntimeError(
+            f"Selected engine {engine.display_name!r} for "
+            f"{config.model.model_path!r} is not installed — {engine.install_hint}."
+        )
+    return engine.loader(config.model, warmup=warmup)
 
 
 # ---------------------------------------------------------------------------
@@ -3443,29 +3450,18 @@ def boot_for_tui(
         # INST-11: honour the user's optional workspace override
         # (config.yaml: workspace.location). Re-bind with the path so
         # ``file_write("workspace/...")`` lands wherever the user wants.
-        if getattr(config.workspace, "location", None):
+        if config.workspace.location:
             jaeger_tools.bind(layout, workspace_override=config.workspace.location)
         _pipeline["layout"] = layout
         _pipeline["config"] = config
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
         _pipeline["show_help_on_start"] = False
-        # CRITICAL ORDERING (operator-found regression 2026-06-07):
-        # VOICE_LLM_GATE_RULE is conditionally injected by the prompt
-        # assembler based on the JAEGER_VOICE_GATE env var.  If the
-        # operator's config.voice.llm_gate is on, set the env var
-        # BEFORE build_system_prompt so the gate rule is baked into
-        # the cached system prompt that every turn (text OR voice)
-        # will use.  voice_loop already does this; the TUI path was
-        # missing it — the env var was being set in VoiceController.
-        # __init__ which runs only at /voice on, AFTER the prompt was
-        # already cached without the rule.  Result: TUI voice mode
-        # had no gate semantically and the model treated TV/movie
-        # audio as real conversation.  This matches VoiceLLM's
-        # pattern of having the gate rule in the system prompt from
-        # boot, not toggled mid-session.
-        if getattr(config.voice, "llm_gate", False):
-            os.environ["JAEGER_VOICE_GATE"] = "1"
+        # The agent brain is transport-agnostic: keyboard and mic produce
+        # identical behaviour.  Ambient-speech filtering for the always-on
+        # mic lives in the voice INPUT layer (VAD + wake word), never in
+        # the brain prompt — see the 2026-06-16 removal of the LLM voice
+        # gate (it shared the agent with tool-calling and suppressed it).
         _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
         _pipeline["with_memory"] = with_memory
         # Phase-7: optional toolset restriction at boot. ``JAEGER_TOOLSETS=...``
@@ -3963,14 +3959,9 @@ def main() -> int:
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
         _pipeline["show_help_on_start"] = config.display.show_help_on_start
-        # CRITICAL ORDERING — see boot_for_tui above for the full
-        # rationale.  In short: VOICE_LLM_GATE_RULE is conditionally
-        # injected by the assembler based on JAEGER_VOICE_GATE, so the
-        # env var MUST be set before build_system_prompt or the cached
-        # prompt won't have the gate and the LLM will respond to TV
-        # audio as if it were real input.
-        if getattr(config.voice, "llm_gate", False):
-            os.environ["JAEGER_VOICE_GATE"] = "1"
+        # Transport-agnostic brain — no voice gate in the system prompt.
+        # Ambient filtering lives in the voice input layer (VAD + wake
+        # word), not here.  See boot_for_tui above.
         _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
 
         # Log rotation at startup — idempotent, never blocks the boot.
