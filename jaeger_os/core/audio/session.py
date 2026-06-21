@@ -223,7 +223,7 @@ class AudioSession:
 
         Deterministic input pipeline (operator-locked 2026-06-07,
         perf-corrected 2026-06-07 after KV-cache thrashing bench
-        — see ``dev_benchmark/voice_gate_latency.py``):
+        — see ``dev/benchmark/voice_gate_latency.py``):
           1. STT adapter polls the mic + finalises a phrase
           2. Non-speech marker filter ([BLANK_AUDIO] / (beeping) etc.)
           3. Self-speech filter (mic picked up our own reply)
@@ -318,7 +318,7 @@ class AudioSession:
     # Two prompts thrashed the brain's single KV-cache slot — a
     # gate call with VOICE_LLM_GATE_RULE invalidated the brain's
     # 14K-token prefill, forcing a cold prefill on the next brain
-    # turn.  Measured 50× slowdown in dev_benchmark/voice_gate_latency.py.
+    # turn.  Measured 50× slowdown in dev/benchmark/voice_gate_latency.py.
     #
     # The LLM gate now lives in the brain's normal turn as the
     # response prefix (VoiceLLM single-pass model).  AudioSession

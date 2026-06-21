@@ -1,7 +1,7 @@
 """inproc_bus.py — in-process Bus implementation.
 
 The 30-line ``queue.Queue`` pattern from VoiceLLM
-(``dev_docs/library_review/voicellm.md``), extended with:
+(``dev/docs/library_review/voicellm.md``), extended with:
 
   * Topic-typed messages (msgspec.Struct from ``jaeger_os.topics``)
   * Per-topic subscriber lists (multiple callbacks per topic)
