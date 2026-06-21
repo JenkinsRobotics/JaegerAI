@@ -561,16 +561,20 @@ def _cut_at_stop(text: str, stops: tuple[str, ...]) -> tuple[str, bool]:
 def _strip_tool_envelopes(text: str) -> str:
     """Remove ``<tool_call>``-style envelopes from the visible text —
     same patterns as the llama.cpp path so the two local backends agree
-    on the visible-text contract."""
+    on the visible-text contract.
+
+    Gemma's envelopes go through the dialect's ``NATIVE_PATTERNS`` so the
+    inner ``<|"|>`` quote markers don't defeat the strip (the old
+    ``call:[^<]*`` regex stopped at the first ``<`` and leaked the block)."""
     import re
-    patterns = [
-        r"<\|tool_call\|>\s*.*?\s*<\|/tool_call\|>",
-        r"<\|tool_call>\s*call:[^<]*<tool_call\|>",
+    from jaeger_os.agent.dialects import gemma
+    out = text
+    for pat in gemma.NATIVE_PATTERNS:
+        out = pat.sub("", out)
+    for p in (
         r"<tool_call>\s*.*?\s*</tool_call>",
         r"\[TOOL_CALLS\]\s*\[.*?\]",
-    ]
-    out = text
-    for p in patterns:
+    ):
         out = re.sub(p, "", out, flags=re.DOTALL)
     return out
 

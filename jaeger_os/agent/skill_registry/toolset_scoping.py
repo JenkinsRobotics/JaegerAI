@@ -87,15 +87,13 @@ CORE: frozenset[str] = frozenset({
     # Meta — always visible so the model can grow its toolbox
     # mid-session without needing a category-wide load_toolset.
     "load_toolset", "describe_tool",
-    # NB: ``system_health`` is intentionally NOT exposed to the agent
-    # at any visibility tier. The probe lives behind the operator-
-    # side ``jaeger health`` CLI verb. Adding it to the agent surface
-    # caused prompts like "do a self check" to stall in prefill on
-    # local Gemma checkpoints — the model dithered between
-    # ``system_health`` and ``system_status`` and the llama.cpp /
-    # Metal sampler hit a slow path under that entropy. Matches
-    # Hermes Agent's design (their ``hermes doctor`` is operator-
-    # only; the agent loop has no self-test tool).
+    # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
+    # toolset, not CORE — loaded on demand like ``run_benchmark``. The
+    # old ``system_health`` was kept out entirely because "do a self
+    # check" stalled in prefill (the model dithered between
+    # ``system_health`` and ``system_status``). The 2026-06-20 rename to
+    # ``self_check`` + this generation's engine/gemma fixes removed that:
+    # "do a self check" now routes in ~0.2s TTFT.
 })
 
 
@@ -195,9 +193,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "plugins": frozenset({"list_plugins", "setup_plugin", "send_message"}),
     "models": frozenset({"list_models", "download_model", "model_location"}),
     "bench": frozenset({"run_benchmark"}),
-    # NB: ``system_health`` not listed here — operator-only via
-    # ``jaeger health`` CLI verb (see toolsets CORE comment above).
-    "diagnostics": frozenset({"system_status", "diagnostics"}),
+    # ``self_check`` = the agent's doctor (same engine as `jaeger
+    # doctor`); ``system_status`` = host cpu/disk/uptime.
+    "diagnostics": frozenset({"system_status", "self_check", "diagnostics"}),
 }
 
 # One-line description per built-in class — for the load_toolset catalog.

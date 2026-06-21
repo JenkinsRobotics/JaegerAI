@@ -1319,14 +1319,16 @@ def _register_builtins(client: Any) -> None:
         finished. Faster than polling ``check_background`` in a loop."""
         return t.pending_background()
 
-    # ``system_health`` is intentionally NOT registered as an agent
-    # tool — operator-only access via ``jaeger health`` CLI verb.
-    # Hiding it from the model surface fixed a prefill stall: prompts
-    # like "do a self check" routed across ``system_health`` /
-    # ``system_status`` and llama.cpp's Metal sampler hung at high
-    # first-token entropy. The underlying function is still imported
-    # by the CLI verb (``daemon/health_verb.py``) and by boot
-    # preflight; only the agent-facing registration is gone.
+    @register_tool_from_function
+    def self_check(deep: bool = False) -> dict:
+        """Run the agent's doctor — the SAME engine as ``jaeger doctor``:
+        deps + config + the runtime substrate (memory round-trip, tool
+        registry, skills, drift parser). ``deep=True`` also drives a few
+        live-agent turns to confirm the agent can actually answer, not
+        just that the substrate is healthy. Pairs with ``run_benchmark``
+        (substrate health vs. answer quality). See
+        ``describe_tool("self_check")`` for the full contract."""
+        return t.self_check(deep=deep)
 
     @register_tool_from_function
     def run_benchmark(tags: str = "", limit: int = 0,
@@ -3766,23 +3768,23 @@ def main() -> int:
     # default) instance is already set up, also validate its
     # config.yaml + model.path + ctx — the failures we see most often.
     if getattr(args, "doctor", False):
+        from jaeger_os.core.diagnostics import run_doctor
         from jaeger_os.core.runtime.preflight import (
-            check_environment, check_instance, fixable, format_report,
-            install_missing, missing, report_as_json,
+            fixable, format_report, install_missing, missing, report_as_json,
         )
-        # Try to bind an instance for the deeper config check. Fall
-        # back to environment-only when no instance exists yet (a fresh
-        # ``pip install jaeger-os`` user running --doctor pre-setup).
+        # The ONE doctor: deps/config (preflight) + runtime substrate
+        # probe, via run_doctor. Fall back to environment-only when no
+        # instance exists yet (a fresh ``pip install jaeger-os`` running
+        # --doctor pre-setup).
         try:
             _doc_inst = args.instance or default_instance_name()
             _doc_root = resolve_instance_dir(_doc_inst)
             _doc_layout = InstanceLayout(root=_doc_root)
-            if (_doc_root / "config.yaml").is_file():
-                checks = check_instance(_doc_layout)
-            else:
-                checks = check_environment()
+            _has_cfg = (_doc_root / "config.yaml").is_file()
+            checks = run_doctor(_doc_layout if _has_cfg else None,
+                                deep=getattr(args, "doctor_deep", False))
         except Exception:  # noqa: BLE001
-            checks = check_environment()
+            checks = run_doctor(None)
         # --doctor-json: machine-readable output for scripting /
         # monitoring agents. Skip the human-readable table and the
         # install prompt; exit code is health-only.

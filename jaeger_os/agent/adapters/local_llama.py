@@ -819,18 +819,28 @@ class LocalLlamaAdapter(OpenAIAdapter):
 
     @staticmethod
     def _strip_tool_call_blocks(text: str) -> str:
-        """Remove every ``<tool_call>`` / ``<|tool_call|>`` envelope
-        from the response text. Mirrors :class:`HermesXMLAdapter`'s
-        helper — kept here so the local-llama and Hermes-XML paths
-        agree on the visible-text contract."""
+        """Remove every ``<tool_call>`` / ``<|tool_call|>`` envelope from
+        the response text so the markup never surfaces as the visible
+        answer. Mirrors :class:`HermesXMLAdapter`'s helper — kept here so
+        the local-llama and Hermes-XML paths agree on the visible-text
+        contract.
+
+        Gemma's envelopes are stripped with the dialect's OWN
+        ``NATIVE_PATTERNS`` rather than a hand-rolled regex: a Gemma call
+        embeds ``<|"|>`` quote markers inside its args, and the old
+        ``call:[^<]*`` pattern stopped dead at that first ``<`` — so the
+        whole ``<|tool_call>…<tool_call|>`` block leaked into the display
+        as a phantom 'thought'. The dialect patterns match across those
+        inner markers correctly."""
         import re
-        patterns = [
-            r"<\|tool_call\|>\s*.*?\s*<\|/tool_call\|>",
-            r"<\|tool_call>\s*call:[^<]*<tool_call\|>",
-            r"<tool_call>\s*.*?\s*</tool_call>",
-        ]
+        from jaeger_os.agent.dialects import gemma
         out = text
-        for p in patterns:
+        for pat in gemma.NATIVE_PATTERNS:
+            out = pat.sub("", out)
+        for p in (
+            r"<tool_call>\s*.*?\s*</tool_call>",
+            r"\[TOOL_CALLS\]\s*\[.*?\]",
+        ):
             out = re.sub(p, "", out, flags=re.DOTALL)
         return out
 

@@ -33,7 +33,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "bench",
     "setup", "instance", "migrate",
     "backup", "restore", "update",
-    "skill", "memory", "kill", "health",
+    "skill", "memory", "kill",
 })
 
 
@@ -82,9 +82,8 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "kill":
         from jaeger_os.cli.verbs.kill_verb import _cmd_kill_argv
         return _cmd_kill_argv(list(argv[1:]))
-    if argv[0] == "health":
-        from jaeger_os.cli.verbs.health_verb import _cmd_health_argv
-        return _cmd_health_argv(list(argv[1:]))
+    # ``health`` was folded into ``jaeger doctor`` (one doctor — deps +
+    # runtime probe). Removed 2026-06-20.
     _print_usage()
     return 2
 
@@ -113,7 +112,7 @@ def _cmd_bench(argv: list[str]) -> int:
         # / ``--no-warmup``); duplicating its argparse here would just
         # mean two places to update on a future flag.
         import subprocess
-        script = repo / "dev_benchmark" / "run_flat_bench.py"
+        script = repo / "dev/benchmark" / "run_flat_bench.py"
         if not script.is_file():
             print(f"bench script missing at {script}", file=sys.stderr)
             return 1
@@ -121,7 +120,7 @@ def _cmd_bench(argv: list[str]) -> int:
 
     if verb == "timing":
         import subprocess
-        script = repo / "dev_benchmark" / "timing" / "bench.py"
+        script = repo / "dev/benchmark" / "timing" / "bench.py"
         if not script.is_file():
             print(f"timing bench missing at {script}", file=sys.stderr)
             return 1
@@ -160,12 +159,12 @@ def _print_bench_usage() -> None:
 
 
 def _repo_root() -> Path:
-    """The benchmark scripts live under ``<repo>/dev_benchmark/``. Walk up
-    from this module until we find a ``dev_benchmark`` sibling; fall back to
+    """The benchmark scripts live under ``<repo>/dev/benchmark/``. Walk up
+    from this module until we find a ``dev/benchmark`` sibling; fall back to
     the install root (``jaeger_os/``'s parent) for unusual layouts."""
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "dev_benchmark").is_dir():
+        if (parent / "dev/benchmark").is_dir():
             return parent
     # jaeger_os/cli/verbs/dispatch.py → parents[3] == install root.
     return here.parents[3]

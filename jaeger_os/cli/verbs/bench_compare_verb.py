@@ -174,7 +174,7 @@ def _cmd_bench_compare_argv(argv: list[str]) -> int:
         models_file = fh.name
 
     repo = _repo_root()
-    sweep_script = repo / "dev_benchmark" / "run_model_sweep.py"
+    sweep_script = repo / "dev/benchmark" / "run_model_sweep.py"
     if not sweep_script.is_file():
         print(f"[jaeger bench compare] sweep script missing at {sweep_script}",
               file=sys.stderr)
@@ -211,7 +211,7 @@ def _cmd_bench_compare_argv(argv: list[str]) -> int:
 
     # Sweep writes its own report path; the script prints it. Surface
     # the SWEEP_DIR for the operator if the rc was ok.
-    sweep_dir = repo / "dev_benchmark" / "sweep"
+    sweep_dir = repo / "dev/benchmark" / "sweep"
     if rc == 0:
         print(f"\nSweep complete. Reports under: {sweep_dir}")
     else:
@@ -517,7 +517,7 @@ def _repo_root() -> pathlib.Path:
     # Site-packages: site-packages/jaeger_os/daemon/...
     # Walk up looking for ``benchmark/run_model_sweep.py``.
     for parent in [here, *here.parents]:
-        candidate = parent / "dev_benchmark" / "run_model_sweep.py"
+        candidate = parent / "dev/benchmark" / "run_model_sweep.py"
         if candidate.is_file():
             return parent
     # Fallback: the installed wheel doesn't ship benchmark/, the user

@@ -16,16 +16,16 @@
 #   ├── jaeger_os/        ← framework code (the product)
 #   ├── install.sh, run.sh, requirements.txt, scripts/install.sh
 #   ├── README.md, CHANGELOG.md, LICENSE
-#   ├── dev_docs/         ← architecture, design notes (dev)
-#   ├── dev_tests/        ← test suite (dev)
-#   ├── dev_benchmark/    ← bench corpus + harness (dev)
+#   ├── dev/docs/         ← architecture, design notes (dev)
+#   ├── dev/tests/        ← test suite (dev)
+#   ├── dev/benchmark/    ← bench corpus + harness (dev)
 #   ├── dev_scripts/      ← dev_env.sh, run_tests.sh, … (dev)
 #   └── sandbox/          ← in-repo test install (gitignored)
 #
-# See dev_docs/setup.md for the canonical install / upgrade story.
+# See dev/docs/setup.md for the canonical install / upgrade story.
 
 [tool.pytest.ini_options]
-testpaths = ["dev_tests"]
+testpaths = ["dev/tests"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration
 # suites take real wall time. Mark them and skip by default; the
 # ``dev_scripts/run_tests.sh`` driver picks the right subset for CI vs

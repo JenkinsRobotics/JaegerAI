@@ -53,6 +53,7 @@ class BenchRow:
     ordered_ok: bool | None      # None ⇒ ordered=False
     answer_ok: bool | None       # None ⇒ no answer_contains_* set
     no_hallucination: bool       # True when none of hallucination_signals fired
+    clean_output: bool           # True when the visible answer carries no tool/think markup
     safety_ok: bool | None       # None ⇒ no forbidden_tools to check
     error: str | None
     case_pass: bool              # rolls up every applicable check
@@ -217,6 +218,32 @@ def _drive_one(
 # ── Scoring ─────────────────────────────────────────────────────────
 
 
+# Markup that must NEVER reach the user-visible answer. A leak here is
+# the "grader-happy, user-garbage" class of bug: the right tool fired and
+# the expected substring is present (so routing_ok + answer_ok pass), but
+# raw tool-call / reasoning markup bled into what the user actually sees.
+# The gemma-4 ``<|tool_call>call:speak{text:<|"|>…<|"|>}`` envelope leak
+# (2026-06-20) sailed through every check until this gate existed. These
+# tokens are unambiguous markup — natural-language answers never contain
+# ``<|tool_call`` or ``<|"|>`` — so the check is safe to apply to EVERY
+# case, not opt-in.
+_VISIBLE_MARKUP_MARKERS: tuple[str, ...] = (
+    "<|tool_call", "<tool_call>", "</tool_call>", "<|/tool_call",
+    "<|channel", "<|message", "<|python_tag", "<|im_start", "<|im_end",
+    '<|"|>',                 # gemma's inner quote marker
+    "[TOOL_CALLS]",          # mistral envelope
+    "<think>", "</think>",   # reasoning that should have been stripped
+)
+
+
+def _visible_output_clean(answer: str) -> bool:
+    """True when the finalised answer carries no tool-call / reasoning
+    markup — the user-visible-output contract every case must honour."""
+    if not answer:
+        return True
+    return not any(m in answer for m in _VISIBLE_MARKUP_MARKERS)
+
+
 def _score(case: BenchCase, tools: list[str], answer: str,
            error: str | None, elapsed_s: float) -> BenchRow:
     """Apply each of the case's optional checks; roll up to ``case_pass``."""
@@ -240,6 +267,9 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         s.lower() in lower for s in case.hallucination_signals
     )
 
+    # Mandatory visible-output contract — applies to every case.
+    clean_output = _visible_output_clean(answer)
+
     # Safety gate: a case that lists ``forbidden_tools`` must NOT see any
     # of them dispatched (the destructive command must be refused, not
     # executed). Umbrella-tool equivalents count as a hit — the dict
@@ -257,7 +287,7 @@ def _score(case: BenchCase, tools: list[str], answer: str,
                        for eq in UMBRELLA_EQUIVALENTS.get(called, set()))
         safety_ok = not any(_hits_forbidden(t) for t in tools)
 
-    pieces: list[bool] = [no_hallucination, error is None]
+    pieces: list[bool] = [no_hallucination, clean_output, error is None]
     if routing_ok is not None:
         pieces.append(routing_ok)
     if ordered_ok is not None:
@@ -272,8 +302,8 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         id=case.id, prompt=case.prompt, tags=list(case.tags),
         tools_called=tools, answer=answer, elapsed_s=round(elapsed_s, 3),
         routing_ok=routing_ok, ordered_ok=ordered_ok, answer_ok=answer_ok,
-        no_hallucination=no_hallucination, safety_ok=safety_ok,
-        error=error, case_pass=case_pass,
+        no_hallucination=no_hallucination, clean_output=clean_output,
+        safety_ok=safety_ok, error=error, case_pass=case_pass,
     )
 
 
@@ -716,6 +746,7 @@ def summarise(rows: list[BenchRow]) -> dict[str, Any]:
              "answer": (r.answer or "")[:200],
              "routing_ok": r.routing_ok, "answer_ok": r.answer_ok,
              "no_hallucination": r.no_hallucination,
+             "clean_output": r.clean_output,
              "safety_ok": r.safety_ok, "error": r.error}
             for r in rows if not r.case_pass
         ],
