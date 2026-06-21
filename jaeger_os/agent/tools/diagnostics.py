@@ -1,24 +1,19 @@
-"""Agent-callable runtime diagnostics.
+"""Agent-callable diagnostics — the agent's own doctor.
 
-  • system_health()  — run the lean health probe set against the
-                       live agent and return ``{ok, passed, total,
-                       checks: [...], elapsed_s}``.
+``self_check()`` runs the SAME doctor as the user-facing ``jaeger doctor``
+(see :func:`jaeger_os.core.diagnostics.run_doctor`): dependency + config
+checks AND the runtime substrate probe (memory round-trip, sandbox, tool
+registry, skills, drift parser), with ``deep=True`` adding live-agent
+turns. One engine, two surfaces — this is the agent-facing one, the CLI
+is the user-facing one.
 
-This is the runtime counterpart to ``--doctor``:
+This pairs with ``run_benchmark`` (the agent's self-benchmark): the agent
+can verify *both* that its substrate is healthy (``self_check``) and that
+its answers are still good (``run_benchmark``).
 
-  * ``--doctor`` validates DEPENDENCIES (pip pkgs, system libs,
-    config.yaml parse, model.path exists) — runs **before** boot.
-  * ``system_health`` validates the RUNTIME (memory round-trip,
-    sandbox, tool registry, skills, parser) — runs **after** boot,
-    on the same live process the user is talking to.
-
-A failing dep check stops you booting; a failing health check means
-something is broken AT runtime, on the surface that responds to the
-user. Distinct failure modes deserve distinct probes.
-
-Tier: READ_ONLY. The probe writes a tiny throwaway file under
-``skills/`` and a throwaway memory key, both immediately cleaned up.
-No external effects, safe to run anytime — including from a cron.
+Tier: READ_ONLY. The probe writes a tiny throwaway file under ``skills/``
+and a throwaway memory key, both immediately cleaned up. No external
+effects — safe anytime, including from cron.
 """
 
 from __future__ import annotations
@@ -26,37 +21,26 @@ from __future__ import annotations
 from typing import Any
 
 
-def system_health(deep: bool = False) -> dict[str, Any]:
-    """Run the runtime health probe.
+def self_check(deep: bool = False) -> dict[str, Any]:
+    """Run the agent's doctor on the live instance.
 
-    Called by ``jaeger health`` (the operator-side CLI verb) and by
-    the boot's preflight diagnostics. NOT exposed to the agent's
-    tool surface — by design. Hiding the function from the model
-    avoids a routing pathology where prompts like "do a self check"
-    stall in prefill on local Gemma checkpoints (the model dithers
-    over disambiguation tokens and llama.cpp's Metal sampler hits
-    a slow path under high first-token entropy). The CLI verb is
-    the operator's path; the function below is the implementation.
+    ``deep=False`` (default) — dependency/config checks + the fast
+    substrate probes (layout, sandbox, memory round-trip, time,
+    calculate, tool registry, skills, drift parser). Under a few
+    seconds; does not call the LLM.
 
-    ``deep=False`` (default) — 8 fast substrate checks (<3s wall,
-    idempotent). Verifies the layers most likely to break silently
-    after a config or refactor change: layout writable, sandbox
-    accepts writes, memory round-trips, get_time / calculate
-    respond, every CORE tool resolves, at least one skill is
-    loaded, the drift parser handles a canonical emission. Does NOT
-    touch the LLM — safe for cron / monitoring.
+    ``deep=True`` — also drives three live-agent turns (free-text
+    answer, a read-only tool call, a sandbox write+read) so the result
+    reflects "the agent can actually answer", not just "the substrate
+    is healthy". Slower — each turn pays the model's per-turn cost.
 
-    ``deep=True`` — adds three agent-loop turns through the LIVE
-    model: a free-text answer, a read-only tool call (calculate),
-    and a sandbox write+read round-trip. Slower (each turn pays
-    the model's per-turn cost) but proves "the agent can actually
-    answer questions" — not just "the substrate is healthy".
-
-    Returns ``{ok, passed, total, deep, checks: [...], elapsed_s}``.
-    ``ok`` is True only when every probe passed.
+    Returns ``{ok, passed, total, deep, checks: [...], failures: [...]}``.
+    ``ok`` is True only when every check passed.
     """
-    from jaeger_os.core.diagnostics import run_health_checks
-    return run_health_checks(deep=bool(deep))
+    from jaeger_os.agent.tools import _common as _tcommon
+    from jaeger_os.core.diagnostics import doctor_summary
+    layout = getattr(_tcommon, "_layout", None)
+    return doctor_summary(layout, deep=bool(deep))
 
 
-__all__ = ["system_health"]
+__all__ = ["self_check"]

@@ -3,7 +3,7 @@
 Read-only view of the markdown roadmap with progress markers
 (✓ / · / ✗) so the operator sees what's shipped vs. queued.
 
-Looks for ``dev_docs/ROADMAP_0.5.md`` (or the highest-numbered
+Looks for ``dev/docs/ROADMAP_0.5.md`` (or the highest-numbered
 ROADMAP at the time), strips the structure, prints the rest.
 """
 
@@ -31,16 +31,16 @@ def register(subparsers: Any) -> None:
 
 def run_roadmap(args: Any) -> int:
     repo = Path(__file__).resolve().parents[2]
-    dev_docs = repo / "dev_docs"
+    dev_docs = repo / "dev/docs"
     if not dev_docs.is_dir():
-        print(c.red("no dev_docs/ — are you in the JROS repo?"))
+        print(c.red("no dev/docs/ — are you in the JROS repo?"))
         return 1
 
     target = _pick_roadmap(dev_docs, args.version)
     if target is None:
         print(c.red(
             f"no ROADMAP file found for version {args.version!r}"
-            if args.version else "no ROADMAP files in dev_docs/"
+            if args.version else "no ROADMAP files in dev/docs/"
         ))
         return 1
 

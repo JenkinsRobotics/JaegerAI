@@ -15,7 +15,7 @@
 #   2. Fetch the JROS repo into a cache ($JAEGER_SRC, default
 #      ~/.cache/jaeger-src) — the full dev tree stays there.
 #   3. Copy ONLY the product (jaeger_os/ + entry scripts + manifests) into
-#      $JAEGER_HOME — so the install dir is clean: no dev_tests/, no
+#      $JAEGER_HOME — so the install dir is clean: no dev/tests/, no
 #      benchmarks, no dev launcher, no .git.
 #   4. Run the in-repo ./install.sh in $JAEGER_HOME — .venv, deps, and
 #      scaffolds $JAEGER_HOME/.jaeger_os/ for instance state.
@@ -34,8 +34,8 @@ JAEGER_SRC="${JAEGER_SRC:-$HOME/.cache/jaeger-src}"
 RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com#; s#\.git$##')/$JAEGER_REF/scripts/install.sh"
 
 # The product allowlist — exactly what an end-user install contains.
-# Everything else in the repo (dev_tests/ dev_benchmark/ dev_scripts/
-# dev_tools/ dev_docs/ sandbox/ launch.py launch apps/ docs/ scripts/) is
+# Everything else in the repo (dev/tests/ dev/benchmark/ dev_scripts/
+# dev_tools/ dev/docs/ sandbox/ launch.py launch apps/ docs/ scripts/) is
 # dev-only and never copied. jaeger_os/ is self-contained — it imports
 # none of the dev tree at runtime.
 PRODUCT=(

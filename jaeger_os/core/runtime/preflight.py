@@ -255,21 +255,25 @@ def _check_instance_config(layout: object) -> list[Check]:
             "set `model.path` in config.yaml to a GGUF file",
         ))
     else:
-        mp = pathlib.Path(model_path).expanduser()
-        if not mp.is_absolute():
-            mp = pathlib.Path(root) / mp
-        if mp.is_file():
-            size_mb = mp.stat().st_size / (1024 * 1024)
-            out.append(Check(
-                "model.path", "instance", True,
-                f"{mp.name} ({size_mb:,.0f} MB)",
-            ))
-        else:
+        # ``model_path`` may be a registry key (``gemma-4-12b-it-q4_k_m``),
+        # an absolute path, or an MLX directory — resolve it the same way
+        # the loader does instead of treating the raw string as a literal
+        # file (which false-flagged registry keys as "missing"). No
+        # network: ``auto_download=False`` raises rather than fetching.
+        from jaeger_os.core.models.model_resolver import resolve_model_path
+        try:
+            resolved = pathlib.Path(resolve_model_path(model_path, auto_download=False))
+            if resolved.is_dir():               # MLX model directory
+                detail = f"{model_path} → {resolved.name}/ (MLX)"
+            else:
+                size_mb = resolved.stat().st_size / (1024 * 1024)
+                detail = f"{model_path} → {resolved.name} ({size_mb:,.0f} MB)"
+            out.append(Check("model.path", "instance", True, detail))
+        except FileNotFoundError:
             out.append(Check(
                 "model.path", "instance", False,
-                f"file missing: {mp}",
-                "fix `model.path` in config.yaml or download the model "
-                "with `jaeger-os` model tooling",
+                f"unresolved: {model_path!r} (not a known model / file on disk)",
+                "fix `model.path` in config.yaml or download the model",
             ))
 
     # ctx — sanity-check, but we can't know n_ctx_train without loading.

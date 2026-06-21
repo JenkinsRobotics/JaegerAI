@@ -7,7 +7,7 @@ URLs for the recommended GGUFs so the operator can pull them with one
 prompt at first-run.
 
 The picks track the corpus 1.1 overall-Score leaderboard in
-``dev_benchmark/HISTORY.md`` (Score = passed/total across deep-think +
+``dev/benchmark/HISTORY.md`` (Score = passed/total across deep-think +
 real-time + multi-turn + safety, mode=auto). The gemma 4 family leads
 every tier — E4B (light, fastest), 12B (medium, #1 Score), 26B-A4B
 (heavy / deep-think: ties Qwen3-30B-A3B on Score but ~5× faster) — so

@@ -189,7 +189,7 @@ JAEGER_HOME=/opt/jaeger curl -fsSL \
 
 The two sibling dirs at the install root make the framework / operator
 split obvious. Operator state is fully `.gitignore`d; framework upgrades
-never touch it. See [`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md)
+never touch it. See [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md)
 for the design rationale.
 
 **Manual install (no curl)** — if you'd rather see every step:
@@ -256,12 +256,12 @@ JAEGER_AUDIO_OUTPUT="Mac Studio Speakers" ./launch   # sounddevice device overri
 ```
 
 **Bench against the model registry leaderboard** — runs the full
-59-case flat bench and updates `dev_benchmark/HISTORY.md`:
+59-case flat bench and updates `dev/benchmark/HISTORY.md`:
 
 ```bash
-./dev_benchmark/run_flat_bench.py             # full corpus
-./dev_benchmark/run_flat_bench.py --limit 5   # 5-case smoke
-./dev_benchmark/run_flat_bench.py --tags routing,multistep
+./dev/benchmark/run_flat_bench.py             # full corpus
+./dev/benchmark/run_flat_bench.py --limit 5   # 5-case smoke
+./dev/benchmark/run_flat_bench.py --tags routing,multistep
 ```
 
 The 2026-06-04 leaderboard row for `gemma-4-26B-A4B-it-Q4_K_M` is
@@ -351,7 +351,7 @@ The position no one else owns:
    code laptop or fleet — only the transport changes (`inproc://`
    → `tcp://` when nodes move across boards).
 
-See [`dev_docs/ROADMAP_0.4.md`](dev_docs/ROADMAP_0.4.md) for the
+See [`dev/docs/ROADMAP_0.4.md`](dev/docs/ROADMAP_0.4.md) for the
 full track breakdown.
 
 ### How JROS fits next to ROS and Hermes
@@ -405,9 +405,9 @@ JROS/                       ← clone goes here (default ~/jaeger)
 │   ├── models/             ← shared model cache
 │   ├── backups/            ← `./run.sh backup` output
 │   └── jaeger.env          ← sourceable instance pin
-├── dev_docs/               ← architecture + design notes
-├── dev_tests/              ← framework test suite
-├── dev_benchmark/          ← bench corpus + sweep + sanity probe
+├── dev/docs/               ← architecture + design notes
+├── dev/tests/              ← framework test suite
+├── dev/benchmark/          ← bench corpus + sweep + sanity probe
 ├── dev_scripts/            ← dev_env.sh, run_tests.sh, generators
 ├── sandbox/                ← in-repo isolated test install (gitignored)
 ├── pyproject.toml          ← pytest + ruff config
@@ -462,17 +462,17 @@ failure → `DQ` regardless of other scores).
 
 | Doc | What |
 |---|---|
-| [`dev_docs/setup.md`](dev_docs/setup.md) | Canonical install, upgrade, and uninstall guide |
-| [`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
-| [`dev_docs/external_models.md`](dev_docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
-| [`dev_docs/deep_think_design.md`](dev_docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
-| [`dev_docs/marketplace_spec.md`](dev_docs/marketplace_spec.md) | The skill marketplace |
-| [`dev_docs/physical_skills_status.md`](dev_docs/physical_skills_status.md) | Where embodiment / physical skills stand |
-| [`dev_docs/kanban_design.md`](dev_docs/kanban_design.md) | The kanban task board |
-| [`dev_docs/hermes_tool_parity.md`](dev_docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
+| [`dev/docs/setup.md`](dev/docs/setup.md) | Canonical install, upgrade, and uninstall guide |
+| [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
+| [`dev/docs/external_models.md`](dev/docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
+| [`dev/docs/deep_think_design.md`](dev/docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
+| [`dev/docs/marketplace_spec.md`](dev/docs/marketplace_spec.md) | The skill marketplace |
+| [`dev/docs/physical_skills_status.md`](dev/docs/physical_skills_status.md) | Where embodiment / physical skills stand |
+| [`dev/docs/kanban_design.md`](dev/docs/kanban_design.md) | The kanban task board |
+| [`dev/docs/hermes_tool_parity.md`](dev/docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
 
 The full JROS spec — architecture, transport, the node standard, the agent
-and skill systems — continues to land under `dev_docs/`.
+and skill systems — continues to land under `dev/docs/`.
 
 ---
 

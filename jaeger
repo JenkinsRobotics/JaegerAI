@@ -4,7 +4,10 @@
 # Dispatches:
 #   jaeger                      run the ACTIVE agent (no --instance needed)
 #   jaeger --instance NAME      run a specific agent
-#   jaeger --tui | --voice ...  run the agent in that mode
+#   jaeger --voice ...          run the agent in voice mode
+#   jaeger --dev [flag]         boot the dev instance's in-process TUI
+#                               (delegates to launch.py: bare → --tui,
+#                               or pass --stop/--restart/--status/--health)
 #   jaeger instances ...        manage agents: list / create / edit /
 #                               delete / set-default / show
 #   jaeger skills|personality|status|roadmap|avatar    operator console
@@ -31,9 +34,14 @@ case "${1:-}" in
     shift; exec "$VENV_PY" -m jaeger_os.cli instances create "$@" ;;
   doctor)
     shift; exec "$VENV_PY" -m jaeger_os.run --doctor "$@" ;;
+  --dev)
+    # Dev TUI on the gitignored dev instance, via the launch.py machinery
+    # (singleton lock, --stop/--restart/--status/--health). Bare → --tui.
+    shift; [ $# -eq 0 ] && set -- --tui
+    exec "$VENV_PY" "$REPO_ROOT/launch.py" "$@" ;;
   help|--help|-h)
     exec "$VENV_PY" -m jaeger_os.cli --help ;;
   *)
-    # bare, --instance, --tui, --voice, a one-shot prompt, … → run the agent
+    # bare, --instance, --voice, a one-shot prompt, … → run the agent
     exec "$VENV_PY" -m jaeger_os.run "$@" ;;
 esac

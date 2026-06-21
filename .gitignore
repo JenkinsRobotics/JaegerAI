@@ -59,21 +59,21 @@ models/*
 !models/README.md
 !models/.gitkeep
 
-# 0.2.6: dev_benchmark/ (was benchmark/). Suite code committed; run
+# 0.2.6: dev/benchmark/ (was benchmark/). Suite code committed; run
 # output is local-only.
-dev_benchmark/**/BENCHMARK_*.md
-dev_benchmark/**/*_rows.jsonl
-dev_benchmark/**/*.jsonl
-dev_benchmark/**/*.log
+dev/benchmark/**/BENCHMARK_*.md
+dev/benchmark/**/*_rows.jsonl
+dev/benchmark/**/*.jsonl
+dev/benchmark/**/*.log
 # Multi-model sweep output — generated per-model logs + JSONL rows.
-dev_benchmark/sweep/
+dev/benchmark/sweep/
 
 # ...EXCEPT the historical record. The timing suite's append-only
 # history and the level-suite's v1-v5 snapshots ARE the project's
 # performance baseline — they are committed and grow with the repo.
-!dev_benchmark/timing/bench_history.jsonl
-!dev_benchmark/levels/history/
-!dev_benchmark/levels/history/BENCHMARK_*.md
+!dev/benchmark/timing/bench_history.jsonl
+!dev/benchmark/levels/history/
+!dev/benchmark/levels/history/BENCHMARK_*.md
 
 # Vendored / reference clones — NOT part of JROS source. Kept locally
 # for cross-reading hermes-agent during the parity port; never tracked.

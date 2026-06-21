@@ -22,6 +22,10 @@ to be safely runnable from any context: agent tool, cron job, TUI
 status panel, future external monitoring.
 """
 
+from .doctor import doctor_summary, run_doctor  # noqa: F401
 from .probe import HealthCheck, HealthResult, run_health_checks  # noqa: F401
 
-__all__ = ["HealthCheck", "HealthResult", "run_health_checks"]
+__all__ = [
+    "HealthCheck", "HealthResult", "run_health_checks",
+    "run_doctor", "doctor_summary",
+]

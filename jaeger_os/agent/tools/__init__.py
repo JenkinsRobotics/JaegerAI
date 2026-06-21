@@ -140,7 +140,7 @@ from .bench import run_benchmark
 
 # Runtime diagnostics — fast idempotent health probe (post-boot
 # counterpart to ``--doctor``).
-from .diagnostics import system_health
+from .diagnostics import self_check
 
 
 __all__ = [
@@ -201,5 +201,5 @@ __all__ = [
     # agent self-benchmark
     "run_benchmark",
     # runtime diagnostics
-    "system_health",
+    "self_check",
 ]

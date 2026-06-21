@@ -64,9 +64,8 @@ def list_known_instances() -> list[Path]:
 
     Scans the **canonical** operator-state root (the install's
     ``.jaeger_os/instances/`` — what the wizard and resolver use), plus the
-    dev sandbox and legacy ``~/.jaeger_os`` so a dev checkout and old
-    installs still list. Wizard backups (``<name>.bak.<ts>``) are hidden.
-    Returns one Path per instance root.
+    legacy ``~/.jaeger_os`` so old installs still list. Wizard backups
+    (``<name>.bak.<ts>``) are hidden. Returns one Path per instance root.
     """
     candidates: list[Path] = []
 
@@ -85,8 +84,6 @@ def list_known_instances() -> list[Path]:
     except Exception:  # noqa: BLE001 — fall back to the legacy scans
         pass
 
-    repo_root = Path(__file__).resolve().parents[2]
-    _scan(repo_root / "sandbox" / ".jaeger_os" / "instances")
     _scan(Path.home() / ".jaeger_os" / "instances")
 
     # De-dup by absolute path while preserving order.

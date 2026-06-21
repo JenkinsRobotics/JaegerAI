@@ -1,6 +1,6 @@
 """Skill-tree msgspec schemas.
 
-See ``dev_docs/SKILL_TREE.md`` for the design contract.  These
+See ``dev/docs/SKILL_TREE.md`` for the design contract.  These
 types ride the bus (e.g. ``XpAwarded`` topic) and persist to
 ``<instance>/skill_tree.json``.
 """

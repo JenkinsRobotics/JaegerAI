@@ -1,8 +1,8 @@
 """``jaeger bench history`` — rolling leaderboard across every bench run.
 
 Each bench run today writes a fresh artifact
-(``dev_benchmark/flat/<model>/<ts>/`` for single-model runs,
-``dev_benchmark/sweep/RESULTS_<ts>.md`` and ``sweep_rows.jsonl`` for
+(``dev/benchmark/flat/<model>/<ts>/`` for single-model runs,
+``dev/benchmark/sweep/RESULTS_<ts>.md`` and ``sweep_rows.jsonl`` for
 multi-model sweeps). Nothing aggregates them — "what's the best model
 on this machine?" requires walking the directory tree and reading
 each file.
@@ -12,23 +12,23 @@ to models, and renders a leaderboard sorted by best routing accuracy.
 Two output modes:
 
   jaeger bench history            # print the leaderboard
-  jaeger bench history --write    # also write dev_benchmark/HISTORY.md
+  jaeger bench history --write    # also write dev/benchmark/HISTORY.md
 
 Data sources (skipped silently when missing):
 
-  * ``dev_benchmark/sweep/sweep_rows.jsonl`` — one row per per-model
+  * ``dev/benchmark/sweep/sweep_rows.jsonl`` — one row per per-model
     sweep invocation. Older format from before the metrics block
     existed.
-  * ``dev_benchmark/flat/<model>/<ts>/summary.json`` — modern per-run
+  * ``dev/benchmark/flat/<model>/<ts>/summary.json`` — modern per-run
     summaries.  Now stamped with ``model_name`` / ``model_path``
     (added 2026-05-27).  Older summaries land in the "unknown model"
     bucket — call those out with a count so the user can re-run them
     if it matters.
 
 0.3.0 note: the writer-side scripts used to land artifacts under
-``benchmark/...`` while this verb read from ``dev_benchmark/...``,
+``benchmark/...`` while this verb read from ``dev/benchmark/...``,
 so fresh runs silently dropped off the leaderboard.  The writers
-(``dev_benchmark/run_flat_bench.py`` + ``run_model_sweep.py``) were
+(``dev/benchmark/run_flat_bench.py`` + ``run_model_sweep.py``) were
 fixed to match this verb's read path; the comment trail there
 remembers the migration.
 
@@ -139,7 +139,7 @@ def _cmd_bench_history_argv(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--write", action="store_true",
-        help="also write dev_benchmark/HISTORY.md",
+        help="also write dev/benchmark/HISTORY.md",
     )
     parser.add_argument(
         "--family", default=None,
@@ -183,7 +183,7 @@ def _cmd_bench_history_argv(argv: list[str]) -> int:
             "Rolling leaderboard across bench runs on this machine.\n"
             "Reads sweep + flat-bench artifacts and aggregates per model.\n"
             "\n"
-            "  --write       also write dev_benchmark/HISTORY.md\n"
+            "  --write       also write dev/benchmark/HISTORY.md\n"
             "  --family STR  only show models whose name contains STR\n"
             "  --top N       cap to top-N by routing %\n"
             f"  --since DATE  only runs on/after DATE (default {_DEFAULT_SINCE},\n"
@@ -206,7 +206,7 @@ def _cmd_bench_history_argv(argv: list[str]) -> int:
     print(md)
 
     if args.write:
-        out_path = repo / "dev_benchmark" / "HISTORY.md"
+        out_path = repo / "dev/benchmark" / "HISTORY.md"
         out_path.write_text(md, encoding="utf-8")
         print(f"\nwrote {out_path}", file=sys.stderr)
     return 0
@@ -230,7 +230,7 @@ def render_history_md(
     ``include_uninstalled``: by default the leaderboard filters out
     entries for models that aren't on disk anymore (deleted from the
     LM Studio cache). The historical data is preserved in
-    ``dev_benchmark/flat/`` and ``sweep_rows.jsonl``; set this true to
+    ``dev/benchmark/flat/`` and ``sweep_rows.jsonl``; set this true to
     include it in the rendered report."""
     entries = list(_collect_entries(repo))
     # ``since=None`` is the CLI's ``--all`` mode: show every run
@@ -304,7 +304,7 @@ def render_history_md(
 
 
 def write_history_md(repo: pathlib.Path | None = None) -> pathlib.Path | None:
-    """Silently (re)generate ``dev_benchmark/HISTORY.md`` with the default
+    """Silently (re)generate ``dev/benchmark/HISTORY.md`` with the default
     current-generation filters. Returns the path written, or ``None``
     if the repo / benchmark dir can't be located. Best-effort — never
     raises, so a bench run can call it as a fire-and-forget finalizer
@@ -316,7 +316,7 @@ def write_history_md(repo: pathlib.Path | None = None) -> pathlib.Path | None:
     manual ``jaeger bench history --write``."""
     try:
         repo = repo or _repo_root()
-        out_path = repo / "dev_benchmark" / "HISTORY.md"
+        out_path = repo / "dev/benchmark" / "HISTORY.md"
         if not out_path.parent.exists():
             return None
         md = render_history_md(repo)
@@ -341,7 +341,7 @@ def _collect_entries(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
 
     Dedup rule: ``sweep_rows.jsonl`` is a per-model log line written by
     ``run_model_sweep.py`` after each model finishes a sweep. It's a
-    strict subset of the matching ``dev_benchmark/flat/<model>/<ts>/
+    strict subset of the matching ``dev/benchmark/flat/<model>/<ts>/
     summary.json`` — same scoring numbers, but no ``thinking_mode``
     field and no per-case detail. Without dedup, the same run shows
     up twice in the leaderboard: once bucketed as ``(model, default)``
@@ -361,10 +361,10 @@ def _collect_entries(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
 
 
 def _from_sweep_jsonl(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
-    """Older format. ``dev_benchmark/sweep/sweep_rows.jsonl`` is one
+    """Older format. ``dev/benchmark/sweep/sweep_rows.jsonl`` is one
     JSON-per-line of ``ModelResult`` dataclasses, written by
     ``run_model_sweep.py`` after each model finishes."""
-    path = repo / "dev_benchmark" / "sweep" / "sweep_rows.jsonl"
+    path = repo / "dev/benchmark" / "sweep" / "sweep_rows.jsonl"
     if not path.exists():
         return
     try:
@@ -408,20 +408,20 @@ def _from_sweep_jsonl(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
                     "tokens_per_sec": 0.0,
                     "tokens_source": "n/a",
                     "cases": cases,
-                    "run_dir": "dev_benchmark/sweep/",
+                    "run_dir": "dev/benchmark/sweep/",
                 }
     except OSError:
         return
 
 
 def _from_flat_summaries(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
-    """Walk ``dev_benchmark/flat/`` for per-run summaries.
+    """Walk ``dev/benchmark/flat/`` for per-run summaries.
 
     Two layouts supported because we restructured the tree
     2026-05-27 to nest by model:
 
-      * NEW: ``dev_benchmark/flat/<model>/<ts>/summary.json``
-      * OLD: ``dev_benchmark/flat/<ts>/summary.json`` (timestamp-only,
+      * NEW: ``dev/benchmark/flat/<model>/<ts>/summary.json``
+      * OLD: ``dev/benchmark/flat/<ts>/summary.json`` (timestamp-only,
         pre-restructure — these always land in the "unknown" bucket
         since model attribution was added at the same time as
         nesting).
@@ -431,7 +431,7 @@ def _from_flat_summaries(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
     without one is a model-named bucket whose grandchildren are
     timestamped runs.
     """
-    flat_root = repo / "dev_benchmark" / "flat"
+    flat_root = repo / "dev/benchmark" / "flat"
     if not flat_root.exists():
         return
     summary_paths: list[pathlib.Path] = []
@@ -941,7 +941,7 @@ def _load_sanity_records(repo: pathlib.Path) -> dict[str, dict[str, Any]]:
     tps. This is the source for both the leaderboard's ``Raw tok/s``
     column and the standalone Hardware-health table — pulling once and
     sharing avoids re-reading the same JSONL twice per render."""
-    sanity_dir = repo / "dev_benchmark" / "sanity"
+    sanity_dir = repo / "dev/benchmark" / "sanity"
     if not sanity_dir.exists():
         return {}
     jsonl_files = sorted(sanity_dir.glob("SANITY_*.jsonl"))
@@ -971,7 +971,7 @@ def _load_sanity_raw_tps(repo: pathlib.Path) -> dict[str, float]:
     prefill cost, multi-turn turns, and reasoning-token waste). Both
     matter; the bench number measures task efficiency, this measures
     the model's actual decode speed."""
-    sanity_dir = repo / "dev_benchmark" / "sanity"
+    sanity_dir = repo / "dev/benchmark" / "sanity"
     if not sanity_dir.exists():
         return {}
     jsonl_files = sorted(sanity_dir.glob("SANITY_*.jsonl"))
@@ -1253,13 +1253,13 @@ def _render(
             f" Filtered out **{len(hidden_orphans)}** entr"
             f"{'y' if len(hidden_orphans) == 1 else 'ies'} for "
             "models no longer on disk — historical data preserved in "
-            "``dev_benchmark/flat/``."
+            "``dev/benchmark/flat/``."
         )
     lines = [
         "# Jaeger-OS bench history",
         "",
         f"_Generated {now_iso} from {total_entries} run(s) across "
-        f"`dev_benchmark/sweep/` and `dev_benchmark/flat/` — showing "
+        f"`dev/benchmark/sweep/` and `dev/benchmark/flat/` — showing "
         f"{window}.{orphan_note}_",
         "",
         f"**Bench corpus version: {_CURRENT_BENCH_VERSION}** (cutoff "
@@ -1565,7 +1565,7 @@ def _repo_root() -> pathlib.Path:
     contains ``benchmark/``). Works for editable + installed wheels."""
     here = pathlib.Path(__file__).resolve()
     for parent in [here, *here.parents]:
-        if (parent / "dev_benchmark").is_dir():
+        if (parent / "dev/benchmark").is_dir():
             return parent
     # Fallback for unusual layouts.
     return here.parents[3]

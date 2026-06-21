@@ -25,7 +25,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 - Dropped `config.voice.{llm_gate,pending_queue,follow_up_retry,`
   `pending_turn_max_age_s}`; deleted `core/voice/llm_gate.py`,
   `VOICE_LLM_GATE_RULE`/`VOICE_FOLLOWUP_HINT_RULE`, and
-  `dev_benchmark/voice_gate_latency.py`.  `VoiceConfig` is now
+  `dev/benchmark/voice_gate_latency.py`.  `VoiceConfig` is now
   `extra="ignore"` so existing config.yaml files with the stale keys
   still load.
 
@@ -81,7 +81,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   `gemma-4-E4B`, medium `gemma-4-12B` (default), heavy / Deep Think
   `gemma-4-26B-A4B` — the latter replacing Qwen3-30B-A3B (ties on
   Score, ~5× faster, better safety).  `score_pct` re-aligned to the
-  canonical corpus-1.1 leaderboard in `dev_benchmark/HISTORY.md`.
+  canonical corpus-1.1 leaderboard in `dev/benchmark/HISTORY.md`.
 - Fixed `_canonical_model_name` dash/underscore split that
   double-counted models on the leaderboard.
 
@@ -110,7 +110,7 @@ The "skills" naming overload is resolved:
                                skills AND node capabilities
 
 No behaviour change — pure structural; tests still 2015 green,
-smoke gates PASS.  See `dev_docs/0.5.0_agent_reorg_plan.md` for
+smoke gates PASS.  See `dev/docs/0.5.0_agent_reorg_plan.md` for
 the destination map + execution rationale.
 
 ### Tests
@@ -202,8 +202,8 @@ call now routes through a typed Bus.
 
 ### Test surface
 - 1824 tests pass (was 1675 at 0.3.0; +149 new).
-- New test packages: `dev_tests/jaeger_os/transport/` (codec,
-  InProcBus, ZMQBus, broker), `dev_tests/jaeger_os/nodes/`
+- New test packages: `dev/tests/jaeger_os/transport/` (codec,
+  InProcBus, ZMQBus, broker), `dev/tests/jaeger_os/nodes/`
   (base, runtime, tts, stt, vision, motor, light).
 - Verification gates: `./launch --node-test` (cross-mode echo
   round-trip), `./launch --tts-boot-test` (Kokoro + node lifecycle).
@@ -266,7 +266,7 @@ before main merge:
   response prefix (single-pass) because a separate gate LLM
   call invalidated the brain's KV-cache prefill and tanked
   voice latency 50× in real testing (measured at
-  `dev_benchmark/voice_gate_latency.py`).
+  `dev/benchmark/voice_gate_latency.py`).
 - **TUI `/quiet` toggle (default ON).**  Voice-activity prints
   (gate decisions, non-speech skips, coalesce notes) hide by
   default; `/quiet off` reveals them for debugging.
@@ -290,7 +290,7 @@ before main merge:
 
 ### Performance benchmark
 
-`dev_benchmark/voice_gate_latency.py` — focused latency probe
+`dev/benchmark/voice_gate_latency.py` — focused latency probe
 that caught the KV-cache thrashing regression.  Verifies the
 single-pass gate stays warm (~0.79s brain turn after prewarm)
 and detects if anyone reintroduces a separate gate-call path
@@ -403,9 +403,9 @@ path.
 ### Bench infra
 
 - **Writer/aggregator dir-mismatch fix** — writers at
-  `dev_benchmark/run_flat_bench.py` and `run_model_sweep.py` now
-  land artifacts under `dev_benchmark/flat/` and
-  `dev_benchmark/sweep/` (was `benchmark/flat/` etc.), matching the
+  `dev/benchmark/run_flat_bench.py` and `run_model_sweep.py` now
+  land artifacts under `dev/benchmark/flat/` and
+  `dev/benchmark/sweep/` (was `benchmark/flat/` etc.), matching the
   aggregator at `jaeger_os/daemon/bench_history_verb.py`.  Six
   baseline gemma-4-26B-A4B-it-Q4_K_M runs included.
 
@@ -555,9 +555,9 @@ Every top-level dir is now obviously framework-vs-dev:
 
 | Before | After |
 |---|---|
-| `dev docs/` | `dev_docs/` (also kills the space) |
-| `tests/` | `dev_tests/` |
-| `benchmark/` | `dev_benchmark/` |
+| `dev docs/` | `dev/docs/` (also kills the space) |
+| `tests/` | `dev/tests/` |
+| `benchmark/` | `dev/benchmark/` |
 | `scripts/install.sh` | `scripts/install.sh` (unchanged — curl URL must hold) |
 | `scripts/run_tests.sh` | `dev_scripts/run_tests.sh` |
 | `scripts/dev_env.sh` | `dev_scripts/dev_env.sh` |
@@ -573,7 +573,7 @@ bench scripts, `daemon/bench_history_verb.py` HISTORY/sweep/flat/
 sanity paths, `daemon/bench_compare_verb.py` sweep_script,
 `dev_scripts/run_tests.sh`, `dev_scripts/generate_agent_contract.py`
 (source + emitted-doc paths), `docs/agent_contract.md` regenerated,
-`.gitignore` patterns swept from `benchmark/**` to `dev_benchmark/**`.
+`.gitignore` patterns swept from `benchmark/**` to `dev/benchmark/**`.
 
 ### Retired-CLI string sweep
 
@@ -818,7 +818,7 @@ where it belongs.
   in-repo `install.sh` picks up the same one.
 
 - **`--setup` flag mentioned in 0.2.3 docs doesn't exist.** README,
-  `dev_docs/setup.md`, `install.sh`, `run.sh`, and `scripts/install.sh`
+  `dev/docs/setup.md`, `install.sh`, `run.sh`, and `scripts/install.sh`
   all pointed at a `--setup` flag that argparse would reject with
   `unrecognized arguments: --setup`. Wizard invocation in 0.2.3 was
   via auto-fire-on-first-run or `--force`. 0.2.4 makes the right
@@ -929,7 +929,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
   root. Gitignored except for the README and `.gitignore` itself —
   upstream JROS never ships agent content; users populate it
   manually or via `jaeger create-agent`.
-- **`dev_docs/setup.md`** — canonical install / upgrade / uninstall
+- **`dev/docs/setup.md`** — canonical install / upgrade / uninstall
   guide. Covers prereqs, the curl one-liner, version pinning,
   custom install locations, multi-instance setups, developer
   install, and troubleshooting.
@@ -948,7 +948,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
 │   └── agents/                        ← "User" layer (gitignored)
 │       ├── lilith/
 │       └── eren/
-├── tests/, benchmark/, dev_docs/
+├── tests/, benchmark/, dev/docs/
 └── pyproject.toml                     ← pytest config only
 ```
 
@@ -999,7 +999,7 @@ files had moved to `<repo>/src/jaeger_os/models/` in 0.2.1.
   existing `recursive-include src/jaeger_os *.md` rule). Added an
   explicit `global-exclude *.gguf` belt-and-suspenders so weight
   files never accidentally ship in the sdist.
-- **`MANIFEST.in` `docs/` references** — bumped to `"dev_docs/"`
+- **`MANIFEST.in` `docs/` references** — bumped to `"dev/docs/"`
   (the post-0.2.1 folder name); the old `docs/` paths would have
   been no-ops since the folder doesn't exist anymore.
 
@@ -1025,7 +1025,7 @@ user customisation.
 ### Architecture — System / Runtime / User layers
 
 New canonical reference at
-[`dev_docs/architecture/system_runtime_user.md`](dev_docs/architecture/system_runtime_user.md).
+[`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md).
 Every persistent file in a JROS deployment now belongs to exactly one
 of three layers:
 
@@ -1056,7 +1056,7 @@ release boundary.
 
 ### Repo housekeeping
 
-- **`docs/` → `dev_docs/`** — the top-level docs folder is now
+- **`docs/` → `dev/docs/`** — the top-level docs folder is now
   clearly developer documentation (audits, design docs, status notes
   for contributors working *on* JROS). User-facing setup runbooks
   live in downstream consumer repos (e.g. `Lilith-AI/docs/SETUP.md`).
