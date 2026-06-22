@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.nodes import Node, NodeState
 from jaeger_os.transport import InProcBus
 

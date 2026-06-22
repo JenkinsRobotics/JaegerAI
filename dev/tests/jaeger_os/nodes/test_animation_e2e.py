@@ -19,7 +19,7 @@ import pytest
 import websockets
 from PIL import Image
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.nodes.software.animation import (
     AnimationNode,
     FrameBuffer,

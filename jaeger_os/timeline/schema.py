@@ -1,7 +1,7 @@
 """Timeline + clip + track schemas (msgspec).
 
 See ``dev/docs/0.5.0_timeline_schema.md`` for design.  These ride
-the bus inside :class:`jaeger_os.topics.TimelineCommand` (as JSON)
+the bus inside :class:`jaeger_os.transport.topics.TimelineCommand` (as JSON)
 and persist to ``<instance>/timelines/<name>.json``.
 """
 

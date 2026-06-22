@@ -4,9 +4,9 @@ Given a :class:`Timeline`, dispatches each clip on the bus at its
 ``t_offset_ms`` and waits the right duration before moving on.
 Per-track dispatch routes by ``track.kind``:
 
-    animation → :class:`jaeger_os.topics.AnimationCommand` on
+    animation → :class:`jaeger_os.transport.topics.AnimationCommand` on
                 /act/animation
-    speech    → :class:`jaeger_os.topics.SpeechCommand`     on
+    speech    → :class:`jaeger_os.transport.topics.SpeechCommand`     on
                 /act/speech
 
 Track kinds the runner declines to dispatch (motion / light / sound)
@@ -20,7 +20,7 @@ Lifecycle::
     runner.wait()         # blocks until timeline ends or stop() fires
     runner.stop()         # interrupts mid-timeline
 
-Publishes :class:`jaeger_os.topics.TimelineProgress` events:
+Publishes :class:`jaeger_os.transport.topics.TimelineProgress` events:
 - ``state="running"`` at t=0
 - ``state="complete"`` at natural end
 - ``state="interrupted"`` when stop() is called or a clip publish
@@ -35,7 +35,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.timeline.schema import (
     TRACK_ANIMATION,
     TRACK_SPEECH,
@@ -225,7 +225,7 @@ class TimelineRunner:
 
 def parse_timeline_json(payload: str) -> Timeline:
     """Parse a Timeline from inline JSON (the wire format used by
-    :class:`jaeger_os.topics.TimelineCommand.timeline_json`).
+    :class:`jaeger_os.transport.topics.TimelineCommand.timeline_json`).
 
     Returns the validated :class:`Timeline` or raises
     ``msgspec.ValidationError``."""

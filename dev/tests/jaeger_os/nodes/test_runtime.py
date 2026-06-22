@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 import queue
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.core.audio import AudioSessionConfig
 from jaeger_os.nodes import runtime
 from jaeger_os.nodes.software.tts import TTSNode

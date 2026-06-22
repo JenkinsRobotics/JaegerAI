@@ -15,7 +15,7 @@
 #   jaeger doctor               environment + readiness check
 #
 # Management subcommands go to the console (jaeger_os.cli); everything
-# else runs the agent (jaeger_os.run). Picks the repo's .venv interpreter
+# else runs the agent (jaeger_os.cli.run). Picks the repo's .venv interpreter
 # directly to sidestep pyenv shims (same pattern as ./launch).
 set -euo pipefail
 
@@ -39,9 +39,9 @@ case "${1:-}" in
   mcp)
     # Expose JROS as an MCP server (stdio) so Claude Code / Cursor / Zed
     # can drive the agent as a tool. Spawned by the MCP client.
-    shift; exec "$VENV_PY" -m jaeger_os.mcp_server "$@" ;;
+    shift; exec "$VENV_PY" -m jaeger_os.interfaces.mcp_server "$@" ;;
   doctor)
-    shift; exec "$VENV_PY" -m jaeger_os.run --doctor "$@" ;;
+    shift; exec "$VENV_PY" -m jaeger_os.cli.run --doctor "$@" ;;
   --dev)
     # Dev TUI on the gitignored dev instance, via the launch.py machinery
     # (singleton lock, --stop/--restart/--status/--health). Bare → --tui.
@@ -51,5 +51,5 @@ case "${1:-}" in
     exec "$VENV_PY" -m jaeger_os.cli --help ;;
   *)
     # bare, --instance, --voice, a one-shot prompt, … → run the agent
-    exec "$VENV_PY" -m jaeger_os.run "$@" ;;
+    exec "$VENV_PY" -m jaeger_os.cli.run "$@" ;;
 esac

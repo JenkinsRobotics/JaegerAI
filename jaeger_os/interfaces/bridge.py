@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     # ``{"type":"tool",...}`` frames (same event the in-process windowed
     # app renders). Fires on this thread during run_for_voice, so it
     # serialises cleanly with reply frames on the one stdout stream.
-    from jaeger_os import protocol
+    from jaeger_os.interfaces import protocol
 
     class _ToolEmitter:
         def publish(self, event: str, **payload: object) -> None:

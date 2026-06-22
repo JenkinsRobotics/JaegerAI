@@ -286,7 +286,7 @@ def _publish_animation(
 ) -> dict[str, Any]:
     """Publish an :class:`AnimationCommand` on the bus.  If ``wait``,
     block briefly on the matching :class:`AnimationState` event."""
-    from jaeger_os import topics
+    from jaeger_os.transport import topics
     from jaeger_os.nodes import runtime
 
     runtime.ensure_animation_node()

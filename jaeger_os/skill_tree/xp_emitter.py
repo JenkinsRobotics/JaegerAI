@@ -18,7 +18,7 @@ The emitter intentionally does NOT publish XP itself — that's the
 job of whatever instruments tool dispatches / bench passes /
 milestone events.  The standalone module ``xp_award.py`` (TBD)
 provides a tiny helper for those callers to fire
-:class:`jaeger_os.topics.XpAwarded` events from anywhere in the
+:class:`jaeger_os.transport.topics.XpAwarded` events from anywhere in the
 codebase without re-implementing the bus wiring.
 """
 
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport import Bus
 
 from .registry import SkillTreeRegistry

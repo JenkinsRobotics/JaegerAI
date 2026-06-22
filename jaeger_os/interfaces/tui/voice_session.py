@@ -144,7 +144,7 @@ class VoiceController:
         """Build + start the mic. Returns True on success, False (with a
         printed reason) if speech deps are missing or the mic won't open."""
         try:
-            from jaeger_os import topics
+            from jaeger_os.transport import topics
             from jaeger_os.core.audio import AudioSessionConfig
             from jaeger_os.nodes import runtime
 
@@ -274,7 +274,7 @@ class VoiceController:
         self._running = False
         if self._bus is not None and self._on_transcript is not None:
             try:
-                from jaeger_os import topics
+                from jaeger_os.transport import topics
                 self._bus.unsubscribe(
                     topics.SENSE_TRANSCRIPT,
                     self._on_transcript,
@@ -283,7 +283,7 @@ class VoiceController:
                 pass
         if self._bus is not None and self._on_gate_decision is not None:
             try:
-                from jaeger_os import topics
+                from jaeger_os.transport import topics
                 self._bus.unsubscribe(
                     topics.SENSE_GATE_DECISION,
                     self._on_gate_decision,
@@ -292,7 +292,7 @@ class VoiceController:
                 pass
         if self._bus is not None:
             try:
-                from jaeger_os import topics
+                from jaeger_os.transport import topics
                 self._bus.publish(topics.SpeechStop(
                     reason="voice controller stopped",
                     node_id="tui_voice",
@@ -401,7 +401,7 @@ class VoiceController:
 
     def _request_speech(self, text: str, correlation_id: str) -> Any:
         """Publish speech intent and wait for the TTS node ack."""
-        from jaeger_os import topics
+        from jaeger_os.transport import topics
 
         return self._bus.request(
             topics.SpeechCommand(
@@ -422,7 +422,7 @@ class VoiceController:
         """Interrupt speech via the bus instead of calling Kokoro directly."""
         if self._bus is None:
             return
-        from jaeger_os import topics
+        from jaeger_os.transport import topics
 
         self._bus.publish(topics.SpeechStop(
             reason=reason,
