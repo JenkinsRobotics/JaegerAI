@@ -85,6 +85,7 @@ class AgentBridge:
         self._state = "idle"          # idle | thinking | error | stopped
         self._last_error: str | None = None
         self._event_adapter: _BusEventAdapter | None = None
+        self._confirm_provider: Any = None
 
     # ── host-component lifecycle ──────────────────────────────────
 
@@ -95,6 +96,20 @@ class AgentBridge:
         from jaeger_os.main import _pipeline
         self._event_adapter = _BusEventAdapter(self.bus)
         _pipeline["event_bus"] = self._event_adapter
+
+        # Route permission prompts over the bus so a window / the Swift app
+        # can answer — the console provider can't prompt from the agent
+        # worker thread. Leave AllowAll (trusted unattended) untouched.
+        try:
+            from jaeger_os.agent.loop.bus_confirm import BusConfirmationProvider
+            from jaeger_os.core.safety.permissions import (
+                AllowAllProvider, current_policy)
+            policy = current_policy()
+            if not isinstance(policy.confirmation, AllowAllProvider):
+                self._confirm_provider = BusConfirmationProvider(self.bus)
+                policy.confirmation = self._confirm_provider
+        except Exception:  # noqa: BLE001 — confirmation routing is best-effort
+            self._confirm_provider = None
 
         self.bus.subscribe(ChatMessage.topic, self._on_chat)
         self.bus.subscribe(Transcript.topic, self._on_transcript)
@@ -154,10 +169,12 @@ class AgentBridge:
                     continue
                 if not (text or "").strip():
                     continue
-                # Tag this turn's tool events with its conversation so
-                # the right window renders them.
+                # Tag this turn's tool events + permission prompts with its
+                # conversation so the right window renders/answers them.
                 if self._event_adapter is not None:
                     self._event_adapter.current_session = session
+                if self._confirm_provider is not None:
+                    self._confirm_provider.current_session = session
                 self._turn_active.set()
                 self.turns += 1
                 self._publish_state("thinking", session)

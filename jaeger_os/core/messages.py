@@ -68,6 +68,32 @@ class AgentState:
 
 
 @dataclass
+class AgentRequest:
+    """Agent → surface: a mid-turn prompt the operator must answer before
+    the turn continues (approval | clarify | secret). The turn blocks until
+    a matching :class:`AgentResponse` arrives — the Hermes interactive
+    request/response pattern, carried over the bus so windowed/voice/remote
+    surfaces can answer (not just the console)."""
+    id: str = ""
+    kind: str = "approval"          # approval | clarify | secret
+    prompt: str = ""
+    options: tuple[str, ...] = ()   # choices (approval/clarify); empty = free text
+    tool: str = ""
+    session: str = ""
+    topic: str = "/sense/request"
+
+
+@dataclass
+class AgentResponse:
+    """Surface → agent: the operator's answer to an :class:`AgentRequest`,
+    correlated by ``id``. ``answer`` is the chosen option or free text."""
+    id: str = ""
+    answer: str = ""
+    session: str = ""
+    topic: str = "/act/response"
+
+
+@dataclass
 class ToolEvent:
     """Agent → surfaces: one tool dispatch, for live tool-activity lines.
 
@@ -88,10 +114,11 @@ class ToolEvent:
 MESSAGES = MessageRegistry()
 MESSAGES.register_all([
     ChatMessage, ChatReply, Transcript, AgentState, ToolEvent,
+    AgentRequest, AgentResponse,
     NodeHealth, LogLine,
 ])
 
 __all__ = [
     "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
-    "ToolEvent",
+    "ToolEvent", "AgentRequest", "AgentResponse",
 ]

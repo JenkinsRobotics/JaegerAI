@@ -59,9 +59,10 @@ def test_ready_then_reply_then_idle(monkeypatch):
     types = [f["type"] for f in frames]
     assert types == ["ready", "state", "reply", "state"]
     assert frames[0]["instance"] == "test-inst"
-    assert frames[1] == {"type": "state", "busy": True}
-    assert frames[2] == {"type": "reply", "text": "echo:hi", "error": None}
-    assert frames[3] == {"type": "state", "busy": False}
+    assert frames[1] == {"type": "state", "busy": True, "session": "desktop-app"}
+    assert frames[2] == {"type": "reply", "text": "echo:hi", "error": None,
+                         "session": "desktop-app"}
+    assert frames[3] == {"type": "state", "busy": False, "session": "desktop-app"}
     assert boot.cleaned is True  # graceful teardown ran
 
 
@@ -84,7 +85,8 @@ def test_turn_error_is_reported_not_raised(monkeypatch):
         run_reply={"text": "", "error": "model exploded"},
     )
     reply = next(f for f in frames if f["type"] == "reply")
-    assert reply == {"type": "reply", "text": "", "error": "model exploded"}
+    assert reply == {"type": "reply", "text": "", "error": "model exploded",
+                     "session": "desktop-app"}
     assert rc == 0
 
 

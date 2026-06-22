@@ -96,7 +96,8 @@ class ChatWindow(QWidget):
 
         # The one sanctioned bus→Qt hop (signal emission crosses threads).
         self._bridge = make_bus_bridge(
-            ctx.bus, ["/sense/chat", "/sense/agent_state", "/sense/tool"])
+            ctx.bus,
+            ["/sense/chat", "/sense/agent_state", "/sense/tool", "/sense/request"])
         self._bridge.message.connect(self._on_msg)
 
     # ── UI ────────────────────────────────────────────────────────
@@ -327,6 +328,8 @@ class ChatWindow(QWidget):
             self._set_busy(False)
         elif msg.topic == "/sense/tool":
             self._emit_tool(msg)
+        elif msg.topic == "/sense/request":
+            self._on_request(msg)
         elif msg.topic == "/sense/agent_state":
             if msg.state == "thinking":
                 self._set_busy(True)
@@ -335,6 +338,36 @@ class ChatWindow(QWidget):
                 self.status.setText("⚠ error")
             else:  # idle
                 self._set_busy(False)
+
+    def _on_request(self, msg: Any) -> None:
+        """A mid-turn agent prompt (approval/clarify/secret). Show it, answer
+        over the bus — the turn is blocked on the agent worker thread until
+        an AgentResponse with this id arrives."""
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        from jaeger_os.core.messages import AgentResponse
+        kind = getattr(msg, "kind", "approval")
+        options = list(getattr(msg, "options", ()) or [])
+        prompt = getattr(msg, "prompt", "") or "The agent is asking for input."
+
+        if kind == "secret" or (kind == "clarify" and not options):
+            text, ok = QInputDialog.getText(self, "Agent request", prompt)
+            answer = text if ok else ""
+        else:  # approval / clarify with choices → buttons
+            box = QMessageBox(self)
+            box.setWindowTitle("Agent request")
+            box.setText(prompt)
+            buttons = {}
+            for opt in (options or ["allow", "deny"]):
+                b = box.addButton(opt.capitalize(),
+                                  QMessageBox.ButtonRole.AcceptRole)
+                buttons[b] = opt
+            box.exec()
+            answer = buttons.get(box.clickedButton(), "deny")
+
+        self.ctx.bus.publish(AgentResponse(
+            id=getattr(msg, "id", ""), answer=answer, session=self._session))
+        self._emit_system(f"{prompt}  → {answer}")
 
     def _emit_tool(self, msg: Any) -> None:
         """Live tool activity — the windowed echo of the TUI's ``┊`` lines.
