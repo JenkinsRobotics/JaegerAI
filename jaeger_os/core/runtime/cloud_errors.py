@@ -26,12 +26,39 @@ T = TypeVar("T")
 # Error classes — what the agent should DO about a failure.
 AUTH = "auth"              # bad / missing / revoked key — stop, tell the user
 NOT_FOUND = "not_found"    # wrong model id — stop, tell the user
-RATE_LIMIT = "rate_limit"  # 429 — back off and retry
+QUOTA = "quota"            # out of credits / billing — stop, retrying is futile
+RATE_LIMIT = "rate_limit"  # 429 too-fast — back off and retry
 TRANSIENT = "transient"    # 5xx / connection / timeout — retry
 UNKNOWN = "unknown"        # unclassified — surface as-is, do not spin
 
-# Classes worth retrying — the rest are pointless to repeat.
+# Classes worth retrying — the rest are pointless to repeat. QUOTA looks
+# like a 429 but a credit-exhausted account won't recover on a backoff.
 _RETRYABLE = frozenset({RATE_LIMIT, TRANSIENT})
+
+# Markers that mean "out of credits", not "slow down" — providers overload
+# 429 for both, so we sniff the body/code to tell them apart.
+_QUOTA_MARKERS = (
+    "insufficient_quota", "insufficient quota", "exceeded your current quota",
+    "out of credits", "billing", "payment required",
+)
+
+
+def _message_of(exc: BaseException) -> str:
+    """Lowercased text we can pattern-match: the str, plus any string
+    ``code``/``type`` attrs and an OpenAI-style ``.body`` error dict."""
+    parts = [str(exc)]
+    for attr in ("code", "type"):
+        v = getattr(exc, attr, None)
+        if isinstance(v, str):
+            parts.append(v)
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error") if isinstance(body.get("error"), dict) else body
+        for k in ("code", "type", "message"):
+            v = err.get(k) if isinstance(err, dict) else None
+            if isinstance(v, str):
+                parts.append(v)
+    return " ".join(parts).lower()
 
 
 def _status_of(exc: BaseException) -> int | None:
@@ -59,6 +86,10 @@ def classify_exception(exc: BaseException) -> str:
         return AUTH
     if status == 404 or "notfound" in name:
         return NOT_FOUND
+    # Quota before rate-limit: a 429 carrying ``insufficient_quota`` is an
+    # empty wallet, not a too-fast burst — retrying it just wastes time.
+    if status == 402 or any(k in _message_of(exc) for k in _QUOTA_MARKERS):
+        return QUOTA
     if status == 429 or "ratelimit" in name:
         return RATE_LIMIT
     if (status is not None and status >= 500) or any(
@@ -149,6 +180,8 @@ def friendly_message(exc: BaseException, *, provider: str = "") -> str:
         AUTH: f"{who} rejected the API key — check the stored credential "
               f"for {who}.",
         NOT_FOUND: f"{who} has no such model — check the model id.",
+        QUOTA: f"{who} rejected the request — the account is out of "
+               f"credits/quota. Add billing or switch to a local model.",
         RATE_LIMIT: f"{who} rate-limited the request and was still limited "
                     f"after retries.",
         TRANSIENT: f"{who} hit a transient error and did not recover after "
@@ -193,6 +226,6 @@ def retry_call(
 
 
 __all__ = [
-    "AUTH", "NOT_FOUND", "RATE_LIMIT", "TRANSIENT", "UNKNOWN",
+    "AUTH", "NOT_FOUND", "QUOTA", "RATE_LIMIT", "TRANSIENT", "UNKNOWN",
     "classify_exception", "friendly_message", "retry_call",
 ]

@@ -138,3 +138,22 @@ def test_pop_last_exchange_with_only_assistant_messages_returns_none(stub_agent)
     assert main.pop_last_exchange("_default_") is None
     # Unchanged.
     assert len(stub_agent.messages) == 2
+
+
+# ── last_ctx_snapshot (status-bar ctx gauge) ─────────────────────────
+
+
+def test_last_ctx_snapshot_empty_without_agent(monkeypatch):
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {})
+    assert main.last_ctx_snapshot("nope") == {}
+
+
+def test_last_ctx_snapshot_computes_pct(monkeypatch):
+    guard = SimpleNamespace(
+        estimate_messages_tokens=lambda msgs, system_prompt, tools: 500,
+        budget=SimpleNamespace(prompt_budget=2000),
+    )
+    agent = SimpleNamespace(messages=[], system_prompt="", tools=[],
+                            context_guard=guard)
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {"s": agent})
+    assert main.last_ctx_snapshot("s") == {"tokens": 500, "pct": 25}

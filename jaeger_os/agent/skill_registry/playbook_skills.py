@@ -186,16 +186,46 @@ def _instance_skills_dir() -> Path | None:
         return None
 
 
+# Discovery cache: stat-signature → parsed result. The signature is
+# (path, mtime, size) for every SKILL.md — a stat-only scan, far cheaper
+# than re-reading + re-parsing 89 files on each call (boot hits this several
+# times). Any edit changes a stat, so the cache self-invalidates and
+# hot-reload still works.
+_DISCOVERY_CACHE: dict[str, Any] = {"sig": None, "result": None}
+
+
+def _discovery_signature(roots: list[Path]) -> tuple:
+    sig: list[tuple] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for md in sorted(root.rglob("SKILL.md")):
+            try:
+                st = md.stat()
+                sig.append((str(md), st.st_mtime, st.st_size))
+            except OSError:
+                pass
+    return tuple(sig)
+
+
 def discover_playbooks() -> list[PlaybookSkill]:
     """Every playbook skill — from the bundled ``skills/`` tree **and**
     the bound instance's ``skills/`` — so a playbook the agent authored
     itself is found, not just shipped ones. On a name collision the
-    instance copy wins, mirroring :mod:`skill_loader`."""
-    by_name: dict[str, PlaybookSkill] = {}
+    instance copy wins, mirroring :mod:`skill_loader`.
+
+    Cached on a stat signature: a second call with an unchanged skills tree
+    skips the read+parse and returns the prior result."""
     roots: list[Path] = [_SKILLS_DIR]
     inst = _instance_skills_dir()
     if inst is not None:
         roots.append(inst)
+
+    sig = _discovery_signature(roots)
+    if _DISCOVERY_CACHE["sig"] == sig and _DISCOVERY_CACHE["result"] is not None:
+        return _DISCOVERY_CACHE["result"]
+
+    by_name: dict[str, PlaybookSkill] = {}
     for root in roots:                 # instance scanned last → it wins
         if not root.is_dir():
             continue
@@ -226,7 +256,10 @@ def discover_playbooks() -> list[PlaybookSkill]:
                 fallback_for_tools=_str_list(fm, "fallback_for_tools"),
             )
             by_name[skill.name] = skill
-    return sorted(by_name.values(), key=lambda s: (s.category, s.name))
+    result = sorted(by_name.values(), key=lambda s: (s.category, s.name))
+    _DISCOVERY_CACHE["sig"] = sig
+    _DISCOVERY_CACHE["result"] = result
+    return result
 
 
 def _select_available(

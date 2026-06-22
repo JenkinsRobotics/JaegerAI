@@ -13,6 +13,7 @@ import pytest
 from jaeger_os.core.runtime.cloud_errors import (
     AUTH,
     NOT_FOUND,
+    QUOTA,
     RATE_LIMIT,
     TRANSIENT,
     UNKNOWN,
@@ -68,6 +69,35 @@ def test_classify_by_class_name():
 
 def test_classify_unknown_falls_through():
     assert classify_exception(ValueError("something odd")) == UNKNOWN
+
+
+def test_classify_quota_beats_rate_limit_on_a_429():
+    """OpenAI returns 429 for BOTH a too-fast burst and an empty wallet.
+    An ``insufficient_quota`` 429 is QUOTA (don't retry), not RATE_LIMIT."""
+    class _Quota(Exception):
+        status_code = 429
+        code = "insufficient_quota"
+    assert classify_exception(_Quota()) == QUOTA
+    # body-dict shape (OpenAI SDK) classifies too.
+    class _Body(Exception):
+        status_code = 429
+        body = {"error": {"code": "insufficient_quota"}}
+    assert classify_exception(_Body()) == QUOTA
+    # a plain 429 with no quota marker is still a rate limit.
+    assert classify_exception(_Status(429)) == RATE_LIMIT
+
+
+def test_quota_is_not_retried():
+    """A credit-exhausted account won't recover on a backoff — re-raise."""
+    calls = {"n": 0}
+    class _Quota(Exception):
+        status_code = 402
+    def fn():
+        calls["n"] += 1
+        raise _Quota()
+    with pytest.raises(_Quota):
+        retry_call(fn, attempts=3, base_delay=0.0)
+    assert calls["n"] == 1  # no retries
 
 
 def test_classify_reads_status_off_a_response_object():
