@@ -225,7 +225,7 @@ def test_skill_view_auto_loads_required_toolsets(monkeypatch, tmp_path):
 
 def test_agent_contract_script_writes_and_check_passes():
     """End-to-end: run the generator, then run ``--check`` — clean."""
-    script = REPO / "dev_scripts" / "generate_agent_contract.py"
+    script = REPO / "dev" / "scripts" / "generate_agent_contract.py"
     doc = REPO / "jaeger_os" / "docs" / "agent_contract.md"
     # Write.
     r = subprocess.run([sys.executable, str(script)],
@@ -242,7 +242,7 @@ def test_agent_contract_script_writes_and_check_passes():
 def test_agent_contract_check_detects_staleness(tmp_path, monkeypatch):
     """If the doc on disk doesn't match the rendered output,
     ``--check`` should exit 1 and say so."""
-    script = REPO / "dev_scripts" / "generate_agent_contract.py"
+    script = REPO / "dev" / "scripts" / "generate_agent_contract.py"
     doc = REPO / "jaeger_os" / "docs" / "agent_contract.md"
     # Stash, scribble, restore.
     original = doc.read_text(encoding="utf-8")

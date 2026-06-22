@@ -47,7 +47,7 @@ from jaeger_os.core.instance.schemas import (
 #
 #   1. --instance NAME CLI flag (handled by caller; passed to this fn)
 #   2. JAEGER_INSTANCE_DIR env var — explicit path (use for sandbox dev
-#      via scripts/dev_env.sh; for tests; for one-off destinations).
+#      via dev/scripts/dev_env.sh; for tests; for one-off destinations).
 #   3. JAEGER_INSTANCE_NAME env var → ~/.jaeger/instances/<name>/
 #   4. ~/.jaeger/active_instance file → ~/.jaeger/instances/<that>/
 #   5. ~/.jaeger/instances/default/
@@ -63,7 +63,7 @@ from jaeger_os.core.instance.schemas import (
 # (INST-10 in docs/ROADMAP_0.2.0.md) — the wheel ships no
 # ``jaeger_os/instance/`` directory and the resolver no longer
 # falls through to one. Dev checkouts opt into a sandbox via
-# JAEGER_INSTANCE_DIR (see scripts/dev_env.sh).
+# JAEGER_INSTANCE_DIR (see dev/scripts/dev_env.sh).
 SYSTEM_ROOT = Path("/var/lib/jaeger")
 INSTANCES_DIR_NAME = "instances"
 ACTIVE_INSTANCE_FILE = "active_instance"

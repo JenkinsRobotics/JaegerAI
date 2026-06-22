@@ -152,7 +152,7 @@ def test_read_active_instance_treats_whitespace_as_missing(monkeypatch, tmp_path
 def _find_repo_root() -> Path:
     here = Path(__file__).resolve()
     for ancestor in [here, *here.parents]:
-        if (ancestor / "pyproject.toml").exists() and (ancestor / "dev_scripts").exists():
+        if (ancestor / "pyproject.toml").exists() and (ancestor / "dev" / "scripts").exists():
             return ancestor
     raise RuntimeError("could not locate repo root from test file")
 
@@ -162,12 +162,12 @@ REPO_ROOT = _find_repo_root()
 
 @pytest.fixture(scope="module")
 def check_wheel_module():
-    """Import ``dev_scripts/check_wheel.py`` without dragging it onto the
+    """Import ``dev/scripts/check_wheel.py`` without dragging it onto the
     install path — the script is intentionally not under ``src/``."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
-        "_check_wheel", REPO_ROOT / "dev_scripts" / "check_wheel.py"
+        "_check_wheel", REPO_ROOT / "dev" / "scripts" / "check_wheel.py"
     )
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)

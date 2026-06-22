@@ -1,7 +1,7 @@
 # Agent contract
 
 Auto-generated from `jaeger_os/core/prompts/rules.py` by
-`dev_scripts/generate_agent_contract.py`. Do not hand-edit — re-run the
+`dev/scripts/generate_agent_contract.py`. Do not hand-edit — re-run the
 script after changing `rules.py` and the diff will land here.
 
 This document mirrors the **literal text** the agent sees in its

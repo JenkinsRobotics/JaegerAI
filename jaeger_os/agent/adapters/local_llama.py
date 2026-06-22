@@ -30,6 +30,7 @@ from jaeger_os.agent.dialects import (
     detect_reasoning,
     extract_tool_calls,
     render_tools_for,
+    strip_reasoning_channels,
     strip_think_blocks,
     textify_tool_history,
 )
@@ -786,6 +787,13 @@ class LocalLlamaAdapter(OpenAIAdapter):
             ):
                 message["finish_reason"] = "thinking_exhausted"
             text = stripped
+        # Gemma 4 leaks reasoning-channel markers (``<|channel>thought\n
+        # <channel|>…answer``) that don't match the proper ``<|channel|>``
+        # harmony form, so they slip past the branch above and surface as
+        # a phantom "thought". Strip them — the answer follows the header.
+        if "channel" in text.lower():
+            text = strip_reasoning_channels(text)
+            message["content"] = text or None
         # Cheap pre-filter: skip the drift parser only when the text
         # can't possibly hold a tool call. A tool call always contains
         # either an angle-bracket envelope (``<tool_call>``,

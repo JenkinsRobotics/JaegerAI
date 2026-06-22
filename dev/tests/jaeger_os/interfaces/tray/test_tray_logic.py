@@ -4,7 +4,7 @@ The tray splits into two halves:
 
   - the *logic* — what glyph to show, which menu items to enable,
     how the state machine transitions on a status snapshot — lives in
-    :mod:`jaeger_os.interfaces.tray.base` and depends on nothing but
+    :mod:`jaeger_os.interfaces.pyside6.tray.base` and depends on nothing but
     dataclasses. **All of that is tested here.**
   - the *rumps adapter* — wires the logic into the macOS menu bar.
     Untested at the unit level because rumps imports an Objective-C
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_os.interfaces.tray.base import (
+from jaeger_os.interfaces.pyside6.tray.base import (
     MenuItem,
     TrayActions,
     TrayModel,

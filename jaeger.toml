@@ -137,7 +137,7 @@ enabled = false   # chassis supervision blocked by bus duality
 # Format 0.1's chassis dispatches event_loop = "qt" only for surface
 # rendering; the TUI is JROS's own Rich loop launched directly by
 # launch.py, and the tray runs as its own
-# `python -m jaeger_os.interfaces.tray.macos` subprocess. The factory
+# `python -m jaeger_os.interfaces.pyside6.tray.macos` subprocess. The factory
 # stubs (J5A) raise NotImplementedError if the chassis ever tries to
 # invoke them; enabled = false keeps that from happening.
 
@@ -149,5 +149,5 @@ enabled = false   # JROS owns the TUI loop; chassis can't host it
 
 [[surface]]
 id = "tray"
-factory = "jaeger_os.interfaces.tray.macos:run_surface"
+factory = "jaeger_os.interfaces.pyside6.tray.macos:run_surface"
 enabled = false   # tray runs as its own subprocess

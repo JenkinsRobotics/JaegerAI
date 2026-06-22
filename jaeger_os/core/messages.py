@@ -23,16 +23,26 @@ from jaeger_os.app.logging import LogLine
 
 @dataclass
 class ChatMessage:
-    """Operator → agent — the window (and voice) input seam."""
+    """Operator → agent — the window (and voice) input seam.
+
+    ``session`` scopes the conversation (rolling history) so multiple
+    chat windows / new conversations share one app-agent but keep their
+    own context — the Hermes session model. Empty = the default session."""
     text: str = ""
     source: str = "gui"      # gui | voice
+    session: str = ""
     topic: str = "/act/chat"
 
 
 @dataclass
 class ChatReply:
-    """Agent → surfaces. Tier-1 rule: only the agent publishes this."""
+    """Agent → surfaces. Tier-1 rule: only the agent publishes this.
+
+    ``session`` echoes the originating ``ChatMessage.session`` so a client
+    renders only its own conversation's replies (events are routed by
+    session, the way Hermes tags every event with its ``session_id``)."""
     text: str = ""
+    session: str = ""
     topic: str = "/sense/chat"
 
 
@@ -46,9 +56,29 @@ class Transcript:
 
 @dataclass
 class AgentState:
-    """Agent lifecycle for the UI to render (idle | thinking | error)."""
+    """Agent lifecycle for the UI to render (idle | thinking | error).
+
+    ``detail`` carries the live sub-status the CLI status bar shows —
+    e.g. ``waiting on model 12.4s`` or a tool name — so windowed clients
+    render the same "what is it doing" readout."""
     state: str = "idle"
+    detail: str = ""
+    session: str = ""
     topic: str = "/sense/agent_state"
+
+
+@dataclass
+class ToolEvent:
+    """Agent → surfaces: one tool dispatch, for live tool-activity lines.
+
+    ``phase`` ∈ ``start`` | ``done`` | ``error``. Mirrors the agent loop's
+    ``tool_progress`` callback (the same signal the terminal TUI's ``┊``
+    lines render from), so every client shows tool use identically."""
+    name: str = ""
+    phase: str = "start"
+    elapsed_s: float = 0.0
+    session: str = ""
+    topic: str = "/sense/tool"
 
 
 # Registered for the ZMQ wire codec (the in-process bus passes objects
@@ -57,10 +87,11 @@ class AgentState:
 # ``/sys/log`` / node health later.
 MESSAGES = MessageRegistry()
 MESSAGES.register_all([
-    ChatMessage, ChatReply, Transcript, AgentState,
+    ChatMessage, ChatReply, Transcript, AgentState, ToolEvent,
     NodeHealth, LogLine,
 ])
 
 __all__ = [
     "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
+    "ToolEvent",
 ]

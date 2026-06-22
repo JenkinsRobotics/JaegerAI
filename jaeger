@@ -32,6 +32,10 @@ case "${1:-}" in
     exec "$VENV_PY" -m jaeger_os.cli "$@" ;;
   setup)
     shift; exec "$VENV_PY" -m jaeger_os.cli instances create "$@" ;;
+  bridge)
+    # Headless NDJSON stdio bridge — spawned by the native (Swift) app
+    # to drive the agent out of process. Not for interactive use.
+    shift; exec "$VENV_PY" -m jaeger_os.interfaces.bridge "$@" ;;
   doctor)
     shift; exec "$VENV_PY" -m jaeger_os.run --doctor "$@" ;;
   --dev)

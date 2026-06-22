@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Identity ─────────────────────────────────────────────────── -->
+    <key>CFBundleName</key>
+    <string>JaegerOS</string>
+    <key>CFBundleDisplayName</key>
+    <string>JaegerOS</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.jenkinsrobotics.JaegerOS</string>
+    <key>CFBundleExecutable</key>
+    <string>JaegerOS</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- Versions ─────────────────────────────────────────────────── -->
+    <!-- Kept in sync with the JROS release line (0.3.0).  Build
+         scripts can override with the current git short SHA. -->
+    <key>CFBundleShortVersionString</key>
+    <string>0.3.0</string>
+    <key>CFBundleVersion</key>
+    <string>0.3.0</string>
+
+    <!-- macOS minimums ──────────────────────────────────────────── -->
+    <!-- Matches Package.swift's .macOS(.v14) — MenuBarExtra,
+         AttributedString markdown init, modern onChange need 14+. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- Behaviour flags ─────────────────────────────────────────── -->
+    <!-- LSUIElement = true makes us a menu-bar-only accessory app:
+         no Dock icon, no Cmd-Tab presence.  Backs up the
+         NSApp.setActivationPolicy(.accessory) call in AppDelegate
+         with the equivalent Info.plist declaration the system
+         honours before any code runs. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- High-DPI all the way. -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- App lifecycle.  Single instance — bringing a second copy to
+         the front shouldn't spawn a second menu-bar icon. -->
+    <key>NSMultipleInstancesProhibited</key>
+    <true/>
+
+    <!-- Privacy strings ─────────────────────────────────────────── -->
+    <!-- macOS shows this string in the permission prompt the first
+         time we hit the mic via AVAudioEngine.  Without it the
+         prompt never fires and the input tap silently captures
+         zero audio. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>JaegerOS uses the microphone for push-to-talk dictation. Audio is processed locally — it never leaves your Mac.</string>
+
+    <!-- Same for speech-recognition APIs (SFSpeechRecognizer).  Not
+         used yet but wiring it now avoids a future Info.plist
+         regeneration when the CoreML Whisper layer lands. -->
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>JaegerOS uses on-device speech recognition to transcribe dictation locally.</string>
+
+    <!-- Apple Events — JaegerOS uses ``osascript`` to spawn the
+         rich-tui in a Terminal window via the "Open Rich TUI" menu
+         item.  Declaring it suppresses the per-app prompt on first
+         click. -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>JaegerOS uses AppleScript to open the Terminal-hosted rich TUI surface.</string>
+
+    <!-- Icon ─────────────────────────────────────────────────────── -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+
+    <!-- Documents / scheme / etc. — none for now. -->
+</dict>
+</plist>

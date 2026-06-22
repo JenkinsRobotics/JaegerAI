@@ -43,8 +43,8 @@ config_key = "agent"
 [[surface]]
 id = "chat_window"
 main = true                   # owns the Qt event loop
-factory = "jaeger_os.interfaces.rich_tui.window:make_surface"
+factory = "jaeger_os.interfaces.pyside6.rich_tui.window:make_surface"
 
 [[surface]]
 id = "tray"
-factory = "jaeger_os.interfaces.tray.qt:make_surface"
+factory = "jaeger_os.interfaces.pyside6.tray.qt:make_surface"

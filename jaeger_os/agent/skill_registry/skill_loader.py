@@ -9,7 +9,7 @@ A *skill* is a self-contained directory:
             smoke_test.py   # Decides whether the skill is safe to register
 
 0.3.0: a parallel canonical form lives alongside legacy
-``<name>_v<N>/`` folders — see ``docs/skill_schema_v3.md``:
+``<name>_v<N>/`` folders — see ``dev/docs/skill_schema_v3.md``:
 
     skills/<id>/
         manifest.yaml       # canonical v3 manifest (id, version, package,
@@ -646,7 +646,7 @@ def load_and_register(
             print(
                 f"[jaeger-skills] {stub_count} of those still use a legacy "
                 "<name>_v<N>/ folder — port them to manifest.yaml at your "
-                "convenience (docs/skill_schema_v3.md).",
+                "convenience (dev/docs/skill_schema_v3.md).",
                 flush=True,
             )
     # Playbook skills (procedural SKILL.md docs the agent reads on

@@ -229,7 +229,8 @@ def _drive_one(
 # case, not opt-in.
 _VISIBLE_MARKUP_MARKERS: tuple[str, ...] = (
     "<|tool_call", "<tool_call>", "</tool_call>", "<|/tool_call",
-    "<|channel", "<|message", "<|python_tag", "<|im_start", "<|im_end",
+    "<|channel", "<channel|>", "<|message", "<|python_tag",
+    "<|im_start", "<|im_end",
     '<|"|>',                 # gemma's inner quote marker
     "[TOOL_CALLS]",          # mistral envelope
     "<think>", "</think>",   # reasoning that should have been stripped

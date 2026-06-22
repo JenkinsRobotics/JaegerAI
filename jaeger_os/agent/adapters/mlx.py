@@ -46,6 +46,7 @@ from jaeger_os.agent.dialects import (
     detect_reasoning,
     extract_tool_calls,
     render_tools_for,
+    strip_reasoning_channels,
     strip_think_blocks,
     textify_tool_history,
 )
@@ -448,6 +449,11 @@ class MLXAdapter(ProviderAdapter):
         had_think = "<think>" in text
         if had_think:
             text = strip_think_blocks(text)
+        # Gemma 4 leaks malformed reasoning-channel markers
+        # (``<|channel>thought\n<channel|>…``); strip them so the answer
+        # surfaces clean instead of as a phantom "thought".
+        if "channel" in text.lower():
+            text = strip_reasoning_channels(text)
 
         tool_calls: list[ToolCall] = extract_tool_calls(text)
         cleaned = _strip_tool_envelopes(text).strip()

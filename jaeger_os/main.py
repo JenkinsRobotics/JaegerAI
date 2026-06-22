@@ -2445,11 +2445,10 @@ def _run_turn_via_jaeger_agent(
                         )
                     except (TypeError, ValueError):
                         pass
-            # Daemon-mode: forward to any chat.subscribe subscribers
-            # so a remote TUI / attach client shows live tool activity.
-            # In-process boot (no daemon) leaves the bus unset and
-            # this is a no-op.
-            bus = _pipeline.get("daemon_event_bus")
+            # Forward to any installed event bus (the windowed app's
+            # AgentBridge sets this to fan tool activity onto the chassis
+            # bus). Left unset → no-op (e.g. a bare TUI boot).
+            bus = _pipeline.get("event_bus")
             if bus is not None:
                 try:
                     payload: dict[str, Any] = {"name": name, "phase": phase}
@@ -3739,7 +3738,7 @@ def main() -> int:
         sys.argv.remove("--stream")
         print(
             "[jaeger] streaming mode — open the Swift renderer at:\n"
-            "          apps/JROS-Avatar (swift run JROSAvatar)\n"
+            "          jaeger_os/interfaces/avatar (swift run JROSAvatar)\n"
             "        connect URL:\n"
             "          ws://127.0.0.1:8765/frames",
             flush=True,

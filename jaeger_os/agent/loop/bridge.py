@@ -22,12 +22,41 @@ import queue
 import threading
 from typing import Any, Callable
 
-from jaeger_os.core.messages import AgentState, ChatMessage, ChatReply, Transcript
+from jaeger_os.core.messages import (
+    AgentState,
+    ChatMessage,
+    ChatReply,
+    ToolEvent,
+    Transcript,
+)
 
 # (client, text, session_key=...) -> {"text": str, "error": str | None, ...}
 TurnFn = Callable[..., dict]
 
 _DEFAULT_MAX_QUEUE = 32
+
+
+class _BusEventAdapter:
+    """Bridges the agent loop's internal event hook to the chassis bus.
+
+    The loop publishes mid-turn observability through
+    ``main._pipeline['event_bus'].publish(event_name, **payload)`` (the
+    same hook the old daemon used to fan out to attach clients). We
+    install one of these so those events land on the chassis bus as
+    typed messages the surfaces render — live tool activity today."""
+
+    def __init__(self, bus: Any) -> None:
+        self._bus = bus
+        self.current_session = ""   # set by the bridge before each turn
+
+    def publish(self, event: str, **payload: Any) -> None:
+        if event == "tool.progress":
+            self._bus.publish(ToolEvent(
+                name=str(payload.get("name", "")),
+                phase=str(payload.get("phase", "start")),
+                elapsed_s=float(payload.get("elapsed_s") or 0.0),
+                session=self.current_session,
+            ))
 
 
 class AgentBridge:
@@ -55,10 +84,18 @@ class AgentBridge:
         self.turns = 0
         self._state = "idle"          # idle | thinking | error | stopped
         self._last_error: str | None = None
+        self._event_adapter: _BusEventAdapter | None = None
 
     # ── host-component lifecycle ──────────────────────────────────
 
     def start(self) -> None:
+        # Route the agent loop's mid-turn events (tool activity) onto the
+        # chassis bus so surfaces render live tool use. Set after boot, so
+        # ``_pipeline`` is populated.
+        from jaeger_os.main import _pipeline
+        self._event_adapter = _BusEventAdapter(self.bus)
+        _pipeline["event_bus"] = self._event_adapter
+
         self.bus.subscribe(ChatMessage.topic, self._on_chat)
         self.bus.subscribe(Transcript.topic, self._on_transcript)
         self._thread = threading.Thread(
@@ -89,21 +126,22 @@ class AgentBridge:
     # ── bus → inbox (runs on the bus delivery thread) ─────────────
 
     def _on_chat(self, msg: ChatMessage) -> None:
-        self._enqueue(getattr(msg, "source", "gui"), msg.text)
+        session = getattr(msg, "session", "") or self.session_key
+        self._enqueue(getattr(msg, "source", "gui"), msg.text, session)
 
     def _on_transcript(self, msg: Transcript) -> None:
-        self._enqueue("voice", msg.text)   # STT seam → same inbox
+        self._enqueue("voice", msg.text, self.session_key)   # STT → same inbox
 
-    def _enqueue(self, source: str, text: str) -> None:
+    def _enqueue(self, source: str, text: str, session: str) -> None:
         if not self._accepting.is_set():
             return
         try:
-            self._inbox.put_nowait((source, text))
+            self._inbox.put_nowait((source, text, session))
         except queue.Full:
             # Backstop — the surface should disable input while thinking,
             # but voice / other producers can still race the model.
             self.bus.publish(ChatReply(
-                text="(busy — finishing the previous turn…)"))
+                text="(busy — finishing the previous turn…)", session=session))
 
     # ── the loop (one turn per inbox item, off the bus thread) ───
 
@@ -111,36 +149,41 @@ class AgentBridge:
         try:
             while not self._stop.is_set():
                 try:
-                    _source, text = self._inbox.get(timeout=0.1)
+                    _source, text, session = self._inbox.get(timeout=0.1)
                 except queue.Empty:
                     continue
                 if not (text or "").strip():
                     continue
+                # Tag this turn's tool events with its conversation so
+                # the right window renders them.
+                if self._event_adapter is not None:
+                    self._event_adapter.current_session = session
                 self._turn_active.set()
                 self.turns += 1
-                self._publish_state("thinking")
+                self._publish_state("thinking", session)
                 try:
-                    reply = self._run_one(text)
+                    reply = self._run_one(text, session)
                 except Exception as exc:  # noqa: BLE001 — a bad turn never kills tier 1
                     self._last_error = f"{type(exc).__name__}: {exc}"
-                    self._publish_state("error")
+                    self._publish_state("error", session)
                     reply = f"(turn failed: {self._last_error})"
-                self.bus.publish(ChatReply(text=reply))   # tier-1: only the agent replies
-                self._publish_state("idle")
+                # tier-1: only the agent replies — tagged with the session.
+                self.bus.publish(ChatReply(text=reply, session=session))
+                self._publish_state("idle", session)
                 self._turn_active.clear()
         finally:
             self._state = "stopped"
 
-    def _run_one(self, text: str) -> str:
+    def _run_one(self, text: str, session: str) -> str:
         run_turn = self._run_turn or _default_turn_fn()
-        out = run_turn(self.client, text, session_key=self.session_key)
+        out = run_turn(self.client, text, session_key=session)
         if out.get("error"):
             return f"(agent error: {out['error']})"
         return out.get("text") or ""
 
-    def _publish_state(self, state: str) -> None:
+    def _publish_state(self, state: str, session: str = "") -> None:
         self._state = state
-        self.bus.publish(AgentState(state=state))
+        self.bus.publish(AgentState(state=state, session=session))
 
 
 def _default_turn_fn() -> TurnFn:
