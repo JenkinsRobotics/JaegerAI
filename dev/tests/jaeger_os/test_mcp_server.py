@@ -4,7 +4,7 @@ is the SDK's responsibility)."""
 
 from __future__ import annotations
 
-from jaeger_os.mcp_server import _run_chat, build_server
+from jaeger_os.interfaces.mcp_server import _run_chat, build_server
 
 
 def test_chat_returns_reply_text():

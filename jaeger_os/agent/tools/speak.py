@@ -146,7 +146,7 @@ def _speak_via_bus(text: str) -> dict[str, Any]:
     """Publish a :class:`SpeechCommand` and block on the matching
     :class:`SpokenAck`.  Returns a dict shaped like the pre-0.4
     in-process result for backward-compatible callers."""
-    from jaeger_os import topics
+    from jaeger_os.transport import topics
     from jaeger_os.nodes import runtime
 
     # Ensure the node + bus are up.  Idempotent — pays the spinup

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import sys
 
-from jaeger_os import protocol
-from jaeger_os.client import JrosClient
+from jaeger_os.interfaces import protocol
+from jaeger_os.interfaces.client import JrosClient
 from jaeger_os.core.messages import AgentState, ChatReply, ToolEvent
 
 

@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.skill_tree import (
     SkillNode,
     SkillStatus,

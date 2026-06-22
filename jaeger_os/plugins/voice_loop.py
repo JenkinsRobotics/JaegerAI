@@ -315,7 +315,7 @@ def main() -> int:
     # /control/* topics that aren't designed yet.  Track B.3.2.b
     # handles those when the TTS path migrates.
     import queue as _queue
-    from jaeger_os import topics as _topics
+    from jaeger_os.transport import topics as _topics
     from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
     from jaeger_os.core.audio import AudioSession as _AudioSession
     from jaeger_os.nodes import AudioSessionNode as _AudioSessionNode

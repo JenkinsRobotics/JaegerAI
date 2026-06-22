@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.nodes import Node
 from jaeger_os.transport import InProcBus, ZMQBus
 

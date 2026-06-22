@@ -97,7 +97,7 @@ def test_short_phrase_path_disabled_with_zero():
 
 
 def test_transcript_topic_carries_timing_fields():
-    from jaeger_os import topics
+    from jaeger_os.transport import topics
     t = topics.Transcript(text="hi", speech_end_pc=12.5, stt_done_pc=12.9)
     assert t.speech_end_pc == 12.5
     assert t.stt_done_pc == 12.9
