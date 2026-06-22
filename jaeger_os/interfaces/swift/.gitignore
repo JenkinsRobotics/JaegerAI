@@ -1,0 +1,11 @@
+# Swift / SwiftPM build artifacts.
+.build/
+.swiftpm/
+Package.resolved
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# macOS junk.
+.DS_Store

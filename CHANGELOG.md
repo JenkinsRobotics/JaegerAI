@@ -33,7 +33,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 - L1-L4 animation adapters vendored from operator's Mochi engine
   (Apache 2.0): `image`, `bitmap`, `sprite`, `gif`, `math`.
 - `AnimationNode` + `FrameBridge` WebSocket bridge ship frames to
-  the Swift app at `apps/JROS-Avatar/` (in-tree).
+  the Swift app at `jaeger_os/interfaces/avatar/` (in-tree).
 - End-to-end animation pipeline proven: agent → bus → adapter →
   bridge → WebSocket client, with byte-perfect frame delivery and
   XP awarded.
@@ -345,7 +345,7 @@ path.
     `scheduleBuffer:completionHandler:` on AVAudioPlayerNode (no
     worker thread, no callback wrapper).  Apple-native, bypasses
     PortAudio entirely.  Ports the SessionPlayer pattern from
-    `dev_tools/audio_smoke/voice_assistant_avaudio.py`.
+    `dev/tools/audio_smoke/voice_assistant_avaudio.py`.
   - Toggle via `config.voice.audio_backend` or
     `JAEGER_AUDIO_BACKEND` env var.
 - **Whisper STT hardening** — `is_non_speech_marker()` suppresses
@@ -356,7 +356,7 @@ path.
 - **`jaeger_os/plugins/avaudio_io/`** — generic PyObjC AVAudioEngine
   bridge.  Used by `voice_loop.py`'s mic input; TTS bypasses the
   OutputStream wrapper for direct scheduling.
-- **`dev_tools/audio_smoke/`** — three standalone voice-assistant
+- **`dev/tools/audio_smoke/`** — three standalone voice-assistant
   loops (`legacy`, `persistent`, `avaudio`) for isolating audio
   regressions from the TUI environment.  Each is a self-contained
   mic + Whisper + Gemma + Kokoro loop.
@@ -426,10 +426,10 @@ path.
 - `docs/agent_contract.md` → `jaeger_os/docs/agent_contract.md`
   (framework-internal material belongs with the package).  Generator
   and test paths updated.
-- New: `docs/skill_schema_v3.md` (480 lines — canonical reference
+- New: `dev/docs/skill_schema_v3.md` (480 lines — canonical reference
   for the v3 manifest schema, capability scoring, deferred
   features).
-- `dev_tools/audio_smoke/README.md` documents the standalone smoke
+- `dev/tools/audio_smoke/README.md` documents the standalone smoke
   tests' purpose + invocation.
 
 ### Skipped from the upstream 0.3.0 plan
@@ -495,7 +495,7 @@ upgrade.
   framework files, and a symlink leaks straight into the parent.
   Now: real `rsync` copy. Agent edits stay in the sandbox, parent
   stays clean.
-- **`dev_scripts/dev_env.sh --refresh`** explicitly re-syncs the
+- **`dev/dev/scripts/dev_env.sh --refresh`** explicitly re-syncs the
   parent's `jaeger_os/` over the sandbox copy. Sync point is
   operator-controlled, never implicit.
 - **Verified directly:** writing `__sandbox_marker.py` into
@@ -559,10 +559,10 @@ Every top-level dir is now obviously framework-vs-dev:
 | `tests/` | `dev/tests/` |
 | `benchmark/` | `dev/benchmark/` |
 | `scripts/install.sh` | `scripts/install.sh` (unchanged — curl URL must hold) |
-| `scripts/run_tests.sh` | `dev_scripts/run_tests.sh` |
-| `scripts/dev_env.sh` | `dev_scripts/dev_env.sh` |
-| `scripts/check_wheel.py` | `dev_scripts/check_wheel.py` |
-| `scripts/generate_agent_contract.py` | `dev_scripts/generate_agent_contract.py` |
+| `scripts/run_tests.sh` | `dev/scripts/run_tests.sh` |
+| `dev/scripts/dev_env.sh` | `dev/dev/scripts/dev_env.sh` |
+| `scripts/check_wheel.py` | `dev/scripts/check_wheel.py` |
+| `scripts/generate_agent_contract.py` | `dev/scripts/generate_agent_contract.py` |
 | `dist/` | deleted (leftover from old pip era) |
 
 `scripts/` stays because the curl install URL is hard-baked to
@@ -571,7 +571,7 @@ Every top-level dir is now obviously framework-vs-dev:
 Path references touched: `pyproject.toml testpaths`, `daemon/cli.py`
 bench scripts, `daemon/bench_history_verb.py` HISTORY/sweep/flat/
 sanity paths, `daemon/bench_compare_verb.py` sweep_script,
-`dev_scripts/run_tests.sh`, `dev_scripts/generate_agent_contract.py`
+`dev/scripts/run_tests.sh`, `dev/scripts/generate_agent_contract.py`
 (source + emitted-doc paths), `docs/agent_contract.md` regenerated,
 `.gitignore` patterns swept from `benchmark/**` to `dev/benchmark/**`.
 

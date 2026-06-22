@@ -49,7 +49,7 @@ def register(subparsers: Any) -> None:
 
 def run_demo(args: Any) -> int:
     repo = Path(__file__).resolve().parents[2]
-    script = repo / "dev_scripts" / "lilith_demo.py"
+    script = repo / "dev" / "scripts" / "lilith_demo.py"
     if not script.exists():
         print(c.red(f"missing demo script: {script}"))
         return 1

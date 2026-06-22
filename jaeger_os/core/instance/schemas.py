@@ -555,7 +555,7 @@ class AvatarConfig(BaseModel):
 
 
 class HardwareConfig(BaseModel):
-    """Hardware package selection (docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
+    """Hardware package selection (dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
 
     ``package`` names a directory under ``jaeger_os/hardware/packages/``
     (e.g. ``"jp01"``); empty string = no robot attached (the default —

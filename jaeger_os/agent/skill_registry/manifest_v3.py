@@ -1,6 +1,6 @@
 """Skill manifest v3 — parser, validator, legacy stub generator.
 
-Implements the spec in ``docs/skill_schema_v3.md``.  This module is
+Implements the spec in ``dev/docs/skill_schema_v3.md``.  This module is
 data-only: parsing YAML into typed objects, validating against the
 closed enums, and synthesising stub manifests for legacy
 ``<name>_v<N>/`` folders that predate the v3 envelope.  It does NOT

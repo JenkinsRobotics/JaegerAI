@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_os.interfaces.tray.base import (
+from jaeger_os.interfaces.pyside6.tray.base import (
     TrayState,
     icon_path_for,
     glyph_for,
@@ -30,7 +30,7 @@ def test_assets_are_bundled_with_the_package():
     """The PNGs ship under ``jaeger_os/assets``. A wheel that drops
     them would degrade the tray to text fallback silently — this
     test catches it."""
-    from jaeger_os.interfaces.tray.base import _asset_root
+    from jaeger_os.interfaces.pyside6.tray.base import _asset_root
     root = _asset_root()
     assert (root / "jaeger_icon.png").is_file()
     assert (root / "jaeger_icon_off.png").is_file()
@@ -63,7 +63,7 @@ def test_resolver_returns_none_when_asset_is_missing(monkeypatch, tmp_path):
     test environment), the resolver returns None so the adapter
     falls back to the text glyph. The rumps adapter checks for None
     and uses ``glyph_for`` in that case."""
-    from jaeger_os.interfaces.tray import base as tray_base
+    from jaeger_os.interfaces.pyside6.tray import base as tray_base
     monkeypatch.setattr(tray_base, "_asset_root", lambda: tmp_path)
     # tmp_path has no PNGs in it.
     assert icon_path_for(TrayState.RUNNING) is None

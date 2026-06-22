@@ -15,7 +15,29 @@ from jaeger_os.agent.dialects import (
     extract_tool_calls,
     normalize_tool_name,
     repair_arguments,
+    strip_reasoning_channels,
 )
+
+
+def test_strip_gemma4_reasoning_channel_leak():
+    """Regression (2026-06-20): gemma-4-12B leaks its reasoning channel as
+    raw text — ``<|channel>thought\\n<channel|>ANSWER`` — that doesn't
+    match the proper ``<|channel|>`` harmony form, so it surfaced verbatim
+    in the live TUI as a phantom 'thought'. The stripper must return just
+    the answer (the content after the channel header)."""
+    leaked = ("<|channel>thought\n<channel|>The current date is "
+              "Saturday, June 20, 2026, and the time is 11:21 PM.")
+    out = strip_reasoning_channels(leaked)
+    assert out == ("The current date is Saturday, June 20, 2026, "
+                   "and the time is 11:21 PM.")
+    assert "channel" not in out and "thought" not in out
+
+
+def test_strip_reasoning_channels_leaves_plain_text_untouched():
+    """No channel markers → unchanged, even if the word 'channel' appears."""
+    plain = "The TV channel was showing a documentary about rabbits."
+    assert strip_reasoning_channels(plain) == plain
+    assert strip_reasoning_channels("just a normal answer") == "just a normal answer"
 
 
 # ── extract_tool_calls — happy paths ───────────────────────────────

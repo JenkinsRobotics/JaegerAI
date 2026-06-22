@@ -408,7 +408,7 @@ JROS/                       ← clone goes here (default ~/jaeger)
 ├── dev/docs/               ← architecture + design notes
 ├── dev/tests/              ← framework test suite
 ├── dev/benchmark/          ← bench corpus + sweep + sanity probe
-├── dev_scripts/            ← dev_env.sh, run_tests.sh, generators
+├── dev/scripts/            ← dev_env.sh, run_tests.sh, generators
 ├── sandbox/                ← in-repo isolated test install (gitignored)
 ├── pyproject.toml          ← pytest + ruff config
 ├── README.md, CHANGELOG.md, LICENSE

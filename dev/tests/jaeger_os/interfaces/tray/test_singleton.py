@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_os.interfaces.tray.singleton import (
+from jaeger_os.interfaces.pyside6.tray.singleton import (
     acquire_tray_slot, existing_tray_pid,
 )
 

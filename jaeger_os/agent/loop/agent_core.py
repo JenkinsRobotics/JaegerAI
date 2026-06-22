@@ -85,16 +85,17 @@ class AgentCore(Core):
 
 
 def _agent_name() -> str:
-    """Best-effort agent display name for the window/tray title; 'agent'
-    if the identity isn't reachable."""
+    """The agent's display name for the window/tray title — the live
+    ``identity.yaml`` ``name`` (a separate file from ``config.yaml``);
+    'agent' only if the identity isn't reachable."""
     try:
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
         from jaeger_os.main import _pipeline
-        cfg = _pipeline.get("config")
-        ident = getattr(cfg, "identity", None)
-        name = (getattr(ident, "display_name", None)
-                or getattr(ident, "name", None))
-        if name:
-            return str(name)
+        layout = _pipeline.get("layout")
+        if layout is not None:
+            name = load_yaml(layout.identity_path, Identity).name
+            if name:
+                return str(name)
     except Exception:  # noqa: BLE001
         pass
     return "agent"

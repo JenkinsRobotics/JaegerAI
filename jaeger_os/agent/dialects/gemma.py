@@ -77,4 +77,33 @@ def render_tools(tools: list[Any]) -> str:
     return ""
 
 
-__all__ = ["extract_native", "render_tools", "NATIVE_PATTERNS"]
+# Gemma 4's reasoning/channel markers, rendered as raw text by llama.cpp
+# (the special tokens leak out detokenised). The MALFORMED forms it emits
+# — ``<|channel>`` (no closing pipe) and ``<channel|>`` (no opening pipe)
+# — never match the proper ``<|channel|>`` harmony form, so the whole
+# block ``<|channel>thought\n<channel|>…answer…`` surfaced verbatim in
+# the TUI as a phantom "thought". 2026-06-20.
+_CHANNEL_MARKER = re.compile(r"<\|?channel\|?>")
+_CHANNEL_LABEL = re.compile(
+    r"^\s*(?:thought|thinking|analysis|commentary|final)\b[\s:]*",
+    re.IGNORECASE,
+)
+
+
+def strip_reasoning_channels(text: str) -> str:
+    """Strip Gemma's leaked channel markers, returning the content of the
+    LAST channel (the answer follows the reasoning preamble) with its
+    channel-name label removed. A no-op when no channel markers present."""
+    if not text or "channel" not in text.lower():
+        return text
+    segments = _CHANNEL_MARKER.split(text)
+    if len(segments) <= 1:
+        return text
+    tail = _CHANNEL_LABEL.sub("", segments[-1])
+    return tail.strip()
+
+
+__all__ = [
+    "extract_native", "render_tools", "NATIVE_PATTERNS",
+    "strip_reasoning_channels",
+]

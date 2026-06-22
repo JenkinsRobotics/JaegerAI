@@ -32,6 +32,7 @@ from jaeger_os.agent.schemas.message_types import ToolCall
 from . import chatml, gemma, harmony, llama3, mistral
 from ._shared import new_id, normalize_tool_name, repair_arguments
 from .detect import FAMILIES, detect_family, detect_reasoning, strip_think_blocks
+from .gemma import strip_reasoning_channels
 
 
 # Union of the envelope-strip patterns (Gemma's three natives + the
@@ -256,5 +257,6 @@ __all__ = [
     "detect_family",
     "detect_reasoning",
     "strip_think_blocks",
+    "strip_reasoning_channels",
     "FAMILIES",
 ]
