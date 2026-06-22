@@ -254,7 +254,7 @@ def ensure_animation_node(
     """Make sure an AnimationNode is running on the bus.  Idempotent.
 
     Spawns the FrameBridge WebSocket server alongside so connected
-    renderers (the Swift app at ``apps/JROS-Avatar/``, an OBS browser
+    renderers (the Swift app at ``jaeger_os/interfaces/avatar/``, an OBS browser
     source, debug tools) receive frames.  Pass ``enable_bridge=False``
     to skip the WS server — useful in headless tests and for the
     ``--no-avatar`` boot flag.

@@ -1,6 +1,6 @@
 """``jaeger_os.hardware`` — the hardware-integration framework.
 
-Design: docs/JROS_HARDWARE_FRAMEWORK_PLAN.md (operator-approved
+Design: dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md (operator-approved
 2026-06-12). This package is plan §4.2 step 1+2: the framework plus
 the simulated JP01 package. No Tier-3 supervisor lives here — node
 process lifecycle belongs to the daemon-arch plan; everything in this

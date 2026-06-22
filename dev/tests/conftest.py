@@ -10,7 +10,7 @@ conftest infers a marker tier from each test's path. The convention:
 
   * tests/jaeger_os/daemon/ ........... subprocess + slow (real forks)
   * tests/jaeger_os/interfaces/tui/ ... ui (TUI rendering / rumps)
-  * tests/jaeger_os/interfaces/tray/ .. ui (menu-bar tray)
+  * tests/jaeger_os/interfaces/pyside6/tray/ .. ui (menu-bar tray)
   * tests/jaeger_os/skills/test_computer_use* .. ui (Apple Events)
   * tests/jaeger_os/skills/test_macos_background* .. subprocess
   * tests/jaeger_os/agent/test_context_guard_integration .. integration
@@ -38,7 +38,7 @@ _PATH_MARKERS: list[tuple[str, tuple[str, ...]]] = [
     ("/jaeger_os/daemon/test_protocol",       ("subprocess",)),
     ("/jaeger_os/daemon/test_lifecycle",      ("subprocess",)),
     ("/jaeger_os/interfaces/tui/",            ("ui",)),
-    ("/jaeger_os/interfaces/tray/",           ("ui",)),
+    ("/jaeger_os/interfaces/pyside6/tray/",           ("ui",)),
     ("/jaeger_os/skills/test_computer_use",   ("ui",)),
     ("/jaeger_os/skills/test_macos_background", ("subprocess",)),
     ("/jaeger_os/agent/test_context_guard_integration", ("integration",)),

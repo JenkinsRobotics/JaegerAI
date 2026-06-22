@@ -5,5 +5,5 @@ Each package holds ``topology.yaml`` (validated by
 controllers, ``devices/`` command builders, ``capabilities.py`` arg
 models + handlers, and ``boot.py`` exposing
 ``load(bus=None) -> PackageRuntime``. See
-docs/JROS_HARDWARE_FRAMEWORK_PLAN.md §5 for the add-a-robot recipe.
+dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md §5 for the add-a-robot recipe.
 """
