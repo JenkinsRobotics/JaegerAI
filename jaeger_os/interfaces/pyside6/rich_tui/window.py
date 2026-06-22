@@ -362,8 +362,16 @@ class ChatWindow(QWidget):
             elif msg.state == "error":
                 self._set_busy(False)
                 self.status.setText("⚠ error")
-            else:  # idle
-                self._set_busy(False)
+            else:  # idle — annotate the resting status with the ctx gauge.
+                # The chat reply (published just before idle) already ran
+                # _set_busy(False) → "✓ replied in Xs"; only stop the timer
+                # here if that didn't happen, then append "· ctx 42%".
+                if self._turn_timer.isActive():
+                    self._set_busy(False)
+                detail = getattr(msg, "detail", "") or ""
+                if detail:
+                    cur = self.status.text()
+                    self.status.setText(f"{cur}  ·  {detail}" if cur else detail)
 
     def _on_request(self, msg: Any) -> None:
         """A mid-turn agent prompt (approval/clarify/secret). Show it, answer

@@ -186,7 +186,7 @@ class AgentBridge:
                     reply = f"(turn failed: {self._last_error})"
                 # tier-1: only the agent replies — tagged with the session.
                 self.bus.publish(ChatReply(text=reply, session=session))
-                self._publish_state("idle", session)
+                self._publish_state("idle", session, detail=_ctx_detail(session))
                 self._turn_active.clear()
         finally:
             self._state = "stopped"
@@ -198,9 +198,9 @@ class AgentBridge:
             return f"(agent error: {out['error']})"
         return out.get("text") or ""
 
-    def _publish_state(self, state: str, session: str = "") -> None:
+    def _publish_state(self, state: str, session: str = "", detail: str = "") -> None:
         self._state = state
-        self.bus.publish(AgentState(state=state, session=session))
+        self.bus.publish(AgentState(state=state, session=session, detail=detail))
 
 
 def _default_turn_fn() -> TurnFn:
@@ -208,3 +208,14 @@ def _default_turn_fn() -> TurnFn:
     # importing this module (and its tests) stays cheap.
     from jaeger_os.main import run_for_voice
     return run_for_voice
+
+
+def _ctx_detail(session: str) -> str:
+    """``ctx 42%`` for the surfaces' status bar, or "" when unavailable.
+    Best-effort: never let a missing pipeline break the post-turn publish."""
+    try:
+        from jaeger_os.main import last_ctx_snapshot
+        snap = last_ctx_snapshot(session)
+    except Exception:  # noqa: BLE001
+        return ""
+    return f"ctx {snap['pct']}%" if snap else ""

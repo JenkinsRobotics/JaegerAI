@@ -1200,21 +1200,60 @@ class JaegerAgent:
         content = self._execute_prepared(prep)
         self._finish_dispatch(prep, content)
 
+    # File tools whose only side effect is a file at ``args["path"]``. These
+    # may run concurrently with each other when their paths don't overlap —
+    # so a multi-file edit fans out — while read-only tools (web_search etc.)
+    # are always parallel-safe.
+    _PATH_SCOPED_READ = frozenset({"read_file"})
+    _PATH_SCOPED_WRITE = frozenset({
+        "write_file", "append_file", "edit_file", "patch", "delete_file"})
+
+    @staticmethod
+    def _call_path(tc: ToolCall) -> str | None:
+        args = tc.get("arguments") or {}
+        p = args.get("path") or args.get("file_path")
+        return str(p) if p else None
+
+    @staticmethod
+    def _paths_overlap(a: str, b: str) -> bool:
+        """True if two paths are the same file or one contains the other."""
+        import os
+        a, b = os.path.normpath(a), os.path.normpath(b)
+        return a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+
     def _batch_is_parallel_safe(self, tool_calls: list[ToolCall]) -> bool:
-        """A batch may run concurrently only when EVERY call resolves to
-        a tool explicitly classified ``side_effect="read"`` and not
-        interactive. Unclassified tools are treated as write-side —
-        conservative by construction."""
+        """A batch may run concurrently when every call is either a
+        ``side_effect="read"`` tool or a path-scoped file tool, none is
+        interactive, and no two path-scoped calls touch overlapping paths
+        where at least one is a write (two reads of the same file are fine).
+        Unclassified tools are treated as write-side — conservative."""
         if len(tool_calls) < 2:
             return False
+        scoped: list[tuple[str, bool]] = []   # (normpath, is_write)
         for tc in tool_calls:
-            tool_def = self._dispatch_by_name.get(tc.get("name") or "")
+            name = tc.get("name") or ""
+            tool_def = self._dispatch_by_name.get(name)
             if tool_def is None:
-                return False
-            if getattr(tool_def, "side_effect", "") != "read":
                 return False
             if getattr(tool_def, "interactive", False):
                 return False
+            is_read = getattr(tool_def, "side_effect", "") == "read"
+            is_scoped = name in self._PATH_SCOPED_READ \
+                or name in self._PATH_SCOPED_WRITE
+            if not is_read and not is_scoped:
+                return False                  # unknown write-side → serial
+            if is_scoped:
+                path = self._call_path(tc)
+                if path is None:
+                    return False              # path-scoped but no path → serial
+                scoped.append((path, name in self._PATH_SCOPED_WRITE))
+        # Conflict only when overlapping paths and at least one is a write.
+        for i in range(len(scoped)):
+            pi, wi = scoped[i]
+            for j in range(i + 1, len(scoped)):
+                pj, wj = scoped[j]
+                if (wi or wj) and self._paths_overlap(pi, pj):
+                    return False
         return True
 
     def _dispatch_parallel(self, tool_calls: list[ToolCall]) -> None:

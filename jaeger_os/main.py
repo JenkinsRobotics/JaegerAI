@@ -733,6 +733,22 @@ def reset_session(session_key: str = _DEFAULT_SESSION_KEY) -> int:
     return legacy_dropped + agent_dropped
 
 
+def last_ctx_snapshot(session_key: str = _DEFAULT_SESSION_KEY) -> dict[str, int]:
+    """How full a session's context window is right now: ``{tokens, pct}``.
+
+    Estimates the *current* prompt size (system + history + tool schemas)
+    against the agent's prompt budget — a live "how close to compaction"
+    gauge for status bars. Empty dict when the session has no agent yet."""
+    agent = _jaeger_agents_by_session.get(session_key)
+    guard = getattr(agent, "context_guard", None)
+    if agent is None or guard is None:
+        return {}
+    tokens = guard.estimate_messages_tokens(
+        agent.messages, system_prompt=agent.system_prompt, tools=agent.tools)
+    budget = guard.budget.prompt_budget
+    return {"tokens": tokens, "pct": round(100 * tokens / budget) if budget else 0}
+
+
 def pop_last_exchange(session_key: str = _DEFAULT_SESSION_KEY) -> str | None:
     """Drop the most recent user→assistant exchange from a session's
     history (``/undo`` / ``/retry``). Returns the user text of that
