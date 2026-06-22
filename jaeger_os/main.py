@@ -2741,7 +2741,18 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     The brain is transport-agnostic — a spoken turn is the same agent
     turn as a typed one; the dict just carries the text + tool activity
     for the voice consumer to speak."""
-    out = _run_turn(client, user_text, session_key=session_key or "voice")
+    session = session_key or "voice"
+    out = _run_turn(client, user_text, session_key=session)
+    # Persist the turn so conversations survive app close + are listable.
+    try:
+        from jaeger_os.core.sessions import get_store
+        store = get_store()
+        if store is not None:
+            store.record(session, "user", user_text)
+            if out.get("text"):
+                store.record(session, "assistant", out["text"])
+    except Exception:  # noqa: BLE001 — persistence never breaks a turn
+        pass
     return {
         "text": out["text"], "tool_activity": out["tool_activity"],
         "spoke_via_tool": out["spoke_via_tool"], "elapsed_s": out["elapsed_s"],

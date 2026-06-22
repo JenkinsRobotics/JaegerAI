@@ -59,6 +59,7 @@ _SLASH_COMMANDS = {
     "/new": "new conversation",
     "/clear": "clear the screen",
     "/copy": "copy the last reply",
+    "/sessions": "list recent conversations",
     "/help": "list commands",
 }
 
@@ -287,6 +288,8 @@ class ChatWindow(QWidget):
             self._emit_banner()
         elif name == "copy":
             self._copy_last_reply()
+        elif name == "sessions":
+            self._list_sessions()
         else:
             self._emit_system(f"unknown command: /{name} — try /help")
 
@@ -310,6 +313,29 @@ class ChatWindow(QWidget):
             self._emit_system("copied last reply")
         else:
             self._emit_system("nothing to copy yet")
+
+    def _list_sessions(self) -> None:
+        """Recent persisted conversations (the durable session store)."""
+        try:
+            from jaeger_os.core.sessions import get_store
+            store = get_store()
+            rows = store.list_sessions(limit=15) if store is not None else None
+        except Exception as exc:  # noqa: BLE001
+            self._emit_system(f"sessions unavailable: {exc}")
+            return
+        if rows is None:
+            self._emit_system("no session store (no instance bound)")
+            return
+        if not rows:
+            self._emit_system("no past conversations yet")
+            return
+        self._emit_system(f"recent conversations ({len(rows)}):")
+        for r in rows:
+            label = (r.get("title") or r.get("preview") or "(untitled)")[:56]
+            mark = "● " if r["id"] == self._session else "  "
+            self._emit(f"  {mark}{r['id']}  {label}  ·  {r['messages']} msgs\n",
+                       _INK_DIM)
+        QTimer.singleShot(20, self._scroll_to_bottom)
 
     def _emit_system(self, text: str) -> None:
         self._emit(f"\n  {text}\n", _INK_DIM, italic=True)
