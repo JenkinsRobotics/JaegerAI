@@ -2433,10 +2433,13 @@ def _run_turn_via_jaeger_agent(
         _pipeline.setdefault("turn_tool_time", 0.0)
 
         def _tool_progress(name: str, phase: str, data: Any) -> None:
+            from jaeger_os.plugins.registry import fire_hook
             if phase == "start":
                 set_agent_status("tool", detail=name)
+                fire_hook("pre_tool", name=name, data=data)
             else:
                 set_agent_status("thinking", detail="")
+                fire_hook("post_tool", name=name, phase=phase, data=data)
                 if phase == "done" and isinstance(data, dict):
                     try:
                         _pipeline["turn_tool_time"] = (
@@ -3002,6 +3005,15 @@ def self_test(layout: InstanceLayout) -> int:
     except Exception as exc:
         print(f"== skill discovery == FAILED: {exc}")
         fail += 1
+
+    # Plugin discovery — third-party tools/commands/hooks (entry points).
+    try:
+        from jaeger_os.plugins.registry import discover_plugins
+        plugins = discover_plugins()
+        if plugins:
+            print(f"== plugins == {plugins}")
+    except Exception as exc:  # noqa: BLE001 — plugins never block boot
+        print(f"== plugins == FAILED: {exc}")
 
     # Credentials: round-trip + perm enforcement
     try:
