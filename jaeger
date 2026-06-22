@@ -36,6 +36,10 @@ case "${1:-}" in
     # Headless NDJSON stdio bridge — spawned by the native (Swift) app
     # to drive the agent out of process. Not for interactive use.
     shift; exec "$VENV_PY" -m jaeger_os.interfaces.bridge "$@" ;;
+  mcp)
+    # Expose JROS as an MCP server (stdio) so Claude Code / Cursor / Zed
+    # can drive the agent as a tool. Spawned by the MCP client.
+    shift; exec "$VENV_PY" -m jaeger_os.mcp_server "$@" ;;
   doctor)
     shift; exec "$VENV_PY" -m jaeger_os.run --doctor "$@" ;;
   --dev)

@@ -82,24 +82,41 @@ def main(argv: list[str] | None = None) -> int:
     # ``{"type":"tool",...}`` frames (same event the in-process windowed
     # app renders). Fires on this thread during run_for_voice, so it
     # serialises cleanly with reply frames on the one stdout stream.
+    from jaeger_os import protocol
+
     class _ToolEmitter:
         def publish(self, event: str, **payload: object) -> None:
             if event == "tool.progress":
-                _emit(proto, {
-                    "type": "tool",
-                    "name": str(payload.get("name", "")),
-                    "phase": str(payload.get("phase", "start")),
-                    "elapsed_s": float(payload.get("elapsed_s") or 0.0),
-                })
+                _emit(proto, protocol.tool_frame(
+                    str(payload.get("name", "")),
+                    str(payload.get("phase", "start")),
+                    float(payload.get("elapsed_s") or 0.0)))
 
     from jaeger_os.main import _pipeline
     _pipeline["event_bus"] = _ToolEmitter()
 
-    _emit(proto, {
-        "type": "ready",
-        "instance": instance,
-        "model": _model_name(boot),
-    })
+    # Keep the console permission provider from stealing a line off our
+    # NDJSON stdin: surface the request to the client (so it's visible) and
+    # fail safe to deny. Full interactive approval over the bridge needs
+    # async stdin reads — a follow-on; the in-process window has it now.
+    class _StdioDenyConfirm:
+        def confirm(self, request: object) -> bool:
+            _emit(proto, protocol.request_frame(
+                "", "approval",
+                (f"Allow {getattr(request, 'skill', '')}."
+                 f"{getattr(request, 'operation', 'this action')}?")))
+            return False
+
+    try:
+        from jaeger_os.core.safety.permissions import (
+            AllowAllProvider, current_policy)
+        policy = current_policy()
+        if not isinstance(policy.confirmation, AllowAllProvider):
+            policy.confirmation = _StdioDenyConfirm()
+    except Exception:  # noqa: BLE001
+        pass
+
+    _emit(proto, protocol.ready_frame(instance, _model_name(boot)))
 
     try:
         for raw in sys.stdin:
@@ -108,26 +125,27 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             try:
                 req = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # ignore malformed frames rather than dying
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(req, dict):
+                continue
             if req.get("op") == "quit":
                 break
+            # ``{"op":"send","text":...}`` (protocol) or legacy ``{"text":...}``.
             text = (req.get("text") or "").strip()
+            session = req.get("session") or "desktop-app"
             if not text:
                 continue
 
-            _emit(proto, {"type": "state", "busy": True})
+            _emit(proto, protocol.state_frame(True, session))
             try:
-                result = run_for_voice(client, text, session_key="desktop-app")
-                _emit(proto, {
-                    "type": "reply",
-                    "text": result.get("text") or "",
-                    "error": result.get("error"),
-                })
+                result = run_for_voice(client, text, session_key=session)
+                _emit(proto, protocol.reply_frame(
+                    result.get("text") or "", result.get("error"), session))
             except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-                _emit(proto, {"type": "reply", "text": "", "error": str(exc)})
+                _emit(proto, protocol.reply_frame("", str(exc), session))
             finally:
-                _emit(proto, {"type": "state", "busy": False})
+                _emit(proto, protocol.state_frame(False, session))
     finally:
         cleanup = getattr(boot, "cleanup", None)
         if callable(cleanup):
