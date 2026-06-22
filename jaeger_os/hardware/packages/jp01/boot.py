@@ -30,7 +30,7 @@ from typing import Any
 
 import inspect
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.agent.schemas.tool_registry import unregister_tool
 from jaeger_os.agent.schemas.tool_schema import ToolDef
 from jaeger_os.hardware.capabilities import register_package_capabilities

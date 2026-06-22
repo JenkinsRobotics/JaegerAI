@@ -9,7 +9,7 @@ from __future__ import annotations
 import msgspec
 import pytest
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport import codec
 
 

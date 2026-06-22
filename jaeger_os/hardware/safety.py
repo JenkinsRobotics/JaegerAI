@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport import Bus
 
 

@@ -17,7 +17,7 @@ Two layers:
   * :mod:`jaeger_os.transport.zmq_bus` (Track A.4) — ZMQ pub/sub
     behind the same Bus interface, used in ``--multiprocess`` mode.
 
-All three import from :mod:`jaeger_os.topics`; nothing in topics.py
+All three import from :mod:`jaeger_os.transport.topics`; nothing in topics.py
 imports from here.  Schemas are transport-free by construction.
 """
 

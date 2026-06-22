@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport import Broker
 from jaeger_os.transport.broker import _BrokerZMQBus
 

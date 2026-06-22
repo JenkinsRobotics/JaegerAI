@@ -49,7 +49,7 @@ from typing import Any
 
 import zmq
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport.bus import Bus, SubscriberFn
 from jaeger_os.transport.codec import decode, encode
 

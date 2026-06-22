@@ -1,4 +1,4 @@
-"""Test suite for ``jaeger_os.topics`` — the 0.4 node-topic SSOT.
+"""Test suite for ``jaeger_os.transport.topics`` — the 0.4 node-topic SSOT.
 
 Track A.1 of the 0.4 roadmap.  Schemas are msgspec.Struct (not
 Pydantic) per the operator-resolved transport-schema decision; tests
@@ -13,7 +13,7 @@ import time
 import msgspec
 import pytest
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 
 
 # ── registry shape ────────────────────────────────────────────────

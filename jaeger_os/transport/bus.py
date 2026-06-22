@@ -24,7 +24,7 @@ from __future__ import annotations
 import abc
 from typing import Callable
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 
 
 # A callback registered for a topic gets the decoded TopicMessage.

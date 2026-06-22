@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import msgspec
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 
 
 # ── topic → wire-format lookup ─────────────────────────────────────

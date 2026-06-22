@@ -9,7 +9,7 @@ package is supervisable but not self-supervising.
 Layering (each boundary keeps its existing JROS idiom):
 
     agent tool boundary    Pydantic   (ToolDef.args_model)
-    bus boundary           msgspec    (jaeger_os.topics structs)
+    bus boundary           msgspec    (jaeger_os.transport.topics structs)
     wire boundary          Protocol   (bytes — package-owned)
 
 Public surface:

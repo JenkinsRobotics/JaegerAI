@@ -3,7 +3,7 @@
 The 30-line ``queue.Queue`` pattern from VoiceLLM
 (``dev/docs/library_review/voicellm.md``), extended with:
 
-  * Topic-typed messages (msgspec.Struct from ``jaeger_os.topics``)
+  * Topic-typed messages (msgspec.Struct from ``jaeger_os.transport.topics``)
   * Per-topic subscriber lists (multiple callbacks per topic)
   * A delivery thread that drains the queue and fans out to
     subscribers (so a slow subscriber doesn't block the publisher)
@@ -19,7 +19,7 @@ from __future__ import annotations
 import queue
 import threading
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 from jaeger_os.transport.bus import Bus, SubscriberFn
 
 
