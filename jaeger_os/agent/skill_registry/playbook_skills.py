@@ -230,19 +230,30 @@ def discover_playbooks() -> list[PlaybookSkill]:
 
 
 def _select_available(
-    skills: list[PlaybookSkill], disabled: set[str]
+    skills: list[PlaybookSkill], disabled: set[str],
+    available_tools: set[str] | None = None,
 ) -> list[PlaybookSkill]:
     """Filter discovered skills to those the agent should see — drop those
-    for another OS and those disabled in config."""
-    return [s for s in skills if _platform_ok(s) and s.name not in disabled]
+    for another OS, those disabled in config, and (when ``available_tools``
+    is given) those whose ``requires_tools`` aren't all present, so a skill
+    that needs an absent tool doesn't clutter the index."""
+    out = [s for s in skills if _platform_ok(s) and s.name not in disabled]
+    if available_tools is not None:
+        out = [s for s in out if all(t in available_tools
+                                     for t in s.requires_tools)]
+    return out
 
 
-def available_playbooks() -> list[PlaybookSkill]:
+def available_playbooks(
+    available_tools: set[str] | None = None,
+) -> list[PlaybookSkill]:
     """Playbook skills the agent should actually see: every discovered skill
-    minus those for another platform and those disabled in the instance
-    config. The `skill` tool and the prompt index use this; the raw
+    minus those for another platform, those disabled in the instance config,
+    and (when ``available_tools`` is given) those whose required tools are
+    absent. The `skill` tool and the prompt index use this; the raw
     :func:`discover_playbooks` is kept for internal callers (e.g. curation)."""
-    return _select_available(discover_playbooks(), _disabled_playbook_names())
+    return _select_available(discover_playbooks(), _disabled_playbook_names(),
+                             available_tools)
 
 
 _SKILL_INDEX_MAX_CHARS = 1400
@@ -276,11 +287,14 @@ def _format_skill_index(skills: list[PlaybookSkill]) -> str:
     return text
 
 
-def build_skill_index() -> str:
+def build_skill_index(available_tools: set[str] | None = None) -> str:
     """A compact index of the available playbook skills for the system
     prompt — so the model knows what procedures exist without a discovery
-    round-trip. Capped so it never crowds out the routing imperatives."""
-    return _format_skill_index(available_playbooks())
+    round-trip. Capped so it never crowds out the routing imperatives.
+
+    Pass ``available_tools`` (active tool names) to hide skills whose
+    required tools aren't present."""
+    return _format_skill_index(available_playbooks(available_tools))
 
 
 def find_playbook(name: str) -> PlaybookSkill | None:
