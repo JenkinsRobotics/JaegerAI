@@ -21,11 +21,11 @@ The Track B audio_session / tts nodes will all subclass this.
 """
 
 from .base import Node, NodeState
-from .software.audio_session import AudioSessionNode, STTAdapter, STTNode
-from .hardware.light import LightAdapter, LightNode, SerialLightAdapter
-from .hardware.motor import MotorAdapter, MotorNode, SerialMotorAdapter
-from .software.tts import Synthesizer, TTSNode
-from .hardware.vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
+from .audio_session import AudioSessionNode, STTAdapter, STTNode
+from .light import LightAdapter, LightNode, SerialLightAdapter
+from .motor import MotorAdapter, MotorNode, SerialMotorAdapter
+from .tts import Synthesizer, TTSNode
+from .vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
 
 __all__ = [
     "Node", "NodeState",

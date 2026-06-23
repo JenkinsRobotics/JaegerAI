@@ -200,8 +200,8 @@ def _start_nodes(runtime: Jp01Runtime, bus: Any) -> set[str]:
     formation. Vision stays adapter-only until live streams land.
     Returns the controllers whose adapters the nodes now own."""
     from jaeger_os.nodes.base import NodeState
-    from jaeger_os.nodes.hardware.light import LightNode
-    from jaeger_os.nodes.hardware.motor import MotorNode
+    from jaeger_os.nodes.light import LightNode
+    from jaeger_os.nodes.motor import MotorNode
 
     specs: list[tuple[str, Any]] = []
     if "mc01" in runtime.adapters:

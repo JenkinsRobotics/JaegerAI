@@ -38,11 +38,11 @@ import time
 from typing import Any, Callable, Optional
 
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
-from jaeger_os.nodes.software.animation import AnimationNode, AvatarAutoStateDriver
-from jaeger_os.nodes.software.animation import bridge as animation_bridge
-from jaeger_os.nodes.software.audio_session import AudioSessionNode
+from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
+from jaeger_os.nodes.animation import bridge as animation_bridge
+from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
-from jaeger_os.nodes.software.tts import Synthesizer, TTSNode
+from jaeger_os.nodes.tts import Synthesizer, TTSNode
 from jaeger_os.transport import Bus, InProcBus
 
 
@@ -315,7 +315,7 @@ def ensure_animation_node(
         # Register the L1-L4 adapter set so the brain can route
         # to any of them by name.
         try:
-            from jaeger_os.nodes.software.animation.adapters import (
+            from jaeger_os.nodes.animation.adapters import (
                 BitmapAdapter, GifAdapter, ImageAdapter,
                 MathAdapter, SpriteAdapter,
             )
