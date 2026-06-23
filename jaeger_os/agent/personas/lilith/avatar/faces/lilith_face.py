@@ -39,7 +39,7 @@ from typing import Any
 
 import numpy as np
 
-from jaeger_os.nodes.software.animation.adapters import MathScript
+from jaeger_os.nodes.animation.adapters import MathScript
 
 
 # ── Mochi palette ────────────────────────────────────────────────

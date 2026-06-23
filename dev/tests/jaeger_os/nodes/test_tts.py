@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_os.nodes.software.tts`` — Track B.1.
+"""Tests for ``jaeger_os.nodes.tts`` — Track B.1.
 
 Mock synthesizer so we exercise the Bus + node + ack contract without
 touching audio hardware or model loading.  Real-Kokoro integration

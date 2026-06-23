@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_os.nodes.hardware.motor`` — Track C skeleton.
+"""Tests for ``jaeger_os.nodes.motor`` — Track C skeleton.
 
 Covers MotorNode lifecycle + SerialMotorAdapter's universal ASCII
 wire format.  Instance-specific board adapters (JP01-MC01 ESP32,

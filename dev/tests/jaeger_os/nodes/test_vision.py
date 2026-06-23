@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_os.nodes.hardware.vision`` — Track B.5.
+"""Tests for ``jaeger_os.nodes.vision`` — Track B.5.
 
 Covers:
   * VisionNode lifecycle with a mock adapter (no cv2, no socket)
@@ -21,7 +21,7 @@ import pytest
 
 from jaeger_os.transport import topics
 from jaeger_os.nodes import VisionNode
-from jaeger_os.nodes.hardware.vision.adapters import FrameEnvelope, TCPCameraAdapter
+from jaeger_os.nodes.vision.adapters import FrameEnvelope, TCPCameraAdapter
 from jaeger_os.transport import InProcBus
 
 

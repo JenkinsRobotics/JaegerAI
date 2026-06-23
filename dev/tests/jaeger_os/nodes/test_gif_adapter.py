@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from jaeger_os.nodes.software.animation.adapters import GifAdapter
+from jaeger_os.nodes.animation.adapters import GifAdapter
 
 
 def _gif(tmp_path: Path, *, frames: int, color_step: int = 40) -> Path:
