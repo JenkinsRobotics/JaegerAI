@@ -13,7 +13,7 @@ import time
 import pytest
 
 from jaeger_os.transport import topics
-from jaeger_os.nodes.software.animation import AvatarAutoStateDriver
+from jaeger_os.nodes.animation import AvatarAutoStateDriver
 from jaeger_os.transport import InProcBus
 
 

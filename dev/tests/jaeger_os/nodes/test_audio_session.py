@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_os.nodes.software.audio_session`` — Track B.3.1.
+"""Tests for ``jaeger_os.nodes.audio_session`` — Track B.3.1.
 
 Mock STT adapter so we don't load Whisper or open the mic.  The
 real-Whisper integration runs out-of-band via

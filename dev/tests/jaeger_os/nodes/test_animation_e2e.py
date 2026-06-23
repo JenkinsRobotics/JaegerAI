@@ -20,12 +20,12 @@ import websockets
 from PIL import Image
 
 from jaeger_os.transport import topics
-from jaeger_os.nodes.software.animation import (
+from jaeger_os.nodes.animation import (
     AnimationNode,
     FrameBuffer,
 )
-from jaeger_os.nodes.software.animation import bridge as _bridge
-from jaeger_os.nodes.software.animation.adapters import ImageAdapter
+from jaeger_os.nodes.animation import bridge as _bridge
+from jaeger_os.nodes.animation.adapters import ImageAdapter
 from jaeger_os.skill_tree import SkillNode, SkillTreeRegistry
 from jaeger_os.transport import InProcBus
 

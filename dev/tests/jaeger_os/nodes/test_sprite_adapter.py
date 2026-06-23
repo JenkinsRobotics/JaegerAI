@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from jaeger_os.nodes.software.animation.adapters import SpriteAdapter
+from jaeger_os.nodes.animation.adapters import SpriteAdapter
 
 
 def _sheet(tmp_path: Path) -> Path:

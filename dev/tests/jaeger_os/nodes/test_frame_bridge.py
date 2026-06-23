@@ -16,8 +16,8 @@ import time
 import pytest
 import websockets
 
-from jaeger_os.nodes.software.animation import bridge
-from jaeger_os.nodes.software.animation.base import FrameBuffer
+from jaeger_os.nodes.animation import bridge
+from jaeger_os.nodes.animation.base import FrameBuffer
 
 
 def _free_port() -> int:

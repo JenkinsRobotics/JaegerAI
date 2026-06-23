@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import pytest
 
 from jaeger_os.transport import topics
-from jaeger_os.nodes.software.animation import AnimationNode, FrameBuffer
+from jaeger_os.nodes.animation import AnimationNode, FrameBuffer
 from jaeger_os.skill_tree import SkillNode, SkillTreeRegistry
 from jaeger_os.transport import InProcBus
 

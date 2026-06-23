@@ -18,7 +18,7 @@ from textwrap import dedent
 import pytest
 
 from jaeger_os.transport import topics
-from jaeger_os.nodes.software.animation.adapters import MathAdapter, MathScript
+from jaeger_os.nodes.animation.adapters import MathAdapter, MathScript
 
 
 # ── MathAdapter.set_runtime_param ───────────────────────────────────
@@ -28,7 +28,7 @@ def test_math_adapter_set_runtime_param_updates_amplitude(
 ) -> None:
     script_path = tmp_path / "ampscript.py"
     script_path.write_text(dedent("""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
         class S(MathScript):
             def render_into(self, t, frame_rgb):
                 frame_rgb[..., 0] = int(self.amplitude_param * 200)
@@ -61,7 +61,7 @@ def test_animation_node_forwards_tts_chunk_to_adapter(
 ) -> None:
     """End-to-end at the node level: publish a TtsChunk on the
     bus, verify the active adapter's amplitude_param updated."""
-    from jaeger_os.nodes.software.animation import AnimationNode
+    from jaeger_os.nodes.animation import AnimationNode
     from jaeger_os.transport import InProcBus
     import threading
 
@@ -69,7 +69,7 @@ def test_animation_node_forwards_tts_chunk_to_adapter(
     # by the test.
     script_path = tmp_path / "probe.py"
     script_path.write_text(dedent("""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
         class S(MathScript):
             def on_enter(self, **kw):
                 super().on_enter(**kw)
@@ -120,7 +120,7 @@ def test_animation_node_tts_chunk_with_no_active_adapter_is_noop(
 ) -> None:
     """When no animation is playing, TtsChunk events are silently
     dropped."""
-    from jaeger_os.nodes.software.animation import AnimationNode
+    from jaeger_os.nodes.animation import AnimationNode
     from jaeger_os.transport import InProcBus
     import threading
 

@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_os.nodes.hardware.light`` — Track C skeleton.
+"""Tests for ``jaeger_os.nodes.light`` — Track C skeleton.
 
 Covers LightNode lifecycle + SerialLightAdapter's universal ASCII
 wire format.

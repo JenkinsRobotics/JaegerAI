@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from jaeger_os.nodes.software.animation.adapters import ImageAdapter
+from jaeger_os.nodes.animation.adapters import ImageAdapter
 
 
 # ── fixtures ──────────────────────────────────────────────────────

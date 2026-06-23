@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_os.nodes.software.animation.adapters import BitmapAdapter
+from jaeger_os.nodes.animation.adapters import BitmapAdapter
 
 
 def _bitmap_json(tmp_path: Path, *, w: int, h: int,

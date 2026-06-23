@@ -11,7 +11,7 @@ from textwrap import dedent
 
 import pytest
 
-from jaeger_os.nodes.software.animation.adapters import MathAdapter, MathScript
+from jaeger_os.nodes.animation.adapters import MathAdapter, MathScript
 
 
 def _script(tmp_path: Path, *, name: str, body: str) -> Path:
@@ -32,7 +32,7 @@ def test_adapter_identity() -> None:
 
 def test_loader_finds_mathscript_subclass(tmp_path: Path) -> None:
     asset = _script(tmp_path, name="solid_red.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class SolidRed(MathScript):
             def render_into(self, t, frame_rgb):
@@ -65,7 +65,7 @@ def test_animation_can_react_to_time(tmp_path: Path) -> None:
     """Script colours red by time mod 256; first vs later frame
     should differ when t advances."""
     asset = _script(tmp_path, name="time_red.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class TimeRed(MathScript):
             def render_into(self, t, frame_rgb):
@@ -84,7 +84,7 @@ def test_animation_can_react_to_time(tmp_path: Path) -> None:
 
 def test_on_enter_receives_params(tmp_path: Path) -> None:
     asset = _script(tmp_path, name="param_red.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class ParamRed(MathScript):
             def on_enter(self, **kwargs):
@@ -104,7 +104,7 @@ def test_on_enter_receives_params(tmp_path: Path) -> None:
 
 def test_render_exception_returns_none(tmp_path: Path) -> None:
     asset = _script(tmp_path, name="broken.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class Broken(MathScript):
             def render_into(self, t, frame_rgb):
@@ -119,7 +119,7 @@ def test_render_exception_returns_none(tmp_path: Path) -> None:
 
 def test_close_drops_script(tmp_path: Path) -> None:
     asset = _script(tmp_path, name="solid.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class Solid(MathScript):
             def render_into(self, t, frame_rgb):
@@ -136,7 +136,7 @@ def test_close_drops_script(tmp_path: Path) -> None:
 
 def test_fps_sets_frame_duration(tmp_path: Path) -> None:
     asset = _script(tmp_path, name="solid.py", body="""
-        from jaeger_os.nodes.software.animation.adapters import MathScript
+        from jaeger_os.nodes.animation.adapters import MathScript
 
         class Solid(MathScript):
             def render_into(self, t, frame_rgb):

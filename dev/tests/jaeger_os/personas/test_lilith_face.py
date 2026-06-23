@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_os.nodes.software.animation.adapters import MathAdapter, MathScript
+from jaeger_os.nodes.animation.adapters import MathAdapter, MathScript
 
 # The Lilith face / animation node is a beta, dev-mode prototype: its
 # avatar tools are JAEGER_DEV_MODE-gated and the node is disabled by
