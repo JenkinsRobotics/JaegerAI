@@ -62,6 +62,8 @@ class QtTray:
         self._pill: Any = None
         self._menu: Any = None
         self._settings: Any = None
+        self._studio: Any = None
+        self._gallery: Any = None
         self._state = "idle"
 
         # Brand the app — window + macOS Dock icon (the tray is the
@@ -120,6 +122,8 @@ class QtTray:
                 instance_name=self._subtitle,
                 on_quick_input=self._show_pill,
                 on_open_chat=self._open_chat,
+                on_open_studio=self._open_studio,
+                on_open_windows=self._open_windows,
                 on_quit=self._quit,
                 on_settings=self._open_settings,
             )
@@ -179,6 +183,36 @@ class QtTray:
                 return w
         return None
 
+    # ── Jaeger Studio + dev windows ───────────────────────────────
+    def _open_studio(self) -> Any:
+        """Open Jaeger Studio (the multi-tab desktop shell) wired to the
+        app's bus + core, so its chat / avatar are live."""
+        try:
+            from jaeger_os.interfaces.studio.window import make_surface
+            self._studio = make_surface(self.ctx)
+            self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
+            return self._studio
+        except Exception as exc:  # noqa: BLE001
+            self._warn("Jaeger Studio", exc)
+            return None
+
+    def _open_windows(self) -> Any:
+        """Open the surface gallery — a launcher for the prealpha windows
+        (Studio, avatar player, media player) so each can be tested."""
+        try:
+            from jaeger_os.interfaces.gallery.window import GalleryWindow
+            self._gallery = GalleryWindow(self.ctx)
+            self._gallery.show(); self._gallery.raise_(); self._gallery.activateWindow()
+            return self._gallery
+        except Exception as exc:  # noqa: BLE001
+            self._warn("Dev windows", exc)
+            return None
+
+    @staticmethod
+    def _warn(what: str, exc: Exception) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(None, f"{what} failed", f"{type(exc).__name__}: {exc}")
+
     # ── lifecycle ─────────────────────────────────────────────────
     def _quit(self) -> None:
         app = QApplication.instance()
@@ -186,7 +220,8 @@ class QtTray:
             app.quit()
 
     def close(self) -> None:
-        for widget in (self._pill, self._menu, self._settings):
+        for widget in (self._pill, self._menu, self._settings,
+                       self._studio, self._gallery):
             if widget is not None:
                 try:
                     widget.close()

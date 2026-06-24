@@ -89,7 +89,9 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   desktop shell, **renamed Jaeger Studio**), `avatar_player` +
   `media_player` (floating popups), and `v4` (the older GUI source, kept
   for reference / cherry-picking — pieces may merge forward).  All
-  construct; none are wired into the live app yet.
+  construct; **Jaeger Studio + the gallery are launchable from the
+  windowed-app tray** (the J icon → "Jaeger Studio" / "Dev windows…"),
+  wired to the live bus + core; the rest stay dormant.
 - `nodes/media` — the media node (FrameBuffer + decoders) imported as an
   experimental node, not yet wired into the runtime.
 - `nodes/animation_dev` — Mochi's further-developed animation node copied
