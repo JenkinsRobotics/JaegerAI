@@ -178,30 +178,12 @@ class AudioSession:
         reference_buffer: Any,
     ) -> STTAdapter:
         wake_phrases = config.wake_phrases or _default_wake_phrases()
-        if config.stt_mode == "continuous":
-            from jaeger_os.plugins.whisper_stt import WhisperSTTContinuous
+        # The STT method registry is the single swap point — flip variants
+        # by name via config.stt_mode (unknown name -> two_pass).
+        from jaeger_os.plugins.whisper_stt.registry import get
 
-            return WhisperSTTContinuous(
-                model_name=config.fast_model_name,
-                require_wake_word=config.require_wake_word,
-                wake_phrases=wake_phrases,
-                followup_window_s=config.followup_window_s,
-                aec=aec,
-                far_end_buffer=reference_buffer,
-                audio_backend=config.audio_backend,
-            )
-        from jaeger_os.plugins.whisper_stt import WhisperSTTTwoPass
-
-        return WhisperSTTTwoPass(
-            fast_model_name=config.fast_model_name,
-            accurate_model_name=config.accurate_model_name,
-            require_wake_word=config.require_wake_word,
-            wake_phrases=wake_phrases,
-            followup_window_s=config.followup_window_s,
-            aec=aec,
-            far_end_buffer=reference_buffer,
-            audio_backend=config.audio_backend,
-        )
+        return get(config.stt_mode).make(
+            config, aec, reference_buffer, wake_phrases)
 
     def start(self) -> None:
         self.adapter.start()
