@@ -134,6 +134,9 @@ from .todo import reset_todos, todo
 # Self-update — the agent editing its own identity.yaml / soul.md
 from .identity_tools import set_name, update_soul
 
+# Persona — the agent tuning its own character's traits
+from .persona import adjust_trait, read_traits
+
 # Agent self-benchmark — runs the flat bench corpus against the live
 # pipeline (the model the user is actually talking to). Tier-1.
 from .bench import run_benchmark
@@ -197,7 +200,7 @@ __all__ = [
     # in-session task list
     "todo", "reset_todos",
     # self-update (own identity / soul)
-    "set_name", "update_soul",
+    "set_name", "update_soul", "read_traits", "adjust_trait",
     # agent self-benchmark
     "run_benchmark",
     # runtime diagnostics
