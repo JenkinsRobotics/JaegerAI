@@ -205,19 +205,23 @@ def layer_items(struct: Any) -> list[tuple[str, float]]:
 
 # ── active character (which character an instance plays) ────────────
 _ACTIVE_FILE = "active_character"
+# ponytail: every instance ALWAYS plays a character — there is no "no persona"
+# state. An instance that hasn't picked one plays the default.
+DEFAULT_CHARACTER_ID = "jarvis"
 
 
 def active_character_id(instance_root: Path) -> str:
+    """The character this instance plays. Never empty — defaults to
+    DEFAULT_CHARACTER_ID when the instance hasn't picked one."""
     f = Path(instance_root) / _ACTIVE_FILE
-    return f.read_text(encoding="utf-8").strip() if f.exists() else ""
+    cid = f.read_text(encoding="utf-8").strip() if f.exists() else ""
+    return cid or DEFAULT_CHARACTER_ID
 
 
 def active_character_signature(instance_root: Path) -> str:
     """id + sheet mtime — changes when the character switches OR its traits are
     edited, so instant-apply rebuilds the prompt for both."""
     cid = active_character_id(instance_root)
-    if not cid:
-        return ""
     try:
         mt = (characters_root() / cid / "character.yaml").stat().st_mtime
     except OSError:
@@ -232,15 +236,17 @@ def set_active_character(instance_root: Path, cid: str) -> None:
 
 
 def active_character(instance_root: Path) -> "Character | None":
-    """The character this instance plays, or None. Its prompt replaces the
-    instance personality block (see agent/prompts/assemble.py)."""
-    cid = active_character_id(instance_root)
-    folder = characters_root() / cid
-    if cid and (folder / "character.yaml").exists():
-        try:
-            return load_character(folder)
-        except Exception:  # noqa: BLE001
-            return None
+    """The character this instance plays — the agent's real persona; its prompt
+    REPLACES the instance persona files (see agent/prompts/assemble.py). Falls
+    back to the default character if the picked one is missing or broken, so a
+    running agent always has a persona. None only if no character loads at all."""
+    for cid in (active_character_id(instance_root), DEFAULT_CHARACTER_ID):
+        folder = characters_root() / cid
+        if (folder / "character.yaml").exists():
+            try:
+                return load_character(folder)
+            except Exception:  # noqa: BLE001
+                continue
     return None
 
 

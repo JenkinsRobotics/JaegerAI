@@ -41,8 +41,6 @@ from .context_blocks import (
     build_skill_index_block,
     build_toolset_catalog,
     load_framework_prompt,
-    load_identity,
-    load_soul,
     load_v2_self_improvement,
 )
 
@@ -117,21 +115,12 @@ def _personality_block(ctx: FragmentContext) -> str:
     # just gets the prompt without it and can fix the file at leisure.
     try:
         from pathlib import Path
-
-        root = Path(ctx.layout.root)
         from jaeger_os.personality import compose_block
         from jaeger_os.personality.character import active_character
-        ch = active_character(root)
-        if ch is not None:
-            # Trait-driven: the character's HEXACO/SPECIAL/Expression/Domains
-            # sliders, rendered into prose ("medium-high sarcasm", ...).
-            return compose_block(ch.personality) or ""
-        personality_path = root / "personality.json"
-        if not personality_path.exists():
-            return ""
-        from jaeger_os.personality import load_personality
-
-        return compose_block(load_personality(personality_path)) or ""
+        # Trait-driven: the active character's HEXACO/SPECIAL/Expression/Domains
+        # sliders, rendered into prose ("medium-high sarcasm", ...).
+        ch = active_character(Path(ctx.layout.root))
+        return (compose_block(ch.personality) or "") if ch is not None else ""
     except Exception:  # noqa: BLE001
         return ""
 
@@ -147,17 +136,12 @@ def _active_char(ctx: "FragmentContext") -> "Any":
 
 def _identity_fragment(ctx: "FragmentContext") -> str:
     ch = _active_char(ctx)
-    return ch.identity_block() if ch is not None else load_identity(ctx.layout)
+    return ch.identity_block() if ch is not None else ""
 
 
 def _soul_fragment(ctx: "FragmentContext") -> str:
     ch = _active_char(ctx)
-    if ch is not None:
-        return ch.soul_block()
-    try:
-        return load_soul(ctx.layout)
-    except Exception:  # noqa: BLE001
-        return ""
+    return ch.soul_block() if ch is not None else ""
 
 
 # ── the registry: order here IS the prompt order ──────────────────────
@@ -182,19 +166,19 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
         _subagent_only, "sub-agents, when context is supplied",
     ),
     PromptFragment(
-        "identity", "instance", "<instance>/identity.yaml",
+        "identity", "instance", "<active character>",
         _identity_fragment, _all,
         "who this agent is — every mode",
     ),
     PromptFragment(
-        "soul", "instance", "<instance>/soul.md",
+        "soul", "instance", "<active character>",
         _soul_fragment, _non_subagent,
         "voice / persona — skipped for sub-agents",
     ),
     PromptFragment(
-        "personality", "instance", "<instance>/personality.json",
+        "personality", "instance", "<active character>",
         _personality_block, _non_subagent,
-        "structured persona block, if personality.json is present",
+        "trait-driven persona block from the active character",
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",
