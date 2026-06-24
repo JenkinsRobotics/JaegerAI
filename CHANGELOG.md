@@ -82,7 +82,8 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 - `nodes/animation_dev` — Mochi's further-developed animation node (adds an
   MScript engine in `plugin_core/` + an `llm_command_parser`) copied
   **parallel** to the live `nodes/animation` (which stays untouched), so it
-  can be vetted via the harness and swapped in only once proven.
+  can be vetted via the harness and swapped in only once proven.  Its
+  MScript scene library (26 scenes) lives in `assets/math/`.
 - **Dev tooling for the imports**: `interfaces/gallery`
   (`python -m jaeger_os.interfaces.gallery` — a button per prealpha
   surface, opened on its own to eyeball) and `nodes/testing.NodeHarness`
