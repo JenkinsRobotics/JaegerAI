@@ -79,6 +79,10 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   construct; none are wired into the live app yet.
 - `nodes/media` — the media node (FrameBuffer + decoders) imported as an
   experimental node, not yet wired into the runtime.
+- `nodes/animation_dev` — Mochi's further-developed animation node (adds an
+  MScript engine in `plugin_core/` + an `llm_command_parser`) copied
+  **parallel** to the live `nodes/animation` (which stays untouched), so it
+  can be vetted via the harness and swapped in only once proven.
 - **Dev tooling for the imports**: `interfaces/gallery`
   (`python -m jaeger_os.interfaces.gallery` — a button per prealpha
   surface, opened on its own to eyeball) and `nodes/testing.NodeHarness`
