@@ -73,6 +73,14 @@ ACT_TIMELINE = "/act/timeline"
 SENSE_ANIMATION_STATE = "/sense/animation_state"
 SENSE_TIMELINE_PROGRESS = "/sense/timeline_progress"
 SENSE_XP_AWARDED = "/sense/xp_awarded"
+
+# 0.5 — media node: a file → RGBA frames on the bus.  Local renderers
+# (the floating media player) subscribe in-process; the same frames ride
+# the ZMQ bus over TCP to a device node (e.g. a Jetson) for the
+# upstream-render-on-Mac / downstream-display split.
+ACT_MEDIA = "/act/media"
+SENSE_MEDIA_FRAME = "/sense/media_frame"
+SENSE_MEDIA_STATE = "/sense/media_state"
 SENSE_SKILL_LEVEL_UP = "/sense/skill_level_up"
 SENSE_SKILL_UNLOCKED = "/sense/skill_unlocked"
 SENSE_SKILL_MASTERED = "/sense/skill_mastered"
@@ -410,6 +418,34 @@ class AnimationCommand(TopicMessage):
 class AnimationStop(TopicMessage):
     """Stop the currently playing animation; revert to idle/default."""
     topic: Literal["/act/animation_stop"] = ACT_ANIMATION_STOP
+
+
+class MediaCommand(TopicMessage):
+    """Brain / Studio → media_node: play a file (image / gif / video).  The
+    node decodes it to RGBA frames streamed as ``MediaFrame``.  ``loop``
+    repeats gif/video; an image is a single held frame.  A new command
+    preempts the current clip."""
+    topic: Literal["/act/media"] = ACT_MEDIA
+    path: str = ""
+    loop: bool = True
+
+
+class MediaFrame(TopicMessage):
+    """media_node → renderer: one RGBA8 frame (``width*height*4`` bytes).
+    The floating media player subscribes in-process; the same frame rides
+    the ZMQ bus over TCP to a device node (e.g. a Jetson)."""
+    topic: Literal["/sense/media_frame"] = SENSE_MEDIA_FRAME
+    data: bytes = b""
+    width: int = 0
+    height: int = 0
+
+
+class MediaState(TopicMessage):
+    """media_node → surfaces: playback state for the current clip."""
+    topic: Literal["/sense/media_state"] = SENSE_MEDIA_STATE
+    path: str = ""
+    kind: str = ""
+    playing: bool = False
     reason: str = "interrupted"
 
 
@@ -515,6 +551,9 @@ TOPIC_TO_CLASS: dict[str, type[TopicMessage]] = {
     ACT_ESTOP: EStop,
     SENSE_NODE_HEALTH: NodeHealth,
     SENSE_TRACE_STEP: TraceStep,
+    ACT_MEDIA: MediaCommand,
+    SENSE_MEDIA_FRAME: MediaFrame,
+    SENSE_MEDIA_STATE: MediaState,
 }
 
 ALL_TOPICS: tuple[str, ...] = tuple(TOPIC_TO_CLASS.keys())
