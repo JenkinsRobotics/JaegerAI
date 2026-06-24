@@ -2604,6 +2604,7 @@ def _run_turn_via_jaeger_agent(
     _pipeline["turn_tool_time"] = 0.0
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
+        _refresh_character_prompt(jaeger_agent)
         if lock is not None:
             with lock:
                 result = drive_one_turn(jaeger_agent, user_text)
@@ -2746,6 +2747,25 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         print_latency(out["report"])
         if out["skipped_final"]:
             print("  (final-LLM skipped — tool result returned directly)")
+
+
+def _refresh_character_prompt(jaeger_agent: Any) -> None:
+    """Instant-apply: if the selected character changed since the system
+    prompt was built, rebuild it so the new persona takes effect THIS turn
+    (no restart). Cheap — rebuilds only on an actual change."""
+    try:
+        from jaeger_os.agent.prompts.prompts import build_system_prompt
+        from jaeger_os.personality.character import active_character_signature
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return
+        sig = active_character_signature(layout.root)
+        if sig != _pipeline.get("active_character_sig"):
+            _pipeline["active_character_sig"] = sig
+            _pipeline["system_prompt"] = build_system_prompt(layout)
+            jaeger_agent.system_prompt = _pipeline["system_prompt"]
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:

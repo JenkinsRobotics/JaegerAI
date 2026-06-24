@@ -88,7 +88,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         tools=[
             "memory",
             "remember", "recall", "forget", "list_facts", "search_memory",
-            "set_name", "update_soul",
+            "set_name", "update_soul", "read_traits", "adjust_trait",
         ],
         includes=[],
     ),
@@ -98,7 +98,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Avoids the 'umbrella vs sibling' attractor split that hurt the "
             "bench's L1 routing."
         ),
-        tools=["memory", "set_name", "update_soul"],
+        tools=["memory", "set_name", "update_soul", "read_traits", "adjust_trait"],
         includes=[],
     ),
     "code": ToolsetDef(

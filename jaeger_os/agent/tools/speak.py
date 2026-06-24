@@ -54,6 +54,13 @@ def _resolve_voice() -> str:
         layout = _require_layout()
     except Exception:
         return KOKORO_VOICE
+    try:
+        from jaeger_os.personality.character import active_character
+        ch = active_character(layout.root)
+        if ch is not None and ch.voice_id:
+            return ch.voice_id.strip()
+    except Exception:
+        pass
     from jaeger_os.core.instance.schemas import Identity, load_yaml
     try:
         identity = load_yaml(layout.identity_path, Identity)

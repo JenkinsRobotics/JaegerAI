@@ -118,12 +118,44 @@ def _personality_block(ctx: FragmentContext) -> str:
     try:
         from pathlib import Path
 
-        personality_path = Path(ctx.layout.root) / "personality.json"
+        root = Path(ctx.layout.root)
+        from jaeger_os.personality import compose_block
+        from jaeger_os.personality.character import active_character
+        ch = active_character(root)
+        if ch is not None:
+            # Trait-driven: the character's HEXACO/SPECIAL/Expression/Domains
+            # sliders, rendered into prose ("medium-high sarcasm", ...).
+            return compose_block(ch.personality) or ""
+        personality_path = root / "personality.json"
         if not personality_path.exists():
             return ""
-        from jaeger_os.personality import compose_block, load_personality
+        from jaeger_os.personality import load_personality
 
         return compose_block(load_personality(personality_path)) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _active_char(ctx: "FragmentContext") -> "Any":
+    try:
+        from pathlib import Path
+        from jaeger_os.personality.character import active_character
+        return active_character(Path(ctx.layout.root))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _identity_fragment(ctx: "FragmentContext") -> str:
+    ch = _active_char(ctx)
+    return ch.identity_block() if ch is not None else load_identity(ctx.layout)
+
+
+def _soul_fragment(ctx: "FragmentContext") -> str:
+    ch = _active_char(ctx)
+    if ch is not None:
+        return ch.soul_block()
+    try:
+        return load_soul(ctx.layout)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -151,12 +183,12 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
     ),
     PromptFragment(
         "identity", "instance", "<instance>/identity.yaml",
-        lambda c: load_identity(c.layout), _all,
+        _identity_fragment, _all,
         "who this agent is — every mode",
     ),
     PromptFragment(
         "soul", "instance", "<instance>/soul.md",
-        lambda c: load_soul(c.layout), _non_subagent,
+        _soul_fragment, _non_subagent,
         "voice / persona — skipped for sub-agents",
     ),
     PromptFragment(
