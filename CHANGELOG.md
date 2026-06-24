@@ -63,8 +63,8 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   produces the system-prompt fragment the brain reads every turn.
 - **Characters are the persona** (imported from Mochi).  A `Character`
   (identity + lore + traits + assets + level/revision) the instance
-  *plays*; `personality/characters/` ships 12 (GLaDOS, HAL, Jarvis,
-  Mochi, …).  The agent's identity / soul / personality / name / voice
+  *plays*; `personality/characters/` ships 14 (GLaDOS, HAL, Jarvis,
+  Mochi, Kamina, Simon, …).  The agent's identity / soul / personality / name / voice
   all resolve from the **active character** — instance `personality.json`
   / `soul.md` / `identity.yaml` are no longer read.  Every instance
   always plays one (defaults to `jarvis`); a switch instant-applies
