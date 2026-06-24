@@ -1,0 +1,35 @@
+schema: asset-props/v1
+
+# Display name (defaults to filename stem when unset).
+# name: "wave_scene"
+
+# Authoring credit.
+# author: ""
+# license: ""
+# source_url: ""
+
+# Curation — auto-derived from filename; operator refines.
+mood: neutral
+tags: [neutral, math]
+hint: "Procedural Python animation: wave_scene."
+
+# Rendering hints — uncomment + set when relevant.
+# ideal_size: [64, 64]      # [w, h] target display size
+# framing: fit              # fit | fill | center | stretch
+# playback_speed: 1.0       # 1.0 = native; 2.0 = double speed
+# loop: true                # auto-restart at end
+# duration_ms: null         # override one-shot stop time
+
+# Operator notes / flags.
+# notes: ""
+# nsfw: false
+
+# type_props:
+#   entry: "render"          # function name in the script
+#   period_s: 2.0
+#   params:
+#     speed:     0.05
+#     intensity: 1.0
+#   param_schema:
+#     speed:     {type: float, min: 0.01, max: 0.5, step: 0.01}
+#     intensity: {type: float, min: 0.0,  max: 2.0, step: 0.1}
