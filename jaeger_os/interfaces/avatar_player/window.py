@@ -61,7 +61,7 @@ class FloatingAvatarPlayer(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Mochi Avatar")
+        self.setWindowTitle("Jaeger Avatar")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)

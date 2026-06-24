@@ -78,9 +78,13 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   for reference / cherry-picking — pieces may merge forward).  All
   construct; none are wired into the live app yet.
 - `nodes/media` — the media node (FrameBuffer + decoders) imported as an
-  experimental node, not yet wired into the runtime.  A launcher gallery
-  + a node test-harness (boot one node on a fresh bus, drive it, observe)
-  are next, so these can be evaluated in isolation before adoption.
+  experimental node, not yet wired into the runtime.
+- **Dev tooling for the imports**: `interfaces/gallery`
+  (`python -m jaeger_os.interfaces.gallery` — a button per prealpha
+  surface, opened on its own to eyeball) and `nodes/testing.NodeHarness`
+  (boot one node on a private bus, drive it with synthetic messages,
+  capture its output) — so the imported surfaces/nodes can be evaluated
+  in isolation before anything wires them into the live app.
 
 ### Operator CLI (terminal-first)
 - New `./jaeger` console: `skills`, `instances`, `personality`,
