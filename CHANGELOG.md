@@ -91,7 +91,11 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   for reference / cherry-picking — pieces may merge forward).  All
   construct; **Jaeger Studio + the gallery are launchable from the
   windowed-app tray** (the J icon → "Jaeger Studio" / "Dev windows…"),
-  wired to the live bus + core; the rest stay dormant.
+  wired to the live bus + core; the rest stay dormant.  Studio's once-stub
+  tabs now each carry a real, simple function — Dashboard (live overview),
+  Animation (trigger expressions), Editors (mscript editor), Assets (library
+  browser), Packs (persona roster), Diagnostics (trace baseline), Learn (docs
+  viewer), Settings (config readout).
 - `nodes/media` — the media node (FrameBuffer + decoders) imported as an
   experimental node, not yet wired into the runtime.
 - `nodes/animation_dev` — Mochi's further-developed animation node copied
