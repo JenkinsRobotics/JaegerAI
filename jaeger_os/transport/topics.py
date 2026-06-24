@@ -60,6 +60,7 @@ SENSE_TOUCH = "/sense/touch"
 SENSE_PROPRIO = "/sense/proprio"
 SENSE_SPOKEN = "/sense/spoken"
 SENSE_TTS_CHUNK = "/sense/tts_chunk"
+SENSE_TRACE_STEP = "/sense/trace_step"
 
 ACT_SPEECH = "/act/speech"
 ACT_AUDIO_OUT = "/act/audio_out"
@@ -260,6 +261,27 @@ class TtsChunk(TopicMessage):
     topic: Literal["/sense/tts_chunk"] = SENSE_TTS_CHUNK
     amplitude: float = 0.0          # 0.0..1.0
     is_final: bool = False          # True on the last chunk of an utterance
+
+
+class TraceStep(TopicMessage):
+    """One step in an agent turn's pipeline — emitted live as the turn
+    runs so a Studio panel can follow the flow (``input`` -> ``tool``...
+    -> ``think`` -> ``answer``), and recorded to ``logs/trace.jsonl`` for
+    the historic baseline.  Flow + timings only — no model reasoning text.
+
+    ``dur_s`` is the step's own duration; the terminal ``answer`` step
+    carries the whole turn's wall time.  ``detail`` is a short (<=200
+    char) input/output preview, never the full payload."""
+    topic: Literal["/sense/trace_step"] = SENSE_TRACE_STEP
+    turn_id: int = 0
+    step_seq: int = 0
+    kind: str = ""        # input | think | tool | answer
+    name: str = ""        # tool name (tool steps), else ""
+    t_offset_s: float = 0.0
+    dur_s: float = 0.0
+    ok: bool = True
+    detail: str = ""
+    session: str = ""
 
 
 # ── /act/* ─────────────────────────────────────────────────────────
@@ -492,6 +514,7 @@ TOPIC_TO_CLASS: dict[str, type[TopicMessage]] = {
     ACT_SPEECH_STOP: SpeechStop,
     ACT_ESTOP: EStop,
     SENSE_NODE_HEALTH: NodeHealth,
+    SENSE_TRACE_STEP: TraceStep,
 }
 
 ALL_TOPICS: tuple[str, ...] = tuple(TOPIC_TO_CLASS.keys())
