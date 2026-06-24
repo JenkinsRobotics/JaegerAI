@@ -48,6 +48,27 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 - `Personality` module — structured persona (HEXACO + SPECIAL +
   Expression + Domains + speech patterns).  `compose_block`
   produces the system-prompt fragment the brain reads every turn.
+- **Characters are the persona** (imported from Mochi).  A `Character`
+  (identity + lore + traits + assets + level/revision) the instance
+  *plays*; `personality/characters/` ships 12 (GLaDOS, HAL, Jarvis,
+  Mochi, …).  The agent's identity / soul / personality / name / voice
+  all resolve from the **active character** — instance `personality.json`
+  / `soul.md` / `identity.yaml` are no longer read.  Every instance
+  always plays one (defaults to `jarvis`); a switch instant-applies
+  (prompt rebuilt that turn).  `read_traits` / `adjust_trait` let the
+  agent tune its own sliders.
+
+### Observability — pipeline tracing
+- **`TraceStep` bus events + `agent/trace.py`** — every turn emits one
+  step per phase (`input` → `tool`… → `think` → `answer`) on
+  `/sense/trace_step` as it runs, so a Studio panel can follow the flow
+  live.  A `TraceRecorder` persists each step to `logs/trace.jsonl` on
+  the bus delivery thread — zero hot-path cost (an emit is a queue
+  `put_nowait`, best-effort, never raises into a turn).  `trace.baseline`
+  aggregates the log (avg/p50/p95 turn time, per-tool frequency + time)
+  for a historic performance baseline; `python -m jaeger_os.agent.trace`
+  prints it, `--last` shows a turn's timeline.  Rides on the existing
+  per-tool `elapsed_s` + `LatencyReport`; no new timing code.
 
 ### Operator CLI (terminal-first)
 - New `./jaeger` console: `skills`, `instances`, `personality`,

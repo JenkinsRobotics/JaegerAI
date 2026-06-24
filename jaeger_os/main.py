@@ -2505,6 +2505,14 @@ def _run_turn_via_jaeger_agent(
                 )
             except Exception:  # noqa: BLE001 — observer must never break the turn
                 pass
+            try:
+                from jaeger_os.agent import trace as _trace
+                _trace.trace_step(
+                    "tool", name, dur_s=elapsed_s, ok=ok,
+                    detail=f"{args} => {error if not ok else result}",
+                )
+            except Exception:  # noqa: BLE001 — tracing never breaks the turn
+                pass
 
         def _heartbeat(elapsed_s: float) -> None:
             # Keep the status line honest while the first model call is
@@ -2602,6 +2610,8 @@ def _run_turn_via_jaeger_agent(
     # Reset the per-turn tool-time accumulator before the dispatch so
     # cross-turn leakage doesn't inflate this turn's report.
     _pipeline["turn_tool_time"] = 0.0
+    from jaeger_os.agent import trace as _trace
+    _trace.trace_begin(key, user_text)
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _refresh_character_prompt(jaeger_agent)
@@ -2618,6 +2628,11 @@ def _run_turn_via_jaeger_agent(
             "latency": asdict(report), "framework_path": "jaeger_os_agent",
         })
         set_agent_status("error", detail=f"{type(exc).__name__}")
+        try:
+            from jaeger_os.agent import trace as _trace
+            _trace.trace_end("", elapsed, ok=False)
+        except Exception:  # noqa: BLE001
+            pass
         return {"text": "", "error": str(exc), "tool_activity": [],
                 "first_decision": None, "skipped_final": False,
                 "spoke_via_tool": False, "elapsed_s": elapsed, "report": report}
@@ -2649,6 +2664,14 @@ def _run_turn_via_jaeger_agent(
         decision_ttft=float(result.get("ttft_s") or 0.0),
         tool=_tool_time, final=0.0, final_ttft=0.0,
     )
+
+    try:
+        from jaeger_os.agent import trace as _trace
+        _trace.trace_step("think", "", dur_s=report.decision,
+                          detail=(first_decision or ""))
+        _trace.trace_end(answer, report.total, ok=True)
+    except Exception:  # noqa: BLE001
+        pass
 
     write_log({
         "user": user_text, "session_key": key, "answer": answer,
@@ -3513,6 +3536,11 @@ def boot_for_tui(
         if config.workspace.location:
             jaeger_tools.bind(layout, workspace_override=config.workspace.location)
         _pipeline["layout"] = layout
+        try:
+            from jaeger_os.agent.trace import start_trace_recorder
+            start_trace_recorder(layout)
+        except Exception:  # noqa: BLE001 — tracing is best-effort
+            pass
         _pipeline["config"] = config
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
@@ -4015,6 +4043,11 @@ def main() -> int:
 
         config: Config = load_yaml(layout.config_path, Config)
         _pipeline["layout"] = layout
+        try:
+            from jaeger_os.agent.trace import start_trace_recorder
+            start_trace_recorder(layout)
+        except Exception:  # noqa: BLE001 — tracing is best-effort
+            pass
         _pipeline["config"] = config
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
