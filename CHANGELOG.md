@@ -70,6 +70,18 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   prints it, `--last` shows a turn's timeline.  Rides on the existing
   per-tool `elapsed_s` + `LatencyReport`; no new timing code.
 
+### Imported from Mochi — GUIs + media node (under development, not wired)
+- Mochi's experimental surfaces vendored into `interfaces/` **alongside**
+  the existing ones (never replacing them): `studio` (the multi-tab
+  desktop shell, **renamed Jaeger Studio**), `avatar_player` +
+  `media_player` (floating popups), and `v4` (the older GUI source, kept
+  for reference / cherry-picking — pieces may merge forward).  All
+  construct; none are wired into the live app yet.
+- `nodes/media` — the media node (FrameBuffer + decoders) imported as an
+  experimental node, not yet wired into the runtime.  A launcher gallery
+  + a node test-harness (boot one node on a fresh bus, drive it, observe)
+  are next, so these can be evaluated in isolation before adoption.
+
 ### Operator CLI (terminal-first)
 - New `./jaeger` console: `skills`, `instances`, `personality`,
   `status`, `roadmap`, `prompt`, `config`, `runtime` subcommands.
