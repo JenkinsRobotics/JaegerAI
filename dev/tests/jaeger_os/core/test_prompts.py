@@ -43,12 +43,11 @@ def test_load_soul_caps_runaway_length(tmp_path) -> None:
     assert "truncated" in soul
 
 
-def test_soul_md_folds_into_the_system_prompt(tmp_path) -> None:
-    (tmp_path / "soul.md").write_text(
-        "## Voice\nDistinctive-soul-marker.", encoding="utf-8"
-    )
+def test_active_character_persona_folds_into_the_system_prompt(tmp_path) -> None:
+    """Characters are the only persona now — the active character (default
+    Jarvis) drives identity/soul; the instance no longer reads soul.md."""
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Distinctive-soul-marker." in sp
+    assert "Jarvis" in sp
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:

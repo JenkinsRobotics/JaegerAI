@@ -82,7 +82,7 @@ def test_framework_prompt_forbids_markdown_bold():
 
 def test_build_system_prompt_carries_identity_and_rules(instance):
     prompt = build_system_prompt(instance)
-    assert "Erin Jaeger" in prompt                # identity
+    assert "Jarvis" in prompt                     # identity (default character)
     assert "Jaeger OS" in prompt                  # system knowledge
     assert "current message" in prompt.lower()    # no stale-task execution
     assert "plain terminal" in prompt.lower()     # terminal-friendly output
