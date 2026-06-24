@@ -29,6 +29,19 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   `extra="ignore"` so existing config.yaml files with the stale keys
   still load.
 
+### STT method layer + bench
+- `plugins/whisper_stt/` reorganized into swappable **method subfolders** —
+  `two_pass/` ("dual whisper": fast `base.en` gates accurate `medium.en`),
+  `continuous/` (rolling re-transcription), `local_agreement/` (streaming
+  **stub**) — all pywhispercpp, all behind the `STTAdapter` interface. A
+  `registry.py` is the single swap point: `config.stt_mode` flips by name
+  (unknown → two_pass), replacing the `if`-chain in `core/audio/session.py`.
+- **CLI bench** — `python -m jaeger_os.plugins.whisper_stt --audio clip.wav
+  [--method all] [--ref "text"]` reports per method: model-load · transcribe
+  · real-time-factor · WER · transcript (two_pass splits fast vs accurate).
+  `--record N` captures from the mic; `--list` shows methods. The harness is
+  the test — verified end-to-end on a real `base.en` run.
+
 ### Animation + avatar
 - L1-L4 animation adapters vendored from operator's Mochi engine
   (Apache 2.0): `image`, `bitmap`, `sprite`, `gif`, `math`.
