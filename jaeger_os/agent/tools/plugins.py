@@ -105,7 +105,11 @@ def _credential_status(env_names: list[str]) -> dict[str, bool]:
         return {name: False for name in env_names or []}
     from jaeger_os.core import credentials as creds_mod
     try:
-        stored = set(creds_mod.list_credentials(layout))
+        # Case-insensitive: credentials are saved under the env-var name
+        # (TELEGRAM_BOT_TOKEN, uppercase, as set_credential / the manifest use),
+        # so compare both sides lowercased — otherwise a saved token reads as
+        # "needs_credentials" even though get_credential resolves it.
+        stored = {s.lower() for s in creds_mod.list_credentials(layout)}
     except Exception:
         stored = set()
     for name in env_names or []:

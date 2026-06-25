@@ -34,9 +34,13 @@ messaging, shipped to main while 0.6 continues.
   through the one model's `llm_lock` (interleaved, not parallel).
 - **Telegram** — instant 👀 receipt reaction (zero added LLM delay) on top of
   the existing typing indicator.
-- **Fixed a latent bug** — `_credential_status` imported the wrong credentials
-  module; harmless until a layout was bound (i.e. in the live agent), where it
-  ImportError'd for every credential-plugin. Caught by the new plugin-health test.
+- **Fixed two latent `_credential_status` bugs** — (1) it imported the wrong
+  credentials module, harmless until a layout was bound (i.e. in the live
+  agent), where it ImportError'd for every credential-plugin; (2) a case
+  mismatch reported a saved UPPERCASE token (`TELEGRAM_BOT_TOKEN`) as
+  "needs_credentials" even though the bridge resolved + used it — so a
+  configured plugin looked unconfigured after a restart. Both caught by the new
+  plugin-health test + a live test session.
 - **Health checks** — `dev/tests/.../test_plugins_health.py` +
   `dev/pipelines/plugins.py` (one-command CLI probe).
 
