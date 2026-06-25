@@ -3,7 +3,7 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
-## `0.5.0` — in progress (branch `origin/0.5.0`)
+## `0.5.0`
 
 **The identity statement.**  JROS = Hermes-in-`agent/` +
 ROS-in-`nodes/` + a shared `transport/` that lets them talk.
@@ -70,6 +70,19 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   always plays one (defaults to `jarvis`); a switch instant-applies
   (prompt rebuilt that turn).  `read_traits` / `adjust_trait` let the
   agent tune its own sliders.
+- **Creation picks a character, not a prompt.**  The setup wizard's
+  manual identity-authoring step is replaced by a character picker
+  (defaults to `jarvis`); the instance's identity / soul / name / voice
+  derive from the chosen character.  The persona-template path
+  (`jaeger_os/personas/`) is retired from the wizard.
+- **Instance ↔ character binding.**  Creation records the chosen
+  character as the instance's canonical identity (`bound_character` in
+  `manifest.json`).  `active_character_id` falls back to the binding
+  (then `jarvis`), so a unit defaults to its own persona even if the
+  active file is cleared.  Studio can still flip the *active* character,
+  but switching away from the binding is a confirmed, session-only
+  override; `bind_character` is the deliberate rebind.  Memory + skill
+  XP live in the instance, so they survive a rebind.
 
 ### Observability — pipeline tracing
 - **`TraceStep` bus events + `agent/trace.py`** — every turn emits one

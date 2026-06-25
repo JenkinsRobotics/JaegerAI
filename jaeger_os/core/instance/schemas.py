@@ -612,6 +612,11 @@ class Manifest(BaseModel):
 
     instance_name: str
     schema_version: str = SCHEMA_VERSION
+    # The character this instance is BOUND to — its canonical identity, set at
+    # creation and changed only by an explicit rebind (Studio asks to confirm).
+    # active_character_id() falls back to this, so the unit defaults to its own
+    # persona, not the global default. Empty = unbound (free-swap dev box).
+    bound_character: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
     last_started_at: str | None = None
 
