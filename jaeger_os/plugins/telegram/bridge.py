@@ -142,6 +142,20 @@ class TelegramBridge:
                 preview = msg.text.strip()
                 short = preview if len(preview) <= 60 else preview[:57] + "..."
                 print(f"[telegram] ← chat={chat_id} {short!r}", flush=True)
+                # Instant receipt ack: a 👀 reaction on the user's message,
+                # fired as a background task so it adds ZERO delay before the
+                # LLM starts (it runs concurrently with the turn). The typing
+                # indicator below shows ongoing work; the reply signals done.
+                # Best-effort — a chat that disallows reactions just keeps the
+                # typing indicator.
+                async def _ack() -> None:
+                    try:
+                        from telegram import ReactionTypeEmoji
+                        await msg.set_reaction(reaction=[ReactionTypeEmoji(emoji="👀")])
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_ack())
                 # Show a "typing…" indicator while the LLM works so the
                 # human can see we're alive even on a slow turn.
                 async def _keep_typing():
