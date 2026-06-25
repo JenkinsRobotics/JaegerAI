@@ -86,6 +86,10 @@ class ChatWindow(QWidget):
         # short uuid keeps it unique without a counter.
         self._session = uuid.uuid4().hex[:8]
         self._turn_start = 0.0
+        # Live activity stream (thoughts + tool use) shown during a turn.
+        self._activity_trace = self._read_activity_trace()  # full|summary|clear|off
+        self._progress_anchor: int | None = None
+        self._progress_steps = 0
         self._turn_timer = QTimer(self)
         self._turn_timer.setInterval(1000)
         self._turn_timer.timeout.connect(self._tick_status)
@@ -99,7 +103,8 @@ class ChatWindow(QWidget):
         # The one sanctioned bus→Qt hop (signal emission crosses threads).
         self._bridge = make_bus_bridge(
             ctx.bus,
-            ["/sense/chat", "/sense/agent_state", "/sense/tool", "/sense/request"])
+            ["/sense/chat", "/sense/agent_state", "/sense/tool", "/sense/request",
+             "/sense/activity"])
         self._bridge.message.connect(self._on_msg)
 
     # ── UI ────────────────────────────────────────────────────────
@@ -378,11 +383,14 @@ class ChatWindow(QWidget):
         if session and session != self._session:
             return
         if msg.topic == "/sense/chat":
+            self._collapse_progress()   # apply activity_trace before the reply
             if msg.text:
                 self._append_turn("assistant", msg.text)
             self._set_busy(False)
         elif msg.topic == "/sense/tool":
             self._emit_tool(msg)
+        elif msg.topic == "/sense/activity":
+            self._emit_activity(msg)
         elif msg.topic == "/sense/request":
             self._on_request(msg)
         elif msg.topic == "/sense/agent_state":
@@ -452,6 +460,61 @@ class ChatWindow(QWidget):
             self._tick_status()
         QTimer.singleShot(20, self._scroll_to_bottom)
 
+    # ── live activity stream ──────────────────────────────────────
+    def _read_activity_trace(self) -> str:
+        try:
+            from jaeger_os.core.instance.instance import (
+                InstanceLayout, default_instance_name, resolve_instance_dir)
+            from jaeger_os.core.instance.schemas import Config, load_yaml
+            lay = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
+            val = (load_yaml(lay.config_path, Config).display.activity_trace
+                   or "full").lower()
+            return val if val in ("full", "summary", "clear", "off") else "full"
+        except Exception:  # noqa: BLE001 — default to the full trace
+            return "full"
+
+    def _doc_end(self) -> int:
+        from PySide6.QtGui import QTextCursor
+        c = self.transcript.textCursor()
+        c.movePosition(QTextCursor.MoveOperation.End)
+        return c.position()
+
+    def _emit_activity(self, msg: Any) -> None:
+        """One live progress line (a thought or a tool action) during a turn —
+        dimmed + italic, distinct from the reply. Off when activity_trace=off."""
+        if self._activity_trace == "off":
+            return
+        text = (getattr(msg, "text", "") or "").strip()
+        if not text:
+            return
+        if self._progress_anchor is None:
+            self._progress_anchor = self._doc_end()
+            self._progress_steps = 0
+        self._progress_steps += 1
+        glyph = "▸" if getattr(msg, "kind", "") == "tool" else "·"
+        self._emit(f"  {glyph} {text}\n", _INK_DIM, italic=True)
+        QTimer.singleShot(20, self._scroll_to_bottom)
+
+    def _collapse_progress(self) -> None:
+        """Apply activity_trace to this turn's progress block as the reply
+        lands: full/off keep it; clear removes it; summary collapses it to one
+        dimmed line."""
+        anchor, steps = self._progress_anchor, self._progress_steps
+        self._progress_anchor = None
+        self._progress_steps = 0
+        if anchor is None or self._activity_trace in ("full", "off"):
+            return
+        from PySide6.QtGui import QTextCursor
+        cur = self.transcript.textCursor()
+        cur.setPosition(anchor)
+        cur.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+        cur.removeSelectedText()
+        if self._activity_trace == "summary" and steps:
+            dur = (self._fmt_dur(time.monotonic() - self._turn_start)
+                   if self._turn_start else "")
+            self._emit(f"  ▸ {steps} steps{('  ·  ' + dur) if dur else ''}\n",
+                       _INK_DIM, italic=True)
+
     # ── helpers ───────────────────────────────────────────────────
     def _append_turn(self, role: str, text: str) -> None:
         self._messages.append((role, text))
@@ -482,6 +545,10 @@ class ChatWindow(QWidget):
             if not self._turn_timer.isActive():
                 self._turn_start = time.monotonic()
                 self._turn_timer.start()
+                # Mark where this turn's progress block begins (for clear/summary).
+                if self._activity_trace != "off":
+                    self._progress_anchor = self._doc_end()
+                    self._progress_steps = 0
             self._tick_status()
         else:
             self._turn_timer.stop()

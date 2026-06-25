@@ -2510,6 +2510,10 @@ def _run_turn_via_jaeger_agent(
                             if k in data:
                                 payload[k] = data[k]
                     bus.publish("tool.progress", **payload)
+                    if phase == "start":
+                        ap = payload.get("args_preview")
+                        line = f"{name}({str(ap)[:60]})" if ap else name
+                        bus.publish("agent.activity", kind="tool", text=line)
                 except Exception:  # noqa: BLE001 — never let pub break the agent
                     pass
 
@@ -2563,10 +2567,21 @@ def _run_turn_via_jaeger_agent(
                 since_ts=since_ts or time.time(),
             )
 
+        def _thinking(state: str) -> None:
+            # The loop's bracketed status lines (retries, context-guard, stalls,
+            # mid-turn steers) → the live activity stream. Low-frequency.
+            bus = _pipeline.get("event_bus")
+            if bus is not None:
+                try:
+                    bus.publish("agent.activity", kind="thinking", text=str(state))
+                except Exception:  # noqa: BLE001 — never let pub break the turn
+                    pass
+
         _status_cb = AgentCallbacks(
             tool_progress=_tool_progress,
             tool_done=_tool_done,
             heartbeat=_heartbeat,
+            thinking=_thinking,
         )
         # Pipe the configured ctx window into the agent's pre-flight
         # ContextGuard so an oversized prompt is trimmed (or refused)
