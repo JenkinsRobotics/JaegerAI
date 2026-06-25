@@ -150,6 +150,15 @@ class AgentBridge:
     def _enqueue(self, source: str, text: str, session: str) -> None:
         if not self._accepting.is_set():
             return
+        text = (text or "").strip()
+        if not text:
+            return
+        # If a turn is already running, STEER it instead of queuing for the
+        # next turn — every follow-up message redirects the live turn (it
+        # lands as a user message before the next model step). Falls through
+        # to the inbox if no agent turn is actually active.
+        if self._turn_active.is_set() and _steer_active_turn(text):
+            return
         try:
             self._inbox.put_nowait((source, text, session))
         except queue.Full:
@@ -201,6 +210,20 @@ class AgentBridge:
     def _publish_state(self, state: str, session: str = "", detail: str = "") -> None:
         self._state = state
         self.bus.publish(AgentState(state=state, session=session, detail=detail))
+
+
+def _steer_active_turn(text: str) -> bool:
+    """Route a follow-up message into the in-flight turn as steering. The
+    active agent's ``steer()`` lands it as a user message before its next
+    model step, and returns True only when a turn was actually active and
+    took it — so the bridge falls back to the inbox otherwise. Best-effort:
+    never raises (a missing pipeline just means "queue it normally")."""
+    try:
+        from jaeger_os.main import _pipeline
+        agent = _pipeline.get("active_jaeger_agent")
+        return bool(agent.steer(text)) if agent is not None else False
+    except Exception:  # noqa: BLE001 — steering is best-effort; fall back to the queue
+        return False
 
 
 def _default_turn_fn() -> TurnFn:

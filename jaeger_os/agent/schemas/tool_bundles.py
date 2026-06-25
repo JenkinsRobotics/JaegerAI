@@ -61,7 +61,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "host": ToolsetDef(
         description="Machine health, instance metadata, stored credentials.",
-        tools=["system_status", "diagnostics", "list_credentials", "get_credential"],
+        tools=["system_status", "diagnostics", "list_credentials", "get_credential", "set_credential"],
         includes=[],
     ),
     "files": ToolsetDef(
