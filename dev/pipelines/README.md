@@ -20,6 +20,7 @@ Run with the repo's venv (the deps live there):
 | `tracing.py` | Observability | emit trace steps + print the baseline | — |
 | `nodes.py` | Node harness | boot an isolated echo node + drive it | — |
 | `gui.py` | Surfaces | launch the dev surface gallery (Studio / players) | a display |
+| `plugins.py` | Plugins | health-check every plugin (libs + status + setup steps) | — |
 
 Status crib (full map in `docs/infographic/`): STT / TTS / 2D avatar = built;
 the media node streams (topics declared); 3D avatar + `local_agreement` STT =
