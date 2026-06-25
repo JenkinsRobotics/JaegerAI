@@ -49,13 +49,16 @@ class AgentCore(Core):
         from jaeger_os.main import boot_for_tui
         # instance_name=None → boot_for_tui resolves default_instance_name()
         # (JAEGER_INSTANCE_NAME), set by main.py (run.sh) or launch.py (dev).
-        # warmup defaults OFF: warmup pre-loads the voice models (whisper /
-        # kokoro) too, and the windowed app is a text-chat surface with no
-        # voice — warming them is wasted work and the Metal-OOM risk seen in
-        # benchmarking. The LLM still loads; only the first turn is cold.
+        # warmup=False skips the heavy VOICE-model preloads (whisper / kokoro)
+        # — the windowed app is text chat with no voice, so warming them is
+        # wasted work + a Metal-OOM risk. But the LLM KV-cache prewarm is
+        # SEPARATE (prewarm_model, default on): it primes the system prompt +
+        # tool schemas synchronously at boot so the FIRST user turn is instant
+        # instead of a ~26s cold prefill. Boot takes ~60s longer; the first
+        # turn earns it. (JAEGER_FAST_BOOT=1 skips prewarm's heavy Pass 2.)
         self.boot = boot_for_tui(
             instance_name=instance_name, with_memory=with_memory,
-            warmup=warmup)
+            warmup=warmup, prewarm_model=True)
         self.agent_name = _agent_name()
         self.bridge: AgentBridge | None = None
 
