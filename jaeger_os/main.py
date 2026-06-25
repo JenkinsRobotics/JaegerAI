@@ -1383,6 +1383,22 @@ def _register_builtins(client: Any) -> None:
         the actual value, and never echo the value in your reply."""
         return {"credentials": creds.list_credentials(_pipeline["layout"])}
 
+    @register_tool_from_function(side_effect="write")
+    def set_credential(name: str, value: str) -> dict:
+        """Save a secret (API key, token, chat ID) the user gave you into
+        the instance's credentials/ store, by name. Use this to PERSIST a
+        credential the user just provided — do NOT tell them to run a CLI
+        or set an env var; store it here. The value is written 0600 and is
+        NEVER echoed back (the result returns only the name). Pick a clear
+        UPPER_SNAKE name matching what the plugin / setup_plugin expects
+        (e.g. TELEGRAM_BOT_TOKEN). Returns {saved, name} or {saved:false,
+        error} — never raises."""
+        try:
+            creds.set_credential(_pipeline["layout"], name, value)
+        except Exception as exc:  # noqa: BLE001 — surface as a tool error, never raise
+            return {"saved": False, "name": name, "error": str(exc)}
+        return {"saved": True, "name": name}
+
     # ------------------------------------------------------------------
     # Parity ports from python_pydantic_ai — TTS, vision, host, sub-agent,
     # semantic memory. Each tool's docstring is what the LLM sees.

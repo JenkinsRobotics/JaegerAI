@@ -51,7 +51,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
     "board":        ["board_view", "board_add", "board_move",
                      "board_update"],
     "interaction":  ["clarify", "help_me"],
-    "credentials":  ["get_credential", "list_credentials"],
+    "credentials":  ["get_credential", "list_credentials", "set_credential"],
     "speech":       ["text_to_speech"],
     "listen":       ["listen"],
     "vision":       ["vision_analyze", "image_generate"],
