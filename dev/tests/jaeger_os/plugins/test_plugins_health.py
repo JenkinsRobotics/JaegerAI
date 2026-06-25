@@ -61,6 +61,32 @@ def test_setup_plugin_runs_for_every_plugin() -> None:
         assert res.get("blocked") or res.get("steps") is not None, f"{d.name}: {res}"
 
 
+def test_setup_plugin_works_with_a_bound_layout() -> None:
+    """Regression: ``_credential_status`` did ``from .. import credentials``
+    (jaeger_os.agent.credentials — doesn't exist). It was masked whenever NO
+    layout was bound (the function returns early), so it only blew up once a
+    layout was bound — i.e. in the real running agent. Deterministic guard:
+    bind a layout, then setup_plugin for a credential-requiring plugin."""
+    import pathlib
+    import tempfile
+
+    from jaeger_os.agent import tools as agent_tools
+    from jaeger_os.core.instance.instance import InstanceLayout
+
+    try:
+        prev = agent_tools.get_layout()
+    except Exception:  # noqa: BLE001 — none bound yet
+        prev = None
+    agent_tools.bind(InstanceLayout(root=pathlib.Path(tempfile.mkdtemp())))
+    try:
+        res = setup_plugin("telegram")  # telegram declares env_required creds
+        assert "error" not in res, res          # no ImportError surfaced
+        assert res.get("steps") is not None, res
+    finally:
+        if prev is not None:
+            agent_tools.bind(prev)
+
+
 def test_agent_can_execute_plugin_tools() -> None:
     """All four plugin tools must be registered, or the agent can't drive
     plugins at all (the Jarvis failure was reaching for a tool that didn't

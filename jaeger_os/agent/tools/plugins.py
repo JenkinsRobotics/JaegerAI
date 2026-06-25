@@ -103,7 +103,7 @@ def _credential_status(env_names: list[str]) -> dict[str, bool]:
         layout = _require_layout()
     except Exception:
         return {name: False for name in env_names or []}
-    from .. import credentials as creds_mod
+    from jaeger_os.core import credentials as creds_mod
     try:
         stored = set(creds_mod.list_credentials(layout))
     except Exception:
