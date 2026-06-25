@@ -1534,12 +1534,39 @@ def _register_builtins(client: Any) -> None:
         if bridge is None:
             return {
                 "sent": False,
-                "error": f"no bridge registered for {channel_clean!r}; live bridges: {list_bridges()}",
+                "error": (f"no {channel_clean!r} bridge is running in this process. "
+                          f"Start it with activate_plugin({channel_clean!r}) — it reads "
+                          f"the credential you saved with set_credential. Live bridges: "
+                          f"{list_bridges()}"),
             }
         try:
             return bridge.send(recipient_clean, text_clean)
         except Exception as exc:
             return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
+
+    @register_tool_from_function
+    def activate_plugin(name: str) -> dict:
+        """Bring a messaging plugin LIVE in this process — e.g.
+        activate_plugin("telegram") after you've saved its credential with
+        set_credential. It reads the token from THIS instance's credential
+        store, connects in a background thread (same model / memory / persona
+        answers every channel), and send_message can then reach it. Each chat
+        keeps its own conversation context; turns serialize through the one
+        model. Returns {started, channel} or {started:false, error}. If it
+        reports a missing credential, ask the user for the value and
+        set_credential it, then retry — never invent a token."""
+        from .plugins import start_bridge
+        client = _pipeline.get("client")
+        layout = _pipeline.get("layout")
+        if client is None:
+            return {"started": False, "error": "no agent in this process to attach the bridge to"}
+
+        def _handler(text: str, session_key: str | None = None) -> str:
+            return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
+
+        # llm_lock=None on purpose: run_for_voice → _run_turn already takes the
+        # shared, non-reentrant _pipeline['llm_lock']; locking here too deadlocks.
+        return start_bridge(name, layout=layout, handler=_handler, llm_lock=None)
 
     @register_tool_from_function
     def reload_skills() -> dict:

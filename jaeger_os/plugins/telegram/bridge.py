@@ -53,7 +53,10 @@ class TelegramBridge:
     through the same asyncio loop.
     """
 
-    def __init__(self, handler: Callable[[str], str], llm_lock: threading.Lock | None = None) -> None:
+    def __init__(self, handler: Callable[[str], str],
+                 llm_lock: threading.Lock | None = None,
+                 token: str | None = None,
+                 allowed_chats: set[int] | None = None) -> None:
         try:
             from telegram.ext import Application  # noqa: F401 — surface ImportError up front
         except ImportError as exc:
@@ -61,10 +64,15 @@ class TelegramBridge:
 
         self._handler = handler
         self._llm_lock = llm_lock
-        self._allowed = _parse_allowed_chats()
-        self._token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+        # Instance-folder first: the resolved token / allowlist are passed in by
+        # the in-process activator (from <instance>/credentials/). Env is only a
+        # legacy fallback for the standalone gateway launch.
+        self._allowed = allowed_chats if allowed_chats is not None else _parse_allowed_chats()
+        self._token = (token or os.environ.get("TELEGRAM_BOT_TOKEN", "")).strip()
         if not self._token:
-            raise RuntimeError("TELEGRAM_BOT_TOKEN env var is required")
+            raise RuntimeError(
+                "TELEGRAM_BOT_TOKEN required — save it with set_credential "
+                "(instance credential store) or export it (legacy)")
 
         self._app: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None

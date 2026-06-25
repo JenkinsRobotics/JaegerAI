@@ -57,7 +57,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
     "vision":       ["vision_analyze", "image_generate"],
     "os":           ["open_on_host"],
     "agent":        ["delegate_task", "send_message", "reload_skills"],
-    "plugins":      ["list_plugins", "setup_plugin"],
+    "plugins":      ["list_plugins", "setup_plugin", "activate_plugin"],
 }
 
 

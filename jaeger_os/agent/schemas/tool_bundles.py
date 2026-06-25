@@ -162,7 +162,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "comm": ToolsetDef(
         description="Cross-platform messaging + plugin awareness.",
-        tools=["send_message", "list_plugins", "setup_plugin"],
+        tools=["send_message", "list_plugins", "setup_plugin", "activate_plugin"],
         includes=[],
     ),
     "host_ui": ToolsetDef(
