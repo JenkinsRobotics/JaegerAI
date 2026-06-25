@@ -60,6 +60,7 @@ _SLASH_COMMANDS = {
     "/clear": "clear the screen",
     "/copy": "copy the last reply",
     "/sessions": "list recent conversations",
+    "/plugins": "list / activate messaging plugins",
     "/help": "list commands",
 }
 
@@ -290,8 +291,36 @@ class ChatWindow(QWidget):
             self._copy_last_reply()
         elif name == "sessions":
             self._list_sessions()
+        elif name == "plugins":
+            self._handle_plugins(cmd[1:].split()[1:])
         else:
             self._emit_system(f"unknown command: /{name} — try /help")
+
+    def _handle_plugins(self, args: list[str]) -> None:
+        """`/plugins` → live bridges + per-plugin status; `/plugins activate
+        <name>` → bring one live in-process from its saved credential (same
+        path as the agent's activate_plugin tool + the Studio button)."""
+        try:
+            from jaeger_os.agent.tools.plugins import list_plugins
+            from jaeger_os.main import activate_plugin_inprocess
+            from jaeger_os.plugins import list_bridges
+        except Exception as exc:  # noqa: BLE001
+            self._emit_system(f"plugins unavailable: {exc}")
+            return
+        if args and args[0].lower() == "activate" and len(args) > 1:
+            res = activate_plugin_inprocess(args[1].strip().lower())
+            if res.get("started"):
+                tail = " (already running)" if res.get("already_running") else ""
+                self._emit_system(f"✓ {res.get('channel')} bridge is live{tail}")
+            else:
+                self._emit_system(f"✗ {res.get('error')}")
+            return
+        live = list_bridges()
+        lines = [f"live bridges: {', '.join(live) if live else 'none'}"]
+        for p in (list_plugins().get("plugins") or []):
+            lines.append(f"  • {p.get('name')}: {p.get('status')}")
+        lines.append("→ /plugins activate <name> to bring one live")
+        self._emit_system("\n".join(lines))
 
     def _new_conversation(self) -> None:
         """Fresh conversation against the same app-agent — new session id
