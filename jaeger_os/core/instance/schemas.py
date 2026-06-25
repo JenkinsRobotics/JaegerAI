@@ -395,6 +395,19 @@ class WarmupConfig(BaseModel):
     vision: bool = False   # warm the Moondream2 VLM — heavy, opt-in
 
 
+class PluginsConfig(BaseModel):
+    """Messaging / integration plugins (telegram, discord, …).
+
+    ``autostart`` names the plugins to bring live in-process at boot. Only
+    those whose credential is already in the instance store actually start
+    (a missing credential is logged and skipped). Empty by default — auto-start
+    is opt-in: otherwise a plugin goes live when the agent calls
+    ``activate_plugin``, the operator clicks Activate in Studio, or a
+    ``/plugins activate <name>`` slash command."""
+    model_config = ConfigDict(extra="forbid")
+    autostart: list[str] = Field(default_factory=list)
+
+
 class PermissionsConfig(BaseModel):
     """How the agent handles tier-gated actions — running code,
     controlling the computer, installing packages.
@@ -584,6 +597,7 @@ class Config(BaseModel):
     avatar: AvatarConfig = Field(default_factory=lambda: AvatarConfig())
     external_model: ExternalModelConfig = Field(default_factory=ExternalModelConfig)
     warmup: WarmupConfig = Field(default_factory=WarmupConfig)
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
