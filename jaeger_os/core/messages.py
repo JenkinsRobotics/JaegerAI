@@ -107,18 +107,32 @@ class ToolEvent:
     topic: str = "/sense/tool"
 
 
+@dataclass
+class AgentActivity:
+    """Agent → surfaces: one live progress line during a turn — a thought /
+    status transition or a tool action — for the dimmed activity stream the
+    windowed chat renders DISTINCT from the final reply, so a multi-minute turn
+    shows what it's thinking/doing instead of a bare spinner. ``kind`` ∈
+    ``thinking`` | ``tool`` | ``status``. Low-frequency (status transitions +
+    tool calls), not per-token spam."""
+    kind: str = "status"
+    text: str = ""
+    session: str = ""
+    topic: str = "/sense/activity"
+
+
 # Registered for the ZMQ wire codec (the in-process bus passes objects
 # through untouched and never consults the registry). NodeHealth + LogLine
 # are chassis-standard ``/sys/*`` topics, registered so a surface can show
 # ``/sys/log`` / node health later.
 MESSAGES = MessageRegistry()
 MESSAGES.register_all([
-    ChatMessage, ChatReply, Transcript, AgentState, ToolEvent,
+    ChatMessage, ChatReply, Transcript, AgentState, ToolEvent, AgentActivity,
     AgentRequest, AgentResponse,
     NodeHealth, LogLine,
 ])
 
 __all__ = [
     "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
-    "ToolEvent", "AgentRequest", "AgentResponse",
+    "ToolEvent", "AgentActivity", "AgentRequest", "AgentResponse",
 ]

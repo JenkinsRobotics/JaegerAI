@@ -142,6 +142,13 @@ class DisplayConfig(BaseModel):
     show_latency: bool = False
     show_tool_activity: bool = True
     show_help_on_start: bool = True
+    # The live activity stream (thoughts + tool use) shown DURING a turn, and
+    # what becomes of it once the final reply lands:
+    #   "full"    — keep the whole dimmed trace above the reply (default)
+    #   "summary" — collapse it to one dimmed "N steps · …" line
+    #   "clear"   — show it live, remove it when the reply arrives
+    #   "off"     — no live stream (just the spinner)
+    activity_trace: str = "full"
     # What pressing Enter does while the agent is mid-turn (hermes parity):
     #   "interrupt" — cancel the running turn, run the new message now
     #   "queue"     — run the new message after the current turn finishes

@@ -23,6 +23,7 @@ import threading
 from typing import Any, Callable
 
 from jaeger_os.core.messages import (
+    AgentActivity,
     AgentState,
     ChatMessage,
     ChatReply,
@@ -55,6 +56,14 @@ class _BusEventAdapter:
                 name=str(payload.get("name", "")),
                 phase=str(payload.get("phase", "start")),
                 elapsed_s=float(payload.get("elapsed_s") or 0.0),
+                session=self.current_session,
+            ))
+        elif event == "agent.activity":
+            # The live progress stream — thoughts + tool actions the windowed
+            # chat renders as dimmed lines distinct from the final reply.
+            self._bus.publish(AgentActivity(
+                kind=str(payload.get("kind", "status")),
+                text=str(payload.get("text", "")),
                 session=self.current_session,
             ))
 
