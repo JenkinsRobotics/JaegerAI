@@ -138,6 +138,43 @@ def _pick_persona() -> Persona | None:
     return None
 
 
+def _pick_character():
+    """Pick the CHARACTER this instance plays — characters ARE the persona
+    now (jaeger_os/personality/characters/).  Returns ``(id, shim)`` where the
+    shim mirrors the persona-identity fields Step 1 prefills from, so the
+    instance's identity.yaml + active_character both reflect the character.
+    The operator picks a character instead of authoring a prompt by hand.
+    """
+    import yaml
+    from types import SimpleNamespace
+    from jaeger_os.personality.character import characters_root
+
+    rows = []
+    for p in sorted(characters_root().iterdir()):
+        y = p / "character.yaml"
+        if not y.exists():
+            continue
+        try:
+            d = yaml.safe_load(y.read_text(encoding="utf-8")) or {}
+            idy = d.get("identity") or {}
+            rows.append((p.name, d.get("name", p.name), idy.get("role", ""),
+                         idy.get("voice_id", ""), idy.get("voice_tone", "")))
+        except Exception:  # noqa: BLE001 — a broken sheet is just skipped
+            continue
+    print()
+    print("  Pick the character this Jaeger plays — its persona, name and")
+    print("  voice all come from the character (edit later in Studio).")
+    options = [(r[0], f"{r[1]} — {r[2]}"[:78]) for r in rows]
+    default = next((i for i, r in enumerate(rows) if r[0] == "jarvis"), 0)
+    chosen = _ask_choice("Character", options, default=max(0, default))
+    r = next(row for row in rows if row[0] == chosen)
+    print(f"  ✓ this Jaeger plays: {r[1]}")
+    return r[0], SimpleNamespace(
+        display_name=r[1], role=r[2],
+        personality=f"Plays the {r[1]} character.",
+        voice_id=r[3], voice_tone=r[4])
+
+
 def _initialise_soul_md(
     root: Path,
     agent_name: str,
@@ -394,8 +431,8 @@ def run_wizard(
     # soul.md.  The full character-level / skill-bundle / tool-gate
     # system is deferred to the Lilith-AI line — see
     # ``jaeger_os/personas/README.md``.
-    persona = _pick_persona()
-    p_id = persona.identity if persona else None
+    char_id, p_id = _pick_character()
+    persona = None  # characters replace the wizard's persona-template path
 
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
@@ -688,13 +725,18 @@ def run_wizard(
         # via ``/voice on`` in the TUI.
         voice=VoiceConfig(enabled=voice_enable_choice),
     )
-    manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION)
+    manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION,
+                        bound_character=char_id)
 
     layout.root.mkdir(parents=True, exist_ok=True)
     layout.ensure_dirs()
     dump_yaml(layout.identity_path, identity)
     dump_yaml(layout.config_path, config)
     dump_json(layout.manifest_path, manifest)
+    # Characters are the persona — wire the instance to the chosen one so the
+    # running agent plays it (identity / soul / traits / name / voice).
+    from jaeger_os.personality.character import set_active_character
+    set_active_character(layout.root, char_id)
     # INST-3 (0.2.0): record install provenance per instance.
     # ``jaeger update`` rewrites ``last_updated_with_framework``;
     # ``jaeger restore`` rewrites ``install_method`` + adds

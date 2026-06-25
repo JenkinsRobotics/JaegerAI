@@ -211,11 +211,43 @@ DEFAULT_CHARACTER_ID = "jarvis"
 
 
 def active_character_id(instance_root: Path) -> str:
-    """The character this instance plays. Never empty — defaults to
-    DEFAULT_CHARACTER_ID when the instance hasn't picked one."""
+    """The character this instance plays right now. Never empty — falls back to
+    the instance's BOUND (canonical) character, then DEFAULT_CHARACTER_ID. So a
+    bound unit defaults to its own persona even if the active file is cleared."""
     f = Path(instance_root) / _ACTIVE_FILE
     cid = f.read_text(encoding="utf-8").strip() if f.exists() else ""
-    return cid or DEFAULT_CHARACTER_ID
+    return cid or bound_character_id(instance_root) or DEFAULT_CHARACTER_ID
+
+
+def bound_character_id(instance_root: Path) -> str:
+    """The character this instance is BOUND to — its canonical identity, written
+    to manifest.json at creation and changed only by an explicit rebind. Empty
+    string if the instance is unbound (a free-swap dev box)."""
+    f = Path(instance_root) / "manifest.json"
+    if not f.exists():
+        return ""
+    try:
+        import json
+        return (json.loads(f.read_text(encoding="utf-8")).get("bound_character") or "").strip()
+    except Exception:  # noqa: BLE001 — a missing/garbled manifest is just "unbound"
+        return ""
+
+
+def bind_character(instance_root: Path, cid: str) -> None:
+    """Rebind the instance to ``cid`` — the deliberate, verified change. Rewrites
+    manifest.json's bound_character (the canonical identity) AND sets it active.
+    A plain :func:`set_active_character` is only a session-level override; this
+    moves the binding. Memory + skill XP live in the instance, so they survive."""
+    import json
+    import os
+    root = Path(instance_root)
+    f = root / "manifest.json"
+    doc = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    doc["bound_character"] = cid.strip()
+    tmp = f.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    os.replace(tmp, f)
+    set_active_character(root, cid)
 
 
 def active_character_signature(instance_root: Path) -> str:
