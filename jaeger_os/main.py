@@ -3588,6 +3588,7 @@ def boot_for_tui(
     instance_name: str | None = None,
     with_memory: bool = True,
     warmup: bool = True,
+    prewarm_model: bool = True,
 ) -> TUIBootResult:
     """Boot the jaeger pipeline for an interactive TUI session.
 
@@ -3678,8 +3679,14 @@ def boot_for_tui(
                       flush=True)
         except Exception:  # noqa: BLE001 — never break boot over this
             pass
-        if warmup:
+        # KV-cache prewarm (system prompt + tool schemas) is DECOUPLED from
+        # voice-model warmup: the windowed app skips the heavy whisper/kokoro
+        # loads (warmup=False) but still primes the LLM so the FIRST user turn
+        # isn't cold. Synchronous — boot finishes fully warm, message #1 is
+        # instant (JAEGER_FAST_BOOT=1 still skips prewarm's heavy Pass 2).
+        if prewarm_model:
             prewarm(client)
+        if warmup:
             warm_plugins(config)
 
         llm_lock = threading.Lock()
