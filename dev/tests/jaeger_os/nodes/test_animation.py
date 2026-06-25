@@ -169,7 +169,7 @@ def test_animation_stop_interrupts_streaming(bus):
             params={"width": 4, "height": 4},
         ))
         time.sleep(0.05)
-        bus.publish(topics.AnimationStop(reason="user_interrupted"))
+        bus.publish(topics.AnimationStop())
         for _ in range(20):
             if adapter.closes > 0:
                 break
