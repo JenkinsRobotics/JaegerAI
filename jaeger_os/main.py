@@ -1555,18 +1555,7 @@ def _register_builtins(client: Any) -> None:
         model. Returns {started, channel} or {started:false, error}. If it
         reports a missing credential, ask the user for the value and
         set_credential it, then retry — never invent a token."""
-        from .plugins import start_bridge
-        client = _pipeline.get("client")
-        layout = _pipeline.get("layout")
-        if client is None:
-            return {"started": False, "error": "no agent in this process to attach the bridge to"}
-
-        def _handler(text: str, session_key: str | None = None) -> str:
-            return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
-
-        # llm_lock=None on purpose: run_for_voice → _run_turn already takes the
-        # shared, non-reentrant _pipeline['llm_lock']; locking here too deadlocks.
-        return start_bridge(name, layout=layout, handler=_handler, llm_lock=None)
+        return activate_plugin_inprocess(name)
 
     @register_tool_from_function
     def reload_skills() -> dict:
@@ -2862,6 +2851,51 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     }
 
 
+def activate_plugin_inprocess(name: str) -> dict:
+    """Bring a messaging plugin live in THIS process from the instance's saved
+    credential — the shared entry point behind the ``activate_plugin`` tool, the
+    Studio Activate button, the ``/plugins`` slash command, and boot auto-start.
+
+    Wires the bridge to the live agent (``run_for_voice``) so the same model /
+    memory / persona answers every channel; per-chat ``session_key``s keep
+    contexts isolated; turns serialize on ``_pipeline['llm_lock']`` inside
+    ``_run_turn`` (so the bridge takes ``llm_lock=None``). Returns
+    ``start_bridge``'s status dict; never raises."""
+    from .plugins import start_bridge
+    client = _pipeline.get("client")
+    layout = _pipeline.get("layout")
+    if client is None:
+        return {"started": False, "error": "no agent in this process to attach the bridge to"}
+
+    def _handler(text: str, session_key: str | None = None) -> str:
+        return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
+
+    return start_bridge(name, layout=layout, handler=_handler, llm_lock=None)
+
+
+def autostart_plugins(config: Any) -> None:
+    """Auto-start the plugins named in ``config.plugins.autostart`` (opt-in).
+    Best-effort + off the boot thread: each bridge's connect can block briefly,
+    and a missing credential / bad token just logs and is skipped — boot never
+    waits on or fails over a plugin."""
+    names = list(getattr(getattr(config, "plugins", None), "autostart", None) or [])
+    if not names:
+        return
+
+    def _run() -> None:
+        for nm in names:
+            try:
+                res = activate_plugin_inprocess(nm)
+            except Exception as exc:  # noqa: BLE001 — never let auto-start break anything
+                res = {"started": False, "error": f"{type(exc).__name__}: {exc}"}
+            if res.get("started"):
+                print(f"[jaeger] plugin auto-started: {nm}", flush=True)
+            else:
+                print(f"[jaeger] plugin {nm!r} auto-start skipped: {res.get('error')}", flush=True)
+
+    threading.Thread(target=_run, name="plugin-autostart", daemon=True).start()
+
+
 def init_extensions(args: Any, client: Any) -> None:
     """Wire up memory / MCP / thinking based on CLI flags + env vars.
     Mirrors python_pydantic_ai.init_extensions."""
@@ -3635,6 +3669,10 @@ def boot_for_tui(
 
         llm_lock = threading.Lock()
         _pipeline["llm_lock"] = llm_lock
+        # Opt-in: bring any config.plugins.autostart bridges live in-process
+        # now that the client + layout + shared lock are ready. Best-effort,
+        # off-thread — never delays or fails boot over a plugin.
+        autostart_plugins(config)
     except Exception:
         lock.release()
         raise
