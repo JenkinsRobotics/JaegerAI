@@ -3,6 +3,55 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.5.1`
+
+Patch release cut from the 0.6 development branch — agent reliability +
+messaging, shipped to main while 0.6 continues.
+
+### Agent behavior hardening
+- **Truthfulness gate (first rule of the contract).** Never fabricate a
+  fact / command / path / tool / result; when unsure, **ask**; **web-verify**
+  facts that can go stale. A mandatory **research → confirm → ask → execute →
+  test** work loop, binding especially for Deep Think / long `/goal` tasks.
+- **`set_credential` tool** over the existing 0600 writer — the agent can now
+  PERSIST a credential the user hands it (never echoed back) instead of telling
+  them to run a CLI.
+- **Steer on every message** — a follow-up arriving mid-turn now redirects the
+  running turn (the bridge routes it to the agent's `steer()`) instead of being
+  queued and feeling ignored.
+
+### Plugins reference the agent instance (in-process)
+- **Instance-folder credentials** — bridges resolve their token from the
+  instance credential store (`plugin_credential`), env only as a legacy
+  fallback. The Telegram bridge takes the resolved token instead of reading
+  `os.environ`.
+- **In-process activation** — `start_bridge` runs a plugin's bridge as a
+  background thread in the live agent process (same model / memory / persona);
+  `send_message` reaches it; an honest, actionable error when it isn't running.
+- **Four triggers** — `activate_plugin` tool · `/plugins activate <name>` slash
+  command · Studio → Settings → Plugins button · opt-in `config.plugins.autostart`.
+- **Multi-conversation** — each channel is an isolated session, serialized
+  through the one model's `llm_lock` (interleaved, not parallel).
+- **Telegram** — instant 👀 receipt reaction (zero added LLM delay) on top of
+  the existing typing indicator.
+- **Fixed a latent bug** — `_credential_status` imported the wrong credentials
+  module; harmless until a layout was bound (i.e. in the live agent), where it
+  ImportError'd for every credential-plugin. Caught by the new plugin-health test.
+- **Health checks** — `dev/tests/.../test_plugins_health.py` +
+  `dev/pipelines/plugins.py` (one-command CLI probe).
+
+### First-turn latency
+- **Windowed app now prewarms the LLM at boot.** `boot_for_tui` decouples the
+  KV-cache prewarm (system prompt + tool schemas) from the voice-model warmup,
+  so the windowed app skips whisper/kokoro but still primes the model — the
+  first user turn is instant instead of a ~26 s cold prefill.
+
+### Surfaces
+- **Live activity stream** — the windowed chat shows the agent's thoughts +
+  tool use as a dimmed trace during a turn, distinct from the reply, with a
+  `display.activity_trace` setting (full / summary / clear / off).
+- `dev/TEST_PROMPTS.md` — manual prompts exercising the tool surface.
+
 ## `0.5.0`
 
 **The identity statement.**  JROS = Hermes-in-`agent/` +
