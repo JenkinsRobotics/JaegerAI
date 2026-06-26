@@ -89,7 +89,8 @@ def _parse_chat_ids(raw: str) -> set[int]:
 _BRIDGE_CLASSES = {"telegram": (".telegram", "TelegramBridge")}
 
 
-def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None) -> dict:
+def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
+                 bus: Any = None) -> dict:
     """Start a plugin's bridge as a background thread IN THIS process, wired to
     the live agent: its ``handler`` runs turns (so the same model / memory /
     persona answers every channel) and its credential comes from the instance
@@ -119,7 +120,8 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None) 
         try:
             mod = importlib.import_module(spec[0], __package__)
             bridge = getattr(mod, spec[1])(
-                handler, llm_lock=llm_lock, token=token, allowed_chats=allowed)
+                handler, llm_lock=llm_lock, token=token, allowed_chats=allowed,
+                bus=bus)
             bridge.start()
         except Exception as exc:  # noqa: BLE001 — surface; a bad bridge never crashes the agent
             return {"started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}

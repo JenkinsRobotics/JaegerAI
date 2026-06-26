@@ -2662,6 +2662,7 @@ def _run_turn_via_jaeger_agent(
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _refresh_character_prompt(jaeger_agent)
+        _tag_confirm_session(key)   # route a mid-turn approval to this channel
         if lock is not None:
             with lock:
                 result = drive_one_turn(jaeger_agent, user_text)
@@ -2819,6 +2820,21 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
             print("  (final-LLM skipped — tool result returned directly)")
 
 
+def _tag_confirm_session(session: str) -> None:
+    """Tag the active confirmation provider with THIS turn's session, so a
+    mid-turn approval prompt routes back to the channel the turn came from —
+    the desktop window, a Telegram chat, or voice. Uniform across every
+    turn-runner (windowed bridge, telegram bridge, gateway) since they all
+    funnel through _run_turn. No-op for the console/AllowAll providers."""
+    try:
+        from jaeger_os.core.safety.permissions import current_policy
+        prov = current_policy().confirmation
+        if hasattr(prov, "current_session"):
+            prov.current_session = session
+    except Exception:  # noqa: BLE001 — never let approval-routing break a turn
+        pass
+
+
 def _refresh_character_prompt(jaeger_agent: Any) -> None:
     """Instant-apply: if the selected character changed since the system
     prompt was built, rebuild it so the new persona takes effect THIS turn
@@ -2885,7 +2901,8 @@ def activate_plugin_inprocess(name: str) -> dict:
     def _handler(text: str, session_key: str | None = None) -> str:
         return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
 
-    return start_bridge(name, layout=layout, handler=_handler, llm_lock=None)
+    return start_bridge(name, layout=layout, handler=_handler, llm_lock=None,
+                        bus=_pipeline.get("chassis_bus"))
 
 
 def autostart_plugins(config: Any) -> None:
