@@ -96,7 +96,26 @@ class IMessageBridge:
         self._thread.start()
         from .. import register_bridge
         register_bridge("imessage", self)
+        if self._bus is not None:
+            try:
+                from jaeger_os.core.messages import AgentRequest
+                self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
+            except Exception:  # noqa: BLE001 — approvals-over-imessage is best-effort
+                pass
         print(f"[imessage] watching chat.db, allowlist: {sorted(self._allowed)}", flush=True)
+
+    def _on_agent_request(self, msg: Any) -> None:
+        """Surface a mid-turn approval to the originating handle; their next
+        message becomes the AgentResponse (see _handle_row)."""
+        from .. import _messaging
+        out = _messaging.request_to_prompt("imessage", msg, self._awaiting)
+        if out is None:
+            return
+        recipient, text = out
+        try:
+            self._send(recipient, text)
+        except Exception:  # noqa: BLE001
+            self._awaiting.pop(recipient, None)
 
     def stop(self) -> None:
         from .. import deregister_bridge
@@ -182,6 +201,30 @@ class IMessageBridge:
             return
         print(f"[imessage] from {handle!r} ({_cocoa_to_iso(row['date_ns'])}): {text[:100]!r}", flush=True)
         session_key = f"imessage:{handle}"
+        from jaeger_os.core.runtime import modes
+        from jaeger_os.core.safety import session_trust
+        from .. import _messaging
+        is_admin = str(handle) in self._admin
+        session_trust.mark_session(session_key, is_admin)
+        # A pending approval? the reply IS the answer (don't run a turn).
+        if _messaging.reply_as_approval("imessage", handle, text, self._awaiting, self._bus):
+            self._send(handle, "✓ got it")
+            return
+        # Slash commands — OWNER-ONLY; handled here, not sent to the LLM.
+        if _messaging.is_slash(text):
+            if not is_admin:
+                self._send(handle, _messaging.SLASH_DENIED)
+                return
+            plan = _messaging.mode_command(text)
+            if not plan:
+                self._send(handle, _messaging.SLASH_UNKNOWN)
+            elif "reply" in plan:
+                self._send(handle, plan["reply"])
+            else:
+                self._send(handle, plan["ack"])
+                res = modes.set_mode(plan["switch"])   # sync — pauses the poll thread (ok)
+                self._send(handle, _messaging.mode_result(res, plan["switch"]))
+            return
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:

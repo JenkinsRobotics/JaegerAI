@@ -90,6 +90,27 @@ class DiscordBridge:
         # Register so the agent's send_message tool can find us.
         from .. import register_bridge
         register_bridge("discord", self)
+        # Answer mid-turn approvals for our own channels over the bus.
+        if self._bus is not None:
+            try:
+                from jaeger_os.core.messages import AgentRequest
+                self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
+            except Exception:  # noqa: BLE001 — approvals-over-discord is best-effort
+                pass
+
+    def _on_agent_request(self, msg: Any) -> None:
+        """Surface a mid-turn approval in the originating Discord channel; the
+        user's next message becomes the AgentResponse (see on_message). Runs on
+        the bus delivery thread — send() schedules onto the discord loop."""
+        from .. import _messaging
+        out = _messaging.request_to_prompt("discord", msg, self._awaiting)
+        if out is None:
+            return
+        recipient, text = out
+        try:
+            self.send(recipient, text)
+        except Exception:  # noqa: BLE001 — couldn't surface it → drop the await state
+            self._awaiting.pop(recipient, None)
 
     def stop(self) -> None:
         from .. import deregister_bridge
@@ -184,6 +205,35 @@ class DiscordBridge:
             # don't see each other's context.
             channel_id = int(getattr(message.channel, "id", 0))
             session_key = f"discord:{channel_id}" if channel_id else f"discord:user:{uid}"
+
+            from jaeger_os.core.runtime import modes
+            from jaeger_os.core.safety import session_trust
+            from .. import _messaging
+            # Trust by AUTHOR (the owner's certified user id), tagged on this
+            # turn's session so the permission layer gates correctly.
+            is_admin = str(uid) in self._admin
+            session_trust.mark_session(session_key, is_admin)
+            recipient = _messaging.recipient_for("discord", session_key) or str(channel_id)
+            # A pending approval? the reply IS the answer (don't run a turn).
+            if _messaging.reply_as_approval("discord", recipient, content, self._awaiting, self._bus):
+                await message.channel.send("✓ got it")
+                return
+            # Slash commands — OWNER-ONLY; handled here, not sent to the LLM.
+            if _messaging.is_slash(content):
+                if not is_admin:
+                    await message.channel.send(_messaging.SLASH_DENIED)
+                    return
+                plan = _messaging.mode_command(content)
+                if not plan:
+                    await message.channel.send(_messaging.SLASH_UNKNOWN)
+                    return
+                if "reply" in plan:
+                    await message.channel.send(plan["reply"])
+                    return
+                await message.channel.send(plan["ack"])
+                res = await asyncio.to_thread(modes.set_mode, plan["switch"])
+                await message.channel.send(_messaging.mode_result(res, plan["switch"]))
+                return
 
             async with message.channel.typing():
                 # Run the (blocking) LLM call in a thread so we don't block the discord loop.
