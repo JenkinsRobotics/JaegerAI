@@ -215,6 +215,10 @@ class IMessageBridge:
             if not is_admin:
                 self._send(handle, _messaging.SLASH_DENIED)
                 return
+            ar = _messaging.autonomy_command(text)     # instant — no model swap
+            if ar:
+                self._send(handle, ar["reply"])
+                return
             plan = _messaging.mode_command(text)
             if not plan:
                 self._send(handle, _messaging.SLASH_UNKNOWN)

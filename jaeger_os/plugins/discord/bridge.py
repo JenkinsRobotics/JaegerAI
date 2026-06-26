@@ -223,6 +223,10 @@ class DiscordBridge:
                 if not is_admin:
                     await message.channel.send(_messaging.SLASH_DENIED)
                     return
+                ar = _messaging.autonomy_command(content)   # instant — no model swap
+                if ar:
+                    await message.channel.send(ar["reply"])
+                    return
                 plan = _messaging.mode_command(content)
                 if not plan:
                     await message.channel.send(_messaging.SLASH_UNKNOWN)

@@ -179,6 +179,10 @@ class TelegramBridge:
         off the event loop (asyncio.to_thread) so the bridge stays responsive."""
         from .. import _messaging
         from jaeger_os.core.runtime import modes
+        ar = _messaging.autonomy_command(text)        # instant — no model swap
+        if ar:
+            await msg.reply_text(ar["reply"])
+            return True
         plan = _messaging.mode_command(text)
         if not plan:
             await msg.reply_text(_messaging.SLASH_UNKNOWN)
