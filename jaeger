@@ -27,31 +27,8 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 
-case "${1:-}" in
-  instances|skills|personality|status|roadmap|avatar|prompt|config)
-    exec "$VENV_PY" -m jaeger_os.cli "$@" ;;
-  setup)
-    shift; exec "$VENV_PY" -m jaeger_os.cli instances create "$@" ;;
-  bridge)
-    # Headless NDJSON stdio bridge — spawned by the native (Swift) app
-    # to drive the agent out of process. Not for interactive use.
-    shift; exec "$VENV_PY" -m jaeger_os.interfaces.bridge "$@" ;;
-  mcp)
-    # Expose JROS as an MCP server (stdio) so Claude Code / Cursor / Zed
-    # can drive the agent as a tool. Spawned by the MCP client.
-    shift; exec "$VENV_PY" -m jaeger_os.interfaces.mcp_server "$@" ;;
-  doctor)
-    shift; exec "$VENV_PY" -m jaeger_os.cli.run --doctor "$@" ;;
-  --dev)
-    # Dev TUI on the gitignored dev instance, via the launch.py machinery
-    # (singleton lock, --stop/--restart/--status/--health). Bare → --tui.
-    shift; [ $# -eq 0 ] && set -- --tui
-    exec "$VENV_PY" "$REPO_ROOT/launch.py" "$@" ;;
-  --version|version)
-    exec "$VENV_PY" -m jaeger_os.cli --version ;;
-  help|--help|-h)
-    exec "$VENV_PY" -m jaeger_os.cli --help ;;
-  *)
-    # bare, --instance, --voice, a one-shot prompt, … → run the agent
-    exec "$VENV_PY" -m jaeger_os.cli.run "$@" ;;
-esac
+# Dispatch now lives in jaeger_os.cli.entry — ONE routing table behind both
+# this wrapper and the installed `jaeger` console script. It re-execs the same
+# `python -m <module>` (or launch.py) targets this case statement used to, so
+# behaviour is unchanged; see jaeger_os/cli/entry.py:_route for the table.
+exec "$VENV_PY" -m jaeger_os.cli.entry "$@"
