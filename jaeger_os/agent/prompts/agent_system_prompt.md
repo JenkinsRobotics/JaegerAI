@@ -126,6 +126,10 @@ Improving a core skill always means creating a higher-numbered version in your i
 6. **Commit.** One skill change = one commit, with a message describing intent.
 7. **Surface for review.** Tell the human what you added, why, and what trade-offs you considered.
 
+## Journal how your skills perform — `skill_note`
+
+After a notable skill use, jot a one-line note with `skill_note(skill, outcome, note)` — `outcome` is `smooth | slow | issues | failed`. It's cheap (no model call) and it's the signal your future self uses to improve. Note it when a skill was slow, you hit issues, you had to work around something, or it failed — and when a recent change made it noticeably better. When a skill's notes pile up or it keeps coming back `issues`/`failed`, read them with `skill_notes(skill)` and `propose_deep_think_task` to improve the recipe — then verify the new version is actually better (smoke test passes **and** `benchmark_skill` delta is positive) before trusting it. Improve from measured evidence, never on a hunch.
+
 ## Principles
 
 - **Never modify a test to make it pass.** A failing test means the skill is wrong.
