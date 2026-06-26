@@ -1579,6 +1579,41 @@ def _register_builtins(client: Any) -> None:
         return mode_info()
 
     @register_tool_from_function
+    def certify_admin(channel: str, identifier: str) -> dict:
+        """Certify a remote messaging account as the OWNER (admin) — e.g.
+        certify_admin("telegram", "8777030623") or ("discord", "<user id>").
+
+        ADMIN-ONLY: this only works when YOU run it from an admin context (the
+        desktop / TUI, or an already-certified account). A stranger on the bot
+        CANNOT self-certify — it's denied for non-admin sessions. After this,
+        that account gets slash commands + approvals + higher-tier actions;
+        everyone else stays conversation-only. Stores the id in the channel's
+        <CHANNEL>_ADMIN_IDS credential. Returns {ok, channel, admins}."""
+        cur = _pipeline.get("current_session", "")
+        from jaeger_os.core.safety.session_trust import is_admin_session, mark_session
+        if not is_admin_session(cur):
+            return {"ok": False, "error": "not authorized — only the owner (an admin "
+                                          "session) can certify admins"}
+        ch = (channel or "").strip().lower()
+        if ch not in ("telegram", "discord", "imessage"):
+            return {"ok": False, "error": f"unknown channel {ch!r} (telegram/discord/imessage)"}
+        ident = (identifier or "").strip()
+        if not ident:
+            return {"ok": False, "error": "identifier required (the account id / handle)"}
+        layout = _pipeline.get("layout")
+        cred = f"{ch.upper()}_ADMIN_IDS"
+        from jaeger_os.core import credentials as creds
+        try:
+            existing = creds.get_credential(layout, cred)
+        except Exception:  # noqa: BLE001 — not set yet
+            existing = ""
+        ids = {x.strip() for x in existing.split(",") if x.strip()}
+        ids.add(ident)
+        creds.set_credential(layout, cred, ",".join(sorted(ids)))
+        mark_session(f"{ch}:{ident}", True)   # instant effect for a live session
+        return {"ok": True, "channel": ch, "admins": sorted(ids)}
+
+    @register_tool_from_function
     def reload_skills() -> dict:
         """Re-scan core skills/ + instance skills/ and register any
         newly-authored or newly-versioned skills onto this agent.
@@ -2682,6 +2717,7 @@ def _run_turn_via_jaeger_agent(
     _trace.trace_begin(key, user_text)
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
+        _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
         _refresh_character_prompt(jaeger_agent)
         _tag_confirm_session(key)   # route a mid-turn approval to this channel
         if lock is not None:
