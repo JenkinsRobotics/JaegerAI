@@ -9,23 +9,25 @@ file isn't already cached.
 Resolution order for any input string ``name_or_path``:
 
   1. Absolute path → use as-is (errors if it doesn't exist).
-  2. Registry key (e.g. ``gemma-4-26b-a4b-it-q4_k_m``) → check
-     ``~/.jaeger/models/<key>/<file>``, then the package's
-     ``src/jaeger_os/models/<file>`` (dev convenience for symlinks
-     to LM Studio), then download from HF Hub to the user cache.
+  2. Registry key (e.g. ``gemma-4-26b-a4b-it-q4_k_m``) → check the
+     operator cache ``<install_root>/.jaeger_os/models/<key>/<file>``,
+     then the package's ``jaeger_os/models/<file>`` (dev convenience for
+     symlinks to LM Studio), then the LM Studio cache, then download
+     from HF Hub to the operator cache.
   3. Relative path (e.g. ``./models/x.gguf`` or ``x.gguf``) → check
-     cwd, package models/, then user cache. If still not found,
+     cwd, package models/, then the operator cache. If still not found,
      fall through to treating the basename as a registry key.
 
-The user cache at ``~/.jaeger/models/<name>/<file>`` is the production
-location. The package's ``src/jaeger_os/models/`` directory stays
-valid as a dev convenience — symlinks to LM Studio's cache resolve
-naturally through step 2.
+The operator cache at ``<install_root>/.jaeger_os/models/<name>/<file>``
+(``operator_state_root()/models``) is the production location. The
+package's ``jaeger_os/models/`` directory stays valid as a dev
+convenience — symlinks to LM Studio's cache resolve through step 2.
 
-History: pre-0.2.1 the dev models dir lived at the repo root
-(``<repo>/models/``). 0.2.1 moved it into the package
-(``<repo>/src/jaeger_os/models/``). The resolver still honours the
-pre-0.2.1 location as a fallback so older dev checkouts keep working.
+History: weights used to resolve from ``~/.jaeger/models/`` with the dev
+dir at ``<repo>/src/jaeger_os/models/``. 0.2.6 dropped the ``src/``
+layer (the package is ``jaeger_os/`` at the repo root) and moved the
+cache to ``<install_root>/.jaeger_os/models/``; the legacy ``~/.jaeger/``
+location is still honoured as a fallback for older installs.
 """
 
 from __future__ import annotations
@@ -206,18 +208,18 @@ def repo_models_dir() -> pathlib.Path | None:
     wheel deployments where there's no repo root to walk to.
 
     Lets us treat the existing symlinks at
-    ``<repo>/src/jaeger_os/models/gemma-...gguf`` as valid resolution
-    targets without changing the dev workflow.
+    ``<repo>/jaeger_os/models/gemma-...gguf`` as valid resolution targets
+    without changing the dev workflow.
 
-    History: pre-0.2.1 this lived at ``<repo>/models/`` (a sibling of
-    ``src/``). 0.2.1 moved it INTO the package at
-    ``<repo>/src/jaeger_os/models/`` so it's discoverable via standard
-    imports and ships predictably in the wheel (README only, weights
-    gitignored). For pre-0.2.1 dev checkouts the old location is
-    still honoured as a fallback."""
+    History: the dev models dir was ``<repo>/models/`` (pre-0.2.1), then
+    ``<repo>/src/jaeger_os/models/`` (0.2.1), and is
+    ``<repo>/jaeger_os/models/`` since 0.2.6 dropped the ``src/`` layer —
+    discoverable via a normal import, README committed, weights
+    gitignored. The original ``<repo>/models/`` is still walked as a
+    fallback for old checkouts."""
     here = pathlib.Path(__file__).resolve()
-    # New (0.2.1+): models/ lives inside the package — one directory
-    # up from this file (core/models/model_resolver.py → core/.. → models/).
+    # 0.2.6+: jaeger_os/models/ — three parents up from this file
+    # (core/models/model_resolver.py → core/models → core → jaeger_os) + /models.
     sibling = here.parent.parent.parent / "models"
     if sibling.is_dir():
         return sibling
