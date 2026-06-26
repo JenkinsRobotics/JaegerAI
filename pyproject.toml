@@ -9,10 +9,10 @@
 # site-packages install — a self-modifying, stateful agent can't live in
 # read-only site-packages.
 #
-# (A first-class `jaeger` console-script entry point is the next step. The
-# operator command is the ./jaeger wrapper today — it dispatches across
-# jaeger_os.cli / .cli.run / .interfaces, which a single entry point must
-# unify before it can replace the wrapper.)
+# The `jaeger` command is a first-class console-script entry point
+# (jaeger_os.cli.entry:main) — one dispatcher behind both the installed
+# `jaeger` (on PATH after install) and the ./jaeger wrapper, which delegates
+# to it. So `jaeger` works from anywhere, not just inside the repo.
 #
 # History: 0.2.3 cut JROS from `pip install jaeger-os` to clone + PYTHONPATH,
 # which lost the entry point and the update path; 0.6 restored proper
@@ -30,6 +30,9 @@ description = "Jaeger-OS — a fused agentic-AI + robotics framework (the agent 
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
+
+[project.scripts]
+jaeger = "jaeger_os.cli.entry:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "jaeger_os.__version__"}
