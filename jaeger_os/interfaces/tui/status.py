@@ -43,7 +43,7 @@ TOOL_GROUPS: dict[str, list[str]] = {
     "web":          ["web_search", "web_extract", "get_weather"],
     "code":         ["run_python", "run_in_venv", "terminal"],
     "packages":     ["install_package", "list_venv_packages"],
-    "models":       ["list_models", "download_model", "set_mode"],
+    "models":       ["list_models", "download_model", "set_mode", "get_mode"],
     "marketplace":  ["package_skill", "benchmark_skill"],
     "background":   ["start_background", "list_background",
                      "check_background", "stop_background"],

@@ -191,7 +191,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message"}),
-    "models": frozenset({"list_models", "download_model", "model_location", "set_mode"}),
+    "models": frozenset({"list_models", "download_model", "model_location", "set_mode", "get_mode"}),
     "bench": frozenset({"run_benchmark"}),
     # ``self_check`` = the agent's doctor (same engine as `jaeger
     # doctor`); ``system_status`` = host cpu/disk/uptime.

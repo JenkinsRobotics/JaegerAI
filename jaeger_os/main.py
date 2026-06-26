@@ -1570,6 +1570,14 @@ def _register_builtins(client: Any) -> None:
         from jaeger_os.core.runtime.modes import set_mode as _set_mode
         return _set_mode(mode)
 
+    @register_tool_from_function(side_effect="read")
+    def get_mode() -> dict:
+        """Report the agent's CURRENT runtime mode + its model/voice profile —
+        use this to answer "what mode are you in?" / "which model is running?"
+        from fact, never guess. Returns {mode, model, voice, options}."""
+        from jaeger_os.core.runtime.modes import mode_info
+        return mode_info()
+
     @register_tool_from_function
     def reload_skills() -> dict:
         """Re-scan core skills/ + instance skills/ and register any
