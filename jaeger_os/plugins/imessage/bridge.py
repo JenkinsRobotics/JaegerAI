@@ -60,7 +60,8 @@ class IMessageBridge:
     def __init__(self, handler: Callable[[str], str],
                  llm_lock: threading.Lock | None = None,
                  allowed_handles: set[str] | None = None,
-                 bus: Any = None) -> None:
+                 bus: Any = None,
+                 admin_ids: set[str] | None = None) -> None:
         if not CHAT_DB.exists():
             raise RuntimeError(f"chat.db not found at {CHAT_DB} — iMessage not configured "
                                "on this Mac (and the agent needs Full Disk Access to read it)")
@@ -72,6 +73,9 @@ class IMessageBridge:
         # iMessage has no bot token — it uses the local Messages app.
         self._allowed = allowed_handles if allowed_handles is not None else _parse_allowed_handles()
         self._bus = bus
+        # The owner's certified handles (the only admin); others conversation-only.
+        self._admin = {str(a) for a in (admin_ids or set())}
+        self._awaiting: dict[str, str] = {}   # handle → pending approval id
         self._service = os.environ.get("IMESSAGE_SERVICE", "iMessage").strip()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None

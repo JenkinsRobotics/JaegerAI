@@ -37,9 +37,11 @@ def test_confirm_round_trips_via_a_channel_responder() -> None:
     from jaeger_os.app.bus.inproc import InProcBus
     from jaeger_os.core.messages import AgentRequest, AgentResponse
 
+    from jaeger_os.core.safety import session_trust
     bus = InProcBus()
     prov = BusConfirmationProvider(bus, timeout_s=3.0)
     prov.current_session = "telegram:55"
+    session_trust.mark_session("telegram:55", True)   # certified owner → prompts (vs auto-deny)
 
     def responder(req) -> None:   # simulate the telegram bridge answering
         if getattr(req, "session", "") == "telegram:55":

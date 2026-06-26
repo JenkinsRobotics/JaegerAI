@@ -57,7 +57,8 @@ class TelegramBridge:
                  llm_lock: threading.Lock | None = None,
                  token: str | None = None,
                  allowed_chats: set[int] | None = None,
-                 bus: Any = None) -> None:
+                 bus: Any = None,
+                 admin_ids: set[str] | None = None) -> None:
         try:
             from telegram.ext import Application  # noqa: F401 — surface ImportError up front
         except ImportError as exc:
@@ -80,6 +81,9 @@ class TelegramBridge:
         # message and turn the user's next reply into the AgentResponse.
         self._bus = bus
         self._awaiting: dict[int, str] = {}   # chat_id → pending approval request id
+        # The owner's certified chat ids (the only admin). Everyone else is a
+        # conversation-only guest: no slash commands, no tier-gated actions.
+        self._admin = {str(a) for a in (admin_ids or set())}
 
         self._app: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -169,27 +173,22 @@ class TelegramBridge:
         except Exception:  # noqa: BLE001 — couldn't surface it → drop the await state
             self._awaiting.pop(chat_id, None)
 
-    # ----- slash commands (handled in-channel, not sent to the LLM) -----
+    # ----- slash commands (admin-gated by the caller; channel-agnostic logic) -----
     async def _handle_slash(self, msg: Any, text: str) -> bool:
-        """Return True if handled. Today: /mode [name] to show/switch the
-        runtime mode. The model swap is slow, so it runs off the event loop."""
-        parts = text[1:].split()
-        cmd = parts[0].lower() if parts else ""
-        if cmd != "mode":
-            return False
+        """Dispatch a slash command via the shared layer. The model swap runs
+        off the event loop (asyncio.to_thread) so the bridge stays responsive."""
+        from .. import _messaging
         from jaeger_os.core.runtime import modes
-        opts = ", ".join(modes.list_modes())
-        if len(parts) < 2:
-            await msg.reply_text(f"mode: {modes.current_mode()}\noptions: {opts}\n/mode <name>")
+        plan = _messaging.mode_command(text)
+        if not plan:
+            await msg.reply_text(_messaging.SLASH_UNKNOWN)
             return True
-        target = parts[1].strip().lower()
-        if target not in modes.list_modes():
-            await msg.reply_text(f"unknown mode '{target}'\noptions: {opts}")
+        if "reply" in plan:
+            await msg.reply_text(plan["reply"])
             return True
-        await msg.reply_text(f"switching to {target} mode… (model swap ~60-90s)")
-        res = await asyncio.to_thread(modes.set_mode, target)
-        await msg.reply_text(f"◆ mode: {res.get('mode', target)}"
-                             if res.get("ok") else f"✗ {res.get('error')}")
+        await msg.reply_text(plan["ack"])
+        res = await asyncio.to_thread(modes.set_mode, plan["switch"])
+        await msg.reply_text(_messaging.mode_result(res, plan["switch"]))
         return True
 
     # ----- internals -----
@@ -210,9 +209,15 @@ class TelegramBridge:
                     print(f"[telegram] dropped message from non-allowlisted chat_id={chat_id}", flush=True)
                     return
                 preview = msg.text.strip()
-                # If we're waiting on this chat to answer a mid-turn approval,
-                # the reply IS the answer — route it to the blocked turn over
-                # the bus, don't start a new turn.
+                # Trust: mark this turn's session with the sender's status — the
+                # owner's certified chat, or a conversation-only guest — so the
+                # permission layer gates tier-actions correctly THIS turn.
+                from jaeger_os.core.safety import session_trust
+                from .. import _messaging
+                is_admin = str(chat_id) in self._admin
+                session_trust.mark_session(f"telegram:{chat_id}", is_admin)
+                # A pending approval? the reply IS the answer — route it to the
+                # blocked turn over the bus, don't start a new turn.
                 rid = self._awaiting.pop(chat_id, None)
                 if rid is not None and self._bus is not None:
                     try:
@@ -223,9 +228,11 @@ class TelegramBridge:
                     except Exception as exc:  # noqa: BLE001
                         print(f"[telegram] approval response failed: {exc}", flush=True)
                     return
-                # Slash commands (e.g. /mode high) are handled here, not sent
-                # to the LLM as a chat turn.
-                if preview.startswith("/"):
+                # Slash commands (e.g. /mode high) — OWNER-ONLY, not sent to the LLM.
+                if _messaging.is_slash(preview):
+                    if not is_admin:
+                        await msg.reply_text(_messaging.SLASH_DENIED)
+                        return
                     if await self._handle_slash(msg, preview):
                         return
                 short = preview if len(preview) <= 60 else preview[:57] + "..."

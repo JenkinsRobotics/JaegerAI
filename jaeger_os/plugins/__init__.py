@@ -89,13 +89,16 @@ def _parse_chat_ids(raw: str) -> set[int]:
 # is the bridge constructor's allowlist kwarg (telegram chats vs discord users).
 _BRIDGE_SPECS = {
     "telegram": {"mod": ".telegram", "cls": "TelegramBridge", "token": "TELEGRAM_BOT_TOKEN",
-                 "allow": "TELEGRAM_ALLOWED_CHAT_IDS", "allow_kw": "allowed_chats", "ints": True},
+                 "allow": "TELEGRAM_ALLOWED_CHAT_IDS", "allow_kw": "allowed_chats", "ints": True,
+                 "admin": "TELEGRAM_ADMIN_IDS"},
     "discord":  {"mod": ".discord", "cls": "DiscordBridge", "token": "DISCORD_BOT_TOKEN",
-                 "allow": "DISCORD_ALLOWED_USER_IDS", "allow_kw": "allowed_users", "ints": True},
+                 "allow": "DISCORD_ALLOWED_USER_IDS", "allow_kw": "allowed_users", "ints": True,
+                 "admin": "DISCORD_ADMIN_IDS"},
     # iMessage has NO bot token — it drives the local Messages app (macOS +
     # Full Disk Access). Its allowlist is string handles (phone / Apple ID).
     "imessage": {"mod": ".imessage", "cls": "IMessageBridge", "token": None,
-                 "allow": "IMESSAGE_ALLOWED_HANDLES", "allow_kw": "allowed_handles", "ints": False},
+                 "allow": "IMESSAGE_ALLOWED_HANDLES", "allow_kw": "allowed_handles", "ints": False,
+                 "admin": "IMESSAGE_ADMIN_IDS"},
 }
 
 
@@ -131,9 +134,12 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
                          f"retry (do not invent a token)"}
     raw_allow = plugin_credential(layout, spec["allow"]) if spec["allow"] else ""
     allowed = _parse_chat_ids(raw_allow) if spec["ints"] else _parse_handles(raw_allow)
+    from ._messaging import parse_admin_ids
+    admin_ids = parse_admin_ids(plugin_credential(layout, spec["admin"]))
     try:
         mod = importlib.import_module(spec["mod"], __package__)
-        kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed}
+        kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed,
+                  "admin_ids": admin_ids}
         if spec["token"]:
             kwargs["token"] = token
         bridge = getattr(mod, spec["cls"])(handler, **kwargs)
