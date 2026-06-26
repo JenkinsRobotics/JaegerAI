@@ -50,6 +50,28 @@ def test_start_bridge_telegram_reports_missing_credential(monkeypatch) -> None:
     assert "TELEGRAM_BOT_TOKEN" in r["error"] and "set_credential" in r["error"]
 
 
+def test_all_messaging_bridges_are_activatable() -> None:
+    from jaeger_os.plugins import _BRIDGE_SPECS
+    assert {"telegram", "discord", "imessage"} <= set(_BRIDGE_SPECS)
+
+
+def test_start_bridge_discord_reports_missing_credential(monkeypatch) -> None:
+    # Discord is wired in-process now (was telegram-only) + reads the credential
+    # store, not env — same honest path as telegram.
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    r = start_bridge("discord", layout=_layout(), handler=lambda *a, **k: "")
+    assert r["started"] is False
+    assert "DISCORD_BOT_TOKEN" in r["error"] and "set_credential" in r["error"]
+
+
+def test_discord_bridge_takes_passed_token_not_env(monkeypatch) -> None:
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+    from jaeger_os.plugins.discord.bridge import DiscordBridge
+    b = DiscordBridge(lambda *a, **k: "", token="passed-token", allowed_users={42})
+    assert b._token == "passed-token"
+    assert b._allowed == {42}
+
+
 def test_telegram_bridge_takes_passed_token_not_env(monkeypatch) -> None:
     # The bridge no longer reaches into os.environ when handed a token.
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)

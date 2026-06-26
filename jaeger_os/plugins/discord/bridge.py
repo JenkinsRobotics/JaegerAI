@@ -51,7 +51,11 @@ class DiscordBridge:
     work (LLM inference) without blocking the Discord client's loop.
     """
 
-    def __init__(self, handler: Callable[[str], str], llm_lock: threading.Lock | None = None) -> None:
+    def __init__(self, handler: Callable[[str], str],
+                 llm_lock: threading.Lock | None = None,
+                 token: str | None = None,
+                 allowed_users: set[int] | None = None,
+                 bus: Any = None) -> None:
         try:
             import discord  # noqa: F401 — surface ImportError up front
         except ImportError as exc:
@@ -59,13 +63,18 @@ class DiscordBridge:
 
         self._handler = handler
         self._llm_lock = llm_lock
-        self._allowed = _parse_allowed_users()
+        # Instance-folder first: token/allowlist passed by the in-process
+        # activator (from <instance>/credentials/); env is a legacy fallback.
+        self._allowed = allowed_users if allowed_users is not None else _parse_allowed_users()
+        self._bus = bus
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
-        self._token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+        self._token = (token or os.environ.get("DISCORD_BOT_TOKEN", "")).strip()
         if not self._token:
-            raise RuntimeError("DISCORD_BOT_TOKEN env var is required")
+            raise RuntimeError(
+                "DISCORD_BOT_TOKEN required — save it with set_credential "
+                "(instance credential store) or export it (legacy)")
 
     # ----- lifecycle -----
     def start(self) -> None:

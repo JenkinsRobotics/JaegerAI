@@ -57,13 +57,21 @@ class IMessageBridge:
     override via IMESSAGE_SERVICE (e.g. "SMS" to force SMS routing).
     """
 
-    def __init__(self, handler: Callable[[str], str], llm_lock: threading.Lock | None = None) -> None:
+    def __init__(self, handler: Callable[[str], str],
+                 llm_lock: threading.Lock | None = None,
+                 allowed_handles: set[str] | None = None,
+                 bus: Any = None) -> None:
         if not CHAT_DB.exists():
-            raise RuntimeError(f"chat.db not found at {CHAT_DB} — iMessage not configured on this Mac")
+            raise RuntimeError(f"chat.db not found at {CHAT_DB} — iMessage not configured "
+                               "on this Mac (and the agent needs Full Disk Access to read it)")
 
         self._handler = handler
         self._llm_lock = llm_lock
-        self._allowed = _parse_allowed_handles()
+        # Instance-folder first: the allowlist is passed by the in-process
+        # activator (from <instance>/credentials/); env is a legacy fallback.
+        # iMessage has no bot token — it uses the local Messages app.
+        self._allowed = allowed_handles if allowed_handles is not None else _parse_allowed_handles()
+        self._bus = bus
         self._service = os.environ.get("IMESSAGE_SERVICE", "iMessage").strip()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None

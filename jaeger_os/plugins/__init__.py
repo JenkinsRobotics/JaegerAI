@@ -85,8 +85,22 @@ def _parse_chat_ids(raw: str) -> set[int]:
     return out
 
 
-# channel → (module, class). The in-process bridges we can start on demand.
-_BRIDGE_CLASSES = {"telegram": (".telegram", "TelegramBridge")}
+# channel → spec for the in-process bridges we can start on demand. ``allow_kw``
+# is the bridge constructor's allowlist kwarg (telegram chats vs discord users).
+_BRIDGE_SPECS = {
+    "telegram": {"mod": ".telegram", "cls": "TelegramBridge", "token": "TELEGRAM_BOT_TOKEN",
+                 "allow": "TELEGRAM_ALLOWED_CHAT_IDS", "allow_kw": "allowed_chats", "ints": True},
+    "discord":  {"mod": ".discord", "cls": "DiscordBridge", "token": "DISCORD_BOT_TOKEN",
+                 "allow": "DISCORD_ALLOWED_USER_IDS", "allow_kw": "allowed_users", "ints": True},
+    # iMessage has NO bot token — it drives the local Messages app (macOS +
+    # Full Disk Access). Its allowlist is string handles (phone / Apple ID).
+    "imessage": {"mod": ".imessage", "cls": "IMessageBridge", "token": None,
+                 "allow": "IMESSAGE_ALLOWED_HANDLES", "allow_kw": "allowed_handles", "ints": False},
+}
+
+
+def _parse_handles(raw: str) -> set[str]:
+    return {h.strip() for h in (raw or "").split(",") if h.strip()}
 
 
 def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
@@ -105,28 +119,28 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
     channel = (name or "").strip().lower()
     if get_bridge(channel) is not None:
         return {"started": True, "channel": channel, "already_running": True}
-    spec = _BRIDGE_CLASSES.get(channel)
+    spec = _BRIDGE_SPECS.get(channel)
     if spec is None:
         return {"started": False, "channel": channel,
-                "error": f"no in-process bridge for {channel!r}; known: {sorted(_BRIDGE_CLASSES)}"}
-    if channel == "telegram":
-        token = plugin_credential(layout, "TELEGRAM_BOT_TOKEN")
-        if not token:
-            return {"started": False, "channel": channel,
-                    "error": "no TELEGRAM_BOT_TOKEN in the instance credential store "
-                             "or env — ask the user for the value and set_credential "
-                             "it first, then retry (do not invent a token)"}
-        allowed = _parse_chat_ids(plugin_credential(layout, "TELEGRAM_ALLOWED_CHAT_IDS"))
-        try:
-            mod = importlib.import_module(spec[0], __package__)
-            bridge = getattr(mod, spec[1])(
-                handler, llm_lock=llm_lock, token=token, allowed_chats=allowed,
-                bus=bus)
-            bridge.start()
-        except Exception as exc:  # noqa: BLE001 — surface; a bad bridge never crashes the agent
-            return {"started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}
-        return {"started": True, "channel": channel}
-    return {"started": False, "channel": channel, "error": f"{channel} activation not wired yet"}
+                "error": f"no in-process bridge for {channel!r}; known: {sorted(_BRIDGE_SPECS)}"}
+    token = plugin_credential(layout, spec["token"]) if spec["token"] else ""
+    if spec["token"] and not token:
+        return {"started": False, "channel": channel,
+                "error": f"no {spec['token']} in the instance credential store or env — "
+                         f"ask the user for the value and set_credential it first, then "
+                         f"retry (do not invent a token)"}
+    raw_allow = plugin_credential(layout, spec["allow"]) if spec["allow"] else ""
+    allowed = _parse_chat_ids(raw_allow) if spec["ints"] else _parse_handles(raw_allow)
+    try:
+        mod = importlib.import_module(spec["mod"], __package__)
+        kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed}
+        if spec["token"]:
+            kwargs["token"] = token
+        bridge = getattr(mod, spec["cls"])(handler, **kwargs)
+        bridge.start()
+    except Exception as exc:  # noqa: BLE001 — surface; a bad bridge never crashes the agent
+        return {"started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}
+    return {"started": True, "channel": channel}
 
 
 __all__ = [
