@@ -1206,9 +1206,19 @@ def _register_builtins(client: Any) -> None:
         coming back `issues`/`failed` — propose_deep_think_task to review the
         notes and improve the recipe. Returns {ok, skill, outcome}."""
         from jaeger_os.core import skill_notes as _sn
-        n = _sn.add_note(_pipeline.get("layout"), skill=skill,
-                         outcome=outcome, note=note)
-        return {"ok": True, "skill": n.skill, "outcome": n.outcome}
+        layout = _pipeline.get("layout")
+        n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note)
+        result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
+        # If the operator enabled the automatic trigger, a pile of issues/
+        # failures may auto-propose a Deep Think review (no-op otherwise).
+        try:
+            from jaeger_os.agent.background import skill_review
+            proposed = skill_review.maybe_propose_on_note(layout, n.skill)
+            if proposed and proposed.get("proposed"):
+                result["review_proposed"] = proposed
+        except Exception:  # noqa: BLE001 — the trigger never breaks a note write
+            pass
+        return result
 
     @register_tool_from_function(side_effect="read")
     def skill_notes(skill: str = "") -> dict:
@@ -1224,6 +1234,27 @@ def _register_builtins(client: Any) -> None:
                     "notes": [{"outcome": n.outcome, "note": n.note, "ts": n.ts}
                               for n in notes[-20:]]}
         return {"summary": _sn.summary(layout)}
+
+    @register_tool_from_function
+    def request_skill_review(skill: str) -> dict:
+        """Queue a Deep Think pass to IMPROVE a recipe-skill from its usage notes
+        — call it when you judge a skill keeps under-performing. It crafts a
+        measured task (baseline benchmark → write a new version → re-benchmark →
+        keep only if smoke passes AND the delta is positive, else revert). Lands
+        approved + ready under `auto` autonomy, else proposed in the backlog for
+        the operator. Deduped if a review's already queued. Returns the proposal."""
+        from jaeger_os.agent.background import skill_review
+        return skill_review.propose_review(_pipeline.get("layout"), skill, force=True)
+
+    @register_tool_from_function
+    def set_skill_review(enabled: bool) -> dict:
+        """Turn the AUTOMATIC skill-review trigger on/off — when on, a skill that
+        accumulates enough issue/failure notes auto-proposes a Deep Think
+        improvement pass (gated further by the autonomy mode). Off by default;
+        you (or the operator) flip it on once you trust the proposals. Returns
+        {ok, auto_trigger}."""
+        from jaeger_os.agent.background import skill_review
+        return skill_review.set_auto_trigger(enabled)
 
     @register_tool_from_function
     def kanban(action: str, card_id: str = "", title: str = "",

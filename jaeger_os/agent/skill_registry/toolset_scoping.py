@@ -187,8 +187,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # is in CORE; the lower-level operators load here.
         "reload_skills", "package_skill", "benchmark_skill",
         "propose_deep_think_task", "list_deep_think_queue",
-        # Skill self-improvement journal (feeds the Deep Think review loop).
-        "skill_note", "skill_notes",
+        # Skill self-improvement: usage journal + the review trigger/toggle
+        # (feeds the Deep Think review loop).
+        "skill_note", "skill_notes", "request_skill_review", "set_skill_review",
     }),
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
