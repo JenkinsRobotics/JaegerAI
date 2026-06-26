@@ -70,10 +70,11 @@ def _resident_model() -> str:
 def _publish(mode: str) -> None:
     try:
         from jaeger_os.core.messages import ModeState
+        from jaeger_os.core.runtime.autonomy import current_autonomy
         from jaeger_os.main import _pipeline
         bus = _pipeline.get("chassis_bus")
         if bus is not None:
-            bus.publish(ModeState(mode=mode))
+            bus.publish(ModeState(mode=mode, autonomy=current_autonomy()))
     except Exception:  # noqa: BLE001 — status is best-effort
         pass
 

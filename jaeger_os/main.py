@@ -1579,6 +1579,27 @@ def _register_builtins(client: Any) -> None:
         return mode_info()
 
     @register_tool_from_function
+    def set_autonomy(mode: str) -> dict:
+        """Set how autonomously you EXECUTE once a task is agreed:
+          • ask    — pause for approval before EVERY outward/hardware/destructive action
+          • scoped — agree the risky scope up front, then run autonomously within it;
+                     anything new prompts once, out-of-scope or missing info → ask (default)
+          • auto   — fully autonomous: act without pausing, reach out only when blocked
+        The PLAN is settled up front regardless; this governs execution only.
+        Switching is INSTANT (no model swap). Returns {ok, mode} or {ok:false,
+        error}."""
+        from jaeger_os.core.runtime.autonomy import set_autonomy as _set_autonomy
+        return _set_autonomy(mode)
+
+    @register_tool_from_function(side_effect="read")
+    def get_autonomy() -> dict:
+        """Report your CURRENT autonomy mode (ask | scoped | auto) — answer "how
+        autonomous are you / will you ask before acting?" from fact, never guess.
+        Returns {autonomy, options, description}."""
+        from jaeger_os.core.runtime.autonomy import autonomy_info
+        return autonomy_info()
+
+    @register_tool_from_function
     def certify_admin(channel: str, identifier: str) -> dict:
         """Certify a remote messaging account as the OWNER (admin) — e.g.
         certify_admin("telegram", "8777030623") or ("discord", "<user id>").

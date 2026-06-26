@@ -124,8 +124,10 @@ class AgentActivity:
 @dataclass
 class ModeState:
     """Agent → surfaces: the active runtime mode (normal | high | deep-sleep)
-    so the tray + chat header can show which model/voice profile is live."""
+    + autonomy mode (ask | scoped | auto) so the tray + chat header can show
+    which model/voice profile is live and how autonomously it's executing."""
     mode: str = "normal"
+    autonomy: str = "scoped"
     topic: str = "/sense/mode"
 
 

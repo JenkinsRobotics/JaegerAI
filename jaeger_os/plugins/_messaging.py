@@ -86,5 +86,37 @@ def mode_result(res: Any, target: str) -> str:
             else f"✗ {res.get('error') if isinstance(res, dict) else 'switch failed'}")
 
 
+def _autonomy_reply(res: Any, target: str, opts: str) -> str:
+    if isinstance(res, dict) and res.get("ok"):
+        return f"◆ autonomy: {res.get('mode', target)}"
+    err = res.get("error") if isinstance(res, dict) else "switch failed"
+    return f"✗ {err}\noptions: {opts}"
+
+
+def autonomy_command(text: str) -> dict:
+    """Parse the autonomy slash commands and APPLY them (switching is instant —
+    no model swap, so no ack/run dance like ``/mode``). Handles the shortcuts
+    ``/ask`` ``/scoped`` ``/auto`` and explicit ``/autonomy [name]``. Returns
+    ``{"reply": str}`` for the bridge to send, or ``{}`` if not an autonomy
+    command (the bridge then tries ``/mode``)."""
+    if not is_slash(text):
+        return {}
+    parts = text[1:].split()
+    if not parts:
+        return {}
+    from jaeger_os.core.runtime import autonomy
+    cmd = parts[0].lower()
+    opts = ", ".join(autonomy.list_autonomy())
+    if cmd in autonomy.list_autonomy():                       # /ask /scoped /auto
+        return {"reply": _autonomy_reply(autonomy.set_autonomy(cmd), cmd, opts)}
+    if cmd == "autonomy":
+        if len(parts) < 2:                                    # bare → status
+            return {"reply": f"autonomy: {autonomy.current_autonomy()}\n"
+                             f"options: {opts}\n/autonomy <name>"}
+        target = parts[1].strip().lower()
+        return {"reply": _autonomy_reply(autonomy.set_autonomy(target), target, opts)}
+    return {}
+
+
 SLASH_DENIED = "⛔ commands are owner-only — you have conversation access."
 SLASH_UNKNOWN = "unknown command — try /mode"

@@ -47,10 +47,20 @@ class BusConfirmationProvider:
         from jaeger_os.core.safety.session_trust import is_admin_session
         if not is_admin_session(self.current_session):
             return False
+        # Autonomy gate (admin sessions only). The plan is agreed up front; this
+        # decides whether execution pauses here:
+        #   auto   → run without prompting at all
+        #   scoped → honor standing grants, prompt-once for anything new
+        #   ask    → pause on every action (ignore standing grants)
+        from jaeger_os.core.runtime import autonomy
+        mode = autonomy.current_autonomy()
+        if mode == "auto":
+            return True
+        honor_grants = mode != "ask"
         skill = getattr(request, "skill", "") or ""
         # Session-scoped "always" grant — stop re-asking for an approved skill.
         with self._lock:
-            if skill and skill in self._granted_skills:
+            if honor_grants and skill and skill in self._granted_skills:
                 return True
 
         rid = uuid.uuid4().hex[:12]
@@ -80,7 +90,7 @@ class BusConfirmationProvider:
         if not answered or answer is None:
             return False                                 # timeout / no surface → deny
         answer = str(answer).strip().lower()
-        if answer == "always" and skill:
+        if answer == "always" and skill and honor_grants:
             with self._lock:
                 self._granted_skills.add(skill)
         return answer in _ALLOW
