@@ -54,12 +54,26 @@ if [[ ! -d "$VENV" ]]; then
 fi
 PIP="$VENV/bin/pip"
 
-# 3. Install dependencies
+# 3. Install JROS — EDITABLE, so the clone IS the live package: a `jaeger`
+#    command + `jaeger --version`, code still writable in place (the agent
+#    self-modifies its skills; you can hack the framework). Runtime deps come
+#    from requirements.txt via pyproject's dynamic dependencies. Prefer uv
+#    (fast); it lives inside the .venv so we never touch system Python.
 if [[ "$SKIP_DEPS" -eq 0 ]]; then
   echo "→ Upgrading pip..."
   "$PIP" install --upgrade pip --quiet
-  echo "→ Installing dependencies..."
-  "$PIP" install -r "$REPO_ROOT/requirements.txt" --quiet
+  UV="$VENV/bin/uv"
+  if [[ ! -x "$UV" ]]; then
+    echo "→ Installing uv..."
+    "$PIP" install uv --quiet || true
+  fi
+  if [[ -x "$UV" ]]; then
+    echo "→ Installing JROS (editable) via uv..."
+    "$UV" pip install --python "$VENV/bin/python" -e "$REPO_ROOT" --quiet
+  else
+    echo "→ uv unavailable — installing JROS (editable) via pip..."
+    "$PIP" install -e "$REPO_ROOT" --quiet
+  fi
 else
   echo "→ --skip-deps: leaving .venv untouched"
 fi

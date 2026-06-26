@@ -1,28 +1,42 @@
-# JROS — Jaeger-OS.
+# JROS — Jaeger-OS packaging + dev-tooling config.
 #
-# 0.2.3+: JROS is no longer distributed as a pip package. Operators
-# clone the repo and run ./install.sh (or use the one-line curl
-# installer in scripts/install.sh). Runtime dependencies are pinned
-# in requirements.txt. The README has the full install flow.
+# JROS installs as an EDITABLE package (PEP 660): the curl installer — and
+# ./install.sh — run `uv pip install -e .` INTO the clone. The code stays
+# writable in place (the agent self-modifies its skills; you can hack the
+# framework) while you still get real packaging: machine-readable version
+# metadata (`jaeger --version`) and `jaeger update` = git pull + editable
+# reinstall. This is the Hermes model (editable-into-clone), NOT a PyPI /
+# site-packages install — a self-modifying, stateful agent can't live in
+# read-only site-packages.
 #
-# This file only carries config for dev tooling (pytest, ruff). The
-# package itself is imported by adding the install root to PYTHONPATH
-# (which run.sh does automatically), not by installing it.
+# (A first-class `jaeger` console-script entry point is the next step. The
+# operator command is the ./jaeger wrapper today — it dispatches across
+# jaeger_os.cli / .cli.run / .interfaces, which a single entry point must
+# unify before it can replace the wrapper.)
 #
-# 0.2.6: dev-only material moved under dev_-prefixed directories so the
-# repo root makes the framework/dev distinction obvious:
-#
-#   <repo>/
-#   ├── jaeger_os/        ← framework code (the product)
-#   ├── install.sh, run.sh, requirements.txt, scripts/install.sh
-#   ├── README.md, CHANGELOG.md, LICENSE
-#   ├── dev/docs/         ← architecture, design notes (dev)
-#   ├── dev/tests/        ← test suite (dev)
-#   ├── dev/benchmark/    ← bench corpus + harness (dev)
-#   ├── dev/scripts/      ← dev_env.sh, run_tests.sh, … (dev)
-#   └── sandbox/          ← in-repo test install (gitignored)
-#
-# See dev/docs/setup.md for the canonical install / upgrade story.
+# History: 0.2.3 cut JROS from `pip install jaeger-os` to clone + PYTHONPATH,
+# which lost the entry point and the update path; 0.6 restored proper
+# packaging WITHOUT moving code — jaeger_os/ stays at the repo root, operator
+# state in .jaeger_os/ beside it. Version is single-sourced from
+# jaeger_os/__init__.py; runtime deps are single-sourced from requirements.txt.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-os"
+description = "Jaeger-OS — a fused agentic-AI + robotics framework (the agent is the top layer of the robot stack)."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+version = {attr = "jaeger_os.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["jaeger_os*"]
 
 [tool.pytest.ini_options]
 testpaths = ["dev/tests"]

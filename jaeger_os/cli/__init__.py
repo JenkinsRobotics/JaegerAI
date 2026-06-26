@@ -51,12 +51,17 @@ def main(argv: list[str] | None = None) -> int:
         status_cmd,
     )
 
+    from jaeger_os import __version__
+
     parser = argparse.ArgumentParser(
         prog="jaeger",
         description=(
             "JROS operator console.  Every subcommand here is also "
             "reachable from the GUI — terminal-first by design."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"jaeger-os {__version__}",
     )
     subparsers = parser.add_subparsers(
         dest="subcommand",

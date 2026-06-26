@@ -47,6 +47,8 @@ case "${1:-}" in
     # (singleton lock, --stop/--restart/--status/--health). Bare → --tui.
     shift; [ $# -eq 0 ] && set -- --tui
     exec "$VENV_PY" "$REPO_ROOT/launch.py" "$@" ;;
+  --version|version)
+    exec "$VENV_PY" -m jaeger_os.cli --version ;;
   help|--help|-h)
     exec "$VENV_PY" -m jaeger_os.cli --help ;;
   *)
