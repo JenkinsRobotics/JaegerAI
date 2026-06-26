@@ -5,12 +5,13 @@ files are large, so `.gitignore` excludes everything in this folder
 except this README.
 
 Jaeger-OS resolves the model named in an instance's `config.yaml`
-through the registry (`src/jaeger_os/core/model_resolver.py`), looking
-in this order:
+through the registry (`jaeger_os/core/models/model_resolver.py`),
+looking in this order:
 
-1. `~/.jaeger/models/`
-2. `./models/` — **this folder**
-3. a Hugging Face Hub download on first use
+1. `<install_root>/.jaeger_os/models/` — the operator cache (production)
+2. `jaeger_os/models/` — **this folder** (dev convenience)
+3. the LM Studio cache (`~/.lmstudio/models/`)
+4. a Hugging Face Hub download on first use
 
 To run JROS locally, either let it download the model on first boot, or
 drop a GGUF here yourself, e.g.:
