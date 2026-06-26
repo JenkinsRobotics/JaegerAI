@@ -56,7 +56,8 @@ class TelegramBridge:
     def __init__(self, handler: Callable[[str], str],
                  llm_lock: threading.Lock | None = None,
                  token: str | None = None,
-                 allowed_chats: set[int] | None = None) -> None:
+                 allowed_chats: set[int] | None = None,
+                 bus: Any = None) -> None:
         try:
             from telegram.ext import Application  # noqa: F401 — surface ImportError up front
         except ImportError as exc:
@@ -74,6 +75,12 @@ class TelegramBridge:
                 "TELEGRAM_BOT_TOKEN required — save it with set_credential "
                 "(instance credential store) or export it (legacy)")
 
+        # Chassis bus (optional) — lets a mid-turn approval reach the user HERE
+        # instead of only a desktop popup: we surface the AgentRequest as a
+        # message and turn the user's next reply into the AgentResponse.
+        self._bus = bus
+        self._awaiting: dict[int, str] = {}   # chat_id → pending approval request id
+
         self._app: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -90,6 +97,13 @@ class TelegramBridge:
         self._ready.wait(timeout=15)
         from .. import register_bridge
         register_bridge("telegram", self)
+        # Answer mid-turn approval prompts for our own chats over the bus.
+        if self._bus is not None:
+            try:
+                from jaeger_os.core.messages import AgentRequest
+                self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
+            except Exception:  # noqa: BLE001 — approvals-over-telegram is best-effort
+                pass
 
     def stop(self) -> None:
         from .. import deregister_bridge
@@ -122,6 +136,39 @@ class TelegramBridge:
         except Exception as exc:
             return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
 
+    # ----- inbound: mid-turn approval prompts -----
+    def _on_agent_request(self, msg: Any) -> None:
+        """A tier-gated tool needs approval mid-turn. If the blocked turn
+        belongs to one of our chats (session ``telegram:<id>``), surface the
+        prompt there and remember we're awaiting that chat's reply — the next
+        message becomes the AgentResponse (see on_message). Runs on the bus
+        delivery thread; the send is scheduled onto our asyncio loop."""
+        session = getattr(msg, "session", "") or ""
+        if not session.startswith("telegram:") or self._loop is None:
+            return
+        try:
+            chat_id = int(session.split(":", 1)[1])
+        except (ValueError, IndexError):
+            return
+        rid = getattr(msg, "id", "")
+        if not rid:
+            return
+        self._awaiting[chat_id] = rid
+        prompt = getattr(msg, "prompt", "") or "Approve this action?"
+        options = list(getattr(msg, "options", ()) or ["allow", "deny"])
+        text = f"🔐 {prompt}\nReply: {' / '.join(options)}"
+
+        async def _send() -> None:
+            try:
+                await self._app.bot.send_message(chat_id=chat_id, text=text)
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            asyncio.run_coroutine_threadsafe(_send(), self._loop)
+        except Exception:  # noqa: BLE001 — couldn't surface it → drop the await state
+            self._awaiting.pop(chat_id, None)
+
     # ----- internals -----
     def _run(self) -> None:
         from telegram import Update
@@ -140,6 +187,19 @@ class TelegramBridge:
                     print(f"[telegram] dropped message from non-allowlisted chat_id={chat_id}", flush=True)
                     return
                 preview = msg.text.strip()
+                # If we're waiting on this chat to answer a mid-turn approval,
+                # the reply IS the answer — route it to the blocked turn over
+                # the bus, don't start a new turn.
+                rid = self._awaiting.pop(chat_id, None)
+                if rid is not None and self._bus is not None:
+                    try:
+                        from jaeger_os.core.messages import AgentResponse
+                        self._bus.publish(AgentResponse(
+                            id=rid, answer=preview, session=f"telegram:{chat_id}"))
+                        await msg.reply_text("✓ got it")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[telegram] approval response failed: {exc}", flush=True)
+                    return
                 short = preview if len(preview) <= 60 else preview[:57] + "..."
                 print(f"[telegram] ← chat={chat_id} {short!r}", flush=True)
                 # Instant receipt ack: a 👀 reaction on the user's message,

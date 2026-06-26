@@ -105,6 +105,9 @@ class AgentBridge:
         from jaeger_os.main import _pipeline
         self._event_adapter = _BusEventAdapter(self.bus)
         _pipeline["event_bus"] = self._event_adapter
+        # Expose the chassis bus so in-process plugin bridges (telegram) can
+        # answer mid-turn approval prompts in-channel, not just the desktop.
+        _pipeline["chassis_bus"] = self.bus
 
         # Route permission prompts over the bus so a window / the Swift app
         # can answer — the console provider can't prompt from the agent
