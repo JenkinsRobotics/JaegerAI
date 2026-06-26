@@ -191,6 +191,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
+    "people": frozenset({"remember_person", "get_person", "list_people"}),
     "models": frozenset({"list_models", "download_model", "model_location", "set_mode", "get_mode"}),
     "bench": frozenset({"run_benchmark"}),
     # ``self_check`` = the agent's doctor (same engine as `jaeger
@@ -214,6 +215,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
+    "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep)",
     "bench": "run the agent self-benchmark against the live pipeline",
     "diagnostics": "system health + cpu/disk status",

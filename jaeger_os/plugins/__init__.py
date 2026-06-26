@@ -137,6 +137,13 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
     from ._messaging import parse_admin_ids
     admin_ids = parse_admin_ids(plugin_credential(layout, spec["admin"]))
     try:
+        # The person index is the richer source of truth: anyone with
+        # access=admin whose handles include this channel is the owner here.
+        from jaeger_os.core import people
+        admin_ids |= people.admins_for_channel(layout, channel)
+    except Exception:  # noqa: BLE001 — person index is optional
+        pass
+    try:
         mod = importlib.import_module(spec["mod"], __package__)
         kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed,
                   "admin_ids": admin_ids}

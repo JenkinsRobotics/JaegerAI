@@ -1611,7 +1611,60 @@ def _register_builtins(client: Any) -> None:
         ids.add(ident)
         creds.set_credential(layout, cred, ",".join(sorted(ids)))
         mark_session(f"{ch}:{ident}", True)   # instant effect for a live session
+        # Also record the owner in the person index (one source of truth).
+        try:
+            from jaeger_os.core import people
+            people.upsert_person(_pipeline.get("layout"), name="Owner",
+                                 access="admin", channel=ch, handle=ident)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
         return {"ok": True, "channel": ch, "admins": sorted(ids)}
+
+    @register_tool_from_function
+    def remember_person(name: str, note: str = "", like: str = "", access: str = "",
+                        channel: str = "", handle: str = "") -> dict:
+        """Build or update a PROFILE of a person you interact with (the owner, a
+        guest) in your person index — which you grow over time the way you grow
+        skills. Use it whenever you learn something durable about someone:
+          • note     — a durable fact about them (appended)
+          • like     — something they like (appended)
+          • access   — admin | member | blocked (their trust level)
+          • channel + handle — link a messaging account to them (e.g. "telegram"
+            + their chat id), so you know which accounts are this person.
+        Distinct from CHARACTERS (the personas YOU play). Returns the profile."""
+        from dataclasses import asdict
+        from jaeger_os.core import people
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return {"ok": False, "error": "no instance bound"}
+        p = people.upsert_person(layout, name=name, note=note, like=like,
+                                 access=(access or None), channel=channel.strip().lower(),
+                                 handle=handle)
+        return {"ok": True, "person": asdict(p)}
+
+    @register_tool_from_function(side_effect="read")
+    def get_person(name: str) -> dict:
+        """Look up a person's profile (by name / alias) from your person index —
+        answer "who is X?" / "what does X like?" from FACT, not a guess. Returns
+        the profile or {found: false}."""
+        from dataclasses import asdict
+        from jaeger_os.core import people
+        layout = _pipeline.get("layout")
+        p = people.find_by_name(layout, name) if layout is not None else None
+        if p is None:
+            return {"found": False, "name": name}
+        return {"found": True, "person": asdict(p)}
+
+    @register_tool_from_function(side_effect="read")
+    def list_people() -> dict:
+        """List everyone in your person index — names + access level. Use to
+        recall who you know."""
+        from jaeger_os.core import people
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return {"people": []}
+        return {"people": [{"id": p.id, "name": p.name, "access": p.access}
+                           for p in people.list_people(layout)]}
 
     @register_tool_from_function
     def reload_skills() -> dict:
