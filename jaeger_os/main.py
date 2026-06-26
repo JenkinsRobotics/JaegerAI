@@ -1196,6 +1196,36 @@ def _register_builtins(client: Any) -> None:
         return t.list_deep_think_queue()
 
     @register_tool_from_function
+    def skill_note(skill: str, outcome: str = "smooth", note: str = "") -> dict:
+        """Jot a SHORT post-use note about a skill you just used — the journal
+        that feeds skill self-improvement. Call it after a notable use:
+          • outcome — smooth | slow | issues | failed (how it actually went)
+          • note    — one terse, concrete line: what worked, what was slow, what
+            you had to work around, what failed.
+        Cheap (one line, no model). When a skill's notes pile up — or it keeps
+        coming back `issues`/`failed` — propose_deep_think_task to review the
+        notes and improve the recipe. Returns {ok, skill, outcome}."""
+        from jaeger_os.core import skill_notes as _sn
+        n = _sn.add_note(_pipeline.get("layout"), skill=skill,
+                         outcome=outcome, note=note)
+        return {"ok": True, "skill": n.skill, "outcome": n.outcome}
+
+    @register_tool_from_function(side_effect="read")
+    def skill_notes(skill: str = "") -> dict:
+        """Read accumulated skill-usage notes — pass a skill name for its recent
+        notes, or blank for a per-skill outcome tally across all skills (which
+        ones are struggling). Use it to decide whether a skill needs a Deep Think
+        improvement pass. Read-only."""
+        from jaeger_os.core import skill_notes as _sn
+        layout = _pipeline.get("layout")
+        if (skill or "").strip():
+            notes = _sn.notes_for(layout, skill)
+            return {"skill": skill.strip(), "count": len(notes),
+                    "notes": [{"outcome": n.outcome, "note": n.note, "ts": n.ts}
+                              for n in notes[-20:]]}
+        return {"summary": _sn.summary(layout)}
+
+    @register_tool_from_function
     def kanban(action: str, card_id: str = "", title: str = "",
                description: str = "", column: str = "", tag: str = "",
                priority: str = "", note: str = "") -> dict:
