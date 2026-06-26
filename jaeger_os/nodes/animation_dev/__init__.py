@@ -1,5 +1,11 @@
 """Animation node — Mochi-vendored adapters + skill-tree integration.
 
+LIVE, not staging — despite the ``_dev`` suffix. Its ``mscript/`` scenes +
+``mscript.logging_utils`` are imported by ``interfaces/studio/pages.py`` and
+``interfaces/v4/mochi_gui.py``, so this stays under ``nodes/`` (moving it to
+``dev/staging/`` would break both GUIs). Distinct from the generic
+``nodes/animation/`` node; this is the Mochi MScript renderer path.
+
 The node owns one active :class:`AnimationAdapter` at a time; it
 subscribes to ``/act/animation`` + ``/act/animation_stop`` on the
 bus and renders pixel buffers it ships to the Swift renderer (or
