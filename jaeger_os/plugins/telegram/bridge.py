@@ -169,6 +169,29 @@ class TelegramBridge:
         except Exception:  # noqa: BLE001 — couldn't surface it → drop the await state
             self._awaiting.pop(chat_id, None)
 
+    # ----- slash commands (handled in-channel, not sent to the LLM) -----
+    async def _handle_slash(self, msg: Any, text: str) -> bool:
+        """Return True if handled. Today: /mode [name] to show/switch the
+        runtime mode. The model swap is slow, so it runs off the event loop."""
+        parts = text[1:].split()
+        cmd = parts[0].lower() if parts else ""
+        if cmd != "mode":
+            return False
+        from jaeger_os.core.runtime import modes
+        opts = ", ".join(modes.list_modes())
+        if len(parts) < 2:
+            await msg.reply_text(f"mode: {modes.current_mode()}\noptions: {opts}\n/mode <name>")
+            return True
+        target = parts[1].strip().lower()
+        if target not in modes.list_modes():
+            await msg.reply_text(f"unknown mode '{target}'\noptions: {opts}")
+            return True
+        await msg.reply_text(f"switching to {target} mode… (model swap ~60-90s)")
+        res = await asyncio.to_thread(modes.set_mode, target)
+        await msg.reply_text(f"◆ mode: {res.get('mode', target)}"
+                             if res.get("ok") else f"✗ {res.get('error')}")
+        return True
+
     # ----- internals -----
     def _run(self) -> None:
         from telegram import Update
@@ -200,6 +223,11 @@ class TelegramBridge:
                     except Exception as exc:  # noqa: BLE001
                         print(f"[telegram] approval response failed: {exc}", flush=True)
                     return
+                # Slash commands (e.g. /mode high) are handled here, not sent
+                # to the LLM as a chat turn.
+                if preview.startswith("/"):
+                    if await self._handle_slash(msg, preview):
+                        return
                 short = preview if len(preview) <= 60 else preview[:57] + "..."
                 print(f"[telegram] ← chat={chat_id} {short!r}", flush=True)
                 # Instant receipt ack: a 👀 reaction on the user's message,

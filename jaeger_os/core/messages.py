@@ -121,6 +121,14 @@ class AgentActivity:
     topic: str = "/sense/activity"
 
 
+@dataclass
+class ModeState:
+    """Agent → surfaces: the active runtime mode (normal | high | deep-sleep)
+    so the tray + chat header can show which model/voice profile is live."""
+    mode: str = "normal"
+    topic: str = "/sense/mode"
+
+
 # Registered for the ZMQ wire codec (the in-process bus passes objects
 # through untouched and never consults the registry). NodeHealth + LogLine
 # are chassis-standard ``/sys/*`` topics, registered so a surface can show
@@ -128,11 +136,11 @@ class AgentActivity:
 MESSAGES = MessageRegistry()
 MESSAGES.register_all([
     ChatMessage, ChatReply, Transcript, AgentState, ToolEvent, AgentActivity,
-    AgentRequest, AgentResponse,
+    ModeState, AgentRequest, AgentResponse,
     NodeHealth, LogLine,
 ])
 
 __all__ = [
     "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
-    "ToolEvent", "AgentActivity", "AgentRequest", "AgentResponse",
+    "ToolEvent", "AgentActivity", "ModeState", "AgentRequest", "AgentResponse",
 ]

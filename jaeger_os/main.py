@@ -1558,6 +1558,19 @@ def _register_builtins(client: Any) -> None:
         return activate_plugin_inprocess(name)
 
     @register_tool_from_function
+    def set_mode(mode: str) -> dict:
+        """Switch the agent's runtime mode — model + voice profile:
+          • normal — small fast model (gemma-12B) + voice (the default)
+          • high — larger model (gemma-26B), voice off; heavier reasoning
+          • deep-sleep — high model + work the Deep Think queue
+        Use when the user asks to switch ("use the bigger model", "go high
+        agentic mode", "back to normal mode"). The model swap is SLOW (~60-90s)
+        — tell the user it's switching, it's not stuck. Returns {ok, mode,
+        model, voice} or {ok:false, error}."""
+        from jaeger_os.core.runtime.modes import set_mode as _set_mode
+        return _set_mode(mode)
+
+    @register_tool_from_function
     def reload_skills() -> dict:
         """Re-scan core skills/ + instance skills/ and register any
         newly-authored or newly-versioned skills onto this agent.
