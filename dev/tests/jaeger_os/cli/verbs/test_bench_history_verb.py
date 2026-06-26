@@ -569,13 +569,15 @@ def test_history_write_persists_history_md(fake_repo, capsys):
 def test_since_filter_excludes_old_runs(fake_repo, capsys):
     """Default --since + bench-version filter drops pre-cutoff (1.0)
     runs; --all + --include-uninstalled bring them back. Old corpus
-    (51-case 1.0) isn't apples-to-apples with current (59-case 1.1)."""
+    (51-case 1.0) isn't apples-to-apples with the current full corpus."""
     bench = fake_repo / "dev/benchmark"
+    # sweep_rows infer version from CASE COUNT (metadata-only path): 51 -> 1.0
+    # (old, dropped), 65 -> current full corpus (ranked).
     _write_sweep_row(bench, name="may28-model", cases=51, route_ok=40,
                      ts="2026-05-28T10:00:00")
-    _write_sweep_row(bench, name="may30-model", cases=59, route_ok=48,
+    _write_sweep_row(bench, name="may30-model", cases=65, route_ok=54,
                      ts="2026-05-30T10:00:00")
-    # Default cutoff is 2026-05-29 (v1.1 corpus) → only may30 shows.
+    # Default cutoff is 2026-05-29 → only may30 (current corpus) shows.
     rc = bhv._cmd_bench_history_argv([])
     out = capsys.readouterr().out
     assert rc == 0
@@ -590,12 +592,13 @@ def test_since_filter_excludes_old_runs(fake_repo, capsys):
 
 def test_since_explicit_date(fake_repo, capsys):
     """An explicit --since overrides the default cutoff.
-    Both rows are post-cutoff (v1.1) so the bench-version filter
-    keeps them; --since is the relevant filter under test."""
+    Both rows are current-corpus so the bench-version filter keeps them;
+    --since is the relevant filter under test."""
     bench = fake_repo / "dev/benchmark"
-    _write_sweep_row(bench, name="m1", cases=59, route_ok=40,
+    # 65 cases -> current corpus (sweep rows infer version from case count).
+    _write_sweep_row(bench, name="m1", cases=65, route_ok=40,
                      ts="2026-05-30T10:00:00")
-    _write_sweep_row(bench, name="m2", cases=59, route_ok=48,
+    _write_sweep_row(bench, name="m2", cases=65, route_ok=48,
                      ts="2026-06-01T10:00:00")
     rc = bhv._cmd_bench_history_argv(["--since", "2026-05-31"])
     out = capsys.readouterr().out
@@ -618,7 +621,7 @@ def test_min_cases_excludes_mini_benches(fake_repo, capsys):
         total=59, passed=45, pass_rate=0.76,
         routing_total=49, routing_passed=45,
         metrics={"p50_latency_s": 2.0},
-        benchmark_version="1.1",
+        benchmark_version=bhv._CURRENT_BENCH_VERSION,
     )
     _write_flat_summary(
         bench, "20260530-110000", nested_under="real-model",
@@ -626,7 +629,7 @@ def test_min_cases_excludes_mini_benches(fake_repo, capsys):
         total=3, passed=3, pass_rate=1.0,
         routing_total=3, routing_passed=3,  # mini-bench, trivial 100%
         metrics={"p50_latency_s": 1.0},
-        benchmark_version="1.1",
+        benchmark_version=bhv._CURRENT_BENCH_VERSION,
     )
     rc = bhv._cmd_bench_history_argv([])  # default min-cases 50
     out = capsys.readouterr().out
@@ -698,6 +701,7 @@ def test_unknown_bucket_excluded_by_default(fake_repo, capsys):
         total=59, passed=45, pass_rate=0.76,
         routing_total=49, routing_passed=45,
         metrics={"p50_latency_s": 2.0},
+        benchmark_version=bhv._CURRENT_BENCH_VERSION,
     )
     _write_flat_summary(
         bench, "20260530-110000",   # no nested_under → 'unknown'
@@ -705,6 +709,7 @@ def test_unknown_bucket_excluded_by_default(fake_repo, capsys):
         total=59, passed=40, pass_rate=0.68,
         routing_total=49, routing_passed=40,
         metrics={"p50_latency_s": 3.0},
+        benchmark_version=bhv._CURRENT_BENCH_VERSION,
     )
     # Default: unknown excluded.
     rc = bhv._cmd_bench_history_argv([])
