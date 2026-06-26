@@ -58,12 +58,13 @@ from typing import Any, Iterable
 # brings the historical runs back for archaeology.
 _DEFAULT_SINCE = "2026-05-29"
 
-# Cutoff for the current corpus version (1.1). Any run on or after
-# this date is considered to have been run against the 1.1 corpus
-# (added T5 safety, T1c hallucination, T3 cross-turn = 59 cases).
-# Anything before is archived as 1.0 (51 cases, no safety tier) and
-# not ranked alongside 1.1 results.
-_CURRENT_BENCH_VERSION = "1.1"
+# The current corpus generation — MUST track ``cases.BENCHMARK_VERSION``
+# (the source of truth; 1.2 = 65 cases). When the corpus is bumped, bump here
+# too, or current runs get FILTERED OUT of the leaderboard — the exact bug this
+# guards against (the bump to 1.2 left this stuck at 1.1, so every 65-case run
+# was excluded). Going-forward runs stamp ``benchmark_version`` explicitly;
+# legacy runs infer by case count via ``_version_from_cases``.
+_CURRENT_BENCH_VERSION = "1.2"
 _BENCH_V11_CUTOFF = "2026-05-29"
 
 
@@ -86,8 +87,18 @@ def _infer_bench_version(summary: dict[str, Any]) -> str:
     explicit = summary.get("benchmark_version")
     if explicit:
         return str(explicit)
-    total = int(summary.get("total", 0) or 0)
-    return _CURRENT_BENCH_VERSION if total >= 59 else "1.0"
+    return _version_from_cases(int(summary.get("total", 0) or 0))
+
+
+def _version_from_cases(total: int) -> str:
+    """Corpus version inferred from case count for legacy runs without an
+    explicit ``benchmark_version`` stamp: 65 = v1.2, 59 = v1.1, else v1.0.
+    (Tiered so a real 59-case v1.1 run isn't mislabeled as the current 1.2.)"""
+    if total >= 65:
+        return "1.2"
+    if total >= 59:
+        return "1.1"
+    return "1.0"
 
 # Minimum case count for a run to count toward the leaderboard.
 # Debugging mini-benches (``--limit 3/5/10``) trivially hit 100%
@@ -388,7 +399,7 @@ def _from_sweep_jsonl(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
                 )
                 # sweep_rows is metadata-only — infer version from
                 # case count (same rule the flat-summary path uses).
-                bv = _CURRENT_BENCH_VERSION if cases >= 59 else "1.0"
+                bv = _version_from_cases(cases)
                 ts = row.get("ts") or ""
                 model = _canonical_model_name(name=row.get("name") or "unknown")
                 yield {
