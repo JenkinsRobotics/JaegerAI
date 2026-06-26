@@ -40,6 +40,13 @@ class BusConfirmationProvider:
         bus.subscribe(AgentResponse.topic, self._on_response)
 
     def confirm(self, request: Any) -> bool:
+        # Trust gate: a non-admin (uncertified remote) session can't elevate.
+        # Deny anything tier-gated outright instead of prompting — a stranger on
+        # the bot gets conversation + un-gated agentic work only, never a prompt
+        # they could answer to reach higher-tier / system actions.
+        from jaeger_os.core.safety.session_trust import is_admin_session
+        if not is_admin_session(self.current_session):
+            return False
         skill = getattr(request, "skill", "") or ""
         # Session-scoped "always" grant — stop re-asking for an approved skill.
         with self._lock:
