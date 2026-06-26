@@ -37,12 +37,14 @@ def test_confirm_auto_denies_non_admin_and_never_prompts() -> None:
     from jaeger_os.agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.app.bus.inproc import InProcBus
     from jaeger_os.core.messages import AgentRequest
+    from jaeger_os.core.safety.session_trust import forget_session
 
+    forget_session("telegram:guest")              # the global registry is shared
     bus = InProcBus()
     asked: list = []
     bus.subscribe(AgentRequest.topic, lambda m: asked.append(m.session))
     prov = BusConfirmationProvider(bus, timeout_s=1.0)
-    prov.current_session = "telegram:55"          # uncertified remote → non-admin
+    prov.current_session = "telegram:guest"       # uncertified remote → non-admin
 
     result = prov.confirm(_req())
     time.sleep(0.1)

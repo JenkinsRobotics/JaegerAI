@@ -55,7 +55,8 @@ class DiscordBridge:
                  llm_lock: threading.Lock | None = None,
                  token: str | None = None,
                  allowed_users: set[int] | None = None,
-                 bus: Any = None) -> None:
+                 bus: Any = None,
+                 admin_ids: set[str] | None = None) -> None:
         try:
             import discord  # noqa: F401 — surface ImportError up front
         except ImportError as exc:
@@ -67,6 +68,10 @@ class DiscordBridge:
         # activator (from <instance>/credentials/); env is a legacy fallback.
         self._allowed = allowed_users if allowed_users is not None else _parse_allowed_users()
         self._bus = bus
+        # The owner's certified user ids (the only admin). Others get
+        # conversation-only access — no slash, no tier-gated actions.
+        self._admin = {str(a) for a in (admin_ids or set())}
+        self._awaiting: dict[str, str] = {}   # recipient → pending approval id
         self._client: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
