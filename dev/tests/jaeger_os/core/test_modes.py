@@ -26,18 +26,21 @@ def test_set_mode_swaps_model_and_toggles_voice(monkeypatch) -> None:
     swapped: list = []
     monkeypatch.setattr(m, "switch_model", lambda model, **k: swapped.append(model))
 
+    # Reference MODES dynamically — verify the orchestration, not the specific
+    # model picks (which change as the benchmark moves).
+    high_model = modes.MODES["high"]["model"]
     modes._state["mode"] = "normal"
-    modes._state["model"] = "gemma-4-12b-it-q4_k_m"   # known resident
+    modes._state["model"] = modes.MODES["normal"]["model"]   # known resident
     assert modes.voice_enabled() is True
 
     r = modes.set_mode("high")
     assert r["ok"] is True and r["mode"] == "high"
-    assert swapped == ["gemma-4-26b-a4b-it-q4_k_m"]    # swapped to the bigger model
+    assert swapped == [high_model]                     # swapped to the high model
     assert modes.voice_enabled() is False              # voice suppressed in high
 
     r2 = modes.set_mode("high")                        # idempotent — no second swap
     assert r2.get("unchanged") is True
-    assert swapped == ["gemma-4-26b-a4b-it-q4_k_m"]
+    assert swapped == [high_model]
     _reset()
 
 
@@ -47,9 +50,9 @@ def test_back_to_normal_swaps_back(monkeypatch) -> None:
     swapped: list = []
     monkeypatch.setattr(m, "switch_model", lambda model, **k: swapped.append(model))
     modes._state["mode"] = "high"
-    modes._state["model"] = "gemma-4-26b-a4b-it-q4_k_m"
+    modes._state["model"] = modes.MODES["high"]["model"]
     r = modes.set_mode("normal")
-    assert r["ok"] is True and swapped == ["gemma-4-12b-it-q4_k_m"]
+    assert r["ok"] is True and swapped == [modes.MODES["normal"]["model"]]
     assert modes.voice_enabled() is True
     _reset()
 
@@ -68,11 +71,12 @@ def test_set_mode_tool_registered() -> None:
 
 def test_mode_info_reports_current_from_fact() -> None:
     from jaeger_os.core.runtime import modes
+    high_model = modes.MODES["high"]["model"]
     modes._state["mode"] = "high"
-    modes._state["model"] = "gemma-4-26b-a4b-it-q4_k_m"
+    modes._state["model"] = high_model
     info = modes.mode_info()
     assert info["mode"] == "high" and info["voice"] is False
-    assert info["model"] == "gemma-4-26b-a4b-it-q4_k_m"
+    assert info["model"] == high_model
     assert "normal" in info["options"]
     _reset()
 

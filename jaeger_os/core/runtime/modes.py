@@ -1,8 +1,14 @@
 """Agent modes — switch the conversational model + voice as one unit.
 
-  normal      — small realtime model (gemma-4-12B) + voice on   (default)
-  high        — larger model (gemma-4-26B), voice off            (heavier reasoning, frees the voice RAM)
+  normal      — e4b realtime model + voice on   (default; 12B = voice backup)
+  high        — 26B-A4B QAT, voice off           (heavier reasoning, frees the voice RAM)
   deep-sleep   — high model, voice off, + drains the Deep Think task queue
+
+Model picks set from the 0.6 clean-batch benchmark (corpus 1.2, 32 GB host):
+e4b is fastest + smallest so it co-loads with voice; the 26B-A4B QAT ties the
+plain 26B on capability but is 2.4 GB smaller (more context headroom voice-off).
+The dense 12B stays the voice-mode BACKUP — slower but 5/5 on the safety /
+no-hallucination tier (vs e4b's 3/5); switch to it when honesty > latency.
 
 Switching swaps the resident LLM via ``main.switch_model`` (slow — the same
 ~60-90s unload→load→prewarm), and toggles a voice flag the audio path honours.
@@ -21,10 +27,13 @@ from typing import Any
 # preset → resident model (registry key), whether voice is allowed, and
 # whether entering it should drain the Deep Think queue.
 MODES: dict[str, dict[str, Any]] = {
-    "normal":     {"model": "gemma-4-12b-it-q4_k_m",     "voice": True,  "deep_sleep": False},
-    "high":       {"model": "gemma-4-26b-a4b-it-q4_k_m", "voice": False, "deep_sleep": False},
-    "deep-sleep": {"model": "gemma-4-26b-a4b-it-q4_k_m", "voice": False, "deep_sleep": True},
+    "normal":     {"model": "gemma-4-e4b-it-q4_k_m",       "voice": True,  "deep_sleep": False},
+    "high":       {"model": "gemma-4-26b-a4b-it-qat-q4_0", "voice": False, "deep_sleep": False},
+    "deep-sleep": {"model": "gemma-4-26b-a4b-it-qat-q4_0", "voice": False, "deep_sleep": True},
 }
+# Voice-mode backup (more honest, slower) — switch_model this in normal mode
+# when the safety/no-hallucination edge matters more than latency.
+VOICE_BACKUP_MODEL = "gemma-4-12b-it-q4_k_m"
 DEFAULT_MODE = "normal"
 
 # Tracked live: the active mode + the model that's actually resident (so we

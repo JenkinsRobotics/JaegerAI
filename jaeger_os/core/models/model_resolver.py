@@ -92,6 +92,26 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "on Apple Silicon."
         ),
     },
+    # ── Heavy tier / high + Deep Think default (0.6) ────────────────
+    # QAT variant of the 26B-A4B. Clean-batch corpus-1.2 bench
+    # (2026-06-26): TIES the plain Q4_K_M on Score (92.3%, 100% routing)
+    # with a PERFECT 20/20 deep-think tier, but 2.4 GB smaller (14.4 vs
+    # 16.8 GB) → more KV/context headroom on a 32 GB host. The high /
+    # deep-sleep model as of 0.6.
+    "gemma-4-26b-a4b-it-qat-q4_0": {
+        "hf_repo": "lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF",
+        "hf_file": "gemma-4-26B-A4B-it-QAT-Q4_0.gguf",
+        "size_gb": 14.4,
+        "role": "deep_think",
+        "verified": True,
+        "description": (
+            "Gemma 4 26B-A4B MoE, QAT Q4_0. Heavy / high + Deep Think "
+            "default (0.6) — 92.3% Score, 100% routing, 20/20 deep-think "
+            "(corpus 1.2). Ties the plain Q4_K_M but 2.4 GB smaller "
+            "(14.4 GB), so it leaves more context headroom voice-off on "
+            "a 32 GB host."
+        ),
+    },
     # ── Deep Think coder model ──────────────────────────────────────
     # Coordinates verified against the HuggingFace API 2026-05-19:
     # the repo + file both exist; size is the real Content-Length.
@@ -145,10 +165,11 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "role": "deep_think",
         "verified": True,
         "description": (
-            "Gemma 4 12B (dense), Q4_K_M. Deep-think pick at the "
-            "24 GB tier — leaderboard #1 at 94.9% routing pass with "
-            "an 18/18 safety subset.  Slower tok/s than Qwen3.5-9B "
-            "but stronger on safety and honest reasoning."
+            "Gemma 4 12B (dense), Q4_K_M. The VOICE-MODE BACKUP (0.6): "
+            "slower than e4b (the voice default) but stronger on the "
+            "safety / no-hallucination tier (5/5 vs 3/5) — switch to it "
+            "in voice mode when honest reasoning matters more than "
+            "latency. Also the 24 GB tier's deep-think pick."
         ),
     },
 }
