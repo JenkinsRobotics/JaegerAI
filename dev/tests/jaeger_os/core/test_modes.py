@@ -64,3 +64,21 @@ def test_set_mode_tool_registered() -> None:
     import jaeger_os.main as m
     m._register_builtins(object())
     assert "set_mode" in {t.name for t in R.get_tools()}
+
+
+def test_mode_info_reports_current_from_fact() -> None:
+    from jaeger_os.core.runtime import modes
+    modes._state["mode"] = "high"
+    modes._state["model"] = "gemma-4-26b-a4b-it-q4_k_m"
+    info = modes.mode_info()
+    assert info["mode"] == "high" and info["voice"] is False
+    assert info["model"] == "gemma-4-26b-a4b-it-q4_k_m"
+    assert "normal" in info["options"]
+    _reset()
+
+
+def test_get_mode_tool_registered() -> None:
+    from jaeger_os.agent.schemas import tool_registry as R
+    import jaeger_os.main as m
+    m._register_builtins(object())
+    assert "get_mode" in {t.name for t in R.get_tools()}

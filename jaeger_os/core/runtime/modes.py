@@ -45,6 +45,15 @@ def voice_enabled() -> bool:
     return bool(MODES.get(_state["mode"], {}).get("voice", True))
 
 
+def mode_info() -> dict:
+    """The CURRENT mode + its model/voice profile — what the agent reports when
+    asked "what mode are you in?" (answer from fact, never guess)."""
+    m = _state["mode"]
+    preset = MODES.get(m, {})
+    return {"mode": m, "model": preset.get("model"),
+            "voice": bool(preset.get("voice", True)), "options": list(MODES)}
+
+
 def _resident_model() -> str:
     """The model registry key currently loaded. Tracked across switches;
     seeded from the instance config's boot model on first call."""
