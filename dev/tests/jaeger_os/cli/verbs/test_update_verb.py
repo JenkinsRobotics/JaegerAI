@@ -158,25 +158,58 @@ def test_update_runs_upgrade_and_skips_migrate_on_no_migrate(tmp_path, monkeypat
     assert json.loads(inst_mf.read_text())["schema_version"] == "0.4.0"
 
 
-def test_update_dev_checkout_prints_hint(tmp_path, monkeypatch, capsys):
+def _fake_editable_repo(tmp_path, monkeypatch, *, dirty: bool) -> list[list[str]]:
+    """Point PACKAGE_ROOT at a throwaway repo and mock subprocess so the
+    editable-update path runs in isolation — never touching or pulling the real
+    repo. Returns the list of subprocess argvs the verb attempted."""
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os",
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **_):
+        calls.append(list(cmd))
+
+        class _R:
+            returncode = 0
+            stdout = " M jaeger_os/x.py\n" if (dirty and "status" in cmd) else ""
+
+        return _R()
+
+    import subprocess as _sp
+    monkeypatch.setattr(_sp, "run", fake_run)
+    return calls
+
+
+def test_update_dev_checkout_dirty_prints_hint(tmp_path, monkeypatch, capsys):
+    """Editable install (the default) + a dirty tree → refuse to pull, print
+    the manual hint."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
     monkeypatch.setattr(U, "_detect_method", lambda: "dev-checkout")
+    calls = _fake_editable_repo(tmp_path, monkeypatch, dirty=True)
     code = U._cmd_update_argv(["--no-migrate"])
     assert code == 0
     out = capsys.readouterr().out
-    assert "dev checkout" in out.lower()
-    assert "git pull" in out
+    assert "uncommitted changes" in out and "git pull" in out
+    assert any("status" in c for c in calls)         # checked status
+    assert not any("pull" in c for c in calls)        # but never pulled
 
 
-def test_update_prints_restart_hint(tmp_path, monkeypatch, capsys):
-    """After upgrade, the verb tells the user to restart — never
-    auto-restarts a running daemon."""
+def test_update_dev_checkout_clean_pulls_and_reinstalls(tmp_path, monkeypatch, capsys):
+    """Editable install + a clean tree → fast-forward pull then an editable
+    reinstall, and still tell the user to restart (never auto-restarts)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
     monkeypatch.setattr(U, "_detect_method", lambda: "dev-checkout")
-    U._cmd_update_argv(["--no-migrate"])
-    out = capsys.readouterr().out
-    assert "Restart" in out
+    calls = _fake_editable_repo(tmp_path, monkeypatch, dirty=False)
+    code = U._cmd_update_argv(["--no-migrate"])
+    assert code == 0
+    assert any("pull" in c and "--ff-only" in c for c in calls)   # fast-forward pull
+    assert any("-e" in c for c in calls)                          # editable reinstall
+    assert "Restart" in capsys.readouterr().out

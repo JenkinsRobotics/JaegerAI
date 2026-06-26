@@ -44,14 +44,49 @@ def _upgrade_command(method: str) -> list[str] | None:
     return None  # dev-checkout / unknown — user-driven
 
 
+def _update_editable() -> int:
+    """Editable / clone install (the default since 0.6): fast-forward pull
+    then resync deps via an editable reinstall — so ``jaeger update`` actually
+    updates instead of just printing a hint. Refuses to pull over a dirty tree
+    (we never touch a working clone with uncommitted changes)."""
+    from jaeger_os.core.instance.instance import PACKAGE_ROOT
+    repo = PACKAGE_ROOT.parent  # jaeger_os/ -> repo root
+    if not (repo / ".git").exists():
+        print("[jaeger update] no .git here — reinstall from source to update.")
+        return 0
+    dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                           capture_output=True, text=True)
+    if dirty.stdout.strip():
+        print("[jaeger update] working tree has uncommitted changes — pull yourself:")
+        print(f"                 cd {repo} && git pull --ff-only && uv pip install -e .")
+        return 0
+    print(f"[jaeger update] pulling latest in {repo}…")
+    pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only"], check=False)
+    if pull.returncode != 0:
+        print("[jaeger update] git pull --ff-only failed (diverged?) — resolve manually.",
+              file=sys.stderr)
+        return pull.returncode
+    venv = repo / ".venv"
+    uv, py = venv / "bin" / "uv", venv / "bin" / "python"
+    if uv.exists():
+        cmd = [str(uv), "pip", "install", "--python", str(py), "-e", str(repo)]
+    else:
+        base = str(py) if py.exists() else sys.executable
+        cmd = [base, "-m", "pip", "install", "-e", str(repo)]
+    print(f"[jaeger update] resyncing deps: {' '.join(cmd)}")
+    res = subprocess.run(cmd, check=False)
+    if res.returncode != 0:
+        print(f"[jaeger update] reinstall exited {res.returncode}", file=sys.stderr)
+        return res.returncode
+    return 0
+
+
 def _run_upgrade(method: str) -> int:
+    if method == "dev-checkout":            # editable / clone install (default 0.6+)
+        return _update_editable()
     cmd = _upgrade_command(method)
     if cmd is None:
-        if method == "dev-checkout":
-            print("[jaeger update] dev checkout detected — pull yourself:")
-            print("                 cd <repo> && git pull && pip install -e .")
-        else:
-            print("[jaeger update] unknown install method — upgrade manually.")
+        print("[jaeger update] unknown install method — upgrade manually.")
         return 0
     print(f"[jaeger update] running: {' '.join(cmd)}")
     try:
