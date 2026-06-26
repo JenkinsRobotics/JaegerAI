@@ -14,6 +14,7 @@ when the bridge starts emitting per-tool events on the bus.
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from typing import Any
@@ -61,6 +62,7 @@ _SLASH_COMMANDS = {
     "/copy": "copy the last reply",
     "/sessions": "list recent conversations",
     "/plugins": "list / activate messaging plugins",
+    "/mode": "show / switch mode (normal · high · deep-sleep)",
     "/help": "list commands",
 }
 
@@ -90,12 +92,13 @@ class ChatWindow(QWidget):
         self._activity_trace = self._read_activity_trace()  # full|summary|clear|off
         self._progress_anchor: int | None = None
         self._progress_steps = 0
+        self._mode = "normal"   # runtime mode, updated by /sense/mode
         self._turn_timer = QTimer(self)
         self._turn_timer.setInterval(1000)
         self._turn_timer.timeout.connect(self._tick_status)
 
         self.setObjectName("JrosChatWindow")
-        self.setWindowTitle(f"JROS — {self._agent_name}")
+        self.setWindowTitle(f"JROS — {self._agent_name} · {self._mode}")
         self.resize(760, 660)
         self._build_ui()
         self._emit_banner()
@@ -104,7 +107,7 @@ class ChatWindow(QWidget):
         self._bridge = make_bus_bridge(
             ctx.bus,
             ["/sense/chat", "/sense/agent_state", "/sense/tool", "/sense/request",
-             "/sense/activity"])
+             "/sense/activity", "/sense/mode"])
         self._bridge.message.connect(self._on_msg)
 
     # ── UI ────────────────────────────────────────────────────────
@@ -298,8 +301,36 @@ class ChatWindow(QWidget):
             self._list_sessions()
         elif name == "plugins":
             self._handle_plugins(cmd[1:].split()[1:])
+        elif name == "mode":
+            self._handle_mode(cmd[1:].split()[1:])
         else:
             self._emit_system(f"unknown command: /{name} — try /help")
+
+    def _handle_mode(self, args: list[str]) -> None:
+        """`/mode` shows the current mode + options; `/mode high` switches. The
+        model swap is slow (~60-90s) so it runs OFF the UI thread; the new mode
+        comes back over /sense/mode and updates the title."""
+        from jaeger_os.core.runtime import modes
+        if not args:
+            self._emit_system(
+                f"mode: {self._mode}  ·  options: {', '.join(modes.list_modes())}"
+                f"  ·  /mode <name> to switch")
+            return
+        target = args[0].strip().lower()
+        if target not in modes.list_modes():
+            self._emit_system(f"unknown mode {target!r} — options: {', '.join(modes.list_modes())}")
+            return
+        if target == self._mode:
+            self._emit_system(f"already in {target} mode")
+            return
+        self._emit_system(f"switching to {target} mode… (model swap ~60-90s — it's not stuck)")
+        threading.Thread(target=lambda: modes.set_mode(target),
+                         daemon=True, name="mode-switch").start()
+
+    def _on_mode(self, msg: Any) -> None:
+        self._mode = getattr(msg, "mode", "") or self._mode
+        self.setWindowTitle(f"JROS — {self._agent_name} · {self._mode}")
+        self._emit_system(f"◆ mode: {self._mode}")
 
     def _handle_plugins(self, args: list[str]) -> None:
         """`/plugins` → live bridges + per-plugin status; `/plugins activate
@@ -391,6 +422,8 @@ class ChatWindow(QWidget):
             self._emit_tool(msg)
         elif msg.topic == "/sense/activity":
             self._emit_activity(msg)
+        elif msg.topic == "/sense/mode":
+            self._on_mode(msg)
         elif msg.topic == "/sense/request":
             self._on_request(msg)
         elif msg.topic == "/sense/agent_state":
