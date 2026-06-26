@@ -47,6 +47,14 @@ def register(subparsers: Any) -> None:
     view.add_argument("skill_id", help="e.g. animation.image")
     view.set_defaults(_handler=run_view)
 
+    notes = sub.add_parser(
+        "notes",
+        help="recipe-skill usage notes (the self-improvement journal)",
+    )
+    notes.add_argument("skill", nargs="?", default="",
+                       help="a skill name, or blank for the per-skill tally")
+    notes.set_defaults(_handler=run_notes)
+
 
 # ── status formatting ─────────────────────────────────────────────
 
@@ -229,5 +237,46 @@ def run_view(args: Any) -> int:
                 print(f"    - {cid}  {c.dim('(unknown)')}")
             else:
                 print(f"    - {cid}  {_status_badge(child.status)}")
+    print()
+    return 0
+
+
+# ── notes (recipe-skill self-improvement journal) ─────────────────
+
+_OUTCOME_COLOUR = {"smooth": c.green, "slow": c.yellow, "issues": c.yellow,
+                   "failed": c.red, "reviewing": c.cyan}
+
+
+def run_notes(args: Any) -> int:
+    layout = c.get_active_instance_layout()
+    if layout is None:
+        print(c.red("no active instance — run the setup wizard first"))
+        return 1
+    from jaeger_os.core import skill_notes
+    skill = (getattr(args, "skill", "") or "").strip()
+    if skill:
+        notes = skill_notes.notes_for(layout, skill)
+        if not notes:
+            print(c.dim(f"no usage notes for {skill!r} yet"))
+            return 0
+        print(f"\n{c.bold(skill)} {c.dim(f'· {len(notes)} note(s)')}\n")
+        for n in notes[-30:]:
+            col = _OUTCOME_COLOUR.get(n.outcome, c.dim)
+            print(f"  {col(f'{n.outcome:<9}')} {c.dim(n.ts)}  {n.note}")
+        print()
+        return 0
+    summary = skill_notes.summary(layout)
+    if not summary:
+        print(c.dim("no skill-usage notes yet — the agent journals them as it works"))
+        return 0
+    print(f"\n{c.bold('Skill usage notes')}  {c.dim('(per-skill outcomes)')}\n")
+    for sk, tally in sorted(summary.items(),
+                            key=lambda kv: -(kv[1].get("failed", 0)
+                                             + kv[1].get("issues", 0))):
+        bad = tally.get("failed", 0) + tally.get("issues", 0)
+        flag = c.red("  ← needs review") if bad >= 3 else ""
+        parts = "  ".join(f"{o}:{tally[o]}" for o in
+                          ("smooth", "slow", "issues", "failed") if tally.get(o))
+        print(f"  {c.bold(sk):<24} {parts}{flag}")
     print()
     return 0
