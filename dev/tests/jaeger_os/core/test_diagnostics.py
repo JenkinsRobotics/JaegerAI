@@ -310,3 +310,28 @@ def test_run_doctor_gates_update_check(monkeypatch):
     assert not any(c.category == "update" for c in D.run_doctor(None))
     assert any(c.category == "update"
                for c in D.run_doctor(None, check_updates=True))
+
+
+# ── macOS Full Disk Access readout ─────────────────────────────────
+
+
+def test_fda_check_skipped_off_macos(monkeypatch):
+    from jaeger_os.core.diagnostics import doctor as D
+    monkeypatch.setattr("sys.platform", "linux")
+    assert D._fda_check() is None
+
+
+def test_fda_check_reports_granted_and_missing(monkeypatch):
+    from jaeger_os.core.diagnostics import doctor as D
+    monkeypatch.setattr("sys.platform", "darwin")
+
+    monkeypatch.setattr(D, "_probe_fda", lambda: True)
+    c = D._fda_check()
+    assert c.category == "system" and c.ok and "granted" in c.detail
+
+    monkeypatch.setattr(D, "_probe_fda", lambda: False)
+    c = D._fda_check()
+    assert c.ok and "not granted" in c.detail and "Full Disk Access" in c.detail
+
+    monkeypatch.setattr(D, "_probe_fda", lambda: None)
+    assert "could not determine" in D._fda_check().detail

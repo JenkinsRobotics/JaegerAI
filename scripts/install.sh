@@ -62,6 +62,31 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
+# C toolchain — several deps (msgspec, llama-cpp-python, …) build from source.
+# Fail early with the exact per-OS fix instead of a half-built .venv later.
+case "$(uname -s)" in
+  Darwin)
+    if ! xcode-select -p >/dev/null 2>&1; then
+      echo "✗ Xcode Command Line Tools not found (needed to build deps)" >&2
+      echo "  fix: xcode-select --install" >&2
+      exit 1
+    fi ;;
+  Linux)
+    if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 \
+       && ! command -v clang >/dev/null 2>&1; then
+      echo "✗ No C compiler (cc/gcc/clang) found — needed to build deps" >&2
+      echo "  fix: Ubuntu — sudo apt install build-essential" >&2
+      echo "       Fedora — sudo dnf groupinstall 'Development Tools'" >&2
+      exit 1
+    fi
+    # PortAudio — sounddevice needs libportaudio for voice (non-fatal).
+    if command -v ldconfig >/dev/null 2>&1 \
+       && ! ldconfig -p 2>/dev/null | grep -q portaudio; then
+      echo "⚠ libportaudio not found — voice (mic/speaker) will be unavailable" >&2
+      echo "  fix: Ubuntu — sudo apt install libportaudio2" >&2
+    fi ;;
+esac
+
 # Python: prefer an explicit 3.12 / 3.11 binary, fall back to python3.
 # macOS often has python3 → 3.13 (Xcode/python.org) while the workable
 # interpreter is python3.12 from Homebrew; search explicitly.
@@ -82,7 +107,7 @@ case "$PY_VERSION" in
     exit 1
     ;;
 esac
-echo "✓ prereqs OK (git, $PY → python$PY_VERSION)"
+echo "✓ prereqs OK (git, C toolchain, $PY → python$PY_VERSION)"
 export PY   # the in-repo install.sh picks up the same interpreter
 
 # 2. Fetch the repo into the source cache (full dev tree lives here, not

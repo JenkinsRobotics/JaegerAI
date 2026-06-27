@@ -55,6 +55,41 @@ def _update_check() -> Any:
     return Check(name="version", category="update", ok=True, detail=detail)
 
 
+def _probe_fda() -> bool | None:
+    """True/False if we can determine Full Disk Access for this process, None
+    if undeterminable. Probes a TCC-gated path (`TCC.db`) — readable only with
+    FDA granted."""
+    from pathlib import Path
+    probe = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
+    try:
+        with open(probe, "rb"):
+            return True
+    except PermissionError:
+        return False
+    except OSError:
+        return None
+
+
+def _fda_check() -> Any | None:
+    """macOS only: does this process have Full Disk Access? Informational —
+    FDA matters only for protected folders (Desktop / Documents / Downloads /
+    external drives), so it's never a hard failure. Returns None off macOS."""
+    import sys
+    if sys.platform != "darwin":
+        return None
+    from jaeger_os.core.runtime.preflight import Check
+    granted = _probe_fda()
+    if granted is False:
+        detail = ("not granted — needed only for protected folders "
+                  "(Desktop/Documents/Downloads/external drives). Grant in "
+                  "System Settings → Privacy & Security → Full Disk Access.")
+    elif granted is True:
+        detail = "granted"
+    else:
+        detail = "could not determine"
+    return Check(name="full_disk_access", category="system", ok=True, detail=detail)
+
+
 def run_doctor(layout: Any = None, *, deep: bool = False,
                check_updates: bool = False) -> list[Any]:
     """Run the one doctor and return a flat ``list[Check]``.
@@ -104,6 +139,14 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
             checks.append(Check(
                 name="version", category="update", ok=True,
                 detail=f"update check error: {type(exc).__name__}"))
+
+    # macOS Full Disk Access readout (local, cheap) — guidance only.
+    try:
+        fda = _fda_check()
+        if fda is not None:
+            checks.append(fda)
+    except Exception:  # noqa: BLE001 — diagnostics never crash the doctor
+        pass
     return checks
 
 
