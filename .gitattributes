@@ -1,0 +1,6 @@
+# Keep the release tarball lean. `jaeger update` (clean installs) fetches the
+# git-archive tarball and extracts only the product allowlist, so the dev tree
+# is dead weight in that download. export-ignore drops it from `git archive` /
+# GitHub's "Download tarball" — `git clone` (contributors, CI) is unaffected.
+dev/        export-ignore
+.github/    export-ignore

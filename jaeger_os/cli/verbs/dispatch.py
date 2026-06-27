@@ -32,7 +32,7 @@ from typing import Sequence
 SUBCOMMANDS: frozenset[str] = frozenset({
     "bench",
     "setup", "instance", "migrate",
-    "backup", "restore", "update",
+    "backup", "restore", "update", "autostart",
     "skill", "memory", "kill",
 })
 
@@ -73,6 +73,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "update":
         from jaeger_os.cli.verbs.update_verb import _cmd_update_argv
         return _cmd_update_argv(list(argv[1:]))
+    if argv[0] == "autostart":
+        from jaeger_os.cli.verbs.autostart_verb import _cmd_autostart_argv
+        return _cmd_autostart_argv(list(argv[1:]))
     if argv[0] == "skill":
         from jaeger_os.cli.verbs.skill_verbs import _cmd_skill_argv
         return _cmd_skill_argv(list(argv[1:]))
@@ -173,7 +176,7 @@ def _repo_root() -> Path:
 def _print_usage() -> None:
     print(
         "Usage: jaeger {bench|setup|instance|migrate|backup|restore|update|"
-        "skill|memory|kill|health} [args]\n"
+        "autostart|skill|memory|kill|health} [args]\n"
         "\n"
         "  bench    Run a JROS benchmark — `jaeger bench run|timing|compare|history`.\n"
         "  setup    Create or re-run the setup wizard for an instance.\n"
@@ -182,6 +185,7 @@ def _print_usage() -> None:
         "  backup   Archive an instance directory to a zip.\n"
         "  restore  Restore an instance from a backup zip.\n"
         "  update   Upgrade the framework and migrate stale instances.\n"
+        "  autostart Run the unit's agent at boot/login — enable|disable|status.\n"
         "  skill    Manage skills — list / clone a bundled skill.\n"
         "  memory   Export or summarise an instance's memory store.\n"
         "  kill     Force-stop every jaeger process + sweep stale lock\n"
