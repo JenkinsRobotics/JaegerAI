@@ -3714,9 +3714,10 @@ def _cli_clear_instance(name: str, *, force: bool = False) -> int:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Jaeger: self-improving local agent.")
     p.add_argument("prompt", nargs="*", help="Optional one-shot command.")
-    p.add_argument("--instance", type=str, default=None,
-                   help="Instance name (default: JAEGER_INSTANCE_NAME or 'default').")
-    # ``--setup`` removed in 0.2.0 — use ``jaeger setup`` (INST-2).
+    p.add_argument("--instance", "--agent", type=str, default=None, dest="instance",
+                   help="Agent to run (default: JAEGER_INSTANCE_NAME or 'default'). "
+                        "`--instance` is the historical alias.")
+    # ``--setup`` removed in 0.2.0 — use ``jaeger agent create`` (INST-2).
     p.add_argument("--self-test", action="store_true",
                    help="Run the sandbox/memory/skill smoke tests without loading the LLM.")
     p.add_argument("--doctor", action="store_true",

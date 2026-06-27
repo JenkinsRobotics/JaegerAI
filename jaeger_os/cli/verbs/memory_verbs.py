@@ -80,8 +80,8 @@ def _memory_export(argv: list[str]) -> int:
     )
     parser.add_argument("path", nargs="?", default=None,
                         help="output directory (created if missing)")
-    parser.add_argument("--instance", default=None,
-                        help="instance name (default: active)")
+    parser.add_argument("--instance", "--agent", default=None, dest="instance",
+                        help="agent name (default: active)")
     parser.add_argument("--tables", default=None,
                         help=f"comma-separated table list "
                              f"(default: {','.join(_DEFAULT_TABLES)})")
@@ -158,8 +158,8 @@ def _memory_stats(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="jaeger memory stats", add_help=False,
     )
-    parser.add_argument("--instance", default=None,
-                        help="instance name (default: active)")
+    parser.add_argument("--instance", "--agent", default=None, dest="instance",
+                        help="agent name (default: active)")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:

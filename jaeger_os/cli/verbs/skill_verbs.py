@@ -50,8 +50,8 @@ def _cmd_skill_argv(argv: list[str]) -> int:
 
 def _skill_list(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger skill list", add_help=False)
-    parser.add_argument("--instance", default=None,
-                        help="instance name (default: active)")
+    parser.add_argument("--instance", "--agent", default=None, dest="instance",
+                        help="agent name (default: active)")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:
@@ -101,8 +101,8 @@ def _skill_list(argv: list[str]) -> int:
 def _skill_clone(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger skill clone", add_help=False)
     parser.add_argument("name", nargs="?", default=None)
-    parser.add_argument("--instance", default=None,
-                        help="instance name (default: active)")
+    parser.add_argument("--instance", "--agent", default=None, dest="instance",
+                        help="agent name (default: active)")
     parser.add_argument("--force", action="store_true",
                         help="overwrite an existing instance-zone copy")
     parser.add_argument("-h", "--help", action="store_true")

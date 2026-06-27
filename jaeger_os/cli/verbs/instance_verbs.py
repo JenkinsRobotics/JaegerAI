@@ -77,6 +77,26 @@ def _print_instance_usage() -> None:
     )
 
 
+def _print_agent_usage() -> None:
+    print(
+        "usage: jaeger agent <command> [args...]\n"
+        "\n"
+        "  An agent is a deployed AI that plays a character — its own memory,\n"
+        "  config, and model. (The character is the persona; the agent runs it.)\n"
+        "\n"
+        "commands:\n"
+        "  create [name] [--force]  run the setup wizard for a new/rebuilt agent\n"
+        "  list                     show every agent (active one starred)\n"
+        "  use <name>               set the default agent\n"
+        "  inspect <name>           print identity + config (no model boot)\n"
+        "  delete <name> [-f]       remove an agent\n"
+        "  clear <name>  [-f]       wipe an agent's memory + logs (keep identity)\n"
+        "\n"
+        "  (`jaeger instance` / `jaeger setup` remain as aliases.)\n",
+        file=sys.stderr,
+    )
+
+
 # ── ``jaeger setup`` ───────────────────────────────────────────────
 
 
@@ -108,8 +128,8 @@ def _cmd_setup_argv(argv: list[str]) -> int:
 
 def _cmd_migrate_argv(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger migrate", add_help=False)
-    parser.add_argument("--instance", default=None,
-                        help="instance name (default: active)")
+    parser.add_argument("--instance", "--agent", default=None, dest="instance",
+                        help="agent name (default: active)")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:
@@ -166,6 +186,27 @@ def _cmd_instance_argv(argv: list[str]) -> int:
         return _instance_clear(rest)
     print(f"[jaeger instance] unknown verb {verb!r}", file=sys.stderr)
     _print_instance_usage()
+    return 2
+
+
+def _cmd_agent_argv(argv: list[str]) -> int:
+    """``jaeger agent ...`` — the operator-facing name for the agents you
+    deploy (each plays a character; its own memory/config/model). Thin
+    front-end over the instance machinery; ``jaeger instance`` / ``jaeger
+    setup`` stay as aliases. Internally these are still 'instances'."""
+    if not argv or argv[0] in ("-h", "--help"):
+        _print_agent_usage()
+        return 0 if argv else 2
+    verb, rest = argv[0], list(argv[1:])
+    if verb == "create":
+        # Friendly positional: `agent create <name>` → setup --name <name>.
+        if rest and not rest[0].startswith("-"):
+            rest = ["--name", rest[0], *rest[1:]]
+        return _cmd_setup_argv(rest)
+    if verb in ("list", "use", "inspect", "delete", "clear"):
+        return _cmd_instance_argv(argv)   # argv[0] is the verb
+    print(f"[jaeger agent] unknown command {verb!r}", file=sys.stderr)
+    _print_agent_usage()
     return 2
 
 
