@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.3.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.5.2-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -131,24 +131,27 @@ Then:
 
 ```bash
 cd ~/jaeger
-./run.sh setup           # create your first agent (wizard: memory tier,
-                         # model choice, voice). Default name is auto-picked.
-./run.sh                 # launch the default agent
+./jaeger setup           # create your first agent — the wizard picks a
+                         # character, memory tier, model, and voice.
+./jaeger                 # launch the default agent
 ```
+
+`jaeger` is the one operator command. Add `~/jaeger` to your `PATH` (the
+installer prints the exact line) to drop the `./` and run `jaeger` from
+anywhere; `./run.sh` still works as an alias.
 
 Or scaffold a named agent:
 
 ```bash
-./run.sh setup lilith         # create "lilith" via the wizard
-./run.sh --instance lilith    # launch "lilith"
+./jaeger setup lilith         # create "lilith" via the wizard
+./jaeger --instance lilith    # launch "lilith"
 ```
 
 Manage multiple agents:
 
 ```bash
-./run.sh list                 # show every installed agent
-./run.sh delete eren          # remove "eren" (asks you to type the name)
-./run.sh help                 # full subcommand cheatsheet
+./jaeger instances            # list / create / delete / set the default agent
+./jaeger help                 # full subcommand cheatsheet
 ```
 
 That's the whole flow. The single install pulls the **entire**
@@ -157,20 +160,23 @@ external-model pipeline, messaging bridges. Nothing is left behind
 an extra. A GGUF model is fetched from Hugging Face on first run, and
 nothing else phones home.
 
-**Upgrades** — same one-line, idempotent:
+**Upgrades** — one command, in place (no git needed on the unit):
 
 ```bash
-cd ~/jaeger && git pull && ./install.sh
+jaeger update                 # download + apply the latest release; keeps your
+                              # .venv + agent state untouched
+jaeger update --rollback      # revert to the previous version
+jaeger update --ref 0.6.0     # pin a specific version
 ```
 
-Or re-run the curl command — it detects an existing clone and just
-pulls + re-installs.
+`jaeger doctor` tells you when a newer release is available. (Re-running the
+curl one-liner also works.)
 
 **Pinning a release** — for reproducible installs:
 
 ```bash
-JAEGER_REF=0.3.0 curl -fsSL \
-  https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.3.0/scripts/install.sh | bash
+JAEGER_REF=0.5.2 curl -fsSL \
+  https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.5.2/scripts/install.sh | bash
 ```
 
 **Custom install location** — override with an env var:
@@ -184,7 +190,7 @@ JAEGER_HOME=/opt/jaeger curl -fsSL \
 
 | Layer | Path | What |
 |---|---|---|
-| **Framework** | `~/jaeger/jaeger_os/` | The code (git-tracked, upgraded by `git pull`) |
+| **Framework** | `~/jaeger/jaeger_os/` | The code (upgraded in place by `jaeger update`) |
 | **Operator state** | `~/jaeger/.jaeger_os/instances/<name>/` | Each agent's persona, config, memory, skills, prompts, workspace, logs, credentials — one folder per agent |
 
 The two sibling dirs at the install root make the framework / operator
@@ -198,22 +204,23 @@ for the design rationale.
 git clone https://github.com/JenkinsRobotics/JROS.git ~/jaeger
 cd ~/jaeger
 ./install.sh
-./run.sh setup     # create your first agent
-./run.sh           # launch it
+./jaeger setup     # create your first agent
+./jaeger           # launch it
 ```
 
 ---
 
-## Daily use (0.3.0)
+## Daily use
 
-The 0.2.x in-process Rich TUI is still the operator surface in 0.3.0.
-Pick whichever launch path matches what you're doing.
+`jaeger` (or `./jaeger` from the install dir) is the operator surface — it
+boots the agent app; `--tui` runs it in the terminal instead. Pick whichever
+launch path matches what you're doing.
 
-**Run a named agent** — the production-flow:
+**Run a named agent** — the production flow:
 
 ```bash
-./run.sh --instance lilith        # in-process TUI for the 'lilith' instance
-./run.sh --instance lilith --no-voice   # text-only (no mic, no Kokoro warm)
+./jaeger --instance lilith            # launch the 'lilith' agent
+./jaeger --instance lilith --no-voice # text-only (no mic, no Kokoro warm)
 ```
 
 **Sandbox dev loop** — for working on JROS itself.  The `./launch`
@@ -403,7 +410,7 @@ JROS/                       ← clone goes here (default ~/jaeger)
 ├── .jaeger_os/             ← operator state (gitignored)
 │   ├── instances/<name>/   ← each agent's full state, one folder per agent
 │   ├── models/             ← shared model cache
-│   ├── backups/            ← `./run.sh backup` output
+│   ├── backups/            ← `jaeger backup` output
 │   └── jaeger.env          ← sourceable instance pin
 ├── dev/docs/               ← architecture + design notes
 ├── dev/tests/              ← framework test suite
@@ -416,7 +423,7 @@ JROS/                       ← clone goes here (default ~/jaeger)
 ```
 
 Two clear buckets at the install root: `jaeger_os/` (framework, owned
-by upstream) and `.jaeger_os/` (operator state, gitignored). `git pull`
+by upstream) and `.jaeger_os/` (operator state, gitignored). `jaeger update`
 only touches the first; instance memory/logs/credentials survive every
 upgrade.
 
