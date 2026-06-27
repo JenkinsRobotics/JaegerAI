@@ -107,7 +107,22 @@ def latest_version(repo: str | None = None, *, timeout: float = 5.0) -> str | No
     return pick_latest(tags)
 
 
+def update_status(repo: str | None = None, *, timeout: float = 5.0) -> dict:
+    """``{'current', 'latest', 'available'}`` — the shape the tray menu, the
+    Studio banner, and ``doctor`` all want. ``latest`` is ``None`` offline;
+    ``available`` is ``True`` only when a strictly-newer tag was found. Never
+    raises (safe to call from UI code)."""
+    import jaeger_os
+    current = jaeger_os.__version__
+    latest = latest_version(repo, timeout=timeout)
+    return {
+        "current": current,
+        "latest": latest,
+        "available": bool(latest and is_newer(latest, current)),
+    }
+
+
 __all__ = [
     "repo_slug", "parse_version", "is_newer", "pick_latest",
-    "fetch_tags", "latest_version",
+    "fetch_tags", "latest_version", "update_status",
 ]

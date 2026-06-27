@@ -32,7 +32,8 @@ from typing import Sequence
 SUBCOMMANDS: frozenset[str] = frozenset({
     "bench",
     "agent", "setup", "instance", "migrate",
-    "backup", "restore", "update", "reinstall", "uninstall", "autostart",
+    "backup", "restore", "update", "reinstall", "uninstall",
+    "autostart", "launcher",
     "skill", "memory", "kill",
 })
 
@@ -85,6 +86,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "autostart":
         from jaeger_os.cli.verbs.autostart_verb import _cmd_autostart_argv
         return _cmd_autostart_argv(list(argv[1:]))
+    if argv[0] == "launcher":
+        from jaeger_os.cli.verbs.launcher_verb import _cmd_launcher_argv
+        return _cmd_launcher_argv(list(argv[1:]))
     if argv[0] == "skill":
         from jaeger_os.cli.verbs.skill_verbs import _cmd_skill_argv
         return _cmd_skill_argv(list(argv[1:]))
@@ -185,7 +189,7 @@ def _repo_root() -> Path:
 def _print_usage() -> None:
     print(
         "Usage: jaeger {bench|agent|migrate|backup|restore|update|"
-        "reinstall|uninstall|autostart|skill|memory|kill|health} [args]\n"
+        "reinstall|uninstall|autostart|launcher|skill|memory|kill|health} [args]\n"
         "\n"
         "  bench    Run a JROS benchmark — `jaeger bench run|timing|compare|history`.\n"
         "  agent    Create / manage agents — create | list | use | inspect |\n"
@@ -197,6 +201,7 @@ def _print_usage() -> None:
         "  reinstall Clean reinstall of the framework, keeping all agents.\n"
         "  uninstall Remove the framework; keep agents unless --purge.\n"
         "  autostart Run the unit's agent at boot/login — enable|disable|status.\n"
+        "  launcher  macOS: create a clickable Jaeger.app — install|remove.\n"
         "  skill    Manage skills — list / clone a bundled skill.\n"
         "  memory   Export or summarise an instance's memory store.\n"
         "  kill     Force-stop every jaeger process + sweep stale lock\n"

@@ -192,6 +192,9 @@ def menu_items_for(state: TrayState) -> list[MenuItem]:
         MenuItem(label="Open Web Dashboard", action="open_web",
                  enabled=False),
         SEPARATOR,
+        # Checks GitHub on click (not on every menu open — that would block
+        # the menu on the network); the handler shows the result.
+        MenuItem(label="Check for Updates…", action="check_update"),
         MenuItem(label="About Jaeger OS",  action="about"),
         # "Quit Jaeger OS" tears EVERYTHING down — daemon, every
         # running tray, and the rumps event loop itself. Users
@@ -274,6 +277,7 @@ class TrayActions:
     open_web: Callable[[], None]
     quit_tray: Callable[[], None]
     about: Callable[[], None] | None = None
+    check_update: Callable[[], None] | None = None
 
     def dispatch(self, name: str | None) -> None:
         """Fire the named action if known; otherwise silently no-op so
@@ -290,6 +294,7 @@ class TrayActions:
             "open_web": self.open_web,
             "quit_tray": self.quit_tray,
             "about": self.about,
+            "check_update": self.check_update,
         }.get(name)
         if handler is None:
             return

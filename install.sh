@@ -85,10 +85,22 @@ echo
 echo "✓ Local install complete"
 echo
 echo "Next steps:"
-echo "  ./jaeger setup [name] # create an agent (the wizard)"
+echo "  ./jaeger agent create # create an agent (the wizard)"
 echo "  ./jaeger              # run the active agent"
-echo "  ./jaeger instances    # manage agents (list/create/delete/set-default)"
+echo "  ./jaeger agent list   # manage agents (list/use/delete/clear)"
 echo "  ./jaeger doctor       # environment + readiness check"
 echo
 echo "Optional — add to your shell rc for global access:"
 echo "  export PATH=\"\$PATH:$REPO_ROOT\""
+case "$(uname -s)" in
+  Darwin)
+    echo
+    echo "Optional — macOS: a clickable app in your Dock / Launchpad:"
+    echo "  ./jaeger launcher install"
+    echo "Optional — run unattended at login:"
+    echo "  ./jaeger autostart enable" ;;
+  Linux)
+    echo
+    echo "Optional — run unattended at boot:"
+    echo "  ./jaeger autostart enable" ;;
+esac

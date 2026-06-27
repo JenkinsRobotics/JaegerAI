@@ -43,43 +43,24 @@ installs the whole stack.**
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.3.0` released.** Voice pipeline rebuild + skill
-> system v3 + persona prefill. The 0.2.x in-process Rich TUI stays
-> as the operator surface; the 0.3.0 work layers underneath it:
+> **Status — `0.5.2` released; `0.6.0` in progress.** The agent is alive
+> (animation, personality, self-improving skills), and the product around it now
+> behaves like real software: a clean one-command install, in-place
+> `jaeger update` with `--rollback`, `jaeger autostart` (boot/login),
+> `jaeger reinstall` / `jaeger uninstall`, and a clickable macOS launcher.
+> Operators manage **agents** (`jaeger agent …`) — each plays a *character*.
 >
-> - **Persistent TTS output stream** — one long-lived OutputStream
->   opens at warm time, stays alive for the session.  Two backends,
->   config-toggled via `config.voice.audio_backend`:
->     - `sounddevice` (default) — PortAudio, with the output device
->       resolved LIVE via CoreAudio so it follows Settings → Sound.
->     - `avaudio` — PyObjC AVAudioEngine, direct
->       `scheduleBuffer:completionHandler:` (no PortAudio in the loop).
-> - **Skill system v3** — unified `jros.skill/v3` manifest schema
->   (id, version, origin, package, runtime, domains, embodiment,
->   permissions, capabilities with per-capability scoring bands +
->   levels, dependencies, artifacts, entrypoint, body, provenance).
->   Capability state persists in `<instance>/capabilities/`; promotion
->   /demotion rules update the live band the router consults.
-> - **Persona prefill** — wizard-time YAML templates in
->   `jaeger_os/personas/` prefill `identity.yaml` + `soul.md` when a
->   new instance is created.  Zero runtime cost on existing instances.
-> - **Whisper STT hardening** — `is_non_speech_marker()` suppresses
->   `[BLANK_AUDIO]` / `(beep)` / `[music]` in follow-up + no-wake-word
->   modes.  Optional AEC plumbing on `_MicStream`.
-> - **Gemma 4 12B-it Q4** added to the model registry; promoted to the
->   24 GB tier asleep pick (Mac Mini sweet spot — leaderboard #1 at
->   94.9 % routing on the 2026-06-04 bench).
-> - **`./launch`** — sandbox launcher with a real-verification boot
->   scroll (every row a check the launcher actually performs against
->   the instance bundle).  Housekeeping flags: `--status`, `--stop`,
->   `--restart`, `--reset-audio`, `--clean-logs`, `--health`.
+> The recent arc: **0.4.0** introduced the node architecture (the `ZmqBus` +
+> body contract); **0.5.0** folded the Mochi project in (Jaeger Studio GUI,
+> the character system, animation/media nodes); **0.6.0** is the
+> install/update/lifecycle theme plus agentic polish (autonomy modes, a person
+> index, and a measured skill self-improvement loop).
 >
-> See `CHANGELOG.md` for the full entry and the explicit "Skipped
-> from the upstream 0.3.0 plan" list. The Swift desktop app stays in
-> tree as archived code. The multi-process daemon scaffold was removed
-> 2026-06-14 when JROS converged on fused mode; the `rich_tui` surface
-> is parked in tree (GUI design preserved) for the windowed-app
-> rework — neither is wired into install or run yet.
+> Full per-release write-ups live in
+> [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/); the running
+> changelog is [`CHANGELOG.md`](CHANGELOG.md). The archived Swift desktop app
+> and the parked `rich_tui` surface remain in tree but are not wired into
+> install/run.
 
 ---
 
@@ -246,8 +227,8 @@ GGUF model on disk, AVAudioEngine bridge import, Whisper assets,
 Kokoro package, skill registry walk, TUI module import.  A red row
 stops boot with the actual reason.
 
-**Pick the audio backend** — 0.3.0 ships two persistent-stream backends
-for TTS.  Configure once in your instance's `config.yaml`:
+**Pick the audio backend** — JROS ships two persistent-stream backends
+for TTS.  Configure once in your agent's `config.yaml`:
 
 ```yaml
 voice:
@@ -280,9 +261,10 @@ regenerated on every run.
 
 ## Architecture direction (0.4+)
 
-**0.3.0 ships the brain.** 0.4.0 wires the spine — the node-based
-embodied architecture that turns JROS from a Mac-side agent into a
-robot operating framework that drives JP01-class hardware.
+**The brain shipped first; 0.4.0 wired the spine** — the node-based
+embodied architecture (the `ZmqBus` + body contract) that turns JROS from a
+Mac-side agent into a robot operating framework that drives JP01-class
+hardware. 0.5–0.6 built out the product around it; hardware adapters are next.
 
 The position no one else owns:
 
