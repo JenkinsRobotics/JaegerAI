@@ -169,25 +169,33 @@ def _deps_changed(home: Path, prev: Path) -> bool:
     return False
 
 
-def _update_download(home: Path, *, ref: str | None = None) -> int:
+def _update_download(home: Path, *, ref: str | None = None,
+                     force: bool = False) -> int:
     """Download + apply a release into a clean (no-.git) install. With no
-    ``ref``, looks up the latest GitHub tag and no-ops if already current."""
+    ``ref``, looks up the latest GitHub tag and no-ops if already current.
+    ``force`` (reinstall) re-fetches even the current version and always
+    resyncs deps — no up-to-date short-circuit."""
     import jaeger_os
     from jaeger_os.core import version_check
 
     repo = version_check.repo_slug()
     current = jaeger_os.__version__
     if ref is None:
-        latest = version_check.latest_version(repo)
-        if latest is None:
-            print("[jaeger update] couldn't reach GitHub to check for updates "
-                  "— try again, or pass --ref.", file=sys.stderr)
-            return 1
-        if not version_check.is_newer(latest, current):
-            print(f"[jaeger update] already up to date (v{current}).")
-            return 0
-        ref = latest
-        print(f"[jaeger update] update available: v{current} → {ref}")
+        if force:
+            ref = current                       # reinstall the current version
+        else:
+            latest = version_check.latest_version(repo)
+            if latest is None:
+                print("[jaeger update] couldn't reach GitHub to check for updates "
+                      "— try again, or pass --ref.", file=sys.stderr)
+                return 1
+            if not version_check.is_newer(latest, current):
+                print(f"[jaeger update] already up to date (v{current}).")
+                return 0
+            ref = latest
+            print(f"[jaeger update] update available: v{current} → {ref}")
+    if force:
+        print(f"[jaeger update] reinstalling {ref} — clean re-fetch of the product.")
 
     staging, prev = home / _STAGING_DIR, home / _PREV_DIR
     shutil.rmtree(staging, ignore_errors=True)
@@ -203,7 +211,7 @@ def _update_download(home: Path, *, ref: str | None = None) -> int:
         swapped = _swap_in(home, staging, copied, prev)
         print(f"[jaeger update] applied {len(swapped)} item(s); previous kept "
               f"in {_PREV_DIR}/ (`jaeger update --rollback` to revert).")
-        if _deps_changed(home, prev):
+        if force or _deps_changed(home, prev):
             rc = _reinstall_deps(home)
             if rc != 0:
                 print(f"[jaeger update] dep resync exited {rc} — `jaeger update "
@@ -213,7 +221,8 @@ def _update_download(home: Path, *, ref: str | None = None) -> int:
             print("[jaeger update] dependencies unchanged — skipped reinstall.")
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-    print(f"[jaeger update] now at {ref}. Restart `jaeger` to apply.")
+    verb = "reinstalled" if force else "now at"
+    print(f"[jaeger update] {verb} {ref}. Restart `jaeger` to apply.")
     return 0
 
 
@@ -421,4 +430,43 @@ def _cmd_update_argv(argv: list[str]) -> int:
     return 0
 
 
-__all__ = ["_cmd_update_argv"]
+def _cmd_reinstall_argv(argv: list[str]) -> int:
+    """``jaeger reinstall`` — clean reinstall of the framework in place,
+    keeping every agent (``.jaeger_os/`` is never touched).
+
+      * clean install (no .git) → re-fetch the product (current version, or
+        ``--ref``) and force a dep resync — fixes corrupted/half-updated files.
+      * dev clone (.git)        → repair the editable install against the
+        working tree (no re-fetch).
+
+    For a fully fresh Python env, re-run the installer (``./install.sh``)."""
+    parser = argparse.ArgumentParser(prog="jaeger reinstall", add_help=False)
+    parser.add_argument("--ref", default=None,
+                        help="version/tag to reinstall (default: current)")
+    parser.add_argument("-h", "--help", action="store_true")
+    args = parser.parse_args(argv)
+    if args.help:
+        print(
+            "usage: jaeger reinstall [--ref TAG]\n"
+            "\n"
+            "  Clean reinstall of the framework, keeping all agents/state.\n"
+            "  Clean install → re-fetch the product + resync deps; dev clone →\n"
+            "  repair the editable install. Recovers a broken / half-updated\n"
+            "  install. For a fresh Python env, re-run ./install.sh.\n",
+            file=sys.stderr,
+        )
+        return 0
+
+    from jaeger_os.core.instance.instance import PACKAGE_ROOT
+    home = PACKAGE_ROOT.parent
+    if (home / ".git").exists():
+        print(f"[jaeger reinstall] dev clone at {home} — repairing the editable "
+              "install (code is your working tree; not re-fetching).")
+        rc = _reinstall_deps(home)
+        if rc == 0:
+            print("[jaeger reinstall] done. Restart `jaeger` to apply.")
+        return rc
+    return _update_download(home, ref=args.ref, force=True)
+
+
+__all__ = ["_cmd_update_argv", "_cmd_reinstall_argv"]

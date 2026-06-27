@@ -331,3 +331,51 @@ def test_update_download_unreachable_returns_1(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(version_check, "latest_version", lambda *a, **k: None)
     assert U._update_download(tmp_path) == 1
     assert "couldn't reach GitHub" in capsys.readouterr().err
+
+
+# ── reinstall (clean re-fetch / repair) ────────────────────────────
+
+
+def test_reinstall_clean_install_forces_download(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "jaeger_os").mkdir(parents=True)                  # NO .git
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", home / "jaeger_os")
+    seen: dict = {}
+    monkeypatch.setattr(
+        U, "_update_download",
+        lambda h, *, ref=None, force=False:
+            (seen.update(home=h, ref=ref, force=force), 0)[1])
+    assert U._cmd_reinstall_argv([]) == 0
+    assert seen == {"home": home, "ref": None, "force": True}
+
+
+def test_reinstall_dev_clone_repairs_editable(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "home"
+    (home / "jaeger_os").mkdir(parents=True)
+    (home / ".git").mkdir()
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", home / "jaeger_os")
+    calls: list = []
+    monkeypatch.setattr(U, "_reinstall_deps", lambda h: calls.append(h) or 0)
+    assert U._cmd_reinstall_argv([]) == 0
+    assert calls == [home]                                    # repaired in place
+    assert "dev clone" in capsys.readouterr().out
+
+
+def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monkeypatch):
+    home = tmp_path
+    (home / "jaeger_os").mkdir()
+    (home / "requirements.txt").write_text("same")
+
+    def fake_extract(tarball, staging):
+        (staging / "jaeger_os").mkdir(parents=True)
+        (staging / "requirements.txt").write_text("same")     # identical → no change
+        return ["jaeger_os", "requirements.txt"]
+
+    monkeypatch.setattr(U, "_download_tarball", lambda repo, ref, dest: dest.write_bytes(b""))
+    monkeypatch.setattr(U, "_extract_product", fake_extract)
+    deps: list = []
+    monkeypatch.setattr(U, "_reinstall_deps", lambda h: deps.append(h) or 0)
+    assert U._update_download(home, ref="9.9.9", force=True) == 0
+    assert deps == [home]      # force resyncs deps even though requirements match
