@@ -7,6 +7,12 @@ and tool gates is deferred to the Lilith-AI development line.  What
 flow for the existing identity.yaml + soul.md initialisation step.
 -->
 
+> **Retired at 0.5.0.** The setup wizard no longer prefills `identity.yaml` +
+> `soul.md` from a persona template — it now picks a **character**
+> (`jaeger_os/personality/characters/`), and an agent's identity / soul / name /
+> voice all derive from the active character. This doc is kept for historical
+> reference; see [`personality/characters/`](../../personality/characters/).
+
 # Personas — wizard prefill templates
 
 A **persona** is a YAML template the setup wizard can use to *prefill*
