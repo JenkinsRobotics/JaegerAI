@@ -17,7 +17,8 @@ whether it still matters.
 
 If you only want the lessons-learned arc, skip to
 [`0.1.0.md`](0.1.0.md) → [`0.2.0.md`](0.2.0.md) →
-[`0.3.0.md`](0.3.0.md) → [`0.4.0.md`](0.4.0.md).
+[`0.3.0.md`](0.3.0.md) → [`0.4.0.md`](0.4.0.md) →
+[`0.5.0.md`](0.5.0.md) → [`0.6.0.md`](0.6.0.md).
 
 ---
 
@@ -28,7 +29,9 @@ If you only want the lessons-learned arc, skip to
 | [`0.1.0.md`](0.1.0.md) | first release — local-first agent framework | 🔵 historical |
 | [`0.2.0.md`](0.2.0.md) | the 0.2.x line (0.2.0 → 0.2.6): sleep cycles, system/runtime/user, install pattern | 🔵 historical with current-still-relevant pieces |
 | [`0.3.0.md`](0.3.0.md) | the refactor release — voice pipeline rebuild + walked-back Swift/daemon work | 🔵 historical with the lessons that shaped 0.4 |
-| [`0.4.0.md`](0.4.0.md) | node architecture release | 🟢 **current** |
+| [`0.4.0.md`](0.4.0.md) | node architecture release (ZmqBus + body contract) | 🔵 historical with current-still-relevant pieces |
+| [`0.5.0.md`](0.5.0.md) | the identity statement + the Mochi fold (voice, characters, animation, Studio) | 🔵 historical with current pieces |
+| [`0.6.0.md`](0.6.0.md) | install / update / lifecycle product shell + agentic polish | 🟢 **current** (active branch) |
 
 ---
 
@@ -36,7 +39,9 @@ If you only want the lessons-learned arc, skip to
 
 | File | Status | Notes |
 |---|---|---|
-| [`ROADMAP_0.4.md`](../ROADMAP_0.4.md) | 🟢 CURRENT | the active roadmap; Tracks A+B+C-skeleton shipped, D/E/F deferred |
+| [`ROADMAP_0.6.md`](../process/ROADMAP_0.6.md) | 🟢 CURRENT | the active roadmap — install/update/lifecycle theme + delivered agentic work |
+| [`ROADMAP_0.5.md`](../process/ROADMAP_0.5.md) | 🔵 REFERENCE | shipped as 0.5.0 (identity statement + Mochi fold) |
+| [`ROADMAP_0.4.md`](../ROADMAP_0.4.md) | 🔵 REFERENCE | shipped at 0.4.0; Tracks A+B+C-skeleton; D/E/F deferred |
 | [`ROADMAP_0.2.0.md`](../ROADMAP_0.2.0.md) | 🔵 REFERENCE | shipped at 0.2.0; useful for understanding the 0.2.x architecture decisions |
 | [`odysseus_review_and_0.3.0_plan.md`](../odysseus_review_and_0.3.0_plan.md) | 🔴 WALKED BACK | the original 0.3.0 plan (Swift app + daemon-attached TUI).  Walked back; superseded by what actually shipped as 0.3.0.  Kept for archeology — see [`0.3.0.md`](0.3.0.md) for the postmortem |
 
