@@ -31,7 +31,7 @@ from typing import Sequence
 # ``main.py``'s legacy path and boots the in-process TUI.
 SUBCOMMANDS: frozenset[str] = frozenset({
     "bench",
-    "setup", "instance", "migrate",
+    "agent", "setup", "instance", "migrate",
     "backup", "restore", "update", "reinstall", "uninstall", "autostart",
     "skill", "memory", "kill",
 })
@@ -55,6 +55,9 @@ def dispatch(argv: Sequence[str]) -> int:
         return _cmd_bench(list(argv[1:]))
     # Each verb below owns its own argparse, imported lazily so a single
     # verb never pays for the others' import cost.
+    if argv[0] == "agent":
+        from jaeger_os.cli.verbs.instance_verbs import _cmd_agent_argv
+        return _cmd_agent_argv(list(argv[1:]))
     if argv[0] == "setup":
         from jaeger_os.cli.verbs.instance_verbs import _cmd_setup_argv
         return _cmd_setup_argv(list(argv[1:]))
@@ -181,13 +184,13 @@ def _repo_root() -> Path:
 
 def _print_usage() -> None:
     print(
-        "Usage: jaeger {bench|setup|instance|migrate|backup|restore|update|"
+        "Usage: jaeger {bench|agent|migrate|backup|restore|update|"
         "reinstall|uninstall|autostart|skill|memory|kill|health} [args]\n"
         "\n"
         "  bench    Run a JROS benchmark — `jaeger bench run|timing|compare|history`.\n"
-        "  setup    Create or re-run the setup wizard for an instance.\n"
-        "  instance Manage instances — list / use / inspect / delete / clear.\n"
-        "  migrate  Run pending instance migrations.\n"
+        "  agent    Create / manage agents — create | list | use | inspect |\n"
+        "           delete | clear. (`setup` + `instance` remain as aliases.)\n"
+        "  migrate  Run pending agent migrations.\n"
         "  backup   Archive an instance directory to a zip.\n"
         "  restore  Restore an instance from a backup zip.\n"
         "  update   Upgrade the framework and migrate stale instances.\n"

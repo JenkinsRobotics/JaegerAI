@@ -131,7 +131,7 @@ Then:
 
 ```bash
 cd ~/jaeger
-./jaeger setup           # create your first agent — the wizard picks a
+./jaeger agent create    # create your first agent — the wizard picks a
                          # character, memory tier, model, and voice.
 ./jaeger                 # launch the default agent
 ```
@@ -143,15 +143,16 @@ anywhere; `./run.sh` still works as an alias.
 Or scaffold a named agent:
 
 ```bash
-./jaeger setup lilith         # create "lilith" via the wizard
-./jaeger --instance lilith    # launch "lilith"
+./jaeger agent create lilith  # create "lilith" via the wizard
+./jaeger --agent lilith       # launch "lilith"
 ```
 
-Manage multiple agents:
+Manage multiple agents (a character is the persona; an agent is a deployed AI
+that plays one, with its own memory + config):
 
 ```bash
-./jaeger instances            # list / create / delete / set the default agent
-./jaeger help                 # full subcommand cheatsheet
+./jaeger agent list           # list agents / mark the default
+./jaeger agent --help         # create | list | use | inspect | delete | clear
 ```
 
 That's the whole flow. The single install pulls the **entire**
@@ -204,8 +205,8 @@ for the design rationale.
 git clone https://github.com/JenkinsRobotics/JROS.git ~/jaeger
 cd ~/jaeger
 ./install.sh
-./jaeger setup     # create your first agent
-./jaeger           # launch it
+./jaeger agent create   # create your first agent
+./jaeger                # launch it
 ```
 
 ---
@@ -219,8 +220,8 @@ launch path matches what you're doing.
 **Run a named agent** — the production flow:
 
 ```bash
-./jaeger --instance lilith            # launch the 'lilith' agent
-./jaeger --instance lilith --no-voice # text-only (no mic, no Kokoro warm)
+./jaeger --agent lilith            # launch the 'lilith' agent
+./jaeger --agent lilith --no-voice # text-only (no mic, no Kokoro warm)
 ```
 
 **Sandbox dev loop** — for working on JROS itself.  The `./launch`
