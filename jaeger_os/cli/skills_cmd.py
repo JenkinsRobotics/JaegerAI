@@ -55,6 +55,14 @@ def register(subparsers: Any) -> None:
                        help="a skill name, or blank for the per-skill tally")
     notes.set_defaults(_handler=run_notes)
 
+    revisions = sub.add_parser(
+        "revisions",
+        help="how recipe-skills changed over time (the self-improvement log)",
+    )
+    revisions.add_argument("skill", nargs="?", default="",
+                           help="a skill name, or blank for per-skill revision counts")
+    revisions.set_defaults(_handler=run_revisions)
+
 
 # ── status formatting ─────────────────────────────────────────────
 
@@ -269,14 +277,53 @@ def run_notes(args: Any) -> int:
     if not summary:
         print(c.dim("no skill-usage notes yet — the agent journals them as it works"))
         return 0
+    from jaeger_os.core import skill_revisions
+    revs = skill_revisions.counts(layout)
     print(f"\n{c.bold('Skill usage notes')}  {c.dim('(per-skill outcomes)')}\n")
     for sk, tally in sorted(summary.items(),
                             key=lambda kv: -(kv[1].get("failed", 0)
                                              + kv[1].get("issues", 0))):
         bad = tally.get("failed", 0) + tally.get("issues", 0)
         flag = c.red("  ← needs review") if bad >= 3 else ""
+        rev = c.dim(f"  · rev {revs[sk]}") if revs.get(sk) else ""
         parts = "  ".join(f"{o}:{tally[o]}" for o in
                           ("smooth", "slow", "issues", "failed") if tally.get(o))
-        print(f"  {c.bold(sk):<24} {parts}{flag}")
+        print(f"  {c.bold(sk):<24} {parts}{rev}{flag}")
+    print()
+    return 0
+
+
+# ── revisions (the self-improvement audit trail) ──────────────────
+
+def run_revisions(args: Any) -> int:
+    layout = c.get_active_instance_layout()
+    if layout is None:
+        print(c.red("no active instance — run the setup wizard first"))
+        return 1
+    from jaeger_os.core import skill_revisions
+    skill = (getattr(args, "skill", "") or "").strip()
+    if skill:
+        revs = skill_revisions.revisions_for(layout, skill)
+        if not revs:
+            print(c.dim(f"{skill!r} has no recorded revisions"))
+            return 0
+        print(f"\n{c.bold(skill)} {c.dim(f'· {len(revs)} revision(s)')}\n")
+        for r in revs:
+            delta = c.green(f"  {r.delta}") if r.delta else ""
+            print(f"  {c.bold(r.version or '?'):<5} {c.dim(r.ts)}  "
+                  f"{c.dim(r.origin)}{delta}")
+            if r.summary:
+                print(f"        {r.summary}")
+        print()
+        return 0
+    counts = skill_revisions.counts(layout)
+    if not counts:
+        print(c.dim("no skill revisions yet — recorded as the agent improves skills"))
+        return 0
+    print(f"\n{c.bold('Skill revisions')}  {c.dim('(times each skill was improved)')}\n")
+    for sk, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        latest = skill_revisions.latest(layout, sk)
+        tail = c.dim(f"  → {latest.version}") if latest and latest.version else ""
+        print(f"  {c.bold(sk):<24} {n} revision(s){tail}")
     print()
     return 0

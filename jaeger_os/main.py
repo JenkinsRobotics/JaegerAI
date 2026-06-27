@@ -1248,13 +1248,28 @@ def _register_builtins(client: Any) -> None:
 
     @register_tool_from_function
     def set_skill_review(enabled: bool) -> dict:
-        """Turn the AUTOMATIC skill-review trigger on/off — when on, a skill that
-        accumulates enough issue/failure notes auto-proposes a Deep Think
-        improvement pass (gated further by the autonomy mode). Off by default;
-        you (or the operator) flip it on once you trust the proposals. Returns
-        {ok, auto_trigger}."""
+        """Turn autonomous skill self-improvement on/off. ON BY DEFAULT (opt-out):
+        a skill that accumulates enough issue/failure notes auto-proposes a Deep
+        Think pass that rewrites it, validated by smoke test + benchmark delta
+        before it's kept (else reverted) — every change recorded as a revision.
+        Set False to opt out: improvements then happen only when explicitly asked
+        and land in the backlog for the operator to approve. Returns {ok, enabled}."""
         from jaeger_os.agent.background import skill_review
-        return skill_review.set_auto_trigger(enabled)
+        return skill_review.set_enabled(enabled)
+
+    @register_tool_from_function
+    def record_skill_revision(skill: str, version: str, summary: str = "",
+                              benchmark_delta: str = "") -> dict:
+        """Log that you modified a skill — call it AFTER you keep a new version
+        (smoke + benchmark passed). Records the revision so the skill's evolution
+        is inspectable + rollback-able: the new version (e.g. 'v3' — the revision
+        id), what changed, and the measured delta. See it via `jaeger skills
+        revisions`. Returns {ok, skill, version, ts}."""
+        from jaeger_os.core import skill_revisions
+        r = skill_revisions.record(_pipeline.get("layout"), skill=skill,
+                                   version=version, origin="self-improvement",
+                                   summary=summary, delta=benchmark_delta)
+        return {"ok": True, "skill": r.skill, "version": r.version, "ts": r.ts}
 
     @register_tool_from_function
     def kanban(action: str, card_id: str = "", title: str = "",

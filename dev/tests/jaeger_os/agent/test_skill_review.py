@@ -1,6 +1,6 @@
 """Skill self-improvement review — threshold trigger + Deep Think proposal
-(phases 2-3). Approval follows the autonomy mode; the auto-trigger is off by
-default.
+(phases 2-3). ON by default (opt-out); when enabled, reviews auto-approve and
+run, smoke/benchmark-gated. Opted out → manual + backlog.
 """
 
 import pathlib
@@ -47,39 +47,31 @@ def test_propose_dedups_while_open() -> None:
     assert r2["proposed"] is False                   # a review is already queued
 
 
-def test_approval_follows_autonomy_mode() -> None:
-    from jaeger_os.core.runtime import autonomy
+def test_enabled_by_default_auto_approves() -> None:
+    assert skill_review.enabled() is True            # ON by default (opt-out)
+    r = skill_review.propose_review(_layout(), "weather", force=True)
+    assert r["proposed"] and r["approved"] is True and r["status"] == "ready"
+
+
+def test_opt_out_proposes_to_backlog_and_disables_trigger() -> None:
     try:
-        autonomy.set_autonomy("auto")
+        skill_review.set_enabled(False)
+        # Manual request now lands in the backlog (operator approves).
         r = skill_review.propose_review(_layout(), "weather", force=True)
-        assert r["proposed"] and r["approved"] is True and r["status"] == "ready"
-
-        autonomy.set_autonomy("scoped")
-        r2 = skill_review.propose_review(_layout(), "files", force=True)
-        assert r2["proposed"] and r2["approved"] is False and r2["status"] == "backlog"
-    finally:
-        autonomy.set_autonomy(autonomy.DEFAULT)
-
-
-def test_auto_trigger_off_by_default_is_noop() -> None:
-    layout = _layout()
-    assert skill_review.auto_trigger_enabled() is False
-    _bad(layout, "weather", 5)
-    assert skill_review.maybe_propose_on_note(layout, "weather") is None
-
-
-def test_auto_trigger_fires_when_enabled() -> None:
-    from jaeger_os.core.runtime import autonomy
-    try:
+        assert r["proposed"] and r["approved"] is False and r["status"] == "backlog"
+        # And the automatic on-note trigger is a no-op.
         layout = _layout()
-        skill_review.set_auto_trigger(True)
-        autonomy.set_autonomy("scoped")
-        _bad(layout, "weather", 3)
-        r = skill_review.maybe_propose_on_note(layout, "weather")
-        assert r and r["proposed"] is True and r["status"] == "backlog"
+        _bad(layout, "files", 5)
+        assert skill_review.maybe_propose_on_note(layout, "files") is None
     finally:
-        skill_review.set_auto_trigger(False)
-        autonomy.set_autonomy(autonomy.DEFAULT)
+        skill_review.set_enabled(True)               # restore the default
+
+
+def test_auto_trigger_fires_by_default() -> None:
+    layout = _layout()
+    _bad(layout, "weather", 3)
+    r = skill_review.maybe_propose_on_note(layout, "weather")
+    assert r and r["proposed"] is True and r["status"] == "ready"
 
 
 def test_review_tools_registered() -> None:
@@ -87,4 +79,5 @@ def test_review_tools_registered() -> None:
     import jaeger_os.main as m
     m._register_builtins(object())
     names = {t.name for t in R.get_tools()}
-    assert {"request_skill_review", "set_skill_review"} <= names
+    assert {"request_skill_review", "set_skill_review",
+            "record_skill_revision"} <= names
