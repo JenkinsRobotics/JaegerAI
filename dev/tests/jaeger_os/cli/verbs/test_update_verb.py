@@ -9,6 +9,7 @@ fires once stale instances exist, etc.
 from __future__ import annotations
 
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -213,3 +214,120 @@ def test_update_dev_checkout_clean_pulls_and_reinstalls(tmp_path, monkeypatch, c
     assert any("pull" in c and "--ff-only" in c for c in calls)   # fast-forward pull
     assert any("-e" in c for c in calls)                          # editable reinstall
     assert "Restart" in capsys.readouterr().out
+
+
+# ── download + apply (clean / no-.git install) ─────────────────────
+
+
+def _make_archive(tmp: Path, ref: str = "9.9.9") -> Path:
+    """A GitHub-style release tarball: one top dir ``JROS-<ref>/`` holding
+    product items plus a ``dev/`` tree that the allowlist must skip."""
+    src = tmp / "src" / f"JROS-{ref}"
+    (src / "jaeger_os").mkdir(parents=True)
+    (src / "jaeger_os" / "__init__.py").write_text('__version__ = "9.9.9"\n')
+    (src / "requirements.txt").write_text("msgspec\n")
+    (src / "README.md").write_text("# JROS\n")
+    (src / "dev" / "tests").mkdir(parents=True)   # NOT product → must be skipped
+    tarball = tmp / "jros.tar.gz"
+    with tarfile.open(tarball, "w:gz") as tf:
+        tf.add(src, arcname=f"JROS-{ref}")
+    return tarball
+
+
+def test_extract_product_copies_allowlist_only(tmp_path):
+    copied = U._extract_product(_make_archive(tmp_path), tmp_path / "staging")
+    assert {"jaeger_os", "requirements.txt", "README.md"} <= set(copied)
+    assert "dev" not in copied                                   # not in PRODUCT
+    assert (tmp_path / "staging" / "jaeger_os" / "__init__.py").exists()
+    assert not (tmp_path / "staging" / "dev").exists()
+
+
+def test_swap_and_restore_preserve_venv_and_state(tmp_path):
+    """The data-loss-critical path: swap replaces product, keeps the old in
+    prev, and never touches .venv/ or .jaeger_os/; restore is the exact
+    inverse."""
+    home = tmp_path / "home"
+    (home / "jaeger_os").mkdir(parents=True)
+    (home / "jaeger_os" / "__init__.py").write_text("OLD")
+    (home / "requirements.txt").write_text("old-deps")
+    (home / ".venv").mkdir(); (home / ".venv" / "marker").write_text("venv")
+    (home / ".jaeger_os").mkdir(); (home / ".jaeger_os" / "state").write_text("state")
+    staging = home / ".update-staging"
+    (staging / "jaeger_os").mkdir(parents=True)
+    (staging / "jaeger_os" / "__init__.py").write_text("NEW")
+    (staging / "requirements.txt").write_text("new-deps")
+    prev = home / ".update-prev"
+
+    swapped = U._swap_in(home, staging, ["jaeger_os", "requirements.txt"], prev)
+    assert set(swapped) == {"jaeger_os", "requirements.txt"}
+    assert (home / "jaeger_os" / "__init__.py").read_text() == "NEW"
+    assert (prev / "jaeger_os" / "__init__.py").read_text() == "OLD"
+    assert (home / ".venv" / "marker").read_text() == "venv"          # untouched
+    assert (home / ".jaeger_os" / "state").read_text() == "state"     # untouched
+
+    restored = U._restore(home, prev, ["jaeger_os", "requirements.txt"])
+    assert set(restored) == {"jaeger_os", "requirements.txt"}
+    assert (home / "jaeger_os" / "__init__.py").read_text() == "OLD"
+
+
+def test_deps_changed(tmp_path):
+    home, prev = tmp_path / "home", tmp_path / "prev"
+    home.mkdir(); prev.mkdir()
+    (home / "requirements.txt").write_text("a")
+    (prev / "requirements.txt").write_text("a")
+    assert not U._deps_changed(home, prev)               # identical
+    (home / "requirements.txt").write_text("b")
+    assert U._deps_changed(home, prev)                   # content differs
+    (home / "requirements.txt").write_text("a")
+    (home / "pyproject.toml").write_text("x")            # present one side only
+    assert U._deps_changed(home, prev)
+
+
+def test_rollback_restores_and_consumes_prev(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "jaeger_os").mkdir(parents=True)
+    (home / "jaeger_os" / "__init__.py").write_text("NEW")    # current (bad)
+    prev = home / ".update-prev"
+    (prev / "jaeger_os").mkdir(parents=True)
+    (prev / "jaeger_os" / "__init__.py").write_text("OLD")    # stashed good
+    monkeypatch.setattr(U, "_reinstall_deps", lambda h: 0)    # no subprocess
+    assert U._do_rollback(home) == 0
+    assert (home / "jaeger_os" / "__init__.py").read_text() == "OLD"
+    assert not prev.exists()                                  # consumed
+
+
+def test_rollback_nothing_to_restore(tmp_path, capsys):
+    home = tmp_path / "home"; home.mkdir()
+    assert U._do_rollback(home) == 1
+    assert "nothing to roll back" in capsys.readouterr().err
+
+
+def test_clean_install_routes_to_download(tmp_path, monkeypatch):
+    """No .git in the install root → _update_editable delegates to
+    _update_download (the clean-install path), forwarding --ref."""
+    home = tmp_path / "home"
+    (home / "jaeger_os").mkdir(parents=True)                  # NO .git
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", home / "jaeger_os")
+    seen: dict = {}
+    monkeypatch.setattr(
+        U, "_update_download",
+        lambda h, *, ref=None: (seen.update(home=h, ref=ref), 0)[1])
+    assert U._update_editable(ref="0.7.0") == 0
+    assert seen == {"home": home, "ref": "0.7.0"}
+
+
+def test_update_download_noop_when_current(tmp_path, monkeypatch, capsys):
+    import jaeger_os
+    from jaeger_os.core import version_check
+    monkeypatch.setattr(version_check, "latest_version",
+                        lambda *a, **k: jaeger_os.__version__)
+    assert U._update_download(tmp_path) == 0
+    assert "already up to date" in capsys.readouterr().out
+
+
+def test_update_download_unreachable_returns_1(tmp_path, monkeypatch, capsys):
+    from jaeger_os.core import version_check
+    monkeypatch.setattr(version_check, "latest_version", lambda *a, **k: None)
+    assert U._update_download(tmp_path) == 1
+    assert "couldn't reach GitHub" in capsys.readouterr().err

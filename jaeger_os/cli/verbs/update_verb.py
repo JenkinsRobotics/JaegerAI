@@ -3,9 +3,12 @@ instance, prompting per-instance to apply pending migrations.
 
 What this verb actually does:
 
-  1. Detect the install method (pipx / pip / dev-checkout / unknown)
-     and run the matching upgrade command. Editable installs print
-     a hint instead — the user controls their git pull.
+  1. Detect the install method and run the matching upgrade:
+       - dev clone (.git)  → fast-forward git pull + editable reinstall;
+       - clean curl install → download the target release tarball and
+         swap the product files in place (no git), keeping ``.venv/`` +
+         ``.jaeger_os/``. ``--ref`` pins a version; ``--rollback`` reverts.
+       - pip / pipx        → the matching upgrade command.
   2. Print "Restart `jaeger` to apply" — we don't auto-restart a
      running daemon. The user picks when to take the agent down.
   3. Scan ``~/.jaeger/instances/<name>/`` for stale manifests and
@@ -20,8 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -44,16 +52,198 @@ def _upgrade_command(method: str) -> list[str] | None:
     return None  # dev-checkout / unknown — user-driven
 
 
-def _update_editable() -> int:
-    """Editable / clone install (the default since 0.6): fast-forward pull
-    then resync deps via an editable reinstall — so ``jaeger update`` actually
-    updates instead of just printing a hint. Refuses to pull over a dirty tree
-    (we never touch a working clone with uncommitted changes)."""
+# ── download + apply (clean / product-only install — no .git to pull) ──────
+#
+# A clean curl install has no ``.git``, so ``git pull`` can't update it.
+# Instead we download the target release's tarball and swap the product files
+# in place, leaving ``.venv/`` and ``.jaeger_os/`` (the model + every byte of
+# instance state) untouched. ``_PRODUCT`` mirrors scripts/install.sh's PRODUCT
+# allowlist — keep the two in sync.
+
+_PRODUCT = (
+    "jaeger_os",
+    "install.sh", "run.sh", "jaeger",
+    "requirements.txt", "pyproject.toml",
+    "jaeger.toml", "jaeger.windowed.toml",
+    "README.md", "LICENSE", "CHANGELOG.md",
+)
+_PREV_DIR = ".update-prev"        # previous product, kept for --rollback
+_STAGING_DIR = ".update-staging"  # new product assembled here before the swap
+_ARCHIVE_URL = "https://github.com/{repo}/archive/refs/tags/{ref}.tar.gz"
+
+
+def _reinstall_deps(home: Path) -> int:
+    """Editable-reinstall into the install's own ``.venv`` (prefer ``uv``,
+    fall back to the venv's pip, then the current interpreter) to resync deps
+    after the product files change. Returns the process exit code."""
+    venv = home / ".venv"
+    uv, py = venv / "bin" / "uv", venv / "bin" / "python"
+    if uv.exists():
+        cmd = [str(uv), "pip", "install", "--python", str(py), "-e", str(home)]
+    else:
+        base = str(py) if py.exists() else sys.executable
+        cmd = [base, "-m", "pip", "install", "-e", str(home)]
+    print(f"[jaeger update] resyncing deps: {' '.join(cmd)}")
+    return subprocess.run(cmd, check=False).returncode
+
+
+def _download_tarball(repo: str, ref: str, dest: Path) -> None:
+    """Fetch the GitHub tag tarball for ``ref`` to ``dest``."""
+    url = _ARCHIVE_URL.format(repo=repo, ref=ref)
+    print(f"[jaeger update] downloading {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": "jaeger-update"})
+    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (https)
+        dest.write_bytes(resp.read())
+
+
+def _extract_product(tarball: Path, staging: Path) -> list[str]:
+    """Extract ``tarball`` and copy the PRODUCT items into ``staging``. The
+    archive's single top-level dir (``JROS-<ref>``) is detected, not assumed.
+    Returns the product items actually present in the archive."""
+    staging.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(tarball) as tf:
+            tf.extractall(tmp, filter="data")  # filter: block path traversal
+        tops = [p for p in Path(tmp).iterdir() if p.is_dir()]
+        if len(tops) != 1:
+            raise RuntimeError(
+                f"unexpected archive layout: {[p.name for p in tops]}")
+        root = tops[0]
+        copied: list[str] = []
+        for item in _PRODUCT:
+            src = root / item
+            if not src.exists():
+                continue
+            dst = staging / item
+            shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
+            copied.append(item)
+    return copied
+
+
+def _swap_in(home: Path, staging: Path, items: list[str], prev: Path) -> list[str]:
+    """Move current ``items`` aside into ``prev``, then move staged items into
+    ``home``. Per-item ``os.replace`` is atomic on one filesystem (staging +
+    prev both live under ``home``); a crash mid-swap is recoverable from
+    ``prev`` via ``--rollback``. Returns the items swapped."""
+    if prev.exists():
+        shutil.rmtree(prev)
+    prev.mkdir(parents=True)
+    swapped: list[str] = []
+    for item in items:
+        new = staging / item
+        if not new.exists():
+            continue
+        cur = home / item
+        if cur.exists():
+            os.replace(cur, prev / item)   # stash the old
+        os.replace(new, home / item)       # install the new
+        swapped.append(item)
+    return swapped
+
+
+def _restore(home: Path, prev: Path, items: list[str]) -> list[str]:
+    """Inverse of :func:`_swap_in` — move ``items`` from ``prev`` back into
+    ``home``, replacing whatever is there. Returns the items restored."""
+    restored: list[str] = []
+    for item in items:
+        saved = prev / item
+        if not saved.exists():
+            continue
+        cur = home / item
+        if cur.exists():
+            shutil.rmtree(cur) if cur.is_dir() else cur.unlink()
+        os.replace(saved, home / item)
+        restored.append(item)
+    return restored
+
+
+def _deps_changed(home: Path, prev: Path) -> bool:
+    """True if requirements.txt / pyproject.toml differ between the new
+    (``home``) and previous (``prev``) product — gates the dep reinstall."""
+    for f in ("requirements.txt", "pyproject.toml"):
+        a, b = prev / f, home / f
+        if a.exists() != b.exists():
+            return True
+        if a.exists() and b.exists() and a.read_bytes() != b.read_bytes():
+            return True
+    return False
+
+
+def _update_download(home: Path, *, ref: str | None = None) -> int:
+    """Download + apply a release into a clean (no-.git) install. With no
+    ``ref``, looks up the latest GitHub tag and no-ops if already current."""
+    import jaeger_os
+    from jaeger_os.core import version_check
+
+    repo = version_check.repo_slug()
+    current = jaeger_os.__version__
+    if ref is None:
+        latest = version_check.latest_version(repo)
+        if latest is None:
+            print("[jaeger update] couldn't reach GitHub to check for updates "
+                  "— try again, or pass --ref.", file=sys.stderr)
+            return 1
+        if not version_check.is_newer(latest, current):
+            print(f"[jaeger update] already up to date (v{current}).")
+            return 0
+        ref = latest
+        print(f"[jaeger update] update available: v{current} → {ref}")
+
+    staging, prev = home / _STAGING_DIR, home / _PREV_DIR
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tarball = Path(td) / "jros.tar.gz"
+            _download_tarball(repo, ref, tarball)
+            copied = _extract_product(tarball, staging)
+        if "jaeger_os" not in copied:
+            print("[jaeger update] archive missing jaeger_os/ — aborting "
+                  "(nothing changed).", file=sys.stderr)
+            return 1
+        swapped = _swap_in(home, staging, copied, prev)
+        print(f"[jaeger update] applied {len(swapped)} item(s); previous kept "
+              f"in {_PREV_DIR}/ (`jaeger update --rollback` to revert).")
+        if _deps_changed(home, prev):
+            rc = _reinstall_deps(home)
+            if rc != 0:
+                print(f"[jaeger update] dep resync exited {rc} — `jaeger update "
+                      f"--rollback` to revert.", file=sys.stderr)
+                return rc
+        else:
+            print("[jaeger update] dependencies unchanged — skipped reinstall.")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    print(f"[jaeger update] now at {ref}. Restart `jaeger` to apply.")
+    return 0
+
+
+def _do_rollback(home: Path) -> int:
+    """``jaeger update --rollback`` — restore the product the last
+    download-update stashed, then resync deps. One level only (the prev dir is
+    consumed)."""
+    prev = home / _PREV_DIR
+    items = [p.name for p in prev.iterdir()] if prev.exists() else []
+    if not items:
+        print("[jaeger update] nothing to roll back to "
+              "(no previous version kept).", file=sys.stderr)
+        return 1
+    restored = _restore(home, prev, items)
+    print(f"[jaeger update] rolled back {len(restored)} item(s).")
+    _reinstall_deps(home)
+    shutil.rmtree(prev, ignore_errors=True)
+    print("[jaeger update] restart `jaeger` to apply the rolled-back version.")
+    return 0
+
+
+def _update_editable(*, ref: str | None = None) -> int:
+    """Editable / clone install (the default since 0.6). With a ``.git`` (dev
+    clone) → fast-forward pull + editable reinstall, refusing a dirty tree.
+    Without ``.git`` (clean curl/product install) → download + apply the
+    release in place."""
     from jaeger_os.core.instance.instance import PACKAGE_ROOT
-    repo = PACKAGE_ROOT.parent  # jaeger_os/ -> repo root
+    repo = PACKAGE_ROOT.parent  # jaeger_os/ -> install root
     if not (repo / ".git").exists():
-        print("[jaeger update] no .git here — reinstall from source to update.")
-        return 0
+        return _update_download(repo, ref=ref)
     dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True)
     if dirty.stdout.strip():
@@ -66,24 +256,12 @@ def _update_editable() -> int:
         print("[jaeger update] git pull --ff-only failed (diverged?) — resolve manually.",
               file=sys.stderr)
         return pull.returncode
-    venv = repo / ".venv"
-    uv, py = venv / "bin" / "uv", venv / "bin" / "python"
-    if uv.exists():
-        cmd = [str(uv), "pip", "install", "--python", str(py), "-e", str(repo)]
-    else:
-        base = str(py) if py.exists() else sys.executable
-        cmd = [base, "-m", "pip", "install", "-e", str(repo)]
-    print(f"[jaeger update] resyncing deps: {' '.join(cmd)}")
-    res = subprocess.run(cmd, check=False)
-    if res.returncode != 0:
-        print(f"[jaeger update] reinstall exited {res.returncode}", file=sys.stderr)
-        return res.returncode
-    return 0
+    return _reinstall_deps(repo)
 
 
-def _run_upgrade(method: str) -> int:
+def _run_upgrade(method: str, *, ref: str | None = None) -> int:
     if method == "dev-checkout":            # editable / clone install (default 0.6+)
-        return _update_editable()
+        return _update_editable(ref=ref)
     cmd = _upgrade_command(method)
     if cmd is None:
         print("[jaeger update] unknown install method — upgrade manually.")
@@ -180,18 +358,29 @@ def _cmd_update_argv(argv: list[str]) -> int:
                         help="don't upgrade or migrate — print plan + exit")
     parser.add_argument("--no-migrate", action="store_true",
                         help="run the framework upgrade but skip migration scan")
+    parser.add_argument("--ref", default=None,
+                        help="target version/tag to install (default: latest)")
+    parser.add_argument("--rollback", action="store_true",
+                        help="revert the last download-update (clean installs)")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:
         print(
-            "usage: jaeger update [--check] [--no-migrate]\n"
+            "usage: jaeger update [--check] [--no-migrate] [--ref TAG] [--rollback]\n"
             "\n"
-            "  Upgrade the framework via the detected install method\n"
-            "  (pipx / pip / dev-checkout), then prompt to back up\n"
-            "  and migrate each stale instance.\n",
+            "  Upgrade the framework via the detected install method, then\n"
+            "  prompt to back up and migrate each stale instance.\n"
+            "\n"
+            "  Clean (curl/product) installs download + apply the release in\n"
+            "  place — no git needed. --ref pins a version; --rollback reverts\n"
+            "  the previous download-update. Dev clones fast-forward via git.\n",
             file=sys.stderr,
         )
         return 0
+
+    if args.rollback:
+        from jaeger_os.core.instance.instance import PACKAGE_ROOT
+        return _do_rollback(PACKAGE_ROOT.parent)
 
     method = _detect_method()
     print(f"[jaeger update] install method: {method}")
@@ -209,7 +398,7 @@ def _cmd_update_argv(argv: list[str]) -> int:
     if args.check:
         return 0 if not stale else 1
 
-    rc = _run_upgrade(method)
+    rc = _run_upgrade(method, ref=args.ref)
     if rc != 0:
         return rc
 

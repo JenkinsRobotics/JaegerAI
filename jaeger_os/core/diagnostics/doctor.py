@@ -35,14 +35,36 @@ def _bind(layout: Any) -> None:
         pass
 
 
-def run_doctor(layout: Any = None, *, deep: bool = False) -> list[Any]:
+def _update_check() -> Any:
+    """Informational Check: installed version vs the latest GitHub tag.
+    Best-effort — an unreachable network degrades to 'couldn't check', and an
+    available update is reported ``ok`` (newer-available is not 'unhealthy')."""
+    import jaeger_os
+
+    from jaeger_os.core import version_check
+    from jaeger_os.core.runtime.preflight import Check
+
+    current = jaeger_os.__version__
+    latest = version_check.latest_version()
+    if latest is None:
+        detail = f"v{current} installed — couldn't reach GitHub to check"
+    elif version_check.is_newer(latest, current):
+        detail = f"v{current} installed — {latest} available · run `jaeger update`"
+    else:
+        detail = f"v{current} — up to date"
+    return Check(name="version", category="update", ok=True, detail=detail)
+
+
+def run_doctor(layout: Any = None, *, deep: bool = False,
+               check_updates: bool = False) -> list[Any]:
     """Run the one doctor and return a flat ``list[Check]``.
 
     ``check_instance`` (environment deps + config + model.path + memory
     integrity) plus the runtime substrate probe (memory round-trip,
     tools, skills, drift parser). ``deep=True`` adds three live-agent
     turns. ``layout=None`` (no instance yet — a fresh ``pip install``)
-    runs environment-only.
+    runs environment-only. ``check_updates=True`` (the CLI ``jaeger doctor``,
+    not the agent's ``self_check``) appends a current-vs-latest readout.
     """
     from jaeger_os.core.runtime.preflight import (
         Check,
@@ -72,6 +94,16 @@ def run_doctor(layout: Any = None, *, deep: bool = False) -> list[Any]:
             name="runtime_probe", category="runtime", ok=False,
             detail=f"probe error: {type(exc).__name__}: {exc}",
         ))
+
+    # Current-vs-latest readout — CLI doctor only (never the agent's
+    # self_check; it shouldn't hit GitHub on every call). Best-effort.
+    if check_updates:
+        try:
+            checks.append(_update_check())
+        except Exception as exc:  # noqa: BLE001
+            checks.append(Check(
+                name="version", category="update", ok=True,
+                detail=f"update check error: {type(exc).__name__}"))
     return checks
 
 

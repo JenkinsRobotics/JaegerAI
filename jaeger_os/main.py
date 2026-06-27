@@ -4195,9 +4195,10 @@ def main() -> int:
             _doc_layout = InstanceLayout(root=_doc_root)
             _has_cfg = (_doc_root / "config.yaml").is_file()
             checks = run_doctor(_doc_layout if _has_cfg else None,
-                                deep=getattr(args, "doctor_deep", False))
+                                deep=getattr(args, "doctor_deep", False),
+                                check_updates=True)
         except Exception:  # noqa: BLE001
-            checks = run_doctor(None)
+            checks = run_doctor(None, check_updates=True)
         # --doctor-json: machine-readable output for scripting /
         # monitoring agents. Skip the human-readable table and the
         # install prompt; exit code is health-only.
