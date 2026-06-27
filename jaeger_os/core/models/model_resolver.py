@@ -181,7 +181,12 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
 # Kokoro ~3 GB) on a 32 GB / ~26 GB-GPU host. The 26B-A4B MoE scores
 # slightly lower awake and OOMs the GPU when voice is co-loaded there — it's
 # reserved for 64+ GB hosts and the deep-think (asleep) role.
-DEFAULT_MODEL = "gemma-4-12b-it-q4_k_m"
+#
+# 0.6: the awake default is gemma-4-E4B — fastest + smallest in the clean
+# corpus-1.2 batch (p50 2.8s, 5.3 GB), so it co-loads with voice with the most
+# headroom. Matches the `normal` runtime mode. The dense 12B is the voice-mode
+# BACKUP (slower but 5/5 safety) — switch_model it when honesty > latency.
+DEFAULT_MODEL = "gemma-4-e4b-it-q4_k_m"
 DEFAULT_AWAKE_MODEL = DEFAULT_MODEL   # explicit alias for sleep-cycle code
 
 # The asleep-mode (deep-think) model: loaded when the agent goes into
@@ -189,17 +194,15 @@ DEFAULT_AWAKE_MODEL = DEFAULT_MODEL   # explicit alias for sleep-cycle code
 # for usable work per unit time — runs in the background while the user
 # is away, but the user still waits on the result on wake.
 #
-# Default: gemma-4-26B-A4B Q4 — corpus 1.1 leaderboard: 93.2% overall
-# Score, 100% routing, 5/5 safety, 4m47s bench. A 4B-active MoE, so it
-# decodes fast despite the 26B footprint. It replaced the prior
-# Qwen3-30B-A3B deep-think pick: they TIE on Score (93.2%) but the 26B
-# runs ~5× faster (4m47s vs 24m29s) with better routing + safety —
-# more usable work per window. Fits as a swap (not co-load) on a 32 GB
-# host; the 35B tier OOMs at 32K context.
+# Default (0.6): gemma-4-26B-A4B QAT Q4_0 — clean corpus-1.2 batch: 92.3%
+# Score, 100% routing, a perfect 20/20 deep-think tier; ties the plain Q4_K_M
+# but 2.4 GB smaller (14.4 vs 16.8), so more KV/context headroom voice-off on a
+# 32 GB host. Matches the `high`/`deep-sleep` runtime modes. A 4B-active MoE, so
+# it decodes fast despite the 26B footprint; swaps in (not co-load) on 32 GB.
 #
 # ``DEFAULT_CODER_MODEL`` kept as an alias — older daemon code uses that
 # name; new code should prefer ``DEFAULT_ASLEEP_MODEL``.
-DEFAULT_ASLEEP_MODEL = "gemma-4-26b-a4b-it-q4_k_m"
+DEFAULT_ASLEEP_MODEL = "gemma-4-26b-a4b-it-qat-q4_0"
 DEFAULT_CODER_MODEL = DEFAULT_ASLEEP_MODEL
 
 

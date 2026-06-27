@@ -114,6 +114,21 @@ _GEMMA_26B_A4B_Q4 = ModelPick(
                   "gemma-4-26B-A4B-it-Q4_K_M.gguf"),
 )
 
+_GEMMA_26B_A4B_QAT = ModelPick(
+    registry_key="gemma-4-26b-a4b-it-qat-q4_0",
+    display_name="gemma-4-26B-A4B QAT Q4_0",
+    size_gb=14.4,
+    score_pct=92.3,
+    tokens_per_task=89,
+    notes=("MoE 4B active, QAT Q4_0 — the high / Deep Think default (0.6). "
+           "Clean corpus-1.2 batch: 92.3% Score, 100% routing, a PERFECT "
+           "20/20 deep-think tier. Ties the plain Q4_K_M but 2.4 GB smaller "
+           "(14.4 GB) → more KV/context headroom voice-off on a 32 GB host."),
+    download_url=("https://huggingface.co/lmstudio-community/"
+                  "gemma-4-26B-A4B-it-QAT-GGUF/resolve/main/"
+                  "gemma-4-26B-A4B-it-QAT-Q4_0.gguf"),
+)
+
 _QWEN_4B_THINKING_Q3 = ModelPick(
     registry_key="qwen3-4b-thinking-2507-q3_k_l",
     display_name="Qwen3-4B-Thinking-2507 Q3",
@@ -186,23 +201,23 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
             asleep=_GEMMA_12B_Q4,
         )
     if tier_gb < 64:
-        # 32 GB: gemma-4-12B dense awake leaves headroom for voice
-        # (Whisper + Kokoro ~3 GB) CO-LOADED with the awake model. The
-        # 26B-A4B awake is NOT recommended here — on a 32 GB host (e.g. M1
-        # Max, ~26 GB GPU working set) the 26B + voice + 32K KV cache OOMs
-        # the GPU. It swaps in for deep-think (asleep), where voice isn't
-        # co-loaded so the 16 GB footprint fits.
+        # 32 GB (0.6, clean corpus-1.2 batch): gemma-4-E4B awake — fastest +
+        # smallest (p50 2.8s, 5.3 GB), so it co-loads with voice with the MOST
+        # headroom. gemma-4-26B-A4B QAT swaps in for deep-think (voice off) —
+        # ties the plain 26B but 2.4 GB smaller. The 26B awake is still NOT
+        # recommended (26B + voice + 32K KV OOMs the GPU). The dense 12B is the
+        # voice-mode backup (slower, but 5/5 safety) — switch to it when honesty
+        # matters more than latency.
         return TierRecommendation(
             tier_label="32 GB",
-            description=("gemma-4-12B Q4 awake (dense, #1 Score 94.9%, "
-                         "6.9 GB) — leaves room to CO-LOAD voice (Whisper "
-                         "+ Kokoro), which the 26B-A4B does not on a 32 GB "
-                         "/ ~26 GB-GPU host (OOM). gemma-4-26B-A4B Q4 asleep "
-                         "for deep-think (swap, not co-load) — 93.2% Score, "
-                         "100% route, 5/5 safety, ~5× faster than Qwen "
-                         "deep-think."),
-            awake=_GEMMA_12B_Q4,
-            asleep=_GEMMA_26B_A4B_Q4,
+            description=("gemma-4-E4B Q4 awake — fastest/smallest (5.3 GB), "
+                         "co-loads with voice (Whisper + Kokoro) with the most "
+                         "headroom. gemma-4-26B-A4B QAT asleep for deep-think "
+                         "(swap, not co-load) — 92.3% Score, 100% route, 20/20 "
+                         "deep-think, 2.4 GB smaller than the plain 26B. The "
+                         "dense 12B is the voice-mode backup (5/5 safety)."),
+            awake=_GEMMA_E4B_Q4,
+            asleep=_GEMMA_26B_A4B_QAT,
         )
     # 64+ GB: plenty of room — gemma-4-26B-A4B in both modes (no swap),
     # so mode transitions are instant. The 35B tier OOMs at 32K context

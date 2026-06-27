@@ -3,15 +3,19 @@ crafts the Deep Think task that does it, measured (smoke + benchmark) before the
 rewrite is trusted. Phases 2-3 of dev/docs/process/SKILL_EVOLUTION_PLAN.md.
 
 The heavy rewrite runs in the EXISTING Deep Think loop (idle/asleep, strong
-model) — this module only proposes the task. Two governance layers, both
-deliberately conservative by default:
+model) — this module only proposes the task and records the revision.
 
-  * the AUTOMATIC threshold trigger is OFF by default (``set_auto_trigger``);
-    the operator enables it once they've watched the proposals. The agent can
-    always request a review by hand regardless.
-  * whether a proposal auto-applies vs waits for approval is the AUTONOMY MODE's
-    call — ``auto`` → the task lands ``ready`` (self-applies in Deep Think),
-    ``scoped``/``ask`` → ``backlog`` (the operator approves it).
+**On by default (opt-OUT).** The operator wants the agent to improve over time,
+so the loop is enabled out of the box: a skill that accumulates enough
+issue/failure notes auto-proposes a review, which auto-approves and runs in Deep
+Think. This is safe by construction — every rewrite is sandboxed to
+``<instance>/skills/``, smoke-gated (a broken version never activates),
+benchmark-validated (kept only if the delta is positive, else reverted), and
+recorded as a revision you can inspect/roll back. It's governed by its OWN
+switch (``set_enabled``), independent of the live-turn autonomy mode, because
+skill improvement is a background, sandboxed concern — not a live tier-gated
+action. Opt out → reviews still happen but only when the agent asks, and they
+land in the backlog for the operator to approve.
 """
 
 from __future__ import annotations
@@ -24,18 +28,18 @@ REVIEW_TAG = "skill-review"
 DEFAULT_THRESHOLD = 3
 _BAD = ("issues", "failed")
 
-# Operator gate for the AUTOMATIC threshold trigger. Off = propose-only, by
-# hand ("until watched", per the plan). Process-global like the runtime modes.
-_state = {"auto_trigger": False}
+# Master switch for autonomous skill improvement. ON by default (opt-out).
+# Process-global like the runtime modes.
+_state = {"enabled": True}
 
 
-def auto_trigger_enabled() -> bool:
-    return _state["auto_trigger"]
+def enabled() -> bool:
+    return _state["enabled"]
 
 
-def set_auto_trigger(on: bool) -> dict:
-    _state["auto_trigger"] = bool(on)
-    return {"ok": True, "auto_trigger": _state["auto_trigger"]}
+def set_enabled(on: bool) -> dict:
+    _state["enabled"] = bool(on)
+    return {"ok": True, "enabled": _state["enabled"]}
 
 
 def _bad_since_last_review(layout: Any, skill: str) -> int:
@@ -59,7 +63,7 @@ def _open_review_exists(queue: Any, skill: str) -> bool:
 
 def review_description(layout: Any, skill: str) -> str:
     """The Deep Think task prompt — the MEASURED improvement loop, so the rewrite
-    is only kept if it's provably better."""
+    is only kept if it's provably better, and the change is recorded."""
     bad = _bad_since_last_review(layout, skill)
     return (
         f"[{REVIEW_TAG}:{skill}] Improve the '{skill}' skill from its usage "
@@ -72,8 +76,9 @@ def review_description(layout: Any, skill: str) -> str:
         f"4. reload_skills, then benchmark_skill('{skill}') again.\n"
         f"5. KEEP the new version ONLY if its smoke test passes AND the benchmark "
         f"delta is positive — otherwise REVERT (delete the new version dir).\n"
-        f"6. skill_note('{skill}', 'smooth' or 'issues', "
-        f"'<what you changed + the measured delta>')."
+        f"6. If you kept it: record_skill_revision('{skill}', <new vN>, "
+        f"'<what you changed>', '<benchmark delta>'), then "
+        f"skill_note('{skill}', 'smooth', '<summary>')."
     )
 
 
@@ -81,7 +86,8 @@ def propose_review(layout: Any, skill: str, *, threshold: int = DEFAULT_THRESHOL
                    force: bool = False) -> dict:
     """Propose a Deep Think skill-review task. ``force`` skips the threshold (the
     agent explicitly requesting one). Deduped against an already-open review for
-    the same skill. Approval follows the autonomy mode."""
+    the same skill. When the loop is enabled (default) the task auto-approves and
+    runs in Deep Think; when opted out it lands in the backlog for the operator."""
     skill = (skill or "").strip()
     if not skill:
         return {"proposed": False, "reason": "no skill given"}
@@ -91,8 +97,7 @@ def propose_review(layout: Any, skill: str, *, threshold: int = DEFAULT_THRESHOL
     queue = queue_for_layout(layout)
     if _open_review_exists(queue, skill):
         return {"proposed": False, "reason": "review already queued"}
-    from jaeger_os.core.runtime import autonomy
-    approved = autonomy.current_autonomy() == "auto"
+    approved = enabled()
     task = queue.add(review_description(layout, skill), source="agent",
                      approved=approved)
     # Marker resets the counter so we don't re-propose while this one runs.
@@ -103,8 +108,8 @@ def propose_review(layout: Any, skill: str, *, threshold: int = DEFAULT_THRESHOL
 
 
 def maybe_propose_on_note(layout: Any, skill: str) -> dict | None:
-    """Called after a note lands. Auto-proposes ONLY if the operator enabled the
-    threshold trigger; otherwise a no-op (returns None)."""
-    if not _state["auto_trigger"]:
+    """Called after a note lands. Auto-proposes IF the loop is enabled (default);
+    a no-op (returns None) when the operator has opted out."""
+    if not enabled():
         return None
     return propose_review(layout, skill)
