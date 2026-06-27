@@ -181,6 +181,24 @@ def _make_actions(instance: str | None) -> TrayActions:
         # at construction time. The fallback exits the process cleanly.
         os._exit(0)
 
+    def check_update() -> None:
+        # Explicit, on-click check (a brief network call is fine here —
+        # the user asked). Surfaces via a macOS notification when rumps is
+        # present; falls back to stdout off-macOS / in tests.
+        from jaeger_os.core.version_check import update_status
+        st = update_status()
+        if st["available"]:
+            title, msg = "Update available", f"{st['latest']} — run `jaeger update`"
+        elif st["latest"]:
+            title, msg = "Up to date", f"You're on {st['current']}."
+        else:
+            title, msg = "Update check", "Couldn't reach GitHub — try again."
+        try:
+            import rumps
+            rumps.notification(title, "", msg)
+        except Exception:  # noqa: BLE001 — no rumps (CI / non-macOS)
+            print(f"[tray] {title}: {msg}")
+
     return TrayActions(
         start=start, stop=stop, restart=restart,
         open_tui=open_tui,
@@ -188,6 +206,7 @@ def _make_actions(instance: str | None) -> TrayActions:
         open_gui=open_gui,
         open_web=open_web,
         about=about, quit_tray=quit_tray,
+        check_update=check_update,
     )
 
 

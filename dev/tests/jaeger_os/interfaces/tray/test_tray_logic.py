@@ -210,6 +210,43 @@ def test_actions_dispatches_to_the_right_callback():
                      "open_voice", "open_gui", "open_web", "quit_tray"]
 
 
+# ── update check (the in-app "update available" surface) ───────────
+
+
+def test_menu_offers_check_for_updates():
+    actions = {i.action for i in menu_items_for(TrayState.RUNNING)}
+    assert "check_update" in actions
+
+
+def test_check_update_dispatches():
+    fired = []
+    actions = TrayActions(
+        start=lambda: None, stop=lambda: None, restart=lambda: None,
+        open_tui=lambda: None, open_voice=lambda: None, open_gui=lambda: None,
+        open_web=lambda: None, quit_tray=lambda: None,
+        check_update=lambda: fired.append("checked"),
+    )
+    actions.dispatch("check_update")
+    assert fired == ["checked"]
+
+
+def test_check_update_handler_queries_status_without_raising(monkeypatch):
+    """The macOS handler runs update_status and surfaces it; it must not
+    raise whether or not rumps is present (the rumps call is try/excepted)."""
+    from jaeger_os.core import version_check
+    from jaeger_os.interfaces.pyside6.tray import macos
+
+    hit = {}
+
+    def fake_status(*a, **k):
+        hit["called"] = True
+        return {"available": True, "latest": "9.9.9", "current": "0.0.1"}
+
+    monkeypatch.setattr(version_check, "update_status", fake_status)
+    macos._make_actions(None).check_update()      # must not raise
+    assert hit.get("called")
+
+
 def test_actions_dispatch_ignores_none_action():
     """Status-label menu items have ``action=None``. The dispatcher
     must handle that without raising so a misclick on the label is a

@@ -28,6 +28,23 @@ def test_pick_latest_ignores_junk_and_picks_highest():
     assert V.pick_latest(["nope", "nightly"]) is None
 
 
+def test_update_status_shape(monkeypatch):
+    import jaeger_os
+    # newer available
+    monkeypatch.setattr(V, "latest_version", lambda *a, **k: "99.0.0")
+    st = V.update_status()
+    assert st["current"] == jaeger_os.__version__
+    assert st["latest"] == "99.0.0"
+    assert st["available"] is True
+    # same version → not available
+    monkeypatch.setattr(V, "latest_version", lambda *a, **k: jaeger_os.__version__)
+    assert V.update_status()["available"] is False
+    # offline → latest None, not available, never raises
+    monkeypatch.setattr(V, "latest_version", lambda *a, **k: None)
+    off = V.update_status()
+    assert off["latest"] is None and off["available"] is False
+
+
 def test_repo_slug_default_and_from_env(monkeypatch):
     monkeypatch.delenv("JAEGER_REPO_URL", raising=False)
     assert V.repo_slug() == "JenkinsRobotics/JROS"
