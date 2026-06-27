@@ -1,0 +1,113 @@
+"""Is there a newer JROS release? — version parsing + GitHub tag lookup.
+
+Two layers, split so the logic is testable without a network:
+
+  * **pure** — :func:`parse_version`, :func:`is_newer`, :func:`pick_latest`
+    do string→tuple comparison; no IO, unit-tested directly.
+  * **IO** — :func:`fetch_tags` is the only network call (the GitHub tags
+    API); :func:`latest_version` wraps it and swallows "GitHub unreachable"
+    into ``None`` so callers can degrade gracefully.
+
+Shared by ``jaeger update`` (what ref to pull) and ``jaeger doctor``
+(current-vs-latest readout). The repo is read from the same env var the
+installer honours so a fork/mirror works without code edits.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import urllib.error
+import urllib.request
+
+# Mirror scripts/install.sh: JAEGER_REPO_URL overrides, default is upstream.
+# We want "owner/repo", install.sh wants the full git URL — derive ours from
+# the env var if it's set, else the known default.
+_DEFAULT_REPO = "JenkinsRobotics/JROS"
+_TAGS_API = "https://api.github.com/repos/{repo}/tags"
+
+
+def repo_slug() -> str:
+    """``owner/repo`` for the GitHub API, honouring ``JAEGER_REPO_URL``
+    (``https://github.com/owner/repo.git`` → ``owner/repo``)."""
+    url = os.environ.get("JAEGER_REPO_URL", "").strip()
+    if "github.com" in url:
+        tail = url.split("github.com", 1)[1].lstrip("/:").removesuffix(".git")
+        if tail.count("/") >= 1:
+            return "/".join(tail.split("/")[:2])
+    return _DEFAULT_REPO
+
+
+def parse_version(s: str) -> tuple[int, ...]:
+    """``'v0.6.0'`` / ``'0.6.0'`` / ``'0.6.0-rc1'`` → ``(0, 6, 0)``.
+
+    Leading ``v`` stripped; split on ``.``; each part contributes its leading
+    run of digits (so ``-rc1`` and other suffixes are ignored). An
+    unparseable string returns ``()`` — which sorts below every real version,
+    so junk tags never win a comparison.
+    """
+    s = s.strip().lstrip("vV")
+    out: list[int] = []
+    for part in s.split("."):
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        if not digits:
+            break
+        out.append(int(digits))
+    return tuple(out)
+
+
+def is_newer(candidate: str, current: str) -> bool:
+    """True iff ``candidate`` is a strictly higher version than ``current``.
+    Numeric per-component, so ``0.10.0 > 0.9.0`` (not lexical)."""
+    return parse_version(candidate) > parse_version(current)
+
+
+def pick_latest(tags: list[str]) -> str | None:
+    """Highest-version tag, or ``None`` for an empty/all-junk list.
+    Unparseable tags are dropped before the max."""
+    real = [t for t in tags if parse_version(t)]
+    if not real:
+        return None
+    return max(real, key=parse_version)
+
+
+def fetch_tags(repo: str | None = None, *, timeout: float = 5.0) -> list[str]:
+    """The repo's tag names from the GitHub API (GitHub's order). Raises
+    ``urllib.error.URLError`` / ``OSError`` if GitHub is unreachable and
+    ``ValueError`` on a malformed body — :func:`latest_version` catches these.
+    A ``User-Agent`` is required or the API returns 403."""
+    url = _TAGS_API.format(repo=repo or repo_slug())
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "jaeger-update",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https)
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, list):
+        raise ValueError("unexpected tags payload")
+    return [item["name"] for item in data
+            if isinstance(item, dict) and "name" in item]
+
+
+def latest_version(repo: str | None = None, *, timeout: float = 5.0) -> str | None:
+    """Newest published tag, or ``None`` if GitHub is unreachable or has no
+    parseable tags. Never raises — a missing network degrades to 'unknown'."""
+    try:
+        tags = fetch_tags(repo, timeout=timeout)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return pick_latest(tags)
+
+
+__all__ = [
+    "repo_slug", "parse_version", "is_newer", "pick_latest",
+    "fetch_tags", "latest_version",
+]

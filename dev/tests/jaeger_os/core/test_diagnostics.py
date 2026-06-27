@@ -270,3 +270,43 @@ def test_check_tool_registry_reads_jaeger_agent_dispatch_map():
     finally:
         jmain._jaeger_agents_by_session.clear()
         jmain._jaeger_agents_by_session.update(saved)
+
+
+# ── current-vs-latest update readout (CLI doctor only) ──────────────
+
+
+def test_update_check_reports_available(monkeypatch):
+    from jaeger_os.core import version_check
+    from jaeger_os.core.diagnostics import doctor as D
+    monkeypatch.setattr(version_check, "latest_version", lambda *a, **k: "99.0.0")
+    c = D._update_check()
+    assert c.category == "update" and c.ok
+    assert "available" in c.detail and "jaeger update" in c.detail
+
+
+def test_update_check_up_to_date(monkeypatch):
+    import jaeger_os
+    from jaeger_os.core import version_check
+    from jaeger_os.core.diagnostics import doctor as D
+    monkeypatch.setattr(version_check, "latest_version",
+                        lambda *a, **k: jaeger_os.__version__)
+    assert "up to date" in D._update_check().detail
+
+
+def test_update_check_unreachable(monkeypatch):
+    from jaeger_os.core import version_check
+    from jaeger_os.core.diagnostics import doctor as D
+    monkeypatch.setattr(version_check, "latest_version", lambda *a, **k: None)
+    assert "couldn't reach GitHub" in D._update_check().detail
+
+
+def test_run_doctor_gates_update_check(monkeypatch):
+    """The agent's self_check (check_updates=False) stays network-free; only
+    the CLI doctor (check_updates=True) appends the version readout."""
+    from jaeger_os.core.diagnostics import doctor as D
+    from jaeger_os.core.runtime.preflight import Check
+    monkeypatch.setattr(D, "_update_check", lambda: Check(
+        name="version", category="update", ok=True, detail="X"))
+    assert not any(c.category == "update" for c in D.run_doctor(None))
+    assert any(c.category == "update"
+               for c in D.run_doctor(None, check_updates=True))
