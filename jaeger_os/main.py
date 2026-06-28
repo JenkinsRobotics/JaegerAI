@@ -1196,18 +1196,24 @@ def _register_builtins(client: Any) -> None:
         return t.list_deep_think_queue()
 
     @register_tool_from_function
-    def skill_note(skill: str, outcome: str = "smooth", note: str = "") -> dict:
-        """Jot a SHORT post-use note about a skill you just used — the journal
-        that feeds skill self-improvement. Call it after a notable use:
-          • outcome — smooth | slow | issues | failed (how it actually went)
-          • note    — one terse, concrete line: what worked, what was slow, what
-            you had to work around, what failed.
-        Cheap (one line, no model). When a skill's notes pile up — or it keeps
-        coming back `issues`/`failed` — propose_deep_think_task to review the
-        notes and improve the recipe. Returns {ok, skill, outcome}."""
+    def skill_note(skill: str, outcome: str = "smooth", note: str = "",
+                   objective: str = "", calls: int = 0, procedure: str = "",
+                   errors: str = "", flag: bool = False) -> dict:
+        """Jot a post-use summary about a skill you just used — the journal that
+        feeds skill self-improvement. After a notable use:
+          • outcome   — smooth | slow | issues | failed (how it went)
+          • note      — one terse, concrete line
+          • calls     — how many tool calls this use took
+          • procedure — the brief ordered calls ("read,read,fetch")
+          • errors    — errors / retries / dead-ends you hit
+          • flag      — True to ask for a review NOW (a use that wasted real effort)
+        Cheap (one line, no model). Reviews fire on their own during idle; `flag`
+        fast-tracks one. Returns {ok, skill, outcome}."""
         from jaeger_os.core import skill_notes as _sn
         layout = _pipeline.get("layout")
-        n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note)
+        n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note,
+                         objective=objective, calls=calls, procedure=procedure,
+                         errors=errors, flag=flag)
         result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
         # If the operator enabled the automatic trigger, a pile of issues/
         # failures may auto-propose a Deep Think review (no-op otherwise).

@@ -52,6 +52,28 @@ def test_broken_line_never_breaks_the_journal() -> None:
     assert len(skill_notes.all_notes(layout)) == 1
 
 
+def test_add_note_stores_structured_fields() -> None:
+    layout = _layout()
+    n = skill_notes.add_note(layout, skill="weather", outcome="issues",
+                             note="slow", objective="get forecast", calls=7,
+                             procedure="read,read,read,fetch",
+                             errors="404 then retry", flag=True)
+    assert n.calls == 7 and n.flag is True and n.objective == "get forecast"
+    loaded = skill_notes.notes_for(layout, "weather")[0]
+    assert loaded.calls == 7 and loaded.flag is True
+    assert loaded.errors == "404 then retry"
+
+
+def test_old_lines_without_new_fields_still_load() -> None:
+    layout = _layout()
+    p = skill_notes.notes_path(layout)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text('{"skill":"x","outcome":"smooth","note":"old","ts":"t"}\n',
+                 encoding="utf-8")
+    n = skill_notes.notes_for(layout, "x")[0]
+    assert n.calls == 0 and n.flag is False        # defaults fill missing fields
+
+
 def test_tools_registered() -> None:
     from jaeger_os.agent.schemas import tool_registry as R
     import jaeger_os.main as m
