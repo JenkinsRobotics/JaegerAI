@@ -4051,6 +4051,14 @@ def run_daemon(*, instance_name: str | None = None,
     client = boot.client
     try:
         while not _stop["flag"]:
+            # Refill: score skills from their post-use summaries and
+            # probabilistically queue the worst few for review. Bounded by the
+            # open-review dedup + the 'reviewing' marker resetting activation.
+            try:
+                from jaeger_os.agent.background import skill_review as _sr
+                _sr.sweep(layout, queue)
+            except Exception:  # noqa: BLE001 — a sweep failure never blocks deep-think
+                pass
             task = queue.next_pending()
             if task is not None:
                 # There's approved work — swap to the coder model, drain
