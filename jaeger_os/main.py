@@ -1215,11 +1215,11 @@ def _register_builtins(client: Any) -> None:
                          objective=objective, calls=calls, procedure=procedure,
                          errors=errors, flag=flag)
         result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
-        # If the operator enabled the automatic trigger, a pile of issues/
-        # failures may auto-propose a Deep Think review (no-op otherwise).
+        # A `flag`ged note fast-tracks a Deep Think review now; everything else
+        # defers to the idle sweep. No-op when opted out.
         try:
             from jaeger_os.agent.background import skill_review
-            proposed = skill_review.maybe_propose_on_note(layout, n.skill)
+            proposed = skill_review.maybe_propose_on_note(layout, n)
             if proposed and proposed.get("proposed"):
                 result["review_proposed"] = proposed
         except Exception:  # noqa: BLE001 — the trigger never breaks a note write

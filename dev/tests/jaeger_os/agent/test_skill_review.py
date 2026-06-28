@@ -59,19 +59,82 @@ def test_opt_out_proposes_to_backlog_and_disables_trigger() -> None:
         # Manual request now lands in the backlog (operator approves).
         r = skill_review.propose_review(_layout(), "weather", force=True)
         assert r["proposed"] and r["approved"] is False and r["status"] == "backlog"
-        # And the automatic on-note trigger is a no-op.
+        # And the on-note fast-path is a no-op when opted out (even if flagged).
         layout = _layout()
-        _bad(layout, "files", 5)
-        assert skill_review.maybe_propose_on_note(layout, "files") is None
+        flagged = skill_notes.add_note(layout, skill="files", outcome="failed",
+                                       note="x", flag=True)
+        assert skill_review.maybe_propose_on_note(layout, flagged) is None
     finally:
         skill_review.set_enabled(True)               # restore the default
 
 
-def test_auto_trigger_fires_by_default() -> None:
+# ── probabilistic severity-weighted trigger (Plan A §2) ────────────
+
+
+def test_severity_and_activation_since_last_review() -> None:
     layout = _layout()
-    _bad(layout, "weather", 3)
-    r = skill_review.maybe_propose_on_note(layout, "weather")
-    assert r and r["proposed"] is True and r["status"] == "ready"
+    skill_notes.add_note(layout, skill="w", outcome="failed", note="")     # 3
+    skill_notes.add_note(layout, skill="w", outcome="reviewing", note="")  # resets
+    skill_notes.add_note(layout, skill="w", outcome="issues", note="")     # 2
+    skill_notes.add_note(layout, skill="w", outcome="slow", note="", flag=True)  # 1+4
+    assert skill_review.activation(layout, "w") == 7.0     # pre-marker dropped
+    assert skill_review.severity(skill_notes.SkillNote(outcome="failed")) == 3
+    assert skill_review.severity(skill_notes.SkillNote(outcome="bogus")) == 0
+
+
+def test_fire_probability_rails_and_shape() -> None:
+    sr = skill_review
+    assert sr.fire_probability(0.0) == 0.0                 # below gate
+    assert sr.fire_probability(sr.S_MIN - 0.01) == 0.0     # gate
+    assert sr.fire_probability(sr.S_MAX) == 1.0            # ceiling
+    assert sr.fire_probability(sr.S_MAX + 5) == 1.0        # past ceiling
+    mid = sr.fire_probability(sr.S0)                       # midpoint ≈ 0.5
+    assert 0.49 <= mid <= 0.51
+    assert sr.fire_probability(sr.S0 - 1) < mid < sr.fire_probability(sr.S0 + 1)
+
+
+def test_select_respects_gate_budget_and_draw() -> None:
+    import random
+    sr = skill_review
+    acts = {"low": 0.0, "mid": sr.S0, "hi1": sr.S_MAX, "hi2": sr.S_MAX + 3}
+
+    class _AlwaysFire(random.Random):
+        def random(self):              # noqa: D401 — always "draws low" → fires
+            return 0.0
+
+    fired = sr.select_for_review(acts, k=5, rng=_AlwaysFire())
+    assert "low" not in fired                          # gated out (P==0)
+    assert set(fired) >= {"hi1", "hi2"}                # ceilings always fire
+    capped = sr.select_for_review(acts, k=1, rng=_AlwaysFire())
+    assert capped == ["hi2"]                           # highest activation first
+
+
+def test_flag_fast_path_proposes_immediately(monkeypatch) -> None:
+    layout = _layout()
+    called = {}
+    monkeypatch.setattr(skill_review, "propose_review",
+                        lambda lay, skill, **k: (called.update(skill=skill),
+                                                 {"proposed": True})[1])
+    flagged = skill_notes.add_note(layout, skill="w", outcome="slow", note="", flag=True)
+    assert skill_review.maybe_propose_on_note(layout, flagged) == {"proposed": True}
+    assert called["skill"] == "w"
+    # an unflagged note defers to the sweep → no immediate proposal
+    unflagged = skill_notes.add_note(layout, skill="w", outcome="slow", note="")
+    assert skill_review.maybe_propose_on_note(layout, unflagged) is None
+
+
+def test_sweep_proposes_selected_and_logs(monkeypatch) -> None:
+    import random
+    layout = _layout()
+    _bad(layout, "w", 4)                               # activation 12 → ceiling
+    proposed: list[str] = []
+    monkeypatch.setattr(skill_review, "propose_review",
+                        lambda lay, skill, **k: (proposed.append(skill),
+                                                 {"proposed": True})[1])
+    decisions = skill_review.sweep(layout, queue=object(), k=3, rng=random.Random(0))
+    assert proposed == ["w"]
+    assert decisions and decisions[0]["skill"] == "w" and decisions[0]["fired"] is True
+    assert skill_review.review_log_path(layout).exists()      # decision logged
 
 
 def test_review_tools_registered() -> None:

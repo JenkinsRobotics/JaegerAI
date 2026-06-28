@@ -20,6 +20,9 @@ land in the backlog for the operator to approve.
 
 from __future__ import annotations
 
+import json
+import math
+from pathlib import Path
 from typing import Any
 
 from jaeger_os.core import skill_notes
@@ -40,6 +43,72 @@ def enabled() -> bool:
 def set_enabled(on: bool) -> dict:
     _state["enabled"] = bool(on)
     return {"ok": True, "enabled": _state["enabled"]}
+
+
+# ── probabilistic, severity-weighted trigger (the "neuron" model) ──────────
+
+_SEVERITY = {"smooth": 0, "slow": 1, "issues": 2, "failed": 3}
+FLAG_BUMP = 4
+
+# Trigger tuning (conservative to start; widen once watched). S is an activation
+# in "severity points": one `failed` = 3, one `issues` = 2, a flag = +4.
+S_MIN = 2.0     # gate: below this, never fire (don't review noise)
+S0 = 5.0        # sigmoid midpoint (~ P=0.5)
+T = 2.0         # temperature: larger = softer ramp
+S_MAX = 10.0    # ceiling: at/above this, always fire (no infinite deferral)
+DEFAULT_K = 3   # max skills reviewed per idle sweep
+
+
+def severity(note: Any) -> int:
+    """Severity weight of one note (unknown outcome → 0)."""
+    return _SEVERITY.get(getattr(note, "outcome", ""), 0)
+
+
+def activation(layout: Any, skill: str) -> float:
+    """Severity-weighted sum of a skill's notes SINCE the last ``reviewing``
+    marker (a review consumes/resets it), plus FLAG_BUMP per flagged note."""
+    notes = skill_notes.notes_for(layout, skill)
+    last = max((i for i, n in enumerate(notes) if n.outcome == "reviewing"),
+               default=-1)
+    recent = notes[last + 1:]
+    return float(sum(severity(n) for n in recent)
+                 + FLAG_BUMP * sum(1 for n in recent if getattr(n, "flag", False)))
+
+
+def fire_probability(s: float, *, s0: float = S0, t: float = T,
+                     s_min: float = S_MIN, s_max: float = S_MAX) -> float:
+    """Probability this skill is reviewed this idle sweep. Gate below ``s_min``
+    (0.0), ceiling at/above ``s_max`` (1.0), sigmoid in between."""
+    if s < s_min:
+        return 0.0
+    if s >= s_max:
+        return 1.0
+    return 1.0 / (1.0 + math.exp(-(s - s0) / t))
+
+
+def select_for_review(activations: dict[str, float], k: int, *, rng) -> list[str]:
+    """Probabilistically pick skills to review this sweep. Each fires with its
+    ``fire_probability``; fired skills are returned worst-first (highest
+    activation), capped at ``k`` so one idle period can't churn everything."""
+    fired = [s for s, a in activations.items()
+             if rng.random() < fire_probability(a)]
+    fired.sort(key=lambda s: activations[s], reverse=True)
+    return fired[:max(0, k)]
+
+
+def review_log_path(layout: Any) -> Path:
+    return Path(layout.root) / "memory" / "skill_review_log.jsonl"
+
+
+def _log_decision(layout: Any, skill: str, s: float, p: float, fired: bool) -> None:
+    """Append one explainable trigger decision (S, P, fired) — so 'why did it
+    review X?' is never a mystery."""
+    rec = {"skill": skill, "S": round(s, 3), "P": round(p, 3),
+           "fired": bool(fired), "ts": skill_notes._now()}
+    path = review_log_path(layout)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def _bad_since_last_review(layout: Any, skill: str) -> int:
@@ -107,9 +176,29 @@ def propose_review(layout: Any, skill: str, *, threshold: int = DEFAULT_THRESHOL
             "approved": approved, "status": "ready" if approved else "backlog"}
 
 
-def maybe_propose_on_note(layout: Any, skill: str) -> dict | None:
-    """Called after a note lands. Auto-proposes IF the loop is enabled (default);
-    a no-op (returns None) when the operator has opted out."""
+def sweep(layout: Any, queue: Any, *, k: int = DEFAULT_K, rng=None) -> list[dict]:
+    """One idle/Deep-Think sweep: score every skill that has notes, pick the
+    worst few probabilistically, propose a review for each, and log every
+    decision (S, P, fired). No-op when the loop is opted out."""
     if not enabled():
+        return []
+    import random
+    rng = rng or random.Random()
+    acts = {skill: activation(layout, skill) for skill in skill_notes.summary(layout)}
+    selected = set(select_for_review(acts, k, rng=rng))
+    decisions: list[dict] = []
+    for skill, s in acts.items():
+        fired = skill in selected
+        _log_decision(layout, skill, s, fire_probability(s), fired)
+        if fired:
+            propose_review(layout, skill, force=True)
+        decisions.append({"skill": skill, "S": s, "fired": fired})
+    return decisions
+
+
+def maybe_propose_on_note(layout: Any, note: Any) -> dict | None:
+    """Called after a note lands. Only the agent's ``flag`` fast-tracks a review;
+    everything else defers to the idle ``sweep``. No-op when opted out."""
+    if not enabled() or not getattr(note, "flag", False):
         return None
-    return propose_review(layout, skill)
+    return propose_review(layout, getattr(note, "skill", ""), force=True)
