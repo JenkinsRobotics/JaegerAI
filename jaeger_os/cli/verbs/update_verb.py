@@ -69,7 +69,10 @@ _PRODUCT = (
 )
 _PREV_DIR = ".update-prev"        # previous product, kept for --rollback
 _STAGING_DIR = ".update-staging"  # new product assembled here before the swap
-_ARCHIVE_URL = "https://github.com/{repo}/archive/refs/tags/{ref}.tar.gz"
+# General ref form (tag OR branch OR sha) so the `latest` channel can fetch a
+# branch (master), not just a release tag.
+_ARCHIVE_URL = "https://github.com/{repo}/archive/{ref}.tar.gz"
+_LATEST_BRANCH = "master"   # the `latest` channel = development HEAD
 
 
 def _reinstall_deps(home: Path) -> int:
@@ -361,6 +364,17 @@ def _ask_yn(prompt: str, default: bool) -> bool:
     return raw[0] == "y"
 
 
+def _resolve_ref(ref: str | None, channel: str) -> str | None:
+    """The effective ref to install. Precedence: explicit ``--ref`` →
+    ``--channel latest`` (master) → ``$JAEGER_REF`` → ``None`` (the ``stable``
+    channel: newest release tag, resolved later by the latest-tag lookup)."""
+    if ref:
+        return ref
+    if channel == "latest":
+        return _LATEST_BRANCH
+    return os.environ.get("JAEGER_REF", "").strip() or None
+
+
 def _cmd_update_argv(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger update", add_help=False)
     parser.add_argument("--check", action="store_true",
@@ -368,21 +382,28 @@ def _cmd_update_argv(argv: list[str]) -> int:
     parser.add_argument("--no-migrate", action="store_true",
                         help="run the framework upgrade but skip migration scan")
     parser.add_argument("--ref", default=None,
-                        help="target version/tag to install (default: latest)")
+                        help="exact version/tag/branch to install (overrides --channel)")
+    parser.add_argument("--channel", choices=("stable", "latest"), default="stable",
+                        help="stable = newest release tag (default); "
+                             "latest = development HEAD (master)")
     parser.add_argument("--rollback", action="store_true",
                         help="revert the last download-update (clean installs)")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:
         print(
-            "usage: jaeger update [--check] [--no-migrate] [--ref TAG] [--rollback]\n"
+            "usage: jaeger update [--check] [--no-migrate] [--channel stable|latest]\n"
+            "                     [--ref TAG] [--rollback]\n"
             "\n"
             "  Upgrade the framework via the detected install method, then\n"
             "  prompt to back up and migrate each stale instance.\n"
             "\n"
-            "  Clean (curl/product) installs download + apply the release in\n"
-            "  place — no git needed. --ref pins a version; --rollback reverts\n"
-            "  the previous download-update. Dev clones fast-forward via git.\n",
+            "  Clean (curl/product) installs download + apply in place — no git\n"
+            "  needed. Channels: stable (newest release tag, default) · latest\n"
+            "  (master / development HEAD). --ref pins an exact tag/branch/sha\n"
+            "  and overrides --channel; $JAEGER_REF is honoured when neither is\n"
+            "  set. --rollback reverts the previous download-update. Dev clones\n"
+            "  fast-forward via git.\n",
             file=sys.stderr,
         )
         return 0
@@ -407,7 +428,7 @@ def _cmd_update_argv(argv: list[str]) -> int:
     if args.check:
         return 0 if not stale else 1
 
-    rc = _run_upgrade(method, ref=args.ref)
+    rc = _run_upgrade(method, ref=_resolve_ref(args.ref, args.channel))
     if rc != 0:
         return rc
 

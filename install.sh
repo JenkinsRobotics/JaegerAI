@@ -47,6 +47,24 @@ case "$PY_VERSION" in
     ;;
 esac
 
+# C toolchain — deps (msgspec, llama-cpp-python, …) build from source. Mirrors
+# the curl-side check in scripts/install.sh, for the direct `./install.sh` path.
+case "$(uname -s)" in
+  Darwin)
+    if ! xcode-select -p >/dev/null 2>&1; then
+      echo "✗ Xcode Command Line Tools not found (needed to build deps)" >&2
+      echo "  fix: xcode-select --install" >&2
+      exit 1
+    fi ;;
+  Linux)
+    if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 \
+       && ! command -v clang >/dev/null 2>&1; then
+      echo "✗ No C compiler (cc/gcc/clang) — needed to build deps" >&2
+      echo "  fix: Ubuntu — sudo apt install build-essential" >&2
+      exit 1
+    fi ;;
+esac
+
 # 2. Create or reuse the .venv
 if [[ ! -d "$VENV" ]]; then
   echo "→ Creating .venv..."

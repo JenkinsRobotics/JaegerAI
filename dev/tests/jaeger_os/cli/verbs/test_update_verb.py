@@ -363,6 +363,18 @@ def test_reinstall_dev_clone_repairs_editable(tmp_path, monkeypatch, capsys):
     assert "dev clone" in capsys.readouterr().out
 
 
+def test_resolve_ref_precedence(monkeypatch):
+    monkeypatch.delenv("JAEGER_REF", raising=False)
+    assert U._resolve_ref("0.6.0", "stable") == "0.6.0"        # --ref wins
+    assert U._resolve_ref("0.6.0", "latest") == "0.6.0"        # --ref overrides channel
+    assert U._resolve_ref(None, "latest") == U._LATEST_BRANCH  # latest → master
+    assert U._resolve_ref(None, "stable") is None              # stable → newest tag (lookup)
+    monkeypatch.setenv("JAEGER_REF", "0.5.2")
+    assert U._resolve_ref(None, "stable") == "0.5.2"           # $JAEGER_REF honoured
+    assert U._resolve_ref(None, "latest") == U._LATEST_BRANCH  # channel beats env
+    assert U._resolve_ref("0.7.0", "stable") == "0.7.0"        # --ref still wins
+
+
 def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monkeypatch):
     home = tmp_path
     (home / "jaeger_os").mkdir()
