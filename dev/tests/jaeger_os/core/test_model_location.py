@@ -119,3 +119,18 @@ def test_discover_local_gguf_picks_up_a_registered_dir(bound, tmp_path):
     custom_entry = next(m for m in found
                         if m["path"] == str(custom / "fake-model.gguf"))
     assert custom_entry["source"] == "custom"
+
+
+# ── download progress line (urllib fallback) ───────────────────────
+
+
+def test_progress_line_has_bar_pct_speed_and_eta() -> None:
+    from jaeger_os.core.models.model_resolver import _progress_line
+    line = _progress_line("gemma", done=500 * 1024 * 1024,
+                          total=1000 * 1024 * 1024, elapsed=10.0)
+    assert "50.0%" in line                       # halfway
+    assert "[" in line and "]" in line           # the bar
+    assert "MB/s" in line and "ETA" in line       # speed + eta
+    assert _progress_line("g", 1000, 1000, 1.0).count("100.0%") == 1   # full
+    # zero/total guards don't divide-by-zero
+    assert "0.0%" in _progress_line("g", 0, 0, 0.0)

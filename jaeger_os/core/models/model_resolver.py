@@ -420,6 +420,21 @@ def _resolve_registered(
 # ── Download ────────────────────────────────────────────────────────
 
 
+def _progress_line(name: str, done: int, total: int, elapsed: float,
+                   *, width: int = 24) -> str:
+    """A simple text progress bar + speed + ETA for the urllib fallback (the HF
+    path gets tqdm for free). Pure → unit-tested."""
+    pct = (100.0 * done / total) if total else 0.0
+    filled = int(width * done / total) if total else 0
+    bar = "#" * filled + "-" * (width - filled)
+    speed = (done / elapsed) if elapsed > 0 else 0.0          # bytes/s
+    eta = int((total - done) / speed) if speed > 0 else 0
+    mb = 1024 * 1024
+    return (f"[jaeger] {name} [{bar}] {pct:5.1f}%  "
+            f"{done // mb}/{total // mb} MB  "
+            f"{speed / mb:4.1f} MB/s  ETA {eta // 60}m{eta % 60:02d}s")
+
+
 def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
     """Download ``name`` from HuggingFace Hub into the user cache.
 
@@ -466,18 +481,19 @@ def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
         pass  # fall through to urllib
 
     # Fallback: urllib. HF Hub's resolve endpoint is a plain HTTP GET.
+    # ponytail: not resumable (urlretrieve restarts on failure); the HF path
+    # above resumes. This fallback only runs when huggingface_hub is absent.
+    import time
     url = f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
     tmp = target.with_suffix(target.suffix + ".part")
+    start = time.monotonic()
 
     def _hook(blocks: int, block_size: int, total_size: int) -> None:
         if not progress or total_size <= 0:
             return
-        downloaded_b = blocks * block_size
-        pct = min(100.0, 100.0 * downloaded_b / total_size)
-        sys.stderr.write(
-            f"\r[jaeger] {name}: {pct:5.1f}%  "
-            f"({downloaded_b // (1024 * 1024)}/{total_size // (1024 * 1024)} MB)"
-        )
+        done = min(total_size, blocks * block_size)
+        sys.stderr.write("\r" + _progress_line(name, done, total_size,
+                                               time.monotonic() - start))
         sys.stderr.flush()
 
     urllib.request.urlretrieve(url, tmp, reporthook=_hook)  # noqa: S310
