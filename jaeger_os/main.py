@@ -1209,7 +1209,7 @@ def _register_builtins(client: Any) -> None:
           • flag      — True to ask for a review NOW (a use that wasted real effort)
         Cheap (one line, no model). Reviews fire on their own during idle; `flag`
         fast-tracks one. Returns {ok, skill, outcome}."""
-        from jaeger_os.core import skill_notes as _sn
+        from jaeger_os.core.skill_improvement import skill_notes as _sn
         layout = _pipeline.get("layout")
         n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note,
                          objective=objective, calls=calls, procedure=procedure,
@@ -1232,7 +1232,7 @@ def _register_builtins(client: Any) -> None:
         notes, or blank for a per-skill outcome tally across all skills (which
         ones are struggling). Use it to decide whether a skill needs a Deep Think
         improvement pass. Read-only."""
-        from jaeger_os.core import skill_notes as _sn
+        from jaeger_os.core.skill_improvement import skill_notes as _sn
         layout = _pipeline.get("layout")
         if (skill or "").strip():
             notes = _sn.notes_for(layout, skill)
@@ -1271,7 +1271,7 @@ def _register_builtins(client: Any) -> None:
         is inspectable + rollback-able: the new version (e.g. 'v3' — the revision
         id), what changed, and the measured delta. See it via `jaeger skills
         revisions`. Returns {ok, skill, version, ts}."""
-        from jaeger_os.core import skill_revisions
+        from jaeger_os.core.skill_improvement import skill_revisions
         r = skill_revisions.record(_pipeline.get("layout"), skill=skill,
                                    version=version, origin="self-improvement",
                                    summary=summary, delta=benchmark_delta)
@@ -4058,6 +4058,13 @@ def run_daemon(*, instance_name: str | None = None,
                 from jaeger_os.agent.background import skill_review as _sr
                 _sr.sweep(layout, queue)
             except Exception:  # noqa: BLE001 — a sweep failure never blocks deep-think
+                pass
+            # Lifecycle maintenance: archive superseded versions + retire
+            # eligible low-win skills. Recoverable (.archive/) + guarded.
+            try:
+                from jaeger_os.core.skill_improvement import skill_maintenance as _sm
+                _sm.maintenance_sweep(layout)
+            except Exception:  # noqa: BLE001 — maintenance never blocks deep-think
                 pass
             task = queue.next_pending()
             if task is not None:
