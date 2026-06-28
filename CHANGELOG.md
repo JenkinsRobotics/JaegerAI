@@ -3,6 +3,60 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.6.0`
+
+**The product shell.** 0.5 made the agent alive; 0.6 makes JROS *feel like real
+software* to install, run, and keep current — plus a measured skill
+self-improvement loop and a cleaner operator vocabulary.
+
+### Install / update / lifecycle (the theme)
+- **Editable package + one `jaeger` command.** JROS is a proper package again
+  (`uv pip install -e .`, code unmoved); a single `jaeger` dispatcher behind the
+  console script + the `./jaeger` wrapper; version single-sourced from
+  `jaeger_os.__version__`.
+- **`jaeger update`** — on a clean install, downloads the target release and
+  swaps the product in place (no git; preserves `.venv/` + `.jaeger_os/`);
+  `--rollback`, `--ref TAG`, `--channel {stable,latest}` (+ `$JAEGER_REF`). Dev
+  clones fast-forward via git. `jaeger doctor` shows current-vs-latest.
+- **`jaeger reinstall`** (clean in-place reinstall, keeps agents) and
+  **`jaeger uninstall`** (`--purge` to also wipe agents; refuses on a dev clone).
+- **`jaeger autostart enable|disable|status`** — opt-in boot/login service
+  (macOS LaunchAgent, Linux `systemd --user` + linger).
+- **`jaeger launcher install|remove`** — a thin, locally-created (unsigned, no
+  Gatekeeper prompt) macOS `Jaeger.app`.
+- **In-app "update available"** — a tray item + a reusable Jaeger Studio
+  `UpdateBanner` widget (off-thread check → an `UpdateDialog` that runs
+  `jaeger update`).
+- **Install experience** — prereq detection (C toolchain per-OS, PortAudio),
+  `jaeger doctor` Full Disk Access, first-run model-download progress (bar +
+  ETA + resume), README + landing-page accuracy. Untracked 93 MB of derived
+  Swift `.build/`; `.gitattributes export-ignore dev/` trims the release tarball.
+
+### Operator vocabulary
+- **`instance` → `agent`.** `jaeger agent <create|list|use|inspect|delete|clear>`
+  unifies the old `setup`/`instance`/`instances`; `--agent` flag; the old names
+  stay as aliases. Surface-only — internals / `instances/` unchanged.
+
+### Agentic
+- **Autonomy modes** (`ask`/`scoped`/`auto`), a **person index**, per-channel
+  **admin trust** + in-channel approvals, and **model defaults** from a clean
+  7-model benchmark (`e4b` awake/voice · `26B-A4B QAT` deep-think · `12B` backup).
+
+### Skill self-improvement (the measured loop)
+- A **structured post-use summary** (objective/calls/procedure/errors/flag) → a
+  **probabilistic, severity-weighted idle trigger** (sigmoid with gate + ceiling
+  rails) → a **second-person measured review** ("review your own trajectory as
+  if someone else's" → one imperative rule → benchmark keep-if-better, else
+  score; spawn a new skill if nothing fits) → **per-skill archive** +
+  **scoring/retirement** (recoverable, guarded — never a user-written skill). On
+  by default (opt-out). Lives in `core/skill_improvement/` +
+  `agent/background/skill_review.py`; `jaeger skills notes|revisions|score`
+  surface it.
+
+### Not in 0.6
+- Full bundle / DMG and a no-git product-only channel were explicitly de-scoped.
+  The Tier-1 `core` app-role and JP01 hardware adapters are 0.7.
+
 ## `0.5.1`
 
 Patch release cut from the 0.6 development branch — agent reliability +
