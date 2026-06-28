@@ -130,24 +130,67 @@ def _open_review_exists(queue: Any, skill: str) -> bool:
                for t in queue.all_tasks())
 
 
+def _summaries_block(layout: Any, skill: str) -> str:
+    """Render a skill's accrued post-use summaries SINCE the last review as the
+    trajectory the auditor reads cold (newest last)."""
+    notes = skill_notes.notes_for(layout, skill)
+    last = max((i for i, n in enumerate(notes) if n.outcome == "reviewing"),
+               default=-1)
+    recent = notes[last + 1:]
+    if not recent:
+        return "(no recent post-use summaries)"
+    lines = []
+    for i, n in enumerate(recent, 1):
+        bits = [f"[{n.outcome}]"]
+        if n.objective:
+            bits.append(f'obj="{n.objective}"')
+        if n.calls:
+            bits.append(f"calls={n.calls}")
+        if n.procedure:
+            bits.append(f'procedure="{n.procedure}"')
+        if n.errors:
+            bits.append(f'errors="{n.errors}"')
+        if n.note:
+            bits.append(f"— {n.note}")
+        lines.append(f"{i}. " + " ".join(bits))
+    return "\n".join(lines)
+
+
 def review_description(layout: Any, skill: str) -> str:
-    """The Deep Think task prompt — the MEASURED improvement loop, so the rewrite
-    is only kept if it's provably better, and the change is recorded."""
-    bad = _bad_since_last_review(layout, skill)
+    """The Deep Think task prompt — a SECOND-PERSON audit of the skill's accrued
+    post-use summaries that ends in one imperative rule, then a MEASURED change
+    (benchmark keep-if-better where possible) recorded as a revision. The
+    grammatical distance ('you', 'your own') is deliberate — it flips the agent
+    from defending what it did to encoding what should change."""
+    block = _summaries_block(layout, skill)
     return (
-        f"[{REVIEW_TAG}:{skill}] Improve the '{skill}' skill from its usage "
-        f"notes ({bad} issue/failure note(s) logged). Do it MEASURED, never on a "
-        f"hunch:\n"
-        f"1. Read the notes: skill_notes('{skill}') — find the recurring problem.\n"
-        f"2. Baseline: benchmark_skill('{skill}') to record the current score.\n"
-        f"3. Write a NEW version (skills/{skill}_vN/) that fixes the recurring "
-        f"problem; keep/extend its smoke test to cover it.\n"
-        f"4. reload_skills, then benchmark_skill('{skill}') again.\n"
-        f"5. KEEP the new version ONLY if its smoke test passes AND the benchmark "
-        f"delta is positive — otherwise REVERT (delete the new version dir).\n"
-        f"6. If you kept it: record_skill_revision('{skill}', <new vN>, "
-        f"'<what you changed>', '<benchmark delta>'), then "
-        f"skill_note('{skill}', 'smooth', '<summary>')."
+        f"[{REVIEW_TAG}:{skill}] Improve the '{skill}' skill. Review your own "
+        f"logged uses below AS IF THEY WERE SOMEONE ELSE'S — judge each "
+        f"trajectory against its objective, not your sympathy for it.\n\n"
+        f"Recent uses of '{skill}' (newest last):\n{block}\n\n"
+        f"AUDIT — answer each, cite the use #:\n"
+        f"1. Objective check — did you meet each objective? full / partial / no.\n"
+        f"2. Issues — errors, wrong tools, backtracks, retries.\n"
+        f"3. Step economy — fewer calls possible? which were redundant, or could "
+        f"have been batched / run in parallel?\n"
+        f"4. Guess vs verify — where did you assume instead of checking?\n"
+        f"5. THE ONE LESSON — a single reusable imperative ('Batch independent "
+        f"reads', NOT 'I read files separately'). If you cannot state it as an "
+        f"imperative, the audit found nothing — STOP and change nothing.\n"
+        f"6. Skill decision — EDIT '{skill}'s playbook · NEW skill (only if the "
+        f"lesson fits no existing skill — check first; prefer EDIT over a "
+        f"near-duplicate) · or NOTHING.\n\n"
+        f"THEN apply it, MEASURED:\n"
+        f"- Benchmarkable skill: baseline benchmark_skill('{skill}'); write "
+        f"skills/{skill}_vN/ applying the lesson (keep/extend its smoke test); "
+        f"reload_skills; benchmark_skill('{skill}') again; KEEP only if smoke "
+        f"passes AND the delta is positive, else REVERT (delete the new dir).\n"
+        f"- Pure procedural playbook (not benchmarkable): apply the rule to the "
+        f"playbook; it will be scored over its next uses.\n"
+        f"- NEW skill: create skills/<name>_v1/ with a use-when trigger + the rule.\n\n"
+        f"If you kept a change: record_skill_revision('{skill}', '<vN>', '<the "
+        f"imperative rule>', '<benchmark delta or \"scored\">'), then "
+        f"skill_note('{skill}', 'smooth', '<one-line summary>')."
     )
 
 

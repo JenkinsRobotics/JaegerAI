@@ -137,6 +137,38 @@ def test_sweep_proposes_selected_and_logs(monkeypatch) -> None:
     assert skill_review.review_log_path(layout).exists()      # decision logged
 
 
+# ── the second-person review (Plan B §3) ───────────────────────────
+
+
+def test_summaries_block_renders_structured_fields() -> None:
+    layout = _layout()
+    skill_notes.add_note(layout, skill="w", outcome="reviewing", note="old")  # dropped
+    skill_notes.add_note(layout, skill="w", outcome="failed", note="n1",
+                         objective="get forecast", calls=7,
+                         procedure="read,read,fetch", errors="404 retry")
+    block = skill_review._summaries_block(layout, "w")
+    assert "old" not in block                       # pre-marker dropped
+    assert 'obj="get forecast"' in block and "calls=7" in block
+    assert "404 retry" in block and "[failed]" in block
+
+
+def test_summaries_block_empty() -> None:
+    assert "no recent" in skill_review._summaries_block(_layout(), "w").lower()
+
+
+def test_review_description_is_second_person_audit() -> None:
+    layout = _layout()
+    skill_notes.add_note(layout, skill="w", outcome="failed", note="n",
+                         objective="o", calls=9)
+    d = skill_review.review_description(layout, "w")
+    assert "AS IF" in d and "calls=9" in d                  # 2nd-person + trajectory
+    assert "THE ONE LESSON" in d and "imperative" in d.lower()
+    assert "change nothing" in d.lower()                    # honesty rule
+    assert "benchmark_skill('w')" in d and "REVERT" in d     # measured validation
+    assert "NEW skill" in d                                  # spawn-new branch
+    assert "record_skill_revision('w'" in d
+
+
 def test_review_tools_registered() -> None:
     from jaeger_os.agent.schemas import tool_registry as R
     import jaeger_os.main as m
