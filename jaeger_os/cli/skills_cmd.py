@@ -63,6 +63,14 @@ def register(subparsers: Any) -> None:
                            help="a skill name, or blank for per-skill revision counts")
     revisions.set_defaults(_handler=run_revisions)
 
+    score = sub.add_parser(
+        "score",
+        help="recipe-skill win-rates + retire candidates (self-improvement)",
+    )
+    score.add_argument("skill", nargs="?", default="",
+                       help="a skill name, or blank for all scored skills")
+    score.set_defaults(_handler=run_score)
+
 
 # ── status formatting ─────────────────────────────────────────────
 
@@ -260,7 +268,7 @@ def run_notes(args: Any) -> int:
     if layout is None:
         print(c.red("no active instance — run the setup wizard first"))
         return 1
-    from jaeger_os.core import skill_notes
+    from jaeger_os.core.skill_improvement import skill_notes
     skill = (getattr(args, "skill", "") or "").strip()
     if skill:
         notes = skill_notes.notes_for(layout, skill)
@@ -277,7 +285,7 @@ def run_notes(args: Any) -> int:
     if not summary:
         print(c.dim("no skill-usage notes yet — the agent journals them as it works"))
         return 0
-    from jaeger_os.core import skill_revisions
+    from jaeger_os.core.skill_improvement import skill_revisions
     revs = skill_revisions.counts(layout)
     print(f"\n{c.bold('Skill usage notes')}  {c.dim('(per-skill outcomes)')}\n")
     for sk, tally in sorted(summary.items(),
@@ -300,7 +308,7 @@ def run_revisions(args: Any) -> int:
     if layout is None:
         print(c.red("no active instance — run the setup wizard first"))
         return 1
-    from jaeger_os.core import skill_revisions
+    from jaeger_os.core.skill_improvement import skill_revisions
     skill = (getattr(args, "skill", "") or "").strip()
     if skill:
         revs = skill_revisions.revisions_for(layout, skill)
@@ -325,5 +333,31 @@ def run_revisions(args: Any) -> int:
         latest = skill_revisions.latest(layout, sk)
         tail = c.dim(f"  → {latest.version}") if latest and latest.version else ""
         print(f"  {c.bold(sk):<24} {n} revision(s){tail}")
+    print()
+    return 0
+
+
+# ── score (win-rate + retirement candidates) ──────────────────────
+
+def run_score(args: Any) -> int:
+    layout = c.get_active_instance_layout()
+    if layout is None:
+        print(c.red("no active instance — run the setup wizard first"))
+        return 1
+    from jaeger_os.core.skill_improvement import skill_maintenance as sm
+    from jaeger_os.core.skill_improvement import skill_notes
+    skill = (getattr(args, "skill", "") or "").strip()
+    skills = [skill] if skill else sorted(skill_notes.summary(layout))
+    if not skills:
+        print(c.dim("no skill-usage notes yet — scores accrue as the agent works"))
+        return 0
+    candidates = set(sm.retire_candidates(layout))
+    print(f"\n{c.bold('Skill scores')}  {c.dim('(win-rate from post-use notes)')}\n")
+    for sk in skills:
+        s = sm.skill_score(layout, sk)
+        rate = f"{s['win_rate'] * 100:.0f}%"
+        flag = c.red("  ← retire candidate") if sk in candidates else ""
+        print(f"  {c.bold(sk):<24} {s['wins']}/{s['uses']} wins  "
+              f"{c.dim(rate)}{flag}")
     print()
     return 0

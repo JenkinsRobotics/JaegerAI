@@ -25,7 +25,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core import skill_notes
+from jaeger_os.core.skill_improvement import skill_notes
 
 REVIEW_TAG = "skill-review"
 DEFAULT_THRESHOLD = 3
