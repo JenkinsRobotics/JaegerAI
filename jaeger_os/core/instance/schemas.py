@@ -189,7 +189,7 @@ class DeepThinkConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     coder_model: str = Field(
-        "gemma-4-26b-a4b-it-q4_k_m",
+        "gemma-4-26b-a4b-it-qat-q4_0",
         description="Model swapped in for Deep Think skill authoring.",
     )
     auto_idle_minutes: int = Field(

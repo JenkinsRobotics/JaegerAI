@@ -3,6 +3,33 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.6.1`
+
+**Model lineup, measured.** End-to-end benchmarks (65-case corpus + a
+self-improvement audit probe) over every downloaded model settled the local
+model strategy on two: **gemma-4-E4B** (awake / real-time, and low-RAM
+deep-think) and **gemma-4-26B-A4B QAT** (deep-think). Everything else was
+dominated and removed.
+
+- **E4B is the universal small model** — 89.2% routing, beats every dense 12B
+  quant (84–88%) while being smaller (5.3 GB). The dense 12B is retired: there's
+  no RAM tier where it wins (below it E4B is better *and* lighter; above it the
+  26B-A4B owns deep-think).
+- **26B-A4B QAT is the one canonical heavy model** — 92.3% routing, 20/20
+  deep-think, 6/6 on the self-improvement audit; ties the plain Q4_K_M but
+  2.4 GB smaller. The 24 GB and 64 GB tiers now use it; the non-QAT 26B is
+  retired from recommendations.
+- **Qwen3-Coder-30B removed** — worst of the sweep (63% routing, 3/6 audit) and
+  it *endorsed* the over-engineering it was asked to flag (a coder model's
+  abstraction bias is wrong for this codebase).
+- **Runtime defaults repointed** — Deep Think `coder_model` → 26B-QAT, realtime
+  → E4B; the dead `VOICE_BACKUP_MODEL` constant removed; the dangling
+  `qwen3-coder` registry key dropped.
+- **Dev Launcher** — a floating, always-on-top window that opens every Qt
+  surface from one place (`./launch --dev-gui`); the launchpad for the 0.6.2
+  GUI pass.
+- ~53 GB of superseded local model weights reclaimed.
+
 ## `0.6.0`
 
 **The product shell.** 0.5 made the agent alive; 0.6 makes JROS *feel like real

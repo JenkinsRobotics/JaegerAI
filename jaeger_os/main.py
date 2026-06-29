@@ -3953,7 +3953,7 @@ def switch_model(new_model: str, *, warmup: bool = True) -> Any:
     its agent change.
 
     ``new_model`` is a model_resolver registry name (e.g.
-    ``qwen3-coder-30b-a3b-q4_k_m``) or a path; it resolves through
+    ``gemma-4-26b-a4b-it-qat-q4_0``) or a path; it resolves through
     :func:`model_resolver.resolve_model_path`.
 
     IMPORTANT — RAM: the caller MUST drop its reference to the OLD
