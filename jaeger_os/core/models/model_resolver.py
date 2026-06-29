@@ -112,23 +112,9 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
             "a 32 GB host."
         ),
     },
-    # ── Deep Think coder model ──────────────────────────────────────
-    # Coordinates verified against the HuggingFace API 2026-05-19:
-    # the repo + file both exist; size is the real Content-Length.
-    # switch_model("qwen3-coder-30b-a3b-q4_k_m") auto-downloads this on
-    # first use if it isn't already in ~/.jaeger/models/ or ./models/.
-    "qwen3-coder-30b-a3b-q4_k_m": {
-        "hf_repo": "lmstudio-community/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-        "hf_file": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
-        "size_gb": 17.4,
-        "role": "coder",
-        "verified": True,
-        "description": (
-            "Qwen3-Coder 30B MoE (3B active), Q4_K_M. Deep Think "
-            "skill-authoring model — coding-specialized, MoE-fast. "
-            "Auto-downloads (~17.4 GB) on first Deep Think entry."
-        ),
-    },
+    # (Qwen3-Coder-30B retired 0.6.x: 63% routing + 3/6 self-improvement
+    # audit — worst of the sweep, and it *endorsed* the over-engineering it
+    # was asked to flag. The 26B-A4B QAT is the Deep Think coder model now.)
     # ── Deep Think general-purpose model ───────────────────────────
     # 0.2.6: the 32 GB tier's recommended asleep model returned by
     # ``host_recommendation`` is ``qwen3-30b-a3b-q4_k_m`` (the non-

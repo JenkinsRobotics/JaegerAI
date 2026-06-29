@@ -31,9 +31,6 @@ MODES: dict[str, dict[str, Any]] = {
     "high":       {"model": "gemma-4-26b-a4b-it-qat-q4_0", "voice": False, "deep_sleep": False},
     "deep-sleep": {"model": "gemma-4-26b-a4b-it-qat-q4_0", "voice": False, "deep_sleep": True},
 }
-# Voice-mode backup (more honest, slower) — switch_model this in normal mode
-# when the safety/no-hallucination edge matters more than latency.
-VOICE_BACKUP_MODEL = "gemma-4-12b-it-q4_k_m"
 DEFAULT_MODE = "normal"
 
 # Tracked live: the active mode + the model that's actually resident (so we

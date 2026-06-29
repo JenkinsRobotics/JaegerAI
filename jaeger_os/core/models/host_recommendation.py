@@ -9,11 +9,12 @@ prompt at first-run.
 The picks track the corpus 1.1 overall-Score leaderboard in
 ``dev/benchmark/HISTORY.md`` (Score = passed/total across deep-think +
 real-time + multi-turn + safety, mode=auto). The gemma 4 family leads
-every tier — E4B (light, fastest), 12B (medium, #1 Score), 26B-A4B
-(heavy / deep-think: ties Qwen3-30B-A3B on Score but ~5× faster) — so
-the slower Qwen deep-think picks were pruned. ``score_pct`` below is the
-HISTORY overall Score, NOT a single routing run. Refresh when a
-re-bench regenerates HISTORY.md.
+every tier — E4B (light, fastest, the awake pick everywhere) and the
+26B-A4B (heavy / deep-think). The dense 12B is RETIRED: the corpus-1.2
+sweep put E4B above every 12B quant on routing while being smaller, so
+12B has no tier where it wins. ``score_pct`` below is the HISTORY
+overall Score, NOT a single routing run. Refresh when a re-bench
+regenerates HISTORY.md.
 """
 
 from __future__ import annotations
@@ -73,46 +74,18 @@ _GEMMA_E4B_Q4 = ModelPick(
                   "gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"),
 )
 
-# 0.3.0: dense 12B Gemma 4.  Becomes the 24 GB tier's asleep pick
-# (Mac Mini sweet spot) — fits cleanly alongside the E4B awake model
-# with room for KV cache + host headroom, and leads the routing
-# leaderboard at 94.9% with a clean 18/18 safety subset (the strict
-# safety win that pushed it above Qwen3.5-9B at the 24 GB tier).
-# At 32 GB and above the Qwen3-30B-A3B MoE stays the asleep pick
-# because its 30B/3B-active speed (~3× tok/s) is the more important
-# axis when host RAM allows.
-_GEMMA_12B_Q4 = ModelPick(
-    registry_key="gemma-4-12b-it-q4_k_m",
-    display_name="gemma-4-12B Q4",
-    size_gb=6.9,
-    score_pct=94.9,
-    tokens_per_task=67,
-    notes=("Dense 12B, 6.9 GB on disk. Medium / real-time default — "
-           "leaderboard #1 at 94.9% overall Score (corpus 1.1), 18/18 "
-           "deep-think, 98.1% routing. Light enough to co-load with voice "
-           "(Whisper + Kokoro) on a 32 GB host where the 26B-A4B would "
-           "OOM the GPU."),
-    download_url=("https://huggingface.co/lmstudio-community/"
-                  "gemma-4-12B-it-GGUF/resolve/main/"
-                  "gemma-4-12B-it-Q4_K_M.gguf"),
-)
+# 0.6.x: the dense 12B is RETIRED from the tier table. The clean corpus-1.2
+# sweep put E4B (89.2% route, 5.3 GB) above every 12B quant (84–88%) while
+# being smaller — so there is no RAM tier where 12B wins: below it E4B is
+# better AND lighter, above it the 26B-A4B owns deep-think. The 24 GB tier
+# now swaps in the 26B-A4B QAT (14.4 GB, 92.3% route) instead. (The registry
+# key still exists for the runtime's VOICE_BACKUP / deep-think realtime
+# fallback until those are repointed to E4B.)
 
-_GEMMA_26B_A4B_Q4 = ModelPick(
-    registry_key="gemma-4-26b-a4b-it-q4_k_m",
-    display_name="gemma-4-26B-A4B Q4",
-    size_gb=15.6,
-    score_pct=93.2,
-    tokens_per_task=66,
-    notes=("MoE 4B active — heavy / Deep Think default. 93.2% overall "
-           "Score (corpus 1.1), 100% routing, 5/5 safety, 4m47s bench. "
-           "Ties the prior Qwen3-30B-A3B deep-think pick on Score but "
-           "runs 5× faster (4m47s vs 24m29s) with better routing + safety "
-           "— more usable work per window. Fits as a swap on a 32 GB host; "
-           "the 35B tier OOMs at 32K context."),
-    download_url=("https://huggingface.co/lmstudio-community/"
-                  "gemma-4-26B-A4B-it-GGUF/resolve/main/"
-                  "gemma-4-26B-A4B-it-Q4_K_M.gguf"),
-)
+# 0.6.x: the plain (non-QAT) 26B-A4B Q4_K_M is retired from the tier table —
+# the QAT Q4_0 ties it on routing (92.3%) and is 2.4 GB smaller, so QAT is the
+# one canonical 26B at every tier. The plain key stays in MODEL_REGISTRY
+# (re-downloadable) but is no longer a recommended pick.
 
 _GEMMA_26B_A4B_QAT = ModelPick(
     registry_key="gemma-4-26b-a4b-it-qat-q4_0",
@@ -152,10 +125,9 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
 
     Below 12 GB the wizard should refuse to recommend a local model
     (too tight even for swap). 12 GB only supports a single small
-    model — no swap, no asleep. 24 GB swaps gemma-4-E4B awake against
-    gemma-4-12B asleep. 32 GB co-loads gemma-4-12B awake with voice and
-    swaps in gemma-4-26B-A4B for deep-think. 64+ GB runs gemma-4-26B-A4B
-    in both modes (no swap).
+    model — no swap, no asleep. 24 GB and 32 GB both run gemma-4-E4B
+    awake and swap in gemma-4-26B-A4B (QAT) for deep-think. 64+ GB runs
+    gemma-4-26B-A4B in both modes (no swap).
     """
     if tier_gb < 12:
         # Under-spec: still assign both modes for code-path symmetry,
@@ -189,47 +161,50 @@ def recommend_for_tier(tier_gb: int) -> TierRecommendation:
             asleep=_QWEN_4B_THINKING_Q3,
         )
     if tier_gb < 32:
-        # 24 GB: Mac Mini sweet spot — both gemmas swap cleanly.
+        # 24 GB: Mac Mini sweet spot. gemma-4-E4B awake + the 26B-A4B QAT
+        # asleep — at 14.4 GB it swaps in cleanly on a 24 GB host (the
+        # awake model is unloaded first) and wins deep-think outright. The
+        # dense 12B that used to sit here is retired (E4B beats it + the
+        # QAT is the better heavy model).
         return TierRecommendation(
             tier_label="24 GB",
             description=("Mac Mini sweet spot.  gemma-4-E4B awake "
-                         "(5.3 GB, fastest) + gemma-4-12B asleep "
-                         "(6.9 GB, #1 Score 94.9%).  Both fit alongside "
-                         "the KV cache + host headroom on a 24 GB "
-                         "unified-memory host (swap, not co-load)."),
+                         "(5.3 GB, fastest) + gemma-4-26B-A4B QAT asleep "
+                         "(14.4 GB, 92.3% route, 6/6 self-improvement "
+                         "audit).  The QAT swaps in for deep-think (the "
+                         "awake model unloads first) on a 24 GB host."),
             awake=_GEMMA_E4B_Q4,
-            asleep=_GEMMA_12B_Q4,
+            asleep=_GEMMA_26B_A4B_QAT,
         )
     if tier_gb < 64:
         # 32 GB (0.6, clean corpus-1.2 batch): gemma-4-E4B awake — fastest +
         # smallest (p50 2.8s, 5.3 GB), so it co-loads with voice with the MOST
         # headroom. gemma-4-26B-A4B QAT swaps in for deep-think (voice off) —
         # ties the plain 26B but 2.4 GB smaller. The 26B awake is still NOT
-        # recommended (26B + voice + 32K KV OOMs the GPU). The dense 12B is the
-        # voice-mode backup (slower, but 5/5 safety) — switch to it when honesty
-        # matters more than latency.
+        # recommended (26B + voice + 32K KV OOMs the GPU).
         return TierRecommendation(
             tier_label="32 GB",
             description=("gemma-4-E4B Q4 awake — fastest/smallest (5.3 GB), "
                          "co-loads with voice (Whisper + Kokoro) with the most "
                          "headroom. gemma-4-26B-A4B QAT asleep for deep-think "
                          "(swap, not co-load) — 92.3% Score, 100% route, 20/20 "
-                         "deep-think, 2.4 GB smaller than the plain 26B. The "
-                         "dense 12B is the voice-mode backup (5/5 safety)."),
+                         "deep-think, 2.4 GB smaller than the plain 26B."),
             awake=_GEMMA_E4B_Q4,
             asleep=_GEMMA_26B_A4B_QAT,
         )
-    # 64+ GB: plenty of room — gemma-4-26B-A4B in both modes (no swap),
+    # 64+ GB: plenty of room — gemma-4-26B-A4B QAT in both modes (no swap),
     # so mode transitions are instant. The 35B tier OOMs at 32K context
     # even here on the measured hardware, so 26B-A4B is the heavy ceiling.
+    # QAT is the one canonical 26B (ties the plain Q4 on routing, smaller);
+    # the plain Q4_K_M is no longer recommended at any tier.
     return TierRecommendation(
         tier_label="64+ GB",
-        description=("Plenty of unified memory. gemma-4-26B-A4B Q4 in "
+        description=("Plenty of unified memory. gemma-4-26B-A4B QAT in "
                      "both awake and deep-think modes — same model, no "
-                     "swap, instant mode transitions. 93.2% Score, 100% "
-                     "route, 5/5 safety on the corpus 1.1 leaderboard."),
-        awake=_GEMMA_26B_A4B_Q4,
-        asleep=_GEMMA_26B_A4B_Q4,
+                     "swap, instant mode transitions. 92.3% route, 20/20 "
+                     "deep-think, 6/6 self-improvement audit (corpus 1.2)."),
+        awake=_GEMMA_26B_A4B_QAT,
+        asleep=_GEMMA_26B_A4B_QAT,
     )
 
 
