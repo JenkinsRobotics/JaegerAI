@@ -3,6 +3,22 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.6.2`
+
+**Install fix.** The standardized operator install (`scripts/install.sh`)
+failed on a clean machine: `speexdsp` (acoustic echo cancellation) was a hard
+dependency, but its native SWIG build needs the speex system library — and
+because the dependency install is atomic, that one optional package took down
+the *entire* runtime install (pydantic, torch, llama-cpp — everything).
+
+- **`speexdsp` is now an optional `aec` extra** — `core/audio/aec.py` already
+  degrades to passthrough when it's missing, so it never belonged in the base
+  deps. Enable echo cancellation with `pip install 'jaeger-os[aec]'` (after
+  `brew install speexdsp` / `apt install libspeexdsp-dev`).
+- Clean installs now complete on a stock machine, and `jaeger update`
+  (download + apply for clean, no-`.git` installs) works end-to-end. Found by
+  walking the real install of 0.6.1 on a clean host.
+
 ## `0.6.1`
 
 **Model lineup, measured.** End-to-end benchmarks (65-case corpus + a
