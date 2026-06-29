@@ -31,6 +31,14 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
+[project.optional-dependencies]
+# Acoustic echo cancellation for duplex voice. OPTIONAL: the native (SWIG)
+# build needs the speex system lib (macOS: brew install speexdsp; Debian:
+# apt install libspeexdsp-dev), and core/audio/aec.py degrades to passthrough
+# without it. Kept out of the base deps so one optional C extension can't
+# break the whole install. Enable with: pip install 'jaeger-os[aec]'.
+aec = ["speexdsp>=0.1.1"]
+
 [project.scripts]
 jaeger = "jaeger_os.cli.entry:main"
 

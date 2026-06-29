@@ -60,9 +60,11 @@ kokoro>=0.9.4
 pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
 pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
-# Acoustic echo cancellation for duplex voice (core/audio/aec.py — guarded
-# import; declared so the full voice path ships).
-speexdsp>=0.1.1
+# Acoustic echo cancellation (core/audio/aec.py) is OPTIONAL — its native
+# build needs the speex system lib and the code degrades to passthrough
+# without it. Moved to the `aec` extra so a clean install never breaks on it:
+#   pip install 'jaeger-os[aec]'   (after: brew install speexdsp / apt install libspeexdsp-dev)
+# See [project.optional-dependencies] in pyproject.toml.
 
 # --- vision: look_at + generate_image ---
 torch>=2.2
