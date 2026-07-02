@@ -67,18 +67,22 @@ def _read_skill_file(folder: pathlib.Path, relpath: str) -> dict[str, Any]:
 
 def skill(action: str, name: str = "", query: str = "",
           file: str = "", category: str = "",
-          limit: int = 20, offset: int = 0) -> dict[str, Any]:
+          limit: int = 0, offset: int = 0) -> dict[str, Any]:
     """Discover and read playbook skills — experienced procedures for a
     task. ``action`` selects the operation:
 
-      - ``list``   — paginated catalog. Default returns category
-        counts + the first ``limit`` (default 20) skills.
-        Filter by ``category=...``; page with ``offset``.
-        With no args, ``list`` is a category summary only — the
-        full corpus is large (~87 playbooks) and dumping every
-        name burns prompt budget on every casual call.
+      - ``list``   — the FULL active catalog: every active skill,
+        enriched (name · category · description · tier · tools ·
+        fallback_for). This is the research-step lookup — call it when
+        STARTING a non-trivial task to see everything available, then
+        follow a matching skill or plan a tool chain. ``category=`` /
+        ``limit`` / ``offset`` page it, but the DEFAULT is the complete
+        list: the routing intelligence is yours, not a filter's. It's
+        on-demand, so it costs tokens only when you research, not every
+        turn.
       - ``search`` — skills matching ``query`` (name / description /
-        tags / category). Use this FIRST when a task might have a skill.
+        tags / category) — a shortcut when you already know roughly what
+        you want.
       - ``view``   — the full instructions of skill ``name``, plus a
         ``files`` listing of its bundled scripts / references. Pass
         ``file="scripts/foo.py"`` to read one of those bundled files.
@@ -127,7 +131,8 @@ def skill(action: str, name: str = "", query: str = "",
             "limit": cap,
             "skills": [
                 {"name": s.name, "category": s.category,
-                 "description": s.description}
+                 "description": s.description, "tier": s.tier,
+                 "tools": s.requires_tools, "fallback_for": s.fallback_for_tools}
                 for s in page
             ],
         }

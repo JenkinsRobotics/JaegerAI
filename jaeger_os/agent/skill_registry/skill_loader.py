@@ -654,6 +654,7 @@ def load_and_register(
     # are NOT registered as agent tools — they get discovered + indexed
     # separately. Mention the count here so the operator sees the full
     # surface, not just the Python-module slice.
+    pb_count = 0
     try:
         from jaeger_os.agent.skill_registry.playbook_skills import discover_playbooks
         pb_count = len(discover_playbooks())
@@ -661,5 +662,13 @@ def load_and_register(
             print(f"[jaeger-skills] {pb_count} playbook skill(s) available "
                   f"via the ``skill`` tool (action=list/view).", flush=True)
     except Exception:  # noqa: BLE001 — playbook discovery must not block boot
+        pass
+    # The full agentic surface in one line: raw tools + tool-skills + playbooks.
+    try:
+        from jaeger_os.agent.schemas.tool_registry import get_tools
+        print(f"[jaeger-skills] agentic surface: {len(get_tools())} tools · "
+              f"{len(registered)} tool-skill(s) · {pb_count} playbook skill(s).",
+              flush=True)
+    except Exception:  # noqa: BLE001
         pass
     return SkillLoadReport(registered=registered, skipped=skipped)

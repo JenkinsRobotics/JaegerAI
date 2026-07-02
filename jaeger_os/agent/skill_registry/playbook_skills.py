@@ -51,6 +51,7 @@ class PlaybookSkill:
     requires_tools: list[str] = field(default_factory=list)
     requires_toolsets: list[str] = field(default_factory=list)
     fallback_for_tools: list[str] = field(default_factory=list)
+    tier: str = "standard"  # routing hint: native | preferred | standard | fallback
 
 
 def read_skill_origin(folder: Path) -> str:
@@ -238,6 +239,8 @@ def discover_playbooks() -> list[PlaybookSkill]:
             except OSError:
                 continue
             fm = _parse_frontmatter(text)
+            if fm.get("archived"):
+                continue  # retired skill — metadata flag, excluded from the surface
             try:
                 rel = folder.relative_to(root)
                 category = rel.parts[0] if len(rel.parts) > 1 else "general"
@@ -254,6 +257,7 @@ def discover_playbooks() -> list[PlaybookSkill]:
                 requires_tools=_str_list(fm, "requires_tools"),
                 requires_toolsets=_str_list(fm, "requires_toolsets"),
                 fallback_for_tools=_str_list(fm, "fallback_for_tools"),
+                tier=str(fm.get("tier") or "standard").strip().lower(),
             )
             by_name[skill.name] = skill
     result = sorted(by_name.values(), key=lambda s: (s.category, s.name))
@@ -321,13 +325,25 @@ def _format_skill_index(skills: list[PlaybookSkill]) -> str:
 
 
 def build_skill_index(available_tools: set[str] | None = None) -> str:
-    """A compact index of the available playbook skills for the system
-    prompt — so the model knows what procedures exist without a discovery
-    round-trip. Capped so it never crowds out the routing imperatives.
+    """The lean, always-on skill *pointer* for the system prompt: the count +
+    category breadth + the cue to pull the detailed catalog when starting a
+    task. Keeps ambient awareness that skills exist (so the agent doesn't
+    reinvent the wheel) WITHOUT the per-turn cost of the full names index — the
+    enriched catalog is fetched on demand via ``skill(action="list")``.
 
-    Pass ``available_tools`` (active tool names) to hide skills whose
-    required tools aren't present."""
-    return _format_skill_index(available_playbooks(available_tools))
+    Pass ``available_tools`` (active tool names) to hide skills whose required
+    tools aren't present."""
+    skills = available_playbooks(available_tools)
+    if not skills:
+        return ""
+    cats = sorted({s.category for s in skills})
+    return (
+        f"Skill playbooks: {len(skills)} experienced procedures available across "
+        f"{' · '.join(cats)}. When you START a non-trivial task, call "
+        'skill(action="list") in your research step to pull the detailed catalog '
+        "(each skill's function · tools · tier), then follow a matching playbook "
+        "or plan a tool chain. If none fits, use tools directly and note the gap."
+    )
 
 
 def find_playbook(name: str) -> PlaybookSkill | None:

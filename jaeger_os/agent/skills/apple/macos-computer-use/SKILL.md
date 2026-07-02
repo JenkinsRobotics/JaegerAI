@@ -1,5 +1,8 @@
 ---
 name: macos-computer-use
+tier: native
+fallback_for_tools: [computer_use]
+requires_tools: [computer_use, computer_do, computer_look]
 description: |
   Drive the macOS desktop two ways — a FOREGROUND mode that uses an app
   like a person (visible, verified, moves the cursor) and a BACKGROUND
