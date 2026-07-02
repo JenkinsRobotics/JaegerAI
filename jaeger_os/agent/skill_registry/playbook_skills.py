@@ -349,16 +349,28 @@ def build_skill_index(available_tools: set[str] | None = None) -> str:
     for s in skills:
         by_cat.setdefault(s.category, []).append((s.name, _short_function(s.description)))
     lines = [
-        "Capabilities — pick in this order:",
-        '1) SKILLS — experienced playbooks. When a task matches one, open it '
-        'with skill(action="view", name="…") and follow it BEFORE reaching for '
-        "raw tools: it's the proven recipe, don't reinvent it. This includes "
-        "tool-backed skills (e.g. macOS control) — view the skill first, then "
-        "use its tools.",
-        "2) TOOLS — your full tool surface is already visible; for anything a "
-        "skill doesn't cover, call the specific tool that matches.",
+        "Capabilities — how to choose, in order:",
+        "1) SKILLS FIRST. For any task beyond a trivial reply or single "
+        "tool call — creative output (ascii art, diagrams, comics, music, "
+        "pixel/p5 art, infographics), research (arxiv papers, blogs, wikis), "
+        "codebase inspection, or driving an external app/service (spotify, "
+        "notion, github, email, obsidian, the macOS desktop) — a matching "
+        'SKILL playbook below almost certainly exists. You MUST call '
+        'skill(action="view", name="…") on the match and follow its recipe '
+        "BEFORE writing your own code or reaching for raw tools. Reinventing "
+        "a skill that already exists is a failure. (Tool-backed skills too — "
+        "view the skill first, then use its tools.) Only if none truly fits, "
+        "use tools directly and say so.",
+        "2) TOOLS — your full tool surface is visible; use it for what no "
+        "skill covers.",
+        "Examples: 'find recent papers on X' → skill(view,name=\"arxiv\") "
+        "first, not web_search. 'inspect this codebase' → "
+        "skill(view,name=\"codebase-inspection\") first, not raw ls/grep. "
+        "'make an ascii banner' → skill(view,name=\"ascii-art\") first, not "
+        "execute_code. On macOS control → skill(view,name=\"macos-computer-use\") "
+        "first, then its tools.",
         "",
-        f"Skill playbooks ({len(skills)}):",
+        f"Skill playbooks ({len(skills)}) — scan for a match before acting:",
     ]
     for cat in sorted(by_cat):
         entries = "; ".join(f"{n} — {f}" if f else n
