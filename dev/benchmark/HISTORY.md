@@ -1,6 +1,6 @@
 # Jaeger-OS bench history
 
-_Generated 2026-07-02T00:39:12 from 5 run(s) across `dev/benchmark/sweep/` and `dev/benchmark/flat/` — showing runs on/after **2026-05-29** (current benchmark generation)._
+_Generated 2026-07-02T09:38:56 from 5 run(s) across `dev/benchmark/sweep/` and `dev/benchmark/flat/` — showing runs on/after **2026-05-29** (current benchmark generation)._
 
 **Bench corpus version: 1.3** (cutoff 2026-05-29). The leaderboard ranks only runs of this version so the comparison stays apples-to-apples; older 1.0 (51-case) runs are archived and shown separately at the bottom of the report.
 
@@ -10,10 +10,10 @@ _Generated 2026-07-02T00:39:12 from 5 run(s) across `dev/benchmark/sweep/` and `
 
 **Methodology — ideal state vs baseline.** Each model is primarily benched in its **ideal operational state**: toggle-capable models run with thinking on ``auto`` (the model decides per turn — what a real user gets); ``always``-reasoning models run as-is (no choice); ``never``-reasoning models run as-is. Rows tagged ``(baseline)`` are the **comparison variants** — same model, forced into a non-ideal state (e.g. an ``auto`` model forced to ``off`` for direct-mode benchmarking). Use ideal-state rows for real-world rank, baseline rows for understanding *why* the ideal works.
 
-| # | Model | Mode | Family | **Score** | Deep-think | Real-time | Multi-turn | Safety | Best route% | Latest elapsed | Tokens/task | Peak TPS | VRAM | Peak load | Latest run | Runs |
-|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
-| 1 | `gemma-4-e4b-it-q4-k-m` | 🧠 auto | gemma | **87.0%** | 18/21 | 27/28 | 12/13 | 3/5 | 96.9% | 9m11s | 138 | — | — | — | 2026-07-02 00:39 | 4 |
-| 2 | `gemma-4-26b-a4b-it-qat-q4-0` | 🧠 auto | gemma | **85.7%** | 18/21 | 26/28 | 12/13 | 4/5 | 92.2% | 14m43s | 112 | — | — | — | 2026-07-01 22:24 | 1 |
+| # | Model | Mode | Family | **Score** | Deep-think | Real-time | Multi-turn | Agentic | Safety | Best route% | Latest elapsed | Tokens/task | Latest run | Runs |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| 1 | `gemma-4-e4b-it-q4-k-m` | 🧠 auto | gemma | **87.0%** | 18/21 | 27/28 | 12/13 | 8/12 | 3/5 | 96.9% | 9m11s | 138 | 2026-07-02 00:39 | 4 |
+| 2 | `gemma-4-26b-a4b-it-qat-q4-0` | 🧠 auto | gemma | **85.7%** | 18/21 | 26/28 | 12/13 | 7/12 | 4/5 | 92.2% | 14m43s | 112 | 2026-07-01 22:24 | 1 |
 
 ## Per-model run details (latest)
 
@@ -22,6 +22,8 @@ Useful for spotting *which* tests a model fails on (a 24/25 routing model that f
 
 <details>
 <summary><b>gemma-4-e4b-it-q4-k-m</b> &nbsp;·&nbsp; <code>🧠 auto</code> &nbsp;·&nbsp; <b>67/77</b> &nbsp;·&nbsp; latest 2026-07-02 00:39</summary>
+
+**By category:** routing 27/28  ·  files 12/15  ·  multiturn 11/12  ·  memory 11/11  ·  multistep 9/11  ·  recovery 8/9  ·  web 9/9  ·  code 5/5  ·  kanban 4/5  ·  safety 3/5  ·  cross_turn 4/4  ·  schedule 4/4  ·  skill 2/4  ·  audio 1/2  ·  hallucination 1/2  ·  parallel 2/2  ·  workflow 1/2  ·  creative 1/1  ·  credential 1/1  ·  deepthink 0/1  ·  destructive 1/1  ·  injection 0/1  ·  persona 1/1  ·  research 0/1  ·  self_improve 1/1
 
 | # | Test | Tags | Pass | Time | Tools called | Error |
 |---:|---|---|:--:|---:|---|---|
@@ -107,6 +109,8 @@ Useful for spotting *which* tests a model fails on (a 24/25 routing model that f
 
 <details>
 <summary><b>gemma-4-26b-a4b-it-qat-q4-0</b> &nbsp;·&nbsp; <code>🧠 auto</code> &nbsp;·&nbsp; <b>66/77</b> &nbsp;·&nbsp; latest 2026-07-01 22:24</summary>
+
+**By category:** routing 26/28  ·  files 13/15  ·  multiturn 11/12  ·  memory 11/11  ·  multistep 10/11  ·  recovery 7/9  ·  web 8/9  ·  code 5/5  ·  kanban 3/5  ·  safety 4/5  ·  cross_turn 3/4  ·  schedule 3/4  ·  skill 2/4  ·  audio 2/2  ·  hallucination 1/2  ·  parallel 2/2  ·  workflow 0/2  ·  creative 1/1  ·  credential 1/1  ·  deepthink 0/1  ·  destructive 1/1  ·  injection 1/1  ·  persona 1/1  ·  research 0/1  ·  self_improve 1/1
 
 | # | Test | Tags | Pass | Time | Tools called | Error |
 |---:|---|---|:--:|---:|---|---|
