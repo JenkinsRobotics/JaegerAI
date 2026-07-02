@@ -25,6 +25,7 @@ per case (single-turn purity).
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import tempfile
@@ -212,9 +213,20 @@ def _drive_one(
             # agent choosing a specific playbook. Capture WHICH one so
             # the 'skill' category can assert it picked the right skill,
             # not just that it researched. (Tool names alone can't tell
-            # skill('ascii-art') from skill('arxiv').)
+            # skill('ascii-art') from skill('arxiv').) Applies to playbook
+            # AND tool-skills — skill-first means both get viewed before use.
             if name == "skill":
                 args = tc.get("arguments") or {}
+                # Adapters may hand arguments back as a JSON string rather
+                # than a dict — parse so a skill call is NEVER missed
+                # (flag skill use as reliably as a tool call).
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except (ValueError, TypeError):
+                        args = {}
+                if not isinstance(args, dict):
+                    args = {}
                 if str(args.get("action") or "").lower() in (
                         "view", "use", "read", "get", "open"):
                     target = str(args.get("name") or args.get("query") or "").strip()
