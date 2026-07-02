@@ -13,6 +13,7 @@ from typing import Any
 
 from jaeger_os.core.memory import memory as mem
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 @requires_tier(
@@ -79,3 +80,21 @@ def cancel_schedule(name: str) -> dict[str, Any]:
     as creation."""
     ok = mem.cancel_schedule(name)
     return {"cancelled": ok, "name": name}
+
+
+@register_tool_from_function(name="schedule_prompt")
+def _t_schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict:
+    """Schedule a prompt for unattended execution on a cron expression."""
+    return schedule_prompt(cron_expr=cron_expr, prompt=prompt, name=name)
+
+
+@register_tool_from_function(name="list_schedules")
+def _t_list_schedules() -> dict:
+    """List every active scheduled prompt."""
+    return list_schedules()
+
+
+@register_tool_from_function(name="cancel_schedule")
+def _t_cancel_schedule(name: str) -> dict:
+    """Cancel a previously-scheduled prompt by name."""
+    return cancel_schedule(name=name)

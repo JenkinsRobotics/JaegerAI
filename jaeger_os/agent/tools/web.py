@@ -38,6 +38,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.runtime.tool_interrupt import is_interrupted
 
 
@@ -461,3 +462,30 @@ def get_weather(location: str) -> dict[str, Any]:
         return {"error": "unknown location", "location": clean}
     pretty = re.sub(r"\s+", " ", text.replace("+", " ")).strip()
     return {"location": clean, "weather": pretty}
+
+
+# ── Agent-tool wrappers (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="web_search", side_effect="read")
+def _t_web_search(query: str, max_results: int = 5) -> dict:
+    """Web search (multi-backend, no API key). Returns titles + URLs
+    + snippets. Use this to FIND relevant pages, then web_extract to
+    actually READ one."""
+    return web_search(query=query, max_results=max_results)
+
+
+@register_tool_from_function(name="web_extract", side_effect="read")
+def _t_web_extract(url: str, max_chars: int = 8000) -> dict:
+    """Fetch a web page and return its readable text. This is the
+    research tool — web_search finds which pages matter, web_extract
+    reads one. Use it to pull library docs, API references, Stack
+    Overflow answers, READMEs — anything you need to understand
+    before writing code for an unfamiliar task."""
+    return web_fetch(url=url, max_chars=max_chars)
+
+
+@register_tool_from_function(name="get_weather", side_effect="read")
+def _t_get_weather(location: str) -> dict:
+    """Look up current weather via wttr.in (no API key)."""
+    return get_weather(location=location)

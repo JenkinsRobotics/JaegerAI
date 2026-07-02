@@ -572,10 +572,10 @@ def test_since_filter_excludes_old_runs(fake_repo, capsys):
     (51-case 1.0) isn't apples-to-apples with the current full corpus."""
     bench = fake_repo / "dev/benchmark"
     # sweep_rows infer version from CASE COUNT (metadata-only path): 51 -> 1.0
-    # (old, dropped), 65 -> current full corpus (ranked).
+    # (old, dropped), 77 -> current full corpus (ranked).
     _write_sweep_row(bench, name="may28-model", cases=51, route_ok=40,
                      ts="2026-05-28T10:00:00")
-    _write_sweep_row(bench, name="may30-model", cases=65, route_ok=54,
+    _write_sweep_row(bench, name="may30-model", cases=77, route_ok=54,
                      ts="2026-05-30T10:00:00")
     # Default cutoff is 2026-05-29 → only may30 (current corpus) shows.
     rc = bhv._cmd_bench_history_argv([])
@@ -595,10 +595,10 @@ def test_since_explicit_date(fake_repo, capsys):
     Both rows are current-corpus so the bench-version filter keeps them;
     --since is the relevant filter under test."""
     bench = fake_repo / "dev/benchmark"
-    # 65 cases -> current corpus (sweep rows infer version from case count).
-    _write_sweep_row(bench, name="m1", cases=65, route_ok=40,
+    # 77 cases -> current corpus (sweep rows infer version from case count).
+    _write_sweep_row(bench, name="m1", cases=77, route_ok=40,
                      ts="2026-05-30T10:00:00")
-    _write_sweep_row(bench, name="m2", cases=65, route_ok=48,
+    _write_sweep_row(bench, name="m2", cases=77, route_ok=48,
                      ts="2026-06-01T10:00:00")
     rc = bhv._cmd_bench_history_argv(["--since", "2026-05-31"])
     out = capsys.readouterr().out

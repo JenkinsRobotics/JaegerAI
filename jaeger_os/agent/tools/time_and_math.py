@@ -18,6 +18,8 @@ import shutil
 from typing import Any
 
 from jaeger_os.core.context import _require_layout
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 def get_time(timezone: str | None = None) -> dict[str, Any]:
@@ -131,3 +133,26 @@ def system_status() -> dict[str, Any]:
             "free_gb": round(free / 1024**3, 2),
         },
     }
+
+
+@register_tool_from_function(name="get_time", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="time", operation="get_time",
+               summary="read the current time")
+def _t_get_time(timezone: str | None = None) -> dict:
+    """The current date, day of the week, year, and time — the ONLY
+    source of truth for "what day/date/year/time is it", "what's
+    today", and similar. Your training data is frozen in the past, so
+    a date or year answered from memory will be WRONG — always call
+    this for anything about the present moment. Optional IANA
+    timezone (e.g. 'Asia/Shanghai')."""
+    return get_time(timezone=timezone)
+
+
+@register_tool_from_function(name="calculate", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="math", operation="calculate",
+               summary="evaluate an arithmetic expression")
+def _t_calculate(expression: str) -> dict:
+    """Evaluate a safe arithmetic expression. Supports + - * / ** % //
+    and single-arg sqrt/abs/log/log10/exp/sin/cos/tan/floor/ceil/round.
+    For "square root of N" call calculate("sqrt(N)")."""
+    return calculate(expression=expression)

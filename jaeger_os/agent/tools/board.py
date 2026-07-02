@@ -23,6 +23,7 @@ from typing import Any
 from jaeger_os.core.context import _require_layout
 from jaeger_os.agent.background.board import COLUMNS, board_for_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 def _card_brief(card: Any) -> dict[str, Any]:
@@ -208,3 +209,64 @@ def kanban(action: str, card_id: str = "", title: str = "",
     return {"ok": False,
             "error": f"unknown kanban action {action!r} — use one of: "
                      "view, add, move, update, complete, block, unblock"}
+
+
+@register_tool_from_function(name="board_view", side_effect="read")
+def _t_board_view(column: str = "", tag: str = "") -> dict:
+    """Read the kanban task board — what work is queued (ready),
+    in_progress, blocked, or done. Optionally filter by `column` or
+    `tag`. Deep Think jobs show here too (tag 'deepthink')."""
+    return board_view(column=column, tag=tag)
+
+
+@register_tool_from_function(name="board_add")
+def _t_board_add(
+    title: str, description: str = "",
+    tags: list[str] | None = None, priority: str = "med",
+) -> dict:
+    """Add a card to the kanban board (lands in `ready`, set to
+    work). Use this to lay out a multi-step task as cards so you and
+    the user can track progress. `priority` is low/med/high."""
+    return board_add(title=title, description=description,
+                     tags=tags, priority=priority)
+
+
+@register_tool_from_function(name="board_move")
+def _t_board_move(card_id: str, column: str) -> dict:
+    """Move a board card: `in_progress` when you start it, `done`
+    when finished, `blocked` when it needs the user. You cannot move
+    a card `backlog → ready` — that is the user's approval step."""
+    return board_move(card_id=card_id, column=column)
+
+
+@register_tool_from_function(name="board_update")
+def _t_board_update(
+    card_id: str, title: str = "", description: str = "",
+    priority: str = "", add_tag: str = "", note: str = "",
+    result: str = "",
+) -> dict:
+    """Edit a board card or log progress on it. `note` appends to
+    the card's running log; `result` records the outcome. Empty
+    arguments are left unchanged."""
+    return board_update(card_id=card_id, title=title,
+                        description=description, priority=priority,
+                        add_tag=add_tag, note=note, result=result)
+
+
+@register_tool_from_function(name="kanban")
+def _t_kanban(action: str, card_id: str = "", title: str = "",
+              description: str = "", column: str = "", tag: str = "",
+              priority: str = "", note: str = "") -> dict:
+    """The kanban task board — ONE tool. `action` selects the op:
+      • view — read the board (optional `column`/`tag` filter)
+      • add — add a card (`title`, optional `description`/`priority`
+        low|med|high/`tag`)
+      • move — move card `card_id` to `column`
+      • update — edit / log on `card_id` (`note` appends a line)
+      • complete — mark `card_id` done
+      • block / unblock — mark `card_id` blocked, or send it back
+    Columns: backlog / ready / in_progress / blocked / done. Lay a
+    multi-step task out as cards so you and the user can track it."""
+    return kanban(action=action, card_id=card_id, title=title,
+                  description=description, column=column, tag=tag,
+                  priority=priority, note=note)

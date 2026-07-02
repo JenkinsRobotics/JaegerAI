@@ -154,7 +154,7 @@ def test_list_returns_empty_when_no_rows(bound):
 def test_audit_dual_writes_jsonl_and_sql(bound, monkeypatch, tmp_path):
     """The canonical JSONL is appended; SQL gets a mirror row.
     Important: SQL is advisory — if SQL fails, JSONL still wins."""
-    from jaeger_os.agent.tools import _common
+    from jaeger_os.core import context as _common
 
     # _audit needs ``_require_layout`` to succeed. Plug in a layout
     # that points at our bound memory + matching log path.
@@ -180,7 +180,7 @@ def test_audit_sql_failure_does_not_break_jsonl(bound, monkeypatch):
     """The SQL writer is wrapped in try/except — if record_audit_event
     raises, the JSONL still gets written. Pin this; the audit log
     is a safety surface."""
-    from jaeger_os.agent.tools import _common
+    from jaeger_os.core import context as _common
 
     monkeypatch.setattr(_common, "_require_layout", lambda: bound)
     monkeypatch.setattr(
@@ -196,7 +196,7 @@ def test_audit_sql_failure_does_not_break_jsonl(bound, monkeypatch):
 def test_audit_dual_write_redacts_secrets(bound, monkeypatch):
     """The single redact pass in _audit happens before BOTH the JSONL
     write and the SQL mirror — secrets must be gone in both."""
-    from jaeger_os.agent.tools import _common
+    from jaeger_os.core import context as _common
     monkeypatch.setattr(_common, "_require_layout", lambda: bound)
 
     _common._audit("run_shell", {

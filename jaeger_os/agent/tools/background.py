@@ -22,6 +22,7 @@ from typing import Any
 from jaeger_os.core.context import _require_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.agent.background import processes as _proc
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 @requires_tier(
@@ -85,3 +86,45 @@ def pending_background() -> dict[str, Any]:
     layout = _require_layout()
     completions = _proc.consume_pending_completions(layout)
     return {"completions": completions, "count": len(completions)}
+
+
+@register_tool_from_function(name="start_background")
+def _t_start_background(code: str, name: str = "") -> dict:
+    """Launch Python code as a background process that OUTLIVES this
+    turn. Use this — not run_python / run_in_venv (which are capped
+    and synchronous) — for work that takes minutes or longer: a long
+    render, a bot that stays connected, a watcher. Runs against the
+    instance venv. Returns a process_id; monitor with
+    check_background, end with stop_background."""
+    return start_background(code=code, name=name)
+
+
+@register_tool_from_function(name="list_background", side_effect="read")
+def _t_list_background() -> dict:
+    """List every background process with live status (running /
+    exited / stopped, exit code, elapsed)."""
+    return list_background()
+
+
+@register_tool_from_function(name="check_background", side_effect="read")
+def _t_check_background(process_id: str, lines: int = 20) -> dict:
+    """Status of one background process + the last `lines` lines of
+    its output (default 20, max 2000 — raise it for fuller output).
+    Use it to see whether a process you started is still running and
+    what it produced."""
+    return check_background(process_id=process_id, lines=lines)
+
+
+@register_tool_from_function(name="stop_background")
+def _t_stop_background(process_id: str) -> dict:
+    """Terminate a running background process by id."""
+    return stop_background(process_id=process_id)
+
+
+@register_tool_from_function(name="pending_background", side_effect="read")
+def _t_pending_background() -> dict:
+    """Drain the queue of background tasks that finished since the
+    last check. Each completion is surfaced at most once. Returns
+    ``{completions: [...], count: N}`` — empty when nothing new has
+    finished. Faster than polling ``check_background`` in a loop."""
+    return pending_background()

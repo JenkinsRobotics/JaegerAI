@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.memory import memory as mem
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
 # ---------------------------------------------------------------------------
@@ -123,3 +125,77 @@ def memory(action: str, key: str = "", value: str = "",
     return {"ok": False,
             "error": f"unknown memory action {action!r} — use one of: "
                      "remember, recall, forget, list, search"}
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main.py::_register_builtins).
+# Private ``_t_*`` names + explicit ``name=`` override so the gated tool never
+# collides with the ungated logic fn above (used by internal callers).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="remember")
+def _t_remember(key: str, value: str, category: str = "") -> dict:
+    """MANDATORY when the user states a preference, identity fact,
+    plan, or anything they might recall later. Call this proactively
+    — do not just acknowledge "OK, I'll remember" in text. Pick a
+    descriptive snake_case key.
+
+    Set `category` to keep memory organised — a short label like
+    `contacts`, `preferences`, `projects`, `schedule`; omit it for a
+    miscellaneous fact. Examples: "my favorite color is teal"
+    (preferences), "Sara's number is 555-0142" (contacts), "I'll be
+    in Tokyo next week" (schedule). For YOUR OWN name use set_name,
+    not this."""
+    return remember(key=key, value=value, category=category)
+
+
+@register_tool_from_function(name="recall", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="recall",
+               summary="recall a fact by key")
+def _t_recall(key: str) -> dict:
+    """MANDATORY when the user asks about something they told you
+    earlier ("what did I say my…", "do you remember…", "what's my
+    favorite X", "what video length do I prefer?"). Call BEFORE
+    answering — the persisted store is the source of truth.
+    Fuzzy match supported, so close-but-not-exact keys still hit."""
+    return recall(key=key)
+
+
+@register_tool_from_function(name="forget")
+def _t_forget(key: str) -> dict:
+    """MANDATORY when the user asks to remove a stored fact
+    ("forget my X", "remove my X preference", "I changed my mind
+    about X"). Call this — don't just acknowledge in text."""
+    return forget(key=key)
+
+
+@register_tool_from_function(name="list_facts", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="list_facts",
+               summary="list every stored fact")
+def _t_list_facts() -> dict:
+    """MANDATORY for open-ended "what do you know about me?" or
+    "what have I told you?" questions. Returns the full k/v store.
+    Use this before falling back to free-text 'I don't know'."""
+    return list_facts()
+
+
+@register_tool_from_function(name="search_memory", side_effect="read")
+def _t_search_memory(query: str, k: int = 5) -> dict:
+    """Semantic search over this instance's episodic conversation log.
+    Use when `recall` (exact key) misses — e.g. "what did we talk
+    about yesterday?", "did I tell you about my dog?". Returns top-k
+    past turns with cosine-similarity scores."""
+    return search_memory(query=query, k=k)
+
+
+@register_tool_from_function(name="memory")
+def _t_memory(action: str, key: str = "", value: str = "",
+              query: str = "", category: str = "") -> dict:
+    """The agent's persistent memory — one tool, action-dispatched.
+    ``action`` ∈ remember / recall / forget / list / search.
+    ``remember`` takes key+value (and optional category);
+    ``recall`` / ``forget`` take key; ``search`` takes query.
+    See ``describe_tool("memory")`` for the full when-to-call
+    contract — the prompt's MANDATORY_TOOL_RULES section also
+    covers it."""
+    return memory(action=action, key=key, value=value,
+                  query=query, category=category)

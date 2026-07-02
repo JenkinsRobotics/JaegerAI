@@ -185,7 +185,7 @@ def test_avatar_tool_falls_back_to_framework_defaults(
     Lilith's face — the avatar tool falls back to the framework
     default location."""
     from jaeger_os.agent.tools import avatar
-    from jaeger_os.agent.tools import _common as tool_common
+    from jaeger_os.core import context as tool_common
     from jaeger_os.core.instance.instance import InstanceLayout
 
     inst = tmp_path / "instance"

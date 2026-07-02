@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+
 
 def self_check(deep: bool = False) -> dict[str, Any]:
     """Run the agent's doctor on the live instance.
@@ -37,10 +39,22 @@ def self_check(deep: bool = False) -> dict[str, Any]:
     Returns ``{ok, passed, total, deep, checks: [...], failures: [...]}``.
     ``ok`` is True only when every check passed.
     """
-    from jaeger_os.agent.tools import _common as _tcommon
+    from jaeger_os.core import context as _tcommon
     from jaeger_os.core.diagnostics import doctor_summary
     layout = getattr(_tcommon, "_layout", None)
     return doctor_summary(layout, deep=bool(deep))
 
 
 __all__ = ["self_check"]
+
+
+@register_tool_from_function(name="self_check")
+def _t_self_check(deep: bool = False) -> dict:
+    """Run the agent's doctor — the SAME engine as ``jaeger doctor``:
+    deps + config + the runtime substrate (memory round-trip, tool
+    registry, skills, drift parser). ``deep=True`` also drives a few
+    live-agent turns to confirm the agent can actually answer, not
+    just that the substrate is healthy. Pairs with ``run_benchmark``
+    (substrate health vs. answer quality). See
+    ``describe_tool("self_check")`` for the full contract."""
+    return self_check(deep=deep)

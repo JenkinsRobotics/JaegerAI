@@ -25,6 +25,7 @@ import tempfile
 import time
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.context import _require_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.runtime.tool_interrupt import ToolInterrupted, run_interruptible
@@ -142,3 +143,31 @@ def run_in_venv(code: str, timeout_s: float = 30.0) -> dict[str, Any]:
         "timed_out": timed_out,
         "interrupted": interrupted,
     }
+
+
+@register_tool_from_function(name="install_package")
+def _t_install_package(package: str) -> dict:
+    """Install a third-party Python package into this instance's
+    own venv (isolated from the framework). Use when a skill you're
+    building needs a library — e.g. `discord.py` for a Discord
+    integration. PRIVILEGED tier: routes through the confirmation
+    flow. After installing, use run_in_venv (not run_python) to run
+    code that imports it."""
+    return install_package(package=package)
+
+
+@register_tool_from_function(name="list_venv_packages")
+def _t_list_venv_packages() -> dict:
+    """List packages installed in this instance's venv. Read-only —
+    check here before install_package to see if a dependency is
+    already available."""
+    return list_venv_packages()
+
+
+@register_tool_from_function(name="run_in_venv")
+def _t_run_in_venv(code: str, timeout_s: float = 30.0) -> dict:
+    """Execute Python against this instance's venv interpreter so
+    packages installed via install_package ARE importable. Sandboxed
+    cwd, 30s default timeout (max 300s). Use this — not run_python —
+    for code that depends on installed libraries."""
+    return run_in_venv(code=code, timeout_s=timeout_s)
