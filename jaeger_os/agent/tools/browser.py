@@ -24,7 +24,9 @@ import queue
 import threading
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.runtime.tool_interrupt import is_interrupted
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
 def _headless() -> bool:
@@ -257,3 +259,22 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
         "url": url, "element": element, "text": text,
         "direction": direction, "key": key,
     })
+
+
+# ── Agent-tool wrapper (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="browser")
+@requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="browser",
+               operation="browser",
+               summary="drive a real web browser")
+def _t_browser(action: str, url: str = "", element: int = 0,
+               text: str = "", direction: str = "down",
+               key: str = "Enter") -> dict:
+    """Drive a real web browser — one tool, action-dispatched.
+    Actions: open / snapshot / click / type / scroll / back /
+    press / close. Open a page → read its returned elements →
+    click/type by index. See ``describe_tool("browser")`` for
+    the full action map + per-action args."""
+    return browser(action=action, url=url, element=element,
+                    text=text, direction=direction, key=key)

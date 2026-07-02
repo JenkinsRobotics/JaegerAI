@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
@@ -142,3 +143,34 @@ def model_location(action: str, path: str = "") -> dict[str, Any]:
         return {"ok": False, "error": f"could not save config: {exc}"}
     return {"ok": True, "action": act, "path": resolved,
             "extra_gguf_dirs": dirs}
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main._register_builtins).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="list_models", side_effect="read")
+def _t_list_models() -> dict:
+    """List the LLM models in the registry with role (realtime /
+    coder) and cache status. Read-only — use this to tell the user
+    what's available, or to back a model recommendation."""
+    return list_models()
+
+
+@register_tool_from_function(name="download_model")
+def _t_download_model(name: str) -> dict:
+    """Download a registered model from HuggingFace Hub. PRIVILEGED
+    tier — routes through confirmation. Only call this when the user
+    has explicitly asked for a model OR agreed to one you
+    recommended; never speculatively. Recommend first, let the user
+    decide, then call. Use list_models for valid names."""
+    return download_model(name=name)
+
+
+@register_tool_from_function(name="model_location")
+def _t_model_location(action: str, path: str = "") -> dict:
+    """Register a custom directory JROS scans for local .gguf models
+    — so a folder you point it at (a non-standard LM Studio / Ollama
+    install, your own model stash) shows up in /models and the model
+    picker. action: 'add' / 'remove' / 'list'. Persisted to the
+    instance config; survives restarts."""
+    return model_location(action=action, path=path)

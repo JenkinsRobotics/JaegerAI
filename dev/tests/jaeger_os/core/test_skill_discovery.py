@@ -113,4 +113,6 @@ def test_discovery_and_index_run_against_the_real_library():
     index = build_skill_index()
     assert isinstance(index, str)
     if available:
-        assert "Skill library" in index
+        # the always-on block is now a "Capabilities" menu listing skill
+        # playbooks alongside tools (was "Skill library — …")
+        assert "Skill playbooks" in index

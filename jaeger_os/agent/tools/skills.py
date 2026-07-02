@@ -13,7 +13,9 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.agent.skill_registry import playbook_skills as _pb
+from jaeger_os.core.context import get_layout
 
 # Cap a single skill's instructions so one huge SKILL.md can't blow the
 # context window. Skills run long but rarely past this.
@@ -244,3 +246,105 @@ def skill(action: str, name: str = "", query: str = "",
     return {"ok": False,
             "error": f"unknown skill action {action!r} — "
                      "use list / search / view"}
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main._register_builtins).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="skill", side_effect="read")
+def _t_skill(action: str, name: str = "", query: str = "",
+             file: str = "") -> dict:
+    """Discover and read playbook skills — experienced procedures
+    for a task. ``action`` ∈ list / search / view. Use ``search``
+    FIRST when a task might have a matching playbook (the
+    OPERATING_DISCIPLINE rule). ``view`` returns the full skill
+    body + its bundled-file listing; pass ``file=...`` to read
+    one. See ``describe_tool("skill")`` for the full contract."""
+    return skill(action=action, name=name, query=query, file=file)
+
+
+@register_tool_from_function(name="skill_note")
+def _t_skill_note(skill: str, outcome: str = "smooth", note: str = "",
+                  objective: str = "", calls: int = 0, procedure: str = "",
+                  errors: str = "", flag: bool = False) -> dict:
+    """Jot a post-use summary about a skill you just used — the journal that
+    feeds skill self-improvement. After a notable use:
+      • outcome   — smooth | slow | issues | failed (how it went)
+      • note      — one terse, concrete line
+      • calls     — how many tool calls this use took
+      • procedure — the brief ordered calls ("read,read,fetch")
+      • errors    — errors / retries / dead-ends you hit
+      • flag      — True to ask for a review NOW (a use that wasted real effort)
+    Cheap (one line, no model). Reviews fire on their own during idle; `flag`
+    fast-tracks one. Returns {ok, skill, outcome}."""
+    from jaeger_os.core.skill_improvement import skill_notes as _sn
+    layout = get_layout()
+    n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note,
+                     objective=objective, calls=calls, procedure=procedure,
+                     errors=errors, flag=flag)
+    result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
+    # A `flag`ged note fast-tracks a Deep Think review now; everything else
+    # defers to the idle sweep. No-op when opted out.
+    try:
+        from jaeger_os.agent.background import skill_review
+        proposed = skill_review.maybe_propose_on_note(layout, n)
+        if proposed and proposed.get("proposed"):
+            result["review_proposed"] = proposed
+    except Exception:  # noqa: BLE001 — the trigger never breaks a note write
+        pass
+    return result
+
+
+@register_tool_from_function(name="skill_notes", side_effect="read")
+def _t_skill_notes(skill: str = "") -> dict:
+    """Read accumulated skill-usage notes — pass a skill name for its recent
+    notes, or blank for a per-skill outcome tally across all skills (which
+    ones are struggling). Use it to decide whether a skill needs a Deep Think
+    improvement pass. Read-only."""
+    from jaeger_os.core.skill_improvement import skill_notes as _sn
+    layout = get_layout()
+    if (skill or "").strip():
+        notes = _sn.notes_for(layout, skill)
+        return {"skill": skill.strip(), "count": len(notes),
+                "notes": [{"outcome": n.outcome, "note": n.note, "ts": n.ts}
+                          for n in notes[-20:]]}
+    return {"summary": _sn.summary(layout)}
+
+
+@register_tool_from_function(name="request_skill_review")
+def _t_request_skill_review(skill: str) -> dict:
+    """Queue a Deep Think pass to IMPROVE a recipe-skill from its usage notes
+    — call it when you judge a skill keeps under-performing. It crafts a
+    measured task (baseline benchmark → write a new version → re-benchmark →
+    keep only if smoke passes AND the delta is positive, else revert). Lands
+    approved + ready under `auto` autonomy, else proposed in the backlog for
+    the operator. Deduped if a review's already queued. Returns the proposal."""
+    from jaeger_os.agent.background import skill_review
+    return skill_review.propose_review(get_layout(), skill, force=True)
+
+
+@register_tool_from_function(name="set_skill_review")
+def _t_set_skill_review(enabled: bool) -> dict:
+    """Turn autonomous skill self-improvement on/off. ON BY DEFAULT (opt-out):
+    a skill that accumulates enough issue/failure notes auto-proposes a Deep
+    Think pass that rewrites it, validated by smoke test + benchmark delta
+    before it's kept (else reverted) — every change recorded as a revision.
+    Set False to opt out: improvements then happen only when explicitly asked
+    and land in the backlog for the operator to approve. Returns {ok, enabled}."""
+    from jaeger_os.agent.background import skill_review
+    return skill_review.set_enabled(enabled)
+
+
+@register_tool_from_function(name="record_skill_revision")
+def _t_record_skill_revision(skill: str, version: str, summary: str = "",
+                             benchmark_delta: str = "") -> dict:
+    """Log that you modified a skill — call it AFTER you keep a new version
+    (smoke + benchmark passed). Records the revision so the skill's evolution
+    is inspectable + rollback-able: the new version (e.g. 'v3' — the revision
+    id), what changed, and the measured delta. See it via `jaeger skills
+    revisions`. Returns {ok, skill, version, ts}."""
+    from jaeger_os.core.skill_improvement import skill_revisions
+    r = skill_revisions.record(get_layout(), skill=skill,
+                               version=version, origin="self-improvement",
+                               summary=summary, delta=benchmark_delta)
+    return {"ok": True, "skill": r.skill, "version": r.version, "ts": r.ts}

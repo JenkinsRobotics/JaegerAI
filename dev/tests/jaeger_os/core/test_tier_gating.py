@@ -27,9 +27,14 @@ def _registered_tools():
     """Register the built-ins into the framework-free tool registry
     and return its ``{name: fn}`` map. Post Phase-6.2 this is the
     canonical surface — there's no pydantic-ai ``Agent`` to interrogate."""
-    from jaeger_os.agent import clear_registry, get_tools
+    # Tools register from two sources now: most live in tools/*.py (register
+    # on module import — importing jaeger_os.main triggers it) and a few
+    # remain main.py builtins (via _register_builtins). Do NOT clear_registry()
+    # — module wrappers can't re-register after a clear (import-cached), and
+    # clearing also polluted later tests. Import both sources and read.
+    import jaeger_os.agent.tools  # noqa: F401 — module-level tool registrations
+    from jaeger_os.agent import get_tools
     from jaeger_os.main import _register_builtins
-    clear_registry()
     _register_builtins(client=None)
     return {t.name: t.fn for t in get_tools()}
 

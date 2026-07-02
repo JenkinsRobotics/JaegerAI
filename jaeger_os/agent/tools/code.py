@@ -18,6 +18,7 @@ import tempfile
 import time
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.context import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
@@ -181,3 +182,30 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
         "timed_out": timed_out,
         "interrupted": interrupted,
     }
+
+
+@register_tool_from_function(name="execute_code")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="code",
+               operation="execute_code",
+               summary="run Python code in the skills workspace")
+def _t_execute_code(code: str, timeout_s: float = 10.0) -> dict:
+    """Run Python code and return its output. Reach for this for
+    computational work: arithmetic that can't be done with
+    `calculate`, string transforms, quick logic — and to run files
+    you wrote with write_file (code runs IN the skills/ workspace,
+    so `import name` and `open('file')` see them). 10s default
+    timeout. Isolated from packages installed via install_package.
+
+    For the current date / day / time / timezone, use `get_time` —
+    it's the ONLY source of truth, not Python's clock."""
+    return run_python(code=code, timeout_s=timeout_s)
+
+
+@register_tool_from_function(name="terminal")
+def _t_terminal(command: str, timeout_s: float = 60.0) -> dict:
+    """Run a non-Python command-line program — git, npm, brew,
+    ffmpeg. For Python code use execute_code; for files use
+    write_file / read_file / list_skill_dir. PRIVILEGED-tier: each
+    call prompts the user, so reach for it only when the task
+    genuinely needs a shell program."""
+    return run_shell(command=command, timeout_s=timeout_s)

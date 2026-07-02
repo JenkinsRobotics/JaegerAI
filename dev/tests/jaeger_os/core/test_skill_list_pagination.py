@@ -28,6 +28,8 @@ def _stub_playbook(name: str, category: str, desc: str = "") -> Any:
     return SimpleNamespace(
         name=name, category=category, description=desc,
         tags=[], path=None,
+        # enriched fields the list tool now surfaces per entry
+        tier="standard", requires_tools=[], fallback_for_tools=[],
     )
 
 
@@ -63,13 +65,13 @@ def test_list_default_returns_category_counts(fake_playbooks):
     }
 
 
-def test_list_default_limit_is_20(fake_playbooks):
-    """Default limit is 20 — large enough that the test fixture
-    (6 skills) fits in one page; the real library (~87 skills)
-    won't."""
+def test_list_default_returns_full_list(fake_playbooks):
+    """Default is the COMPLETE active catalog (limit=0) — the curator
+    doesn't gate scope; the agent is the routing intelligence. Explicit
+    limit/offset still paginate (tested below)."""
     out = skill_tool.skill(action="list")
-    assert out["limit"] == 20
-    assert len(out["skills"]) == 6  # fixture has 6
+    assert out["limit"] == 0
+    assert len(out["skills"]) == 6  # fixture has 6 → all returned
 
 
 # ── pagination ────────────────────────────────────────────────────

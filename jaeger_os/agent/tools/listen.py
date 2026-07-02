@@ -15,6 +15,8 @@ import threading as _threading
 import time
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+
 
 # Reuse the same default the voice daemon uses for its "accurate" pass —
 # medium.en strikes the sharpest quality/latency balance for English on
@@ -229,3 +231,19 @@ def _record_via_avaudio(seconds: int, np_module):
         raise RuntimeError("avaudio capture produced no audio")
     audio = np_module.concatenate(buf, axis=0)[:target]
     return audio
+
+
+# ── Agent-tool wrapper (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="listen")
+def _t_listen(seconds: int = 5) -> dict:
+    """Record N seconds of microphone audio and return the transcript.
+
+    Use when the user asks you to listen, or when you need to capture
+    spoken input mid-chat. Atomic: mic opens, records, closes — no
+    always-on listening. Cap is 60s; for hands-free conversation, tell
+    the user to launch ``python -m jaeger_os --voice`` instead.
+
+    Returns ``{ok, transcript, seconds, model, elapsed_s}`` on success."""
+    return listen(seconds=seconds)

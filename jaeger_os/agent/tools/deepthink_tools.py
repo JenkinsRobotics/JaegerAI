@@ -17,6 +17,7 @@ from typing import Any
 
 from jaeger_os.core.context import _require_layout
 from jaeger_os.agent.background.deep_think import queue_for_layout
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 def propose_deep_think_task(description: str) -> dict[str, Any]:
@@ -63,3 +64,19 @@ def list_deep_think_queue() -> dict[str, Any]:
             for t in tasks
         ],
     }
+
+
+@register_tool_from_function(name="propose_deep_think_task")
+def _t_propose_deep_think_task(description: str) -> dict:
+    """Queue a skill-development task for Deep Think to work later.
+    Use when you notice something worth building/fixing that's too
+    big for the current turn. The task is added UNAPPROVED — the
+    user approves it before Deep Think runs it. You propose; the
+    user decides."""
+    return propose_deep_think_task(description=description)
+
+
+@register_tool_from_function(name="list_deep_think_queue", side_effect="read")
+def _t_list_deep_think_queue() -> dict:
+    """Read the Deep Think task queue with status counts. Read-only."""
+    return list_deep_think_queue()

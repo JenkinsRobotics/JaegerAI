@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.context import (
     SandboxError,
     _audit,
@@ -33,6 +34,7 @@ from jaeger_os.core.context import (
     _resolve_write,
     git_autocommit,
 )
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 # Directories search_files never descends into — VCS internals, virtual
 # envs, caches, and the multi-GB model store would swamp a content grep.
@@ -426,3 +428,88 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         "searched": True, "query": query, "matches": matches,
         "count": len(matches), "truncated": len(matches) >= cap,
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main.py::_register_builtins).
+# Private ``_t_*`` names + explicit ``name=`` override so the gated tool never
+# collides with the ungated logic fn above (used by internal callers).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="write_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="write_file",
+               summary="write a file in the skills workspace")
+def _t_write_file(path: str, content: str) -> dict:
+    """Write a text file in the sandboxed skills/ directory. Overwrites
+    if it already exists."""
+    return file_write(path=path, content=content)
+
+
+@register_tool_from_function(name="append_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="append_file",
+               summary="append to a file in the skills workspace")
+def _t_append_file(path: str, content: str) -> dict:
+    """Append text to an existing skills/ file."""
+    return append_file(path=path, content=content)
+
+
+@register_tool_from_function(name="patch")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="patch",
+               summary="edit a file in the skills workspace")
+def _t_patch(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    """Surgically edit an EXISTING skills/ file by find-and-replace.
+    Prefer this over write_file to change a file you've already
+    written — it swaps one region instead of regenerating the whole
+    file, so a long file can't be lost to a truncated rewrite. `old`
+    must be a snippet that occurs exactly once (pass a longer unique
+    snippet if it isn't), or set replace_all=true to change every
+    occurrence."""
+    return edit_file(path=path, old=old, new=new, replace_all=replace_all)
+
+
+@register_tool_from_function(name="delete_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="delete_file",
+               summary="delete a file from the skills workspace")
+def _t_delete_file(path: str) -> dict:
+    """Delete a file from the skills/ directory."""
+    return delete_file(path=path)
+
+
+@register_tool_from_function(name="read_file", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_file",
+               summary="read a workspace file")
+def _t_read_file(path: str, offset: int = 0, limit: int | None = None) -> dict:
+    """Read a text file from ANYWHERE on the machine — your own
+    source code, the whole repository you run from, the wider
+    system. Absolute paths and `~` work; reading is not sandboxed.
+    (Off-limits: the credentials/ store and OS secret files like
+    ~/.ssh.) For a large file, page it: `offset` is the 0-based
+    first line, `limit` the line count (default: the whole file)."""
+    return file_read(path=path, offset=offset, limit=limit)
+
+
+@register_tool_from_function(name="list_skill_dir", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="list_skill_dir",
+               summary="list contents of the skills directory")
+def _t_list_skill_dir(path: str = ".") -> dict:
+    """List a directory's contents. With no path, lists your instance
+    workspace; pass an ABSOLUTE path (or `~`) to browse ANY directory
+    — your repository, the wider system. Listing is not sandboxed.
+    Use for "list files", "show files", "what's in <dir>"."""
+    return list_skill_dir(path=path)
+
+
+@register_tool_from_function(name="search_files", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_files",
+               summary="search file contents under the skills directory")
+def _t_search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
+    """Recursively grep file CONTENTS — case-insensitive substring
+    match. With no path, searches the working directory; pass an
+    ABSOLUTE path to search ANY directory — e.g. your whole
+    repository. Searching is not sandboxed. Use this to find where
+    something is defined or used instead of reading files one by
+    one. Returns {file, line, text} matches."""
+    return search_files(query=query, path=path, max_results=max_results)
