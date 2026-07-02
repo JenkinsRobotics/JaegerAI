@@ -234,6 +234,13 @@ class PermissionGrants:
             self.persistent.add(skill)
             self._save()
 
+    def revoke(self, skill: str) -> None:
+        """Withdraw a grant — the skill prompts again next time it's used."""
+        self.session.discard(skill)
+        if skill in self.persistent:
+            self.persistent.discard(skill)
+            self._save()
+
     def _save(self) -> None:
         if self.path is None:
             return
