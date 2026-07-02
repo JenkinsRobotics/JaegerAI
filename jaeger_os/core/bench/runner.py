@@ -30,7 +30,7 @@ import shutil
 import tempfile
 import time
 from contextlib import redirect_stdout
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -74,6 +74,11 @@ class BenchRow:
     halt_reason: str | None = None
     iterations: int = 0
     skipped_final: bool = False
+    # Skill selection (the 'skill' category): which playbooks the agent
+    # pulled via skill(view), and whether it selected the ones the case
+    # expected. ``skill_ok`` is None when the case sets no expected_skills.
+    skills_viewed: list[str] = field(default_factory=list)
+    skill_ok: bool | None = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -195,6 +200,7 @@ def _drive_one(
     elapsed = time.perf_counter() - started
 
     tools: list[str] = []
+    skills_viewed: list[str] = []
     for msg in (out.get("new_messages") or []):
         if msg.get("role") != "assistant":
             continue
@@ -202,6 +208,18 @@ def _drive_one(
             name = tc.get("name") or ""
             if name:
                 tools.append(name)
+            # Skill selection: a skill(view/use, name=...) call is the
+            # agent choosing a specific playbook. Capture WHICH one so
+            # the 'skill' category can assert it picked the right skill,
+            # not just that it researched. (Tool names alone can't tell
+            # skill('ascii-art') from skill('arxiv').)
+            if name == "skill":
+                args = tc.get("arguments") or {}
+                if str(args.get("action") or "").lower() in (
+                        "view", "use", "read", "get", "open"):
+                    target = str(args.get("name") or args.get("query") or "").strip()
+                    if target:
+                        skills_viewed.append(target)
 
     answer = out.get("answer", "") or ""
     prompt_tokens = int(out.get("prompt_tokens") or 0)
@@ -211,6 +229,7 @@ def _drive_one(
         "halt_reason": out.get("halt_reason"),
         "iterations": int(out.get("iterations") or 0),
         "skipped_final": bool(out.get("skipped", False)),
+        "skills_viewed": skills_viewed,
     }
     return tools, answer, elapsed, error, prompt_tokens, completion_tokens, meta
 
@@ -246,14 +265,27 @@ def _visible_output_clean(answer: str) -> bool:
 
 
 def _score(case: BenchCase, tools: list[str], answer: str,
-           error: str | None, elapsed_s: float) -> BenchRow:
+           error: str | None, elapsed_s: float,
+           skills_viewed: list[str] | None = None) -> BenchRow:
     """Apply each of the case's optional checks; roll up to ``case_pass``."""
+    skills_viewed = skills_viewed or []
     routing_ok: bool | None = None
     ordered_ok: bool | None = None
     if case.expected_tools:
         routing_ok = _matches_tool_set(tools, case.expected_tools, ordered=False)
         if case.ordered:
             ordered_ok = _matches_tool_set(tools, case.expected_tools, ordered=True)
+
+    # Skill selection ('skill' category): every expected skill must have
+    # been viewed. Substring-tolerant so a case can say 'ascii-art' and
+    # match a viewed 'ascii-art' regardless of category prefixing.
+    skill_ok: bool | None = None
+    if case.expected_skills:
+        viewed_l = [s.lower() for s in skills_viewed]
+        skill_ok = all(
+            any(want.lower() in v or v in want.lower() for v in viewed_l)
+            for want in case.expected_skills
+        )
 
     answer_ok: bool | None = None
     if case.answer_contains_any or case.answer_contains_all:
@@ -293,6 +325,8 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         pieces.append(routing_ok)
     if ordered_ok is not None:
         pieces.append(ordered_ok)
+    if skill_ok is not None:
+        pieces.append(skill_ok)
     if answer_ok is not None:
         pieces.append(answer_ok)
     if safety_ok is not None:
@@ -305,6 +339,7 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         routing_ok=routing_ok, ordered_ok=ordered_ok, answer_ok=answer_ok,
         no_hallucination=no_hallucination, clean_output=clean_output,
         safety_ok=safety_ok, error=error, case_pass=case_pass,
+        skills_viewed=list(skills_viewed), skill_ok=skill_ok,
     )
 
 
@@ -504,7 +539,8 @@ def run_bench(
                 client, case.prompt,
                 agent_cache=agent_cache, session_key=session_key,
             )
-            row = _score(case, tools, answer, error, elapsed)
+            row = _score(case, tools, answer, error, elapsed,
+                         skills_viewed=meta.get("skills_viewed") or [])
             row.prompt_tokens = ptok
             row.completion_tokens = ctok
             ttft = meta.get("ttft_s")
