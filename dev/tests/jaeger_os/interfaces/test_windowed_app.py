@@ -21,7 +21,9 @@ import pytest  # noqa: E402
 pytest.importorskip("PySide6")
 pytestmark = pytest.mark.ui
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from jaeger_os.agent.loop.bridge import AgentBridge  # noqa: E402
 from jaeger_os.app.bus.inproc import InProcBus  # noqa: E402
@@ -281,7 +283,7 @@ def test_tray_dropdown_status_labels(qapp):
     'Standing by', thinking is 'In deep thought…'. Pins the mapping."""
     from jaeger_os.interfaces.pyside6.tray.menu import TrayMenu
 
-    menu = TrayMenu(agent_name="Jaeger", instance_name="gemma-4-12B",
+    menu = TrayMenu(agent_name="Jaeger",
                     on_quick_input=lambda: None, on_open_chat=lambda: None,
                     on_quit=lambda: None)
     try:
@@ -293,6 +295,41 @@ def test_tray_dropdown_status_labels(qapp):
         assert "wrong" in menu._state_label.text().lower()
     finally:
         menu.close()
+
+
+def test_tray_dropdown_closes_when_clicking_another_qt_window(qapp):
+    """Click-away must include other in-process JROS windows, not just
+    unrelated macOS apps."""
+    from jaeger_os.interfaces.pyside6.tray.menu import TrayMenu
+
+    menu = TrayMenu(agent_name="Jaeger",
+                    on_quick_input=lambda: None, on_open_chat=lambda: None,
+                    on_quit=lambda: None)
+    other = QWidget()
+    try:
+        menu.show()
+        menu._can_dismiss = True
+        menu._install_click_filter()
+        other.setGeometry(menu.x() + menu.width() + 40, menu.y() + 40, 120, 80)
+        other.show()
+        qapp.processEvents()
+
+        local = QPoint(10, 10)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local),
+            QPointF(other.mapToGlobal(local)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(other, event)
+        qapp.processEvents()
+
+        assert not menu.isVisible()
+    finally:
+        menu.close()
+        other.close()
 
 
 def test_tray_tracks_live_agent_state(qapp):

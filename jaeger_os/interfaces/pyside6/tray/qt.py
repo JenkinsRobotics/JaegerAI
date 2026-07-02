@@ -62,8 +62,7 @@ class QtTray:
         self._pill: Any = None
         self._menu: Any = None
         self._settings: Any = None
-        self._studio: Any = None
-        self._gallery: Any = None
+        self._companion: Any = None
         self._state = "idle"
 
         # Brand the app — window + macOS Dock icon (the tray is the
@@ -116,24 +115,43 @@ class QtTray:
 
     def _show_menu(self) -> None:
         from jaeger_os.interfaces.pyside6.tray.menu import TrayMenu
+        name, icon = self._character_brand()
         if self._menu is None:
             self._menu = TrayMenu(
-                agent_name=self._name,
-                instance_name=self._subtitle,
+                agent_name=name,
+                avatar_path=icon,
                 on_quick_input=self._show_pill,
                 on_open_chat=self._open_chat,
-                on_open_studio=self._open_studio,
-                on_open_windows=self._open_windows,
+                on_open_companion=self._open_companion,
                 on_quit=self._quit,
+                on_restart=self._restart,
                 on_settings=self._open_settings,
             )
+        else:
+            # Refresh to the current character (no rebuild → no show churn).
+            self._menu.update_brand(name, icon)
         self._menu.set_state(self._state)
         self._menu.popup_under(self._icon.geometry())
 
+    def _character_brand(self) -> tuple[str, str | None]:
+        """Current character's name + profile-icon path for the tray header."""
+        try:
+            from jaeger_os.interfaces.avatar_player.window import resolve_character
+            c = resolve_character(self.ctx)
+            if c is not None:
+                icon = c.icon_path()
+                return c.name, (str(icon) if icon else None)
+        except Exception:  # noqa: BLE001
+            pass
+        return self._name, None
+
     def _open_settings(self) -> None:
-        from jaeger_os.interfaces.pyside6.settings import open_settings
-        # Hold the ref so the window isn't garbage-collected on return.
-        self._settings = open_settings()
+        # The new agent-centric HUD replaces the old tabbed SettingsWindow.
+        from jaeger_os.interfaces.pyside6.agent_settings.window import make_surface
+        self._settings = make_surface(self.ctx)  # hold ref so it isn't GC'd
+        self._settings.show()
+        self._settings.raise_()
+        self._settings.activateWindow()
 
     def _on_state(self, msg: Any) -> None:
         state = getattr(msg, "state", None)
@@ -183,30 +201,32 @@ class QtTray:
                 return w
         return None
 
-    # ── Jaeger Studio + dev windows ───────────────────────────────
-    def _open_studio(self) -> Any:
-        """Open Jaeger Studio (the multi-tab desktop shell) wired to the
-        app's bus + core, so its chat / avatar are live."""
+    def _open_companion(self) -> Any:
+        """Open the avatar + chat companion window, wired to the app bus/core."""
         try:
-            from jaeger_os.interfaces.studio.window import make_surface
-            self._studio = make_surface(self.ctx)
-            self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
-            return self._studio
+            from jaeger_os.interfaces.avatar_chat.window import make_surface
+            self._companion = make_surface(self.ctx)
+            self._companion.show(); self._companion.raise_(); self._companion.activateWindow()
+            return self._companion
         except Exception as exc:  # noqa: BLE001
-            self._warn("Jaeger Studio", exc)
+            self._warn("Avatar + chat", exc)
             return None
 
-    def _open_windows(self) -> Any:
-        """Open the surface gallery — a launcher for the prealpha windows
-        (Studio, avatar player, media player) so each can be tested."""
-        try:
-            from jaeger_os.interfaces.gallery.window import GalleryWindow
-            self._gallery = GalleryWindow(self.ctx)
-            self._gallery.show(); self._gallery.raise_(); self._gallery.activateWindow()
-            return self._gallery
-        except Exception as exc:  # noqa: BLE001
-            self._warn("Dev windows", exc)
-            return None
+    def _restart(self) -> None:
+        """Restart the agent/app by re-execing the process."""
+        import os
+        import sys
+        # Best-effort graceful stop so memory/state flushes before we re-exec.
+        core = getattr(self.ctx, "core", None)
+        stop = getattr(core, "stop", None) or getattr(self.ctx, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:  # noqa: BLE001 — never block a restart on teardown
+                pass
+        # ponytail: re-exec is the whole restart; wire a fuller graceful shutdown
+        # here if a mid-write corruption ever shows up.
+        os.execv(sys.executable, [sys.executable, *sys.argv])
 
     @staticmethod
     def _warn(what: str, exc: Exception) -> None:
@@ -215,13 +235,24 @@ class QtTray:
 
     # ── lifecycle ─────────────────────────────────────────────────
     def _quit(self) -> None:
+        # ggml-metal aborts (SIGABRT) in its C++ static destructor at normal
+        # interpreter exit. Run the app's atexit cleanup (app.shutdown, hardware-
+        # safe shutdown, process slots) explicitly, then hard-exit so those
+        # broken native destructors never run. Nothing useful is skipped — the
+        # destructors only abort.
+        import atexit
+        import os
         app = QApplication.instance()
         if app is not None:
             app.quit()
+        try:
+            atexit._run_exitfuncs()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)
 
     def close(self) -> None:
-        for widget in (self._pill, self._menu, self._settings,
-                       self._studio, self._gallery):
+        for widget in (self._pill, self._menu, self._settings, self._companion):
             if widget is not None:
                 try:
                     widget.close()
