@@ -23,7 +23,7 @@ def fake_repo(tmp_path, monkeypatch):
     """Build a minimal ``benchmark/`` tree the verb can scan."""
     bench = tmp_path / "dev/benchmark"
     (bench / "sweep").mkdir(parents=True)
-    (bench / "flat").mkdir()
+    (bench / "results").mkdir()
     monkeypatch.setattr(bhv, "_repo_root", lambda: tmp_path)
     return tmp_path
 
@@ -52,10 +52,10 @@ def _write_flat_summary(
     ``summary.json``. The walker handles both.
     """
     if nested_under:
-        run = bench_dir / "flat" / nested_under / ts
+        run = bench_dir / "results" / nested_under / ts
         prefix = f"{nested_under}-{ts}"
     else:
-        run = bench_dir / "flat" / ts
+        run = bench_dir / "results" / ts
         prefix = f"unknown-{ts}"
     run.mkdir(parents=True, exist_ok=True)
     filename = f"{prefix}-summary.json" if use_new_filename else "summary.json"
@@ -179,7 +179,7 @@ def test_flat_summaries_skips_dirs_without_summary(fake_repo):
     """A run dir with rows.jsonl but no summary.json is incomplete
     (interrupted run). Skip silently."""
     bench = fake_repo / "dev/benchmark"
-    (bench / "flat" / "20260527-broken").mkdir()
+    (bench / "results" / "20260527-broken").mkdir()
     out = list(bhv._from_flat_summaries(fake_repo))
     assert out == []
 

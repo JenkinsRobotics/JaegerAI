@@ -49,6 +49,10 @@ class BenchCase:
     session: str = ""                        # "" = unique session per case
     expected_tools: list[str] = field(default_factory=list)
     ordered: bool = False                    # require expected_tools order
+    # Skill selection ('skill' category): playbook names the agent MUST
+    # pull via skill(view) for this task — verifies discovery + the right
+    # pick, not just that a tool fired. Substring-matched by the runner.
+    expected_skills: list[str] = field(default_factory=list)
     # Tools the model MUST NOT call. Powers the T5 safety gate: a
     # destructive prompt should be refused, not dispatched. If any tool
     # in ``tools_called`` matches this list (or its umbrella), the row
@@ -78,6 +82,11 @@ UMBRELLA_EQUIVALENTS: dict[str, set[str]] = {
     "run_python":     {"execute_code"},
     "run_shell":      {"terminal"},
     "list_skill_dir": {"read_dir"},
+    # The kanban board is registered both as the umbrella ``kanban``
+    # (action-dispatch) AND the fine-grained ``board_*`` verbs; the model
+    # may call either. A case expecting "kanban" accepts any board verb.
+    "kanban":         {"board_add", "board_view", "board_move",
+                       "board_update"},
 }
 
 
@@ -115,7 +124,7 @@ UMBRELLA_EQUIVALENTS: dict[str, set[str]] = {
 #            pair exercising the facts-snapshot path. Rows gained
 #            loop-health telemetry (ttft_s / halt_reason / iterations /
 #            skipped_final) — see runner._loop_health_metrics.
-BENCHMARK_VERSION = "1.2"
+BENCHMARK_VERSION = "1.3"
 
 
 # ── The flat case list ──────────────────────────────────────────────
@@ -581,6 +590,114 @@ CASES: list[BenchCase] = [
               hallucination_signals=["I don't know your favorite",
                                      "you haven't told me"],
               tags=["memory", "cross_turn"]),
+
+    # ── v1.3: SKILL selection ───────────────────────────────────────
+    # Tasks that map to a specific playbook. The pull model says: for a
+    # non-trivial specialized task, RESEARCH via skill(list) then follow
+    # the matching playbook — don't reinvent it. ``expected_skills``
+    # asserts the agent pulled the RIGHT playbook (not just that it
+    # called a tool). These are the cases the old corpus couldn't see —
+    # and the ones most likely to expose "agent didn't research".
+    BenchCase(id="skill_ascii_art",
+              prompt="Make an ASCII-art banner that spells HELLO.",
+              expected_skills=["ascii-art"],
+              tags=["skill", "creative"]),
+    BenchCase(id="skill_arxiv",
+              prompt="Find recent arXiv papers on retrieval-augmented "
+                     "generation and summarize the top few.",
+              expected_skills=["arxiv"],
+              tags=["skill", "research"]),
+    BenchCase(id="skill_codebase_inspect",
+              prompt="Give me a structured inspection of this codebase's "
+                     "architecture and main modules.",
+              expected_skills=["codebase-inspection"],
+              tags=["skill"]),
+    BenchCase(id="skill_native_tier",
+              prompt="On this Mac, open System Settings and turn on Dark "
+                     "Mode for me.",
+              # Native-tier preference: a macOS task should pull the
+              # macos-computer-use playbook (tier:native), not the
+              # generic computer_use fallback.
+              expected_skills=["macos-computer-use"],
+              tags=["skill", "routing"]),
+
+    # ── v1.3: KANBAN (task board) ───────────────────────────────────
+    # board.json is snapshotted by hermetic mode, so these don't
+    # pollute the live board.
+    BenchCase(id="kanban_add",
+              prompt="Add a task to my board: 'refactor the auth module', "
+                     "high priority.",
+              expected_tools=["kanban"],
+              tags=["kanban"]),
+    BenchCase(id="kanban_add_complete",
+              prompt="Put 'water the plants' on my task board, then mark "
+                     "it done.",
+              expected_tools=["kanban"],
+              tags=["kanban", "multistep"]),
+    BenchCase(id="kanban_view",
+              prompt="What's on my task board right now?",
+              expected_tools=["kanban"],
+              tags=["kanban"]),
+
+    # ── v1.3: DEEP-THINK (escalate a hard task to the coder model) ──
+    # Two real entry points: propose_deep_think_task (the queue) and a
+    # kanban card with kind=deepthink. Either is correct routing for a
+    # task too big for the current fast-model turn.
+    BenchCase(id="dt_propose_skill_fix",
+              prompt="The weather skill keeps crashing on malformed input. "
+                     "It's too big to fix right now — note it so the deep "
+                     "think model can build a proper fix later.",
+              expected_tools=["propose_deep_think_task", "kanban"],
+              tags=["deepthink"],
+              notes="Model stays LOCKED in the dev bench — this checks the "
+                    "agent RECOGNIZES the escalation moment (queues the task "
+                    "via propose_deep_think_task OR a deepthink kanban card), "
+                    "not an actual model swap. The real flip to the coder "
+                    "model is tested in the agent/full-system run. "
+                    "expected_tools is a set-match (either tool passes)."),
+
+    # ── v1.3: SELF-IMPROVE (deep-learning loop) ─────────────────────
+    # Routing only — the fast dev bench must NOT trigger run_benchmark
+    # (that would recurse a full bench inside the bench). curate is the
+    # read-only assessment entry point; the async keep-better loop is a
+    # full-system / agent-internal concern.
+    BenchCase(id="selfimprove_curate",
+              prompt="Check your skill library for stale or unused skills "
+                     "that might be worth retiring.",
+              expected_tools=["skill"],
+              tags=["self_improve"]),
+
+    # ── v1.3: WORKFLOW (triage judgment — the day-to-day kanban test) ─
+    # The flagship: does the agent do the URGENT part now and FILE the
+    # deferrable parts on the board, unprompted — not drop them, not
+    # block on all of them. The async execution of the filed cards is a
+    # full-system concern; here we score the triage-and-file turn.
+    BenchCase(id="wf_triage_defer",
+              prompt="Three things: (A) draft a project outline, (B) what "
+                     "is 47*89 — I need that now, and (C) research the best "
+                     "vector databases. B is urgent; A and C can wait.",
+              # B now (calculate → 4183) AND A/C filed on the board.
+              expected_tools=["calculate", "kanban"],
+              answer_contains_any=["4183"],
+              tags=["workflow", "kanban"]),
+    BenchCase(id="wf_defer_nonurgent",
+              prompt="No rush at all, but when you get a chance: reorganize "
+                     "my notes and write a summary of my week.",
+              # Non-urgent multi-part → belongs on the board, not done
+              # inline in a single turn.
+              expected_tools=["kanban"],
+              tags=["workflow", "kanban"]),
+
+    # ── v1.3: PERSONA (stays in character) ──────────────────────────
+    # Light check: the agent answers in its JROS persona, not as a
+    # generic disclaiming chatbot. Content-only (no tool).
+    BenchCase(id="persona_no_disclaimer",
+              prompt="Are you just a chatbot?",
+              hallucination_signals=["I am a large language model",
+                                     "as an AI language model",
+                                     "I'm an AI assistant developed by",
+                                     "I am an AI developed by"],
+              tags=["persona"]),
 ]
 
 

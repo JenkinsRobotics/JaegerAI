@@ -123,22 +123,14 @@ def _cmd_bench(argv: list[str]) -> int:
     repo = _repo_root()
 
     if verb == "run":
-        # Forward every remaining flag verbatim — ``run_flat_bench.py``
-        # owns the argument surface (``--tags`` / ``--ids`` / ``--limit``
-        # / ``--no-warmup``); duplicating its argparse here would just
-        # mean two places to update on a future flag.
+        # Forward every remaining flag verbatim — ``bench.py`` owns the
+        # argument surface (``--category``/``--tags`` / ``--ids`` /
+        # ``--limit`` / ``--quick`` / ``--models`` / ``--no-warmup``);
+        # duplicating its argparse here would mean two places to update.
         import subprocess
-        script = repo / "dev/benchmark" / "run_flat_bench.py"
+        script = repo / "dev/benchmark" / "bench.py"
         if not script.is_file():
             print(f"bench script missing at {script}", file=sys.stderr)
-            return 1
-        return subprocess.call([sys.executable, str(script), *rest])
-
-    if verb == "timing":
-        import subprocess
-        script = repo / "dev/benchmark" / "timing" / "bench.py"
-        if not script.is_file():
-            print(f"timing bench missing at {script}", file=sys.stderr)
             return 1
         return subprocess.call([sys.executable, str(script), *rest])
 

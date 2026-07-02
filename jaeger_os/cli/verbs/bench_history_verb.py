@@ -442,7 +442,7 @@ def _from_flat_summaries(repo: pathlib.Path) -> Iterable[dict[str, Any]]:
     without one is a model-named bucket whose grandchildren are
     timestamped runs.
     """
-    flat_root = repo / "dev/benchmark" / "flat"
+    flat_root = repo / "dev/benchmark" / "results"
     if not flat_root.exists():
         return
     summary_paths: list[pathlib.Path] = []
