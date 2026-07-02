@@ -333,53 +333,22 @@ def _short_function(desc: str) -> str:
 
 
 def build_skill_index(available_tools: set[str] | None = None) -> str:
-    """The always-on CAPABILITIES block: a skills menu (name + one-line
-    function, grouped by category) sitting alongside the tool surface, with
-    an explicit SKILL-FIRST rule. This is what lets skills surface like tools
-    — the model sees the menu every turn, not just a 'skills exist' pointer.
-    The full recipe (SKILL.md) is still pulled on demand via skill(view); the
-    detailed enriched catalog (tier/tools/fallbacks) via skill(action=list).
-
-    Pass ``available_tools`` (active tool names) to hide skills whose required
-    tools aren't present."""
+    """A ONE-LINE skill pointer for the system prompt. The 87 playbook names
+    now live as an ENUM on the ``use_skill`` tool (the model's native action
+    space), so the old ~1.9k-token prose menu is gone — this just reminds the
+    model the capability exists and which tool loads a skill. ``skill(list)``
+    still gives the full enriched catalog on demand."""
     skills = available_playbooks(available_tools)
     if not skills:
         return ""
-    by_cat: dict[str, list[tuple[str, str]]] = {}
-    for s in skills:
-        by_cat.setdefault(s.category, []).append((s.name, _short_function(s.description)))
-    lines = [
-        "Capabilities — how to choose, in order:",
-        "1) SKILLS FIRST. For any task beyond a trivial reply or single "
-        "tool call — creative output (ascii art, diagrams, comics, music, "
-        "pixel/p5 art, infographics), research (arxiv papers, blogs, wikis), "
-        "codebase inspection, or driving an external app/service (spotify, "
-        "notion, github, email, obsidian, the macOS desktop) — a matching "
-        'SKILL playbook below almost certainly exists. You MUST call '
-        'skill(action="view", name="…") on the match and follow its recipe '
-        "BEFORE writing your own code or reaching for raw tools. Reinventing "
-        "a skill that already exists is a failure. (Tool-backed skills too — "
-        "view the skill first, then use its tools.) Only if none truly fits, "
-        "use tools directly and say so.",
-        "2) TOOLS — your full tool surface is visible; use it for what no "
-        "skill covers.",
-        "Examples: 'find recent papers on X' → skill(view,name=\"arxiv\") "
-        "first, not web_search. 'inspect this codebase' → "
-        "skill(view,name=\"codebase-inspection\") first, not raw ls/grep. "
-        "'make an ascii banner' → skill(view,name=\"ascii-art\") first, not "
-        "execute_code. On macOS control → skill(view,name=\"macos-computer-use\") "
-        "first, then its tools.",
-        "",
-        f"Skill playbooks ({len(skills)}) — scan for a match before acting:",
-    ]
-    for cat in sorted(by_cat):
-        entries = "; ".join(f"{n} — {f}" if f else n
-                            for n, f in sorted(by_cat[cat]))
-        lines.append(f"- {cat}: {entries}")
-    lines.append("")
-    lines.append('For the full detailed catalog (tier · tools · fallbacks) '
-                 'during planning, call skill(action="list").')
-    return "\n".join(lines)
+    return (
+        f"Skills: you have {len(skills)} specialized playbooks (research, "
+        "creative, codebase inspection, apps/services, macOS control, …), "
+        "exposed as the name enum on the use_skill tool. For any specialized "
+        'task, call use_skill(name="…") to load the recipe and follow it '
+        "BEFORE reaching for raw tools. skill(action=\"list\") shows the full "
+        "catalog with descriptions if you need to browse."
+    )
 
 
 def find_playbook(name: str) -> PlaybookSkill | None:

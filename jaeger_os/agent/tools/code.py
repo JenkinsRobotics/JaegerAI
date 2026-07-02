@@ -193,7 +193,10 @@ def _t_execute_code(code: str, timeout_s: float = 10.0) -> dict:
     computational work: arithmetic that can't be done with
     `calculate`, string transforms, quick logic — and to run files
     you wrote with write_file (code runs IN the skills/ workspace,
-    so `import name` and `open('file')` see them). 10s default
+    so `import name` and `open('file')` see them). To run a file you
+    wrote, pass Python (e.g. code="import fib10" or
+    open('fib10.py').read()) — NOT a shell line like
+    "python fib10.py", which is not valid Python. 10s default
     timeout. Isolated from packages installed via install_package.
 
     For the current date / day / time / timezone, use `get_time` —

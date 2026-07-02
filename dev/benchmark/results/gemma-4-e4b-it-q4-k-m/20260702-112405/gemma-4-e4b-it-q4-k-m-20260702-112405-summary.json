@@ -1,0 +1,207 @@
+{
+  "total": 10,
+  "passed": 7,
+  "pass_rate": 0.7,
+  "routing_passed": 9,
+  "routing_total": 10,
+  "answer_passed": 5,
+  "answer_total": 6,
+  "errors": 0,
+  "elapsed_s": 101.9,
+  "metrics": {
+    "avg_latency_s": 10.19,
+    "p50_latency_s": 5.639,
+    "p95_latency_s": 36.483,
+    "min_latency_s": 2.259,
+    "max_latency_s": 36.483,
+    "total_tool_dispatches": 17,
+    "avg_tools_per_turn": 1.7,
+    "answer_tokens_total": 1769,
+    "answer_tokens_avg": 176.9,
+    "answer_tokens_per_sec": 17.4,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 347781,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.5,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 3.416,
+    "ttft_p50_s": 0.223,
+    "ttft_p95_s": 31.821,
+    "ttft_reported": 10
+  },
+  "suites": {
+    "smoke": {
+      "total": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 36.483,
+      "p95_latency_s": 36.483,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 1,
+      "passed": 1,
+      "pass_rate": 1.0,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 36.483,
+      "p95_latency_s": 36.483,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 3,
+      "passed": 2,
+      "pass_rate": 0.667,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 9.188,
+      "p95_latency_s": 15.347,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "recovery": {
+      "total": 2,
+      "passed": 1,
+      "pass_rate": 0.5,
+      "threshold": 0.6,
+      "meets_threshold": false,
+      "avg_latency_s": 4.409,
+      "p95_latency_s": 5.639,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 10,
+      "passed": 7,
+      "pass_rate": 0.7,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 10.19,
+      "p95_latency_s": 36.483,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 36.483
+    },
+    "code": {
+      "total": 5,
+      "passed": 3,
+      "avg_latency_s": 13.816
+    },
+    "multistep": {
+      "total": 3,
+      "passed": 2,
+      "avg_latency_s": 9.188
+    },
+    "files": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 11.889
+    },
+    "recovery": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 4.409
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 6.565
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 9.854
+    }
+  },
+  "failures": [
+    {
+      "id": "ms_write_run_fib",
+      "prompt": "Write a python file called fib10.py in the skills/ directory that prints the first 10 Fibonacci numb",
+      "tools_called": [
+        "write_file",
+        "execute_code"
+      ],
+      "answer": "The previous attempt failed because I tried to execute the file using `python skills/fib10.py` inside the `execute_code` tool, which seems to interpret the command as Python code itself, leading to a ",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "rec_python_syntax",
+      "prompt": "Use run_python to execute this code (it has a syntax error on purpose): print(   — note the unclosed",
+      "tools_called": [
+        "execute_code"
+      ],
+      "answer": "The code executed without a visible error in the standard error stream, but the output was empty, which suggests the syntax error you intended was not caught by the execution environment's standard er",
+      "routing_ok": true,
+      "answer_ok": true,
+      "no_hallucination": false,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "wf_triage_defer",
+      "prompt": "Three things: (A) draft a project outline, (B) what is 47*89 — I need that now, and (C) research the",
+      "tools_called": [
+        "calculate",
+        "use_skill",
+        "use_skill"
+      ],
+      "answer": "I have addressed your requests in order of urgency.\n\n(B) The calculation for 47 * 89 is 4183.\n\n(C) I have initiated a web search to research the best vector databases. I will analyze the results and p",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 105.92,
+  "load_s": 53.35,
+  "category_breakdown": {
+    "routing": {
+      "passed": 1,
+      "total": 1
+    },
+    "multistep": {
+      "passed": 2,
+      "total": 3
+    },
+    "recovery": {
+      "passed": 1,
+      "total": 2
+    },
+    "files": {
+      "passed": 1,
+      "total": 2
+    },
+    "code": {
+      "passed": 3,
+      "total": 5
+    },
+    "kanban": {
+      "passed": 4,
+      "total": 5
+    },
+    "workflow": {
+      "passed": 1,
+      "total": 2
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260702-112405",
+  "benchmark_version": "1.3"
+}

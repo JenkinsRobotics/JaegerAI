@@ -215,7 +215,7 @@ def _drive_one(
             # not just that it researched. (Tool names alone can't tell
             # skill('ascii-art') from skill('arxiv').) Applies to playbook
             # AND tool-skills — skill-first means both get viewed before use.
-            if name == "skill":
+            if name in ("skill", "use_skill"):
                 args = tc.get("arguments") or {}
                 # Adapters may hand arguments back as a JSON string rather
                 # than a dict — parse so a skill call is NEVER missed
@@ -227,7 +227,9 @@ def _drive_one(
                         args = {}
                 if not isinstance(args, dict):
                     args = {}
-                if str(args.get("action") or "").lower() in (
+                # use_skill(name=…) is a direct enum selection; skill(view,
+                # name=…) is the meta-tool form. Both = viewing a playbook.
+                if name == "use_skill" or str(args.get("action") or "").lower() in (
                         "view", "use", "read", "get", "open"):
                     target = str(args.get("name") or args.get("query") or "").strip()
                     if target:
