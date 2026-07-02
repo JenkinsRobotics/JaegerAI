@@ -43,11 +43,13 @@ def test_load_soul_caps_runaway_length(tmp_path) -> None:
     assert "truncated" in soul
 
 
-def test_active_character_persona_folds_into_the_system_prompt(tmp_path) -> None:
-    """Characters are the only persona now — the active character (default
-    Jarvis) drives identity/soul; the instance no longer reads soul.md."""
+def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
+    """Workers run vanilla: the active character (default Jarvis) does NOT fold
+    into the worker prompt — persona is applied by the two-pass output filter,
+    not injected into the execution context. See dev/docs/persona_compiler.md."""
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Jarvis" in sp
+    assert "Jarvis" not in sp
+    assert "## My voice —" not in sp
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:

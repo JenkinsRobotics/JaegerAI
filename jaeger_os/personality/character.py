@@ -103,6 +103,45 @@ class Character:
         ci = self.personality.custom_instructions.strip()
         return "\n\n".join(x for x in (ci, self.soul.strip(), self._lore_block()) if x)
 
+    def character_block(self) -> str:
+        """The unified persona VIEW the live model sees — identity + soul +
+        compiled trait clauses + the persona boundary, as one coherent block.
+
+        This is the compiled View of the character's State (the numeric
+        sliders). It replaces the old identity/soul/personality fragments.
+        Compiled here, not on disk: the assembled prompt is cached and only
+        rebuilt when the character sheet changes (main.py _refresh_character_
+        prompt), so this runs on edit, not per turn. Main agent only — a
+        sub-agent gets no persona (its preamble is its whole identity).
+        See dev/docs/persona_compiler.md."""
+        from jaeger_os.personality.compose import (
+            PERSONA_BOUNDARY, domain_lens, expression_clauses,
+        )
+        p = self.personality
+        parts: list[str] = [f"## My voice — {self.name}"]
+        # Persona body = the prose fields written for the model: soul (narrative)
+        # + custom_instructions (the directive; per schema the one that feeds the
+        # model today). `description` is a library tagline (UI only) and excluded;
+        # the "You are X" one-liner is a last-resort fallback when there's no body
+        # at all. The header already names the character, so a body never needs
+        # the one-liner too — this is what kills the repeated "You are X".
+        body = [x.strip() for x in (self.soul, p.custom_instructions) if x.strip()]
+        parts.extend(body or [self.identity_block()])
+        # compiled trait View — voice clauses (deviations only) + domain lens.
+        voice: list[str] = []
+        clauses = expression_clauses(p.expression)
+        if clauses:
+            voice.append("When you speak to the operator, " + ", ".join(clauses) + ".")
+        lens = domain_lens(p.domains)
+        if lens:
+            voice.append(lens)
+        if p.speech_patterns:
+            voice.append("Speech habits: " + "; ".join(s for s in p.speech_patterns if s) + ".")
+        if voice:
+            parts.append(" ".join(voice))
+        parts.append(PERSONA_BOUNDARY)
+        return "\n\n".join(parts)
+
     def card_path(self) -> Path | None:
         if self.root and self.card:
             p = self.root / self.card

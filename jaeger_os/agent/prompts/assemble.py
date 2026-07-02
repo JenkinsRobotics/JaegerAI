@@ -110,38 +110,12 @@ def _three_laws(_ctx: FragmentContext) -> str:
     return THREE_LAWS_PROMPT_BLOCK
 
 
-def _personality_block(ctx: FragmentContext) -> str:
-    # A broken personality file must NEVER take down the boot — the operator
-    # just gets the prompt without it and can fix the file at leisure.
-    try:
-        from pathlib import Path
-        from jaeger_os.personality import compose_block
-        from jaeger_os.personality.character import active_character
-        # Trait-driven: the active character's HEXACO/SPECIAL/Expression/Domains
-        # sliders, rendered into prose ("medium-high sarcasm", ...).
-        ch = active_character(Path(ctx.layout.root))
-        return (compose_block(ch.personality) or "") if ch is not None else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _active_char(ctx: "FragmentContext") -> "Any":
-    try:
-        from pathlib import Path
-        from jaeger_os.personality.character import active_character
-        return active_character(Path(ctx.layout.root))
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _identity_fragment(ctx: "FragmentContext") -> str:
-    ch = _active_char(ctx)
-    return ch.identity_block() if ch is not None else ""
-
-
-def _soul_fragment(ctx: "FragmentContext") -> str:
-    ch = _active_char(ctx)
-    return ch.soul_block() if ch is not None else ""
+# NOTE: there is deliberately NO character/persona fragment here. The persona is
+# applied by the two-pass OUTPUT FILTER (re-voicing the final reply), not injected
+# into the worker prompt — a 4B's execution degrades ~7% with a character in
+# context (measured: dev/docs/persona_compiler.md). Workers run vanilla; the
+# character's compiled View (Character.character_block()) feeds the filter, which
+# lives in the response path, not prompt assembly.
 
 
 # ── the registry: order here IS the prompt order ──────────────────────
@@ -164,21 +138,6 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
         "subagent_context", "instance", "(caller-supplied context)",
         lambda c: f"Context:\n{c.context.strip()}" if c.context else "",
         _subagent_only, "sub-agents, when context is supplied",
-    ),
-    PromptFragment(
-        "identity", "instance", "<active character>",
-        _identity_fragment, _all,
-        "who this agent is — every mode",
-    ),
-    PromptFragment(
-        "soul", "instance", "<active character>",
-        _soul_fragment, _non_subagent,
-        "voice / persona — skipped for sub-agents",
-    ),
-    PromptFragment(
-        "personality", "instance", "<active character>",
-        _personality_block, _non_subagent,
-        "trait-driven persona block from the active character",
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",
