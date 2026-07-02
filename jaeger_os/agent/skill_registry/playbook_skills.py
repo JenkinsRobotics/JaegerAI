@@ -324,26 +324,50 @@ def _format_skill_index(skills: list[PlaybookSkill]) -> str:
     return text
 
 
+def _short_function(desc: str) -> str:
+    """A 3-8 word 'what it does' for the always-on skill menu — first
+    clause of the SKILL.md description, trimmed."""
+    fn = (desc or "").strip().replace("\n", " ")
+    fn = fn.split(". ")[0].split(" — ")[0]
+    return (fn[:57].rstrip() + "…") if len(fn) > 58 else fn
+
+
 def build_skill_index(available_tools: set[str] | None = None) -> str:
-    """The lean, always-on skill *pointer* for the system prompt: the count +
-    category breadth + the cue to pull the detailed catalog when starting a
-    task. Keeps ambient awareness that skills exist (so the agent doesn't
-    reinvent the wheel) WITHOUT the per-turn cost of the full names index — the
-    enriched catalog is fetched on demand via ``skill(action="list")``.
+    """The always-on CAPABILITIES block: a skills menu (name + one-line
+    function, grouped by category) sitting alongside the tool surface, with
+    an explicit SKILL-FIRST rule. This is what lets skills surface like tools
+    — the model sees the menu every turn, not just a 'skills exist' pointer.
+    The full recipe (SKILL.md) is still pulled on demand via skill(view); the
+    detailed enriched catalog (tier/tools/fallbacks) via skill(action=list).
 
     Pass ``available_tools`` (active tool names) to hide skills whose required
     tools aren't present."""
     skills = available_playbooks(available_tools)
     if not skills:
         return ""
-    cats = sorted({s.category for s in skills})
-    return (
-        f"Skill playbooks: {len(skills)} experienced procedures available across "
-        f"{' · '.join(cats)}. When you START a non-trivial task, call "
-        'skill(action="list") in your research step to pull the detailed catalog '
-        "(each skill's function · tools · tier), then follow a matching playbook "
-        "or plan a tool chain. If none fits, use tools directly and note the gap."
-    )
+    by_cat: dict[str, list[tuple[str, str]]] = {}
+    for s in skills:
+        by_cat.setdefault(s.category, []).append((s.name, _short_function(s.description)))
+    lines = [
+        "Capabilities — pick in this order:",
+        '1) SKILLS — experienced playbooks. When a task matches one, open it '
+        'with skill(action="view", name="…") and follow it BEFORE reaching for '
+        "raw tools: it's the proven recipe, don't reinvent it. This includes "
+        "tool-backed skills (e.g. macOS control) — view the skill first, then "
+        "use its tools.",
+        "2) TOOLS — your full tool surface is already visible; for anything a "
+        "skill doesn't cover, call the specific tool that matches.",
+        "",
+        f"Skill playbooks ({len(skills)}):",
+    ]
+    for cat in sorted(by_cat):
+        entries = "; ".join(f"{n} — {f}" if f else n
+                            for n, f in sorted(by_cat[cat]))
+        lines.append(f"- {cat}: {entries}")
+    lines.append("")
+    lines.append('For the full detailed catalog (tier · tools · fallbacks) '
+                 'during planning, call skill(action="list").')
+    return "\n".join(lines)
 
 
 def find_playbook(name: str) -> PlaybookSkill | None:
