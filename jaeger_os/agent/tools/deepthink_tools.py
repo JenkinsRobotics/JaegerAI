@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
 from jaeger_os.agent.background.deep_think import queue_for_layout
 
 

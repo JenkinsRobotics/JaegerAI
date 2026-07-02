@@ -3903,7 +3903,7 @@ def boot_for_tui(
         # can't reach for ``send_message`` when Discord isn't set
         # up. The wiring is idempotent + best-effort.
         try:
-            from jaeger_os.agent.tools.availability import wire_availability_checks
+            from jaeger_os.agent.availability import wire_availability_checks
             wired = wire_availability_checks(agent)
             if wired:
                 print(f"[jaeger] availability wired for {wired} plugin-backed tool(s)",

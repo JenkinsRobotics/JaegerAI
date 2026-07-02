@@ -17,7 +17,7 @@ import platform
 import shutil
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
 
 
 def get_time(timezone: str | None = None) -> dict[str, Any]:

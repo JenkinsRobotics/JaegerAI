@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from jaeger_os.core import credentials as creds
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
 
 
 def get_credential(name: str) -> dict[str, Any]:

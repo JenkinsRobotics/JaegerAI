@@ -27,7 +27,7 @@ import subprocess
 import time
 from typing import Any
 
-from ._common import _audit, _require_layout
+from jaeger_os.core.context import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.runtime.tool_interrupt import ToolInterrupted, run_interruptible

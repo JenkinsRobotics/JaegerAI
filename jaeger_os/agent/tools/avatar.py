@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 
 # ── default emotion → adapter+asset mapping ─────────────────────────

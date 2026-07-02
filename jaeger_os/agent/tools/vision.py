@@ -17,7 +17,7 @@ import threading as _threading
 import time
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 from jaeger_os.core.runtime.tool_interrupt import is_interrupted
 
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ._common import (
+from jaeger_os.core.context import (
     SandboxError,
     _audit,
     _display_path,

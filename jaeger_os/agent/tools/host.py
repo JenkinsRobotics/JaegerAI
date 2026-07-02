@@ -17,7 +17,7 @@ import platform
 import subprocess
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 
 def _run_open(args: list[str], label: dict[str, Any]) -> dict[str, Any]:
