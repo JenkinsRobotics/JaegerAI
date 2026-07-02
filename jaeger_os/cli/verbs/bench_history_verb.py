@@ -530,6 +530,11 @@ _DEEP_TAGS = frozenset({"code", "multistep", "recovery"})
 _CONTEXT_TAGS = frozenset({"memory", "multiturn"})
 _MULTITURN_TAGS = frozenset({"multiturn", "cross_turn"})
 _SAFETY_TAGS = frozenset({"safety"})
+# v1.3 agentic categories — the new-generation behaviours (skill discovery,
+# task board, deep-think escalation, triage workflow, self-improvement,
+# persona). Rolled up into one "Agentic" leaderboard column.
+_AGENTIC_TAGS = frozenset({"skill", "kanban", "deepthink", "workflow",
+                           "self_improve", "persona"})
 
 # Score is just ``passed / total`` — every case worth the same
 # 1/total fraction. No tier weighting, no hidden math. The per-tier
@@ -551,11 +556,16 @@ def _category_pass(run_dir: pathlib.Path) -> dict[str, int]:
             "ctx_pass": 0, "ctx_total": 0,
             "mt_pass": 0, "mt_total": 0,
             "safety_pass": 0, "safety_total": 0,
+            "ag_pass": 0, "ag_total": 0,
+            "cat_breakdown": {},
             "safety_fail_ids": []}
     if not rf:
         return zero
-    dp = dt = rp = rt = cp = ct = mp = mt = sp = st = 0
+    dp = dt = rp = rt = cp = ct = mp = mt = sp = st = agp = agt = 0
     safety_fails: list[str] = []
+    # Per-category pass/total for the v1.3 category breakdown, so the
+    # per-model detail can show skill / kanban / deepthink / etc.
+    cat: dict[str, list[int]] = {}
     try:
         for line in rf[0].read_text(encoding="utf-8").splitlines():
             if not line.strip():
@@ -563,6 +573,9 @@ def _category_pass(run_dir: pathlib.Path) -> dict[str, int]:
             r = json.loads(line)
             tags = set(r.get("tags") or [])
             passed = 1 if r.get("case_pass") else 0
+            for t in tags:
+                c = cat.setdefault(t, [0, 0])
+                c[1] += 1; c[0] += passed
             if tags & _DEEP_TAGS:
                 dt += 1; dp += passed
             if "routing" in tags:
@@ -571,6 +584,8 @@ def _category_pass(run_dir: pathlib.Path) -> dict[str, int]:
                 ct += 1; cp += passed
             if tags & _MULTITURN_TAGS:
                 mt += 1; mp += passed
+            if tags & _AGENTIC_TAGS:
+                agt += 1; agp += passed
             if tags & _SAFETY_TAGS:
                 st += 1
                 if passed:
@@ -584,6 +599,8 @@ def _category_pass(run_dir: pathlib.Path) -> dict[str, int]:
             "ctx_pass": cp, "ctx_total": ct,
             "mt_pass": mp, "mt_total": mt,
             "safety_pass": sp, "safety_total": st,
+            "ag_pass": agp, "ag_total": agt,
+            "cat_breakdown": {k: tuple(v) for k, v in cat.items()},
             "safety_fail_ids": safety_fails}
 
 
@@ -633,18 +650,24 @@ def _family_of(name: str) -> str:
 
 _CAT_KEYS = ("deep_pass", "deep_total", "rt_pass", "rt_total",
              "ctx_pass", "ctx_total", "mt_pass", "mt_total",
-             "safety_pass", "safety_total", "safety_fail_ids")
+             "safety_pass", "safety_total", "ag_pass", "ag_total",
+             "cat_breakdown", "safety_fail_ids")
 
 
 def _latest_category(runs: list[dict[str, Any]]) -> dict[str, Any]:
     """Per-category counts from the most recent run that actually has
     them. Aggregated sweep rows carry none, so we skip past them to the
     newest flat run with per-case rows."""
+    def _default(k: str) -> Any:
+        if k == "safety_fail_ids":
+            return []
+        if k == "cat_breakdown":
+            return {}
+        return 0
     for r in runs:  # newest-first
         if any(r.get(k) for k in _CAT_KEYS):
-            return {k: r.get(k, 0 if k != "safety_fail_ids" else [])
-                    for k in _CAT_KEYS}
-    return {k: 0 if k != "safety_fail_ids" else [] for k in _CAT_KEYS}
+            return {k: r.get(k, _default(k)) for k in _CAT_KEYS}
+    return {k: _default(k) for k in _CAT_KEYS}
 
 
 def _score(model_row: dict[str, Any]) -> tuple[str, bool]:
@@ -1200,7 +1223,21 @@ def _render_per_case_block(model_row: dict[str, Any]) -> str:
                f"<code>{mode_label}</code> &nbsp;·&nbsp; "
                f"<b>{passed}/{total}</b> &nbsp;·&nbsp; latest {ts}")
 
-    table = ["| # | Test | Tags | Pass | Time | Tools called | Error |",
+    # Per-category breakdown (every tag a case carries), most-populous first —
+    # the granular "skill / kanban / deepthink / tool-routing / …" view.
+    cat_tally: dict[str, list[int]] = {}
+    for c in cases:
+        for t in (c.get("tags") or []):
+            b = cat_tally.setdefault(t, [0, 0])
+            b[1] += 1
+            b[0] += 1 if c.get("case_pass") else 0
+    cat_line = "  ·  ".join(
+        f"{t} {p}/{n}" for t, (p, n) in
+        sorted(cat_tally.items(), key=lambda kv: (-kv[1][1], kv[0]))
+    )
+
+    table = [f"**By category:** {cat_line}", "",
+             "| # | Test | Tags | Pass | Time | Tools called | Error |",
              "|---:|---|---|:--:|---:|---|---|"]
     for i, c in enumerate(cases, start=1):
         ok = "✅" if c.get("case_pass") else "❌"
@@ -1323,9 +1360,9 @@ def _render(
         "ideal works.",
         "",
         "| # | Model | Mode | Family | **Score** | Deep-think | "
-        "Real-time | Multi-turn | Safety | Best route% | Latest elapsed | "
-        "Tokens/task | Peak TPS | VRAM | Peak load | Latest run | Runs |",
-        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|",
+        "Real-time | Multi-turn | Agentic | Safety | Best route% | "
+        "Latest elapsed | Tokens/task | Latest run | Runs |",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|",
     ]
     # ``Raw tok/s`` = the model's per-token GPU decode rate measured by
     # ``run_model_sanity`` on a trivial prompt. ``Bench tok/s`` =
@@ -1341,9 +1378,11 @@ def _render(
         dt, rt = r.get("deep_total", 0), r.get("rt_total", 0)
         mt_t = r.get("mt_total", 0)
         st = r.get("safety_total", 0)
+        ag_t = r.get("ag_total", 0)
         deep = f"{r.get('deep_pass', 0)}/{dt}" if dt else "—"
         real = f"{r.get('rt_pass', 0)}/{rt}" if rt else "—"
         multi = f"{r.get('mt_pass', 0)}/{mt_t}" if mt_t else "—"
+        agentic = f"{r.get('ag_pass', 0)}/{ag_t}" if ag_t else "—"
         safety = f"{r.get('safety_pass', 0)}/{st}" if st else "—"
         score = r.get("score_display", "—")
         rec = sanity_records.get(r["model"]) or {}
@@ -1392,10 +1431,10 @@ def _render(
         peak_tps_disp = f"{peak_tps:.1f}" if peak_tps else "—"
         lines.append(
             f"| {i} | `{r['model']}` | {mode_label} | {r['family']} | "
-            f"**{score}** | {deep} | {real} | {multi} | {safety} | "
+            f"**{score}** | {deep} | {real} | {multi} | {agentic} | {safety} | "
             f"{r['best_route_pct']:.1f}% | "
             f"{_format_duration(r.get('latest_wall_s', 0.0))} | "
-            f"{tokens_disp} | {peak_tps_disp} | {vram_disp} | {load_disp} | "
+            f"{tokens_disp} | "
             f"{latest_ts} | {r['run_count']} |"
         )
 
