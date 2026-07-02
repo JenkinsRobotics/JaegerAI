@@ -79,9 +79,9 @@ CORE: frozenset[str] = frozenset({
     # Tasks + board — both umbrellas. Granular ``board_*`` tools
     # load via the ``board`` toolset.
     "todo", "kanban",
-    # Skill discovery (umbrella) + delegation. Heavy procedures live
-    # behind ``skill(action="view", name=…)``.
-    "skill", "delegate_task",
+    # Skill discovery (umbrella) + the enum-callable use_skill + delegation.
+    # Heavy procedures live behind ``skill(view)`` / ``use_skill(name=…)``.
+    "skill", "use_skill", "delegate_task",
     # User interaction.
     "clarify", "help_me",
     # Meta — always visible so the model can grow its toolbox

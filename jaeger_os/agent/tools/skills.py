@@ -348,3 +348,40 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
                                version=version, origin="self-improvement",
                                summary=summary, delta=benchmark_delta)
     return {"ok": True, "skill": r.skill, "version": r.version, "ts": r.ts}
+
+
+# ── use_skill: skill selection as a first-class, enum-constrained TOOL ──
+# Skills as callable-like-tools (per the 2026-07-02 refactor plan). The 87
+# playbook names become a schema ENUM on a real tool, so the model picks a
+# skill from its NATIVE ACTION SPACE the same structured way it picks any
+# tool — and the ~1.9k-token prose menu is dropped from the system prompt
+# (build_skill_index → a one-line pointer). use_skill(name) returns the
+# playbook recipe to follow (delegates to the skill(view) reader).
+def _register_use_skill() -> None:
+    import typing
+    from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+    names = [s.name for s in _pb.available_playbooks()]
+    if not names:
+        return
+    skill_name_enum = typing.Literal[tuple(names)]  # dynamic enum of names
+
+    def use_skill(name) -> str:
+        """Load a specialized JROS playbook recipe and FOLLOW it. You MUST
+        call this BEFORE reaching for raw tools when the task is a
+        specialized domain: research (papers, blogs, wikis), codebase
+        analysis, creative output (ascii art, diagrams, music, infographics),
+        an external app/service (spotify, notion, github, email, obsidian),
+        or macOS/desktop automation. Returns the playbook's step-by-step
+        recipe — execute it with your normal tools. `name` must be one of
+        the listed skills."""
+        r = skill(action="view", name=str(name))
+        if not r.get("ok"):
+            return (f"Error loading skill '{name}': {r.get('error')}. "
+                    "Pick an exact name from the available list.")
+        return f"PLAYBOOK RECIPE — {r.get('name')}:\n\n{r.get('instructions','')}"
+
+    use_skill.__annotations__ = {"name": skill_name_enum, "return": str}
+    register_tool_from_function(side_effect="read")(use_skill)
+
+
+_register_use_skill()
