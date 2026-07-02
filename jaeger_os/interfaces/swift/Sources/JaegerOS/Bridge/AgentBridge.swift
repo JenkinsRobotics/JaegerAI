@@ -61,7 +61,22 @@ final class AgentBridge: ObservableObject {
         status = AgentStatus(rawDict: [
             "instance": ready.instance,
             "model": ready.model as Any,
+            "character": ready.character as Any,
+            "icon": ready.icon as Any,
         ])
+    }
+
+    /// Read-only data for the settings HUD (characters, config, permissions).
+    func query(_ what: String, args: [String: any Sendable] = [:]) async -> QueryResult {
+        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
+        return await bridge.query(what, args: args)
+    }
+
+    /// A mutation (select/make-default/save…). Check ``ok``/``error``.
+    @discardableResult
+    func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
+        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
+        return await bridge.command(cmd, args: args)
     }
 
     /// Connect without throwing — failures land on ``lastError``. The
@@ -135,6 +150,10 @@ struct AgentStatus {
 
     var instance: String? { rawDict["instance"] as? String }
     var modelName: String? { rawDict["model"] as? String }
+    /// Active character's display name — the agent's name in the tray/header.
+    var character: String? { rawDict["character"] as? String }
+    /// Absolute path to the active character's profile image, if any.
+    var iconPath: String? { rawDict["icon"] as? String }
     var uptimeSeconds: Double? { rawDict["uptime"] as? Double }
     var turnCount: Int? { rawDict["turns"] as? Int }
 

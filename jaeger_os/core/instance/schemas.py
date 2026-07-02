@@ -255,6 +255,14 @@ class VoiceConfig(BaseModel):
         False,
         description="Mic live from TUI boot. Off (default) = text-only TUI.",
     )
+    speak_replies: bool = Field(
+        True,
+        description=(
+            "Speaker default: read each agent reply aloud (TTS) in the chat/"
+            "avatar windows. On by default; the window's speaker toggle mirrors "
+            "this and can flip it per-window."
+        ),
+    )
     wake_word: bool = Field(
         True,
         description=(
@@ -547,6 +555,15 @@ class InteractionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     default_mode: Literal["tui", "gui", "voice"] = "tui"
+    ui: Literal["pyside6", "swift"] = Field(
+        "swift",
+        description=(
+            "Windowed-app UI toolkit. 'swift' = the native SwiftUI app "
+            "(interfaces/swift/); 'pyside6' = the Qt app. launch.py builds+runs "
+            "the Swift app when set to 'swift', falling back to PySide6 if the "
+            "Swift build/binary is unavailable."
+        ),
+    )
 
 
 class AvatarConfig(BaseModel):

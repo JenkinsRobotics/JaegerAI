@@ -109,6 +109,13 @@ class Character:
             return p if p.exists() else None
         return None
 
+    def icon_path(self) -> Path | None:
+        """Square profile icon for tray / menus / small avatars. Uses a dedicated
+        ``icon`` asset when the character ships one, else falls back to the card
+        art. Add ``assets/icon.png`` + an ``icon`` manifest entry for a tighter
+        crop; until then the card serves."""
+        return self.asset("icon") or self.card_path()
+
     def asset(self, role: str) -> Path | None:
         """Resolve a manifest asset by ROLE (e.g. 'model', 'idle', 'sprites') —
         the character's own ``assets/`` first, then the shared jaeger_os/assets/
@@ -292,6 +299,35 @@ def save_character_traits(folder: Path, traits: dict) -> None:
         if layer in traits:
             t[layer] = {k: round(float(v), 3) for k, v in traits[layer].items()}
     # An edit is a new revision — bump the definition version (level is separate).
+    doc["revision"] = round(float(doc.get("revision", 1.0) or 1.0) + 0.1, 1)
+    yf.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+
+def save_character_profile(folder: Path, *, role: str | None = None,
+                           voice_tone: str | None = None, voice_id: str | None = None,
+                           soul: str | None = None, backstory: str | None = None,
+                           custom_instructions: str | None = None) -> None:
+    """Write edited identity/prompt fields back to <folder>/character.yaml.
+
+    Companion to :func:`save_character_traits` — that one owns the trait layers,
+    this one owns the narrative + identity. Only non-None fields are touched;
+    bumps ``revision`` so the running agent re-reads the persona next turn."""
+    yf = Path(folder) / "character.yaml"
+    doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
+    ident = doc.setdefault("identity", {})
+    prompt = doc.setdefault("prompt", {})
+    if role is not None:
+        ident["role"] = role
+    if voice_tone is not None:
+        ident["voice_tone"] = voice_tone
+    if voice_id is not None:
+        ident["voice_id"] = voice_id
+    if soul is not None:
+        prompt["soul"] = soul
+    if backstory is not None:
+        prompt["backstory"] = backstory
+    if custom_instructions is not None:
+        prompt["custom_instructions"] = custom_instructions
     doc["revision"] = round(float(doc.get("revision", 1.0) or 1.0) + 0.1, 1)
     yf.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
