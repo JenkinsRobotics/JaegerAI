@@ -71,6 +71,25 @@ def get_layout() -> InstanceLayout:
     return _require_layout()
 
 
+# Runtime session key for admin-gated tools (certify_admin). Set per-turn by
+# the dispatch layer; read by tools that live in tools/ but need to know WHO
+# is asking — without importing main._pipeline (which would invert the
+# tool→core layering the way _common did before it moved into core).
+_current_session: str = ""
+
+
+def set_current_session(key: str) -> None:
+    """Record the current session key (``channel:id`` or ``local``). Mirrors
+    what used to live in ``main._pipeline['current_session']``."""
+    global _current_session
+    _current_session = key or ""
+
+
+def get_current_session() -> str:
+    """The current session key, or ``''`` when unset."""
+    return _current_session
+
+
 def get_effective_workspace_dir() -> Path:
     """Where ``workspace/...`` writes actually land. Honours the
     override set by ``bind(workspace_override=...)`` if any;

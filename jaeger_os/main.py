@@ -40,6 +40,7 @@ from jaeger_os.core.memory import memory as mem
 from jaeger_os.agent.prompts import prompts as prompt_module
 from jaeger_os.core.runtime import tool_interrupt
 from .agent import tools as jaeger_tools
+from jaeger_os.core import context as _context
 from jaeger_os.agent.background.cron_runner import CronRunner
 from jaeger_os.core.instance.instance import (
     CoreVersionMismatch,
@@ -1587,44 +1588,10 @@ def _register_builtins(client: Any) -> None:
             return _delegate_internal(client, clean[0])
         return _delegate_parallel(client, clean)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="messaging",
-                   operation="send_message",
-                   summary="send a message on an external channel")
-    def send_message(channel: str, recipient: str, text: str) -> dict:
-        """Send a proactive message to a user on a messaging channel.
-
-        Available `channel` values depend on which bridges are live in
-        this process — typically "discord", "telegram", "imessage".
-        `recipient` is the channel-specific ID (numeric Discord user ID,
-        Telegram chat ID, or iMessage phone/Apple-ID handle).
-
-        Use this together with `schedule_prompt` to send unattended
-        notifications: schedule a prompt that says "send the weather to
-        Discord user 12345" and the cron runner will fire it on time.
-        """
-        text_clean = (text or "").strip()
-        channel_clean = (channel or "").strip().lower()
-        recipient_clean = (recipient or "").strip()
-        if not channel_clean or not recipient_clean or not text_clean:
-            return {"sent": False, "error": "channel, recipient, and text are all required"}
-        try:
-            from .plugins import get_bridge, list_bridges
-        except Exception as exc:
-            return {"sent": False, "error": f"messaging plugin not importable: {exc}"}
-        bridge = get_bridge(channel_clean)
-        if bridge is None:
-            return {
-                "sent": False,
-                "error": (f"no {channel_clean!r} bridge is running in this process. "
-                          f"Start it with activate_plugin({channel_clean!r}) — it reads "
-                          f"the credential you saved with set_credential. Live bridges: "
-                          f"{list_bridges()}"),
-            }
-        try:
-            return bridge.send(recipient_clean, text_clean)
-        except Exception as exc:
-            return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
+    # send_message + certify_admin now live in tools/messaging.py — importing
+    # it registers them (they reach runtime state via core.context accessors,
+    # not a client closure, so they belong in tools/ like every other tool).
+    from jaeger_os.agent.tools import messaging as _messaging  # noqa: F401
 
     @register_tool_from_function
     def activate_plugin(name: str) -> dict:
@@ -1680,48 +1647,6 @@ def _register_builtins(client: Any) -> None:
         Returns {autonomy, options, description}."""
         from jaeger_os.core.runtime.autonomy import autonomy_info
         return autonomy_info()
-
-    @register_tool_from_function
-    def certify_admin(channel: str, identifier: str) -> dict:
-        """Certify a remote messaging account as the OWNER (admin) — e.g.
-        certify_admin("telegram", "8777030623") or ("discord", "<user id>").
-
-        ADMIN-ONLY: this only works when YOU run it from an admin context (the
-        desktop / TUI, or an already-certified account). A stranger on the bot
-        CANNOT self-certify — it's denied for non-admin sessions. After this,
-        that account gets slash commands + approvals + higher-tier actions;
-        everyone else stays conversation-only. Stores the id in the channel's
-        <CHANNEL>_ADMIN_IDS credential. Returns {ok, channel, admins}."""
-        cur = _pipeline.get("current_session", "")
-        from jaeger_os.core.safety.session_trust import is_admin_session, mark_session
-        if not is_admin_session(cur):
-            return {"ok": False, "error": "not authorized — only the owner (an admin "
-                                          "session) can certify admins"}
-        ch = (channel or "").strip().lower()
-        if ch not in ("telegram", "discord", "imessage"):
-            return {"ok": False, "error": f"unknown channel {ch!r} (telegram/discord/imessage)"}
-        ident = (identifier or "").strip()
-        if not ident:
-            return {"ok": False, "error": "identifier required (the account id / handle)"}
-        layout = _pipeline.get("layout")
-        cred = f"{ch.upper()}_ADMIN_IDS"
-        from jaeger_os.core import credentials as creds
-        try:
-            existing = creds.get_credential(layout, cred)
-        except Exception:  # noqa: BLE001 — not set yet
-            existing = ""
-        ids = {x.strip() for x in existing.split(",") if x.strip()}
-        ids.add(ident)
-        creds.set_credential(layout, cred, ",".join(sorted(ids)))
-        mark_session(f"{ch}:{ident}", True)   # instant effect for a live session
-        # Also record the owner in the person index (one source of truth).
-        try:
-            from jaeger_os.core import people
-            people.upsert_person(_pipeline.get("layout"), name="Owner",
-                                 access="admin", channel=ch, handle=ident)
-        except Exception:  # noqa: BLE001 — best-effort
-            pass
-        return {"ok": True, "channel": ch, "admins": sorted(ids)}
 
     @register_tool_from_function
     def remember_person(name: str, note: str = "", like: str = "", access: str = "",
@@ -2874,6 +2799,7 @@ def _run_turn_via_jaeger_agent(
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
+        _context.set_current_session(key)    # same, for tools that live in tools/
         _refresh_character_prompt(jaeger_agent)
         _tag_confirm_session(key)   # route a mid-turn approval to this channel
         if lock is not None:
