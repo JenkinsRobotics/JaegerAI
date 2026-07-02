@@ -698,6 +698,29 @@ CASES: list[BenchCase] = [
                                      "I'm an AI assistant developed by",
                                      "I am an AI developed by"],
               tags=["persona"]),
+
+    # ── EXPERIMENT: two-turn PLAN-FIRST (does an isolated planning turn,
+    # where the agent reviews skills before any execution, fix the
+    # reflexive tool grab?). Turn 1 = plan only; turn 2 = execute (scored).
+    # Tagged plan_first ONLY so it doesn't skew the skill category count.
+    BenchCase(id="pf_arxiv_plan", session="pf_arxiv",
+              prompt="I want recent arXiv papers on retrieval-augmented "
+                     "generation. DON'T do it yet — first tell me your plan: "
+                     "which skill or tools would you use, and why?",
+              tags=["plan_first"]),
+    BenchCase(id="pf_arxiv_do", session="pf_arxiv",
+              prompt="Great plan — go ahead and do it now.",
+              expected_skills=["arxiv"],
+              tags=["plan_first"]),
+    BenchCase(id="pf_macos_plan", session="pf_macos",
+              prompt="I want to turn on Dark Mode on this Mac. DON'T do it "
+                     "yet — first describe your plan and which skill or tools "
+                     "you'd use.",
+              tags=["plan_first"]),
+    BenchCase(id="pf_macos_do", session="pf_macos",
+              prompt="Perfect — go ahead and do it now.",
+              expected_skills=["macos-computer-use"],
+              tags=["plan_first"]),
 ]
 
 
