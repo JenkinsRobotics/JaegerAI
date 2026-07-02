@@ -59,12 +59,12 @@ from typing import Any, Iterable
 _DEFAULT_SINCE = "2026-05-29"
 
 # The current corpus generation — MUST track ``cases.BENCHMARK_VERSION``
-# (the source of truth; 1.2 = 65 cases). When the corpus is bumped, bump here
-# too, or current runs get FILTERED OUT of the leaderboard — the exact bug this
-# guards against (the bump to 1.2 left this stuck at 1.1, so every 65-case run
-# was excluded). Going-forward runs stamp ``benchmark_version`` explicitly;
-# legacy runs infer by case count via ``_version_from_cases``.
-_CURRENT_BENCH_VERSION = "1.2"
+# (the source of truth; 1.3 = 77 cases, category-tagged). When the corpus is
+# bumped, bump here too, or current runs get FILTERED OUT of the leaderboard —
+# the exact bug this guards against (the bump left this stuck one version back,
+# so every current run was excluded). Going-forward runs stamp
+# ``benchmark_version`` explicitly; legacy runs infer via ``_version_from_cases``.
+_CURRENT_BENCH_VERSION = "1.3"
 _BENCH_V11_CUTOFF = "2026-05-29"
 
 
@@ -92,8 +92,10 @@ def _infer_bench_version(summary: dict[str, Any]) -> str:
 
 def _version_from_cases(total: int) -> str:
     """Corpus version inferred from case count for legacy runs without an
-    explicit ``benchmark_version`` stamp: 65 = v1.2, 59 = v1.1, else v1.0.
-    (Tiered so a real 59-case v1.1 run isn't mislabeled as the current 1.2.)"""
+    explicit ``benchmark_version`` stamp: 77 = v1.3, 65 = v1.2, 59 = v1.1,
+    else v1.0. (Tiered so an older run isn't mislabeled as the current gen.)"""
+    if total >= 77:
+        return "1.3"
     if total >= 65:
         return "1.2"
     if total >= 59:
