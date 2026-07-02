@@ -18,10 +18,10 @@ from pathlib import Path
 import pytest
 
 from jaeger_os.core.instance.instance import InstanceLayout
-from jaeger_os.agent.tools._common import (
+from jaeger_os.core.context import (
     SandboxError, _require_layout, _resolve_write,
 )
-import jaeger_os.agent.tools._common as _common
+import jaeger_os.core.context as _common
 from jaeger_os.agent.tools import files as file_tools
 
 

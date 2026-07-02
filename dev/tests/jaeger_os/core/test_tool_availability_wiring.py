@@ -18,7 +18,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from jaeger_os.agent.schemas.tool_schema import ToolDef
-from jaeger_os.agent.tools.availability import (
+from jaeger_os.agent.availability import (
     _TOOL_TO_PLUGIN,
     wire_availability_checks,
 )

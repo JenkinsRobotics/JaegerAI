@@ -55,7 +55,7 @@ def _check_layout() -> tuple[bool, str]:
     read-only filesystem (USB drive, NixOS store accidentally
     selected as instance root) breaks every later check, so this
     runs first and gives a decisive failure when it bites."""
-    from jaeger_os.agent.tools._common import _require_layout
+    from jaeger_os.core.context import _require_layout
     layout = _require_layout()
     for attr in ("logs_dir", "memory_dir", "skills_dir"):
         d = getattr(layout, attr, None)
@@ -72,7 +72,7 @@ def _check_file_sandbox() -> tuple[bool, str]:
     """Write + read + delete a probe file via the real sandbox path
     resolver. Catches a broken ``_resolve_under`` rule or a permission
     glitch on the skills/ directory."""
-    from jaeger_os.agent.tools._common import _require_layout
+    from jaeger_os.core.context import _require_layout
     layout = _require_layout()
     probe = layout.skills_dir / f"_health_probe_{uuid.uuid4().hex[:8]}.txt"
     body = "ok"
@@ -209,7 +209,7 @@ def _check_skills_loaded() -> tuple[bool, str]:
     which is a confusing failure mode — the agent boots fine but says
     "I have no skills" mid-conversation."""
     from jaeger_os.agent.skill_registry.skill_loader import discover_skills
-    from jaeger_os.agent.tools._common import _require_layout
+    from jaeger_os.core.context import _require_layout
     layout = _require_layout()
     try:
         skills = list(discover_skills(layout))
@@ -383,7 +383,7 @@ def _check_agent_sandbox_write() -> tuple[bool, str]:
     work."""
     try:
         from jaeger_os.main import _pipeline, run_command
-        from jaeger_os.agent.tools._common import _require_layout
+        from jaeger_os.core.context import _require_layout
     except Exception as exc:  # noqa: BLE001
         return False, f"could not import agent: {exc}"
     client = _pipeline.get("client")

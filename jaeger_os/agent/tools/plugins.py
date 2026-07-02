@@ -16,7 +16,7 @@ import os
 import pathlib
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
 
 try:
     import yaml as _yaml  # PyYAML is already a hard dep

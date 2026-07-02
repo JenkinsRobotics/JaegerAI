@@ -164,7 +164,7 @@ def _archive_dir() -> Path:
     """Where archived skills live — always *outside* the scanned skills
     tree so an archived skill is not re-discovered."""
     try:
-        from jaeger_os.agent.tools._common import get_layout
+        from jaeger_os.core.context import get_layout
         return get_layout().root / "skills_archived"
     except Exception:  # noqa: BLE001
         from jaeger_os.agent.skill_registry.playbook_skills import _SKILLS_DIR
