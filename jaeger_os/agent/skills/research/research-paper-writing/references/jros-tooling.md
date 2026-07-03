@@ -1,8 +1,10 @@
 # JROS Tooling for the Research Pipeline
 
 How to drive the research-paper pipeline with REAL JROS tools. Every tool below is in
-the JROS registry — do not substitute names from other agents (there is no
-`delegate_task`, `cronjob`, `send_message`, `clarify`, or `process` tool in JROS).
+the JROS registry — do not substitute names from other agents. JROS HAS
+`delegate_task` (fan out to sub-agents), `clarify` (ask a blocking question),
+`schedule_prompt` (periodic/scheduled), and `start_background` (long processes). It has
+NO `cronjob`, `send_message`, or `process` tool — use the JROS names above instead.
 
 ## Tool map
 
@@ -18,11 +20,11 @@ the JROS registry — do not substitute names from other agents (there is no
 | Scheduled monitoring / deadline pings | `schedule_prompt`, `list_schedules`, `cancel_schedule` |
 | Load a companion recipe | `use_skill(name=...)`, browse with `list_skills(action="view", ...)` |
 
-There is **no parallel-subagent / delegation tool in JROS.** Draft sections
-sequentially, or offload a long-running crawl/experiment to `start_background` and
-poll it with `check_background`. Notify the user by responding in chat — there is no
-`send_message`. Ask blocking questions by asking directly in your reply — there is no
-`clarify` tool.
+**Parallel/subagent work:** `delegate_task([...])` hands focused subtasks to fresh
+sub-agents (no parent history; shared memory/tools; max 2 concurrent, turns serialize)
+— draft sections or run analyses in isolation. For a long crawl/experiment, offload to
+`start_background` and poll with `check_background`. Ask blocking questions with the
+`clarify` tool (or just ask in your reply).
 
 ## Companion skills
 

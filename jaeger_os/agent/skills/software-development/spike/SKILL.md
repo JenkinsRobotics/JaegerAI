@@ -3,7 +3,7 @@ name: spike
 description: "Build throwaway prototypes to validate an idea before committing to a real build — load this when the user says 'let me try this', 'spike it out', 'is this even possible?', 'quick prototype of X', or 'compare A vs B'."
 version: 1.1.0
 platforms: [macos, linux, windows]
-requires_tools: [web_search, web_extract, terminal, write_file, read_file, todo]
+requires_tools: [web_search, web_extract, terminal, write_file, read_file, todo, delegate_task]
 metadata:
   jros:
     tags: [spike, prototype, experiment, feasibility, proof-of-concept]
@@ -78,8 +78,9 @@ HARDCODE everything — no Docker, bundlers, config systems, env files. It's a s
 DEPTH OVER SPEED: never declare "it works" after one happy path. Test edge cases;
 follow surprising findings. The verdict is only trustworthy if the probe was honest.
 
-For comparison spikes (002a/002b), build them BACK TO BACK, then write the
-head-to-head. (There is no sub-agent delegation tool — build sequentially.)
+For comparison spikes (002a/002b), build them back to back, then write the
+head-to-head — or hand them to fresh sub-agents with
+`delegate_task(["build spike 002a: …", "build spike 002b: …"])` (max 2 concurrent).
 
 ### 5. VERDICT
 Close each spike's `README.md` with:

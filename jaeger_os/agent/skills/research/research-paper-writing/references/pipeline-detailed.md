@@ -222,7 +222,7 @@ Round 3 (Targeted): Fill specific gaps
 
 **When to stop**: If a round returns >80% papers already in your collection, the search is saturated. Typically 2-3 rounds suffice. For survey papers, expect 4-5 rounds.
 
-**For agent-based workflows**: Run each round's queries with `web_search`, offload hits to a file with `append_file`, deduplicate, then generate the next round's queries from the combined learnings. (JROS has no parallel-subagent tool — batch the searches sequentially, or drive a long crawl with `start_background`.)
+**For agent-based workflows**: Run each round's queries with `web_search`, offload hits to a file with `append_file`, deduplicate, then generate the next round's queries from the combined learnings. (Batch the searches sequentially, fan them out with `delegate_task([...])` to fresh sub-agents, or drive a long crawl with `start_background`.)
 
 ### Step 1.3: Verify Every Citation
 
