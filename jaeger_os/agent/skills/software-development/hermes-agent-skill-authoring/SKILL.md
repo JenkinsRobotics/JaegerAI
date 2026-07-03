@@ -123,7 +123,7 @@ Pick the closest existing category. Don't invent new top-level categories casual
    assert len(content) <= 100_000
    ```
 5. **Git add + commit** on the active branch.
-6. **Note:** the CURRENT session's skill loader is cached — `skill_view` / `skills_list` will not see the new skill until a new session. This is expected, not a bug.
+6. **Note:** the CURRENT session's skill loader is cached — `skill_view` / `skill(action="list")` will not see the new skill until a new session. This is expected, not a bug.
 
 ## Cross-Referencing Other Skills
 

@@ -37,7 +37,7 @@ system, shadows, responsive behavior, and practical agent prompts with exact CSS
 ## How to Use
 
 1. Pick a design from the catalog below
-2. Load it: `skill_view(name="popular-web-designs", file_path="templates/<site>.md")`
+2. Load it: `skill(action="view", name="popular-web-designs", file="templates/<site>.md")`
 3. Use the design tokens and component specs when generating HTML
 4. Pair with the `generative-widgets` skill to serve the result via cloudflared tunnel
 
