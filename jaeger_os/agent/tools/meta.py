@@ -149,4 +149,31 @@ def load_toolset(name: str = "") -> dict[str, Any]:
     }
 
 
-__all__ = ["describe_tool", "load_toolset"]
+@register_tool_from_function
+def list_tools(query: str = "") -> dict[str, Any]:
+    """Search the FULL tool index — EVERY tool (even ones not currently
+    visible), what it does, and which toolset holds it. Use this to FIND
+    the exact tool a task needs before acting — e.g. ``list_tools("weather")``
+    → ``get_weather`` lives in the ``web`` toolset; then ``load_toolset("web")``
+    to bring it in. ALWAYS search here before force-fitting a visible tool or
+    concluding a task can't be done. Optional ``query`` filters by substring in
+    the tool name or description; empty ``query`` returns the whole index."""
+    from jaeger_os.agent.schemas.tool_registry import get_tools
+    from jaeger_os.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
+    where: dict[str, str] = {}
+    for ts, tools in TOOLSETS.items():
+        for t in tools:
+            where[t] = ts
+    q = (query or "").strip().lower()
+    rows = []
+    for t in sorted(get_tools(), key=lambda x: x.name):
+        desc = " ".join((t.description or "").split())[:80]
+        if q and q not in t.name.lower() and q not in desc.lower():
+            continue
+        loc = "CORE" if t.name in CORE else where.get(t.name, "other")
+        rows.append({"tool": t.name, "toolset": loc, "does": desc})
+    return {"ok": True, "count": len(rows), "tools": rows,
+            "note": "not-CORE tools: load their toolset with load_toolset(<toolset>)"}
+
+
+__all__ = ["describe_tool", "load_toolset", "list_tools"]

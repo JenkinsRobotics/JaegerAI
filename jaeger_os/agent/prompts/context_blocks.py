@@ -150,7 +150,7 @@ def build_runtime_tail() -> str:
     # scoped-mode mechanics (load_toolset / describe_tool) remain here, and
     # only when scoping is actually on.
     if not scoped:
-        return ""
+        return "Tool surface:\n" + RUNTIME_TOOLSET_UNSCOPED.strip()
     return "Tool surface:\n" + RUNTIME_TOOLSET_SCOPED.strip()
 
 
