@@ -15,7 +15,7 @@ platforms: [linux, macos, windows]         # drop any it genuinely can't run on
 requires_tools: [<real JROS tool names this recipe CALLS>]   # for integration/hints
 metadata:
   jros:
-    tags: [<3-6 keywords — feed skill(action="search"); the loader reads jros.tags>]
+    tags: [<3-6 keywords — feed list_skills(action="search"); the loader reads jros.tags>]
     category: <the folder's category>
     related_skills: [<skills a user might chain — best-effort>]
 ---
@@ -68,7 +68,7 @@ skills. A skill whose TASK writes project/source/test files must tell the agent 
 use `execute_code` or `terminal` for those, not `write_file`.
 
 ## The lifecycle (tools)
-study (`skill`/`use_skill`/`list_skill_dir`) → author (`write_file`/`patch`) →
+study (`list_skills`/`use_skill`/`list_skill_dir`) → author (`write_file`/`patch`) →
 verify (`benchmark_skill`) → record (`record_skill_revision`) → journal in use
 (`skill_note`) → deep improve (`request_skill_review`) → share (`package_skill`).
 Rule: keep a change only if `benchmark_skill` shows no regression.

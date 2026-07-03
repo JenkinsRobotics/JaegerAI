@@ -31,7 +31,7 @@ matching reference file for full step-by-step detail.
 - `web_search(...)` then `web_extract(url=…)` — literature discovery + verification.
 - `todo(action=…)` + `memory(action=…)` — cross-session state.
 - `schedule_prompt(cron=…, prompt=…)` — periodic monitoring / deadline pings.
-- `use_skill(name=…)` to load a companion; `skill(action="view", name=…)` to browse it.
+- `use_skill(name=…)` to load a companion; `list_skills(action="view", name=…)` to browse it.
 - Full tool map + patterns: `read_file("references/jros-tooling.md")`.
 
 ## CORE PRINCIPLES

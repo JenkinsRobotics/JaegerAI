@@ -249,15 +249,25 @@ def skill(action: str, name: str = "", query: str = "",
 # ---------------------------------------------------------------------------
 # Agent-facing tool wrappers (migrated from main._register_builtins).
 # ---------------------------------------------------------------------------
-@register_tool_from_function(name="skill", side_effect="read")
-def _t_skill(action: str, name: str = "", query: str = "",
+@register_tool_from_function(name="list_skills", side_effect="read")
+def _t_skill(action: str = "list", name: str = "", query: str = "",
              file: str = "") -> dict:
-    """Discover and read playbook skills — experienced procedures
-    for a task. ``action`` ∈ list / search / view. Use ``search``
-    FIRST when a task might have a matching playbook (the
-    OPERATING_DISCIPLINE rule). ``view`` returns the full skill
-    body + its bundled-file listing; pass ``file=...`` to read
-    one. See ``describe_tool("skill")`` for the full contract."""
+    """LIST, SEARCH, and read your playbook skills — the skill-library
+    lookup (the read-only counterpart to ``use_skill``, which loads ONE
+    recipe to follow). ``action`` selects the operation:
+
+      - ``list``   — the FULL catalog of available skills (the default).
+        Call it when STARTING a non-trivial task to see what exists.
+      - ``search`` — skills matching ``query`` (name/description/tags).
+      - ``view``   — the full instructions of skill ``name`` (+ its
+        bundled files; pass ``file="references/x.md"`` to read one).
+      - ``curate`` — audit the library for STALE / unused skills.
+      - ``stats``  — which skills/tools get used most.
+
+    Does NOT create or edit skills (that's ``write_file`` + the
+    skill-builder recipe). Read-only. Reach for it whenever a task is
+    specialized ("inspect a codebase", "search arxiv", "check for stale
+    skills")."""
     return skill(action=action, name=name, query=query, file=file)
 
 

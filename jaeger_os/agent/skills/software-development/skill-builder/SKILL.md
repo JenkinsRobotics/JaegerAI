@@ -3,7 +3,7 @@ name: skill-builder
 description: "Create, review, or improve a JROS skill (a SKILL.md playbook). Load this whenever the task is to author a new skill, fix/tighten an existing one, or audit the skill library — it hands you the standard, the exact authoring tools, and the review + benchmark loop."
 version: 1.0.0
 platforms: [linux, macos, windows]
-requires_tools: [write_file, patch, read_file, list_skill_dir, search_files, skill, use_skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
+requires_tools: [write_file, patch, read_file, list_skill_dir, search_files, list_skills, use_skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
 metadata:
   jros:
     tags: [skill, authoring, meta, review, standard, playbook]
@@ -21,8 +21,8 @@ is a folder under `jaeger_os/agent/skills/<category>/<name>/` with a `SKILL.md`
 ## THE AUTHORING TOOLS (exact names — call with named args)
 ```
 list_skill_dir(path="…")                     survey the skills tree
-skill(action="list") / skill(action="search", query="…")   study peer skills
-skill(action="view", name="…", file="references/x.md")     read a skill's files
+list_skills(action="list") / list_skills(action="search", query="…")   study peer skills
+list_skills(action="view", name="…", file="references/x.md")     read a skill's files
 use_skill(name="…")                          load a peer recipe to learn its shape
 write_file(path="…", content="…")            create/overwrite a skills/ file
 patch(path="…", old="…", new="…")            surgical edit of an EXISTING skills/ file (prefer this)
@@ -56,7 +56,7 @@ references/, fetched with read_file — never inline).
   Target 50–130 lines for SKILL.md; overflow → references/.
 
 ## FLOW A — CREATE a new skill
-1. STUDY: `skill(action="search", query=…)` for near-duplicates (don't rebuild an
+1. STUDY: `list_skills(action="search", query=…)` for near-duplicates (don't rebuild an
    existing skill); `use_skill` the closest peer to copy its shape.
 2. DRAFT: pick `<category>/<name>/`, `write_file` the SKILL.md to the schema in
    references/authoring-standard.md. Verify every tool name is real (rule 1).

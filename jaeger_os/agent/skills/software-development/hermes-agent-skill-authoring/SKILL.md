@@ -26,7 +26,7 @@ runtime state. `write_file` writes into the sandboxed `skills/` tree.
 
 ## TOOLS (real JROS names — never invent one)
 - `list_skill_dir(path="jaeger_os/agent/skills/<category>")` — survey peers.
-- `skill(action="list")` / `skill(action="view", name=…)` — discover + read skills.
+- `list_skills(action="list")` / `list_skills(action="view", name=…)` — discover + read skills.
 - `read_file(path=…)` — read 2-3 peer SKILL.md files to match tone.
 - `search_files(query=…)` — find how a tool is actually used across skills.
 - `write_file(path=…, content=…)` — create/rewrite SKILL.md or a `references/…` file.

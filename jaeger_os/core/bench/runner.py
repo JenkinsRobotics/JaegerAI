@@ -215,7 +215,7 @@ def _drive_one(
             # not just that it researched. (Tool names alone can't tell
             # skill('ascii-art') from skill('arxiv').) Applies to playbook
             # AND tool-skills — skill-first means both get viewed before use.
-            if name in ("skill", "use_skill"):
+            if name in ("list_skills", "use_skill"):
                 args = tc.get("arguments") or {}
                 # Adapters may hand arguments back as a JSON string rather
                 # than a dict — parse so a skill call is NEVER missed

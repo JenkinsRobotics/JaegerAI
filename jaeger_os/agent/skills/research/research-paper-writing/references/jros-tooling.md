@@ -16,7 +16,7 @@ the JROS registry — do not substitute names from other agents (there is no
 | Literature discovery | `web_search`, then `web_extract` on the chosen URLs |
 | Persistent cross-session state | `todo` (granular tasks), `memory` (key decisions), `remember` / `recall` |
 | Scheduled monitoring / deadline pings | `schedule_prompt`, `list_schedules`, `cancel_schedule` |
-| Load a companion recipe | `use_skill(name=...)`, browse with `skill(action="view", ...)` |
+| Load a companion recipe | `use_skill(name=...)`, browse with `list_skills(action="view", ...)` |
 
 There is **no parallel-subagent / delegation tool in JROS.** Draft sections
 sequentially, or offload a long-running crawl/experiment to `start_background` and
@@ -26,7 +26,7 @@ poll it with `check_background`. Notify the user by responding in chat — there
 
 ## Companion skills
 
-Load with `use_skill(name=...)`; browse a skill's files with `skill(action="view", name=...)`.
+Load with `use_skill(name=...)`; browse a skill's files with `list_skills(action="view", name=...)`.
 
 | Skill | Phase | Load |
 |-------|-------|------|
