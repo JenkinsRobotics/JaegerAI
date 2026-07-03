@@ -917,7 +917,7 @@ def _register_builtins(client: Any) -> None:
 
 
 
-    # NB: ``describe_tool`` and ``load_toolset`` are NOT redefined here.
+    # NB: ``describe_tool`` and ``load_tools`` are NOT redefined here.
     # Both are owned by :mod:`jaeger_os.agent.tools.meta` and registered
     # at module-import time. The pre-Phase-9 pattern of wrapping each
     # built-in tool inside this closure created two copies (one in

@@ -57,7 +57,7 @@ def test_scoping_on_shows_core_hides_unloaded_toolsets(monkeypatch) -> None:
     # CORE always visible.
     assert tool_visible("get_time") is True
     # ``terminal`` lives in the ``code`` toolset — hidden until
-    # someone calls load_toolset("code").
+    # someone calls load_tools("code").
     assert tool_visible("terminal") is False
     # Unclassified tool fails open.
     assert tool_visible("a_brand_new_uncategorised_tool") is True

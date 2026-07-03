@@ -79,7 +79,7 @@ class JaegerAgent:
         # ``_all_tools`` holds the FULL registered set the agent can
         # dispatch + validate against. ``tools`` (the property below)
         # filters this per access through :func:`tool_visible` so a
-        # mid-session ``load_toolset`` call expands what the model sees
+        # mid-session ``load_tools`` call expands what the model sees
         # on the very next turn — without rebuilding the agent.
         # Beta gating: tools marked ``beta=True`` (still stabilising —
         # avatar / animation while Mochi is the testbed) are excluded
@@ -209,7 +209,7 @@ class JaegerAgent:
     def tools(self) -> list[ToolDef]:
         """The tools visible to the model THIS turn.
 
-        Recomputed on every access so a mid-session ``load_toolset``
+        Recomputed on every access so a mid-session ``load_tools``
         call (which mutates the shared visibility state in
         :mod:`jaeger_os.agent.skill_registry.toolset_scoping`) takes effect on the
         next turn without rebuilding the agent. The full set the agent

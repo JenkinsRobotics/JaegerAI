@@ -107,7 +107,7 @@ def build_toolset_catalog() -> str:
         return ""
     builtin = [(k, rows[k]) for k in TOOLSET_SUMMARY if k in rows]
     skills = [(k, v) for k, v in rows.items() if k not in TOOLSET_SUMMARY]
-    lines = ["TOOL CATALOG — categories you can describe_tool / load_toolset:"]
+    lines = ["TOOL CATALOG — categories you can describe_tool / load_tools:"]
     for name, summary in builtin + skills:
         lines.append(f"  • {name:<14} — {summary}")
     return "\n".join(lines)
@@ -136,7 +136,7 @@ def build_runtime_tail() -> str:
 
     The static file-access / behavior / output rules moved into
     ``framework_agent.md``; what's left here is the one bit that varies
-    at runtime — scoped (lean CORE set + ``describe_tool`` / ``load_toolset``)
+    at runtime — scoped (lean CORE set + ``describe_tool`` / ``load_tools``)
     vs. unscoped (full surface visible) — keyed on the live
     ``JAEGER_TOOLSET_SCOPING`` flag."""
     try:
@@ -147,7 +147,7 @@ def build_runtime_tail() -> str:
     # Unscoped (default) tool-surface framing now lives in the merged
     # capabilities block (build_skill_index) alongside the skills menu, so
     # tools + skills read as one "pick in this order" section. Only the
-    # scoped-mode mechanics (load_toolset / describe_tool) remain here, and
+    # scoped-mode mechanics (load_tools / describe_tool) remain here, and
     # only when scoping is actually on.
     if not scoped:
         return "Tool surface:\n" + RUNTIME_TOOLSET_UNSCOPED.strip()

@@ -51,7 +51,7 @@ from .files import (
 from .time_and_math import calculate, get_time, system_status
 
 # Meta-tools — introspection over the agent's own tool registry.
-from .meta import describe_tool, load_toolset
+from .meta import describe_tool, load_tools
 
 # Memory
 from .memory import forget, list_facts, memory, recall, remember, search_memory

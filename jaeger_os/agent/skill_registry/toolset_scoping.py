@@ -14,7 +14,7 @@ Two kinds of toolset:
 
 Why scope at all: routing accuracy on a local model degrades as the
 visible tool count grows. The CORE set (~17 common tools) covers most
-turns; ``load_toolset`` widens the view when a task needs more. The
+turns; ``load_tools`` widens the view when a task needs more. The
 active set only ever GROWS within a session, so the tool-schema KV
 prefix is re-prefilled at most once per widening, never thrashed.
 
@@ -84,9 +84,9 @@ CORE: frozenset[str] = frozenset({
     # User interaction.
     "clarify", "help_me",
     # Meta — the search + activate primitives, always visible so the model
-    # can FIND any tool (list_tools) and bring it in (load_toolset) without
+    # can FIND any tool (list_tools) and bring it in (load_tools) without
     # ever force-fitting a visible tool for one it hasn't looked up.
-    "list_tools", "load_toolset", "describe_tool",
+    "list_tools", "load_tools", "describe_tool",
     # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
     # toolset, not CORE — loaded on demand like ``run_benchmark``. The
     # old ``system_health`` was kept out entirely because "do a self
@@ -123,10 +123,10 @@ LEAN_CORE: frozenset[str] = frozenset({
 # doctor's tool-registry check); the actual gate the agent uses is
 # :func:`tool_visible`, opt-in via ``JAEGER_TOOLSET_SCOPING``.
 
-# Built-in tool classes — loaded on demand via load_toolset(name).
+# Built-in tool classes — loaded on demand via load_tools(name).
 # Every registered tool should appear in EXACTLY ONE of these
 # toolsets; intentional fail-open is reserved for the two meta-tools
-# (``describe_tool`` / ``load_toolset``) which are themselves in CORE.
+# (``describe_tool`` / ``load_tools``) which are themselves in CORE.
 # Classification is checked by ``test_every_registered_tool_is_classified``.
 TOOLSETS: dict[str, frozenset[str]] = {
     "files": frozenset({
@@ -204,7 +204,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "diagnostics": frozenset({"system_status", "self_check", "diagnostics"}),
 }
 
-# One-line description per built-in class — for the load_toolset catalog.
+# One-line description per built-in class — for the load_tools catalog.
 TOOLSET_SUMMARY: dict[str, str] = {
     "files": "append, delete, patch, search files; list the workspace",
     "code": "shell/terminal, ssh, install packages, venv exec",

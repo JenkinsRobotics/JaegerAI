@@ -196,7 +196,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "toolset_mgmt": ToolsetDef(
         description="Load a different toolset mid-session.",
-        tools=["load_toolset"],
+        tools=["load_tools"],
         includes=[],
     ),
 
