@@ -80,7 +80,7 @@ def test_prompt_defaults_to_unscoped_tool_surface(tmp_path, monkeypatch) -> None
 def test_prompt_scoped_when_explicit_env(tmp_path, monkeypatch) -> None:
     """``JAEGER_TOOLSET_SCOPING=1`` opts into the lean surface — the
     model sees CORE + a one-line-per-category catalog, can peek at any
-    schema via ``describe_tool``, and widen via ``load_toolset``.
+    schema via ``describe_tool``, and widen via ``load_tools``.
     Useful for context-tight runs; not the default while routing
     regressions are open."""
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")

@@ -1,11 +1,12 @@
-"""The `skill` tool — discover and read playbook skills on demand.
+"""The `list_skills` tool — discover and read playbook skills on demand.
 
 A skill is an experienced playbook for a task — instructions plus, often,
 runnable shell/Python or a ``scripts/`` folder. There are dozens; they
-are NOT dumped into the prompt. The agent calls this tool to find the
-right skill for a task, then reads it and follows it with its normal
-tools (``terminal``, ``execute_code``, …). On-demand, so the skill
-library never bloats context.
+are NOT dumped into the prompt. The agent calls `list_skills` (action=
+list/search/view/curate) to find the right skill for a task, then reads
+it and follows it with its normal tools (``terminal``, ``execute_code``,
+…). Its counterpart `use_skill` loads ONE recipe to follow. On-demand,
+so the skill library never bloats context.
 """
 
 from __future__ import annotations
@@ -201,7 +202,7 @@ def skill(action: str, name: str = "", query: str = "",
             result["requires_toolsets"] = s.requires_toolsets
             # POLISH-4: auto-load the toolsets the skill declares it
             # needs. Without this the model has to round-trip a
-            # ``load_toolset`` call after every ``skill(view)`` —
+            # ``load_tools`` call after every ``skill(view)`` —
             # one wasted turn per skill. Auto-load is a no-op when
             # JAEGER_TOOLSET_SCOPING is off; when on, the tools are
             # visible on the agent's very next step.

@@ -70,7 +70,7 @@ def test_core_tools_always_visible() -> None:
     granular memory tools, and ``execute_code`` was promoted from
     the ``code`` toolset. Pin the new membership."""
     for name in ("get_time", "memory", "web_search", "todo",
-                 "execute_code", "kanban", "skill", "load_toolset"):
+                 "execute_code", "kanban", "skill", "load_tools"):
         assert ts.tool_visible(name), name
 
 
@@ -140,7 +140,7 @@ def test_catalog_lists_built_ins_and_skills() -> None:
 # silently leave a tool fail-open instead of intentionally classified.
 _INTENTIONAL_FAIL_OPEN: frozenset[str] = frozenset({
     # Meta-introspection — always reachable.
-    "describe_tool", "load_toolset",
+    "describe_tool", "load_tools",
     # Umbrellas — they SUBSUME categories so by design they're outside
     # any single one.
     "memory", "kanban", "skill", "computer_use", "computer_do", "browser",

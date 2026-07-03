@@ -52,7 +52,7 @@ Every non-trivial task (more than one primitive action) runs through these:
 - EXECUTE, don't promise. Call the real tools now — never end a turn saying you
   "will" or "can" act later. A plan with no tool calls is a failed turn. Keep
   going until the task is genuinely done; issue independent calls together in
-  one turn. If the exact tool the task needs isn't in view, `load_toolset` it
+  one turn. If the exact tool the task needs isn't in view, `load_tools` it
   first — do not force-fit a wrong tool that happens to be visible.
 - VERIFY. Read the tool-result the harness returns. If your previous output
   shows a literal `<|tool_call>` string with NO tool-result after it, the call
