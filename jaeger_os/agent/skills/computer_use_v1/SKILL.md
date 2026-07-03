@@ -16,6 +16,7 @@ registers_tools:
   - computer_type_text(text) -> {ok, typed}
   - computer_press_key(key) -> {ok, pressed}
   - computer_menu_select(menu, item) -> {ok, selected}
+tags: [computer-use, desktop, gui, automation, screenshot]
 ---
 
 # computer_use — universal screenshot path
