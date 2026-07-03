@@ -9,9 +9,9 @@ embodiment_requires: ["macos"]
 authored_at: 2026-05-25
 description: macOS-native computer control via a capability ladder — AppleScript → CDP → Accessibility → screenshot. 10-30× faster than the screenshot loop for Mac apps, focus-preserving where possible. The recommended computer-use path on a Jaeger unit running macOS.
 registers_tools:
-  - _computer_do(goal) -> {ok, plan, steps, result}
-  - _computer_use(action, ...) -> {ok, result}
-  - _computer_look() -> {ok, app, windows, ax_tree}
+  - computer_do(goal) -> {ok, plan, steps, result}
+  - computer_use(action, ...) -> {ok, result}
+  - computer_look() -> {ok, app, windows, ax_tree}
 ---
 
 # macos_computer — capability-ladder Mac control
@@ -50,13 +50,13 @@ testing the portable path or running on a non-Mac host.
 
 Three tools the model sees:
 
-- `_computer_do(goal)` — natural language goal; planner expands it
+- `computer_do(goal)` — natural language goal; planner expands it
   into a step list and dispatches each step through the ladder.
-  E.g. ``_computer_do("open Calculator and compute 5 plus 5")``.
-- `_computer_use(action, ...)` — explicit primitive (open, click,
+  E.g. ``computer_do("open Calculator and compute 5 plus 5")``.
+- `computer_use(action, ...)` — explicit primitive (open, click,
   type, read, screenshot) when the planner's intent inference
   isn't right.
-- `_computer_look()` — current screen state. Returns the frontmost
+- `computer_look()` — current screen state. Returns the frontmost
   app, window list, and the AX tree of the focused window. Cheap;
   doesn't take a screenshot unless asked.
 
@@ -68,7 +68,7 @@ Three tools the model sees:
   checks PyObjC + Accessibility permission; `browser_engine`
   checks Playwright; `vision_engine` always returns True.
 - The planner records which engine handled each step so
-  ``_computer_do(...)["steps"]`` is auditable.
+  ``computer_do(...)["steps"]`` is auditable.
 
 ## Depends on
 - macOS (PyObjC for AX, osascript for AppleScript).
