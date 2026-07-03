@@ -1236,8 +1236,13 @@ def _render_per_case_block(model_row: dict[str, Any]) -> str:
         sorted(cat_tally.items(), key=lambda kv: (-kv[1][1], kv[0]))
     )
 
-    table = [f"**By category:** {cat_line}", "",
-             "| # | Test | Tags | Pass | Time | Tools called | Error |",
+    # Category breakdown as a VISIBLE table — the key per-model "where are we"
+    # view that must survive a collapsed-<details> preview.
+    cat_tbl = ["| Category | Passed | Rate |", "|---|---:|---:|"]
+    for t, (p, n) in sorted(cat_tally.items(), key=lambda kv: (-kv[1][1], kv[0])):
+        cat_tbl.append(f"| {t} | {p}/{n} | {(100*p/n if n else 0):.0f}% |")
+
+    table = ["| # | Test | Tags | Pass | Time | Tools called | Error |",
              "|---:|---|---|:--:|---:|---|---|"]
     for i, c in enumerate(cases, start=1):
         ok = "✅" if c.get("case_pass") else "❌"
@@ -1265,8 +1270,14 @@ def _render_per_case_block(model_row: dict[str, Any]) -> str:
             f"{elapsed:.1f}s | {tools_disp} | {err or '—'} |"
         )
 
+    pct = f"{100*passed/total:.1f}%" if total else "—"
+    header = (f"### {model_row['model']}  ·  `{mode_label}`  ·  "
+              f"**{passed}/{total}** ({pct})  ·  latest {ts}")
     return (
-        f"<details>\n<summary>{summary}</summary>\n\n"
+        header + "\n\n"
+        + "\n".join(cat_tbl) + "\n\n"
+        + f"<details><summary>per-case detail — all {total} cases "
+          "(question, tools, latency; click to expand)</summary>\n\n"
         + "\n".join(table)
         + "\n\n</details>\n"
     )
@@ -1288,7 +1299,7 @@ def _render(
     yesterday vs. last week?" (chronological)."""
     if not rows:
         return (
-            "# Jaeger-OS bench history\n\n"
+            "# Jaeger-OS Benchmark Leaderboard\n\n"
             "No bench artifacts found. Run ``jaeger bench run`` or\n"
             "``jaeger bench compare`` first.\n"
         )
@@ -1306,7 +1317,7 @@ def _render(
             "``dev/benchmark/flat/``."
         )
     lines = [
-        "# Jaeger-OS bench history",
+        "# Jaeger-OS Benchmark Leaderboard",
         "",
         f"_Generated {now_iso} from {total_entries} run(s) across "
         f"`dev/benchmark/sweep/` and `dev/benchmark/flat/` — showing "
@@ -1461,13 +1472,14 @@ def _render(
     if detail_blocks:
         lines += [
             "",
-            "## Per-model run details (latest)",
+            "## Per-model breakdown — latest run, by category",
             "",
-            "Each model's most recent run, case-by-case. Click to expand.",
-            "Useful for spotting *which* tests a model fails on (a 24/25 "
-            "routing model that fails the same case across runs has a "
-            "real gap, not noise), and for reading per-case latency to "
-            "decide if a high p95 is one outlier or a pattern.",
+            "Each model's most recent run: the **category breakdown is shown "
+            "inline** (routing / skill / kanban / memory / safety / …), so you "
+            "can see *where* a model is strong or weak at a glance. The full "
+            "case-by-case detail (every test, tools dispatched, latency) is in "
+            "the collapsible under each — expand it to drill into *which* case "
+            "failed and why.",
             "",
         ]
         lines.extend(detail_blocks)

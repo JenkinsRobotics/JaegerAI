@@ -272,6 +272,14 @@ def _run_single(args: argparse.Namespace) -> int:
     (out_dir / f"{prefix}.log").write_text("\n".join(log_lines) + "\n",
                                            encoding="utf-8")
 
+    # Full sent/process/expected/outcome transcript, per run, next to the data.
+    with contextlib.suppress(Exception):
+        import sys as _sys
+        _sys.path.insert(0, str(_REPO / "dev/benchmark"))
+        from make_transcript import render as _render
+        (out_dir / f"{prefix}-transcript.md").write_text(
+            _render(out_dir / f"{prefix}-rows.jsonl"), encoding="utf-8")
+
     total = summary["total"] or 1
     print(f"\n{summary['passed']}/{summary['total']} passed "
           f"({100 * summary['passed'] / total:.0f}%); "
