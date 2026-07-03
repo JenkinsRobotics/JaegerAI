@@ -1,0 +1,398 @@
+{
+  "total": 81,
+  "passed": 75,
+  "pass_rate": 0.926,
+  "routing_passed": 60,
+  "routing_total": 63,
+  "answer_passed": 46,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 514.36,
+  "metrics": {
+    "avg_latency_s": 6.35,
+    "p50_latency_s": 2.555,
+    "p95_latency_s": 27.968,
+    "min_latency_s": 0.305,
+    "max_latency_s": 63.456,
+    "total_tool_dispatches": 117,
+    "avg_tools_per_turn": 1.44,
+    "answer_tokens_total": 9828,
+    "answer_tokens_avg": 121.3,
+    "answer_tokens_per_sec": 19.1,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 2591705,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "called computer_read_screen with identical arguments 4 times": 1,
+      "hit the same skill_notes failure 2 times": 1
+    },
+    "halted_turns": 2,
+    "avg_iterations": 2.3,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.57,
+    "ttft_p50_s": 0.175,
+    "ttft_p95_s": 0.312,
+    "ttft_reported": 81
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 7.513,
+      "p95_latency_s": 32.162,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "pass_rate": 0.964,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 6.228,
+      "p95_latency_s": 32.162,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "pass_rate": 1.0,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 7.253,
+      "p95_latency_s": 14.087,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "pass_rate": 0.917,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 2.197,
+      "p95_latency_s": 3.674,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "pass_rate": 0.889,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 2.669,
+      "p95_latency_s": 7.386,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 81,
+      "passed": 75,
+      "pass_rate": 0.926,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 6.35,
+      "p95_latency_s": 27.968,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "avg_latency_s": 6.228
+    },
+    "files": {
+      "total": 15,
+      "passed": 14,
+      "avg_latency_s": 4.71
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 10.267
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 5.705
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 3.667
+    },
+    "code": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 6.171
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 1.94
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 7.253
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "avg_latency_s": 2.197
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "avg_latency_s": 2.669
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 1.826
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.31
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.365
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.539
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 1.457
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 2.297
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.938
+    },
+    "skill": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 25.634
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 13.201
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 27.968
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 4.828
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 2.536
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 1.557
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 5.741
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.433
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 25.567
+    }
+  },
+  "failures": [
+    {
+      "id": "rec_python_syntax",
+      "prompt": "Use run_python to execute this code (it has a syntax error on purpose): print(   — note the unclosed",
+      "tools_called": [],
+      "answer": "I cannot use the `run_python` tool because it does not exist in my available toolset.\n\nHowever, I can use the `execute_code` tool, which is designed to run Python code.\n\nPLAN: execute_code(\"print(   )",
+      "routing_ok": false,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "chain_weather_t3",
+      "prompt": "Read that file back and tell me what the weather was.",
+      "tools_called": [
+        "read_file"
+      ],
+      "answer": "The weather saved in the file is: Partly cloudy 76°F (feels 80°F), humidity 89%, wind ↗6mph.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_do",
+        "computer_look",
+        "computer_read_screen",
+        "computer_click",
+        "computer_do",
+        "computer_read_screen",
+        "computer_do",
+        "computer_read_screen"
+      ],
+      "answer": "I am having trouble finding the \"Appearance\" section using the direct commands. I will try to find the \"Appearance\" setting by looking at the main categories in System Settings.",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "dt_propose_skill_fix",
+      "prompt": "The weather skill keeps crashing on malformed input. It's too big to fix right now — note it so the ",
+      "tools_called": [
+        "board_add"
+      ],
+      "answer": "I have added a card to the Kanban board titled \"Fix the weather skill to handle malformed input gracefully\" in the ready column, tagged as deepthink. This will be available for the deep think model to",
+      "routing_ok": false,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "selfimprove_curate",
+      "prompt": "Check your skill library for stale or unused skills that might be worth retiring.",
+      "tools_called": [
+        "skill_notes",
+        "skill_notes"
+      ],
+      "answer": "[halted: hit the same skill_notes failure 2 times]",
+      "routing_ok": false,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_do"
+      ],
+      "answer": "The `computer_do` call failed again, indicating it couldn't find a running app or execute the action. This confirms that the high-level automation is failing.\n\nSince the user has given the final go-ah",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 532.38,
+  "load_s": 39.3,
+  "category_breakdown": {
+    "routing": {
+      "passed": 27,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 11,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 8,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 11,
+      "total": 12
+    },
+    "files": {
+      "passed": 14,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 4,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 3,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 5,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 0,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 0,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 2,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260703-130220",
+  "benchmark_version": "1.3"
+}

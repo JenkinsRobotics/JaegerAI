@@ -1,165 +1,95 @@
 ---
 name: hermes-agent-skill-authoring
-description: "Author in-repo SKILL.md: frontmatter, validator, structure."
-version: 1.0.0
-author: Hermes Agent
-license: MIT
-platforms: [linux, macos, windows]
+description: "Author or edit an in-repo JROS SKILL.md to the 8-point standard — frontmatter, tool-coupling, phased SOP. Load this when creating a new skill, rewriting one, or fixing a skill that names tools that don't exist."
+version: 2.0.0
+platforms: [macos, linux, windows]
+requires_tools: [write_file, read_file, patch, append_file, list_skill_dir, search_files, skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
 metadata:
-  hermes:
-    tags: [skills, authoring, hermes-agent, conventions, skill-md]
+  jros:
+    tags: [skills, authoring, skill-md, conventions, meta]
+    category: software-development
     related_skills: [writing-plans, requesting-code-review]
 ---
 
-# Authoring Hermes-Agent Skills (in-repo)
+# AUTHORING JROS SKILLS
 
-## Overview
+A skill is a CHEAT SHEET a small (4B) local agent must be able to follow: knowledge +
+exact tool names + a tight SOP. Skills live at
+`jaeger_os/agent/skills/<category>/<name>/SKILL.md` and are committed source, not
+runtime state. `write_file` writes into the sandboxed `skills/` tree.
 
-There are two places a SKILL.md can live:
+## WHEN TO USE
+- Creating a new skill, or rewriting/tightening an existing one.
+- Fixing a skill that references tools that are not in the JROS registry.
+- Splitting an oversized SKILL.md into `references/` and routing to them.
+- Don't use for: authoring product code, or editing skills of another agent framework.
 
-1. **User-local:** `~/.hermes/skills/<maybe-category>/<name>/SKILL.md` — personal, not shared. Created via `skill_manage(action='create')`.
-2. **In-repo (this skill is about this case):** `/home/bb/hermes-agent/skills/<category>/<name>/SKILL.md` — committed, shipped with the package. Use `write_file` + `git add`. `skill_manage(action='create')` does NOT target this tree.
+## TOOLS (real JROS names — never invent one)
+- `list_skill_dir(path="jaeger_os/agent/skills/<category>")` — survey peers.
+- `skill(action="list")` / `skill(action="view", name=…)` — discover + read skills.
+- `read_file(path=…)` — read 2-3 peer SKILL.md files to match tone.
+- `search_files(query=…)` — find how a tool is actually used across skills.
+- `write_file(path=…, content=…)` — create/rewrite SKILL.md or a `references/…` file.
+- `patch(path=…, old=…, new=…)` — small surgical edits; `append_file` to extend a file.
+- `benchmark_skill(name=…)` — run the skill's `tests/benchmark.py` and track the score delta (only if it ships one).
+- `record_skill_revision(name=…)` — log the change AFTER you keep a new version.
+- `request_skill_review(name=…)` / `skill_note(name=…, note=…)` — queue a Deep Think improvement pass / journal a post-use summary.
+- `package_skill(name=…)` — bundle a finished skill into a shareable `.zip`.
 
-## When to Use
+There is no `skill_manage` tool in JROS. Create and edit skills with `write_file` /
+`patch`; there is no separate "create" verb.
 
-- User asks you to add a skill "in this branch / repo / commit"
-- You're committing a reusable workflow that should ship with hermes-agent
-- You're editing an existing skill under `/home/bb/hermes-agent/skills/` (use `patch` for small edits, `write_file` for rewrites; `skill_manage` still works for patch on in-repo skills, but not for `create`)
+## THE 8-POINT STANDARD (what makes a good skill)
+1. FRONTMATTER — exact schema (below). Registry parses the leading `---…\n---` YAML block; `metadata.jros.tags` is the standard namespace.
+2. HEADERS — UPPERCASE section headers, no nested markdown tables, minimal `**bold**`. Plain and scannable for a 4B model.
+3. TOOLS BLOCK — list the exact tool calls with NAMED args, e.g. `web_extract(url=…)`. Every tool named must exist in the JROS registry (verify with `describe_tool` / `list_tools`). If a capability has no tool, tell the agent to use `execute_code` / `terminal` / `web_search` — do NOT fabricate a tool.
+4. SOP — phased and numbered, tight enough that a small model can't get lost.
+5. STATE OFFLOADING — if the task has >3 steps/outputs, mandate `append_file` / `write_file` / `todo` / `kanban` instead of holding state in context.
+6. ERROR HATCH — the one common failure and its escape ("if X fails twice, do Y").
+7. DONE WHEN — the concrete deliverable, so the agent knows when to stop.
+8. LAZY LOAD — heavy templates/tables/examples go in `references/…` and are pulled with `read_file("references/…")`, not inlined. Target 50-130 lines for SKILL.md.
 
-## Required Frontmatter
-
-Source of truth: `tools/skill_manager_tool.py::_validate_frontmatter`. Hard requirements:
-
-- Starts with `---` as the first bytes (no leading blank line).
-- Closes with `\n---\n` before the body.
-- Parses as a YAML mapping.
-- `name` field present.
-- `description` field present, ≤ **1024 chars** (`MAX_DESCRIPTION_LENGTH`).
-- Non-empty body after the closing `---`.
-
-Peer-matched shape used by every skill under `skills/software-development/`:
-
+## FRONTMATTER SCHEMA
 ```yaml
 ---
-name: my-skill-name               # lowercase, hyphens, ≤64 chars (MAX_NAME_LENGTH)
-description: Use when <trigger>. <one-line behavior>.
+name: my-skill-name                # folder name, kebab-case, no cute codenames
+description: "One sentence: what it does + the WHEN-to-pick-this trigger."
 version: 1.0.0
-author: Hermes Agent
-license: MIT
+platforms: [macos, linux, windows] # normalized; drop any the skill can't run on
+requires_tools: [real, jros, tool, names]
 metadata:
-  hermes:
-    tags: [short, descriptive, tags]
-    related_skills: [other-skill, another-skill]
+  jros:
+    tags: [three, to, six, keywords]
+    category: <existing category>
+    related_skills: [skills-a-user-might-chain]
 ---
 ```
+Must start with `---` at byte 0 and close with a `\n---` line; the body after it must be
+non-empty. Pick an existing category — run `list_skill_dir(path="jaeger_os/agent/skills")`
+and don't invent a top-level category casually.
 
-`version` / `author` / `license` / `metadata` are NOT enforced by the validator, but every peer has them — omit and your skill sticks out.
+## SOP
+1. SURVEY — `list_skill_dir` the target category; `read_file` 2-3 peers to match structure.
+2. VERIFY TOOLS — for every tool the recipe will CALL, confirm it exists via `describe_tool` or `list_tools`. Fix legacy/wrong names before writing.
+3. DRAFT — `write_file` the SKILL.md to `skills/<category>/<name>/SKILL.md` against the 8-point standard.
+4. OFFLOAD BULK — move heavy tables/appendices/examples into `skills/<category>/<name>/references/<file>.md` with `write_file`; link them with `read_file("references/…")`. Preserve any shipped `scripts/`/`templates/` — reference, don't inline.
+5. BENCHMARK — if the skill ships `tests/benchmark.py`, run `benchmark_skill(name=…)` and keep the change only if the score holds or improves.
+6. LOG — `record_skill_revision(name=…)` after you keep the new version; add a `skill_note` if there's a lesson. Optionally `request_skill_review` to queue a Deep Think improvement pass.
+7. COMMIT — `git add` + commit on the active branch (skills are source). Optionally `package_skill(name=…)` to share.
 
-## Size Limits
+## STATE OFFLOADING
+When rewriting a large skill, don't hold the old body in context — slice it into
+`references/` files with `write_file`, then fix tool names in each with `patch`. Track
+the rewrite steps with `todo` if it spans several files.
 
-- Description: ≤ 1024 chars (enforced).
-- Full SKILL.md: ≤ 100,000 chars (enforced as `MAX_SKILL_CONTENT_CHARS`, ~36k tokens).
-- Peer skills in `software-development/` sit at **8-14k chars**. Aim for that range. If you're pushing past 20k, split into `references/*.md` and reference them from SKILL.md.
+## ERROR HATCH
+- A tool name you're unsure about: run `describe_tool(name=…)`. If it errors, the tool
+  doesn't exist — reroute to `execute_code` / `terminal` / `web_search`. Never guess.
+- The current session won't see a newly-written skill: the loader is cached at session
+  start. That's expected — verify in a fresh session or `read_file` the exact path.
 
-## Peer-Matched Structure
-
-Every in-repo skill follows roughly:
-
-```
-# <Title>
-
-## Overview
-One or two paragraphs: what and why.
-
-## When to Use
-- Bulleted triggers
-- "Don't use for:" counter-triggers
-
-## <Topic sections specific to the skill>
-- Quick-reference tables are common
-- Code blocks with exact commands
-- Hermes-specific recipes (tests via scripts/run_tests.sh, ui-tui paths, etc.)
-
-## Common Pitfalls
-Numbered list of mistakes and their fixes.
-
-## Verification Checklist
-- [ ] Checkbox list of post-action verifications
-
-## One-Shot Recipes (optional)
-Named scenarios → concrete command sequences.
-```
-
-Not every section is mandatory, but `Overview` + `When to Use` + actionable body + pitfalls are the minimum for the skill to feel like a peer.
-
-## Directory Placement
-
-```
-skills/<category>/<skill-name>/SKILL.md
-```
-
-Categories currently in repo (confirm with `ls skills/`): `autonomous-ai-agents`, `creative`, `data-science`, `devops`, `dogfood`, `email`, `gaming`, `github`, `leisure`, `mcp`, `media`, `mlops/*`, `note-taking`, `productivity`, `red-teaming`, `research`, `smart-home`, `social-media`, `software-development`.
-
-Pick the closest existing category. Don't invent new top-level categories casually.
-
-## Workflow
-
-1. **Survey peers** in the target category:
-   ```
-   ls skills/<category>/
-   ```
-   Read 2-3 peer SKILL.md files to match tone and structure.
-2. **Check validator constraints** in `tools/skill_manager_tool.py` if unsure.
-3. **Draft** with `write_file` to `skills/<category>/<name>/SKILL.md`.
-4. **Validate locally**:
-   ```python
-   import yaml, re, pathlib
-   content = pathlib.Path("skills/<category>/<name>/SKILL.md").read_text()
-   assert content.startswith("---")
-   m = re.search(r'\n---\s*\n', content[3:])
-   fm = yaml.safe_load(content[3:m.start()+3])
-   assert "name" in fm and "description" in fm
-   assert len(fm["description"]) <= 1024
-   assert len(content) <= 100_000
-   ```
-5. **Git add + commit** on the active branch.
-6. **Note:** the CURRENT session's skill loader is cached — `skill_view` / `skill(action="list")` will not see the new skill until a new session. This is expected, not a bug.
-
-## Cross-Referencing Other Skills
-
-`metadata.hermes.related_skills` unions both trees (`skills/` in-repo and `~/.hermes/skills/`) at load time. You CAN reference a user-local skill from an in-repo skill, but it won't resolve for other users who clone the repo fresh. Prefer referencing only in-repo skills from in-repo skills. If a frequently-referenced skill lives only in `~/.hermes/skills/`, consider promoting it to the repo.
-
-## Editing Existing In-Repo Skills
-
-- **Small fix (typo, added pitfall, tightened trigger):** `skill_manage(action='patch', name=..., old_string=..., new_string=...)` works fine on in-repo skills.
-- **Major rewrite:** `write_file` the whole SKILL.md. `skill_manage(action='edit')` also works but requires supplying the full new content.
-- **Adding supporting files:** `write_file` to `skills/<category>/<name>/references/<file>.md`, `templates/<file>`, or `scripts/<file>`. `skill_manage(action='write_file')` also works and enforces the references/templates/scripts/assets subdir allowlist.
-- **Always commit** the edit — in-repo skills are source, not runtime state.
-
-## Common Pitfalls
-
-1. **Using `skill_manage(action='create')` for an in-repo skill.** It writes to `~/.hermes/skills/`, not the repo tree. Use `write_file` for in-repo creation.
-
-2. **Leading whitespace before `---`.** The validator checks `content.startswith("---")`; any leading blank line or BOM fails validation.
-
-3. **Description too generic.** Peer descriptions start with "Use when ..." and describe the *trigger class*, not the one task. "Use when debugging X" > "Debug X".
-
-4. **Forgetting the author/license/metadata block.** Not validator-enforced, but every peer has it; omitting makes the skill look half-finished.
-
-5. **Writing a skill that duplicates a peer.** Before creating, `ls skills/<category>/` and open 2-3 peers. Prefer extending an existing skill to creating a narrow sibling.
-
-6. **Expecting the current session to see the new skill.** It won't. The skill loader is initialized at session start. Verify in a fresh session or via `skill_view` using the exact path.
-
-7. **Linking to skills that don't exist in-repo.** `related_skills: [some-user-local-skill]` works for you but breaks for other clones. Prefer only in-repo links.
-
-## Verification Checklist
-
-- [ ] File is at `skills/<category>/<name>/SKILL.md` (not in `~/.hermes/skills/`)
-- [ ] Frontmatter starts at byte 0 with `---`, closes with `\n---\n`
-- [ ] `name`, `description`, `version`, `author`, `license`, `metadata.hermes.{tags, related_skills}` all present
-- [ ] Name ≤ 64 chars, lowercase + hyphens
-- [ ] Description ≤ 1024 chars and starts with "Use when ..."
-- [ ] Total file ≤ 100,000 chars (aim for 8-15k)
-- [ ] Structure: `# Title` → `## Overview` → `## When to Use` → body → `## Common Pitfalls` → `## Verification Checklist`
-- [ ] `related_skills` references resolve in-repo (or are explicitly OK to be user-local)
-- [ ] `git add skills/<category>/<name>/ && git commit` completed on the intended branch
+## DONE WHEN
+SKILL.md is at `skills/<category>/<name>/SKILL.md`, frontmatter validates (starts `---`,
+closes `\n---`, has name + description + `metadata.jros`), every named tool exists in the
+registry, the body follows the 8-point standard within ~50-130 lines, heavy content is in
+`references/`, and the change is committed (and `record_skill_revision` logged).

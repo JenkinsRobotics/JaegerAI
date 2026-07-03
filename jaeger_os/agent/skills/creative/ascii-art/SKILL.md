@@ -1,322 +1,129 @@
 ---
 name: ascii-art
-description: "ASCII art: pyfiglet, cowsay, boxes, image-to-ascii."
-version: 4.0.0
-author: 0xbyt4, Hermes Agent
-license: MIT
-dependencies: []
-platforms: [linux, macos, windows]
+description: "Make ASCII/Unicode text art — banners (pyfiglet/toilet), speech-bubble critters (cowsay), decorative borders (boxes), image-to-ASCII, and curated art from the web. Load this when the user wants a text banner, logo, terminal art, or an image converted to ASCII."
+version: 4.1.0
+platforms: [macos, linux, windows]
+requires_tools: [terminal]
 metadata:
-  hermes:
-    tags: [ASCII, Art, Banners, Creative, Unicode, Text-Art, pyfiglet, figlet, cowsay, boxes]
+  jros:
+    tags: [ascii, art, banner, figlet, cowsay, unicode]
+    category: creative
     related_skills: [excalidraw]
-
 ---
 
-# ASCII Art Skill
+# ASCII ART
 
-Multiple tools for different ASCII art needs. All tools are local CLI programs or free REST APIs — no API keys required.
+Every generator here is a local CLI or a free REST API. Run them all through the
+`terminal` tool — no API keys. Pick the tool from DECISION FLOW, run it, show the output.
 
-## Tool 1: Text Banners (pyfiglet — local)
+## DECISION FLOW (pick one, then run it)
 
-Render text as large ASCII art banners. 571 built-in fonts.
+1. Text banner → `pyfiglet` if installed, else the `asciified` API (curl).
+2. Message in a critter's speech bubble → `cowsay`.
+3. Decorative border/frame → `boxes` (pipe a banner into it).
+4. Colored/filtered banner → `toilet` (ANSI color; may not render outside a terminal).
+5. Art of a specific thing (cat, rocket, dragon) → fetch from `ascii.co.uk` (curl + parse).
+6. Convert an image to ASCII → `ascii-image-converter` or `jp2a`.
+7. QR code / weather art → `qrenco.de` / `wttr.in` (curl).
+8. Nothing above fits → hand-build from the UNICODE PALETTE below.
+9. A tool isn't installed → install it, or drop to the next option.
 
-### Setup
+## 1. TEXT BANNERS — pyfiglet (local, 571 fonts)
 
 ```bash
-pip install pyfiglet --break-system-packages -q
-```
-
-### Usage
-
-```bash
+pip install pyfiglet --break-system-packages -q     # once
 python3 -m pyfiglet "YOUR TEXT" -f slant
-python3 -m pyfiglet "TEXT" -f doom -w 80    # Set width
-python3 -m pyfiglet --list_fonts             # List all 571 fonts
+python3 -m pyfiglet "TEXT" -f doom -w 80            # -w sets width
+python3 -m pyfiglet --list_fonts                    # all fonts
 ```
+Good fonts: `slant` (clean), `doom`/`big` (bold), `small`/`mini` (long text),
+`banner3`/`cyberlarge` (wide). Short text suits detailed fonts; long text suits compact ones.
 
-### Recommended fonts
+## 2. TEXT BANNERS — asciified API (remote, no install)
 
-| Style | Font | Best for |
-|-------|------|----------|
-| Clean & modern | `slant` | Project names, headers |
-| Bold & blocky | `doom` | Titles, logos |
-| Big & readable | `big` | Banners |
-| Classic banner | `banner3` | Wide displays |
-| Compact | `small` | Subtitles |
-| Cyberpunk | `cyberlarge` | Tech themes |
-| 3D effect | `3-d` | Splash screens |
-| Gothic | `gothic` | Dramatic text |
-
-### Tips
-
-- Preview 2-3 fonts and let the user pick their favorite
-- Short text (1-8 chars) works best with detailed fonts like `doom` or `block`
-- Long text works better with compact fonts like `small` or `mini`
-
-## Tool 2: Text Banners (asciified API — remote, no install)
-
-Free REST API that converts text to ASCII art. 250+ FIGlet fonts. Returns plain text directly — no parsing needed. Use this when pyfiglet is not installed or as a quick alternative.
-
-### Usage (via terminal curl)
+Returns plain-text art directly. Use when pyfiglet isn't installed. Encode spaces as `+`.
 
 ```bash
-# Basic text banner (default font)
 curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello+World"
-
-# With a specific font
 curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello&font=Slant"
-curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello&font=Doom"
-curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello&font=Star+Wars"
-curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello&font=3-D"
-curl -s "https://asciified.thelicato.io/api/v2/ascii?text=Hello&font=Banner3"
-
-# List all available fonts (returns JSON array)
-curl -s "https://asciified.thelicato.io/api/v2/fonts"
+curl -s "https://asciified.thelicato.io/api/v2/fonts"        # list font names (case-sensitive)
 ```
 
-### Tips
-
-- URL-encode spaces as `+` in the text parameter
-- The response is plain text ASCII art — no JSON wrapping, ready to display
-- Font names are case-sensitive; use the fonts endpoint to get exact names
-- Works from any terminal with curl — no Python or pip needed
-
-## Tool 3: Cowsay (Message Art)
-
-Classic tool that wraps text in a speech bubble with an ASCII character.
-
-### Setup
+## 3. COWSAY (message in a speech bubble)
 
 ```bash
-sudo apt install cowsay -y    # Debian/Ubuntu
-# brew install cowsay         # macOS
-```
-
-### Usage
-
-```bash
+sudo apt install cowsay -y      # or: brew install cowsay
 cowsay "Hello World"
-cowsay -f tux "Linux rules"       # Tux the penguin
-cowsay -f dragon "Rawr!"          # Dragon
-cowsay -f stegosaurus "Roar!"     # Stegosaurus
-cowthink "Hmm..."                  # Thought bubble
-cowsay -l                          # List all characters
+cowsay -f tux "Linux rules"     # -f picks the character; cowsay -l lists them
+cowthink "Hmm..."               # thought bubble
 ```
+Characters incl. `tux dragon stegosaurus elephant skull vader turtle sheep ghostbusters`.
+Eye modifiers: `-b` borg, `-d` dead, `-g` greedy, `-p` paranoid, `-s` stoned, `-e "OO"` custom.
 
-### Available characters (50+)
-
-`beavis.zen`, `bong`, `bunny`, `cheese`, `daemon`, `default`, `dragon`,
-`dragon-and-cow`, `elephant`, `eyes`, `flaming-skull`, `ghostbusters`,
-`hellokitty`, `kiss`, `kitty`, `koala`, `luke-koala`, `mech-and-cow`,
-`meow`, `moofasa`, `moose`, `ren`, `sheep`, `skeleton`, `small`,
-`stegosaurus`, `stimpy`, `supermilker`, `surgery`, `three-eyes`,
-`turkey`, `turtle`, `tux`, `udder`, `vader`, `vader-koala`, `www`
-
-### Eye/tongue modifiers
+## 4. BOXES (decorative borders)
 
 ```bash
-cowsay -b "Borg"       # =_= eyes
-cowsay -d "Dead"       # x_x eyes
-cowsay -g "Greedy"     # $_$ eyes
-cowsay -p "Paranoid"   # @_@ eyes
-cowsay -s "Stoned"     # *_* eyes
-cowsay -w "Wired"      # O_O eyes
-cowsay -e "OO" "Msg"   # Custom eyes
-cowsay -T "U " "Msg"   # Custom tongue
+sudo apt install boxes -y       # or: brew install boxes
+echo "Hello World" | boxes -d stone
+boxes -l                        # list 70+ designs (stone parchment cat dog diamonds c-cmt …)
+python3 -m pyfiglet "JROS" -f slant | boxes -d stone     # combine with a banner
 ```
 
-## Tool 4: Boxes (Decorative Borders)
-
-Draw decorative ASCII art borders/frames around any text. 70+ built-in designs.
-
-### Setup
+## 5. TOILET (colored banners)
 
 ```bash
-sudo apt install boxes -y    # Debian/Ubuntu
-# brew install boxes         # macOS
+sudo apt install toilet toilet-fonts -y     # or: brew install toilet
+toilet -f pagga "Block"        # unique block font
+toilet --gay "Rainbow!"        # also --metal, -F border
+toilet -F list                 # list filters
 ```
+Outputs ANSI color codes — great in a terminal, may not render in plain text/chat.
 
-### Usage
+## 6. IMAGE → ASCII
 
 ```bash
-echo "Hello World" | boxes                    # Default box
-echo "Hello World" | boxes -d stone           # Stone border
-echo "Hello World" | boxes -d parchment       # Parchment scroll
-echo "Hello World" | boxes -d cat             # Cat border
-echo "Hello World" | boxes -d dog             # Dog border
-echo "Hello World" | boxes -d unicornsay      # Unicorn
-echo "Hello World" | boxes -d diamonds        # Diamond pattern
-echo "Hello World" | boxes -d c-cmt           # C-style comment
-echo "Hello World" | boxes -d html-cmt        # HTML comment
-echo "Hello World" | boxes -a c               # Center text
-boxes -l                                       # List all 70+ designs
+# ascii-image-converter (recommended): snap install ascii-image-converter
+ascii-image-converter image.png            # -C color, -b braille, -d 60,30 dims, URL ok
+# jp2a (lightweight, JPEG only): sudo apt install jp2a -y
+jp2a --width=80 --colors image.jpg
 ```
 
-### Combine with pyfiglet or asciified
+## 7. CURATED ART — ascii.co.uk
 
-```bash
-python3 -m pyfiglet "HERMES" -f slant | boxes -d stone
-# Or without pyfiglet installed:
-curl -s "https://asciified.thelicato.io/api/v2/ascii?text=HERMES&font=Slant" | boxes -d stone
-```
-
-## Tool 5: TOIlet (Colored Text Art)
-
-Like pyfiglet but with ANSI color effects and visual filters. Great for terminal eye candy.
-
-### Setup
-
-```bash
-sudo apt install toilet toilet-fonts -y    # Debian/Ubuntu
-# brew install toilet                      # macOS
-```
-
-### Usage
-
-```bash
-toilet "Hello World"                    # Basic text art
-toilet -f bigmono12 "Hello"            # Specific font
-toilet --gay "Rainbow!"                 # Rainbow coloring
-toilet --metal "Metal!"                 # Metallic effect
-toilet -F border "Bordered"             # Add border
-toilet -F border --gay "Fancy!"         # Combined effects
-toilet -f pagga "Block"                 # Block-style font (unique to toilet)
-toilet -F list                          # List available filters
-```
-
-### Filters
-
-`crop`, `gay` (rainbow), `metal`, `flip`, `flop`, `180`, `left`, `right`, `border`
-
-**Note**: toilet outputs ANSI escape codes for colors — works in terminals but may not render in all contexts (e.g., plain text files, some chat platforms).
-
-## Tool 6: Image to ASCII Art
-
-Convert images (PNG, JPEG, GIF, WEBP) to ASCII art.
-
-### Option A: ascii-image-converter (recommended, modern)
-
-```bash
-# Install
-sudo snap install ascii-image-converter
-# OR: go install github.com/TheZoraiz/ascii-image-converter@latest
-```
-
-```bash
-ascii-image-converter image.png                  # Basic
-ascii-image-converter image.png -C               # Color output
-ascii-image-converter image.png -d 60,30         # Set dimensions
-ascii-image-converter image.png -b               # Braille characters
-ascii-image-converter image.png -n               # Negative/inverted
-ascii-image-converter https://url/image.jpg      # Direct URL
-ascii-image-converter image.png --save-txt out   # Save as text
-```
-
-### Option B: jp2a (lightweight, JPEG only)
-
-```bash
-sudo apt install jp2a -y
-jp2a --width=80 image.jpg
-jp2a --colors image.jpg              # Colorized
-```
-
-## Tool 7: Search Pre-Made ASCII Art
-
-Search curated ASCII art from the web. Use `terminal` with `curl`.
-
-### Source A: ascii.co.uk (recommended for pre-made art)
-
-Large collection of classic ASCII art organized by subject. Art is inside HTML `<pre>` tags. Fetch the page with curl, then extract art with a small Python snippet.
-
-**URL pattern:** `https://ascii.co.uk/art/{subject}`
-
-**Step 1 — Fetch the page:**
+Pattern `https://ascii.co.uk/art/{subject}` (subjects: cat dog dragon rocket skull robot
+tree star christmas …). Art lives in HTML `<pre>` tags. Fetch, then extract:
 
 ```bash
 curl -s 'https://ascii.co.uk/art/cat' -o /tmp/ascii_art.html
-```
-
-**Step 2 — Extract art from pre tags:**
-
-```python
+python3 -c "
 import re, html
-with open('/tmp/ascii_art.html') as f:
-    text = f.read()
-arts = re.findall(r'<pre[^>]*>(.*?)</pre>', text, re.DOTALL)
-for art in arts:
-    clean = re.sub(r'<[^>]+>', '', art)
-    clean = html.unescape(clean).strip()
-    if len(clean) > 30:
-        print(clean)
-        print('\n---\n')
+t = open('/tmp/ascii_art.html').read()
+for a in re.findall(r'<pre[^>]*>(.*?)</pre>', t, re.DOTALL):
+    c = html.unescape(re.sub(r'<[^>]+>', '', a)).strip()
+    if len(c) > 30: print(c, '\n---\n')
+"
 ```
+Preserve any artist signature/initials — that's etiquette. Pick the best piece for the user.
 
-**Available subjects** (use as URL path):
-- Animals: `cat`, `dog`, `horse`, `bird`, `fish`, `dragon`, `snake`, `rabbit`, `elephant`, `dolphin`, `butterfly`, `owl`, `wolf`, `bear`, `penguin`, `turtle`
-- Objects: `car`, `ship`, `airplane`, `rocket`, `guitar`, `computer`, `coffee`, `beer`, `cake`, `house`, `castle`, `sword`, `crown`, `key`
-- Nature: `tree`, `flower`, `sun`, `moon`, `star`, `mountain`, `ocean`, `rainbow`
-- Characters: `skull`, `robot`, `angel`, `wizard`, `pirate`, `ninja`, `alien`
-- Holidays: `christmas`, `halloween`, `valentine`
-
-**Tips:**
-- Preserve artist signatures/initials — important etiquette
-- Multiple art pieces per page — pick the best one for the user
-- Works reliably via curl, no JavaScript needed
-
-### Source B: GitHub Octocat API (fun easter egg)
-
-Returns a random GitHub Octocat with a wise quote. No auth needed.
+## 8. FUN EXTRAS (curl)
 
 ```bash
-curl -s https://api.github.com/octocat
+curl -s "qrenco.de/Hello+World"     # QR code as ASCII
+curl -s "wttr.in/London"            # weather art;  wttr.in/Moon for moon phase
+curl -s https://api.github.com/octocat   # random Octocat + quote
 ```
 
-## Tool 8: Fun ASCII Utilities (via curl)
+## 9. HAND-BUILT (fallback)
 
-These free services return ASCII art directly — great for fun extras.
+No tool fits → compose from these. Max 60 wide, ≤15 lines (banner)/25 (scene), monospace only.
+Box `╔ ╗ ╚ ╝ ║ ═ ┌ ┐ └ ┘ │ ─ ├ ┤ ┼ ╭ ╮ ╰ ╯` · Blocks `░ ▒ ▓ █ ▄ ▀ ▌ ▐` · Symbols `◆ ● ○ ■ □ ▲ ▼ ★ ☆ ✦ ◀ ▶ ⬡ ⬢`
 
-### QR Codes as ASCII Art
+## ERROR HATCH
 
-```bash
-curl -s "qrenco.de/Hello+World"
-curl -s "qrenco.de/https://example.com"
-```
+A CLI tool is missing → install it (`pip`/`apt`/`brew`), or fall to the next option in
+DECISION FLOW. If a curl endpoint fails twice, switch to a local tool (pyfiglet/hand-built).
 
-### Weather as ASCII Art
+## DONE WHEN
 
-```bash
-curl -s "wttr.in/London"          # Full weather report with ASCII graphics
-curl -s "wttr.in/Moon"            # Moon phase in ASCII art
-curl -s "v2.wttr.in/London"       # Detailed version
-```
-
-## Tool 9: LLM-Generated Custom Art (Fallback)
-
-When tools above don't have what's needed, generate ASCII art directly using these Unicode characters:
-
-### Character Palette
-
-**Box Drawing:** `╔ ╗ ╚ ╝ ║ ═ ╠ ╣ ╦ ╩ ╬ ┌ ┐ └ ┘ │ ─ ├ ┤ ┬ ┴ ┼ ╭ ╮ ╰ ╯`
-
-**Block Elements:** `░ ▒ ▓ █ ▄ ▀ ▌ ▐ ▖ ▗ ▘ ▝ ▚ ▞`
-
-**Geometric & Symbols:** `◆ ◇ ◈ ● ○ ◉ ■ □ ▲ △ ▼ ▽ ★ ☆ ✦ ✧ ◀ ▶ ◁ ▷ ⬡ ⬢ ⌂`
-
-### Rules
-
-- Max width: 60 characters per line (terminal-safe)
-- Max height: 15 lines for banners, 25 for scenes
-- Monospace only: output must render correctly in fixed-width fonts
-
-## Decision Flow
-
-1. **Text as a banner** → pyfiglet if installed, otherwise asciified API via curl
-2. **Wrap a message in fun character art** → cowsay
-3. **Add decorative border/frame** → boxes (can combine with pyfiglet/asciified)
-4. **Art of a specific thing** (cat, rocket, dragon) → ascii.co.uk via curl + parsing
-5. **Convert an image to ASCII** → ascii-image-converter or jp2a
-6. **QR code** → qrenco.de via curl
-7. **Weather/moon art** → wttr.in via curl
-8. **Something custom/creative** → LLM generation with Unicode palette
-9. **Any tool not installed** → install it, or fall back to next option
+The requested art is generated and shown to the user in a monospace-safe block. If it was
+saved, report the file path (`--save-txt` for images, or `write_file` for captured output).
