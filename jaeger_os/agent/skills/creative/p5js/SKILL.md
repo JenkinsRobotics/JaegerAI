@@ -491,7 +491,7 @@ When building p5.js sketches:
 5. **Headless export** — `node scripts/export-frames.js sketch.html --frames 300` for automated frame capture (sketch must use `noLoop()` + `_p5Ready`)
 6. **MP4 rendering** — `bash scripts/render.sh sketch.html output.mp4 --duration 30`
 7. **Iterative refinement** — edit the HTML file, user refreshes browser to see changes
-8. **Load references on demand** — use `skill_view(name="p5js", file_path="references/...")` to load specific reference files as needed during implementation
+8. **Load references on demand** — use `skill(action="view", name="p5js", file="references/...")` to load specific reference files as needed during implementation
 
 ## Performance Targets
 
