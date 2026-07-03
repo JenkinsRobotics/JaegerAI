@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -117,11 +118,17 @@ def _matches_tool_set(observed: list[str], expected: list[str],
     return False
 
 
+# Digit-group separators: a model may write "9,999" where a check wants "9999".
+# Strip commas that sit BETWEEN digits so the numeric answer still matches.
+_THOUSANDS_SEP = re.compile(r"(?<=\d),(?=\d)")
+
+
 def _contains_any(haystack: str, needles: list[str]) -> bool:
     if not needles:
         return True
     lower = (haystack or "").lower()
-    return any(n.lower() in lower for n in needles)
+    normalized = _THOUSANDS_SEP.sub("", lower)
+    return any(n.lower() in lower or n.lower() in normalized for n in needles)
 
 
 def _contains_all(haystack: str, needles: list[str]) -> bool:
