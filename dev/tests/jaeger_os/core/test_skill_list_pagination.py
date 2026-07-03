@@ -29,7 +29,7 @@ def _stub_playbook(name: str, category: str, desc: str = "") -> Any:
         name=name, category=category, description=desc,
         tags=[], path=None,
         # enriched fields the list tool now surfaces per entry
-        tier="standard", requires_tools=[], fallback_for_tools=[],
+        tier="standard", requires_tools=[],
     )
 
 

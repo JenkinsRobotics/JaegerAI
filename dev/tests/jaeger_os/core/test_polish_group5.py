@@ -194,7 +194,6 @@ def test_skill_view_auto_loads_required_toolsets(monkeypatch, tmp_path):
         platforms = ()
         requires_tools = ()
         requires_toolsets = ["files", "code"]
-        fallback_for_tools = ()
 
     monkeypatch.setattr(
         _pb, "find_playbook",

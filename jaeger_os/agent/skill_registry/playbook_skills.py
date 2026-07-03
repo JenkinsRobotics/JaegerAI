@@ -23,10 +23,6 @@ from typing import Any
 # skills/ sits at the package root:  core/skills/ → core/ → jaeger_os/ → skills/
 _SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "agent" / "skills"
 
-# JROS code skills are named "<name>_v<N>" and carry a Python module —
-# skill_loader.py owns those; they are not playbooks.
-_VERSIONED = re.compile(r"_v\d+$")
-
 
 # Where a skill came from — for trust decisions and a future curator
 # that must never prune a user-written skill (audit gap #8).
@@ -44,13 +40,12 @@ class PlaybookSkill:
     # (the agent authored it), "marketplace" (installed from elsewhere).
     origin: str = "builtin"
     # Discovery metadata (all optional). ``platforms`` empty = every OS;
-    # otherwise a skill is hidden on a platform it does not list. The
-    # ``requires_*`` / ``fallback_for_tools`` fields are advisory — surfaced
-    # on `skill view` so the model knows a skill's prerequisites.
+    # otherwise a skill is hidden on a platform it does not list.
+    # ``requires_tools`` HIDES the skill when its tools aren't registered;
+    # ``requires_toolsets`` auto-loads the named toolsets on `skill view`.
     platforms: list[str] = field(default_factory=list)
     requires_tools: list[str] = field(default_factory=list)
     requires_toolsets: list[str] = field(default_factory=list)
-    fallback_for_tools: list[str] = field(default_factory=list)
     tier: str = "standard"  # routing hint: native | preferred | standard | fallback
 
 
@@ -92,16 +87,6 @@ def _parse_frontmatter(text: str) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
-
-
-def _is_code_skill(folder: Path) -> bool:
-    """True for a JROS Python tool-registering skill (skill_loader's job)."""
-    if _VERSIONED.search(folder.name):
-        return True
-    try:
-        return any(p.suffix == ".py" for p in folder.iterdir() if p.is_file())
-    except OSError:
-        return False
 
 
 def _tags_of(fm: dict[str, Any]) -> list[str]:
@@ -232,8 +217,10 @@ def discover_playbooks() -> list[PlaybookSkill]:
             continue
         for md in root.rglob("SKILL.md"):
             folder = md.parent
-            if _is_code_skill(folder):
-                continue
+            # Presence-based unification: ANY folder with a SKILL.md is a recipe.
+            # A folder that ALSO ships a module registers tools (skill_loader) —
+            # so a skill can be both. No "code_skill vs playbook" split. See
+            # dev/docs/skill_unification.md.
             try:
                 text = md.read_text(encoding="utf-8")
             except OSError:
@@ -256,7 +243,6 @@ def discover_playbooks() -> list[PlaybookSkill]:
                 platforms=_normalize_platforms(_str_list(fm, "platforms")),
                 requires_tools=_str_list(fm, "requires_tools"),
                 requires_toolsets=_str_list(fm, "requires_toolsets"),
-                fallback_for_tools=_str_list(fm, "fallback_for_tools"),
                 tier=str(fm.get("tier") or "standard").strip().lower(),
             )
             by_name[skill.name] = skill
