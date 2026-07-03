@@ -2,7 +2,7 @@
 and the compact prompt-side skill index.
 
 Skills gained discovery metadata: ``platforms`` (with ``macos`` first-class),
-``requires_tools`` / ``requires_toolsets`` / ``fallback_for_tools``, and a
+``requires_tools`` / ``requires_toolsets``, and a
 config-driven disabled list. ``available_playbooks`` is the agent-facing
 view — discovered skills minus those for another OS and those disabled in
 config — and ``build_skill_index`` renders a compact index for the prompt.

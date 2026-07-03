@@ -74,8 +74,8 @@ def skill(action: str, name: str = "", query: str = "",
     task. ``action`` selects the operation:
 
       - ``list``   — the FULL active catalog: every active skill,
-        enriched (name · category · description · tier · tools ·
-        fallback_for). This is the research-step lookup — call it when
+        enriched (name · category · description · tier · tools).
+        This is the research-step lookup — call it when
         STARTING a non-trivial task to see everything available, then
         follow a matching skill or plan a tool chain. ``category=`` /
         ``limit`` / ``offset`` page it, but the DEFAULT is the complete
@@ -134,7 +134,7 @@ def skill(action: str, name: str = "", query: str = "",
             "skills": [
                 {"name": s.name, "category": s.category,
                  "description": s.description, "tier": s.tier,
-                 "tools": s.requires_tools, "fallback_for": s.fallback_for_tools}
+                 "tools": s.requires_tools}
                 for s in page
             ],
         }
@@ -218,8 +218,6 @@ def skill(action: str, name: str = "", query: str = "",
                     result["active_toolsets"] = sorted(active_toolset_names())
             except Exception:  # noqa: BLE001 — never let auto-load break view
                 pass
-        if s.fallback_for_tools:
-            result["fallback_for_tools"] = s.fallback_for_tools
         # Safety scan — a playbook is markdown the model is told to run.
         # Surface a warning so the model treats a flagged skill with
         # care; never blocks the read (the model still needs to see it).
@@ -360,26 +358,42 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 def _register_use_skill() -> None:
     import typing
     from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
-    names = [s.name for s in _pb.available_playbooks()]
+    skills = _pb.available_playbooks()
+    names = [s.name for s in skills]
     if not names:
         return
     skill_name_enum = typing.Literal[tuple(names)]  # dynamic enum of names
 
     def use_skill(name) -> str:
-        """Load a specialized JROS playbook recipe and FOLLOW it. You MUST
-        call this BEFORE reaching for raw tools when the task is a
-        specialized domain: research (papers, blogs, wikis), codebase
-        analysis, creative output (ascii art, diagrams, music, infographics),
-        an external app/service (spotify, notion, github, email, obsidian),
-        or macOS/desktop automation. Returns the playbook's step-by-step
-        recipe — execute it with your normal tools. `name` must be one of
-        the listed skills."""
         r = skill(action="view", name=str(name))
         if not r.get("ok"):
             return (f"Error loading skill '{name}': {r.get('error')}. "
                     "Pick an exact name from the available list.")
-        return f"PLAYBOOK RECIPE — {r.get('name')}:\n\n{r.get('instructions','')}"
+        recipe = f"PLAYBOOK RECIPE — {r.get('name')}:\n\n{r.get('instructions','')}"
+        # requires_tools guard: at call time the registry is complete, so we can
+        # tell the model up front if the skill's tools aren't available here
+        # (e.g. a macOS skill on Linux) instead of letting it follow a recipe
+        # that calls tools that don't exist.
+        need = r.get("requires_tools") or []
+        if need:
+            from jaeger_os.agent.schemas.tool_registry import get_tools
+            have = {t.name for t in get_tools()}
+            missing = [t for t in need if t not in have]
+            if missing:
+                recipe = (f"NOTE: this skill needs tools not available on this "
+                          f"system: {missing}. You likely can't complete it as "
+                          f"written — tell the operator, or use another approach."
+                          f"\n\n{recipe}")
+        return recipe
 
+    use_skill.__doc__ = (
+        "Load a specialized JROS playbook recipe and FOLLOW it. Call this BEFORE "
+        "raw tools for any specialized task (research, codebase analysis, "
+        "creative output, an app/service, macOS/desktop automation) — first scan "
+        "your skills for a match; only if NONE fits do you reach for raw tools. "
+        "Returns the playbook's step-by-step recipe; execute it with your normal "
+        "tools. `name` must be one of the available skills."
+    )
     use_skill.__annotations__ = {"name": skill_name_enum, "return": str}
     register_tool_from_function(side_effect="read")(use_skill)
 
