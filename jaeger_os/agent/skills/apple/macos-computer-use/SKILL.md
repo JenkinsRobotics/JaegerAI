@@ -1,7 +1,7 @@
 ---
 name: macos-computer-use
 tier: native
-requires_tools: [computer_open_app, computer_read_screen, computer_click, computer_menu_select, computer_type_text, computer_press_key, _computer_do]
+requires_tools: [computer_open_app, computer_read_screen, computer_click, computer_menu_select, computer_type_text, computer_press_key, computer_do]
 requires_toolsets: [computer_use]
 description: "Drive this Mac's GUI: open apps, click, type, pick menus, change System Settings. Load this for ANY 'do X on my Mac / open Y / turn on Z / click W' task — it hands you the exact desktop tools so you don't guess their names."
 version: 2.0.0
@@ -30,8 +30,8 @@ keys the tool expects — get them wrong and the call is rejected).
 AUTONOMOUS (preferred for a multi-step goal) — one call, it runs its own
 look -> act -> verify loop:
 ```
-_computer_do(goal="turn on Dark Mode in System Settings")
-_computer_do(goal="open Calculator, compute 5+5, report the result")
+computer_do(goal="turn on Dark Mode in System Settings")
+computer_do(goal="open Calculator, compute 5+5, report the result")
 ```
 
 STEP-BY-STEP (when you need to control each action):
@@ -44,12 +44,11 @@ computer_type_text(text="hello")                  type text
 computer_press_key(key="cmd+s")                   press a key / chord
 ```
 `computer_read_screen()` FIRST to get coordinates, THEN `computer_click(x=…, y=…)`.
-Note the underscore on `_computer_do` — that is the real tool name; its one
-argument is `goal`.
+`computer_do` takes one argument, `goal`.
 
 ## SOP
 
-1. Decide: a single clear goal -> `_computer_do(goal="…")`. Need to control each
+1. Decide: a single clear goal -> `computer_do(goal="…")`. Need to control each
    step -> step-by-step below.
 2. Step-by-step: `computer_open_app(name="…")` -> `computer_read_screen()` to see
    what's on screen and where -> act (`computer_click`/`computer_menu_select`/
