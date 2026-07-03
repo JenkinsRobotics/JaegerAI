@@ -5,12 +5,15 @@ version: 2.0.0
 author: dodo-reach
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [clarify, execute_code, terminal]
 metadata:
   hermes:
     tags: [creative, pixel-art, arcade, snes, nes, gameboy, retro, image, video]
     category: creative
     credits:
       - "Hardware palettes and animation loops ported from Synero/pixel-art-studio (MIT) — https://github.com/Synero/pixel-art-studio"
+  jros:
+    related_skills: [comfyui, manim-video, p5js]
 ---
 
 # Pixel Art

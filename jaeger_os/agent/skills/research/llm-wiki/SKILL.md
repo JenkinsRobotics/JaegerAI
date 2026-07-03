@@ -5,11 +5,14 @@ version: 2.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [read_file, write_file, search_files, web_extract, execute_code]
 metadata:
   hermes:
     tags: [wiki, knowledge-base, research, notes, markdown, rag-alternative]
     category: research
     related_skills: [obsidian, arxiv]
+  jros:
+    related_skills: [obsidian, arxiv, blogwatcher]
 ---
 
 # Karpathy's LLM Wiki

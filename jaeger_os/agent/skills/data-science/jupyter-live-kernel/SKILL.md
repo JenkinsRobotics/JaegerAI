@@ -5,10 +5,13 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal, execute_code]
 metadata:
   hermes:
     tags: [jupyter, notebook, repl, data-science, exploration, iterative]
     category: data-science
+  jros:
+    related_skills: [dspy, weights-and-biases, huggingface-hub]
 ---
 
 # Jupyter Live Kernel (hamelnb)

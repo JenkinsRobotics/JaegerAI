@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [segment-anything, transformers>=4.30.0, torch>=1.7.0]
 platforms: [linux, macos, windows]
+requires_tools: [execute_code, terminal]
 metadata:
   hermes:
     tags: [Multimodal, Image Segmentation, Computer Vision, SAM, Zero-Shot]
+  jros:
+    related_skills: [audiocraft-audio-generation, comfyui, huggingface-hub]
 
 ---
 

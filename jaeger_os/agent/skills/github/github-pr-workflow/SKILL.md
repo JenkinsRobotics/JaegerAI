@@ -5,10 +5,13 @@ version: 1.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal, write_file, patch, read_file]
 metadata:
   hermes:
     tags: [GitHub, Pull-Requests, CI/CD, Git, Automation, Merge]
     related_skills: [github-auth, github-code-review]
+  jros:
+    related_skills: [github-auth, github-code-review, github-issues]
 ---
 
 # GitHub Pull Request Workflow

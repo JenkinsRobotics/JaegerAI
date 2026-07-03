@@ -7,10 +7,13 @@ license: MIT
 platforms: [linux, macos, windows]
 prerequisites:
   tools: [spotify_playback, spotify_devices, spotify_queue, spotify_search, spotify_playlists, spotify_albums, spotify_library]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [spotify, music, playback, playlists, media]
     related_skills: [gif-search]
+  jros:
+    related_skills: [gif-search, youtube-content, songsee]
 ---
 
 # Spotify

@@ -5,10 +5,13 @@ version: 1.0.0
 author: community
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal, vision_analyze]
 metadata:
   hermes:
     tags: [Audio, Visualization, Spectrogram, Music, Analysis]
     homepage: https://github.com/steipete/songsee
+  jros:
+    related_skills: [heartmula, spotify, gif-search]
 prerequisites:
   commands: [songsee]
 ---

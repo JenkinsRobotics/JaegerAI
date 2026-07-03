@@ -5,9 +5,12 @@ version: 2.2.0
 author: Hermes Agent + Teknium
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Coding-Agent, Claude, Anthropic, Code-Review, Refactoring, PTY, Automation]
+    related_skills: [codex, hermes-agent, opencode]
+  jros:
     related_skills: [codex, hermes-agent, opencode]
 ---
 

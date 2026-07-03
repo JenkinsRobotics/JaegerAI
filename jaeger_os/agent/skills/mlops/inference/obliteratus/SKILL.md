@@ -6,10 +6,13 @@ author: Hermes Agent
 license: MIT
 dependencies: [obliteratus, torch, transformers, bitsandbytes, accelerate, safetensors]
 platforms: [linux, macos]
+requires_tools: [terminal, execute_code]
 metadata:
   hermes:
     tags: [Abliteration, Uncensoring, Refusal-Removal, LLM, Weight-Projection, SVD, Mechanistic-Interpretability, HuggingFace, Model-Surgery]
     related_skills: [vllm, gguf, huggingface-tokenizers]
+  jros:
+    related_skills: [serving-llms-vllm, llama-cpp, huggingface-hub]
 ---
 
 # OBLITERATUS Skill

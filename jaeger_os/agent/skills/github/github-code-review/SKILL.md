@@ -5,10 +5,13 @@ version: 1.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal, read_file, search_files]
 metadata:
   hermes:
     tags: [GitHub, Code-Review, Pull-Requests, Git, Quality]
     related_skills: [github-auth, github-pr-workflow]
+  jros:
+    related_skills: [github-auth, github-pr-workflow, github-issues]
 ---
 
 # GitHub Code Review

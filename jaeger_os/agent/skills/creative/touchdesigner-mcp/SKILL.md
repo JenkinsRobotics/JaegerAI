@@ -5,10 +5,13 @@ version: 1.1.0
 author: kshitijk4poor
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [TouchDesigner, MCP, twozero, creative-coding, real-time-visuals, generative-art, audio-reactive, VJ, installation, GLSL]
     related_skills: [native-mcp, ascii-video, manim-video, hermes-video]
+  jros:
+    related_skills: [comfyui, manim-video, p5js, ascii-video]
 
 ---
 

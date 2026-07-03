@@ -6,10 +6,13 @@ author: Cocoon AI (hello@cocoon-ai.com), ported by Hermes Agent
 license: MIT
 dependencies: []
 platforms: [linux, macos, windows]
+requires_tools: [write_file, list_skills]
 metadata:
   hermes:
     tags: [architecture, diagrams, SVG, HTML, visualization, infrastructure, cloud]
     related_skills: [concept-diagrams, excalidraw]
+  jros:
+    related_skills: [excalidraw, claude-design, baoyu-infographic]
 ---
 
 # Architecture Diagram Skill

@@ -5,10 +5,13 @@ version: 1.0.0
 author: community
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [PDF, Documents, Editing, NLP, Productivity]
     homepage: https://pypi.org/project/nano-pdf/
+  jros:
+    related_skills: [ocr-and-documents, powerpoint, google-workspace]
 ---
 
 # nano-pdf

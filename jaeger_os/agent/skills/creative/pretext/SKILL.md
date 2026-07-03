@@ -5,10 +5,13 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [write_file, terminal]
 metadata:
   hermes:
     tags: [creative-coding, typography, pretext, ascii-art, canvas, generative, text-layout, kinetic-typography]
     related_skills: [p5js, claude-design, excalidraw, architecture-diagram]
+  jros:
+    related_skills: [p5js, sketch, manim-video]
 ---
 
 # Pretext Creative Demos

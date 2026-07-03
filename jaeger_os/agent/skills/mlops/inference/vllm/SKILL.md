@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [vllm, torch, transformers]
 platforms: [linux, macos]
+requires_tools: [terminal, execute_code]
 metadata:
   hermes:
     tags: [vLLM, Inference Serving, PagedAttention, Continuous Batching, High Throughput, Production, OpenAI API, Quantization, Tensor Parallelism]
+  jros:
+    related_skills: [serving-llms-vllm, llama-cpp, huggingface-hub]
 
 ---
 

@@ -3,7 +3,7 @@ name: hermes-agent-skill-authoring
 description: "Author or edit an in-repo JROS SKILL.md to the 8-point standard — frontmatter, tool-coupling, phased SOP. Load this when creating a new skill, rewriting one, or fixing a skill that names tools that don't exist."
 version: 2.0.0
 platforms: [macos, linux, windows]
-requires_tools: [write_file, read_file, patch, append_file, list_skill_dir, search_files, skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
+requires_tools: [write_file, read_file, patch, append_file, list_skill_dir, search_files, list_skills, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
 metadata:
   jros:
     tags: [skills, authoring, skill-md, conventions, meta]
