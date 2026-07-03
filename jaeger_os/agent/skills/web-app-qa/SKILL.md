@@ -3,6 +3,7 @@ name: web-app-qa
 description: "Exploratory QA of a web app: drive it in a browser, find bugs, capture evidence, write a report. Load this for 'test / QA / find bugs in / dogfood this site' tasks."
 version: 2.0.0
 platforms: [linux, macos, windows]
+requires_tools: [browser, append_file, write_file, read_file, execute_code, web_extract]
 metadata:
   jros:
     tags: [qa, testing, browser, web]

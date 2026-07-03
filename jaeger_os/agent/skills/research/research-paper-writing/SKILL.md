@@ -3,7 +3,7 @@ name: research-paper-writing
 description: "End-to-end pipeline for publication-ready ML/AI papers (NeurIPS, ICML, ICLR, ACL, AAAI, COLM). Load this to design/run experiments, draft or revise any section, verify citations, self-review, or prep a submission or rebuttal."
 version: 1.2.0
 platforms: [linux, macos]
-requires_tools: [terminal, execute_code, read_file, write_file, patch, append_file, web_search, web_extract, todo, memory, use_skill, skill, start_background, check_background, schedule_prompt, delegate_task]
+requires_tools: [terminal, execute_code, read_file, write_file, patch, append_file, web_search, web_extract, todo, memory, use_skill, list_skills, start_background, check_background, schedule_prompt, delegate_task]
 metadata:
   jros:
     tags: [research, paper-writing, experiments, latex, citations, statistics]

@@ -8,10 +8,13 @@ platforms: [linux, macos, windows]
 prerequisites:
   env_vars: [AIRTABLE_API_KEY]
   commands: [curl]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Airtable, Productivity, Database, API]
     homepage: https://airtable.com/developers/web/api/introduction
+  jros:
+    related_skills: [notion, linear, google-workspace]
 ---
 
 # Airtable — Bases, Tables & Records

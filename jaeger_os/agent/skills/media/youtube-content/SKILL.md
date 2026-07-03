@@ -3,6 +3,10 @@ name: youtube-content
 description: "YouTube transcripts to summaries, threads, blogs."
 platforms: [linux, macos, windows]
 tags: [youtube, video, transcript, content, captions]
+requires_tools: [terminal]
+metadata:
+  jros:
+    related_skills: [gif-search, spotify, songsee]
 ---
 
 # YouTube Content Tool

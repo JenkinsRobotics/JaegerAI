@@ -5,10 +5,13 @@ version: 1.56.1
 author: 宝玉 (JimLiu)
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [image_generate, write_file, clarify, read_file]
 metadata:
   hermes:
     tags: [infographic, visual-summary, creative, image-generation]
     homepage: https://github.com/JimLiu/baoyu-skills#baoyu-infographic
+  jros:
+    related_skills: [baoyu-comic, claude-design, architecture-diagram]
 ---
 
 # Infographic Generator

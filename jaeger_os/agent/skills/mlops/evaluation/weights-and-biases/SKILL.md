@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [wandb]
 platforms: [linux, macos, windows]
+requires_tools: [execute_code, terminal]
 metadata:
   hermes:
     tags: [MLOps, Weights And Biases, WandB, Experiment Tracking, Hyperparameter Tuning, Model Registry, Collaboration, Real-Time Visualization, PyTorch, TensorFlow, HuggingFace]
+  jros:
+    related_skills: [evaluating-llms-harness, serving-llms-vllm, huggingface-hub]
 
 ---
 

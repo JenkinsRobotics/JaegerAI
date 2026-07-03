@@ -5,10 +5,13 @@ version: 1.56.1
 author: 宝玉 (JimLiu)
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [image_generate, write_file, clarify, terminal]
 metadata:
   hermes:
     tags: [comic, knowledge-comic, creative, image-generation]
     homepage: https://github.com/JimLiu/baoyu-skills#baoyu-comic
+  jros:
+    related_skills: [baoyu-infographic, claude-design, architecture-diagram]
 ---
 
 # Knowledge Comic Creator

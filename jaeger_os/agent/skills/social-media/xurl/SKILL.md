@@ -5,6 +5,7 @@ version: 1.1.1
 author: xdevplatform + openclaw + Hermes Agent
 license: MIT
 platforms: [linux, macos]
+requires_tools: [terminal]
 prerequisites:
   commands: [xurl]
 metadata:
@@ -12,6 +13,8 @@ metadata:
     tags: [twitter, x, social-media, xurl, official-api]
     homepage: https://github.com/xdevplatform/xurl
     upstream_skill: https://github.com/openclaw/openclaw/blob/main/skills/xurl/SKILL.md
+  jros:
+    related_skills: [gif-search, youtube-content, imessage]
 ---
 
 # xurl — X (Twitter) API via the Official CLI

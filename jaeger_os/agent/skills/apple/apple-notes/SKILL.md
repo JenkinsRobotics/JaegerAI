@@ -5,10 +5,13 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [macos]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Notes, Apple, macOS, note-taking]
     related_skills: [obsidian]
+  jros:
+    related_skills: [obsidian, apple-reminders, imessage]
 prerequisites:
   commands: [memo]
 ---

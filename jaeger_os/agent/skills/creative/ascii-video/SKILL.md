@@ -3,6 +3,10 @@ name: ascii-video
 description: "ASCII video: convert video/audio to colored ASCII MP4/GIF."
 platforms: [linux, macos, windows]
 tags: [ascii, video, animation, terminal, creative]
+requires_tools: [execute_code, terminal]
+metadata:
+  jros:
+    related_skills: [ascii-art, manim-video, p5js]
 ---
 
 # ASCII Video Production Pipeline

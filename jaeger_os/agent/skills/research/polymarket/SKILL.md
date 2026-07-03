@@ -5,6 +5,10 @@ version: 1.0.0
 author: Hermes Agent + Teknium
 tags: [polymarket, prediction-markets, market-data, trading]
 platforms: [linux, macos, windows]
+requires_tools: [terminal, execute_code]
+metadata:
+  jros:
+    related_skills: [arxiv, blogwatcher, llm-wiki]
 ---
 
 # Polymarket — Prediction Market Data

@@ -6,6 +6,10 @@ author: Hermes Agent + Teknium (design systems sourced from VoltAgent/awesome-de
 license: MIT
 tags: [design, css, html, ui, web-development, design-systems, templates]
 platforms: [linux, macos, windows]
+requires_tools: [write_file, list_skills, browser]
+metadata:
+  jros:
+    related_skills: [claude-design, design-md, sketch]
 triggers:
   - build a page that looks like
   - make it look like stripe

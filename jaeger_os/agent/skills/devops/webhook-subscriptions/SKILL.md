@@ -3,9 +3,12 @@ name: webhook-subscriptions
 description: "Webhook subscriptions: event-driven agent runs."
 version: 1.1.0
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [webhook, events, automation, integrations, notifications, push]
+  jros:
+    related_skills: [kanban-orchestrator, kanban-worker, native-mcp]
 ---
 
 # Webhook Subscriptions

@@ -8,9 +8,12 @@ platforms: [linux, macos, windows]
 prerequisites:
   env_vars: [LINEAR_API_KEY]
   commands: [curl]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Linear, Project Management, Issues, GraphQL, API, Productivity]
+  jros:
+    related_skills: [notion, airtable, google-workspace]
 ---
 
 # Linear — Issue & Project Management

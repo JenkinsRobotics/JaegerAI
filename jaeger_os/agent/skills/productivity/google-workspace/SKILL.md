@@ -10,11 +10,14 @@ required_credential_files:
     description: Google OAuth2 token (created by setup script)
   - path: google_client_secret.json
     description: Google OAuth2 client credentials (downloaded from Google Cloud Console)
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]
     homepage: https://github.com/NousResearch/hermes-agent
     related_skills: [himalaya]
+  jros:
+    related_skills: [himalaya, linear, notion]
 ---
 
 # Google Workspace
