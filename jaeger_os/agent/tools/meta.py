@@ -151,13 +151,12 @@ def load_toolset(name: str = "") -> dict[str, Any]:
 
 @register_tool_from_function
 def list_tools(query: str = "") -> dict[str, Any]:
-    """Search the FULL tool index — EVERY tool (even ones not currently
-    visible), what it does, and which toolset holds it. Use this to FIND
-    the exact tool a task needs before acting — e.g. ``list_tools("weather")``
-    → ``get_weather`` lives in the ``web`` toolset; then ``load_toolset("web")``
-    to bring it in. ALWAYS search here before force-fitting a visible tool or
-    concluding a task can't be done. Optional ``query`` filters by substring in
-    the tool name or description; empty ``query`` returns the whole index."""
+    """Find a SPECIFIC tool by keyword when the exact tool a task needs isn't in
+    your current view — e.g. ``list_tools("weather")`` → ``get_weather`` in the
+    ``web`` toolset; then ``load_toolset("web")`` to use it. It returns matching
+    tool names + their toolset, NOT a description of your capabilities — for
+    "what can you do / help" use ``help_me``, not this. When every tool is
+    already visible you rarely need it. Optional ``query`` filters by substring."""
     from jaeger_os.agent.schemas.tool_registry import get_tools
     from jaeger_os.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
     where: dict[str, str] = {}
