@@ -78,6 +78,27 @@ def test_extract_gemma_brace_args_form():
     assert calls[0]["arguments"] == {"tz": "UTC"}
 
 
+def test_extract_gemma_brace_form_missing_closing_token():
+    """Regression (2026-07-03): Gemma-4 sometimes drops the closing
+    ``<tool_call|>`` token under the scoped surface, stranding a real
+    call as text so the turn halts. The tolerant fallback salvages it."""
+    text = 'PLAN: <|tool_call>call:use_skill{name:<|"|>codebase-inspection<|"|>}'
+    calls = extract_tool_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "use_skill"
+    assert calls[0]["arguments"] == {"name": "codebase-inspection"}
+
+
+def test_tolerant_fallback_does_not_fire_when_strict_matches():
+    """A well-formed call (with the closing token) must parse via the
+    strict path unchanged — the tolerant fallback only runs when strict
+    finds nothing, so no double-counting."""
+    text = '<|tool_call>call:get_time{tz:<|"|>UTC<|"|>}<tool_call|>'
+    calls = extract_tool_calls(text)
+    assert len(calls) == 1
+    assert calls[0]["name"] == "get_time"
+
+
 def test_extract_gemma_paren_kwargs_form():
     text = "<|tool_call>call:write_file(path='/tmp/x.py', content='print(1)')<tool_call|>"
     calls = extract_tool_calls(text)

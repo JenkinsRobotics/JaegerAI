@@ -1,0 +1,155 @@
+{
+  "total": 4,
+  "passed": 0,
+  "pass_rate": 0.0,
+  "routing_passed": 0,
+  "routing_total": 0,
+  "answer_passed": 0,
+  "answer_total": 0,
+  "errors": 0,
+  "elapsed_s": 42.89,
+  "metrics": {
+    "avg_latency_s": 10.723,
+    "p50_latency_s": 17.346,
+    "p95_latency_s": 21.953,
+    "min_latency_s": 0.549,
+    "max_latency_s": 21.953,
+    "total_tool_dispatches": 3,
+    "avg_tools_per_turn": 0.75,
+    "answer_tokens_total": 1037,
+    "answer_tokens_avg": 259.2,
+    "answer_tokens_per_sec": 24.2,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 49066,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 1.75,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 2.185,
+    "ttft_p50_s": 0.212,
+    "ttft_p95_s": 8.245,
+    "ttft_reported": 4
+  },
+  "suites": {
+    "smoke": {
+      "total": 1,
+      "passed": 0,
+      "pass_rate": 0.0,
+      "threshold": 0.8,
+      "meets_threshold": false,
+      "avg_latency_s": 0.549,
+      "p95_latency_s": 0.549,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 1,
+      "passed": 0,
+      "pass_rate": 0.0,
+      "threshold": 0.85,
+      "meets_threshold": false,
+      "avg_latency_s": 0.549,
+      "p95_latency_s": 0.549,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "full": {
+      "total": 4,
+      "passed": 0,
+      "pass_rate": 0.0,
+      "threshold": 0.7,
+      "meets_threshold": false,
+      "avg_latency_s": 10.723,
+      "p95_latency_s": 21.953,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "skill": {
+      "total": 2,
+      "passed": 0,
+      "avg_latency_s": 8.947
+    },
+    "routing": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 0.549
+    },
+    "plan_first": {
+      "total": 2,
+      "passed": 0,
+      "avg_latency_s": 12.497
+    }
+  },
+  "failures": [
+    {
+      "id": "skill_codebase_inspect",
+      "prompt": "Give me a structured inspection of this codebase's architecture and main modules.",
+      "tools_called": [],
+      "answer": "PLAN: use_skill(name=\"codebase-inspection\")\n<|tool_call>call:use_skill{name:<|\"|>codebase-inspection<|\"|>}",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": false,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [],
+      "answer": "PLAN: use_skill(name=\"macos-computer-use\")\n",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_plan",
+      "prompt": "I want to turn on Dark Mode on this Mac. DON'T do it yet — first describe your plan and which skill ",
+      "tools_called": [
+        "use_skill",
+        "_computer_do"
+      ],
+      "answer": "<|tool_call>call:clarify{question:<|\"|>I was unable to execute the command to change the Dark Mode because the underlying system tool failed to claim an action. To proceed, I need to know if you are r",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": false,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "_computer_do"
+      ],
+      "answer": "<|tool_call>call:clarify{question:<|\"|>I am still unable to execute the command to change the Dark Mode because the underlying system tool failed to claim an action. Could you please confirm if you ar",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": false,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 42.89,
+  "load_s": 40.6,
+  "category_breakdown": {
+    "routing": {
+      "passed": 0,
+      "total": 1
+    },
+    "skill": {
+      "passed": 0,
+      "total": 2
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260703-112408",
+  "benchmark_version": "1.3"
+}

@@ -43,6 +43,19 @@ NATIVE_PATTERNS = [
 ]
 
 
+# Salvage patterns: Gemma 4 sometimes omits the closing ``<tool_call|>``
+# token — the same malformed-emission class as the leaked channel markers
+# below (2026-06-20) — stranding an otherwise-valid opening call as plain
+# text so the model's real tool call is dropped and the turn halts. These
+# match the opening form WITHOUT the closing token, greedy to the last
+# brace/paren so nested args survive. Consulted ONLY when the strict
+# patterns matched nothing, so well-formed (multi-)call output is untouched.
+TOLERANT_PATTERNS = [
+    re.compile(r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w:/.\-]*)\s*\{(.*)\}", re.DOTALL),
+    re.compile(r"<\|tool_call>\s*call:\s*([a-zA-Z_][\w:/.\-]*)\s*\((.*)\)", re.DOTALL),
+]
+
+
 def extract_native(text: str) -> list[dict[str, Any]]:
     """Salvage Gemma's three native tool-call forms. Returns
     ``[{name, args}]`` in pattern order, then match order within a
@@ -68,6 +81,24 @@ def extract_native(text: str) -> list[dict[str, Any]]:
                 call = _shared.payload_to_call(groups[0])
                 if call:
                     out.append(call)
+    if out or "<|tool_call>" not in text:
+        return out
+    # Nothing matched but an opening token is present: salvage the
+    # close-token-less form (see TOLERANT_PATTERNS).
+    for pat_idx, pattern in enumerate(TOLERANT_PATTERNS):
+        for match in pattern.finditer(text):
+            name = match.group(1)
+            if not name:
+                continue
+            if pat_idx == 1:
+                args = _shared.parse_paren_args(match.group(2))
+            else:
+                args = _shared.parse_gemma_args(match.group(2))
+            if not isinstance(args, dict):
+                args = {"value": args}
+            out.append({"name": str(name), "args": args})
+        if out:
+            break
     return out
 
 
