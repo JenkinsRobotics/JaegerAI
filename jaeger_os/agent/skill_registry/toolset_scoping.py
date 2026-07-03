@@ -80,7 +80,7 @@ CORE: frozenset[str] = frozenset({
     "todo", "kanban",
     # Skill discovery (umbrella) + the enum-callable use_skill + delegation.
     # Heavy procedures live behind ``skill(view)`` / ``use_skill(name=…)``.
-    "skill", "use_skill", "delegate_task",
+    "list_skills", "use_skill", "delegate_task",
     # User interaction.
     "clarify", "help_me",
     # Meta — the search + activate primitives, always visible so the model
@@ -108,7 +108,7 @@ LEAN_CORE: frozenset[str] = frozenset({
     "read_file", "write_file", "patch", "search_files", "list_skill_dir",
     "web_search", "web_extract",
     "memory",
-    "todo", "clarify", "delegate_task", "kanban", "skill",
+    "todo", "clarify", "delegate_task", "kanban", "list_skills",
     "computer_use", "browser",
     "vision_analyze", "image_generate", "text_to_speech",
 })

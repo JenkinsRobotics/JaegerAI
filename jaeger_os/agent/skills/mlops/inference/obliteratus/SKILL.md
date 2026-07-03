@@ -261,7 +261,7 @@ vllm serve ./abliterated-models/<model>
 ## Analysis Modules
 
 OBLITERATUS includes 28 analysis modules for mechanistic interpretability.
-See `skill(action="view", name="obliteratus", file="references/analysis-modules.md")` for the full reference.
+See `list_skills(action="view", name="obliteratus", file="references/analysis-modules.md")` for the full reference.
 
 ### Quick analysis commands
 ```bash

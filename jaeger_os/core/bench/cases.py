@@ -674,7 +674,7 @@ CASES: list[BenchCase] = [
     BenchCase(id="selfimprove_curate",
               prompt="Check your skill library for stale or unused skills "
                      "that might be worth retiring.",
-              expected_tools=["skill"],
+              expected_tools=["list_skills"],
               tags=["self_improve"]),
 
     # ── v1.3: WORKFLOW (triage judgment — the day-to-day kanban test) ─
