@@ -345,7 +345,7 @@ def test_render_produces_markdown_table(fake_repo):
          "latest_cases": 51, "run_count": 2},
     ]
     md = bhv._render(rows, all_entries=[], total_entries=2)
-    assert "# Jaeger-OS bench history" in md
+    assert "# Jaeger-OS Benchmark Leaderboard" in md
     assert "gemma-4-E4B" in md
     assert "92.0%" in md
     assert "Runs" in md
@@ -560,7 +560,7 @@ def test_history_write_persists_history_md(fake_repo, capsys):
     assert rc == 0
     written = fake_repo / "dev/benchmark" / "HISTORY.md"
     assert written.exists()
-    assert "# Jaeger-OS bench history" in written.read_text(encoding="utf-8")
+    assert "# Jaeger-OS Benchmark Leaderboard" in written.read_text(encoding="utf-8")
 
 
 # ── --since / --min-cases filters (2026-05-27) ───────────────
@@ -671,7 +671,7 @@ def test_write_history_md_silent_helper(fake_repo, capsys):
     captured = capsys.readouterr()
     assert out_path is not None
     assert out_path.exists()
-    assert "# Jaeger-OS bench history" in out_path.read_text(encoding="utf-8")
+    assert "# Jaeger-OS Benchmark Leaderboard" in out_path.read_text(encoding="utf-8")
     # Silent: nothing printed to stdout/stderr.
     assert captured.out == ""
     assert captured.err == ""
