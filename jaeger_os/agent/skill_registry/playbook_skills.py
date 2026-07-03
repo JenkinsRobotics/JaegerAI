@@ -92,9 +92,11 @@ def _parse_frontmatter(text: str) -> dict[str, Any]:
 def _tags_of(fm: dict[str, Any]) -> list[str]:
     meta = fm.get("metadata")
     if isinstance(meta, dict):
-        hermes = meta.get("hermes")
-        if isinstance(hermes, dict) and isinstance(hermes.get("tags"), list):
-            return [str(t) for t in hermes["tags"]]
+        # JROS is the standard namespace; hermes kept for imported skills.
+        for ns in ("jros", "hermes"):
+            block = meta.get(ns)
+            if isinstance(block, dict) and isinstance(block.get("tags"), list):
+                return [str(t) for t in block["tags"]]
     if isinstance(fm.get("tags"), list):
         return [str(t) for t in fm["tags"]]
     return []
