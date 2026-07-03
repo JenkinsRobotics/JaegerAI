@@ -70,12 +70,11 @@ CORE: frozenset[str] = frozenset({
     # via the ``web`` toolset for users that don't want it bloating
     # routing on quiet days.
     "web_search", "web_extract",
-    # Memory — umbrella ONLY. The five granular tools (remember /
-    # recall / forget / list_facts / search_memory) are still
-    # registered and callable but loadable via the
-    # ``memory_granular`` toolset — keeps routing concentrated on
-    # one tool instead of splitting across five.
-    "memory",
+    # Memory — umbrella + ``recall`` (the everyday read). The other
+    # granular verbs (forget / list_facts / search_memory) load via the
+    # ``memory_granular`` toolset. ``recall`` is CORE because scoped runs
+    # showed the umbrella alone lost the plain "what did I say" cases.
+    "memory", "recall",
     # Tasks + board — both umbrellas. Granular ``board_*`` tools
     # load via the ``board`` toolset.
     "todo", "kanban",
@@ -84,9 +83,10 @@ CORE: frozenset[str] = frozenset({
     "skill", "use_skill", "delegate_task",
     # User interaction.
     "clarify", "help_me",
-    # Meta — always visible so the model can grow its toolbox
-    # mid-session without needing a category-wide load_toolset.
-    "load_toolset", "describe_tool",
+    # Meta — the search + activate primitives, always visible so the model
+    # can FIND any tool (list_tools) and bring it in (load_toolset) without
+    # ever force-fitting a visible tool for one it hasn't looked up.
+    "list_tools", "load_toolset", "describe_tool",
     # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
     # toolset, not CORE — loaded on demand like ``run_benchmark``. The
     # old ``system_health`` was kept out entirely because "do a self

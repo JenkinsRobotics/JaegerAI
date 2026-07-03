@@ -72,8 +72,8 @@ def test_prompt_defaults_to_unscoped_tool_surface(tmp_path, monkeypatch) -> None
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "full tool surface is already visible" in sp
-    assert "focused CORE set of tools" not in sp
+    assert "full built-in tool surface is visible" in sp
+    assert "small CORE set of tools" not in sp
     assert "TOOL CATALOG" not in sp
 
 
@@ -86,7 +86,7 @@ def test_prompt_scoped_when_explicit_env(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "focused CORE set of tools" in sp
+    assert "small CORE set of tools" in sp
     assert "TOOL CATALOG" in sp
     assert "describe_tool" in sp
 
@@ -98,7 +98,7 @@ def test_prompt_full_tools_env_overrides_explicit_scoping(tmp_path, monkeypatch)
     monkeypatch.setenv("JAEGER_FULL_TOOLS", "1")
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "full tool surface is already visible" in sp
+    assert "full built-in tool surface is visible" in sp
     assert "TOOL CATALOG" not in sp
 
 
@@ -107,7 +107,7 @@ def test_prompt_unscoped_when_toolset_scoping_env_disabled(tmp_path, monkeypatch
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "0")
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "full tool surface is already visible" in sp
+    assert "full built-in tool surface is visible" in sp
 
 
 # ── regression pins for tool-usage rules (2026-05-26) ─────────────
