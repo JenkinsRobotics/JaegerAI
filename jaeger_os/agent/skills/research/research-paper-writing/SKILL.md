@@ -3,7 +3,7 @@ name: research-paper-writing
 description: "End-to-end pipeline for publication-ready ML/AI papers (NeurIPS, ICML, ICLR, ACL, AAAI, COLM). Load this to design/run experiments, draft or revise any section, verify citations, self-review, or prep a submission or rebuttal."
 version: 1.2.0
 platforms: [linux, macos]
-requires_tools: [terminal, execute_code, read_file, write_file, patch, append_file, web_search, web_extract, todo, memory, use_skill, skill, start_background, check_background, schedule_prompt]
+requires_tools: [terminal, execute_code, read_file, write_file, patch, append_file, web_search, web_extract, todo, memory, use_skill, skill, start_background, check_background, schedule_prompt, delegate_task]
 metadata:
   jros:
     tags: [research, paper-writing, experiments, latex, citations, statistics]
@@ -62,7 +62,9 @@ Full detail for every phase (commands, formulas, code): `read_file("references/p
 ## ERROR HATCH
 - LaTeX won't compile: run `chktex` and read the FIRST error only; fix undefined refs/citations by re-running `bibtex` + two `pdflatex` passes. If it fails twice, `read_file("references/pipeline-detailed.md")` LaTeX error checklist.
 - Citation won't verify twice: mark it `[CITATION NEEDED]` and move on — never fabricate BibTeX.
-- No parallel-subagent tool in JROS: draft sections sequentially or offload long jobs to `start_background`.
+- Parallel drafting: `delegate_task(["draft section X: …", "draft section Y: …"])` fans
+  sections out to fresh sub-agents (max 2 concurrent; turns serialize). Or draft
+  sequentially / offload long jobs to `start_background`.
 
 ## DONE WHEN
 A compiling PDF that states one contribution in one sentence, every claim backed by an
