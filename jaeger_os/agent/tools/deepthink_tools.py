@@ -68,11 +68,15 @@ def list_deep_think_queue() -> dict[str, Any]:
 
 @register_tool_from_function(name="propose_deep_think_task")
 def _t_propose_deep_think_task(description: str) -> dict:
-    """Queue a skill-development task for Deep Think to work later.
-    Use when you notice something worth building/fixing that's too
-    big for the current turn. The task is added UNAPPROVED — the
-    user approves it before Deep Think runs it. You propose; the
-    user decides."""
+    """Hand a build/fix job to the DEEP THINK model — the ONLY way to
+    queue work for it. Call this the moment the user says "note it so the
+    deep think model can fix it later", "that's too big to fix now", or
+    you spot a skill/feature worth building that's too big for this turn
+    (e.g. "the weather skill keeps crashing on bad input"). This is NOT
+    the kanban board: adding a board card does NOT queue Deep Think — call
+    THIS to actually hand off the work (you can ALSO board it to track it).
+    The task lands UNAPPROVED; the user approves before Deep Think runs
+    it. You propose; the user decides."""
     return propose_deep_think_task(description=description)
 
 
