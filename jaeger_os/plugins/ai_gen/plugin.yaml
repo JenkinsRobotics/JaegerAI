@@ -1,0 +1,14 @@
+name: ai_gen
+version: 1
+description: |
+  Cloud AI image + video generation via fal.ai's queue REST API
+  (queue.fal.run — plain requests, no SDK). Registers the
+  generate_image_fal and generate_video_fal agent tools. The paid,
+  higher-quality counterpart to the local image_generate tool
+  (SDXL-Turbo on-device): FLUX for images, Pixverse/Veo/Kling for
+  video. Needs the FAL_KEY credential (set_credential or env).
+requires:
+  libraries: [requests]
+  env: [FAL_KEY]
+provides:
+  tools: [generate_image_fal, generate_video_fal]

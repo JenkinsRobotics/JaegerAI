@@ -997,6 +997,13 @@ def _register_builtins(client: Any) -> None:
     # not a client closure, so they belong in tools/ like every other tool).
     from jaeger_os.agent.tools import messaging as _messaging  # noqa: F401
 
+    # Home Assistant plugin tools (ha_list_entities / ha_get_state /
+    # ha_list_services / ha_call_service) — same pattern: importing
+    # registers them. They resolve HASS_URL/HASS_TOKEN at call time and
+    # return a friendly setup error when unconfigured, so always-on
+    # registration costs nothing for users without a HA instance.
+    from jaeger_os.plugins import homeassistant as _homeassistant  # noqa: F401
+
     @register_tool_from_function
     def activate_plugin(name: str) -> dict:
         """Bring a messaging plugin LIVE in this process — e.g.

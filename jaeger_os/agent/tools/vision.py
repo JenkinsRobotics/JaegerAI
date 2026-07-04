@@ -251,7 +251,9 @@ def _t_image_generate(
 ) -> dict:
     """Generate an image from a text prompt and save under skills/.
     Default backbone: SDXL-Turbo (1-step). First call downloads ~6 GB
-    of weights; subsequent calls are 1-3s per image."""
+    of weights; subsequent calls are 1-3s per image. Local + free +
+    offline; for higher quality cloud generation (FLUX, needs FAL_KEY)
+    use generate_image_fal instead."""
     return generate_image(
         prompt=prompt, out_path=out_path,
         num_inference_steps=num_inference_steps,

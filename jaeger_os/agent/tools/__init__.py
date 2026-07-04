@@ -83,6 +83,10 @@ from .avatar import play_timeline, set_avatar_state, warm_avatar
 # Vision
 from .vision import generate_image, look_at
 
+# Cloud AI generation (fal.ai) — the paid, higher-quality counterpart
+# to the local vision tools. Plugin-provided (jaeger_os/plugins/ai_gen).
+from jaeger_os.plugins.ai_gen import generate_image_fal, generate_video_fal
+
 # macOS host control
 from .host import open_on_host
 
@@ -173,6 +177,8 @@ __all__ = [
     "KOKORO_VOICE", "KOKORO_LANG", "KOKORO_SAMPLE_RATE",
     # vision
     "look_at", "generate_image",
+    # cloud AI generation (fal.ai plugin)
+    "generate_image_fal", "generate_video_fal",
     # host
     "open_on_host",
     # credentials
