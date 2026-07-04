@@ -1885,6 +1885,33 @@ def _preflight_log() -> None:
 _jaeger_agents_by_session: dict[str, Any] = {}
 
 
+def _apply_persona_filter(answer: str) -> str:
+    """Station 3 (dev/docs/agentic_runners.md): restyle the final answer in
+    the active character's voice via ONE bounded clean-context call.
+    Everything is best-effort and fail-open — no character, filter disabled,
+    or any error returns the plain answer unchanged."""
+    try:
+        config = _pipeline.get("config")
+        client = _pipeline.get("client")
+        layout = _pipeline.get("layout")
+        if config is None or client is None or layout is None:
+            return answer
+        pconf = getattr(config, "persona", None)
+        if pconf is None or not pconf.output_filter or pconf.max_chars <= 0:
+            return answer
+        from jaeger_os.personality.character import active_character
+        character = active_character(layout.root)
+        if character is None:
+            return answer
+        block = character.character_block()
+        from jaeger_os.agent.prompts.persona_filter import apply_persona_voice
+        return apply_persona_voice(
+            client, answer, block, max_chars=pconf.max_chars,
+        )
+    except Exception:  # noqa: BLE001 — voice is optional, the answer is not
+        return answer
+
+
 def _run_turn_via_jaeger_agent(
     client: Any,
     user_text: str,
@@ -2128,6 +2155,14 @@ def _run_turn_via_jaeger_agent(
     first_decision = result["first_decision"]
     elapsed = result["elapsed_s"]
     skipped = result["skipped"]
+
+    # Station 3 — the persona output filter (dev/docs/agentic_runners.md).
+    # Applied ONLY here, the user-facing boundary: the bench and
+    # delegate_task sub-agents drive the loop directly and never pass
+    # through, so the engine is always measured persona-off. Skip-final
+    # deterministic answers stay instant. Fail-open by construction.
+    if answer and not skipped:
+        answer = _apply_persona_filter(answer)
 
     # Tool time we can fill — summed from the ``tool_progress("done")``
     # callback via the per-turn accumulator. ``decision`` / ``final``
