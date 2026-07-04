@@ -464,6 +464,7 @@ class JaegerAgent:
                         final_text,
                         self._turn_tool_successes,
                         {getattr(t, "name", "") for t in (self._all_tools or [])},
+                        user_prompt=user_message,
                     )
                     if nudge is not None:
                         self._verify_nudge_used = True

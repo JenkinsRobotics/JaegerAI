@@ -34,6 +34,26 @@ def test_lowercase_plan_line_mid_text_is_nudged():
     assert verify_final(text, set(), TOOLS) == PLAN_NUDGE
 
 
+def test_plan_requested_by_user_stands_down():
+    """Measured false positive (pf_arxiv_plan): when the USER asked for a
+    plan without execution, answering with a PLAN line and stopping is
+    correct — the gate must not nudge the model into acting early."""
+    plan_answer = 'PLAN: use_skill("arxiv") -> web_extract the top hits'
+    for prompt in (
+        "I want recent arXiv papers on RAG. DON'T do it yet — first tell "
+        "me your plan: which skill or tools would you use, and why?",
+        "How would you approach cleaning up this repo?",
+        "What's your plan for the migration? Do not run anything.",
+        "Give me the plan first.",
+    ):
+        assert verify_final(plan_answer, set(), TOOLS,
+                            user_prompt=prompt) is None, prompt
+    # …and a normal do-it prompt still fires
+    assert verify_final(plan_answer, set(), TOOLS,
+                        user_prompt="find me recent arXiv papers on RAG"
+                        ) == PLAN_NUDGE
+
+
 def test_plan_prose_without_a_tool_call_shape_passes():
     """'Here's the plan, shall I proceed?' is a legitimate final answer —
     only a plan that NAMES a real tool call it never made is a halt."""
