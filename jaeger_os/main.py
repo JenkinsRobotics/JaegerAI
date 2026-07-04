@@ -3374,6 +3374,29 @@ def _windowed_available() -> bool:
 
 
 def main() -> int:
+    """CLI entry — dispatch, then the F1 exit mitigation.
+
+    F1 (STATUS.md, 2026-05-22; upstream llama.cpp PR #17869): when the
+    in-process ggml/Metal runtime (llama.cpp, whisper.cpp) has been
+    loaded, letting the interpreter exit normally runs C++ static
+    destructors (``__cxa_finalize``) which abort in
+    ``ggml_metal_device_free`` — SIGABRT + a macOS crash report on
+    EVERY quit and every bench run. All orderly cleanup (model free,
+    DB close, audit flush) has already happened by the time we get
+    here; ``os._exit`` just skips the doomed destructors, exactly as
+    ``_shakedown.py`` and the tray quit paths already do."""
+    rc = _main_dispatch()
+    if "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:  # noqa: BLE001 — never let a flush block the exit
+            pass
+        os._exit(rc)
+    return rc
+
+
+def _main_dispatch() -> int:
     # Daemon subcommands — ``jaeger start | stop | status | restart`` —
     # peel off BEFORE argparse so they don't collide with the positional
     # ``prompt`` argument the legacy CLI takes. Standalone ``jaeger``
