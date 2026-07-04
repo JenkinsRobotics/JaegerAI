@@ -50,12 +50,33 @@ _PLAN_LINE = re.compile(r"^\s*plan\s*:", re.IGNORECASE | re.MULTILINE)
 # names by the caller, so prose like "Plan: we should think(!)" can't trip.
 _CALLISH = re.compile(r"\b([a-z][a-z0-9_]{2,})\s*\(")
 
+# The user ASKED for a plan without execution ("DON'T do it yet — first
+# tell me your plan"). Answering with a plan and stopping is then CORRECT
+# behaviour, not a halt — check A must stand down. (Measured false
+# positive: the gate nudged the pf_arxiv_plan turn into executing early,
+# which broke the follow-up "go ahead and do it now" turn — gate-ON
+# failed 2/2, gate-OFF passed 2/2.)
+_PLAN_REQUESTED = re.compile(
+    r"don'?t\s+(?:do|run|execute)|do\s+not\s+(?:do|run|execute)"
+    r"|not\s+yet|before\s+(?:you\s+)?(?:do|run|execut)"
+    r"|(?:tell|give|show)\s+me\s+(?:your|the|a)\s+plan"
+    r"|what(?:'s| is)\s+(?:your|the)\s+plan"
+    r"|how\s+would\s+you|what\s+would\s+you"
+    r"|just\s+(?:the\s+)?plan|plan\s+first|plan\s+only",
+    re.IGNORECASE,
+)
 
-def _is_plan_halt(text: str, tool_names: Iterable[str]) -> bool:
+
+def _is_plan_halt(text: str, tool_names: Iterable[str],
+                  user_prompt: str = "") -> bool:
     """True when the candidate answer is a narrated plan that names a real
     tool call it never made. The registered-tool requirement keeps a
     legitimate 'here is my plan, shall I proceed?' answer from tripping —
-    the failure signature is specifically ``PLAN: execute_code(...)``."""
+    the failure signature is specifically ``PLAN: execute_code(...)``.
+    Stands down entirely when the user's own prompt requested a plan
+    without execution."""
+    if user_prompt and _PLAN_REQUESTED.search(user_prompt):
+        return False
     if not _PLAN_LINE.search(text):
         return False
     names = set(tool_names)
@@ -112,8 +133,12 @@ def verify_final(
     text: str,
     tool_successes: Iterable[str],
     tool_names: Iterable[str],
+    user_prompt: str = "",
 ) -> str | None:
     """Inspect a candidate FINAL answer (a response with no tool calls).
+
+    ``user_prompt`` is the turn's user message — check A stands down when
+    the user explicitly asked for a plan without execution.
 
     Returns the nudge string to inject (caller enforces once-per-turn and
     non-persistence), or ``None`` to accept the answer. Order matters: a
@@ -123,7 +148,7 @@ def verify_final(
     clean = (text or "").strip()
     if not clean or clean.startswith("["):   # halt/system notes pass through
         return None
-    if _is_plan_halt(clean, tool_names):
+    if _is_plan_halt(clean, tool_names, user_prompt):
         return PLAN_NUDGE
     if _is_false_claim(clean, tool_successes):
         return CLAIM_NUDGE
