@@ -146,6 +146,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "media": frozenset({
         "text_to_speech", "listen", "vision_analyze", "image_generate",
+        # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart
+        # to the local image_generate.
+        "generate_image_fal", "generate_video_fal",
     }),
     "avatar": frozenset({
         # BETA — these register with ``beta=True``, so they reach the
@@ -198,6 +201,12 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
+    "smart_home": frozenset({
+        # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
+        # registered on import like send_message; loaded on intent.
+        "ha_list_entities", "ha_get_state", "ha_list_services",
+        "ha_call_service",
+    }),
     "people": frozenset({"remember_person", "get_person", "list_people"}),
     "models": frozenset({"list_models", "download_model", "model_location",
                          "set_mode", "get_mode", "set_autonomy", "get_autonomy"}),
@@ -211,7 +220,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
 TOOLSET_SUMMARY: dict[str, str] = {
     "files": "append, delete, patch, search files; list the workspace",
     "code": "shell/terminal, ssh, install packages, venv exec",
-    "media": "text-to-speech, mic capture, vision, image generation",
+    "media": "text-to-speech, mic capture, vision, image/video generation (local + fal.ai cloud)",
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
@@ -223,6 +232,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
+    "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
               "set_autonomy (ask/scoped/auto)",

@@ -11,7 +11,7 @@ metadata:
     tags: [Smart-Home, Hue, Lights, IoT, Automation]
     homepage: https://www.openhue.io/cli
   jros:
-    related_skills: [apple-reminders, imessage, findmy]
+    related_skills: [home-assistant, apple-reminders, imessage, findmy]
 prerequisites:
   commands: [openhue]
 ---
