@@ -521,7 +521,7 @@ CASES_B: list[BenchCase] = [
 
     # ── v1.3: DEEP-THINK (escalate a hard task to the coder model) ──
     # Two real entry points: propose_deep_think_task (the queue) and a
-    # kanban card with kind=deepthink. Either is correct routing.
+    # board card tracks it; propose_deep_think_task queues it. BOTH required.
     BenchCase(id="dt_propose_skill_fix",
               prompt="The audio transcription skill freezes on long files. "
                      "It's too big to fix right now — note it so the deep "
@@ -530,10 +530,10 @@ CASES_B: list[BenchCase] = [
               tags=["deepthink"],
               notes="Model stays LOCKED in the dev bench — this checks the "
                     "agent RECOGNIZES the escalation moment (queues the task "
-                    "via propose_deep_think_task OR a deepthink kanban card), "
+                    "via propose_deep_think_task AND tracks it with a board card), "
                     "not an actual model swap. The real flip to the coder "
                     "model is tested in the agent/full-system run. "
-                    "expected_tools is a set-match (either tool passes)."),
+                    "— both required."),
 
     # ── v1.3: SELF-IMPROVE (deep-learning loop) ─────────────────────
     # Routing only — the fast dev bench must NOT trigger run_benchmark.

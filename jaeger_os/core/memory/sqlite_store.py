@@ -351,6 +351,26 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
                 SELECT {subj}, key, value, category, {src}, {tg}, {nt},
                        created_at, updated_at
                 FROM facts;
+            -- Seed the history log so migrated facts are traceable from day
+            -- one (recall_history must not return empty for a fact that
+            -- demonstrably existed). fact_log may not exist yet — this
+            -- migration runs BEFORE the schema statements.
+            CREATE TABLE IF NOT EXISTS fact_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject    TEXT NOT NULL DEFAULT 'user',
+                key        TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                category   TEXT NOT NULL DEFAULT 'general',
+                source     TEXT NOT NULL DEFAULT 'user',
+                tags       TEXT NOT NULL DEFAULT '',
+                note       TEXT NOT NULL DEFAULT '',
+                ts         TEXT NOT NULL
+            );
+            INSERT INTO fact_log
+                (subject, key, value, category, source, tags, note, ts)
+                SELECT subject, key, value, category, source, tags,
+                       'migrated from schema v1', updated_at
+                FROM _facts_v2;
             DROP TABLE facts;
             ALTER TABLE _facts_v2 RENAME TO facts;
             COMMIT;

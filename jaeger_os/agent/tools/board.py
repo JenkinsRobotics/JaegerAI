@@ -200,9 +200,10 @@ def _t_board_add(
 
 @register_tool_from_function(name="board_move")
 def _t_board_move(card_id: str, column: str) -> dict:
-    """Move a board card: `in_progress` when you start it, `done`
-    when finished, `blocked` when it needs the user. You cannot move
-    a card `backlog → ready` — that is the user's approval step."""
+    """Move a board card: `ready` to promote it from backlog,
+    `in_progress` when you start it, `done` when finished, `blocked`
+    when it needs the user. Self-promoting `backlog → ready` is
+    allowed — the whole board is actionable work."""
     return board_move(card_id=card_id, column=column)
 
 

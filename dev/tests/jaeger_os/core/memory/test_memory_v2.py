@@ -79,6 +79,11 @@ def test_v1_db_migrates_rows_and_shape(layout):
         "SELECT subject, source FROM facts WHERE key='hometown'"
     ).fetchone()
     assert (row["subject"], row["source"]) == ("user", "user")
+    # migrated facts are traceable: the rebuild seeds one fact_log row
+    # per fact, so recall_history isn't empty for pre-v2 facts.
+    hist = mem.recall_history("hometown")
+    assert [h["value"] for h in hist] == ["Austin"]
+    assert hist[0]["note"] == "migrated from schema v1"
 
 
 def test_migration_is_idempotent_across_rebinds(layout):
@@ -93,6 +98,25 @@ def test_migration_is_idempotent_across_rebinds(layout):
 
 
 # ── source isolation + precedence ──────────────────────────────────
+
+
+def test_benchmark_forget_cannot_delete_operator_facts(bound):
+    """Review 2026-07-04 critical: in benchmark mode, forget() reached
+    through the source boundary and deleted a live source='user' row the
+    bench couldn't even see via recall. Destruction must be source-scoped
+    exactly like reads."""
+    mem.remember("home_town", "Austin")                   # operator fact
+    mem.set_memory_source("benchmark")
+    assert mem.forget("home_town") is False               # nothing IT owns
+    mem.set_memory_source("user")
+    assert mem.recall("home_town") == "Austin"            # survived
+    # and symmetrically: operator forget leaves benchmark rows alone
+    mem.set_memory_source("benchmark")
+    mem.remember("home_town", "Testville")
+    mem.set_memory_source("user")
+    mem.forget("home_town")
+    mem.set_memory_source("benchmark")
+    assert mem.recall("home_town") == "Testville"
 
 
 def test_benchmark_facts_never_surface_as_operator_facts(bound):
