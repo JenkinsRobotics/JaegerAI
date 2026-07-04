@@ -438,6 +438,14 @@ _MUTABLE_MEMORY_FILES: tuple[str, ...] = (
     "board.json",
     "schedules.json",
     "episodic.jsonl",
+    # The REAL memory backend is SQLite (facts.json/episodic.jsonl are the
+    # legacy files, lazy-migrated in). Without snapshotting the .db (+ its
+    # WAL sidecars) the bench's writes leaked into the operator's live memory
+    # and NEVER rolled back — that baked stale "favorite color" facts into
+    # state.db and broke corpus B's recall cases (they read the pollution,
+    # not the store). 2026-07-03.
+    "state.db", "state.db-wal", "state.db-shm",
+    "sessions.db", "sessions.db-wal", "sessions.db-shm",
 )
 
 
@@ -553,6 +561,16 @@ def run_bench(
         except Exception:  # noqa: BLE001 — snapshot is opt-in convenience
             pass
 
+    # Tag every fact the bench writes as source='benchmark' so it never
+    # masquerades as the operator's (and is trivially purgeable). Belt-and-
+    # suspenders with the hermetic snapshot, which rolls the writes back.
+    try:
+        from jaeger_os.core.memory import memory as _mem
+        _prev_source = _mem.set_memory_source("benchmark")
+    except Exception:  # noqa: BLE001
+        _mem = None
+        _prev_source = None
+
     with snapshot_ctx:
         for idx, case in enumerate(selected):
             session_key = case.session or f"bench_{case.id}"
@@ -587,6 +605,8 @@ def run_bench(
                            agent_cache=agent_cache, session_key=session_key)
             except Exception:  # noqa: BLE001
                 pass
+    if _mem is not None and _prev_source is not None:
+        _mem.set_memory_source(_prev_source)
     return rows
 
 

@@ -49,7 +49,7 @@ from typing import Any, Iterator
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DB_FILENAME = "state.db"
 
@@ -179,14 +179,44 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
     # facts — replaces ``facts.json``. ``category`` is the new
     # field added when WIZ-2 / categorised memory landed; default
     # 'general' matches the JSON store's behaviour.
+    # facts = the CURRENT view (latest value per subject+key+source).
+    #   subject = who/what the fact is ABOUT (the operator by default, or
+    #             another person/thing — "many people's colours").
+    #   source  = who SET it (user / agent / benchmark) — provenance.
+    #   tags/note/category = the 5W1H context + grouping.
+    # PK (subject, key, source) so facts about different subjects, or from
+    # different sources, coexist instead of clobbering each other.
     """CREATE TABLE IF NOT EXISTS facts (
-        key        TEXT PRIMARY KEY,
+        subject    TEXT NOT NULL DEFAULT 'user',
+        key        TEXT NOT NULL,
         value      TEXT NOT NULL,
         category   TEXT NOT NULL DEFAULT 'general',
+        source     TEXT NOT NULL DEFAULT 'user',
+        tags       TEXT NOT NULL DEFAULT '',
+        note       TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (subject, key, source)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_facts_category ON facts (category)",
+    "CREATE INDEX IF NOT EXISTS idx_facts_source ON facts (source)",
+    "CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts (subject, key)",
+
+    # fact_log = append-only history of every assertion, so a fact can be
+    # traced over time ("Jonathan's favorite colour was blue on d1, black on
+    # d2") — the current `facts` row is just the latest. One row per write.
+    """CREATE TABLE IF NOT EXISTS fact_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject    TEXT NOT NULL DEFAULT 'user',
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        category   TEXT NOT NULL DEFAULT 'general',
+        source     TEXT NOT NULL DEFAULT 'user',
+        tags       TEXT NOT NULL DEFAULT '',
+        note       TEXT NOT NULL DEFAULT '',
+        ts         TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_fact_log_key ON fact_log (subject, key, ts)",
 
     # episodic — one row per agent turn. ``session_key`` lets the
     # TUI / messaging gateway / voice loop keep separate histories.
@@ -278,6 +308,54 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
 )
 
 
+def _migrate_facts_table(conn: sqlite3.Connection) -> None:
+    """Rebuild an older ``facts`` table into the v2 shape (subject / source /
+    tags / note + composite PK ``(subject, key, source)``). Idempotent: a
+    no-op on a fresh DB (no table yet) or one already at v2. Existing rows
+    become subject='user', source='user'. Runs before the schema CREATE
+    INDEXes that reference the new columns."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts'"
+    ).fetchone()
+    if not exists:
+        return
+    info = conn.execute("PRAGMA table_info(facts)").fetchall()
+    cols = {r[1] for r in info}
+    pk = {r[1] for r in info if r[5]}
+    if {"subject", "source", "tags", "note"} <= cols and \
+            pk == {"subject", "key", "source"}:
+        return  # already v2
+    subj = "subject" if "subject" in cols else "'user'"
+    src = "source" if "source" in cols else "'user'"
+    tg = "tags" if "tags" in cols else "''"
+    nt = "note" if "note" in cols else "''"
+    conn.executescript(
+        f"""
+        BEGIN;
+        CREATE TABLE _facts_v2 (
+            subject    TEXT NOT NULL DEFAULT 'user',
+            key        TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            category   TEXT NOT NULL DEFAULT 'general',
+            source     TEXT NOT NULL DEFAULT 'user',
+            tags       TEXT NOT NULL DEFAULT '',
+            note       TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (subject, key, source)
+        );
+        INSERT OR IGNORE INTO _facts_v2
+            (subject, key, value, category, source, tags, note, created_at, updated_at)
+            SELECT {subj}, key, value, category, {src}, {tg}, {nt},
+                   created_at, updated_at
+            FROM facts;
+        DROP TABLE facts;
+        ALTER TABLE _facts_v2 RENAME TO facts;
+        COMMIT;
+        """
+    )
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create / migrate the schema to ``SCHEMA_VERSION``.
 
@@ -296,6 +374,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     cur = conn.cursor()
+    # v1 → v2: rebuild an older `facts` table into the subject/source/tags/note
+    # shape BEFORE the schema statements — the new indexes reference columns an
+    # old table lacks. No-op on a fresh DB or one already at v2.
+    _migrate_facts_table(conn)
     cur.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
 
     row = conn.execute(

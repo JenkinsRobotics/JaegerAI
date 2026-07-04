@@ -172,24 +172,83 @@ def _lazy_import_facts_from_json() -> None:
             )
 
 
-def remember(key: str, value: str, category: str | None = None) -> None:
-    """Store a fact. ``category`` groups it (e.g. 'contacts',
-    'preferences', 'projects') — omitted facts land in 'general'."""
+# Who is setting facts right now. Live operator turns leave it at "user";
+# the benchmark sets it to "benchmark" so its facts are tagged (and easy to
+# purge: DELETE FROM facts WHERE source='benchmark'), and never masquerade as
+# the operator's. The agent can pass source="agent" for things it inferred.
+_memory_source: str = "user"
+
+
+def set_memory_source(source: str) -> str:
+    """Set the source tag applied to subsequent ``remember`` writes (and the
+    filter ``recall`` applies). Returns the PREVIOUS value so callers can
+    restore it. Used by the bench to tag its facts 'benchmark'."""
+    global _memory_source
+    prev = _memory_source
+    _memory_source = (source or "user").strip().lower() or "user"
+    return prev
+
+
+def current_memory_source() -> str:
+    return _memory_source
+
+
+def _norm_subject(subject: str | None) -> str:
+    return (subject or "user").strip().lower() or "user"
+
+
+def _norm_tags(tags: Any) -> str:
+    """Normalise tags to a comma-separated string (accepts list or string)."""
+    if not tags:
+        return ""
+    if isinstance(tags, str):
+        parts = tags.replace(",", " ").split()
+    else:
+        parts = [str(t) for t in tags]
+    seen: list[str] = []
+    for t in parts:
+        t = t.strip().lower()
+        if t and t not in seen:
+            seen.append(t)
+    return ",".join(seen)
+
+
+def remember(key: str, value: str, category: str | None = None,
+             source: str | None = None, subject: str | None = None,
+             tags: Any = None, note: str = "") -> None:
+    """Store a fact and append it to the history log.
+
+    ``subject`` = who/what it's ABOUT (the operator by default, or another
+    person/thing). ``source`` = who SET it (defaults to the active memory
+    source — 'user' live, 'benchmark' during a bench run). ``category``
+    groups it; ``tags`` (list or comma string) + ``note`` carry context. The
+    current view (``facts``) is upserted; every call also appends to
+    ``fact_log`` so the value can be traced over time."""
     from jaeger_os.core.memory import sqlite_store
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cat = _norm_category(category)
+    src = (source or _memory_source or "user").strip().lower() or "user"
+    subj = _norm_subject(subject)
+    tag_str = _norm_tags(tags)
     with sqlite_store.writer() as conn:
-        # INSERT OR REPLACE preserves the row's created_at when the
-        # key already exists — handled by the SELECT below.
         existing = conn.execute(
-            "SELECT created_at FROM facts WHERE key = ?", (key,)
+            "SELECT created_at FROM facts "
+            "WHERE subject = ? AND key = ? AND source = ?",
+            (subj, key, src),
         ).fetchone()
         created_at = existing["created_at"] if existing else now
         conn.execute(
             "INSERT OR REPLACE INTO facts "
-            "(key, value, category, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (key, value, cat, created_at, now),
+            "(subject, key, value, category, source, tags, note, "
+            " created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (subj, key, value, cat, src, tag_str, note, created_at, now),
+        )
+        conn.execute(
+            "INSERT INTO fact_log "
+            "(subject, key, value, category, source, tags, note, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (subj, key, value, cat, src, tag_str, note, now),
         )
 
 
@@ -197,23 +256,39 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"my", "the", "a", "an", "is", "of", "do", "i", "what", "this", "that"}
 
 
-def recall(key: str) -> str | None:
-    """Look up a fact by exact key, with fuzzy fallback.
+def _source_filter() -> tuple[str, tuple[str, ...]]:
+    """The operator's recall ignores 'benchmark' facts (and a bench run only
+    sees its own) — so the benchmark's favourite colour is never returned as
+    the operator's."""
+    if _memory_source == "benchmark":
+        return "source = ?", ("benchmark",)
+    return "source != ?", ("benchmark",)
+
+
+def recall(key: str, subject: str | None = None) -> str | None:
+    """Look up the CURRENT value of a fact by exact key, with fuzzy fallback.
+    ``subject`` scopes whose fact (the operator by default). For the value
+    OVER TIME, use :func:`recall_history`.
 
     The fuzzy path lets the agent ask for ``"birthday"`` and find
-    ``"users_birthday"`` — important because the model's phrasing
-    drifts. Order: exact key → substring match against keys →
-    word-overlap against keys (excluding common stopwords)."""
+    ``"users_birthday"`` — the model's phrasing drifts. Order: exact key →
+    substring match against keys → word-overlap (excluding stopwords)."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
+    subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
     # 1) Exact key.
-    row = conn.execute("SELECT value FROM facts WHERE key = ?", (key,)).fetchone()
+    row = conn.execute(
+        f"SELECT value FROM facts WHERE subject = ? AND key = ? AND {src_sql}",
+        (subj, key, *src_args),
+    ).fetchone()
     if row is not None:
         return row["value"]
-    # 2) Substring match across keys. Read all keys (we expect at most
-    #    thousands — a single SELECT is fine; if this ever becomes a
-    #    bottleneck we can add an FTS table).
-    all_rows = conn.execute("SELECT key, value FROM facts").fetchall()
+    # 2) Substring match across this subject's keys.
+    all_rows = conn.execute(
+        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql}",
+        (subj, *src_args),
+    ).fetchall()
     if not all_rows:
         return None
     needle = key.lower().strip()
@@ -241,19 +316,49 @@ def recall(key: str) -> str | None:
     return best_value if best_overlap >= 1 else None
 
 
-def forget(key: str) -> bool:
-    """Remove a fact by exact key. Returns True if the row existed."""
+def recall_history(key: str, subject: str | None = None) -> list[dict[str, str]]:
+    """The full timeline of a fact from ``fact_log`` — every value it has
+    held, oldest first, with when/who/tags/note. Lets the agent answer
+    "you said blue on d1 and black on d2; your colours are blue and black."
+    Subject-scoped; source-filtered like ``recall``."""
     from jaeger_os.core.memory import sqlite_store
+    conn = sqlite_store.connection()
+    subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
+    rows = conn.execute(
+        f"SELECT value, source, tags, note, ts FROM fact_log "
+        f"WHERE subject = ? AND key = ? AND {src_sql} ORDER BY ts",
+        (subj, key, *src_args),
+    ).fetchall()
+    return [
+        {"value": r["value"], "source": r["source"], "tags": r["tags"],
+         "note": r["note"], "when": r["ts"]}
+        for r in rows
+    ]
+
+
+def forget(key: str, subject: str | None = None) -> bool:
+    """Remove a fact by exact key (scoped to ``subject``, default the
+    operator). Returns True if a row existed. History in ``fact_log`` is
+    kept — forgetting the current value doesn't erase that it was once true."""
+    from jaeger_os.core.memory import sqlite_store
+    subj = _norm_subject(subject)
     with sqlite_store.writer() as conn:
-        cur = conn.execute("DELETE FROM facts WHERE key = ?", (key,))
+        cur = conn.execute(
+            "DELETE FROM facts WHERE subject = ? AND key = ?", (subj, key)
+        )
         return cur.rowcount > 0
 
 
 def list_facts() -> dict[str, str]:
-    """Every stored fact as a ``{key: value}`` dict."""
+    """Every stored fact as a ``{key: value}`` dict (excludes benchmark
+    facts and, for now, defaults to the operator's subject)."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
-    rows = conn.execute("SELECT key, value FROM facts ORDER BY key").fetchall()
+    src_sql, src_args = _source_filter()
+    rows = conn.execute(
+        f"SELECT key, value FROM facts WHERE {src_sql} ORDER BY key", src_args
+    ).fetchall()
     return {r["key"]: r["value"] for r in rows}
 
 
@@ -262,8 +367,10 @@ def list_facts_by_category() -> dict[str, dict[str, str]]:
     Categories are sorted with 'general' last."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
+    src_sql, src_args = _source_filter()
     rows = conn.execute(
-        "SELECT key, value, category FROM facts ORDER BY category, key"
+        f"SELECT key, value, category FROM facts WHERE {src_sql} "
+        f"ORDER BY category, key", src_args
     ).fetchall()
     grouped: dict[str, dict[str, str]] = {}
     for r in rows:
