@@ -31,19 +31,25 @@ def _reflections_md(layout: Any) -> Path:
 def reflect(summary: str, worked: str = "", hard: str = "",
             lesson: str = "") -> dict[str, Any]:
     """Close the loop on a task you just finished. After a non-trivial,
-    multi-step job, call this ONCE at the end to record a brief
-    after-action note — it's appended to ``reflections.md`` so a future
-    you can learn from it.
+    multi-step job, call this ONCE at the end.
+
+    Write it in the SECOND PERSON — review what just happened AS IF it were
+    another agent's work ("you opened the file before reading it", "you should
+    have used X"). That outside-in, auditor's distance catches what a
+    first-person "what I did" glosses over — the same technique the skill-review
+    loop uses on purpose. Be honest about the misses.
 
       * ``summary`` — one line: what the task was + how it turned out.
-      * ``worked``  — the approach/tool/order that succeeded.
-      * ``hard``    — what was slow, failed, or needed a retry, and why.
-      * ``lesson``  — the ONE reusable takeaway (a pattern worth a skill,
-        a user preference, a pitfall to avoid next time).
+      * ``worked``  — the approach/tool/order that succeeded (2nd person).
+      * ``hard``    — what was slow, failed, or needed a retry, and why (2nd person).
+      * ``lesson``  — the ONE reusable takeaway, as an instruction to your future
+        self ("next time, load the skill before improvising"): a pattern worth a
+        skill, a user preference, a pitfall to avoid.
 
-    Skip it for trivial one-tool turns. This is the REFLECT step of
-    research → plan → execute → verify → reflect. (For per-skill-use
-    telemetry that feeds skill review, use ``skill_note`` instead.)"""
+    Appended to ``reflections.md`` so a future you learns from it. Skip trivial
+    one-tool turns. This is the REFLECT step of research → plan → execute →
+    verify → reflect. (For per-skill-use telemetry that feeds the skill-review
+    sweep, use ``skill_note`` instead.)"""
     clean = (summary or "").strip()
     if not clean:
         return {"ok": False, "error": "reflect needs a summary"}
