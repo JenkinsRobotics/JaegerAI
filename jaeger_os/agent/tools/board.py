@@ -1,11 +1,11 @@
-"""Kanban board agent tools.
+"""Kanban board agent tool.
 
-The agent's task-planning surface — see docs/kanban_design.md.
-
-  • board_view(column, tag)        — read the board
-  • board_add(title, …)            — add a card to the `ready` column
-  • board_move(card_id, column)    — move a card between columns
-  • board_update(card_id, …)       — edit a card / log progress on it
+The agent's task-planning surface — see docs/kanban_design.md. ONE
+action-dispatched tool, ``kanban(action=…)``:
+view / add / move / update / complete / block / unblock / delete.
+(The ``board_view``/``board_add``/``board_move``/``board_update`` functions
+below are the internal implementation that ``kanban`` and the TUI call; they
+are no longer registered as separate agent tools — one board tool, not five.)
 
 The board is one JSON file inside the instance (``memory/board.json``);
 these tools are local bookkeeping and are NOT confirmation-gated — the
@@ -206,67 +206,35 @@ def kanban(action: str, card_id: str = "", title: str = "",
         return board_move(card_id=card_id, column="blocked")
     if act in ("unblock", "resume"):
         return board_move(card_id=card_id, column="ready")
+    if act in ("delete", "remove", "drop"):
+        if not card_id:
+            return {"ok": False, "error": "delete needs a card_id"}
+        board = board_for_layout(_require_layout())
+        if board.remove(card_id):
+            return {"ok": True, "card_id": card_id, "deleted": True}
+        return {"ok": False, "error": f"no card {card_id!r}"}
     return {"ok": False,
-            "error": f"unknown kanban action {action!r} — use one of: "
-                     "view, add, move, update, complete, block, unblock"}
-
-
-@register_tool_from_function(name="board_view", side_effect="read")
-def _t_board_view(column: str = "", tag: str = "") -> dict:
-    """Read the kanban task board — what work is queued (ready),
-    in_progress, blocked, or done. Optionally filter by `column` or
-    `tag`. Deep Think jobs show here too (tag 'deepthink')."""
-    return board_view(column=column, tag=tag)
-
-
-@register_tool_from_function(name="board_add")
-def _t_board_add(
-    title: str, description: str = "",
-    tags: list[str] | None = None, priority: str = "med",
-) -> dict:
-    """Add a card to the kanban board (lands in `ready`, set to
-    work). Use this to lay out a multi-step task as cards so you and
-    the user can track progress. `priority` is low/med/high."""
-    return board_add(title=title, description=description,
-                     tags=tags, priority=priority)
-
-
-@register_tool_from_function(name="board_move")
-def _t_board_move(card_id: str, column: str) -> dict:
-    """Move a board card: `in_progress` when you start it, `done`
-    when finished, `blocked` when it needs the user. You cannot move
-    a card `backlog → ready` — that is the user's approval step."""
-    return board_move(card_id=card_id, column=column)
-
-
-@register_tool_from_function(name="board_update")
-def _t_board_update(
-    card_id: str, title: str = "", description: str = "",
-    priority: str = "", add_tag: str = "", note: str = "",
-    result: str = "",
-) -> dict:
-    """Edit a board card or log progress on it. `note` appends to
-    the card's running log; `result` records the outcome. Empty
-    arguments are left unchanged."""
-    return board_update(card_id=card_id, title=title,
-                        description=description, priority=priority,
-                        add_tag=add_tag, note=note, result=result)
+            "error": f"unknown kanban action {action!r} — use one of: view, "
+                     "add, move, update, complete, block, unblock, delete"}
 
 
 @register_tool_from_function(name="kanban")
 def _t_kanban(action: str, card_id: str = "", title: str = "",
               description: str = "", column: str = "", tag: str = "",
-              priority: str = "", note: str = "") -> dict:
-    """The kanban task board — ONE tool. `action` selects the op:
+              priority: str = "", note: str = "", kind: str = "general") -> dict:
+    """The kanban task board — ONE tool for ALL board work. `action` selects the op:
       • view — read the board (optional `column`/`tag` filter)
       • add — add a card (`title`, optional `description`/`priority`
-        low|med|high/`tag`)
+        low|med|high/`tag`/`kind` general|deepthink)
       • move — move card `card_id` to `column`
-      • update — edit / log on `card_id` (`note` appends a line)
+      • update / edit — edit or log on `card_id` (`note` appends a line)
       • complete — mark `card_id` done
       • block / unblock — mark `card_id` blocked, or send it back
+      • delete — remove card `card_id` from the board
     Columns: backlog / ready / in_progress / blocked / done. Lay a
-    multi-step task out as cards so you and the user can track it."""
+    multi-step task out as cards so you and the user can track it. To hand a
+    hard build/fix to the strong model, use `propose_deep_think_task` (a board
+    card alone does NOT queue Deep Think)."""
     return kanban(action=action, card_id=card_id, title=title,
                   description=description, column=column, tag=tag,
-                  priority=priority, note=note)
+                  priority=priority, note=note, kind=kind)

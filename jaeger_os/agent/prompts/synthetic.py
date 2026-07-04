@@ -25,12 +25,12 @@ from __future__ import annotations
 
 AUTO_BOARD_PROMPT = (
     "(Idle pickup) You have free time and the kanban board has "
-    "actionable work. Use board_view to look at the cards, then "
+    "actionable work. Use kanban(action='view') to look at the cards, then "
     "pick the highest-priority card from in_progress (resume), "
-    "ready, or backlog and work it through: move it to in_progress "
-    "if it isn't already, do the real work with tool calls, then "
-    "board_move to done and board_update with a short result. "
-    "If the work needs the user, mark it blocked and explain what's "
+    "ready, or backlog and work it through: kanban(action='move') it to "
+    "in_progress if it isn't already, do the real work with tool calls, then "
+    "kanban(action='complete') and kanban(action='update', note=…) with a "
+    "short result. If the work needs the user, mark it blocked and explain what's "
     "needed. Just one card per idle tick — quality over volume."
 )
 
