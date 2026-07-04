@@ -77,13 +77,24 @@ def verify_outcome(layout: Any, task_id: str,
     return True, f"verified: successful {', '.join(mutated)}"
 
 
-def settle_task(queue: Any, layout: Any, task: Any, answer: str) -> str:
+def settle_task(queue: Any, layout: Any, task: Any, answer: str,
+                extra_check: Any = None) -> str:
     """Decide a finished Deep Think run's fate from observable evidence.
+
+    ``extra_check`` is an optional per-task-type verifier (a callable
+    returning ``(ok, reason)``) layered ON TOP of the generic evidence —
+    e.g. a skill-review task must also have recorded a new skill revision.
 
     Returns the action taken: ``"done"``, ``"retried"`` (one bounded replan
     cycle — the retry is queued pre-approved with the failure evidence
     appended), or ``"failed"`` (a retry that failed again; never loops)."""
     ok, evidence = verify_outcome(layout, task.id, answer)
+    if ok and callable(extra_check):
+        extra_ok, extra_reason = extra_check()
+        if not extra_ok:
+            ok, evidence = False, extra_reason
+        else:
+            evidence = f"{evidence}; {extra_reason}"
     if ok:
         queue.mark_done(task.id, f"completed by daemon ({evidence})")
         return "done"

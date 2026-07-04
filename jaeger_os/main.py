@@ -3350,22 +3350,19 @@ def run_daemon(*, instance_name: str | None = None,
                           f"{task.description}", flush=True)
                     outcome = "done"
                     try:
-                        answer = run_command(
-                            client,
-                            f"Deep Think task — complete it fully, writing "
-                            f"files into skills/ and installing deps as "
-                            f"needed:\n\n{task.description}",
-                            session_key=f"daemon_{task.id}",
+                        # Runner 2, the staged assembly line
+                        # (agentic_runners.md): PLAN (artifact saved) →
+                        # plan-informed EXECUTE in the task's clean session
+                        # → VERIFY on observable evidence + per-task-type
+                        # receipts → SETTLE (done / one informed retry /
+                        # failed). Never trust-by-return.
+                        from jaeger_os.agent.background.deepthink_runner import (
+                            run_one_task,
                         )
-                        # Runner 2 verify-before-done (agentic_runners.md):
-                        # completion is decided by observable evidence
-                        # (successful mutating tool calls in the task's
-                        # session + no failure admission), with ONE bounded
-                        # replan cycle — never by trust-by-return.
-                        from jaeger_os.agent.background.deepthink_verify import (
-                            settle_task,
+                        outcome = run_one_task(
+                            client, queue, layout, task,
+                            run_command_fn=run_command,
                         )
-                        outcome = settle_task(queue, layout, task, answer)
                         print(f"[jaeger-daemon] {task.id}: {outcome}",
                               flush=True)
                     except Exception as exc:  # noqa: BLE001
