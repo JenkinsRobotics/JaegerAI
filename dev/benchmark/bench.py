@@ -194,6 +194,12 @@ def _run_single(args: argparse.Namespace) -> int:
 
         from jaeger_os.core.bench import run_bench, summarise
 
+        corpus = None
+        if args.corpus == "B":
+            from jaeger_os.core.bench.cases_b import CASES_B
+            corpus = CASES_B
+            print(f"=== Corpus B ({len(corpus)} cases) ===", flush=True)
+
         def _on_row(idx, total, case_id, passed, elapsed_s):
             mark = "✓" if passed else "✗"
             print(f"  [ROW {idx:02d}] {case_id:40s} pass={mark}  "
@@ -201,7 +207,7 @@ def _run_single(args: argparse.Namespace) -> int:
 
         started = time.perf_counter()
         try:
-            rows = run_bench(boot.client, tags=tag_list or None,
+            rows = run_bench(boot.client, cases=corpus, tags=tag_list or None,
                              ids=id_list or None, limit=cap, progress=_on_row,
                              hermetic=args.hermetic)
         finally:
@@ -318,6 +324,8 @@ def _run_sweep(args: argparse.Namespace) -> int:
                                 force_allow=not args.no_force_allow),
                 encoding="utf-8")
             child = [sys.executable, str(pathlib.Path(__file__).resolve())]
+            if args.corpus != "A":
+                child += ["--corpus", args.corpus]
             if args.category:
                 child += ["--category", args.category]
             if args.quick:
@@ -350,6 +358,10 @@ def main() -> int:
                    help="Comma-separated categories/tags to run. Empty = "
                         "full corpus. See the module docstring for the list.")
     p.add_argument("--ids", default="", help="Comma-separated case ids.")
+    p.add_argument("--corpus", choices=["A", "B"], default="A",
+                   help="Which corpus: A = the original cases (default); B = "
+                        "the parallel same-category/new-prompt set (cases_b) — "
+                        "tests generalization, catches prompt-memorization.")
     p.add_argument("--limit", type=int, default=0,
                    help="Cap number of cases (after filtering). 0 = none.")
     p.add_argument("--quick", action="store_true",
