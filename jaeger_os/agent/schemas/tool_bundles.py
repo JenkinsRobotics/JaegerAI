@@ -122,7 +122,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "kanban": ToolsetDef(
         description="Cross-session kanban board for durable work.",
-        tools=["kanban"],
+        tools=["kanban", "board_view", "board_add", "board_move", "board_update"],
         includes=[],
     ),
     "kanban_umbrella_only": ToolsetDef(
