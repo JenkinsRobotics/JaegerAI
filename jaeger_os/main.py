@@ -2268,17 +2268,19 @@ def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any
     return _run_turn_via_jaeger_agent(client, user_text, session_key=session_key)
 
 
-def run_command(client: Any, user_text: str, session_key: str | None = None) -> None:
+def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
     """Run a turn and print the answer + tool activity to stdout.
     Thin output adapter over :func:`_run_turn` — used by the one-shot
-    CLI, the cron runner, and the daemon."""
+    CLI, the cron runner, and the daemon. Returns the final answer text
+    ("" on error) so callers like the Deep Think daemon can VERIFY the
+    outcome instead of trusting that returning == succeeding."""
     out = _run_turn(client, user_text,
                     session_key=session_key or _DEFAULT_SESSION_KEY)
     if out["error"]:
         print(f"Jaeger agent failed: {out['error']}")
         if _pipeline.get("show_latency"):
             print_latency(out["report"])
-        return
+        return ""
     if _pipeline.get("show_tool_activity", True):
         for line in out["tool_activity"]:
             print(line)
@@ -2288,6 +2290,7 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         print_latency(out["report"])
         if out["skipped_final"]:
             print("  (final-LLM skipped — tool result returned directly)")
+    return out["text"] or ""
 
 
 def _tag_confirm_session(session: str) -> None:
@@ -3347,14 +3350,24 @@ def run_daemon(*, instance_name: str | None = None,
                           f"{task.description}", flush=True)
                     outcome = "done"
                     try:
-                        run_command(
+                        answer = run_command(
                             client,
                             f"Deep Think task — complete it fully, writing "
                             f"files into skills/ and installing deps as "
                             f"needed:\n\n{task.description}",
                             session_key=f"daemon_{task.id}",
                         )
-                        queue.mark_done(task.id, "completed by daemon")
+                        # Runner 2 verify-before-done (agentic_runners.md):
+                        # completion is decided by observable evidence
+                        # (successful mutating tool calls in the task's
+                        # session + no failure admission), with ONE bounded
+                        # replan cycle — never by trust-by-return.
+                        from jaeger_os.agent.background.deepthink_verify import (
+                            settle_task,
+                        )
+                        outcome = settle_task(queue, layout, task, answer)
+                        print(f"[jaeger-daemon] {task.id}: {outcome}",
+                              flush=True)
                     except Exception as exc:  # noqa: BLE001
                         outcome = f"failed: {exc}"
                         queue.mark_failed(task.id, str(exc))
