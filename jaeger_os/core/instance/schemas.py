@@ -607,6 +607,29 @@ class HardwareConfig(BaseModel):
     package: str = ""
 
 
+class PersonaConfig(BaseModel):
+    """Station 3 of the standard runner (dev/docs/agentic_runners.md):
+    workers execute vanilla (a character in the execution context costs a
+    4B ~7 bench points, measured); the character's voice is applied to the
+    FINAL answer by one bounded clean-context call at the user-facing
+    boundary. Fail-open — any filter failure returns the plain answer."""
+    model_config = ConfigDict(extra="forbid")
+
+    output_filter: bool = Field(
+        True,
+        description="Restyle final answers in the active character's voice "
+                    "(one extra bounded model call per user-facing turn). "
+                    "The execution loop always runs persona-free either way.",
+    )
+    max_chars: int = Field(
+        1600, ge=0, le=20000,
+        description="Answers longer than this pass through unstyled — "
+                    "rewriting long reports risks mangling content and "
+                    "doubles latency where it hurts most. 0 disables "
+                    "styling entirely.",
+    )
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -627,6 +650,7 @@ class Config(BaseModel):
     interaction: InteractionConfig = Field(default_factory=InteractionConfig)
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

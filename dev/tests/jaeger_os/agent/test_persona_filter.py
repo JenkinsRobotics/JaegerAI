@@ -1,0 +1,81 @@
+"""Station 3 — the persona output filter.
+
+The contracts that matter: persona-off (or any failure) is BYTE-IDENTICAL
+pass-through, the prompt pins verbatim preservation, and the styled result
+is sanity-checked. Design: dev/docs/agentic_runners.md.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from jaeger_os.agent.prompts.persona_filter import (
+    DEFAULT_MAX_CHARS,
+    apply_persona_voice,
+    filter_enabled,
+)
+
+BLOCK = "You are Jarvis: dry wit, precise, quietly loyal."
+
+
+class _Client:
+    def __init__(self, reply="Indeed, sir — the answer is 4096."):
+        self._reply = reply
+        self.calls: list[dict] = []
+
+    def chat(self, messages, **kwargs):
+        self.calls.append({"messages": messages, **kwargs})
+        if isinstance(self._reply, Exception):
+            raise self._reply
+        return SimpleNamespace(text=self._reply)
+
+
+def test_styles_a_normal_answer():
+    c = _Client()
+    out = apply_persona_voice(c, "The answer is 4096.", BLOCK)
+    assert out == "Indeed, sir — the answer is 4096."
+    # clean-context contract: exactly system(block) + user(rules+answer)
+    msgs = c.calls[0]["messages"]
+    assert msgs[0] == {"role": "system", "content": BLOCK}
+    assert "VERBATIM" in msgs[1]["content"]
+    assert msgs[1]["content"].endswith("The answer is 4096.")
+
+
+def test_fail_open_on_exception_and_empty():
+    assert apply_persona_voice(
+        _Client(RuntimeError("model died")), "plain answer", BLOCK,
+    ) == "plain answer"
+    assert apply_persona_voice(_Client(""), "plain answer", BLOCK) == "plain answer"
+
+
+def test_inflated_rewrite_is_rejected():
+    c = _Client("word " * 400)  # absurdly longer than the input
+    assert apply_persona_voice(c, "short answer", BLOCK) == "short answer"
+
+
+def test_skips_are_byte_identical():
+    c = _Client()
+    halt = "[halted: hit max iterations]"
+    long_answer = "x" * (DEFAULT_MAX_CHARS + 1)
+    assert apply_persona_voice(c, halt, BLOCK) is halt
+    assert apply_persona_voice(c, long_answer, BLOCK) is long_answer
+    assert apply_persona_voice(c, "", BLOCK) == ""
+    assert apply_persona_voice(c, "answer", "") == "answer"   # no character
+    assert c.calls == []                                       # never called
+
+
+def test_env_kill_switch(monkeypatch):
+    monkeypatch.setenv("JAEGER_PERSONA_FILTER", "0")
+    assert filter_enabled() is False
+    c = _Client()
+    assert apply_persona_voice(c, "answer", BLOCK) == "answer"
+    assert c.calls == []
+    monkeypatch.delenv("JAEGER_PERSONA_FILTER")
+    assert filter_enabled() is True
+
+
+def test_config_schema_has_persona_section():
+    from jaeger_os.core.instance.schemas import Config, PersonaConfig
+    pc = PersonaConfig()
+    assert pc.output_filter is True and pc.max_chars == 1600
+    assert Config.model_fields["persona"].default_factory is PersonaConfig
