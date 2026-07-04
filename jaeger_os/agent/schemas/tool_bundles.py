@@ -132,7 +132,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "skills": ToolsetDef(
         description="Inspect, package, benchmark, and reload skills.",
-        tools=["skill", "reload_skills", "package_skill", "benchmark_skill"],
+        tools=["list_skills", "reload_skills", "package_skill", "benchmark_skill"],
         includes=[],
     ),
     "media": ToolsetDef(

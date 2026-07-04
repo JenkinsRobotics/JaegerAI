@@ -1,14 +1,15 @@
-"""Instance-scoped persistent memory.
+"""Instance-scoped persistent memory — the public facade over SQLite.
 
-Everything lives under <instance>/memory/:
-  facts.json       — key/value facts curated via remember()/recall()
-  episodic.jsonl   — per-turn append-only log
-  schedules.jsonl  — cron-style scheduled prompts (append + cancel rows)
+The store is ``<instance>/memory/state.db`` (see ``sqlite_store.py`` and
+dev/docs/memory_architecture.md): ``facts`` is the current subject-attributed
+view, ``fact_log`` the append-only assertion history, ``episodic`` +
+``episodic_embeddings`` the per-turn log with semantic search. The old flat
+files (``facts.json`` / ``episodic.jsonl`` / ``schedules.jsonl``) are legacy —
+read once by the ``_lazy_import_*`` helpers to migrate a pre-0.2.0 instance,
+never written.
 
-No cross-imports from the project root — Jaeger owns its memory store.
-The shapes mirror memory/memory_module.py at the project root, but the
-files live inside each instance dir so two Jaeger instances on one host
-never share state.
+No cross-imports from the project root — Jaeger owns its memory store, and
+files live inside each instance dir so two instances never share state.
 """
 
 from __future__ import annotations
@@ -277,16 +278,23 @@ def recall(key: str, subject: str | None = None) -> str | None:
     conn = sqlite_store.connection()
     subj = _norm_subject(subject)
     src_sql, src_args = _source_filter()
+    # Precedence when the same (subject, key) exists under several sources
+    # (user-stated vs agent-inferred): what the USER said wins; ties break
+    # by recency. Without an explicit ORDER BY the row returned is
+    # PK-storage order — effectively arbitrary.
+    _prec = "ORDER BY (source = 'user') DESC, updated_at DESC"
     # 1) Exact key.
     row = conn.execute(
-        f"SELECT value FROM facts WHERE subject = ? AND key = ? AND {src_sql}",
+        f"SELECT value FROM facts WHERE subject = ? AND key = ? AND {src_sql} "
+        f"{_prec} LIMIT 1",
         (subj, key, *src_args),
     ).fetchone()
     if row is not None:
         return row["value"]
-    # 2) Substring match across this subject's keys.
+    # 2) Substring match across this subject's keys (precedence-ordered, so
+    #    the first hit is the authoritative row for its key).
     all_rows = conn.execute(
-        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql}",
+        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql} {_prec}",
         (subj, *src_args),
     ).fetchall()
     if not all_rows:
@@ -350,27 +358,47 @@ def forget(key: str, subject: str | None = None) -> bool:
         return cur.rowcount > 0
 
 
-def list_facts() -> dict[str, str]:
-    """Every stored fact as a ``{key: value}`` dict (excludes benchmark
-    facts and, for now, defaults to the operator's subject)."""
+def list_facts(subject: str | None = "user") -> dict[str, str]:
+    """Facts as a ``{key: value}`` dict — the OPERATOR's facts by default
+    (``subject="user"``). Pass another subject for their facts, or ``None``
+    for every subject with keys prefixed ``subject:key`` so different
+    subjects' facts can never silently clobber each other in the merged
+    dict (Alice's favorite_color must not read as the operator's).
+    Benchmark-sourced facts are always excluded."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
     src_sql, src_args = _source_filter()
+    if subject is None:
+        rows = conn.execute(
+            f"SELECT subject, key, value FROM facts WHERE {src_sql} "
+            f"ORDER BY subject, key", src_args
+        ).fetchall()
+        return {
+            (r["key"] if r["subject"] == "user"
+             else f'{r["subject"]}:{r["key"]}'): r["value"]
+            for r in rows
+        }
+    subj = _norm_subject(subject)
     rows = conn.execute(
-        f"SELECT key, value FROM facts WHERE {src_sql} ORDER BY key", src_args
+        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql} "
+        f"ORDER BY key", (subj, *src_args)
     ).fetchall()
     return {r["key"]: r["value"] for r in rows}
 
 
-def list_facts_by_category() -> dict[str, dict[str, str]]:
-    """Facts grouped by category — ``{category: {key: value}}``.
-    Categories are sorted with 'general' last."""
+def list_facts_by_category(subject: str | None = "user") -> dict[str, dict[str, str]]:
+    """Facts grouped by category — ``{category: {key: value}}`` — for one
+    subject (the operator by default; this feeds the system-prompt facts
+    snapshot, which must never present someone else's fact as the
+    operator's). Categories are sorted with 'general' last."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
     src_sql, src_args = _source_filter()
+    subj = _norm_subject(subject)
     rows = conn.execute(
-        f"SELECT key, value, category FROM facts WHERE {src_sql} "
-        f"ORDER BY category, key", src_args
+        f"SELECT key, value, category FROM facts "
+        f"WHERE subject = ? AND {src_sql} "
+        f"ORDER BY category, key", (subj, *src_args)
     ).fetchall()
     grouped: dict[str, dict[str, str]] = {}
     for r in rows:
