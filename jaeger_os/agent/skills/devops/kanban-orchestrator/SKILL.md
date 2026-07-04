@@ -3,7 +3,7 @@ name: kanban-orchestrator
 description: Decomposition playbook + anti-temptation rules for an orchestrator profile routing work through Kanban. The "don't do the work yourself" rule and the basic lifecycle are auto-injected into every kanban worker's system prompt; this skill is the deeper playbook when you're specifically playing the orchestrator role.
 version: 3.0.0
 platforms: [linux, macos, windows]
-requires_tools: [kanban, delegate_task, terminal]
+requires_tools: [board_view, board_add, board_move, board_update, delegate_task, terminal]
 metadata:
   hermes:
     tags: [kanban, multi-agent, orchestration, routing]
@@ -13,6 +13,16 @@ metadata:
 ---
 
 # Kanban Orchestrator — Decomposition Playbook
+
+## JROS TOOL MAPPING (read first — the recipe below uses legacy names)
+This playbook was written for Hermes' `kanban_*` tools. In JROS the board is
+five individual verbs — translate as you follow the steps:
+- `kanban_create(...)`  -> `board_add(title=…, description=…, priority=…)`
+- `kanban_show` / `kanban_list` -> `board_view()`
+- `kanban_complete(id)` -> `board_move(card_id=…, column="done")`
+- `kanban_block(id)`    -> `board_move(card_id=…, column="blocked")`
+- `kanban_comment(...)` -> `board_update(card_id=…, note=…)`
+- `kanban_link`         -> `board_update(card_id=…, note="depends on <id>")`
 
 > The **core worker lifecycle** (including the `kanban_create` fan-out pattern and the "decompose, don't execute" rule) is auto-injected into every kanban process via the `KANBAN_GUIDANCE` system-prompt block. This skill is the deeper playbook when you're an orchestrator profile whose whole job is routing.
 

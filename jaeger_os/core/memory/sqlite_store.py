@@ -329,46 +329,58 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
     src = "source" if "source" in cols else "'user'"
     tg = "tags" if "tags" in cols else "''"
     nt = "note" if "note" in cols else "''"
-    conn.executescript(
-        f"""
-        BEGIN;
-        CREATE TABLE _facts_v2 (
-            subject    TEXT NOT NULL DEFAULT 'user',
-            key        TEXT NOT NULL,
-            value      TEXT NOT NULL,
-            category   TEXT NOT NULL DEFAULT 'general',
-            source     TEXT NOT NULL DEFAULT 'user',
-            tags       TEXT NOT NULL DEFAULT '',
-            note       TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (subject, key, source)
-        );
-        INSERT OR IGNORE INTO _facts_v2
-            (subject, key, value, category, source, tags, note, created_at, updated_at)
-            SELECT {subj}, key, value, category, {src}, {tg}, {nt},
-                   created_at, updated_at
-            FROM facts;
-        DROP TABLE facts;
-        ALTER TABLE _facts_v2 RENAME TO facts;
-        COMMIT;
-        """
-    )
+    try:
+        conn.executescript(
+            f"""
+            BEGIN;
+            DROP TABLE IF EXISTS _facts_v2;
+            CREATE TABLE _facts_v2 (
+                subject    TEXT NOT NULL DEFAULT 'user',
+                key        TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                category   TEXT NOT NULL DEFAULT 'general',
+                source     TEXT NOT NULL DEFAULT 'user',
+                tags       TEXT NOT NULL DEFAULT '',
+                note       TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (subject, key, source)
+            );
+            INSERT OR IGNORE INTO _facts_v2
+                (subject, key, value, category, source, tags, note, created_at, updated_at)
+                SELECT {subj}, key, value, category, {src}, {tg}, {nt},
+                       created_at, updated_at
+                FROM facts;
+            DROP TABLE facts;
+            ALTER TABLE _facts_v2 RENAME TO facts;
+            COMMIT;
+            """
+        )
+    except sqlite3.Error:
+        # A mid-script failure leaves the transaction open on this
+        # autocommit connection — roll it back explicitly so the old
+        # table survives intact, then re-raise (refusing to run on a
+        # half-migrated DB beats limping on one).
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute("ROLLBACK")
+        raise
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create / migrate the schema to ``SCHEMA_VERSION``.
 
     First-open: every CREATE TABLE runs cleanly (IF NOT EXISTS), the
-    schema_version row is INSERTed at the target version.
+    schema_version row is INSERTed at the target version (v2).
 
     Same-version reopen: every CREATE TABLE no-ops; the
     schema_version row matches and we just return.
 
-    Older-version reopen: today only v0 (no schema_version row)
-    exists in practice — the migrator inserts the row at v1 and
-    runs the CREATE TABLE statements (which are all idempotent).
-    Future versions will route through the migration runner.
+    Older DB (v1 facts shape): ``_migrate_facts_table`` detects the old
+    SHAPE (columns + PK, not the version number — robust to partially
+    migrated intermediates) and rebuilds ``facts`` into the v2
+    subject/source/tags/note form BEFORE the schema statements run,
+    because the v2 indexes reference columns a v1 table lacks. The
+    version row is then bumped to v2 below.
     """
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")

@@ -449,11 +449,52 @@ _MUTABLE_MEMORY_FILES: tuple[str, ...] = (
 )
 
 
+def _checkpoint_sqlite() -> None:
+    """Fold the state.db WAL into the main db file so a plain file copy
+    of ``state.db`` is a complete, consistent snapshot. Best-effort."""
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import sqlite_store
+        if sqlite_store.is_bound():
+            sqlite_store.connection().execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def _close_sqlite_stores() -> bool:
+    """Close the process's live SQLite connections (state.db singleton +
+    the sessions.db store) so the on-disk files can be safely replaced.
+    Returns True when something was closed (caller should re-bind)."""
+    closed = False
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import sqlite_store
+        if sqlite_store.is_bound():
+            sqlite_store.close()
+            closed = True
+    with contextlib.suppress(Exception):
+        from jaeger_os.core import sessions
+        sessions.reset_for_tests()   # closes + clears the lazy singleton
+    return closed
+
+
+def _rebind_sqlite_stores(layout: Any) -> None:
+    """Reopen the memory store against the (restored) files. The sessions
+    store reopens lazily on its next ``get_store`` call."""
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import memory as _memory_mod
+        _memory_mod.bind(layout)
+
+
 @contextlib.contextmanager
 def _hermetic_memory(layout: Any) -> Iterator[None]:
     """Snapshot the mutable memory files on entry; restore them on
     exit. Any bench-driven writes between are invisible to the user's
     live state after the ``with`` block.
+
+    SQLite handling (the part that bit us): a WAL database CANNOT be
+    safely copied or replaced under an open connection — the page cache
+    and mmap'd -shm index would disagree with disk, corrupting the file
+    or resurrecting bench rows. So we ``wal_checkpoint(TRUNCATE)`` before
+    the snapshot (making the bare .db a complete copy), and on restore we
+    CLOSE the live connections first, swap the files, then re-bind.
 
     Best-effort throughout — if a snapshot or restore fails (no
     permission, disk full, etc.) we log and let the run continue.
@@ -471,6 +512,7 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
         yield
         return
 
+    _checkpoint_sqlite()
     snapshot_dir = Path(tempfile.mkdtemp(prefix=".bench_snapshot_",
                                          dir=str(memory_dir)))
     saved: dict[str, Path] = {}
@@ -488,6 +530,9 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
                     pass
         yield
     finally:
+        # Close the live SQLite connections BEFORE touching their files —
+        # restoring under an open connection is undefined behaviour.
+        rebind = _close_sqlite_stores()
         # Restore: copy each snapshotted file back. If snapshot was
         # missing (file didn't exist pre-run) AND the bench created
         # it, remove the bench-created file so the live state stays
@@ -508,6 +553,8 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
                     live.unlink()
                 except OSError:
                     pass
+        if rebind:
+            _rebind_sqlite_stores(layout)
         try:
             shutil.rmtree(snapshot_dir, ignore_errors=True)
         except OSError:
@@ -571,7 +618,19 @@ def run_bench(
         _mem = None
         _prev_source = None
 
-    with snapshot_ctx:
+    @contextlib.contextmanager
+    def _memory_source_guard(mod: Any, prev: str | None) -> Iterator[None]:
+        """Restore the live process's memory source EVEN IF the run raises —
+        leaking source='benchmark' would silently mis-tag the operator's
+        subsequent remembers and hide their real facts from recall."""
+        try:
+            yield
+        finally:
+            if mod is not None and prev is not None:
+                with contextlib.suppress(Exception):
+                    mod.set_memory_source(prev)
+
+    with snapshot_ctx, _memory_source_guard(_mem, _prev_source):
         for idx, case in enumerate(selected):
             session_key = case.session or f"bench_{case.id}"
             tools, answer, elapsed, error, ptok, ctok, meta = _drive_one(
@@ -605,8 +664,6 @@ def run_bench(
                            agent_cache=agent_cache, session_key=session_key)
             except Exception:  # noqa: BLE001
                 pass
-    if _mem is not None and _prev_source is not None:
-        _mem.set_memory_source(_prev_source)
     return rows
 
 
