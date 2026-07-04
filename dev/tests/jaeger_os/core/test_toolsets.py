@@ -68,9 +68,14 @@ def test_full_tools_env_overrides_explicit_scoping(monkeypatch) -> None:
 def test_core_tools_always_visible() -> None:
     """CORE was slimmed: the umbrella ``memory`` replaced the five
     granular memory tools, and ``execute_code`` was promoted from
-    the ``code`` toolset. Pin the new membership."""
+    the ``code`` toolset. Pin the new membership — with names that
+    actually exist in CORE (the old ``kanban``/``skill`` entries here
+    kept passing vacuously via the unknown-name fail-open after those
+    tools were renamed/removed)."""
     for name in ("get_time", "memory", "web_search", "todo",
-                 "execute_code", "kanban", "skill", "load_tools"):
+                 "execute_code", "board_add", "board_view",
+                 "list_skills", "load_tools"):
+        assert name in ts.CORE, f"{name} not in CORE"
         assert ts.tool_visible(name), name
 
 

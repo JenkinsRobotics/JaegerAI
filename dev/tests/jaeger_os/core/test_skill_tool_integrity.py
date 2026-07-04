@@ -23,13 +23,12 @@ import pytest
 REPO = Path(__file__).resolve().parents[4]
 SKILLS_DIR = REPO / "jaeger_os" / "agent" / "skills"
 
-# Tool-providing modules whose registrations happen at agent-build /
-# skill-load time rather than module import.
-_BUILD_TIME_SOURCES = (
-    REPO / "jaeger_os" / "main.py",
-    REPO / "jaeger_os" / "agent" / "skills" / "computer_use_v1" / "computer_use.py",
-    REPO / "jaeger_os" / "agent" / "skills" / "macos_computer_v1" / "macos_computer.py",
-)
+# Registration happens in three layers: module import (agent/tools/*),
+# agent-build time (main.py closures), and skill/plugin load time. Scanning
+# every source file for the registration decorators catches all three —
+# a bare ``import jaeger_os.agent.tools`` misses the latter two, which is
+# exactly how the delegate_task incident happened.
+_SOURCE_ROOT = REPO / "jaeger_os"
 
 
 def _decorated_tool_names(src: str) -> set[str]:
@@ -58,8 +57,13 @@ def registry_names() -> set[str]:
     import jaeger_os.agent.tools  # noqa: F401 — triggers module-level registration
     from jaeger_os.agent.schemas.tool_registry import get_tools
     names = {t.name for t in get_tools()}
-    for path in _BUILD_TIME_SOURCES:
-        names |= _decorated_tool_names(path.read_text(encoding="utf-8"))
+    for path in _SOURCE_ROOT.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            names |= _decorated_tool_names(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
     return names
 
 
@@ -95,3 +99,31 @@ def test_registry_extraction_sees_build_time_tools(registry_names):
                   "computer_open_app", "computer_do",  # skill-module tools
                   "board_add", "list_skills", "reflect"):  # module-level
         assert probe in registry_names, f"extraction lost {probe!r}"
+
+
+def test_toolset_maps_only_name_real_tools(registry_names):
+    """Both toolset catalogs — the scoping gate the agent actually uses
+    AND the JAEGER_TOOLSETS env bundles — must only reference registered
+    tools. Stale entries either hide a real tool from a restricted
+    surface or advertise a phantom one (review 2026-07-04 found the
+    removed kanban umbrella, the renamed `skill`, never-registered
+    read_traits/adjust_trait, and seven pre-rename computer_* names
+    lingering here)."""
+    from jaeger_os.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
+    from jaeger_os.agent.schemas.tool_bundles import JAEGER_TOOLSETS
+    offenders: list[str] = []
+    for name in CORE:
+        if name not in registry_names:
+            offenders.append(f"toolset_scoping.CORE: {name!r}")
+    for ts_name, members in TOOLSETS.items():
+        for name in members:
+            if name not in registry_names:
+                offenders.append(f"toolset_scoping.TOOLSETS[{ts_name}]: {name!r}")
+    for ts_name, spec in JAEGER_TOOLSETS.items():
+        for name in spec.get("tools", []):
+            if name not in registry_names:
+                offenders.append(f"tool_bundles[{ts_name}]: {name!r}")
+    assert not offenders, (
+        "toolset catalogs naming unregistered tools:\n  "
+        + "\n  ".join(offenders)
+    )

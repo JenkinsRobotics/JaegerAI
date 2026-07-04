@@ -165,11 +165,21 @@ def _lazy_import_facts_from_json() -> None:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with sqlite_store.writer() as wconn:
         for k, v in facts.items():
+            cat = _norm_category(cats.get(k))
             wconn.execute(
                 "INSERT OR REPLACE INTO facts "
                 "(key, value, category, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (k, str(v), _norm_category(cats.get(k)), now, now),
+                (k, str(v), cat, now, now),
+            )
+            # Seed the history log so imported facts are traceable —
+            # a fact with no fact_log row looks like it never existed.
+            wconn.execute(
+                "INSERT INTO fact_log "
+                "(subject, key, value, category, source, tags, note, ts) "
+                "VALUES ('user', ?, ?, ?, 'user', '', "
+                "'imported from facts.json', ?)",
+                (k, str(v), cat, now),
             )
 
 
@@ -348,12 +358,19 @@ def recall_history(key: str, subject: str | None = None) -> list[dict[str, str]]
 def forget(key: str, subject: str | None = None) -> bool:
     """Remove a fact by exact key (scoped to ``subject``, default the
     operator). Returns True if a row existed. History in ``fact_log`` is
-    kept — forgetting the current value doesn't erase that it was once true."""
+    kept — forgetting the current value doesn't erase that it was once true.
+
+    Source-scoped like ``recall``: a benchmark run can only delete its own
+    facts, never the operator's (a bench "forget my hometown" case must not
+    reach through and destroy the real hometown row), and the operator's
+    forget never touches benchmark rows."""
     from jaeger_os.core.memory import sqlite_store
     subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
     with sqlite_store.writer() as conn:
         cur = conn.execute(
-            "DELETE FROM facts WHERE subject = ? AND key = ?", (subj, key)
+            f"DELETE FROM facts WHERE subject = ? AND key = ? AND {src_sql}",
+            (subj, key, *src_args),
         )
         return cur.rowcount > 0
 

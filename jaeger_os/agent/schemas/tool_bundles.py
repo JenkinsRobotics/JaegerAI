@@ -88,7 +88,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         tools=[
             "memory",
             "remember", "recall", "forget", "list_facts", "search_memory",
-            "set_name", "update_soul", "read_traits", "adjust_trait",
+            "set_name", "update_soul",
         ],
         includes=[],
     ),
@@ -98,7 +98,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Avoids the 'umbrella vs sibling' attractor split that hurt the "
             "bench's L1 routing."
         ),
-        tools=["memory", "set_name", "update_soul", "read_traits", "adjust_trait"],
+        tools=["memory", "set_name", "update_soul"],
         includes=[],
     ),
     "code": ToolsetDef(
@@ -172,12 +172,12 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "the high-level entry points; the rest are atomic ops."
         ),
         tools=[
-            "computer_use", "computer_do", "computer_look", "computer_capture",
-            "computer_windows", "computer_open", "computer_click",
-            "computer_type", "computer_key", "computer_menu",
-            "computer_screenshot",
-            "computer_bg_apps", "computer_bg_windows", "computer_bg_move",
-            "computer_bg_resize", "computer_bg_press", "computer_bg_js",
+            # high-level (macos_computer skill): goal + action dispatch + look
+            "computer_use", "computer_do", "computer_look",
+            # atomic ops (computer_use skill)
+            "computer_screenshot", "computer_read_screen", "computer_open_app",
+            "computer_click", "computer_type_text", "computer_press_key",
+            "computer_menu_select",
         ],
         includes=[],
     ),

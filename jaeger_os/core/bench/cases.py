@@ -651,9 +651,10 @@ CASES: list[BenchCase] = [
               tags=["kanban"]),
 
     # ── v1.3: DEEP-THINK (escalate a hard task to the coder model) ──
-    # Two real entry points: propose_deep_think_task (the queue) and a
-    # kanban card with kind=deepthink. Either is correct routing for a
-    # task too big for the current fast-model turn.
+    # The correct handoff is BOTH calls: propose_deep_think_task actually
+    # queues the work (a board card alone does NOT reach Deep Think), and
+    # a board card tracks it. The deep-think skill + the tool description
+    # teach exactly this pair, and expected_tools requires both.
     BenchCase(id="dt_propose_skill_fix",
               prompt="The weather skill keeps crashing on malformed input. "
                      "It's too big to fix right now — note it so the deep "
@@ -661,11 +662,11 @@ CASES: list[BenchCase] = [
               expected_tools=["propose_deep_think_task", "kanban"],
               tags=["deepthink"],
               notes="Model stays LOCKED in the dev bench — this checks the "
-                    "agent RECOGNIZES the escalation moment (queues the task "
-                    "via propose_deep_think_task OR a deepthink kanban card), "
-                    "not an actual model swap. The real flip to the coder "
-                    "model is tested in the agent/full-system run. "
-                    "expected_tools is a set-match (either tool passes)."),
+                    "agent RECOGNIZES the escalation moment (queues via "
+                    "propose_deep_think_task AND tracks it with a board "
+                    "card — both required), not an actual model swap. The "
+                    "real flip to the coder model is tested in the "
+                    "agent/full-system run."),
 
     # ── v1.3: SELF-IMPROVE (deep-learning loop) ─────────────────────
     # Routing only — the fast dev bench must NOT trigger run_benchmark
