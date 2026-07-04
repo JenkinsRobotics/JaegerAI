@@ -164,11 +164,6 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # favour of the umbrella ``memory(action=…)`` (in CORE).
         "remember", "recall", "forget", "list_facts", "search_memory",
     }),
-    "board": frozenset({
-        # ``kanban`` umbrella is in CORE; the granular ``board_*``
-        # primitives load via this toolset.
-        "board_view", "board_add", "board_move", "board_update",
-    }),
     "scheduling": frozenset({
         "schedule_prompt", "list_schedules", "cancel_schedule",
     }),
@@ -212,7 +207,6 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
-    "board": "granular board_view/add/move/update (kanban is always-on)",
     "scheduling": "schedule, list, cancel cron prompts",
     "background": "long-running background processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",
