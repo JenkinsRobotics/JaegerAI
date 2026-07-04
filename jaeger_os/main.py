@@ -282,19 +282,18 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if not text:
             return f"(no speech detected in {result.get('seconds')}s)"
         return f"Heard: {text}"
-    if name == "kanban":
+    if name == "board_add":
         if not result.get("ok"):
-            return f"Board op failed: {result.get('error', 'unknown')}"
-        if result.get("deleted"):
-            return f"Deleted card {result.get('card_id')}."
-        if result.get("title") and result.get("card_id"):
-            return f"Added card {result.get('card_id')} — {result.get('title')!r} → {result.get('column')}."
-        if result.get("updated"):
-            return f"Updated {result.get('card_id')} ({', '.join(result.get('updated'))})."
-        if result.get("column") and result.get("card_id"):
-            return f"Moved {result.get('card_id')} → {result.get('column')}."
-        if result.get("cards") is not None:
-            return f"Board: {result.get('summary', '')} ({len(result['cards'])} card(s) shown)."
+            return f"Couldn't add card: {result.get('error', 'unknown')}"
+        return f"Added card {result.get('card_id')} — {result.get('title')!r} → {result.get('column')}."
+    if name == "board_move":
+        if not result.get("ok"):
+            return f"Couldn't move card: {result.get('error', 'unknown')}"
+        return f"Moved {result.get('card_id')} → {result.get('column')}."
+    if name == "board_update":
+        if not result.get("ok"):
+            return f"Couldn't update card: {result.get('error', 'unknown')}"
+        return f"Updated {result.get('card_id')} ({', '.join(result.get('updated') or [])})."
     return str(result)
 
 
@@ -1210,7 +1209,7 @@ _FAST_FINALIZE_DIRECTIVE = (
 _DETERMINISTIC_FINAL_TOOLS = frozenset({
     "get_time", "calculate", "list_facts", "recall", "remember", "forget",
     "delete_file", "list_credentials", "schedule_prompt", "cancel_schedule",
-    "reload_skills", "listen", "kanban",
+    "reload_skills", "listen", "board_add", "board_move", "board_update",
 })
 
 
