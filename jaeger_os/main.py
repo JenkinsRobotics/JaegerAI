@@ -294,6 +294,10 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if not result.get("ok"):
             return f"Couldn't update card: {result.get('error', 'unknown')}"
         return f"Updated {result.get('card_id')} ({', '.join(result.get('updated') or [])})."
+    if name == "board_delete":
+        if not result.get("ok"):
+            return f"Couldn't delete card: {result.get('error', 'unknown')}"
+        return f"Deleted card {result.get('card_id')}."
     return str(result)
 
 
@@ -1210,6 +1214,7 @@ _DETERMINISTIC_FINAL_TOOLS = frozenset({
     "get_time", "calculate", "list_facts", "recall", "remember", "forget",
     "delete_file", "list_credentials", "schedule_prompt", "cancel_schedule",
     "reload_skills", "listen", "board_add", "board_move", "board_update",
+    "board_delete",
 })
 
 

@@ -120,7 +120,9 @@ from .background import (
 from .deepthink_tools import list_deep_think_queue, propose_deep_think_task
 
 # Kanban task board
-from .board import board_add, board_move, board_update, board_view, kanban
+from .board import (
+    board_add, board_delete, board_move, board_update, board_view,
+)
 
 # Browser automation (Playwright) — one consolidated browser() tool
 from .browser import browser
@@ -192,7 +194,7 @@ __all__ = [
     # deep think
     "propose_deep_think_task", "list_deep_think_queue",
     # kanban board
-    "board_view", "board_add", "board_move", "board_update", "kanban",
+    "board_view", "board_add", "board_move", "board_update", "board_delete",
     # browser automation
     "browser",
     # playbook skills

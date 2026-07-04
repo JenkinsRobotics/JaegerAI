@@ -6,6 +6,11 @@ The agent's task-planning surface — see docs/kanban_design.md.
   • board_add(title, …)            — add a card to the `ready` column
   • board_move(card_id, column)    — move a card between columns
   • board_update(card_id, …)       — edit a card / log progress on it
+  • board_delete(card_id)          — remove a card
+
+Five small, individual tools (not one action-dispatched umbrella) — a local
+model routes over distinct named verbs better than over one tool's `action=`
+parameter. The `kanban` SKILL carries the workflow (columns, when to file).
 
 The board is one JSON file inside the instance (``memory/board.json``);
 these tools are local bookkeeping and are NOT confirmation-gated — the
@@ -158,57 +163,15 @@ def board_update(
     return {"ok": True, "card_id": card_id, "updated": sorted(fields)}
 
 
-# ---------------------------------------------------------------------------
-# Consolidated kanban tool — one tool, every board operation
-# ---------------------------------------------------------------------------
-def kanban(action: str, card_id: str = "", title: str = "",
-           description: str = "", column: str = "", tag: str = "",
-           priority: str = "", note: str = "",
-           kind: str = "general") -> dict[str, Any]:
-    """The kanban task board — ONE tool, action-dispatch. ``action``:
-
-      - ``view``     — read the board (optional ``column`` / ``tag`` filter)
-      - ``add``      — add a card: ``title`` (+ ``description`` / ``priority``
-        low|med|high / ``tag`` / ``kind=general|deepthink``)
-      - ``move``     — move card ``card_id`` to ``column``
-      - ``update``   — edit / log on card ``card_id`` (``note`` appends a
-        progress line)
-      - ``complete`` — mark card ``card_id`` done
-      - ``block``    — mark card ``card_id`` blocked (needs the user)
-      - ``unblock``  — move a blocked card back to ready
-
-    Columns: backlog / ready / in_progress / blocked / done.
-
-    Card kinds: ``general`` (default — worked by the current model on
-    a normal turn) vs ``deepthink`` (worked by the Deep Think coder
-    model after the user approves it from backlog → ready). Pick
-    deepthink for hard tasks that need the strongest model; pick
-    general for routine work."""
-    act = (action or "").strip().lower()
-    if act in ("view", "show", "list", "read"):
-        return board_view(column=column, tag=tag)
-    if act in ("add", "create", "new"):
-        return board_add(title=title, description=description,
-                         tags=[tag.strip()] if tag.strip() else None,
-                         priority=priority or "med",
-                         kind=kind or "general")
-    if act == "move":
-        if not column:
-            return {"ok": False, "error": "move needs a target column"}
-        return board_move(card_id=card_id, column=column)
-    if act in ("update", "comment", "log", "edit"):
-        return board_update(card_id=card_id, title=title,
-                            description=description, priority=priority,
-                            add_tag=tag, note=note)
-    if act in ("complete", "done", "finish"):
-        return board_move(card_id=card_id, column="done")
-    if act == "block":
-        return board_move(card_id=card_id, column="blocked")
-    if act in ("unblock", "resume"):
-        return board_move(card_id=card_id, column="ready")
-    return {"ok": False,
-            "error": f"unknown kanban action {action!r} — use one of: "
-                     "view, add, move, update, complete, block, unblock"}
+def board_delete(card_id: str) -> dict[str, Any]:
+    """Remove a card from the board entirely (vs ``board_move`` to
+    ``done``, which keeps it as a finished card)."""
+    if not (card_id or "").strip():
+        return {"ok": False, "error": "delete needs a card_id"}
+    board = board_for_layout(_require_layout())
+    if board.remove(card_id):
+        return {"ok": True, "card_id": card_id, "deleted": True}
+    return {"ok": False, "error": f"no card {card_id!r}"}
 
 
 @register_tool_from_function(name="board_view", side_effect="read")
@@ -223,12 +186,16 @@ def _t_board_view(column: str = "", tag: str = "") -> dict:
 def _t_board_add(
     title: str, description: str = "",
     tags: list[str] | None = None, priority: str = "med",
+    kind: str = "general",
 ) -> dict:
     """Add a card to the kanban board (lands in `ready`, set to
     work). Use this to lay out a multi-step task as cards so you and
-    the user can track progress. `priority` is low/med/high."""
+    the user can track progress. `priority` is low/med/high.
+    `kind="deepthink"` files it for the Deep Think coder model (lands
+    in `backlog` for the user to approve) — but for a genuine hard
+    build/fix, prefer `propose_deep_think_task`."""
     return board_add(title=title, description=description,
-                     tags=tags, priority=priority)
+                     tags=tags, priority=priority, kind=kind)
 
 
 @register_tool_from_function(name="board_move")
@@ -253,20 +220,10 @@ def _t_board_update(
                         add_tag=add_tag, note=note, result=result)
 
 
-@register_tool_from_function(name="kanban")
-def _t_kanban(action: str, card_id: str = "", title: str = "",
-              description: str = "", column: str = "", tag: str = "",
-              priority: str = "", note: str = "") -> dict:
-    """The kanban task board — ONE tool. `action` selects the op:
-      • view — read the board (optional `column`/`tag` filter)
-      • add — add a card (`title`, optional `description`/`priority`
-        low|med|high/`tag`)
-      • move — move card `card_id` to `column`
-      • update — edit / log on `card_id` (`note` appends a line)
-      • complete — mark `card_id` done
-      • block / unblock — mark `card_id` blocked, or send it back
-    Columns: backlog / ready / in_progress / blocked / done. Lay a
-    multi-step task out as cards so you and the user can track it."""
-    return kanban(action=action, card_id=card_id, title=title,
-                  description=description, column=column, tag=tag,
-                  priority=priority, note=note)
+@register_tool_from_function(name="board_delete")
+def _t_board_delete(card_id: str) -> dict:
+    """Delete a card from the kanban board by `card_id` — removes it
+    entirely. To just finish a card, `board_move` it to `done` instead;
+    use this only to discard one. For the board workflow (columns, when
+    to file vs do), load the `kanban` skill (`use_skill(name="kanban")`)."""
+    return board_delete(card_id=card_id)
