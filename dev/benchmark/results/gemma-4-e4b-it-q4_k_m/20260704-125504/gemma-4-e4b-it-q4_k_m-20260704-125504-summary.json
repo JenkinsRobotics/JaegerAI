@@ -1,0 +1,364 @@
+{
+  "total": 81,
+  "passed": 77,
+  "pass_rate": 0.951,
+  "routing_passed": 62,
+  "routing_total": 63,
+  "answer_passed": 45,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 587.88,
+  "metrics": {
+    "avg_latency_s": 7.258,
+    "p50_latency_s": 2.681,
+    "p95_latency_s": 25.598,
+    "min_latency_s": 0.309,
+    "max_latency_s": 76.38,
+    "total_tool_dispatches": 118,
+    "avg_tools_per_turn": 1.46,
+    "answer_tokens_total": 10623,
+    "answer_tokens_avg": 131.1,
+    "answer_tokens_per_sec": 18.1,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 2781645,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "hit the same read_file failure 2 times": 2
+    },
+    "halted_turns": 2,
+    "avg_iterations": 2.32,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.608,
+    "ttft_p50_s": 0.216,
+    "ttft_p95_s": 0.331,
+    "ttft_reported": 81
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 7.938,
+      "p95_latency_s": 34.215,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 28,
+      "pass_rate": 1.0,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 7.724,
+      "p95_latency_s": 34.215,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 10,
+      "pass_rate": 0.909,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 7.468,
+      "p95_latency_s": 19.502,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "pass_rate": 0.917,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 2.319,
+      "p95_latency_s": 4.122,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "pass_rate": 0.889,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 3.193,
+      "p95_latency_s": 8.385,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 81,
+      "passed": 77,
+      "pass_rate": 0.951,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 7.258,
+      "p95_latency_s": 25.598,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 28,
+      "avg_latency_s": 7.724
+    },
+    "files": {
+      "total": 15,
+      "passed": 13,
+      "avg_latency_s": 5.609
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 9.989
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 5.923
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 2.571
+    },
+    "code": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 7.061
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.073
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 10,
+      "avg_latency_s": 7.468
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "avg_latency_s": 2.319
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "avg_latency_s": 3.193
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 1.92
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.389
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.469
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.681
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 1.53
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 3.079
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 4.026
+    },
+    "skill": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 34.965
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 12.171
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 27.04
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 5.883
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 5.766
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.681
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 8.094
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 5.826
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 28.772
+    }
+  },
+  "failures": [
+    {
+      "id": "ms_write_append_read",
+      "prompt": "Create todo.txt with 'buy milk', append 'walk dog' to it, then read it back and tell me both items.",
+      "tools_called": [
+        "write_file",
+        "append_file",
+        "read_file",
+        "read_file"
+      ],
+      "answer": "I encountered an error reading the file, which suggests the file might not be in the expected location or the previous write/append operations didn't persist the content as expected for a simple read.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "mt_file_round_2",
+      "prompt": "Read level3_test.txt and tell me what it says.",
+      "tools_called": [
+        "read_file",
+        "read_file"
+      ],
+      "answer": "[halted: hit the same read_file failure 2 times]",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "rec_python_syntax",
+      "prompt": "Use run_python to execute this code (it has a syntax error on purpose): print(   — note the unclosed",
+      "tools_called": [],
+      "answer": "I cannot use the `run_python` tool because it does not exist in my available toolset.\n\nHowever, I can use the `execute_code` tool, which is designed to run Python code.\n\nPLAN: execute_code(code=\"print",
+      "routing_ok": false,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_click",
+        "computer_read_screen"
+      ],
+      "answer": "The \"Appearance\" setting is now the active section. I need to find the control for Dark Mode. Based on the previous screen read, the next logical step is to look for a toggle or a specific setting rel",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 608.18,
+  "load_s": 42.56,
+  "category_breakdown": {
+    "routing": {
+      "passed": 28,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 10,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 8,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 11,
+      "total": 12
+    },
+    "files": {
+      "passed": 13,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 4,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 4,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 5,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 1,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 2,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260704-125504",
+  "benchmark_version": "1.3"
+}
