@@ -129,6 +129,7 @@ from .browser import browser
 
 # Playbook skills — the skill() discover/read tool
 from .skills import skill
+from .reflect import reflect
 
 # In-session task list (planning scratchpad)
 from .todo import reset_todos, todo
