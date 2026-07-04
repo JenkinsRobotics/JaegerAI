@@ -82,11 +82,10 @@ UMBRELLA_EQUIVALENTS: dict[str, set[str]] = {
     "run_python":     {"execute_code"},
     "run_shell":      {"terminal"},
     "list_skill_dir": {"read_dir"},
-    # The kanban board is registered both as the umbrella ``kanban``
-    # (action-dispatch) AND the fine-grained ``board_*`` verbs; the model
-    # may call either. A case expecting "kanban" accepts any board verb.
+    # The board is five individual verbs (board_add/view/move/update/delete);
+    # a case written as expecting "kanban" accepts any of them.
     "kanban":         {"board_add", "board_view", "board_move",
-                       "board_update"},
+                       "board_update", "board_delete"},
 }
 
 

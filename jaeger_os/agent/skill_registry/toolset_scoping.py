@@ -53,11 +53,12 @@ def _scoping_enabled() -> bool:
     return val in ("1", "true", "yes", "on")
 
 
-# CORE — always visible when scoping is on. Curated to the umbrella
-# tools instead of granular siblings: ``memory`` instead of the five
-# fine-grained verbs, ``kanban`` instead of the four ``board_*``
-# operations, ``skill`` instead of skill-dir primitives. Lower
-# routing entropy, same capability surface.
+# CORE — always visible when scoping is on. Umbrellas where they route
+# well (``memory`` instead of the five fine-grained verbs, ``list_skills``
+# instead of skill-dir primitives), but INDIVIDUAL board verbs
+# (``board_add``/``board_view``) rather than an ``action=`` umbrella — a
+# local model routes over distinct named tools better than one tool's
+# action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
     # Time and math — the cheapest, most-routed pair.
     "get_time", "calculate",
@@ -75,9 +76,10 @@ CORE: frozenset[str] = frozenset({
     # ``memory_granular`` toolset. ``recall`` is CORE because scoped runs
     # showed the umbrella alone lost the plain "what did I say" cases.
     "memory", "recall",
-    # Tasks + board — both umbrellas. Granular ``board_*`` tools
-    # load via the ``board`` toolset.
-    "todo", "kanban",
+    # Tasks + board. Individual board verbs (a local model routes over
+    # distinct named tools better than one ``action=`` umbrella); the
+    # common two are CORE, the rest load via the ``board`` toolset.
+    "todo", "board_add", "board_view",
     # Skill discovery (umbrella) + the enum-callable use_skill + delegation.
     # Heavy procedures live behind ``skill(view)`` / ``use_skill(name=…)``.
     "list_skills", "use_skill", "delegate_task",
@@ -108,7 +110,7 @@ LEAN_CORE: frozenset[str] = frozenset({
     "read_file", "write_file", "patch", "search_files", "list_skill_dir",
     "web_search", "web_extract",
     "memory",
-    "todo", "clarify", "delegate_task", "kanban", "list_skills",
+    "todo", "clarify", "delegate_task", "board_add", "board_view", "list_skills",
     "computer_use", "browser",
     "vision_analyze", "image_generate", "text_to_speech",
 })
@@ -165,9 +167,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "remember", "recall", "forget", "list_facts", "search_memory",
     }),
     "board": frozenset({
-        # ``kanban`` umbrella is in CORE; the granular ``board_*``
-        # primitives load via this toolset.
-        "board_view", "board_add", "board_move", "board_update",
+        # board_add / board_view are CORE; the rest load on intent.
+        "board_move", "board_update", "board_delete",
     }),
     "scheduling": frozenset({
         "schedule_prompt", "list_schedules", "cancel_schedule",
@@ -212,7 +213,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
-    "board": "granular board_view/add/move/update (kanban is always-on)",
+    "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
     "scheduling": "schedule, list, cancel cron prompts",
     "background": "long-running background processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",
