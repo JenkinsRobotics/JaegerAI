@@ -382,4 +382,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    rc = main()
+    # F1 mitigation (STATUS.md; upstream llama.cpp PR #17869): the bench
+    # always loads the in-process Metal runtime; a normal interpreter exit
+    # runs C++ static destructors that abort in ggml_metal_device_free —
+    # SIGABRT + a crash report AFTER all results are already written.
+    # Everything is flushed/committed by now; skip the doomed destructors.
+    with contextlib.suppress(Exception):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    os._exit(rc)
