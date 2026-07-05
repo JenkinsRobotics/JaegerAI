@@ -65,6 +65,12 @@ final class AgentBridge: ObservableObject {
     /// Last-known agent status (instance + model), or nil while down.
     @Published private(set) var status: AgentStatus? = nil
 
+    /// True while a turn is running anywhere (any window, the pill…).
+    /// Set from the bridge's ``state`` frames, so surfaces that exist
+    /// independently of the chat window (tray card, orb) get the real
+    /// busy signal without a view-to-view mirror.
+    @Published private(set) var isBusy: Bool = false
+
     /// Last connect-failure reason, surfaced in the menu. Cleared on success.
     @Published private(set) var lastError: String? = nil
 
@@ -179,6 +185,7 @@ final class AgentBridge: ObservableObject {
         state = .disconnected
         agentState = .booting
         status = nil
+        isBusy = false
     }
 
     /// The Quit-from-tray path: give the core time to free the model and
@@ -190,6 +197,7 @@ final class AgentBridge: ObservableObject {
         state = .disconnected
         agentState = .booting
         status = nil
+        isBusy = false
     }
 
     // MARK: - Queries / commands / chat
@@ -237,6 +245,7 @@ final class AgentBridge: ObservableObject {
     private func handleTermination(clean: Bool) {
         bridge = nil
         status = nil
+        isBusy = false
         if clean {
             state = .disconnected
         } else {
@@ -276,6 +285,7 @@ final class AgentBridge: ObservableObject {
     /// Map a ``state`` frame onto the thinking-chip event vocabulary the
     /// chat view already understands.
     private func fanout(state busy: Bool) {
+        isBusy = busy
         let event = Event(name: busy ? "thinking" : "thought.end", payload: [:])
         for cb in listeners.values { cb(event) }
     }
