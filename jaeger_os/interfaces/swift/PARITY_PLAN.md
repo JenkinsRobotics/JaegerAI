@@ -72,6 +72,18 @@ live orb data (tts amplitude / audio frames / agent-state phases).
 - **P4 — settings HUD** (files-direct read/write) to full parity.
 - **P5 — tray restructure** to match; polish; then confirm parity & keep Swift default.
 
+## 5b. First-run onboarding — DONE (2026-07-05, not a parity item)
+
+A new-in-Swift surface (nothing equivalent shipped in PySide6): when the
+bridge reports `fatal kind="no_instance"` (v1 additive), `Onboarding/`
+presents an iOS-style setup window — Welcome → Character grid → Identity →
+Model (host-tier recommendation) → Permissions → Review → live "Creating…"
+off `agent_state` frames. It drives the SAME Python core as the CLI wizard
+via additive bridge ops: query `instance_exists`, query `setup_defaults`,
+command `create_instance` (all pinned in `protocol_v1_fixtures.json`).
+The CLI wizard remains the terminal path (`jaeger setup`, and bare
+`jaeger` in a tty still runs it before launching the app).
+
 ## 6. Notes / risks
 
 - Swift is a separate build (SwiftPM) + eventual code-signing/notarization.
