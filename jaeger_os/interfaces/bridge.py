@@ -126,6 +126,12 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     )
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
+    if what == "identity":
+        # The agent's live identity for tray/header/orb branding — cheap
+        # enough to re-ask after a character switch (the client refreshes
+        # this instead of waiting for the next agent_state frame).
+        name, icon = _active_character(boot)
+        return {"character": name, "icon": icon, "model": _model_name(boot)}
     if what == "characters":
         active_id = active_character_id(root) if root else None
         bound_id = bound_character_id(root) if root else None

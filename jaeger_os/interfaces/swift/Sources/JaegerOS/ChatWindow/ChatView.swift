@@ -262,6 +262,16 @@ struct ChatView: View {
                 .fill(agent.isConnected ? Color.green : Term.inkDim)
                 .frame(width: 7, height: 7)
             if agent.isConnected {
+                // Character-first identity, the windowed echo of the rich
+                // TUI's "jros · <name> · local" header.
+                if let character = agent.status?.character {
+                    Text(character)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Term.accent)
+                    Text("·")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Term.inkDim.opacity(0.7))
+                }
                 Text(agent.status?.modelName ?? "connected")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)

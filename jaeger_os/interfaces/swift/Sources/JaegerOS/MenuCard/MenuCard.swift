@@ -50,6 +50,9 @@ struct MenuCard: View {
         }
         .padding(14)
         .frame(width: 300)
+        // Fresh identity every open — a character switched from another
+        // surface (or edited on disk) shows up the next time the card drops.
+        .task { await agent.refreshIdentity() }
     }
 
     // MARK: - header (avatar · name+status · settings · power)
