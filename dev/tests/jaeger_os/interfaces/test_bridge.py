@@ -30,6 +30,22 @@ class _FakeBoot:
         self.cleaned = True
 
 
+@pytest.fixture(autouse=True)
+def _instance_on_disk(tmp_path, monkeypatch):
+    """``bridge.main`` refuses to boot when the resolved instance doesn't
+    exist (fatal kind=``no_instance`` — the first-run signal the native
+    app's onboarding runs on). Give every test a minimal on-disk instance
+    (the identity/config/manifest trio ``InstanceLayout.exists()`` checks)
+    so the faked-boot paths exercise the normal flow; the no-instance
+    tests below override ``JAEGER_INSTANCE_DIR`` to a missing dir."""
+    root = tmp_path / "inst"
+    root.mkdir()
+    for f in ("identity.yaml", "config.yaml", "manifest.json"):
+        (root / f).write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
+    return root
+
+
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
          boot_delay=0.0, run_fn=None):
     """Drive ``bridge.main`` with faked deps; return parsed stdout frames."""
@@ -118,6 +134,35 @@ def test_lock_conflict_gets_the_locked_kind(monkeypatch):
     fatal = next(f for f in frames if f["type"] == "fatal")
     assert fatal["kind"] == "locked"
     assert rc == 1
+
+
+def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path):
+    """First-run: the resolved instance isn't on disk. The bridge must NOT
+    reach ``boot_for_tui`` (which would auto-fire the interactive wizard
+    against our protocol stdin — the 0.6 first-run break) — it reports
+    ``fatal kind=no_instance`` and keeps the transport alive."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    # If boot ran anyway, the faked boot would emit ``agent_state booting``
+    # + ``ready`` — the exact frame-sequence assert below catches it.
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
+                         boot_exc=AssertionError("boot must not run"))
+    types = [f["type"] for f in frames]
+    assert types == ["ready", "agent_state", "fatal", "bye"]
+    assert frames[1]["state"] == "failed"
+    assert "first-run setup required" in frames[1]["error"]
+    assert frames[2]["kind"] == "no_instance"
+    assert rc == 1
+
+
+def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
+    """Pre-instance the pipe stays useful: queries answer (the native
+    onboarding needs characters/setup data over this same transport)."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    stdin = '{"op":"query","what":"identity","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert set(result["data"]) == {"character", "icon", "model"}
 
 
 def test_turn_during_failed_boot_reports_error(monkeypatch):
@@ -297,6 +342,9 @@ def test_fixture_frames_match_builders():
     assert frames["fatal_locked"] == protocol.fatal_frame(
         "instance 'jros-dev' is locked by pid 4242 (still running).",
         kind="locked")
+    assert frames["fatal_no_instance"] == protocol.fatal_frame(
+        "no instance named 'default' exists yet — first-run setup required",
+        kind="no_instance")
     assert frames["bye"] == protocol.bye_frame()
     assert fx["ops"]["send"] == protocol.send_op("hello", "desktop-app")
     assert fx["ops"]["respond"] == protocol.respond_op("perm1", "allow")

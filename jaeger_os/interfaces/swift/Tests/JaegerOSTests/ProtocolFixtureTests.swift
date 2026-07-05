@@ -136,6 +136,14 @@ final class ProtocolFixtureTests: XCTestCase {
             return XCTFail("fatal_boot")
         }
         XCTAssertEqual(bootKind, "boot")
+        // v1 additive: first-run — no instance on disk yet. The shell
+        // routes this kind to onboarding instead of a generic error.
+        guard case .fatal(let noInstErr, let noInstKind) =
+                try decode("fatal_no_instance") else {
+            return XCTFail("fatal_no_instance")
+        }
+        XCTAssertEqual(noInstKind, "no_instance")
+        XCTAssertTrue(noInstErr.contains("first-run"))
 
         guard case .bye = try decode("bye") else { return XCTFail("bye") }
     }

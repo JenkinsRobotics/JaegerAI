@@ -3501,6 +3501,21 @@ def _swift_app_binary() -> "Path | None":
     return None
 
 
+def _launch_swift_app(binary: "Path", instance_name: str) -> int:
+    """Run the built JaegerOS.app's inner binary (stdout stays attached
+    for terminal users) and forward its exit code. Pins
+    ``JAEGER_INSTANCE_NAME`` to the instance THIS process resolved (and,
+    on first run, just created via the wizard) so the app's bridge child
+    boots exactly that instance — without the pin, a wizard-created
+    instance and the bridge's own default resolution could disagree."""
+    if instance_name:
+        os.environ["JAEGER_INSTANCE_NAME"] = instance_name
+    print(f"[jros] launching {binary.parent.parent.parent.name} — "
+          "menu-bar tray + chat window…", file=sys.stderr, flush=True)
+    import subprocess as _sp
+    return _sp.run([str(binary)]).returncode
+
+
 def _windowed_available() -> bool:
     """Whether the Pattern-1 windowed app can run here. Needs PySide6 and a
     display. Honours ``JAEGER_NO_GUI`` and ``QT_QPA_PLATFORM=offscreen`` as
@@ -3661,10 +3676,22 @@ def _main_dispatch() -> int:
         layout.ensure_dirs()
         return self_test(layout)
 
-    # First-run / missing-instance: auto-fire the wizard. Explicit
-    # ``jaeger setup`` runs through the daemon-cli dispatcher and
-    # never reaches this branch.
+    # First-run / missing-instance: auto-fire the wizard — BEFORE any
+    # surface launch, the same contract old bare-``jaeger`` had
+    # (wizard → boot). Explicit ``jaeger setup`` runs through the
+    # daemon-cli dispatcher and never reaches this branch.
+    #
+    # One exception: no terminal to ask questions in (stdin isn't a
+    # tty — launched from a .app/launcher/IDE) on a bare invocation
+    # headed for the native app. The wizard's ``input()`` would crash
+    # on the closed stdin; the Swift app's onboarding owns first-run
+    # there, so launch it directly.
     if not layout.exists():
+        _bare = not " ".join(args.prompt).strip()
+        _app = (_swift_app_binary()
+                if _bare and not os.environ.get("JAEGER_NO_GUI") else None)
+        if _app is not None and not sys.stdin.isatty():
+            return _launch_swift_app(_app, instance_name)
         layout = run_wizard(force=False, instance_name=instance_name)
 
     # Manifest gate. On version mismatch try the migration runner; only
@@ -3735,14 +3762,12 @@ def _main_dispatch() -> int:
         # routing lived in the deleted launch.py and never made it into the
         # product path — bare ``./jaeger`` was still booting the old Qt
         # shell in-process, with no splash.)
-        swift_app = _swift_app_binary()
+        # ``JAEGER_NO_GUI`` is the headless escape hatch (SSH boxes,
+        # CI): never spawn a GUI app; fall through to the TUI below.
+        swift_app = (None if os.environ.get("JAEGER_NO_GUI")
+                     else _swift_app_binary())
         if swift_app is not None:
-            if args.instance:
-                os.environ["JAEGER_INSTANCE_NAME"] = args.instance
-            print(f"[jros] launching {swift_app.parent.parent.parent.name} — "
-                  "menu-bar tray + chat window…", file=sys.stderr, flush=True)
-            import subprocess as _sp
-            return _sp.run([str(swift_app)]).returncode
+            return _launch_swift_app(swift_app, instance_name)
         # PySide6 fallback (no built Swift app). ``--tui`` (handled above)
         # opts into the terminal explicitly.
         if _windowed_available():
