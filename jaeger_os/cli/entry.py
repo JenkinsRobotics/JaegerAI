@@ -45,7 +45,15 @@ def _route(argv: list[str], py: str) -> list[str]:
     if cmd == "doctor":
         return [py, "-m", "jaeger_os.cli.run", "--doctor", *rest]
     if cmd == "update":
-        return [py, "-m", "jaeger_os.cli.devtools", "--update"]
+        # Two updaters, one word: in a DEV CHECKOUT `jaeger update` is the
+        # git-pull dev loop (devtools); in a clean product install it must
+        # fall through to the real end-user updater (cli/verbs/update_verb,
+        # reached via the main dispatch). Detect the checkout by the repo
+        # markers next to this package — a pip install has neither.
+        _repo = Path(__file__).resolve().parents[2]
+        if (_repo / "pyproject.toml").exists() and (_repo / ".git").exists():
+            return [py, "-m", "jaeger_os.cli.devtools", "--update"]
+        return [py, "-m", "jaeger_os.cli.run", "update", *rest]
     if cmd in ("--dev", "dev"):
         # Developer toolbox (dev TUI, JaegerOS-dev.app build/run, health,
         # stop/status) — lives IN the package since launch.py was removed.
