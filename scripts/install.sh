@@ -34,10 +34,9 @@ JAEGER_SRC="${JAEGER_SRC:-$HOME/.cache/jaeger-src}"
 RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com#; s#\.git$##')/$JAEGER_REF/scripts/install.sh"
 
 # The product allowlist — exactly what an end-user install contains.
-# Everything else in the repo (dev/tests/ dev/benchmark/ dev_scripts/
-# dev_tools/ dev/docs/ sandbox/ launch.py launch apps/ docs/ scripts/) is
-# dev-only and never copied. jaeger_os/ is self-contained — it imports
-# none of the dev tree at runtime.
+# Everything else in the repo (dev/ jaeger-studio/ launch_studio
+# scripts/ JaegerOS-dev.app) is dev-only and never copied. jaeger_os/ is
+# self-contained — it imports none of the dev tree at runtime.
 PRODUCT=(
   jaeger_os
   install.sh run.sh jaeger
@@ -156,9 +155,9 @@ $JAEGER_SRC — delete it any time.)
 
 Next steps:
   cd $JAEGER_HOME
-  ./jaeger setup [name]    # create an agent (the wizard)
+  ./jaeger agent create    # create your first agent (the wizard)
   ./jaeger                 # run the active agent (windowed app; --tui for terminal)
-  ./jaeger instances       # manage agents: list / create / edit / delete / set-default
+  ./jaeger agent list      # manage agents: create / list / use / inspect / delete
   ./jaeger doctor          # environment + readiness check
 
 Upgrade later:
