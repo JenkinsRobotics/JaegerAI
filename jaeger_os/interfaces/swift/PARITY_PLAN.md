@@ -15,8 +15,12 @@ release` → `JaegerOS`). Already implemented:
 - **Pill:** `PillView` / `PillPanel` / `PillHotkey` (⌥Space) / `PillBridge`.
 - **Tray:** `MenuCard` (menu-bar card).
 - **Settings:** `SettingsView`.
-- **Voice:** `TTSManager` + `AppleSpeechSynth`; `STTManager` + `AppleSpeechSTT` +
-  `WhisperSTT`; `VoiceRecorder`.
+- **Voice:** `TTSManager` — speech routes to the agent's Kokoro voice over the
+  bridge `speak` command (config `voice.speech_engine`, default `kokoro`; active
+  character's voice_id), with `AppleSpeechSynth` as the `apple` engine and the
+  automatic fallback when the bridge is down; `STTManager` + `AppleSpeechSTT` +
+  `WhisperSTT`; `VoiceRecorder`. HUD picker for the engine: follow-up (settings
+  HUD is in flight).
 - Separate `interfaces/avatar/` — Metal + `URLSessionWebSocketTask` avatar renderer.
 
 ## 2. The seam (actual, not the WS gateway I wrongly proposed)

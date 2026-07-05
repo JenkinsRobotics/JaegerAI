@@ -300,6 +300,18 @@ class VoiceConfig(BaseModel):
             "window = less time for stale noise between turns)."
         ),
     )
+    speech_engine: Literal["kokoro", "apple"] = Field(
+        "kokoro",
+        description=(
+            "Which synthesizer speaks agent replies in the native app. "
+            "'kokoro' (default) = the agent's REAL voice: the Python-side "
+            "Kokoro TTS node, using the active character's configured "
+            "voice_id — the Swift shell routes its speaker button through "
+            "the bridge's 'speak' command.  'apple' = the shell's local "
+            "AVSpeechSynthesizer (also the automatic fallback whenever the "
+            "bridge is down)."
+        ),
+    )
     audio_backend: Literal["sounddevice", "avaudio"] = Field(
         "sounddevice",
         description=(

@@ -191,6 +191,77 @@ def test_identity_query_roundtrip(monkeypatch):
     assert rc == 0
 
 
+def test_speak_command_roundtrip(monkeypatch):
+    """``{"op":"command","cmd":"speak"}`` — the native app's speaker button.
+    Accepted (ok=True) once the agent is up; the synthesis itself runs
+    fire-and-forget on a worker thread via the agent's speak machinery
+    (Kokoro + the active character's voice). Empty text is refused."""
+    import importlib
+    import threading
+
+    spoken = {}
+    done = threading.Event()
+
+    def fake_speak(text="", path=""):
+        spoken["text"] = text
+        done.set()
+        return {"spoken": True, "elapsed_s": 0.1, "reason": ""}
+
+    # Patch the MODULE object, not the dotted string: the tools package
+    # re-exports a ``speak`` FUNCTION that shadows the submodule on
+    # attribute lookup, so the string form patches the wrong object.
+    speak_mod = importlib.import_module("jaeger_os.agent.tools.speak")
+    monkeypatch.setattr(speak_mod, "speak", fake_speak)
+    stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
+             '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    results = {f["id"]: f for f in frames if f["type"] == "result"}
+    assert results["r3"]["ok"] is True
+    assert results["r4"]["ok"] is False
+    assert "nothing to speak" in results["r4"]["error"]
+    assert done.wait(5.0)
+    assert spoken["text"] == "Good day."
+    assert rc == 0
+
+
+def test_speak_command_while_booting_reports_not_ready(monkeypatch):
+    """Before the model lands there is no agent to route speech through —
+    the command reports instead of wedging or crashing."""
+    stdin = ('{"op":"command","cmd":"speak","args":{"text":"hi"},"id":"r1"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin, boot_delay=0.5)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert "booting" in result["error"]
+    assert rc == 0
+
+
+def test_config_query_carries_speech_engine(monkeypatch):
+    """The Swift shell routes its speaker button on ``speech_engine`` read
+    over the existing config query — pin the field's presence + default."""
+    import io as _io
+    import pathlib
+    import tempfile
+
+    from jaeger_os.core.instance.schemas import (
+        Config, Identity, ModelConfig, dump_yaml)
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    dump_yaml(tmp / "config.yaml", Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null")))
+    dump_yaml(tmp / "identity.yaml", Identity(
+        name="T", role="r", personality="p", voice_tone="v"))
+
+    class _Lay:
+        config_path = tmp / "config.yaml"
+        identity_path = tmp / "identity.yaml"
+        root = tmp
+
+    data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
+    assert data["speech_engine"] == "kokoro"
+
+
 def test_fixture_frames_match_builders():
     """The cross-language fixtures ARE what the builders produce — if a
     builder changes shape, this fails here and the Swift decoder test
