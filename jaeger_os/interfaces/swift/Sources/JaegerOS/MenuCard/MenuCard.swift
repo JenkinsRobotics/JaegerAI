@@ -14,21 +14,33 @@ import SwiftUI
 struct MenuCard: View {
     @ObservedObject var agent: AgentBridge
     @ObservedObject var tts: TTSManager
-    @ObservedObject private var pill = PillBridge.shared
 
     /// Display name = the active character, else instance, else a default.
     private var displayName: String {
         agent.status?.character ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }
 
-    /// state → words, matching the PySide6 card's vocabulary.
-    private var statusText: String {
-        if !agent.isConnected { return "Offline" }
-        return pill.isAgentBusy ? "In deep thought…" : "Standing by"
-    }
-    private var statusColor: Color {
-        if !agent.isConnected { return .gray }
-        return pill.isAgentBusy ? .orange : .green
+    /// One derived status for the header row — words + dot colour matching
+    /// the PySide6 card's vocabulary (``tray/menu.py`` ``_STATE_DISPLAY``),
+    /// extended with the transport truth the Qt card never had: connecting,
+    /// warming up (fast-ready handshake before the model loads), and the
+    /// failed/terminated reasons off the connection state machine.
+    private var status: (text: String, color: Color, detail: String?) {
+        switch agent.state {
+        case .disconnected:
+            return ("Offline", .gray, nil)
+        case .connecting:
+            return ("Connecting…", .orange, nil)
+        case .failed(let m), .terminated(let m):
+            return ("Something went wrong", .red, m)
+        case .ready:
+            if case .failed(let reason) = agent.agentState {
+                return ("Something went wrong", .red, reason)
+            }
+            if agent.isAgentBooting { return ("Warming up…", .orange, nil) }
+            if agent.isBusy { return ("In deep thought…", .orange, nil) }
+            return ("Standing by", .green, nil)
+        }
     }
 
     var body: some View {
@@ -50,9 +62,10 @@ struct MenuCard: View {
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Circle().fill(statusColor).frame(width: 8, height: 8)
-                    Text(statusText).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Circle().fill(status.color).frame(width: 8, height: 8)
+                    Text(status.text).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
+                .help(status.detail ?? status.text)
             }
             Spacer()
             SettingsLink {
