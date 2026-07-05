@@ -419,12 +419,27 @@ def main(argv: list[str] | None = None) -> int:
 
     # FAST READY: the transport is usable now; the agent streams in behind.
     _emit(proto, protocol.ready_frame(instance, None, agent="booting"))
-    _emit(proto, protocol.agent_state_frame("booting"))
 
-    booter = threading.Thread(
-        target=_boot_agent, args=(proto, ctx, instance),
-        name="bridge-boot", daemon=True)
-    booter.start()
+    # FIRST-RUN GUARD: with no instance on disk, ``boot_for_tui`` would
+    # auto-fire the INTERACTIVE CLI wizard, whose ``input()`` reads
+    # protocol JSON (or EOF) off OUR stdin and crashes the boot — the
+    # 0.6 first-run break ("EOF when reading a line" → fatal boot).
+    # Report ``no_instance`` instead and KEEP the transport alive:
+    # queries/commands still work pre-instance, which is exactly what
+    # the native app's onboarding flow runs on.
+    if ctx.layout is None or not ctx.layout.exists():
+        msg = (f"no instance named {instance!r} exists yet — "
+               "first-run setup required")
+        ctx.boot_error = msg
+        _emit(proto, protocol.agent_state_frame("failed", error=msg))
+        _emit(proto, protocol.fatal_frame(msg, kind="no_instance"))
+        ctx.booted.set()
+    else:
+        _emit(proto, protocol.agent_state_frame("booting"))
+        booter = threading.Thread(
+            target=_boot_agent, args=(proto, ctx, instance),
+            name="bridge-boot", daemon=True)
+        booter.start()
 
     turns: "_queue.Queue[dict[str, Any] | None]" = _queue.Queue()
     worker = threading.Thread(
