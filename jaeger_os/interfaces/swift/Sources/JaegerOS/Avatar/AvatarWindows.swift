@@ -103,18 +103,41 @@ private struct AvatarChatView: View {
                 .frame(minWidth: 620)
         }
         .background(canvas)
+        .task { await loadVoiceConfig() }
+    }
+
+    /// Seed the toggles from the instance config (``voice.enabled`` +
+    /// ``voice.speak_replies``) — the same defaults the PySide6 window
+    /// reads. Speaker state also syncs the runtime auto-speak switch.
+    private func loadVoiceConfig() async {
+        let result = await agent.query("config")
+        guard result.ok, let data = result.json,
+              let cfg = try? JSONDecoder().decode(AppConfig.self, from: data)
+        else { return }
+        micOn = cfg.voice_enabled
+        tts.autoSpeakEnabled = cfg.speak_replies
     }
 
     private var controls: some View {
         HStack(spacing: 14) {
             Spacer()
             toggle(on: micOn, onSymbol: "mic.fill", offSymbol: "mic.slash",
-                   help: micOn ? "Mic on — voice input" : "Mic off") {
-                micOn.toggle()   // voice-input loop lands with the STT wiring
+                   help: micOn ? "Mic ON — voice input (applies on restart)"
+                               : "Mic OFF — click to enable voice input") {
+                micOn.toggle()
+                // No runtime mic-enable path yet → persist voice.enabled
+                // (takes effect on restart), same honest behaviour as the
+                // PySide6 window. The live voice loop lands with STT wiring.
+                let on = micOn
+                Task { await agent.command("save_config", args: ["voice_enabled": on]) }
             }
             toggle(on: tts.autoSpeakEnabled, onSymbol: "speaker.wave.2.fill",
-                   offSymbol: "speaker.slash", help: tts.autoSpeakEnabled ? "Speaker on" : "Speaker off") {
-                tts.autoSpeakEnabled.toggle()
+                   offSymbol: "speaker.slash",
+                   help: tts.autoSpeakEnabled ? "Speaker ON — reads replies aloud"
+                                              : "Speaker OFF") {
+                tts.autoSpeakEnabled.toggle()   // live, this session
+                let on = tts.autoSpeakEnabled   // …and persisted
+                Task { await agent.command("save_config", args: ["speak_replies": on]) }
             }
             Spacer()
         }
