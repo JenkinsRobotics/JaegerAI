@@ -57,6 +57,31 @@ def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
     assert "butler" not in sp.lower()
 
 
+def test_bench_neutral_identity_ignores_active_character(tmp_path, monkeypatch) -> None:
+    """Under JAEGER_BENCH_NEUTRAL_IDENTITY=1 (set by the bench runner) the
+    active character's name stays OUT of the prompt — the bench measures the
+    engine, not the costume. A character name tints free-text answers
+    (free_text_story regression, 2026-07-05: "story about a robot" → a story
+    about HAL 9000). Live turns (flag unset) keep the character's name."""
+    import jaeger_os.personality.character as character
+
+    class _Hal:
+        name = "HAL 9000"
+
+    monkeypatch.setattr(character, "active_character", lambda root: _Hal())
+    (tmp_path / "identity.yaml").write_text(
+        "name: Neutral\nrole: assistant\npersonality: plain\n",
+        encoding="utf-8",
+    )
+    sp = build_system_prompt(InstanceLayout(root=tmp_path))
+    assert "Your name is HAL 9000." in sp            # live: character wins
+
+    monkeypatch.setenv("JAEGER_BENCH_NEUTRAL_IDENTITY", "1")
+    sp = build_system_prompt(InstanceLayout(root=tmp_path))
+    assert "Your name is HAL 9000." not in sp        # bench: character ignored
+    assert "Your name is Neutral." in sp             # identity.yaml fallback
+
+
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:
     """soul.md is optional — absent, the prompt is still well-formed."""
     sp = build_system_prompt(InstanceLayout(root=tmp_path))

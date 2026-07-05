@@ -130,15 +130,26 @@ def _identity_name(ctx: FragmentContext) -> str:
     """The agent's NAME — the active character's, falling back to
     identity.yaml. Name ONLY: soul/traits/voice stay out of the worker
     prompt (station 3, dev/docs/agentic_runners.md — the measured ~7-point
-    execution tax); the persona output filter supplies the voice."""
+    execution tax); the persona output filter supplies the voice.
+
+    Under ``JAEGER_BENCH_NEUTRAL_IDENTITY=1`` (set by the bench runner for
+    the duration of a run) the active character is IGNORED and the plain
+    identity.yaml name is used: the bench measures the engine, not the
+    costume. A character name here tints free-text answers (measured:
+    free_text_story wrote its story about HAL 9000, deterministic 2/2 A/B
+    on E4B, 2026-07-05) and answer_contains checks false-negative on the
+    styled output. Live turns always keep the character's name."""
+    import os
+
     name = ""
-    try:
-        from jaeger_os.personality.character import active_character
-        ch = active_character(ctx.layout.root)
-        if ch is not None:
-            name = (ch.name or "").strip()
-    except Exception:  # noqa: BLE001 — a broken sheet never breaks the prompt
-        name = ""
+    if os.environ.get("JAEGER_BENCH_NEUTRAL_IDENTITY") != "1":
+        try:
+            from jaeger_os.personality.character import active_character
+            ch = active_character(ctx.layout.root)
+            if ch is not None:
+                name = (ch.name or "").strip()
+        except Exception:  # noqa: BLE001 — a broken sheet never breaks the prompt
+            name = ""
     if not name:
         try:
             from jaeger_os.core.instance.schemas import Identity, load_yaml
