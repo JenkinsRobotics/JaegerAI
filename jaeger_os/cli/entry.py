@@ -44,6 +44,8 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_os.interfaces.mcp_server", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_os.cli.run", "--doctor", *rest]
+    if cmd == "update":
+        return [py, "-m", "jaeger_os.cli.devtools", "--update"]
     if cmd in ("--dev", "dev"):
         # Developer toolbox (dev TUI, JaegerOS-dev.app build/run, health,
         # stop/status) — lives IN the package since launch.py was removed.

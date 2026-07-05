@@ -778,6 +778,38 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
 
 # ─── main ─────────────────────────────────────────────────────────────
 
+def cmd_update() -> int:
+    """`jaeger update` — the dev update loop, one command:
+    git pull, reinstall deps if they changed, rebuild the dev app if the
+    Swift tree changed, then a doctor hint. Safe on a dirty tree (ff-only)."""
+    import hashlib
+    req = REPO / "requirements.txt"
+    before = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
+    say("git pull --ff-only…", prefix="update")
+    pull = subprocess.run(["git", "-C", str(REPO), "pull", "--ff-only"],
+                          capture_output=True, text=True)
+    print(pull.stdout.strip() or pull.stderr.strip())
+    if pull.returncode != 0:
+        fail("pull failed (no upstream, diverged, or offline) — resolve and rerun")
+        return 1
+    changed = subprocess.run(
+        ["git", "-C", str(REPO), "diff", "--name-only", "HEAD@{1}", "HEAD"],
+        capture_output=True, text=True).stdout.splitlines() \
+        if "Already up to date" not in pull.stdout else []
+    after = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
+    if before != after or any(f in ("pyproject.toml",) for f in changed):
+        say("dependencies changed — reinstalling…", prefix="update")
+        subprocess.run([str(VENV_PY), "-m", "pip", "install", "-q",
+                        "-r", str(req), "-e", str(REPO)], cwd=str(REPO))
+        ok("deps reinstalled")
+    if any(f.startswith("jaeger_os/interfaces/swift/") for f in changed):
+        say("Swift app changed — rebuilding JaegerOS-dev.app…", prefix="update")
+        subprocess.run([str(REPO / "jaeger_os/interfaces/swift/Scripts/build-app.sh"),
+                        "--dev"])
+    ok("up to date — run `jaeger dev --health` to verify")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -794,6 +826,8 @@ def main() -> int:
     parser.add_argument("--tui", action="store_true",
                         help="boot the CLI/TUI in-process agent (Pattern 0). "
                              "A bare ./launch boots the windowed JROS app.")
+    parser.add_argument("--update", action="store_true",
+                        help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",
                         help="rebuild the Swift app before launching it "
                              "(a bare ./launch runs the existing build)")
@@ -848,6 +882,8 @@ def main() -> int:
         return cmd_status(env)
     if args.stop:
         return cmd_stop(env)
+    if args.update:
+        return cmd_update()
     if args.dev_gui:
         return cmd_dev_gui(env)
     if args.node_test:

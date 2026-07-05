@@ -13,7 +13,16 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
+# One-line install: `curl -fsSL <raw-url>/install.sh | bash` runs this
+# OUTSIDE a checkout — detect that (no pyproject beside us), clone, and
+# re-exec inside the fresh clone.
+if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
+  JROS_HOME="${JROS_HOME:-$HOME/GITHUB/JROS}"
+  echo "no checkout here — cloning JROS to $JROS_HOME"
+  git clone "${JROS_REPO_URL:-https://github.com/Jenkins-Robotics/JROS.git}" "$JROS_HOME"
+  exec bash "$JROS_HOME/install.sh" "$@"
+fi
 VENV="$REPO_ROOT/.venv"
 
 SKIP_DEPS=0
@@ -122,3 +131,17 @@ case "$(uname -s)" in
     echo "Optional — run unattended at boot:"
     echo "  ./jaeger autostart enable" ;;
 esac
+
+# Build the dev app so the first thing a developer sees works.
+if command -v swift >/dev/null 2>&1; then
+  echo; echo "building JaegerOS-dev.app…"
+  "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
+    && echo "✓ JaegerOS-dev.app ready (symlinked at repo root)" \
+    || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
+fi
+echo
+echo "Next steps:"
+echo "  open JaegerOS-dev.app     the windowed dev shell (menu-bar tray)"
+echo "  ./jaeger dev --tui        the terminal agent"
+echo "  ./jaeger update           pull + reinstall deps + rebuild as needed"
+echo "  ./jaeger dev --health     verify the install"
