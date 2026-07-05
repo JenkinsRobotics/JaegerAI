@@ -274,7 +274,14 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     from jaeger_os.interfaces import protocol
     try:
         from jaeger_os.main import boot_for_tui
-        boot = boot_for_tui(instance_name=instance)
+        # prewarm_model=False: the generic two-pass prewarm primes a
+        # DIFFERENT prefix (bare boot prompt + unfiltered registry
+        # schemas) than the one the app's first turn actually sends, so
+        # the first message re-prefilled everything anyway (~40 s
+        # measured on gemma-4-E4B). prewarm_session below primes the
+        # EXACT first-turn prefix instead — same warm-boot cost, zero
+        # first-message delay.
+        boot = boot_for_tui(instance_name=instance, prewarm_model=False)
     except Exception as exc:  # noqa: BLE001 — reported, never raised
         msg = str(exc)
         kind = "locked" if "lock" in msg.lower() else "boot"
@@ -310,6 +317,17 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         if not isinstance(policy.confirmation, AllowAllProvider):
             policy.confirmation = _BridgeConfirm(proto, ctx)
     except Exception:  # noqa: BLE001
+        pass
+
+    # Prefix-exact KV prewarm for the app's chat session, BEFORE the
+    # ready frame — the splash holds on agent_state "ready", so by the
+    # time the operator can type, the first turn's whole prompt prefix
+    # (session system prompt + tool schemas + resume digest) is already
+    # prefilled and message #1 starts decoding immediately.
+    try:
+        from jaeger_os.main import prewarm_session
+        prewarm_session(boot.client, session_key="desktop-app")
+    except Exception:  # noqa: BLE001 — an optimization, never a boot failure
         pass
 
     name, icon = _active_character(boot)

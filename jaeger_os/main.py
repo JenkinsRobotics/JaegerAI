@@ -1919,17 +1919,13 @@ def _apply_persona_filter(answer: str) -> str:
         return answer
 
 
-def _run_turn_via_jaeger_agent(
-    client: Any,
-    user_text: str,
-    *,
-    session_key: str,
-) -> dict[str, Any]:
-    """Phase-6 parallel implementation of :func:`_run_turn` that drives
-    the loop through :class:`JaegerAgent`. Returns the exact same dict
-    shape so ``run_command`` / ``run_for_voice`` don't need to know
-    which loop ran."""
-    from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
+def _ensure_session_agent(client: Any, session_key: str) -> Any:
+    """Build (or fetch) the per-session :class:`JaegerAgent` — the exact
+    object the next turn on ``session_key`` drives. Factored out of
+    :func:`_run_turn_via_jaeger_agent` so :func:`prewarm_session` can
+    construct the REAL first-turn agent at boot (prefix-exact KV warm)
+    instead of approximating it."""
+    from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent
 
     key = session_key
     # First call per session builds + caches a JaegerAgent. Force the
@@ -2116,7 +2112,85 @@ def _run_turn_via_jaeger_agent(
                 {"role": "assistant",
                  "content": "Noted — picking up from the earlier session."},
             ])
-    jaeger_agent = _jaeger_agents_by_session[key]
+    return _jaeger_agents_by_session[key]
+
+
+def prewarm_session(client: Any, session_key: str = "desktop-app") -> None:
+    """Prime the KV cache with the EXACT prompt prefix ``session_key``'s
+    first turn will send — so message #1 pays zero cold prefill.
+
+    :func:`prewarm` approximates the turn (bare boot-time system prompt +
+    unfiltered registry tool schemas, via ``create_chat_completion``).
+    Close — but the REAL first turn goes through the per-session agent:
+    the session system prompt (facts snapshot appended at construction,
+    then the character-signature refresh), the availability/toolset-
+    filtered tool list, the adapter's own dialect rendering, and the
+    session-resume digest seeded into ``messages``. llama.cpp reuses the
+    KV cache only up to the first BYTE of divergence, and ~10K tokens of
+    tool schemas sit after the system text — so a prefix that diverges in
+    the system block re-prefills the whole tool catalogue on message #1
+    (~30 s on 12B-class hardware). That was the bridge's bug: it prewarmed
+    one prefix and ran a different one.
+
+    So: build the SAME session agent the first turn will use, format the
+    SAME prompt through the SAME adapter, run a 1-token call. The prefix
+    cache then matches the first real turn up to the user message.
+    Fail-open and idempotent; ``agent.messages`` is not mutated, so the
+    session transcript stays clean."""
+    done: set = _pipeline.setdefault("session_prewarmed", set())
+    if session_key in done:
+        return
+    # Only in-process backends have a KV cache to prime. This also guards
+    # the bridge's test path, where a fake boot hands over a bare object().
+    if (getattr(client, "llm", None) is None
+            and getattr(client, "_mlx_model", None) is None):
+        return
+    started = time.perf_counter()
+    try:
+        agent = _ensure_session_agent(client, session_key)
+        # Seed the character signature + rebuild exactly as turn 1 will —
+        # after this, turn 1's _refresh_character_prompt is a no-op and
+        # the prompt below is byte-identical to the one it sends.
+        _refresh_character_prompt(agent)
+        adapter = agent.primary_adapter
+        messages = [*agent.messages, {"role": "user", "content": "ready"}]
+        formatted = adapter.format_messages(
+            messages, agent.tools, agent.system_prompt)
+        lock = _pipeline.get("llm_lock")
+        if lock is not None:
+            with lock:
+                adapter.call(formatted, threading.Event(),
+                             stale_timeout=None, max_tokens=1, temperature=0.0)
+        else:
+            adapter.call(formatted, threading.Event(),
+                         stale_timeout=None, max_tokens=1, temperature=0.0)
+    except Exception as exc:  # noqa: BLE001 — prewarm is an optimization, never a boot failure
+        print(f"[jaeger] session prewarm skipped: {exc}", flush=True)
+        return
+    done.add(session_key)
+    # The generic two-pass prewarm is redundant behind this (its prefix is
+    # a strict approximation of ours) — stop late callers (voice_loop /
+    # messaging_gateway plugin starts) from re-running it.
+    _pipeline["prewarmed"] = True
+    print(f"[jaeger] session '{session_key}' prewarmed in "
+          f"{time.perf_counter() - started:.1f}s — first turn is prefix-hot",
+          flush=True)
+
+
+def _run_turn_via_jaeger_agent(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+) -> dict[str, Any]:
+    """Phase-6 parallel implementation of :func:`_run_turn` that drives
+    the loop through :class:`JaegerAgent`. Returns the exact same dict
+    shape so ``run_command`` / ``run_for_voice`` don't need to know
+    which loop ran."""
+    from jaeger_os.agent.loop.runtime_bridge import drive_one_turn
+
+    key = session_key
+    jaeger_agent = _ensure_session_agent(client, key)
 
     lock = _pipeline["llm_lock"]
     started = time.perf_counter()

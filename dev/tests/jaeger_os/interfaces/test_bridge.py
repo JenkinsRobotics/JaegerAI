@@ -35,7 +35,10 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
     """Drive ``bridge.main`` with faked deps; return parsed stdout frames."""
     boot = _FakeBoot()
 
-    def fake_boot(*, instance_name):
+    def fake_boot(*, instance_name, **kwargs):
+        # ``**kwargs`` absorbs prewarm_model=False (the bridge skips the
+        # generic prewarm and runs the prefix-exact prewarm_session — which
+        # no-ops here because the fake client has no ``.llm``).
         if boot_delay:
             time.sleep(boot_delay)
         if boot_exc:
