@@ -290,8 +290,10 @@ final class ChatViewModel: ObservableObject {
         defer { isSending = false }
 
         do {
-            // One turn over the bridge → the reply text.
-            let replyText = try await agent.sendChat(text: trimmed)
+            // One turn over the bridge → the reply text. The session key
+            // keeps THIS window's conversation isolated on the Python side.
+            let replyText = try await agent.sendChat(text: trimmed,
+                                                     session: sessionKey)
             messages[placeholderIndex].text = replyText
             messages[placeholderIndex].isStreaming = false
 

@@ -3,24 +3,64 @@
 //  JaegerOS / Bridge
 //
 //  High-level agent client used everywhere except the transport itself
-//  (the Chat window, the menu-bar status, the future Voice loop).  The
-//  "agent" is gone: this now drives the out-of-process ``jaeger bridge``
-//  child (see ``BridgeProcess``) — same typed surface, no socket.
+//  (the Chat window, the menu-bar status, the Voice loop). Drives the
+//  out-of-process ``jaeger bridge`` child (see ``BridgeProcess``).
 //
-//  @Observable-friendly so SwiftUI views watch ``isConnected`` / ``status``
-//  without polling.  Shared singleton because the AppDelegate kicks off
-//  ``tryConnect()`` at launch before SwiftUI's @StateObject wiring exists.
+//  Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md): a real connection
+//  STATE MACHINE (not a bool), a single in-flight connect, child-death
+//  detection wired into published state, the agent lifecycle separated
+//  from transport readiness (settings work while the model boots), and
+//  interactive permission approval.
+//
+//  @Observable-friendly so SwiftUI views watch ``state`` / ``agentState``
+//  / ``status`` without polling. ``isConnected`` remains as a computed
+//  compatibility surface for existing views.
 //
 
+import AppKit
 import Foundation
+
+/// The transport connection, as a real state machine.
+enum ConnectionState: Equatable {
+    case disconnected
+    case connecting
+    case ready                 // transport up — queries/settings work
+    case failed(String)        // connect failed (launch/boot/lock)
+    case terminated(String)    // child died after being up
+
+    var label: String {
+        switch self {
+        case .disconnected: return "stopped"
+        case .connecting: return "connecting…"
+        case .ready: return "running"
+        case .failed(let m): return "failed: \(m)"
+        case .terminated(let m): return m
+        }
+    }
+}
 
 @MainActor
 final class AgentBridge: ObservableObject {
 
     static let shared = AgentBridge()
 
-    /// Reactive flag — drives the menu-bar icon swap + composer enable.
-    @Published private(set) var isConnected: Bool = false
+    /// Transport state — the machine, not a bool.
+    @Published private(set) var state: ConnectionState = .disconnected
+
+    /// Agent lifecycle, decoupled from the transport: the bridge is READY
+    /// (settings usable) while the model is still ``booting``. The chat
+    /// composer gates on ``agentState == .ready``.
+    @Published private(set) var agentState: AgentLifecycle = .booting
+
+    /// Compatibility surface — existing views read this.
+    var isConnected: Bool { state == .ready }
+
+    /// True from connect until the model finishes loading — drives
+    /// "warming up" UI without blocking settings.
+    var isAgentBooting: Bool {
+        if case .booting = agentState { return true }
+        return false
+    }
 
     /// Last-known agent status (instance + model), or nil while down.
     @Published private(set) var status: AgentStatus? = nil
@@ -28,12 +68,17 @@ final class AgentBridge: ObservableObject {
     /// Last connect-failure reason, surfaced in the menu. Cleared on success.
     @Published private(set) var lastError: String? = nil
 
-    /// Listeners for inline activity chips (thinking / tool). Driven off
-    /// the bridge's ``state`` frames; tool events land when the bridge
-    /// learns to emit them.
+    /// A pending permission request (published so a HUD can render it
+    /// in-window later; the default presenter is an NSAlert).
+    @Published private(set) var pendingRequest: BridgeRequest? = nil
+
+    /// Listeners for inline activity chips (thinking / tool).
     private var listeners: [UUID: @MainActor (Event) -> Void] = [:]
 
     private var bridge: BridgeProcess?
+    /// Single in-flight connect — a second caller awaits the same task
+    /// instead of spawning a second child (the review's finding #3).
+    private var connectTask: Task<Void, Error>?
 
     /// Default instance — honours ``JAEGER_INSTANCE_NAME`` (the bridge
     /// also resolves its own default, so this is just for display/parity).
@@ -44,9 +89,26 @@ final class AgentBridge: ObservableObject {
     /// Diagnostic string for the About panel — the launcher we spawn.
     var socketPath: String? { BridgeProcess.jaegerPath() }
 
-    /// Launch the bridge child and await its ready handshake.
+    // MARK: - Connect / disconnect
+
+    /// Launch the bridge child and await its (fast) ready handshake.
+    /// Settings/queries are usable on return; the model may still be
+    /// booting — watch ``agentState``.
     func connect(instance: String = defaultInstanceName) async throws {
-        guard bridge == nil else { return }
+        if state == .ready { return }
+        if let inFlight = connectTask {          // join, don't double-spawn
+            try await inFlight.value
+            return
+        }
+        let task = Task { try await self.doConnect(instance: instance) }
+        connectTask = task
+        defer { connectTask = nil }
+        try await task.value
+    }
+
+    private func doConnect(instance: String) async throws {
+        state = .connecting
+        agentState = .booting
         let proc = BridgeProcess()
         await proc.setOnState { [weak self] busy in
             Task { @MainActor in self?.fanout(state: busy) }
@@ -54,29 +116,40 @@ final class AgentBridge: ObservableObject {
         await proc.setOnTool { [weak self] name, phase, elapsed in
             Task { @MainActor in self?.fanout(tool: name, phase: phase, elapsed: elapsed) }
         }
-        let ready = try await proc.start()
-        bridge = proc
-        isConnected = true
-        lastError = nil
-        status = AgentStatus(rawDict: [
-            "instance": ready.instance,
-            "model": ready.model as Any,
-            "character": ready.character as Any,
-            "icon": ready.icon as Any,
-        ])
-    }
-
-    /// Read-only data for the settings HUD (characters, config, permissions).
-    func query(_ what: String, args: [String: any Sendable] = [:]) async -> QueryResult {
-        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
-        return await bridge.query(what, args: args)
-    }
-
-    /// A mutation (select/make-default/save…). Check ``ok``/``error``.
-    @discardableResult
-    func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
-        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
-        return await bridge.command(cmd, args: args)
+        await proc.setOnAgentState { [weak self] lifecycle in
+            Task { @MainActor in self?.handleAgentState(lifecycle) }
+        }
+        await proc.setOnRequest { [weak self] request in
+            Task { @MainActor in self?.handleRequest(request) }
+        }
+        await proc.setOnTermination { [weak self] clean in
+            Task { @MainActor in self?.handleTermination(clean: clean) }
+        }
+        do {
+            let ready = try await proc.start()
+            if ready.proto != ProtocolV1.version {
+                await proc.stop()
+                throw BridgeError.bootFailed(
+                    "protocol mismatch: core speaks v\(ready.proto), "
+                    + "shell speaks v\(ProtocolV1.version) — update JROS")
+            }
+            bridge = proc
+            state = .ready
+            lastError = nil
+            if ready.agent == "ready" {          // already-warm core (attach)
+                agentState = .ready(model: ready.model,
+                                    character: ready.character, icon: ready.icon)
+            }
+            status = AgentStatus(rawDict: [
+                "instance": ready.instance,
+                "model": ready.model as Any,
+                "character": ready.character as Any,
+                "icon": ready.icon as Any,
+            ])
+        } catch {
+            state = .failed(error.localizedDescription)
+            throw error
+        }
     }
 
     /// Connect without throwing — failures land on ``lastError``. The
@@ -95,16 +168,88 @@ final class AgentBridge: ObservableObject {
     func disconnect() async {
         if let bridge { await bridge.stop() }
         bridge = nil
-        isConnected = false
+        state = .disconnected
+        agentState = .booting
         status = nil
     }
 
-    /// Run one chat turn through the bridge; returns the reply text.
-    func sendChat(text: String) async throws -> String {
+    // MARK: - Queries / commands / chat
+
+    /// Read-only data for the settings HUD (characters, config, permissions).
+    func query(_ what: String, args: [String: any Sendable] = [:]) async -> QueryResult {
+        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
+        return await bridge.query(what, args: args)
+    }
+
+    /// A mutation (select/make-default/save…). Check ``ok``/``error``.
+    @discardableResult
+    func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
+        guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
+        return await bridge.command(cmd, args: args)
+    }
+
+    /// Run one chat turn; returns the reply text. ``session`` isolates
+    /// this conversation on the Python side (sessions.db) so multiple
+    /// windows / saved chats never collapse into one history.
+    func sendChat(text: String, session: String = "desktop-app") async throws -> String {
         guard let bridge else { throw BridgeError.notRunning }
-        let (reply, error) = await bridge.runTurn(text)
+        let (reply, error) = await bridge.runTurn(text, session: session)
         if let error, !error.isEmpty { throw BridgeError.bootFailed(error) }
         return reply
+    }
+
+    // MARK: - Agent lifecycle + death detection
+
+    private func handleAgentState(_ lifecycle: AgentLifecycle) {
+        agentState = lifecycle
+        if case .ready(let model, let character, let icon) = lifecycle {
+            // Enrich the status the fast handshake couldn't fill yet.
+            var raw = status?.rawDict ?? [:]
+            raw["model"] = model as Any
+            raw["character"] = character as Any
+            raw["icon"] = icon as Any
+            status = AgentStatus(rawDict: raw)
+        }
+        if case .failed(let reason) = lifecycle {
+            lastError = reason
+        }
+    }
+
+    private func handleTermination(clean: Bool) {
+        bridge = nil
+        status = nil
+        if clean {
+            state = .disconnected
+        } else {
+            state = .terminated("agent process died")
+            lastError = "agent process died unexpectedly"
+        }
+    }
+
+    // MARK: - Permission requests
+
+    /// Default presenter: a native alert. ``pendingRequest`` is also
+    /// published so the settings HUD can render richer approval UI later
+    /// without touching the transport.
+    private func handleRequest(_ request: BridgeRequest) {
+        pendingRequest = request
+        guard request.kind == "approval" else { return }
+        let alert = NSAlert()
+        alert.messageText = "Jaeger asks permission"
+        alert.informativeText = request.prompt
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Deny")
+        let allowed = alert.runModal() == .alertFirstButtonReturn
+        respond(to: request, answer: allowed ? "allow" : "deny")
+    }
+
+    /// Answer a pending request (used by the alert above and available to
+    /// any richer approval UI).
+    func respond(to request: BridgeRequest, answer: String) {
+        pendingRequest = nil
+        guard let bridge else { return }
+        Task { await bridge.respond(id: request.id, answer: answer) }
     }
 
     // MARK: - Activity events
@@ -156,8 +301,4 @@ struct AgentStatus {
     var iconPath: String? { rawDict["icon"] as? String }
     var uptimeSeconds: Double? { rawDict["uptime"] as? Double }
     var turnCount: Int? { rawDict["turns"] as? Int }
-
-    /// The bridge only reports ``ready`` after the model loads, so by the
-    /// time we have a status the agent is past booting.
-    var isBooting: Bool { false }
 }
