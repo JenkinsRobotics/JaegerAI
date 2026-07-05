@@ -149,6 +149,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return {"name": ident.name, "role": ident.role,
                 "default_mode": cfg.interaction.default_mode, "ui": cfg.interaction.ui,
                 "voice_enabled": cfg.voice.enabled, "speak_replies": cfg.voice.speak_replies,
+                "speech_engine": cfg.voice.speech_engine,
                 "show_latency": cfg.display.show_latency,
                 "show_tool_activity": cfg.display.show_tool_activity,
                 "idle_minutes": cfg.deep_think.auto_idle_minutes,
@@ -193,6 +194,34 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
         if cmd == "revoke_permission":
             from jaeger_os.core.safety.permissions import PermissionGrants
             PermissionGrants.load(root).revoke(args["skill"]); return True, None
+        if cmd == "speak":
+            # The agent's REAL voice for the native app's speaker button:
+            # synthesize via the Python-side Kokoro node with the ACTIVE
+            # character's configured voice (agent.tools.speak resolves it).
+            # Fire-and-forget on a worker thread — narration can outlive the
+            # client's 15 s request timeout, and the stdin loop must stay
+            # free for respond/quit — so ok here means "accepted", and any
+            # synth failure lands in the bridge's stderr log.
+            text = str(args.get("text") or "").strip()
+            if not text:
+                return False, "nothing to speak"
+            if getattr(boot, "client", None) is None:
+                return False, "agent still booting"
+
+            def _speak_bg() -> None:
+                try:
+                    from jaeger_os.agent.tools.speak import speak
+                    out = speak(text=text)
+                    if not out.get("spoken"):
+                        print(f"[bridge] speak failed: {out.get('reason')}",
+                              file=sys.stderr, flush=True)
+                except Exception as exc:  # noqa: BLE001 — never crash the bridge
+                    print(f"[bridge] speak crashed: {exc}",
+                          file=sys.stderr, flush=True)
+
+            threading.Thread(target=_speak_bg, name="bridge-speak",
+                             daemon=True).start()
+            return True, None
         return False, f"unknown command: {cmd}"
     except Exception as exc:  # noqa: BLE001 — a bad command reports, never crashes the bridge
         return False, str(exc)
@@ -202,6 +231,7 @@ def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
     fields = {
         "default_mode": ("interaction", "default_mode"), "ui": ("interaction", "ui"),
         "voice_enabled": ("voice", "enabled"), "speak_replies": ("voice", "speak_replies"),
+        "speech_engine": ("voice", "speech_engine"),
         "show_latency": ("display", "show_latency"),
         "show_tool_activity": ("display", "show_tool_activity"),
         "idle_minutes": ("deep_think", "auto_idle_minutes"),

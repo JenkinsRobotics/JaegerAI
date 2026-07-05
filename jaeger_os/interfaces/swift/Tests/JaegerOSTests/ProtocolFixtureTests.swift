@@ -140,6 +140,30 @@ final class ProtocolFixtureTests: XCTestCase {
         guard case .bye = try decode("bye") else { return XCTFail("bye") }
     }
 
+    func testSpeakCommandOpFixtureMatchesWhatTheShellSends() throws {
+        // The speaker button routes through BridgeProcess.command("speak",
+        // args: ["text": …]) — assert the cross-language fixture pins the
+        // exact shape that call serializes, so a Python-side rename breaks
+        // here too.
+        let here = URL(fileURLWithPath: #filePath)
+        let url = here
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("protocol_v1_fixtures.json")
+        let root = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)) as? [String: Any]
+        let ops = root?["ops"] as? [String: Any]
+        guard let speak = ops?["command_speak"] as? [String: Any] else {
+            return XCTFail("command_speak op fixture missing")
+        }
+        XCTAssertEqual(speak["op"] as? String, "command")
+        XCTAssertEqual(speak["cmd"] as? String, "speak")
+        let args = speak["args"] as? [String: Any]
+        XCTAssertEqual(args?["text"] as? String, "Good day.")
+    }
+
     func testUnknownFrameTypeIsSkippedNotFatal() {
         let unknown = #"{"type":"telemetry_v9","payload":{}}"#.data(using: .utf8)!
         XCTAssertNil(ProtocolFrame.decode(unknown))
