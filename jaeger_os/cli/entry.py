@@ -29,13 +29,7 @@ _CONSOLE = (
 )
 
 
-def _launch_py() -> Path:
-    """Repo-root launch.py (editable / clone installs): entry.py lives at
-    jaeger_os/cli/entry.py, so three parents up is the repo root."""
-    return Path(__file__).resolve().parent.parent.parent / "launch.py"
-
-
-def _route(argv: list[str], py: str, launch_py: str) -> list[str]:
+def _route(argv: list[str], py: str) -> list[str]:
     """Map the operator's argv to the ``python -m …`` (or launch.py) argv to
     exec. Mirrors the ./jaeger wrapper's case statement exactly."""
     cmd = argv[0] if argv else ""
@@ -50,8 +44,10 @@ def _route(argv: list[str], py: str, launch_py: str) -> list[str]:
         return [py, "-m", "jaeger_os.interfaces.mcp_server", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_os.cli.run", "--doctor", *rest]
-    if cmd == "--dev":
-        return [py, launch_py, *(rest or ["--tui"])]
+    if cmd in ("--dev", "dev"):
+        # Developer toolbox (dev TUI, JaegerOS-dev.app build/run, health,
+        # stop/status) — lives IN the package since launch.py was removed.
+        return [py, "-m", "jaeger_os.cli.devtools", *rest]
     if cmd in ("--version", "version"):
         return [py, "-m", "jaeger_os.cli", "--version"]
     if cmd in ("help", "--help", "-h"):
@@ -62,7 +58,7 @@ def _route(argv: list[str], py: str, launch_py: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    cmd = _route(argv, sys.executable, str(_launch_py()))
+    cmd = _route(argv, sys.executable)
     os.execv(cmd[0], cmd)        # replaces this process — never returns
     return 0                     # unreachable; keeps type-checkers happy
 
