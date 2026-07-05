@@ -161,6 +161,16 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         cfg = load_yaml(lay.config_path, Config)
         return {"mode": cfg.permissions.mode,
                 "granted": sorted(PermissionGrants.load(root).persistent)}
+    if what == "instance_exists":
+        # v1 additive: first-run probe — does the resolved instance
+        # exist on disk? Works pre-boot (fast-ready) and pre-instance.
+        return {"exists": bool(lay is not None and lay.exists()),
+                "root": str(lay.root) if lay is not None else None}
+    if what == "setup_defaults":
+        # v1 additive: host tier + recommended models + voices for the
+        # native onboarding — the same data the CLI wizard prints.
+        from jaeger_os.core.instance.setup_wizard import setup_defaults
+        return setup_defaults()
     return None
 
 
@@ -453,6 +463,43 @@ def main(argv: list[str] | None = None) -> int:
         def __init__(self, layout: Any) -> None:
             self.layout = layout
 
+    def _start_boot(inst: str) -> None:
+        """(Re)start the background boot — used after ``create_instance``
+        turns a no-instance transport into a real agent."""
+        ctx.boot_error = None
+        ctx.booted.clear()
+        _emit(proto, protocol.agent_state_frame("booting"))
+        threading.Thread(target=_boot_agent, args=(proto, ctx, inst),
+                         name="bridge-boot", daemon=True).start()
+
+    def _create_instance(args: dict[str, Any]) -> tuple[bool, Any, str | None]:
+        """The ``create_instance`` command — first-run onboarding's write.
+        Maps the client's answers onto the SAME non-interactive core the
+        CLI wizard drives (setup_wizard.create_instance), then boots the
+        fresh instance so ``agent_state`` streams booting → ready as the
+        client's live "creating your Jaeger" progress."""
+        from jaeger_os.core.instance.setup_wizard import create_instance
+        cid = str(args.get("character_id") or "").strip()
+        if not cid:
+            return False, None, "character_id is required"
+        try:
+            lay = create_instance(
+                character_id=cid,
+                name=(args.get("name") or None),
+                display_name=(args.get("display_name") or None),
+                role=(args.get("role") or None),
+                personality=(args.get("personality") or None),
+                voice_id=(args.get("voice_id") or None),
+                awake_model=(args.get("awake_model") or None),
+                asleep_model=(args.get("asleep_model") or None),
+                permission_mode=str(args.get("permission_mode") or "confirm"),
+                interaction_mode=str(args.get("interaction_mode") or "gui"),
+            )
+        except Exception as exc:  # noqa: BLE001 — reported, never crashes the bridge
+            return False, None, str(exc)
+        ctx.layout = lay
+        return True, {"instance": lay.root.name, "root": str(lay.root)}, None
+
     rc = 0
     try:
         for raw in sys.stdin:
@@ -477,6 +524,17 @@ def main(argv: list[str] | None = None) -> int:
                     evt.set()
                 else:
                     ctx.early[rid] = str(req.get("answer") or "")
+                continue
+            if op == "command" and (req.get("cmd") or "") == "create_instance":
+                # Handled here (not in _command): it needs ctx + proto to
+                # restart the boot thread against the new instance. The
+                # result goes out FIRST so the client sees ok before the
+                # agent_state booting → ready progress starts streaming.
+                ok, data, err = _create_instance(req.get("args") or {})
+                _emit(proto, protocol.result_frame(
+                    req.get("id"), data=data, ok=ok, error=err))
+                if ok:
+                    _start_boot(data["instance"])
                 continue
             if op in ("query", "command"):
                 target = ctx.boot if ctx.boot is not None else _LayoutOnly(ctx.layout)

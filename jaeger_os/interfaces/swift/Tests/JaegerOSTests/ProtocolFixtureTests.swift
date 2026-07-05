@@ -172,6 +172,44 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(args?["text"] as? String, "Good day.")
     }
 
+    func testOnboardingOpFixturesMatchWhatTheShellSends() throws {
+        // First-run onboarding rides three additive v1 values:
+        // query "instance_exists", query "setup_defaults", and command
+        // "create_instance". Pin the shapes the shell serializes via
+        // BridgeProcess.query/command so a Python-side rename breaks here.
+        let here = URL(fileURLWithPath: #filePath)
+        let url = here
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("protocol_v1_fixtures.json")
+        let root = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)) as? [String: Any]
+        let ops = root?["ops"] as? [String: Any]
+
+        guard let exists = ops?["query_instance_exists"] as? [String: Any] else {
+            return XCTFail("query_instance_exists op fixture missing")
+        }
+        XCTAssertEqual(exists["op"] as? String, "query")
+        XCTAssertEqual(exists["what"] as? String, "instance_exists")
+
+        guard let defaults = ops?["query_setup_defaults"] as? [String: Any] else {
+            return XCTFail("query_setup_defaults op fixture missing")
+        }
+        XCTAssertEqual(defaults["op"] as? String, "query")
+        XCTAssertEqual(defaults["what"] as? String, "setup_defaults")
+
+        guard let create = ops?["command_create_instance"] as? [String: Any] else {
+            return XCTFail("command_create_instance op fixture missing")
+        }
+        XCTAssertEqual(create["op"] as? String, "command")
+        XCTAssertEqual(create["cmd"] as? String, "create_instance")
+        let args = create["args"] as? [String: Any]
+        XCTAssertEqual(args?["character_id"] as? String, "jarvis")
+        XCTAssertEqual(args?["permission_mode"] as? String, "confirm")
+    }
+
     func testUnknownFrameTypeIsSkippedNotFatal() {
         let unknown = #"{"type":"telemetry_v9","payload":{}}"#.data(using: .utf8)!
         XCTAssertNil(ProtocolFrame.decode(unknown))

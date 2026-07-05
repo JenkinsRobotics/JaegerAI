@@ -46,8 +46,27 @@ def _instance_on_disk(tmp_path, monkeypatch):
     return root
 
 
+class _SlowStdin:
+    """An iterable stdin that holds the FIRST line back briefly — lets a
+    test deterministically lose the stdin-vs-boot-thread race (the boot
+    wins) instead of depending on scheduler luck."""
+
+    def __init__(self, text: str, first_line_delay: float) -> None:
+        self._lines = iter(io.StringIO(text))
+        self._delay = first_line_delay
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._delay:
+            time.sleep(self._delay)
+            self._delay = 0.0
+        return next(self._lines)
+
+
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
-         boot_delay=0.0, run_fn=None):
+         boot_delay=0.0, run_fn=None, stdin_delay=0.0):
     """Drive ``bridge.main`` with faked deps; return parsed stdout frames."""
     boot = _FakeBoot()
 
@@ -59,6 +78,11 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
             time.sleep(boot_delay)
         if boot_exc:
             raise boot_exc
+        # The real TUIBootResult carries the layout — post-boot queries
+        # (instance_exists, config, …) read it off the boot object.
+        from jaeger_os.core.instance.instance import (
+            InstanceLayout, resolve_instance_dir)
+        boot.layout = InstanceLayout(resolve_instance_dir(instance_name))
         return boot
 
     def fake_run(client, text, session_key=None):
@@ -74,7 +98,7 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
 
     proto = io.StringIO()
     monkeypatch.setattr("sys.stdout", proto)
-    monkeypatch.setattr("sys.stdin", io.StringIO(stdin_text))
+    monkeypatch.setattr("sys.stdin", _SlowStdin(stdin_text, stdin_delay))
 
     rc = bridge.main(argv=[])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
@@ -163,6 +187,87 @@ def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     assert set(result["data"]) == {"character", "icon", "model"}
+
+
+def test_instance_exists_query_both_states(monkeypatch, tmp_path,
+                                            _instance_on_disk):
+    """``instance_exists`` — the first-run probe. True with the fixture's
+    on-disk instance; false when the resolution points at nothing."""
+    stdin = '{"op":"query","what":"instance_exists","id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["data"] == {"exists": True, "root": str(_instance_on_disk)}
+
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["data"]["exists"] is False
+
+
+def test_setup_defaults_query_serves_recommendations(monkeypatch, tmp_path):
+    """``setup_defaults`` answers pre-instance with the host tier, the
+    recommended awake/asleep pair, voices, and a default character — the
+    data the native onboarding renders."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    stdin = '{"op":"query","what":"setup_defaults","id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    data = result["data"]
+    assert {"host_memory_gb", "tier_label", "awake", "asleep", "voices",
+            "default_character", "permission_modes"} <= set(data)
+    assert data["awake"]["key"]
+    assert data["voices"] and {"id", "label"} == set(data["voices"][0])
+
+
+def test_create_instance_command_writes_instance_and_boots(monkeypatch, tmp_path):
+    """First-run onboarding end-to-end over the pipe: no instance →
+    ``create_instance`` writes a schema-valid instance (same core the CLI
+    wizard drives) → the bridge boots it, streaming agent_state booting →
+    ready as the client's live progress."""
+    inst_dir = tmp_path / "fresh-inst"
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(inst_dir))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "opstate"))
+    # No git shell-out for the instance repo in the unit walk.
+    from jaeger_os.core.instance import setup_wizard as W
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+
+    stdin = ('{"op":"command","cmd":"create_instance",'
+             '"args":{"character_id":"jarvis","display_name":"Jarvis"},'
+             '"id":"r1"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    types = [f["type"] for f in frames]
+    # no-instance handshake, then the create result, then a REAL boot.
+    assert types == ["ready", "agent_state", "fatal",
+                     "result", "agent_state", "agent_state", "bye"]
+    result = frames[3]
+    assert result["ok"] is True
+    assert result["data"]["root"] == str(inst_dir)
+    assert frames[4]["state"] == "booting"
+    assert frames[5]["state"] == "ready"
+    assert rc == 0   # boot_error cleared by the restart
+
+    # The instance on disk is complete and schema-valid.
+    from jaeger_os.core.instance.schemas import (
+        Config, Identity, Manifest, load_json, load_yaml)
+    ident = load_yaml(inst_dir / "identity.yaml", Identity)
+    cfg = load_yaml(inst_dir / "config.yaml", Config)
+    man = load_json(inst_dir / "manifest.json", Manifest)
+    assert ident.name == "Jarvis"
+    assert cfg.permissions.mode == "confirm"
+    assert man.bound_character == "jarvis"
+    assert (inst_dir / "active_character").read_text().strip() == "jarvis"
+
+
+def test_create_instance_requires_character(monkeypatch, tmp_path):
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    stdin = ('{"op":"command","cmd":"create_instance","args":{},"id":"r1"}\n'
+             '{"op":"quit"}\n')
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert "character_id" in result["error"]
 
 
 def test_turn_during_failed_boot_reports_error(monkeypatch):
@@ -260,7 +365,10 @@ def test_speak_command_roundtrip(monkeypatch):
     stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
              '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
              '{"op":"quit"}\n')
-    rc, frames, _ = _run(monkeypatch, stdin)
+    # Hold the first command back so the (faked, instant) boot wins the
+    # race — this test pins the POST-boot speak path; the pre-boot path
+    # has its own test below.
+    rc, frames, _ = _run(monkeypatch, stdin, stdin_delay=0.25)
     results = {f["id"]: f for f in frames if f["type"] == "result"}
     assert results["r3"]["ok"] is True
     assert results["r4"]["ok"] is False
