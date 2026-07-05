@@ -34,9 +34,13 @@
 set -euo pipefail
 
 CONFIG="debug"
-if [[ "${1:-}" == "--release" ]]; then
-    CONFIG="release"
-fi
+INSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --release) CONFIG="release" ;;
+        --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
+    esac
+done
 
 # Resolve paths — APP_ROOT is jaeger_os/interfaces/swift, REPO_ROOT is the
 # JROS root (three levels up: swift → interfaces → jaeger_os → JROS).
@@ -108,8 +112,18 @@ rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Info.plist — copy from Resources/ (the canonical source).
+# Info.plist — copy from Resources/ (the canonical source), then stamp
+# the REAL version: CFBundleShortVersionString from jaeger_os.__version__
+# (the single source of truth), CFBundleVersion suffixed with the git SHA
+# so two builds of the same release line are distinguishable.
 cp "$APP_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_os/__init__.py")"
+GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+if [[ -n "$JROS_VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JROS_VERSION" \
+        -c "Set :CFBundleVersion $JROS_VERSION+$GIT_SHA" \
+        "$APP_BUNDLE/Contents/Info.plist"
+fi
 
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerOS"
@@ -155,9 +169,22 @@ fi
 # Info.plist privacy strings get ignored).  Sign inner bundles
 # first, then the outer .app, since codesign needs each contained
 # bundle to be valid before the outer signature is computed.
-echo "[build-app] ad-hoc codesign"
-codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
-codesign --force --sign - "$APP_BUNDLE" 2>&1 || \
+# Signing.  Default: ad-hoc (dev builds — TCC prompts fire, no Gatekeeper
+# story).  Distribution: export JAEGER_SIGN_IDENTITY="Developer ID
+# Application: <name> (<team>)" for a real signature; then notarize with
+#   xcrun notarytool submit <zip> --keychain-profile jaeger-notary --wait
+#   xcrun stapler staple JaegerOS.app
+SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
+echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
+codesign --force --sign "$SIGN_IDENTITY" \
+    "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
+codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
+
+if [[ "$INSTALL" == "1" ]]; then
+    echo "[build-app] installing -> /Applications/JaegerOS.app"
+    rm -rf "/Applications/JaegerOS.app"
+    ditto "$APP_BUNDLE" "/Applications/JaegerOS.app"
+fi
 
 echo "$APP_BUNDLE"

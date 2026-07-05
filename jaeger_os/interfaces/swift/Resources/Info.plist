@@ -43,9 +43,11 @@
     <key>NSHighResolutionCapable</key>
     <true/>
 
-    <!-- App lifecycle.  Single instance — bringing a second copy to
-         the front shouldn't spawn a second menu-bar icon. -->
-    <key>NSMultipleInstancesProhibited</key>
+    <!-- App lifecycle.  Single instance — launching a second copy just
+         activates the running one instead of spawning a second menu-bar
+         icon.  (LS prefix — the NS-prefixed spelling that sat here
+         before is not a real key and was silently ignored.) -->
+    <key>LSMultipleInstancesProhibited</key>
     <true/>
 
     <!-- Privacy strings ─────────────────────────────────────────── -->
