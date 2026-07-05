@@ -35,12 +35,23 @@ set -euo pipefail
 
 CONFIG="debug"
 INSTALL=0
+DEV=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
+        --dev)     DEV=1 ;;   # JaegerOS-dev.app: jros-dev instance, debug-fast
     esac
 done
+
+# Two apps, one pipeline (operator call 2026-07-05): JaegerOS.app is the
+# PRODUCT (default instance); JaegerOS-dev.app is the dev shell pinned to
+# the repo's jros-dev instance via LSEnvironment. Separate bundle ids so
+# both can run side by side, each single-instanced.
+APP_NAME="JaegerOS"
+if [[ "$DEV" == "1" ]]; then
+    APP_NAME="JaegerOS-dev"
+fi
 
 # Resolve paths — APP_ROOT is jaeger_os/interfaces/swift, REPO_ROOT is the
 # JROS root (three levels up: swift → interfaces → jaeger_os → JROS).
@@ -105,7 +116,7 @@ if icon_needs_rebuild; then
 fi
 
 # Step 3 — Assemble the .app bundle.
-APP_BUNDLE="$BUILD_DIR/JaegerOS.app"
+APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 echo "[build-app] assembling $APP_BUNDLE"
 
 rm -rf "$APP_BUNDLE"
@@ -122,6 +133,15 @@ GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 if [[ -n "$JROS_VERSION" ]]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JROS_VERSION" \
         -c "Set :CFBundleVersion $JROS_VERSION+$GIT_SHA" \
+        "$APP_BUNDLE/Contents/Info.plist"
+fi
+if [[ "$DEV" == "1" ]]; then
+    /usr/libexec/PlistBuddy \
+        -c "Set :CFBundleIdentifier com.jenkinsrobotics.JaegerOS.dev" \
+        -c "Set :CFBundleName JaegerOS-dev" \
+        -c "Set :CFBundleDisplayName JaegerOS Dev" \
+        -c "Add :LSEnvironment dict" \
+        -c "Add :LSEnvironment:JAEGER_INSTANCE_NAME string jros-dev" \
         "$APP_BUNDLE/Contents/Info.plist"
 fi
 
@@ -182,9 +202,9 @@ codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 ||
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
 
 if [[ "$INSTALL" == "1" ]]; then
-    echo "[build-app] installing -> /Applications/JaegerOS.app"
-    rm -rf "/Applications/JaegerOS.app"
-    ditto "$APP_BUNDLE" "/Applications/JaegerOS.app"
+    echo "[build-app] installing -> /Applications/$APP_NAME.app"
+    rm -rf "/Applications/$APP_NAME.app"
+    ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
 fi
 
 echo "$APP_BUNDLE"

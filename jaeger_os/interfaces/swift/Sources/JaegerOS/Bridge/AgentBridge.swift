@@ -86,6 +86,14 @@ final class AgentBridge: ObservableObject {
         ProcessInfo.processInfo.environment["JAEGER_INSTANCE_NAME"] ?? "default"
     }
 
+    /// An EXPLICIT instance override, or nil to let the bridge resolve its
+    /// own default. JaegerOS-dev.app pins ``jros-dev`` here via its
+    /// Info.plist LSEnvironment; the product app leaves it unset.
+    static var explicitInstance: String? {
+        let v = ProcessInfo.processInfo.environment["JAEGER_INSTANCE_NAME"] ?? ""
+        return v.isEmpty ? nil : v
+    }
+
     /// Diagnostic string for the About panel — the launcher we spawn.
     var socketPath: String? { BridgeProcess.jaegerPath() }
 
@@ -126,7 +134,7 @@ final class AgentBridge: ObservableObject {
             Task { @MainActor in self?.handleTermination(clean: clean) }
         }
         do {
-            let ready = try await proc.start()
+            let ready = try await proc.start(instance: Self.explicitInstance)
             if ready.proto != ProtocolV1.version {
                 await proc.stop()
                 throw BridgeError.bootFailed(
