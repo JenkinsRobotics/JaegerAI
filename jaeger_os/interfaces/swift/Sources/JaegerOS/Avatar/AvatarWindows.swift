@@ -98,9 +98,6 @@ private struct AvatarChatView: View {
     @ObservedObject private var tts = TTSManager.shared
     @State private var micOn = false     // chat-mode default: mic off
 
-    private let canvas = Color(red: 0.043, green: 0.055, blue: 0.078)
-    private let panel = Color(red: 0.075, green: 0.090, blue: 0.122)
-
     var body: some View {
         HSplitView {
             VStack(spacing: 10) {
@@ -113,13 +110,13 @@ private struct AvatarChatView: View {
             }
             .padding(16)
             .frame(minWidth: 340)
-            .background(panel)
+            .background(Term.panel)
 
             ChatView(agent: agent)
                 .environmentObject(agent)
                 .frame(minWidth: 620)
         }
-        .background(canvas)
+        .background(Term.canvas)
         .task { await loadVoiceConfig() }
     }
 
