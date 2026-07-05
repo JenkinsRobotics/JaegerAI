@@ -173,6 +173,17 @@ final class AgentBridge: ObservableObject {
         status = nil
     }
 
+    /// The Quit-from-tray path: give the core time to free the model and
+    /// exit orderly (``bye``) before the app terminates. This is the ONLY
+    /// place the agent's life ends — closing windows never reaches here.
+    func shutdownForQuit() async {
+        if let bridge { await bridge.quitGracefully() }
+        bridge = nil
+        state = .disconnected
+        agentState = .booting
+        status = nil
+    }
+
     // MARK: - Queries / commands / chat
 
     /// Read-only data for the settings HUD (characters, config, permissions).

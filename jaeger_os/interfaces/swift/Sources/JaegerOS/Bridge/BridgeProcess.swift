@@ -252,10 +252,31 @@ actor BridgeProcess {
         replyCont = nil
     }
 
+    /// Immediate stop: quit op + SIGTERM. Use ``quitGracefully()`` for the
+    /// tray-quit path so the core frees the model and exits with ``bye``.
     func stop() {
         write(["op": "quit"])
         stdout?.readabilityHandler = nil
         process?.terminate()
+        drainAll(reason: "bridge stopped")
+        process = nil
+        stdin = nil
+        stdout = nil
+    }
+
+    /// Orderly shutdown for Quit-from-tray: send ``quit``, give the core up
+    /// to ``grace`` to tear down (model free + bye + clean exit), then
+    /// SIGTERM as the fallback. The windows-close-freely / quit-from-tray
+    /// lifetime means this is the ONE place the core's life ends.
+    func quitGracefully(grace: Duration = .seconds(10)) async {
+        guard let proc = process else { return }
+        write(["op": "quit"])
+        let deadline = ContinuousClock.now + grace
+        while proc.isRunning && ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        if proc.isRunning { proc.terminate() }
+        stdout?.readabilityHandler = nil
         drainAll(reason: "bridge stopped")
         process = nil
         stdin = nil
