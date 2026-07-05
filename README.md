@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.5.2-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.6.2-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -43,24 +43,30 @@ installs the whole stack.**
 - 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.5.2` released; `0.6.0` in progress.** The agent is alive
-> (animation, personality, self-improving skills), and the product around it now
-> behaves like real software: a clean one-command install, in-place
-> `jaeger update` with `--rollback`, `jaeger autostart` (boot/login),
-> `jaeger reinstall` / `jaeger uninstall`, and a clickable macOS launcher.
-> Operators manage **agents** (`jaeger agent …`) — each plays a *character*.
+> **Status — `0.6.2` (the product-shell line).** The agent is alive
+> (animation, personality, a measured self-improving skill loop), and 0.6
+> made it a product: **JROS is now Swift-first** — `JaegerOS.app` is the
+> primary UI (menu-bar resident, chat/settings windows, quit-from-tray),
+> talking to the Python core over a versioned NDJSON bridge (ready in
+> ~0.5s; the model warms behind it). The agentic core runs a two-runner
+> architecture: a soft-loop/hard-boundary realtime runner (verify gate +
+> persona output filter) and a staged plan→execute→verify Deep Think
+> pipeline — benched at **E4B 78/81, 26B 76/81**, with 99 self-improvable
+> skills, subject-attributed SQL memory, and HomeAssistant / fal.ai
+> plugins. Operators manage **agents** (`jaeger agent …`) — each plays a
+> *character*.
 >
 > The recent arc: **0.4.0** introduced the node architecture (the `ZmqBus` +
 > body contract); **0.5.0** folded the Mochi project in (Jaeger Studio GUI,
-> the character system, animation/media nodes); **0.6.0** is the
-> install/update/lifecycle theme plus agentic polish (autonomy modes, a person
-> index, and a measured skill self-improvement loop).
+> the character system, animation/media nodes); **0.6.x** delivered the
+> install/update/lifecycle theme, the agentic-quality arc (verify gate,
+> Deep Think staged runner, memory provenance), and the Swift-first app
+> (JaegerOS.app + JaegerOS-dev.app).
 >
 > Full per-release write-ups live in
 > [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/); the running
-> changelog is [`CHANGELOG.md`](CHANGELOG.md). The archived Swift desktop app
-> and the parked `rich_tui` surface remain in tree but are not wired into
-> install/run.
+> changelog is [`CHANGELOG.md`](CHANGELOG.md). The parked `rich_tui` surface remains
+> in tree but is not wired into install/run.
 
 ---
 
@@ -205,21 +211,29 @@ launch path matches what you're doing.
 ./jaeger --agent lilith --no-voice # text-only (no mic, no Kokoro warm)
 ```
 
-**Sandbox dev loop** — for working on JROS itself.  The `./launch`
-wrapper boots the in-repo sandbox at `sandbox/.jaeger_os/instances/jros-dev/`
-with a real-verification boot scroll, then hands the terminal to the
-TUI.  Daily flags:
+**Dev loop** — for working on JROS itself (one line to set up):
 
 ```bash
-./launch                           # boot the sandbox TUI
-./launch --status                  # what's running across modes
-./launch --stop                    # kill a lingering TUI singleton
-./launch --restart                 # stop, then boot
-./launch --health                  # preflight checks and exit
-./launch --reset-audio             # sudo killall coreaudiod
-./launch --clean-logs              # truncate <instance>/run/jaeger.log
-./launch --no-voice                # tell the TUI to skip voice startup
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/install.sh | bash
 ```
+
+That clones the repo, builds the venv, and produces **`JaegerOS-dev.app`**
+at the repo root — the windowed dev shell, pinned to the gitignored
+`jros-dev` instance. Double-click it, or drive everything through the
+`jaeger` CLI:
+
+```bash
+open JaegerOS-dev.app              # the windowed dev shell (menu-bar tray)
+./jaeger dev                       # same, from the terminal
+./jaeger dev --tui                 # the terminal (TUI) agent
+./jaeger update                    # git pull + reinstall deps + rebuild app as needed
+./jaeger dev --health              # preflight checks and exit
+./jaeger dev --status / --stop     # singleton management
+./jaeger dev --reset-audio         # sudo killall coreaudiod
+```
+
+The end-user app is `JaegerOS.app` (default instance) — built with
+`jaeger_os/interfaces/swift/Scripts/build-app.sh --release --install`.
 
 The `./launch` boot scroll runs every check before handing off:
 sandbox bundle, library import resolution, instance manifest schema,
