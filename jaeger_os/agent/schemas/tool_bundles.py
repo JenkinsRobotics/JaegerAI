@@ -14,7 +14,10 @@ Two surfaces:
     (description, tool names, included toolsets). Centralised here
     rather than tagged on each ``ToolDef`` so adding a new toolset
     doesn't require touching 63 ``@register_tool_from_function`` sites
-    in ``main.py``.
+    in ``main.py``. Tool membership is DERIVED from
+    ``skill_registry.toolset_scoping`` (CORE + TOOLSETS — the live
+    visibility gate) rather than hand-maintained in parallel; only
+    the bundle groupings/composites live here.
 
   • :func:`resolve_toolsets` — expand a set of toolset names to the
     union of tool names they contain. The agent loop's filter calls
@@ -34,6 +37,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.agent.skill_registry.toolset_scoping import (
+    CORE as _SCOPING_CORE,
+    TOOLSETS as _SCOPING,
+)
+
 
 # A *toolset definition*. ``includes`` references other toolsets by
 # name; the resolver recurses (with cycle detection). ``description``
@@ -44,6 +52,66 @@ class ToolsetDef(dict):  # type: ignore[type-arg]
     natural to read without a frozendict / dataclass ceremony."""
 
 
+# ── derivation helpers ─────────────────────────────────────────────
+#
+# The tool→group classification is single-sourced from
+# ``toolset_scoping`` (the live visibility gate). The bundles below
+# never restate a tool list the scoping map already owns — they
+# compose it. Every helper validates its names at import time, so a
+# rename/removal in toolset_scoping fails loudly here instead of
+# leaving a stale parallel copy (the drift these two hand-maintained
+# maps used to grow).
+
+
+def _scoping(*toolset_names: str) -> set[str]:
+    """Union of whole ``toolset_scoping.TOOLSETS`` groups."""
+    missing = [n for n in toolset_names if n not in _SCOPING]
+    if missing:
+        raise KeyError(
+            f"tool_bundles references unknown toolset_scoping groups: {missing}")
+    out: set[str] = set()
+    for n in toolset_names:
+        out |= _SCOPING[n]
+    return out
+
+
+def _core(*names: str) -> set[str]:
+    """Named picks from ``toolset_scoping.CORE`` (membership-checked)."""
+    missing = [n for n in names if n not in _SCOPING_CORE]
+    if missing:
+        raise ValueError(
+            f"tool_bundles names tools missing from toolset_scoping.CORE: {missing}")
+    return set(names)
+
+
+def _pick(toolset: str, *names: str) -> set[str]:
+    """Named picks from ONE scoping group, for bundles narrower than
+    the group (membership-checked so renames can't strand the pick)."""
+    members = _SCOPING.get(toolset)
+    if members is None:
+        raise KeyError(f"tool_bundles references unknown toolset_scoping "
+                       f"group: {toolset!r}")
+    missing = [n for n in names if n not in members]
+    if missing:
+        raise ValueError(
+            f"tool_bundles picks {missing} which are not in "
+            f"toolset_scoping.TOOLSETS[{toolset!r}]")
+    return set(names)
+
+
+def _tools(*sets: set[str], exclude: set[str] = frozenset()) -> list[str]:
+    """Union the pieces into the sorted ``tools`` list."""
+    out: set[str] = set()
+    for s in sets:
+        out |= s
+    return sorted(out - exclude)
+
+
+# ``open_on_host`` sits in scoping's ``background`` group but is its
+# own bundle atom (``host_ui``) — excluded from ``code`` below.
+_HOST_UI_TOOLS = _pick("background", "open_on_host")
+
+
 # ── canonical toolset map ──────────────────────────────────────────
 
 
@@ -51,30 +119,27 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     # ── atomic toolsets ────────────────────────────────────────────
     "time": ToolsetDef(
         description="Current date + time (the model's only source of truth).",
-        tools=["get_time"],
+        tools=_tools(_core("get_time")),
         includes=[],
     ),
     "math": ToolsetDef(
         description="Safe arithmetic + expressions.",
-        tools=["calculate"],
+        tools=_tools(_core("calculate")),
         includes=[],
     ),
     "host": ToolsetDef(
-        description="Machine health, instance metadata, stored credentials.",
-        tools=["system_status", "diagnostics", "list_credentials", "get_credential", "set_credential"],
+        description="Machine health, self-diagnostics, stored credentials.",
+        tools=_tools(_scoping("diagnostics", "credentials")),
         includes=[],
     ),
     "files": ToolsetDef(
         description="Read / write / patch / delete / list / search the sandboxed workspace.",
-        tools=[
-            "read_file", "write_file", "append_file", "patch", "delete_file",
-            "list_skill_dir", "search_files",
-        ],
+        tools=_tools(_core("read_file", "write_file"), _scoping("files")),
         includes=[],
     ),
     "web": ToolsetDef(
         description="Web search, content extraction, current weather.",
-        tools=["web_search", "web_extract", "get_weather"],
+        tools=_tools(_core("web_search", "web_extract"), _scoping("web")),
         includes=[],
     ),
     "memory": ToolsetDef(
@@ -85,11 +150,8 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         # Umbrella + the granular siblings — keep both so we can A/B
         # which the model routes to better. Phase-7 consolidation may
         # drop the siblings (see ``memory_umbrella_only`` below).
-        tools=[
-            "memory",
-            "remember", "recall", "forget", "list_facts", "search_memory",
-            "set_name", "update_soul",
-        ],
+        tools=_tools(_core("memory", "recall"),
+                     _scoping("memory_granular", "identity")),
         includes=[],
     ),
     "memory_umbrella_only": ToolsetDef(
@@ -98,46 +160,51 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Avoids the 'umbrella vs sibling' attractor split that hurt the "
             "bench's L1 routing."
         ),
-        tools=["memory", "set_name", "update_soul"],
+        tools=_tools(_core("memory"), _scoping("identity")),
         includes=[],
     ),
     "code": ToolsetDef(
         description="Run Python, run shell, manage the workspace venv + background processes.",
-        tools=[
-            "execute_code", "terminal", "install_package", "list_venv_packages",
-            "run_in_venv", "start_background", "list_background",
-            "check_background", "stop_background",
-        ],
+        tools=_tools(_core("execute_code"), _scoping("code", "background"),
+                     exclude=_HOST_UI_TOOLS),
         includes=[],
     ),
     "schedule": ToolsetDef(
         description="Cron-style scheduling of future prompts.",
-        tools=["schedule_prompt", "list_schedules", "cancel_schedule"],
+        tools=_tools(_scoping("scheduling")),
         includes=[],
     ),
     "planning": ToolsetDef(
         description="Within-session todo list + queue deep-think tasks.",
-        tools=["todo", "propose_deep_think_task", "list_deep_think_queue"],
+        tools=_tools(_core("todo"),
+                     _pick("skills", "propose_deep_think_task",
+                           "list_deep_think_queue")),
         includes=[],
     ),
     "kanban": ToolsetDef(
         description="Cross-session kanban board for durable work (individual verbs).",
-        tools=["board_view", "board_add", "board_move", "board_update", "board_delete"],
+        tools=_tools(_core("board_add", "board_view"), _scoping("board")),
         includes=[],
     ),
     "browser": ToolsetDef(
         description="Browser automation (navigate, click, type, scroll).",
-        tools=["browser"],
+        tools=_tools(_pick("computer_use", "browser")),
         includes=[],
     ),
     "skills": ToolsetDef(
-        description="Inspect, package, benchmark, and reload skills.",
-        tools=["list_skills", "reload_skills", "package_skill", "benchmark_skill"],
+        description=(
+            "Inspect, package, benchmark, reload skills; the usage journal "
+            "+ review loop; the deep-think queue."
+        ),
+        tools=_tools(_core("list_skills"), _scoping("skills")),
         includes=[],
     ),
     "media": ToolsetDef(
-        description="Speech, vision, image generation, microphone capture.",
-        tools=["text_to_speech", "vision_analyze", "image_generate", "listen"],
+        description=(
+            "Speech, vision, microphone capture; image/video generation "
+            "(local + fal.ai cloud)."
+        ),
+        tools=_tools(_scoping("media")),
         includes=[],
     ),
     "avatar": ToolsetDef(
@@ -147,22 +214,22 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "dev mode (JAEGER_DEV_MODE=1 / --dev) while Mochi is the "
             "animation testbed."
         ),
-        tools=["set_avatar_state", "play_timeline"],
+        tools=_tools(_scoping("avatar")),
         includes=[],
     ),
     "delegate": ToolsetDef(
         description="Hand off subtasks to a fresh agent, clarify, or ask for help.",
-        tools=["delegate_task", "clarify", "help_me"],
+        tools=_tools(_core("delegate_task", "clarify", "help_me")),
         includes=[],
     ),
     "comm": ToolsetDef(
         description="Cross-platform messaging + plugin awareness.",
-        tools=["send_message", "list_plugins", "setup_plugin", "activate_plugin"],
+        tools=_tools(_scoping("plugins")),
         includes=[],
     ),
     "host_ui": ToolsetDef(
         description="Open files / URLs / apps on the host (Finder / browser).",
-        tools=["open_on_host"],
+        tools=_tools(_HOST_UI_TOOLS),
         includes=[],
     ),
     "computer": ToolsetDef(
@@ -171,6 +238,11 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "keyboard, scrolling. ``computer_use`` and ``computer_do`` are "
             "the high-level entry points; the rest are atomic ops."
         ),
+        # Hand-listed on purpose: beyond the ``computer_use`` umbrella
+        # pair these are SKILL-registered tools (macos_computer /
+        # computer_use skills), which toolset_scoping only learns at
+        # runtime via register_skill_toolset — there is no static
+        # scoping group to derive from.
         tools=[
             # high-level (macos_computer skill): goal + action dispatch + look
             "computer_use", "computer_do", "computer_look",
@@ -191,7 +263,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "toolset_mgmt": ToolsetDef(
         description="Load a different toolset mid-session.",
-        tools=["load_tools"],
+        tools=_tools(_core("load_tools")),
         includes=[],
     ),
 
@@ -241,7 +313,13 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "full": ToolsetDef(
         description="Every registered tool. Big schema; use only when nothing else fits.",
-        tools=[],
+        # Derived: CORE plus every toolset_scoping group — so groups
+        # with no bundle atom of their own (people, models, bench,
+        # smart_home, …) are still covered and "every registered tool"
+        # stays true as scoping grows. ``computer`` is included for the
+        # skill-registered computer_* tools scoping doesn't list
+        # statically.
+        tools=_tools(_core(*_SCOPING_CORE), _scoping(*_SCOPING)),
         includes=[
             "essentials", "files", "web", "memory", "code", "schedule",
             "kanban", "browser", "skills", "media", "delegate", "comm",
