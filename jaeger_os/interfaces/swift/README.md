@@ -1,104 +1,91 @@
 # JaegerOS — native macOS desktop app
 
-> The 0.3.0 Apple-native rebuild of the JROS client surface.
-> Replaces the rumps + Terminal-spawn tray that 0.2.6 retired.
+> The DEFAULT windowed UI since 0.6.0 (`interaction.ui = "swift"`;
+> `launch.py` builds + runs it, PySide6 is the fallback).
 
-A single Swift process owns the tray icon, the chat window, the pill
-launcher, and the voice loop. Talks to the Python `jaeger_os` daemon
-over the existing Unix socket using `chat.send` / `chat.subscribe`.
+One Swift process owns the tray card, the chat window, the avatar orb,
+the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
+(the Python NDJSON stdio child, `jaeger_os/interfaces/bridge.py`) and
+speaks **protocol v1** — the single wire contract in
+`jaeger_os/interfaces/protocol.py`, pinned cross-language by
+`protocol_v1_fixtures.json` (Python asserts its builders against it;
+`ProtocolFixtureTests` decodes the same bytes here).
 
-## Status
-
-Week 0 scaffold — `MenuBarExtra` only, no daemon connection yet.
-
-| Week | Lands | Status |
-|------|-------|--------|
-| 0 | `MenuBarExtra` skeleton, About / Quit | ✅ this commit |
-| 1 | Unix-socket daemon client + NDJSON protocol layer | next |
-| 2 | SwiftUI chat window (bubbles, composer, status bar) | |
-| 3 | Pill launcher + Option+Space global hotkey | |
-| 4 | AVAudioEngine voice loop (push-to-talk + voice processing AEC) | |
-| 5 | CoreML-accelerated `whisper.cpp` STT; AVSpeechSynthesizer TTS | |
-| 6 | Polish, side-panel sketches, `.app` packaging | |
-
-## Build & run from the command line
+## Build, test, run
 
 ```bash
-cd apps/JaegerOS
-swift build -c debug
-swift run JaegerOS
+cd jaeger_os/interfaces/swift
+swift build            # debug build
+swift test             # ProtocolFixtureTests — the wire contract
+Scripts/build-app.sh --dev   # .build/JaegerOS-dev.app (pins the jros-dev instance)
+Scripts/build-app.sh         # .build/JaegerOS.app (product)
 ```
 
-The app should appear in your menu bar with a brain icon labeled "JROS."
-There's no Dock icon yet (that comes when we add the `LSUIElement = true`
-Info.plist via Xcode).
+`xed Package.swift` opens the package in Xcode.
 
-## Open in Xcode
+## Source layout
 
-```bash
-cd apps/JaegerOS
-xed Package.swift          # opens in Xcode, autogenerates project
-```
-
-Xcode reads `Package.swift` and synthesizes the project. Use the
-auto-generated scheme to build, run, and debug interactively. When we
-need an `.xcodeproj` for code signing + bundling, we'll convert this
-SwiftPM package to a full Xcode project (File → New → Project from
-Package, or generate via xcodegen).
-
-## Architecture (target end-state for 0.3.0)
+One directory per feature; each window follows the same shape — a
+`*WindowController` (AppKit lifecycle, lazy creation, single instance)
+hosting SwiftUI views over shared `ObservableObject` state. No polling
+loops anywhere: state flows through `@Published` (Combine), animation
+through `TimelineView` schedules.
 
 ```
-┌────────────────────────────────────────────────┐
-│           JaegerOS.app (this package)          │
-│   ┌────────────────────────────────────────┐   │
-│   │ MenuBarExtra — NSStatusItem            │   │
-│   │   Open Chat · Open Pill · Quit         │   │
-│   ├────────────────────────────────────────┤   │
-│   │ Chat window (SwiftUI)                  │   │
-│   │   Bubbles · composer · status bar      │   │
-│   ├────────────────────────────────────────┤   │
-│   │ Pill launcher (Option+Space)           │   │
-│   │   Frameless, always-on-top, autohides  │   │
-│   ├────────────────────────────────────────┤   │
-│   │ Voice loop                             │   │
-│   │   AVAudioEngine (built-in AEC)         │   │
-│   │   CoreML Whisper STT (ANE-accelerated) │   │
-│   │   AVSpeechSynthesizer (placeholder TTS)│   │
-│   ├────────────────────────────────────────┤   │
-│   │ DaemonClient                           │   │
-│   │   Unix socket → NDJSON protocol        │   │
-│   │   chat.send · chat.subscribe · status  │   │
-│   └────────────────────────────────────────┘   │
-└────────────────────────────────────────────────┘
-                          │
-                          │ <instance>/run/jaeger.sock
-                          ▼
-┌────────────────────────────────────────────────┐
-│   jaeger_os daemon (Python, unchanged)         │
-│   Gemma + memory + tools + kanban + skills     │
-└────────────────────────────────────────────────┘
+Sources/JaegerOS/
+  JaegerOSApp.swift     @main MenuBarExtra scene (tray icon + card)
+  AppDelegate.swift     activation policy, splash boot, orderly quit
+  Bridge/               the agent seam — everything else is UI
+    Protocol.swift        typed frames, NDJSON framer, protocol version
+    BridgeProcess.swift   child process + framing (actor, timeouts, bye)
+    AgentBridge.swift     app-facing state machine: state / agentState /
+                          status (character identity) / isBusy / requests
+  MenuCard/             tray dropdown card + settings HUD (+ store)
+  ChatWindow/           chat surface: controller · view · transcript rows
+                        · view-model (send pipeline, event chips)
+  Avatar/               VoiceOrbView (TimelineView+Canvas spectrum ring)
+                        + orb-only and orb+chat window controllers
+  Floating/             pill quick-input: panel · view · hotkey · bridge
+  Voice/                VoiceRecorder + TTS/ (manager, Apple synth)
+                        + STT/ (manager, Apple, Whisper)
+  Splash/               boot progress window
+  Theme/                Term — the terminal palette every dark surface uses
+  Resources/            menu-bar icons, splash hero
 ```
 
-## Why Swift (not PySide 6 / Tauri / Electron)
+Conventions:
 
-See `dev_docs/odysseus_review_and_0.3.0_plan.md` § 1.1 for the full
-rationale. Short version:
+* **State down, actions up.** Views read `AgentBridge.shared` /
+  `TTSManager.shared` publishers; side-effects live in view-models or
+  controllers, never in view bodies.
+* **Identity is `status`.** The active character (name + icon) rides
+  `AgentBridge.status`; every surface (tray card, chat title/status bar,
+  orb face) re-brands from that one publisher. A `select_character`
+  command refreshes it automatically (`refreshIdentity()`).
+* **Windows are lazy singletons** — created on first open, reused after,
+  closing never quits (quit lives in the tray card and tears the core
+  down through `bye`).
+* Keep files under ~400 lines; split view files by layout vs. typography
+  (see `ChatView` / `ChatTranscript`).
 
-- Smallest footprint (~10 MB binary, ~40 MB RAM idle)
-- Direct ANE access for CoreML-accelerated Whisper (2-3× faster STT)
-- AVAudioEngine retires PortAudio's wedging-CoreAudio bug class
-- AVAudioEngine voice processing mode = free AEC (retires speexdsp)
-- Native AirPods / Bluetooth route handling
-- Apple is JROS's bread and butter — Jetson on JP01 is a sensor + motor
-  I/O node, not a brain target
+## The seam (frozen v1)
 
-## References
+```
+app → bridge:  {"op":"send"|"respond"|"quit"|"query"|"command", ...}
+bridge → app:  ready · agent_state · state · tool · reply · result ·
+               request · fatal · bye
+```
 
-- `dev_docs/odysseus_review_and_0.3.0_plan.md` — full 0.3.x release ladder
-- Hermes' `ui-tui` (React+Ink) — streaming token deltas, tool/reasoning
-  display, modal overlays as state branches
-- Lilith's `tray.py` PyQt6 pill — visual language (16px rounded, blue
-  accents, glass), Option+Space global hotkey pattern
-- [Ollama Desktop](https://github.com/ollama/ollama) — same architectural
-  shape (Swift UI + separate backend daemon over localhost)
+Fast-ready: `ready` lands before the model loads (queries/settings work
+immediately); `agent_state` streams booting → ready/failed. New read-only
+`query` whats are additive and allowed; frame shapes are frozen — change
+`protocol.py` + fixtures + both test suites together or not at all.
+
+## Known follow-ups
+
+* Speaking-state orb amplitude is a proxy waveform (Apple TTS exposes no
+  amplitude tap) — real amplitude/audio frames over the bridge is the
+  noted follow-up, matching the PySide6 orb's proxy fallback.
+* Mic toggle persists `voice.enabled` (applies on restart); a live
+  voice-input loop lands with the STT wiring.
+* Code-signing/notarization for distribution builds.
