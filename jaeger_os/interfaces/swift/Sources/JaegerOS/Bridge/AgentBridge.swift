@@ -74,6 +74,12 @@ final class AgentBridge: ObservableObject {
     /// Last connect-failure reason, surfaced in the menu. Cleared on success.
     @Published private(set) var lastError: String? = nil
 
+    /// First-run: the bridge reported ``fatal kind=no_instance`` — no
+    /// agent exists on disk yet. The transport stays up (queries and the
+    /// ``create_instance`` command work), and the onboarding window is
+    /// presented over it. Cleared when onboarding finishes.
+    @Published private(set) var needsOnboarding: Bool = false
+
     /// A pending permission request (published so a HUD can render it
     /// in-window later; the default presenter is an NSAlert).
     @Published private(set) var pendingRequest: BridgeRequest? = nil
@@ -135,6 +141,9 @@ final class AgentBridge: ObservableObject {
         }
         await proc.setOnRequest { [weak self] request in
             Task { @MainActor in self?.handleRequest(request) }
+        }
+        await proc.setOnFatal { [weak self] kind, error in
+            Task { @MainActor in self?.handleFatal(kind: kind, error: error) }
         }
         await proc.setOnTermination { [weak self] clean in
             Task { @MainActor in self?.handleTermination(clean: clean) }
@@ -262,6 +271,23 @@ final class AgentBridge: ObservableObject {
         if case .failed(let reason) = lifecycle {
             lastError = reason
         }
+    }
+
+    /// Route ``fatal`` frames by kind. ``no_instance`` is FIRST-RUN, not
+    /// an error: the bridge transport stays alive for setup queries, so
+    /// present the onboarding window instead of a failure surface.
+    private func handleFatal(kind: String, error: String) {
+        guard kind == "no_instance" else { return }
+        needsOnboarding = true
+        NSLog("[Bridge] no instance on disk — presenting onboarding")
+        OnboardingWindowController.shared.show(agent: self)
+    }
+
+    /// Onboarding finished (instance created + agent booted): clear the
+    /// first-run flag and refresh the identity every surface renders.
+    func onboardingDidFinish() {
+        needsOnboarding = false
+        Task { await self.refreshIdentity() }
     }
 
     private func handleTermination(clean: Bool) {
