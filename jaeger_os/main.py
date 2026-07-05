@@ -3407,6 +3407,26 @@ def run_daemon(*, instance_name: str | None = None,
     return 0
 
 
+def _swift_app_binary() -> "Path | None":
+    """The built Swift app's inner binary, or None. Order: the dev bundle
+    in this checkout (JaegerOS-dev.app — pinned to jros-dev), then the
+    product bundle beside it, then /Applications. Running the inner binary
+    (not ``open``) keeps stdout attached for terminal users."""
+    from pathlib import Path as _P
+    swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
+    candidates = [
+        swift / "JaegerOS-dev.app",
+        swift / "JaegerOS.app",
+        _P("/Applications/JaegerOS.app"),
+        _P("/Applications/JaegerOS-dev.app"),
+    ]
+    for app in candidates:
+        binary = app / "Contents" / "MacOS" / "JaegerOS"
+        if binary.exists():
+            return binary
+    return None
+
+
 def _windowed_available() -> bool:
     """Whether the Pattern-1 windowed app can run here. Needs PySide6 and a
     display. Honours ``JAEGER_NO_GUI`` and ``QT_QPA_PLATFORM=offscreen`` as
@@ -3634,11 +3654,23 @@ def _main_dispatch() -> int:
                 return voice_main()
             finally:
                 sys.argv = _orig_argv
-        # 0.5: the windowed app (Pattern 1 — PySide6 chat window + tray) is
-        # the default interactive surface. Fall back to the TUI when there's
-        # no display (headless / SSH) or PySide6 is absent; ``--tui`` (handled
-        # above) opts into the terminal explicitly. The instance is threaded
-        # via the env the windowed core resolves through.
+        # 0.6: SWIFT-FIRST — the windowed surface is JaegerOS.app (splash,
+        # menu-bar tray, fast-ready bridge). Bare ``jaeger`` launches the
+        # built app: the dev bundle in a checkout, /Applications when
+        # installed. Falls back to the PySide6 shell, then the TUI. (This
+        # routing lived in the deleted launch.py and never made it into the
+        # product path — bare ``./jaeger`` was still booting the old Qt
+        # shell in-process, with no splash.)
+        swift_app = _swift_app_binary()
+        if swift_app is not None:
+            if args.instance:
+                os.environ["JAEGER_INSTANCE_NAME"] = args.instance
+            print(f"[jros] launching {swift_app.parent.parent.parent.name} — "
+                  "menu-bar tray + chat window…", file=sys.stderr, flush=True)
+            import subprocess as _sp
+            return _sp.run([str(swift_app)]).returncode
+        # PySide6 fallback (no built Swift app). ``--tui`` (handled above)
+        # opts into the terminal explicitly.
         if _windowed_available():
             if args.instance:
                 os.environ["JAEGER_INSTANCE_NAME"] = args.instance
