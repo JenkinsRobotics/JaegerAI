@@ -164,10 +164,23 @@ actor BridgeProcess {
     // MARK: - Lifecycle
 
     /// Resolve the ``jaeger`` launcher. ``$JAEGER_BRIDGE_CMD`` overrides
-    /// outright; else ``$JAEGER_REPO/jaeger``; else a dev-tree default.
+    /// outright; then a dev bundle self-locates the repo it was built in
+    /// (JaegerOS-dev.app lives at ``<repo>/…/swift/.build/``, so walking
+    /// up from the bundle finds ``<repo>/jaeger`` — no PATH games); then
+    /// ``$JAEGER_REPO/jaeger``; else the dev-tree default.
     static func jaegerPath() -> String {
         let env = ProcessInfo.processInfo.environment
         if let cmd = env["JAEGER_BRIDGE_CMD"], !cmd.isEmpty { return cmd }
+        var dir = URL(fileURLWithPath: Bundle.main.bundlePath)
+            .deletingLastPathComponent()
+        for _ in 0..<8 {
+            let candidate = dir.appendingPathComponent("jaeger").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+            if dir.path == "/" { break }
+            dir.deleteLastPathComponent()
+        }
         let repo = (env["JAEGER_REPO"].flatMap { $0.isEmpty ? nil : $0 })
             ?? (NSHomeDirectory() as NSString).appendingPathComponent("GITHUB/JROS")
         return (repo as NSString).appendingPathComponent("jaeger")
@@ -175,8 +188,10 @@ actor BridgeProcess {
 
     /// Launch the bridge and await its ``ready`` frame (or ``fatal``).
     /// FAST: ready means the transport is up, not that the model is loaded
-    /// — watch ``onAgentState`` for booting → ready.
-    func start() async throws -> BridgeReady {
+    /// — watch ``onAgentState`` for booting → ready. ``instance`` pins the
+    /// bridge to a named instance (the dev app passes ``jros-dev`` via
+    /// LSEnvironment); nil lets the bridge resolve its own default.
+    func start(instance: String? = nil) async throws -> BridgeReady {
         guard process == nil else { throw BridgeError.launchFailed("already running") }
 
         let path = Self.jaegerPath()
@@ -186,7 +201,7 @@ actor BridgeProcess {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = ["bridge"]
+        proc.arguments = instance.map { ["bridge", $0] } ?? ["bridge"]
         proc.currentDirectoryURL =
             URL(fileURLWithPath: (path as NSString).deletingLastPathComponent)
 
