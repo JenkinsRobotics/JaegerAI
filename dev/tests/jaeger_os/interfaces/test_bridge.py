@@ -174,6 +174,20 @@ def test_permission_request_respond_roundtrip(monkeypatch):
     assert rc == 0
 
 
+def test_identity_query_roundtrip(monkeypatch):
+    """``{"op":"query","what":"identity"}`` answers with a result frame
+    carrying character/icon/model — the additive read the Swift shell uses
+    to refresh tray/header branding after a character switch. Works even
+    with no character configured (all-None payload, ok=True)."""
+    stdin = '{"op":"query","what":"identity","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["id"] == "r1"
+    assert result["ok"] is True
+    assert set(result["data"]) == {"character", "icon", "model"}
+    assert rc == 0
+
+
 def test_fixture_frames_match_builders():
     """The cross-language fixtures ARE what the builders produce — if a
     builder changes shape, this fails here and the Swift decoder test

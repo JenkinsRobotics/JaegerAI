@@ -8,7 +8,16 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
+
+/// Window title tracking the active character — shared by both avatar
+/// surfaces ("<suffix>" ↦ "Jaeger — <character> · <suffix>").
+@MainActor
+private func characterTitle(_ status: AgentStatus?, suffix: String) -> String {
+    if let character = status?.character { return "Jaeger — \(character) · \(suffix)" }
+    return "Jaeger — \(suffix)"
+}
 
 // MARK: - agent window (orb only)
 
@@ -16,6 +25,7 @@ import SwiftUI
 final class AvatarWindowController {
     static let shared = AvatarWindowController()
     private var window: NSWindow?
+    private var titleSub: AnyCancellable?
 
     static func show(agent: AgentBridge) { shared.present(agent: agent) }
 
@@ -33,12 +43,15 @@ final class AvatarWindowController {
             contentRect: NSRect(x: 0, y: 0, width: 360, height: 420),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
-        win.title = "Jaeger — Avatar"
+        win.title = characterTitle(agent.status, suffix: "Avatar")
         win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.contentViewController = NSHostingController(rootView: view)
         win.center()
         window = win
+        titleSub = agent.$status.sink { [weak win] status in
+            win?.title = characterTitle(status, suffix: "Avatar")
+        }
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
     }
@@ -50,6 +63,7 @@ final class AvatarWindowController {
 final class AvatarChatWindowController {
     static let shared = AvatarChatWindowController()
     private var window: NSWindow?
+    private var titleSub: AnyCancellable?
 
     static func show(agent: AgentBridge) { shared.present(agent: agent) }
 
@@ -64,13 +78,16 @@ final class AvatarChatWindowController {
             contentRect: NSRect(x: 0, y: 0, width: 1040, height: 640),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false)
-        win.title = "Jaeger — Avatar + Chat"
+        win.title = characterTitle(agent.status, suffix: "Avatar + Chat")
         win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
         win.contentViewController = NSHostingController(rootView: view)
         win.center()
         win.minSize = NSSize(width: 820, height: 480)
         window = win
+        titleSub = agent.$status.sink { [weak win] status in
+            win?.title = characterTitle(status, suffix: "Avatar + Chat")
+        }
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
     }

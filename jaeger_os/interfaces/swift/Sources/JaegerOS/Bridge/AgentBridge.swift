@@ -209,10 +209,32 @@ final class AgentBridge: ObservableObject {
     }
 
     /// A mutation (select/make-default/save…). Check ``ok``/``error``.
+    /// A successful character switch re-reads the live identity so every
+    /// surface bound to ``status`` (tray card, chat header, orb face)
+    /// re-brands immediately — no restart, no next-boot wait.
     @discardableResult
     func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
         guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
-        return await bridge.command(cmd, args: args)
+        let result = await bridge.command(cmd, args: args)
+        if result.ok && cmd == "select_character" {
+            await refreshIdentity()
+        }
+        return result
+    }
+
+    /// Re-ask the bridge for the active character + model and fold the
+    /// answer into ``status``. Cheap (one small query); safe to call from
+    /// any surface's appear hook.
+    func refreshIdentity() async {
+        let result = await query("identity")
+        guard result.ok, let data = result.json,
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return }
+        var raw = status?.rawDict ?? [:]
+        raw["character"] = obj["character"] as? String as Any
+        raw["icon"] = obj["icon"] as? String as Any
+        if let model = obj["model"] as? String { raw["model"] = model as Any }
+        status = AgentStatus(rawDict: raw)
     }
 
     /// Run one chat turn; returns the reply text. ``session`` isolates
