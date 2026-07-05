@@ -4,50 +4,71 @@
 //
 //  Out-of-process transport to the agent: spawns ``jaeger bridge`` (the
 //  Python NDJSON stdio bridge) as a child and exchanges newline-JSON over
-//  its stdin/stdout.  The SAME agent the PySide6 app runs in-process,
-//  one hop out — no socket, no port, no agent.  Each app instance owns
-//  its own child (1:1); there's no shared server to manage.
+//  its stdin/stdout.  Protocol v1 — the single wire contract lives in
+//  ``jaeger_os/interfaces/protocol.py`` with cross-language fixtures in
+//  ``protocol_v1_fixtures.json`` (decoded by ProtocolFixtureTests here).
 //
-//  Protocol (one JSON object per line) — mirror of
-//  ``jaeger_os/interfaces/bridge.py``:
-//
-//    bridge → us (stdout):
-//      {"type":"ready","instance":<str>,"model":<str?>}
-//      {"type":"state","busy":<bool>}
-//      {"type":"reply","text":<str>,"error":<str?>}
-//      {"type":"fatal","error":<str>}
-//    us → bridge (stdin):
-//      {"text":<str>}      one turn
-//      {"op":"quit"}       graceful stop
+//  Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md):
+//   * FAST READY — ``ready`` arrives before the model boots (transport
+//     usable immediately); ``agent_state`` frames stream booting→ready.
+//   * NO HANGS — every await has a timeout; termination resumes every
+//     pending continuation with a typed failure and clears pipe handlers.
+//   * CLEAN-EXIT — the Python side emits ``bye`` before exiting (its exit
+//     code is unreliable — ggml Metal teardown), so "bye seen" is the
+//     orderly-shutdown signal and anything else is a crash.
 //
 
 import Foundation
 
-/// Ready handshake — what the bridge reports once the model is loaded.
+/// Ready handshake — the TRANSPORT is up. ``agent`` says whether the model
+/// is already warm ("ready") or still coming up ("booting" → watch
+/// ``onAgentState``).
 struct BridgeReady: Sendable {
     let instance: String
     let model: String?
     let character: String?   // active character's display name
     let icon: String?        // absolute path to its profile image
+    let proto: String        // protocol version the bridge speaks
+    let capabilities: [String]
+    let agent: String        // "ready" | "booting"
+}
+
+/// Agent lifecycle, decoupled from transport readiness.
+enum AgentLifecycle: Sendable, Equatable {
+    case booting
+    case ready(model: String?, character: String?, icon: String?)
+    case failed(String)
+}
+
+/// A permission/clarify request the agent raised mid-turn. Answer with
+/// ``BridgeProcess.respond(id:answer:)``.
+struct BridgeRequest: Sendable {
+    let id: String
+    let kind: String        // approval | clarify | secret
+    let prompt: String
+    let options: [String]
 }
 
 enum BridgeError: Error, LocalizedError {
     case launchFailed(String)
     case bootFailed(String)
+    case locked(String)         // another process holds the instance lock
     case notRunning
+    case timeout(String)
+    case terminated(String)     // child died (no ``bye`` = crash)
 
     var errorDescription: String? {
         switch self {
         case .launchFailed(let m): return "couldn't launch jaeger bridge: \(m)"
         case .bootFailed(let m): return m
+        case .locked(let m): return "instance already running: \(m)"
         case .notRunning: return "agent bridge not running"
+        case .timeout(let m): return "bridge timed out: \(m)"
+        case .terminated(let m): return "bridge exited: \(m)"
         }
     }
 }
 
-/// Owns the child process + NDJSON framing. One pending turn at a time
-/// (the UI disables send while a turn is in flight), so a single reply
-/// continuation is sufficient.
 /// Reply to a query/command. ``json`` is the serialized ``data`` payload —
 /// decode it into a typed struct with ``JSONDecoder``.
 struct QueryResult: Sendable {
@@ -56,11 +77,21 @@ struct QueryResult: Sendable {
     let json: Data?
 }
 
+/// Owns the child process + NDJSON framing. One pending turn at a time
+/// (the UI disables send while a turn is in flight).
 actor BridgeProcess {
+
+    // Timeouts. ``ready`` is fast now (no model boot ahead of it) so a
+    // short fuse catches a wedged child instead of hanging the splash.
+    static let readyTimeout: Duration = .seconds(20)
+    static let requestTimeout: Duration = .seconds(15)
+    static let turnTimeout: Duration = .seconds(600)   // model turns are slow
 
     private var process: Process?
     private var stdin: FileHandle?
+    private var stdout: FileHandle?
     private let framer = FrameStream()
+    private var sawBye = false
 
     private var readyCont: CheckedContinuation<BridgeReady, Error>?
     private var replyCont: CheckedContinuation<(text: String, error: String?), Never>?
@@ -68,6 +99,24 @@ actor BridgeProcess {
     // Correlated query/command requests (id → waiter).
     private var reqCounter = 0
     private var resultConts: [String: CheckedContinuation<QueryResult, Never>] = [:]
+
+    // MARK: - Callbacks (set by AgentBridge)
+
+    var onState: (@Sendable (Bool) -> Void)?
+    var onTool: (@Sendable (String, String, Double) -> Void)?
+    var onAgentState: (@Sendable (AgentLifecycle) -> Void)?
+    var onRequest: (@Sendable (BridgeRequest) -> Void)?
+    /// Fired once when the child exits. ``clean`` = a ``bye`` frame was
+    /// seen (orderly); false = crash/kill.
+    var onTermination: (@Sendable (_ clean: Bool) -> Void)?
+
+    func setOnState(_ cb: @escaping @Sendable (Bool) -> Void) { onState = cb }
+    func setOnTool(_ cb: @escaping @Sendable (String, String, Double) -> Void) { onTool = cb }
+    func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
+    func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
+    func setOnTermination(_ cb: @escaping @Sendable (Bool) -> Void) { onTermination = cb }
+
+    // MARK: - Queries / commands
 
     /// Ask the bridge for read-only data (characters, config, permissions).
     func query(_ what: String, args: [String: any Sendable] = [:]) async -> QueryResult {
@@ -84,12 +133,16 @@ actor BridgeProcess {
         let id = "r\(reqCounter)"
         var obj = base
         obj["id"] = id
+        guard let stdin,
+              let data = try? JSONSerialization.data(withJSONObject: obj) else {
+            return QueryResult(ok: false, error: "bridge not running", json: nil)
+        }
+        let timeout = Task {
+            try? await Task.sleep(for: Self.requestTimeout)
+            await self.expireRequest(id)
+        }
+        defer { timeout.cancel() }
         return await withCheckedContinuation { cont in
-            guard let stdin,
-                  let data = try? JSONSerialization.data(withJSONObject: obj) else {
-                cont.resume(returning: QueryResult(ok: false, error: "bridge not running", json: nil))
-                return
-            }
             resultConts[id] = cont
             var line = data
             line.append(0x0A)
@@ -97,18 +150,18 @@ actor BridgeProcess {
         }
     }
 
-    /// Called on every ``state`` frame (true = turn started, false = idle).
-    /// Set by the facade to drive the thinking chip. Runs on the actor.
-    var onState: (@Sendable (Bool) -> Void)?
-
-    /// Called on every ``tool`` frame (name, phase ∈ start|done|error,
-    /// elapsed). Drives the inline tool chips.
-    var onTool: (@Sendable (String, String, Double) -> Void)?
-
-    func setOnState(_ cb: @escaping @Sendable (Bool) -> Void) { onState = cb }
-    func setOnTool(_ cb: @escaping @Sendable (String, String, Double) -> Void) {
-        onTool = cb
+    private func expireRequest(_ id: String) {
+        resultConts.removeValue(forKey: id)?
+            .resume(returning: QueryResult(ok: false,
+                                           error: "bridge timed out", json: nil))
     }
+
+    /// Answer a pending ``request`` frame (permission approval etc.).
+    func respond(id: String, answer: String) {
+        write(["op": "respond", "id": id, "answer": answer])
+    }
+
+    // MARK: - Lifecycle
 
     /// Resolve the ``jaeger`` launcher. ``$JAEGER_BRIDGE_CMD`` overrides
     /// outright; else ``$JAEGER_REPO/jaeger``; else a dev-tree default.
@@ -121,6 +174,8 @@ actor BridgeProcess {
     }
 
     /// Launch the bridge and await its ``ready`` frame (or ``fatal``).
+    /// FAST: ready means the transport is up, not that the model is loaded
+    /// — watch ``onAgentState`` for booting → ready.
     func start() async throws -> BridgeReady {
         guard process == nil else { throw BridgeError.launchFailed("already running") }
 
@@ -153,49 +208,87 @@ actor BridgeProcess {
         do {
             try proc.run()
         } catch {
+            outPipe.fileHandleForReading.readabilityHandler = nil
             throw BridgeError.launchFailed(error.localizedDescription)
         }
         self.process = proc
         self.stdin = inPipe.fileHandleForWriting
+        self.stdout = outPipe.fileHandleForReading
 
+        let timeout = Task {
+            try? await Task.sleep(for: Self.readyTimeout)
+            await self.expireReady()
+        }
+        defer { timeout.cancel() }
         return try await withCheckedThrowingContinuation { cont in
             self.readyCont = cont
         }
     }
 
-    /// Send one turn and await the agent's reply.
-    func runTurn(_ text: String) async -> (text: String, error: String?) {
+    private func expireReady() {
+        readyCont?.resume(throwing: BridgeError.timeout("no ready frame"))
+        readyCont = nil
+    }
+
+    /// Send one turn and await the agent's reply. ``session`` keeps each
+    /// window/conversation isolated on the Python side (sessions.db).
+    func runTurn(_ text: String, session: String = "desktop-app")
+        async -> (text: String, error: String?)
+    {
         guard process != nil else { return ("", "agent bridge not running") }
-        write(["text": text])
+        write(["op": "send", "text": text, "session": session])
+        let timeout = Task {
+            try? await Task.sleep(for: Self.turnTimeout)
+            await self.expireTurn()
+        }
+        defer { timeout.cancel() }
         return await withCheckedContinuation { cont in
             self.replyCont = cont
         }
     }
 
+    private func expireTurn() {
+        replyCont?.resume(returning: ("", "turn timed out"))
+        replyCont = nil
+    }
+
     func stop() {
         write(["op": "quit"])
+        stdout?.readabilityHandler = nil
         process?.terminate()
+        drainAll(reason: "bridge stopped")
         process = nil
         stdin = nil
-        readyCont?.resume(throwing: BridgeError.notRunning)
-        readyCont = nil
-        replyCont?.resume(returning: ("", "bridge stopped"))
-        replyCont = nil
+        stdout = nil
     }
 
     // MARK: - internals
 
+    /// Resume EVERY pending continuation — nothing may hang past the
+    /// child's death (the review's headline finding).
+    private func drainAll(reason: String) {
+        readyCont?.resume(throwing: BridgeError.terminated(reason))
+        readyCont = nil
+        replyCont?.resume(returning: ("", reason))
+        replyCont = nil
+        for (_, cont) in resultConts {
+            cont.resume(returning: QueryResult(ok: false, error: reason, json: nil))
+        }
+        resultConts.removeAll()
+    }
+
     private func ingest(_ data: Data) {
         for frame in framer.feed(data) {
-            guard let f = Self.parse(frame) else { continue }
+            guard let f = ProtocolFrame.decode(frame) else { continue }
             switch f {
-            case .ready(let instance, let model, let character, let icon):
-                readyCont?.resume(returning: BridgeReady(
-                    instance: instance, model: model, character: character, icon: icon))
+            case .ready(let r):
+                readyCont?.resume(returning: r)
                 readyCont = nil
+            case .agentState(let s):
+                onAgentState?(s)
             case .result(let id, let ok, let error, let data):
-                resultConts[id]?.resume(returning: QueryResult(ok: ok, error: error, json: data))
-                resultConts[id] = nil
+                resultConts.removeValue(forKey: id)?
+                    .resume(returning: QueryResult(ok: ok, error: error, json: data))
             case .state(let busy):
                 onState?(busy)
             case .tool(let name, let phase, let elapsed):
@@ -203,22 +296,30 @@ actor BridgeProcess {
             case .reply(let text, let error):
                 replyCont?.resume(returning: (text, error))
                 replyCont = nil
-            case .fatal(let error):
-                readyCont?.resume(throwing: BridgeError.bootFailed(error))
+            case .request(let r):
+                onRequest?(r)
+            case .fatal(let error, let kind):
+                let err: BridgeError = kind == "locked"
+                    ? .locked(error) : .bootFailed(error)
+                readyCont?.resume(throwing: err)
                 readyCont = nil
+                onAgentState?(.failed(error))
                 replyCont?.resume(returning: ("", error))
                 replyCont = nil
+            case .bye:
+                sawBye = true
             }
         }
     }
 
     private func handleTermination() {
-        readyCont?.resume(throwing: BridgeError.bootFailed("bridge exited"))
-        readyCont = nil
-        replyCont?.resume(returning: ("", "bridge exited"))
-        replyCont = nil
+        stdout?.readabilityHandler = nil
+        let clean = sawBye
+        drainAll(reason: clean ? "bridge shut down" : "bridge crashed")
         process = nil
         stdin = nil
+        stdout = nil
+        onTermination?(clean)
     }
 
     private func write(_ obj: [String: Any]) {
@@ -227,50 +328,5 @@ actor BridgeProcess {
         else { return }
         data.append(0x0A)
         try? stdin.write(contentsOf: data)
-    }
-
-    private enum Frame {
-        case ready(instance: String, model: String?, character: String?, icon: String?)
-        case result(id: String, ok: Bool, error: String?, data: Data?)
-        case state(busy: Bool)
-        case tool(name: String, phase: String, elapsed: Double)
-        case reply(text: String, error: String?)
-        case fatal(error: String)
-    }
-
-    private static func parse(_ frame: Data) -> Frame? {
-        guard let obj = (try? JSONSerialization.jsonObject(with: frame))
-                as? [String: Any],
-              let type = obj["type"] as? String
-        else { return nil }
-        switch type {
-        case "ready":
-            return .ready(instance: obj["instance"] as? String ?? "",
-                          model: obj["model"] as? String,
-                          character: obj["character"] as? String,
-                          icon: obj["icon"] as? String)
-        case "result":
-            var payload: Data? = nil
-            if let d = obj["data"], !(d is NSNull) {
-                payload = try? JSONSerialization.data(withJSONObject: d,
-                                                      options: [.fragmentsAllowed])
-            }
-            return .result(id: obj["id"] as? String ?? "",
-                           ok: obj["ok"] as? Bool ?? true,
-                           error: obj["error"] as? String, data: payload)
-        case "state":
-            return .state(busy: obj["busy"] as? Bool ?? false)
-        case "tool":
-            return .tool(name: obj["name"] as? String ?? "",
-                         phase: obj["phase"] as? String ?? "start",
-                         elapsed: (obj["elapsed_s"] as? Double) ?? 0)
-        case "reply":
-            return .reply(text: obj["text"] as? String ?? "",
-                          error: obj["error"] as? String)
-        case "fatal":
-            return .fatal(error: obj["error"] as? String ?? "bridge failed")
-        default:
-            return nil
-        }
     }
 }

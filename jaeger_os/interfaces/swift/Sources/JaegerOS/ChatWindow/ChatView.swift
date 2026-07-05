@@ -270,8 +270,10 @@ struct ChatView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Term.inkDim.opacity(0.7))
                 }
-                if agent.status?.isBooting == true {
-                    Text("· booting…")
+                if agent.isAgentBooting {
+                    // Real signal now: the fast handshake connects before
+                    // the model loads; agent_state streams the transition.
+                    Text("· warming up…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Term.inkDim.opacity(0.7))
                 }

@@ -60,3 +60,91 @@ final class FrameStream {
         return frames
     }
 }
+
+// MARK: - Protocol v1 typed frames
+
+/// The protocol version this shell speaks. Compared against the ``proto``
+/// field in ``ready`` — a mismatch is surfaced, never silently degraded.
+enum ProtocolV1 {
+    static let version = "1"
+}
+
+/// Every agent→client frame, decoded strictly by its ``type`` discriminator.
+/// THE typed mirror of ``jaeger_os/interfaces/protocol.py`` — shapes are
+/// pinned by ProtocolFixtureTests against ``protocol_v1_fixtures.json``,
+/// the same fixture file the Python side asserts its builders against.
+/// An unknown ``type`` decodes to nil (forward-compatible: new frames from
+/// a newer core are skipped, not fatal).
+enum ProtocolFrame {
+    case ready(BridgeReady)
+    case agentState(AgentLifecycle)
+    case state(busy: Bool)
+    case tool(name: String, phase: String, elapsed: Double)
+    case reply(text: String, error: String?)
+    case result(id: String, ok: Bool, error: String?, data: Data?)
+    case request(BridgeRequest)
+    case fatal(error: String, kind: String)
+    case bye
+
+    static func decode(_ frame: Data) -> ProtocolFrame? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: frame))
+                as? [String: Any],
+              let type = obj["type"] as? String
+        else { return nil }
+        switch type {
+        case "ready":
+            return .ready(BridgeReady(
+                instance: obj["instance"] as? String ?? "",
+                model: obj["model"] as? String,
+                character: obj["character"] as? String,
+                icon: obj["icon"] as? String,
+                proto: obj["proto"] as? String ?? "0",
+                capabilities: obj["capabilities"] as? [String] ?? [],
+                agent: obj["agent"] as? String ?? "ready"))
+        case "agent_state":
+            switch obj["state"] as? String ?? "" {
+            case "booting":
+                return .agentState(.booting)
+            case "ready":
+                return .agentState(.ready(model: obj["model"] as? String,
+                                          character: obj["character"] as? String,
+                                          icon: obj["icon"] as? String))
+            case "failed":
+                return .agentState(.failed(obj["error"] as? String ?? "agent failed"))
+            default:
+                return nil
+            }
+        case "state":
+            return .state(busy: obj["busy"] as? Bool ?? false)
+        case "tool":
+            return .tool(name: obj["name"] as? String ?? "",
+                         phase: obj["phase"] as? String ?? "start",
+                         elapsed: (obj["elapsed_s"] as? Double) ?? 0)
+        case "reply":
+            return .reply(text: obj["text"] as? String ?? "",
+                          error: obj["error"] as? String)
+        case "result":
+            var payload: Data? = nil
+            if let d = obj["data"], !(d is NSNull) {
+                payload = try? JSONSerialization.data(withJSONObject: d,
+                                                      options: [.fragmentsAllowed])
+            }
+            return .result(id: obj["id"] as? String ?? "",
+                           ok: obj["ok"] as? Bool ?? true,
+                           error: obj["error"] as? String, data: payload)
+        case "request":
+            return .request(BridgeRequest(
+                id: obj["id"] as? String ?? "",
+                kind: obj["kind"] as? String ?? "approval",
+                prompt: obj["prompt"] as? String ?? "",
+                options: obj["options"] as? [String] ?? []))
+        case "fatal":
+            return .fatal(error: obj["error"] as? String ?? "bridge failed",
+                          kind: obj["kind"] as? String ?? "boot")
+        case "bye":
+            return .bye
+        default:
+            return nil
+        }
+    }
+}
