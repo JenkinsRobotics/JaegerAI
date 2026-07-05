@@ -184,6 +184,10 @@ def _run_single(args: argparse.Namespace) -> int:
     cap = _QUICK_LIMIT if args.quick else (args.limit if args.limit > 0 else None)
 
     print("=== Booting JROS pipeline ===", flush=True)
+    # Neutral identity from BOOT so the prewarmed first-turn prefix matches
+    # the prompt run_bench's _neutral_identity_guard rebuilds (same flag →
+    # identical string). Process-scoped; dies with this CLI run.
+    os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
     boot_started = time.perf_counter()
     with _prepared_config(model_path=None, force_allow=not args.no_force_allow):
         from jaeger_os.main import boot_for_tui

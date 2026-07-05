@@ -630,7 +630,45 @@ def run_bench(
                 with contextlib.suppress(Exception):
                     mod.set_memory_source(prev)
 
-    with snapshot_ctx, _memory_source_guard(_mem, _prev_source):
+    @contextlib.contextmanager
+    def _neutral_identity_guard() -> Iterator[None]:
+        """Bench turns run under a NEUTRAL identity: the plain identity.yaml
+        name, never the active character's. The bench measures the engine,
+        not the costume — a character name in the worker prompt tints
+        free-text answers (free_text_story wrote its story about HAL 9000)
+        and answer_contains checks false-negative on the styled output.
+
+        The prompt fragment reads ``JAEGER_BENCH_NEUTRAL_IDENTITY``; the
+        pipeline's system prompt was assembled at boot, so it is rebuilt
+        here under the flag and restored after — same try/finally shape as
+        the memory-source guard above. Live behavior is untouched."""
+        prev_env = os.environ.get("JAEGER_BENCH_NEUTRAL_IDENTITY")
+        os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
+        prev_prompt: str | None = None
+        pipeline: Any = None
+        try:
+            from jaeger_os.agent.prompts.prompts import build_system_prompt
+            from jaeger_os.main import _pipeline
+            layout = _pipeline.get("layout")
+            if layout is not None:
+                prev_prompt = _pipeline.get("system_prompt")
+                _pipeline["system_prompt"] = build_system_prompt(layout)
+                pipeline = _pipeline
+        except Exception:  # noqa: BLE001 — raw fixtures have no pipeline
+            pass
+        try:
+            yield
+        finally:
+            if prev_env is None:
+                os.environ.pop("JAEGER_BENCH_NEUTRAL_IDENTITY", None)
+            else:
+                os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = prev_env
+            if pipeline is not None and prev_prompt is not None:
+                with contextlib.suppress(Exception):
+                    pipeline["system_prompt"] = prev_prompt
+
+    with snapshot_ctx, _memory_source_guard(_mem, _prev_source), \
+            _neutral_identity_guard():
         for idx, case in enumerate(selected):
             session_key = case.session or f"bench_{case.id}"
             tools, answer, elapsed, error, ptok, ctok, meta = _drive_one(
