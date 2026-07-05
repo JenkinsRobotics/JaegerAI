@@ -173,16 +173,13 @@ private struct SplashWindowView: View {
                 HStack(spacing: 14) {
                     JaegerMechIcon(size: 46)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("JAEGER OS")
-                            .font(.system(size: 13, weight: .semibold))
+                        Text("REAL-WORLD LOCAL AGENTIC AGENT FRAMEWORK")
+                            .font(.system(size: 11, weight: .semibold))
+                            .kerning(1.4)
                             .foregroundStyle(Color.white.opacity(0.65))
-                        // One quip per launch — robots deserve a
-                        // sense of humor about their own boot process.
-                        Text(SplashQuips.pick)
-                            .font(.system(size: 19, weight: .heavy))
+                        Text("JAEGER OS")
+                            .font(.system(size: 36, weight: .heavy))
                             .foregroundStyle(.white)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Text(model.headline)
@@ -196,6 +193,19 @@ private struct SplashWindowView: View {
                     .progressViewStyle(.linear)
                     .tint(Color(red: 0.35, green: 0.95, blue: 0.70))
                     .frame(width: 310)
+                // The fun line: robot humor rotating along the bottom
+                // while the boot grinds — a new quip every few seconds
+                // (frozen once the system is online).
+                TimelineView(.periodic(from: .now, by: 4)) { context in
+                    let idx = Int(context.date.timeIntervalSinceReferenceDate / 4)
+                        % SplashQuips.all.count
+                    Text(model.progress >= 1.0 ? "All systems nominal."
+                                               : SplashQuips.all[idx])
+                        .font(.system(size: 11, weight: .medium).italic())
+                        .foregroundStyle(Color.white.opacity(0.45))
+                        .lineLimit(1)
+                        .animation(.easeInOut(duration: 0.4), value: idx)
+                }
             }
 
             Spacer(minLength: 20)
