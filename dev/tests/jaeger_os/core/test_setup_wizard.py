@@ -203,13 +203,15 @@ def test_wizard_writes_ctx_32k_for_new_instances(monkeypatch, tmp_path):
 
     # Canned answers walk: name, role, personality, voice idx, model idx,
     # perm idx, interaction idx, confirm y. Warm-up no longer prompts —
-    # every system warms unconditionally now.
+    # every system warms unconditionally now. Prompts past the canned
+    # list (and any non-numeric answer a choice prompt rejects) fall
+    # through to "" = accept-the-default.
     answers = iter([
         "Jarvis", "general-purpose", "Helpful and concise.",
         "1",    # voice = michael
         "1",    # model registry index 1 (any registered key)
         "1",    # permissions = confirm
-        "1",    # interaction = tui
+        "1",    # interaction (index 1 = gui, the desktop-app default)
         "y",    # confirm create
     ])
 
@@ -226,8 +228,9 @@ def test_wizard_writes_ctx_32k_for_new_instances(monkeypatch, tmp_path):
     layout = W.run_wizard()
     cfg_text = layout.config_path.read_text(encoding="utf-8")
     assert "ctx: 32768" in cfg_text
-    # And the new interaction key landed too.
-    assert "default_mode: tui" in cfg_text
+    # And the interaction key landed — 0.6 Swift-first: the desktop app
+    # ("gui") is the wizard's recommended default surface.
+    assert "default_mode: gui" in cfg_text
 
 
 # ── WIZ-1 (legacy): the ``--setup`` flag was removed in 0.2.0 ───────

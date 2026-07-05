@@ -24,11 +24,6 @@ from jaeger_os.core.instance.instance import (
     default_instance_name,
     resolve_instance_dir,
 )
-from jaeger_os.core.instance.personas import (
-    Persona,
-    list_personas,
-)
-from jaeger_os.core.models.model_resolver import DEFAULT_MODEL, MODEL_REGISTRY
 from jaeger_os.core.instance.schemas import (
     SCHEMA_VERSION,
     Config,
@@ -98,44 +93,6 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
         print(f"     (pick 1-{len(options)})")
-
-
-def _pick_persona() -> Persona | None:
-    """Offer the operator a starter persona before Step 1.
-
-    Personas are wizard-time templates only (see
-    ``jaeger_os/personas/README.md``).  A picked persona supplies
-    DEFAULTS for the identity questions; the operator can still type
-    over any of them, so picking one never traps you into a shape.
-
-    Returns the chosen ``Persona`` or ``None`` if the operator
-    declined / no personas are installed.  Never raises — a broken
-    persona file is skipped by ``list_personas`` upstream.
-    """
-    available = list_personas()
-    if not available:
-        return None
-    print()
-    print("  Start from a persona template?  Optional — the picked")
-    print("  values become defaults for the next step; you can still")
-    print("  edit any of them.  (Character levels + skill bundles")
-    print("  come later on the Lilith-AI line.)")
-    options: list[tuple[str, str]] = [("none", "Skip — define identity manually")]
-    for p in available:
-        # Keep the label tight so the wizard's choice list stays on
-        # one line per option.
-        label = f"{p.name} — {p.description}"
-        if len(label) > 80:
-            label = label[:77] + "…"
-        options.append((p.id, label))
-    chosen = _ask_choice("Persona", options, default=0)
-    if chosen == "none":
-        return None
-    for p in available:
-        if p.id == chosen:
-            print(f"  ✓ prefilling from persona: {p.name}")
-            return p
-    return None
 
 
 def _pick_character():
@@ -422,17 +379,11 @@ def run_wizard(
             sys.exit(0)
         backup_instance_dir(layout)
 
-    # ── Optional · Persona prefill (0.3.0 framework) ───────────────
-    # Personas are wizard-time templates only — they prefill the
-    # Step 1 defaults so an operator who's happy with a canonical
-    # shape can press Enter through identity instead of typing it
-    # out.  Zero runtime impact: after the wizard finishes, the
-    # instance directory just has the resulting identity.yaml +
-    # soul.md.  The full character-level / skill-bundle / tool-gate
-    # system is deferred to the Lilith-AI line — see
-    # ``jaeger_os/personas/README.md``.
+    # ── Character pick ──────────────────────────────────────────────
+    # Characters ARE the persona (0.5): the pick prefills Step 1's
+    # identity defaults and binds the instance to the character at the
+    # end. (The 0.3 persona-template path was retired with it.)
     char_id, p_id = _pick_character()
-    persona = None  # characters replace the wizard's persona-template path
 
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
@@ -605,8 +556,8 @@ def run_wizard(
     interaction_mode = _ask_choice(
         "Pick a mode",
         [
-            ("tui", "Type — terminal TUI is my default surface  (recommended)"),
-            ("gui", "Floating window — PyQt6 chat bubble"),
+            ("gui", "Desktop app — JaegerOS window + menu-bar tray  (recommended)"),
+            ("tui", "Terminal — text TUI (`jaeger --tui`)"),
             ("voice", "Voice — always-on mic + spoken responses  (experimental)"),
         ],
         default=0,
@@ -646,10 +597,13 @@ def run_wizard(
             "  Enable always-on voice now (you can flip in config.yaml later)?",
             False,
         )
-    elif interaction_mode == "gui":
+    elif interaction_mode == "tui":
+        # 0.6 Swift-first: a bare ``jaeger`` opens the desktop app when
+        # one is built; the terminal TUI is always one flag away. Say so
+        # here so the choice isn't read as "bare `jaeger` opens the TUI".
         print()
-        print("     ⚠  the PyQt6 GUI is planned for a future release;")
-        print("        for now `jaeger` will fall back to the TUI when invoked.")
+        print("     note: a bare `jaeger` opens the desktop app when it's")
+        print("           installed — run `jaeger --tui` for the terminal.")
 
     # ── Step 5 · Warm-up ────────────────────────────────────────────
     # Vision (Moondream2) is wired in code (core/tools/vision.py) but
@@ -750,16 +704,14 @@ def run_wizard(
         install_method=install_method,
         install_source=_install_source_for(install_method),
     ))
-    # Write soul.md from the persona template (if any) AND / OR the
-    # role-overflow text (if any).  Both sources are optional and
-    # combine cleanly — see ``_initialise_soul_md``.  Short role +
-    # no persona → soul.md stays absent, identical to the
-    # pre-persona behaviour (the agent's ``update_soul`` tool can
-    # write one later if it ever needs to).
+    # Write soul.md when the role overflowed identity.role's cap (the
+    # character's own soul lives in its character sheet, not here).
+    # Short role → soul.md stays absent; the agent's ``update_soul``
+    # tool can write one later if it ever needs to.
     _initialise_soul_md(
         layout.root,
         agent_name,
-        persona_soul=persona.soul_md if persona else None,
+        persona_soul=None,
         role_overflow=role_overflow,
     )
     # INST-4: populate the per-instance HOME jail if the user opted
