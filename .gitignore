@@ -113,3 +113,7 @@ sandbox/
 
 # Chassis runtime: PID slot + child registry
 .run/
+
+# built app bundles (symlink at root, bundles in swift/.build)
+/JaegerOS-dev.app
+/JaegerOS.app

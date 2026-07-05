@@ -201,6 +201,12 @@ codesign --force --sign "$SIGN_IDENTITY" \
 codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
 
+# Keep the dev app VISIBLE at the repo root (gitignored symlink) — the
+# bundle itself lives in swift/.build, which nobody should have to find.
+if [[ "$DEV" == "1" ]]; then
+    ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS-dev.app"
+fi
+
 if [[ "$INSTALL" == "1" ]]; then
     echo "[build-app] installing -> /Applications/$APP_NAME.app"
     rm -rf "/Applications/$APP_NAME.app"
