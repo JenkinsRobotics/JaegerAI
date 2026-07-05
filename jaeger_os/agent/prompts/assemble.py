@@ -116,6 +116,36 @@ def _three_laws(_ctx: FragmentContext) -> str:
 # context (measured: dev/docs/persona_compiler.md). Workers run vanilla; the
 # character's compiled View (Character.character_block()) feeds the filter, which
 # lives in the response path, not prompt assembly.
+#
+# The one exception is the NAME (below): a name is a fact, not a persona, and
+# the output filter's "preserve facts verbatim" rule means it faithfully keeps
+# a WRONG name — so the name has to be right at the source. Before this
+# fragment the prompt carried no name at all; framework_agent.md's "the
+# name/persona above are who you are" pointed at nothing, and "what's your
+# name" answered with the framework line ("Jaeger OS") no matter which
+# character was active.
+
+
+def _identity_name(ctx: FragmentContext) -> str:
+    """The agent's NAME — the active character's, falling back to
+    identity.yaml. Name ONLY: soul/traits/voice stay out of the worker
+    prompt (station 3, dev/docs/agentic_runners.md — the measured ~7-point
+    execution tax); the persona output filter supplies the voice."""
+    name = ""
+    try:
+        from jaeger_os.personality.character import active_character
+        ch = active_character(ctx.layout.root)
+        if ch is not None:
+            name = (ch.name or "").strip()
+    except Exception:  # noqa: BLE001 — a broken sheet never breaks the prompt
+        name = ""
+    if not name:
+        try:
+            from jaeger_os.core.instance.schemas import Identity, load_yaml
+            name = (load_yaml(ctx.layout.identity_path, Identity).name or "").strip()
+        except Exception:  # noqa: BLE001
+            name = ""
+    return f"Your name is {name}." if name else ""
 
 
 # ── the registry: order here IS the prompt order ──────────────────────
@@ -138,6 +168,11 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
         "subagent_context", "instance", "(caller-supplied context)",
         lambda c: f"Context:\n{c.context.strip()}" if c.context else "",
         _subagent_only, "sub-agents, when context is supplied",
+    ),
+    PromptFragment(
+        "identity_name", "instance", "(generated: active character / identity.yaml)",
+        _identity_name, _non_subagent,
+        "the agent's NAME only — persona stays in the output filter",
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",

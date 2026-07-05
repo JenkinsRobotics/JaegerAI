@@ -44,12 +44,17 @@ def test_load_soul_caps_runaway_length(tmp_path) -> None:
 
 
 def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
-    """Workers run vanilla: the active character (default Jarvis) does NOT fold
-    into the worker prompt — persona is applied by the two-pass output filter,
-    not injected into the execution context. See dev/docs/persona_compiler.md."""
+    """Workers run vanilla EXCEPT the name: the active character's NAME is a
+    fact (the output filter preserves facts verbatim, so a wrong name can't be
+    fixed downstream) and flows into the prompt as one line. The persona BLOCK
+    (soul/traits/voice) still stays out — it's applied by the two-pass output
+    filter, never the execution context. See dev/docs/persona_compiler.md."""
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Jarvis" not in sp
-    assert "## My voice —" not in sp
+    assert "Your name is Jarvis." in sp          # name-only fragment
+    assert "## My voice —" not in sp             # compiled persona stays out
+    # No persona prose leaks alongside the name (Jarvis' sheet mentions
+    # neither of these outside the compiled block, so absence is the canary).
+    assert "butler" not in sp.lower()
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:
