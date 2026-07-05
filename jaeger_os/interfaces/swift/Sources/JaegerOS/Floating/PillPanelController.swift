@@ -97,6 +97,13 @@ final class PillPanelController: NSObject {
         // the rounded corner).
         let newPanel = PillPanel()
         newPanel.contentViewController = hosting
+        // Pin the frame RIGHT AFTER the hosting assignment: AppKit derives
+        // the window size from SwiftUI's fitting size asynchronously, so
+        // positioning on first summon could measure a stale width — the
+        // pill then hangs off-center (left edge at midX). Explicit size +
+        // an immediate layout keeps every centre computation truthful.
+        newPanel.setContentSize(NSSize(width: 720, height: 160))
+        newPanel.layoutIfNeeded()
 
         // Auto-dismiss on key-resign — operator clicks back to whatever
         // they were doing → pill goes away.  Mirrors PyQt6
@@ -153,6 +160,7 @@ final class PillPanelController: NSObject {
         }
 
         let visible = screen.visibleFrame
+        panel.layoutIfNeeded()          // never measure a pre-layout frame
         let size = panel.frame.size
 
         // Centre, then clamp inside visibleFrame so a narrow display
