@@ -106,6 +106,10 @@ actor BridgeProcess {
     var onTool: (@Sendable (String, String, Double) -> Void)?
     var onAgentState: (@Sendable (AgentLifecycle) -> Void)?
     var onRequest: (@Sendable (BridgeRequest) -> Void)?
+    /// Fired for every ``fatal`` frame with its ``kind`` — the transport
+    /// may STAY alive after one (kind ``no_instance``: first-run, the
+    /// bridge keeps serving queries so onboarding can run over it).
+    var onFatal: (@Sendable (_ kind: String, _ error: String) -> Void)?
     /// Fired once when the child exits. ``clean`` = a ``bye`` frame was
     /// seen (orderly); false = crash/kill.
     var onTermination: (@Sendable (_ clean: Bool) -> Void)?
@@ -114,6 +118,7 @@ actor BridgeProcess {
     func setOnTool(_ cb: @escaping @Sendable (String, String, Double) -> Void) { onTool = cb }
     func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
     func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
+    func setOnFatal(_ cb: @escaping @Sendable (String, String) -> Void) { onFatal = cb }
     func setOnTermination(_ cb: @escaping @Sendable (Bool) -> Void) { onTermination = cb }
 
     // MARK: - Queries / commands
@@ -339,6 +344,7 @@ actor BridgeProcess {
                     ? .locked(error) : .bootFailed(error)
                 readyCont?.resume(throwing: err)
                 readyCont = nil
+                onFatal?(kind, error)
                 onAgentState?(.failed(error))
                 replyCont?.resume(returning: ("", error))
                 replyCont = nil
