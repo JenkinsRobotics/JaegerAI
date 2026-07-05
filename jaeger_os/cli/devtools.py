@@ -842,11 +842,6 @@ def main() -> int:
                         help="open the Dev Launcher — a floating window to open "
                              "every Qt surface (Studio, Chat, Avatar, Gallery, "
                              "Media, Settings, Pill) for GUI evaluation")
-    # 0.4 node infrastructure entry points (Track A + B).
-    parser.add_argument("--node-test", action="store_true",
-                        help="run the 0.4 Track A verification gate "
-                             "(echo-node round-trip in monolithic mode "
-                             "by default) and exit")
     parser.add_argument("--tts-test", action="store_true",
                         help="run the 0.4 Track B.1 TTS node integration "
                              "gate (loads real Kokoro + speaks a test "
@@ -886,21 +881,13 @@ def main() -> int:
         return cmd_update()
     if args.dev_gui:
         return cmd_dev_gui(env)
-    if args.node_test:
-        # 0.4 Track A verification gate.  Delegates to the standalone
-        # script so the test logic + child-subprocess pattern stay
-        # together — launch.py shouldn't grow node-orchestration code
-        # that belongs in dev_scripts/.
-        import subprocess as _sp
-        node_test_path = _REPO_ROOT / "dev_scripts" / "node_verification.py"
-        return _sp.call([_sys.executable, str(node_test_path)])
     if args.tts_test or args.tts_boot_test:
         # 0.4 Track B.1 TTS node integration gate.  --tts-test speaks
         # audibly through the speakers (operator audio gate);
         # --tts-boot-test loads Kokoro + checks node lifecycle without
         # audio output (safe for headless / autonomous runs).
         import subprocess as _sp
-        tts_test_path = _REPO_ROOT / "dev_scripts" / "tts_node_test.py"
+        tts_test_path = _REPO_ROOT / "dev" / "scripts" / "tts_node_test.py"
         cmd = [_sys.executable, str(tts_test_path)]
         if args.tts_boot_test:
             cmd.append("--boot-only")
