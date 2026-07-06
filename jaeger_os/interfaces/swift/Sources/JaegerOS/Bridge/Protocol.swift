@@ -80,7 +80,10 @@ enum ProtocolFrame {
     case agentState(AgentLifecycle)
     case state(busy: Bool)
     case tool(name: String, phase: String, elapsed: Double)
-    case reply(text: String, error: String?)
+    /// ``telemetry`` fields are v1 ADDITIVE optionals — a core that
+    /// doesn't send them (or an older fixture) decodes to nils.
+    case reply(text: String, error: String?,
+               elapsedS: Double?, ctxUsed: Int?, ctxMax: Int?)
     case result(id: String, ok: Bool, error: String?, data: Data?)
     case request(BridgeRequest)
     case fatal(error: String, kind: String)
@@ -122,7 +125,10 @@ enum ProtocolFrame {
                          elapsed: (obj["elapsed_s"] as? Double) ?? 0)
         case "reply":
             return .reply(text: obj["text"] as? String ?? "",
-                          error: obj["error"] as? String)
+                          error: obj["error"] as? String,
+                          elapsedS: (obj["elapsed_s"] as? NSNumber)?.doubleValue,
+                          ctxUsed: (obj["ctx_used"] as? NSNumber)?.intValue,
+                          ctxMax: (obj["ctx_max"] as? NSNumber)?.intValue)
         case "result":
             var payload: Data? = nil
             if let d = obj["data"], !(d is NSNull) {

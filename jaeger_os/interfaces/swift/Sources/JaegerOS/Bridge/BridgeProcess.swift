@@ -77,6 +77,16 @@ struct QueryResult: Sendable {
     let json: Data?
 }
 
+/// One finished chat turn. The telemetry trio is v1 ADDITIVE — nil when
+/// the core didn't send it (older core, error paths, slash replies).
+struct TurnResult: Sendable {
+    let text: String
+    let error: String?
+    var elapsedS: Double? = nil   // wall-clock turn time ("replied in 3s")
+    var ctxUsed: Int? = nil       // estimated prompt tokens in the session
+    var ctxMax: Int? = nil        // the loaded model's context window
+}
+
 /// Owns the child process + NDJSON framing. One pending turn at a time
 /// (the UI disables send while a turn is in flight).
 actor BridgeProcess {
@@ -94,7 +104,7 @@ actor BridgeProcess {
     private var sawBye = false
 
     private var readyCont: CheckedContinuation<BridgeReady, Error>?
-    private var replyCont: CheckedContinuation<(text: String, error: String?), Never>?
+    private var replyCont: CheckedContinuation<TurnResult, Never>?
 
     // Correlated query/command requests (id → waiter).
     private var reqCounter = 0
@@ -253,9 +263,11 @@ actor BridgeProcess {
     /// Send one turn and await the agent's reply. ``session`` keeps each
     /// window/conversation isolated on the Python side (sessions.db).
     func runTurn(_ text: String, session: String = "desktop-app")
-        async -> (text: String, error: String?)
+        async -> TurnResult
     {
-        guard process != nil else { return ("", "agent bridge not running") }
+        guard process != nil else {
+            return TurnResult(text: "", error: "agent bridge not running")
+        }
         write(["op": "send", "text": text, "session": session])
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
@@ -268,7 +280,7 @@ actor BridgeProcess {
     }
 
     private func expireTurn() {
-        replyCont?.resume(returning: ("", "turn timed out"))
+        replyCont?.resume(returning: TurnResult(text: "", error: "turn timed out"))
         replyCont = nil
     }
 
@@ -310,7 +322,7 @@ actor BridgeProcess {
     private func drainAll(reason: String) {
         readyCont?.resume(throwing: BridgeError.terminated(reason))
         readyCont = nil
-        replyCont?.resume(returning: ("", reason))
+        replyCont?.resume(returning: TurnResult(text: "", error: reason))
         replyCont = nil
         for (_, cont) in resultConts {
             cont.resume(returning: QueryResult(ok: false, error: reason, json: nil))
@@ -334,8 +346,10 @@ actor BridgeProcess {
                 onState?(busy)
             case .tool(let name, let phase, let elapsed):
                 onTool?(name, phase, elapsed)
-            case .reply(let text, let error):
-                replyCont?.resume(returning: (text, error))
+            case .reply(let text, let error, let elapsed, let used, let mx):
+                replyCont?.resume(returning: TurnResult(
+                    text: text, error: error,
+                    elapsedS: elapsed, ctxUsed: used, ctxMax: mx))
                 replyCont = nil
             case .request(let r):
                 onRequest?(r)
@@ -346,7 +360,7 @@ actor BridgeProcess {
                 readyCont = nil
                 onFatal?(kind, error)
                 onAgentState?(.failed(error))
-                replyCont?.resume(returning: ("", error))
+                replyCont?.resume(returning: TurnResult(text: "", error: error))
                 replyCont = nil
             case .bye:
                 sawBye = true

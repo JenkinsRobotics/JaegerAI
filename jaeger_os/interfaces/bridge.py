@@ -412,6 +412,28 @@ def _run_slash(text: str, ctx: "_Ctx") -> str:
     return console.export_text().rstrip() or "(no output)"
 
 
+def _ctx_usage(session: str) -> tuple[int | None, int | None]:
+    """Post-turn context telemetry for the reply frame (v1 additive):
+    ``(used, max)`` tokens, or Nones when unavailable. ``used`` is the live
+    prompt-size estimate for this session (system + history + schemas —
+    the same gauge the TUI status bar shows); ``max`` is the loaded model's
+    context window, falling back to ``config.model.ctx``."""
+    used = mx = None
+    try:
+        from jaeger_os.main import _pipeline, last_ctx_snapshot
+        snap = last_ctx_snapshot(session)
+        if snap:
+            used = int(snap["tokens"])
+        loaded = int(getattr(_pipeline.get("client"), "loaded_ctx", 0) or 0)
+        if loaded <= 0:
+            cfg = _pipeline.get("config")
+            loaded = int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0)
+        mx = loaded or None
+    except Exception:  # noqa: BLE001 — telemetry never breaks a reply
+        pass
+    return used, mx
+
+
 def _turn_worker(proto: TextIO, ctx: _Ctx,
                  turns: "_queue.Queue[dict[str, Any] | None]") -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
@@ -446,8 +468,11 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         try:
             from jaeger_os.main import run_for_voice
             result = run_for_voice(ctx.client, text, session_key=session)
+            used, mx = _ctx_usage(session)
             _emit(proto, protocol.reply_frame(
-                result.get("text") or "", result.get("error"), session))
+                result.get("text") or "", result.get("error"), session,
+                elapsed_s=result.get("elapsed_s"),
+                ctx_used=used, ctx_max=mx))
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(proto, protocol.reply_frame("", str(exc), session))
         finally:
