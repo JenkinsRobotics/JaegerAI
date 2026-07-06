@@ -11,11 +11,12 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Window title tracking the active character — shared by both avatar
-/// surfaces ("<suffix>" ↦ "Jaeger — <character> · <suffix>").
+/// Window title leading with the AGENT's name (identity.yaml; character
+/// fallback while the identity query is in flight) — shared by both avatar
+/// surfaces ("<suffix>" ↦ "Jaeger — <name> · <suffix>").
 @MainActor
 private func characterTitle(_ status: AgentStatus?, suffix: String) -> String {
-    if let character = status?.character { return "Jaeger — \(character) · \(suffix)" }
+    if let name = status?.displayName { return "Jaeger — \(name) · \(suffix)" }
     return "Jaeger — \(suffix)"
 }
 
