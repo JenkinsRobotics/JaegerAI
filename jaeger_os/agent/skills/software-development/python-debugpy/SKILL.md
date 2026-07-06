@@ -5,9 +5,12 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos]
+requires_tools: [terminal, execute_code]
 metadata:
   hermes:
     tags: [debugging, python, pdb, debugpy, breakpoints, dap, post-mortem]
+    related_skills: [systematic-debugging, node-inspect-debugger, debugging-hermes-tui-commands]
+  jros:
     related_skills: [systematic-debugging, node-inspect-debugger, debugging-hermes-tui-commands]
 ---
 

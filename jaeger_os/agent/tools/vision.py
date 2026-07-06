@@ -17,8 +17,10 @@ import threading as _threading
 import time
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 from jaeger_os.core.runtime.tool_interrupt import is_interrupted
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
 # ---------------------------------------------------------------------------
@@ -222,3 +224,38 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
         "elapsed_s": round(elapsed, 3),
         "path": clean_path,
     }
+
+
+# ── Agent-tool wrappers (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="vision_analyze")
+def _t_vision_analyze(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
+    """Look at a workspace image and answer a question about it.
+    Default backbone: Moondream2 (~1.9B VLM, Apache-2.0). image_path is
+    sandbox-resolved under <instance>/skills/. First call lazy-loads
+    the VLM on CPU."""
+    return look_at(image_path=image_path, question=question)
+
+
+@register_tool_from_function(name="image_generate")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="vision",
+               operation="image_generate",
+               summary="generate an image into the skills workspace")
+def _t_image_generate(
+    prompt: str,
+    out_path: str = "generated.png",
+    num_inference_steps: int = 1,
+    guidance_scale: float = 0.0,
+    seed: int | None = None,
+) -> dict:
+    """Generate an image from a text prompt and save under skills/.
+    Default backbone: SDXL-Turbo (1-step). First call downloads ~6 GB
+    of weights; subsequent calls are 1-3s per image. Local + free +
+    offline; for higher quality cloud generation (FLUX, needs FAL_KEY)
+    use generate_image_fal instead."""
+    return generate_image(
+        prompt=prompt, out_path=out_path,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale, seed=seed,
+    )

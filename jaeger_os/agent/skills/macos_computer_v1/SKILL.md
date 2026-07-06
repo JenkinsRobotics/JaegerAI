@@ -12,6 +12,11 @@ registers_tools:
   - computer_do(goal) -> {ok, plan, steps, result}
   - computer_use(action, ...) -> {ok, result}
   - computer_look() -> {ok, app, windows, ax_tree}
+tags: [computer-use, macos, desktop, automation, gui]
+requires_tools: [computer_do, computer_use, computer_look]
+metadata:
+  jros:
+    related_skills: [computer_use, web-app-qa]
 ---
 
 # macos_computer — capability-ladder Mac control

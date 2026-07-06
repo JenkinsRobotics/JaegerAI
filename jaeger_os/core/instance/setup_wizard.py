@@ -24,11 +24,6 @@ from jaeger_os.core.instance.instance import (
     default_instance_name,
     resolve_instance_dir,
 )
-from jaeger_os.core.instance.personas import (
-    Persona,
-    list_personas,
-)
-from jaeger_os.core.models.model_resolver import DEFAULT_MODEL, MODEL_REGISTRY
 from jaeger_os.core.instance.schemas import (
     SCHEMA_VERSION,
     Config,
@@ -100,44 +95,6 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
         print(f"     (pick 1-{len(options)})")
 
 
-def _pick_persona() -> Persona | None:
-    """Offer the operator a starter persona before Step 1.
-
-    Personas are wizard-time templates only (see
-    ``jaeger_os/personas/README.md``).  A picked persona supplies
-    DEFAULTS for the identity questions; the operator can still type
-    over any of them, so picking one never traps you into a shape.
-
-    Returns the chosen ``Persona`` or ``None`` if the operator
-    declined / no personas are installed.  Never raises — a broken
-    persona file is skipped by ``list_personas`` upstream.
-    """
-    available = list_personas()
-    if not available:
-        return None
-    print()
-    print("  Start from a persona template?  Optional — the picked")
-    print("  values become defaults for the next step; you can still")
-    print("  edit any of them.  (Character levels + skill bundles")
-    print("  come later on the Lilith-AI line.)")
-    options: list[tuple[str, str]] = [("none", "Skip — define identity manually")]
-    for p in available:
-        # Keep the label tight so the wizard's choice list stays on
-        # one line per option.
-        label = f"{p.name} — {p.description}"
-        if len(label) > 80:
-            label = label[:77] + "…"
-        options.append((p.id, label))
-    chosen = _ask_choice("Persona", options, default=0)
-    if chosen == "none":
-        return None
-    for p in available:
-        if p.id == chosen:
-            print(f"  ✓ prefilling from persona: {p.name}")
-            return p
-    return None
-
-
 def _pick_character():
     """Pick the CHARACTER this instance plays — characters ARE the persona
     now (jaeger_os/personality/characters/).  Returns ``(id, shim)`` where the
@@ -145,12 +102,31 @@ def _pick_character():
     instance's identity.yaml + active_character both reflect the character.
     The operator picks a character instead of authoring a prompt by hand.
     """
+    rows = _character_rows()
+    print()
+    print("  Pick the character this Jaeger plays — its persona, name and")
+    print("  voice all come from the character (edit later in Studio).")
+    options = [(r[0], f"{r[1]} — {r[2]}"[:78]) for r in rows]
+    default = next((i for i, r in enumerate(rows) if r[0] == "jarvis"), 0)
+    chosen = _ask_choice("Character", options, default=max(0, default))
+    shim = _character_shim(chosen, rows=rows)
+    print(f"  ✓ this Jaeger plays: {shim.display_name}")
+    return chosen, shim
+
+
+def _character_rows() -> list[tuple[str, str, str, str, str]]:
+    """Every installed character as ``(id, name, role, voice_id,
+    voice_tone)`` — the identity fields setup prefills from. Shared by
+    the interactive picker and the non-interactive ``create_instance``
+    (the bridge's onboarding path). A broken sheet is skipped."""
     import yaml
-    from types import SimpleNamespace
     from jaeger_os.personality.character import characters_root
 
-    rows = []
-    for p in sorted(characters_root().iterdir()):
+    rows: list[tuple[str, str, str, str, str]] = []
+    root = characters_root()
+    if not root.is_dir():
+        return rows
+    for p in sorted(root.iterdir()):
         y = p / "character.yaml"
         if not y.exists():
             continue
@@ -161,15 +137,18 @@ def _pick_character():
                          idy.get("voice_id", ""), idy.get("voice_tone", "")))
         except Exception:  # noqa: BLE001 — a broken sheet is just skipped
             continue
-    print()
-    print("  Pick the character this Jaeger plays — its persona, name and")
-    print("  voice all come from the character (edit later in Studio).")
-    options = [(r[0], f"{r[1]} — {r[2]}"[:78]) for r in rows]
-    default = next((i for i, r in enumerate(rows) if r[0] == "jarvis"), 0)
-    chosen = _ask_choice("Character", options, default=max(0, default))
-    r = next(row for row in rows if row[0] == chosen)
-    print(f"  ✓ this Jaeger plays: {r[1]}")
-    return r[0], SimpleNamespace(
+    return rows
+
+
+def _character_shim(char_id: str, rows=None):
+    """The identity-prefill shim for one character id. Raises
+    ``LookupError`` when the id names no installed character."""
+    from types import SimpleNamespace
+    r = next((row for row in (rows or _character_rows())
+              if row[0] == char_id), None)
+    if r is None:
+        raise LookupError(f"unknown character: {char_id!r}")
+    return SimpleNamespace(
         display_name=r[1], role=r[2],
         personality=f"Plays the {r[1]} character.",
         voice_id=r[3], voice_tone=r[4])
@@ -422,17 +401,11 @@ def run_wizard(
             sys.exit(0)
         backup_instance_dir(layout)
 
-    # ── Optional · Persona prefill (0.3.0 framework) ───────────────
-    # Personas are wizard-time templates only — they prefill the
-    # Step 1 defaults so an operator who's happy with a canonical
-    # shape can press Enter through identity instead of typing it
-    # out.  Zero runtime impact: after the wizard finishes, the
-    # instance directory just has the resulting identity.yaml +
-    # soul.md.  The full character-level / skill-bundle / tool-gate
-    # system is deferred to the Lilith-AI line — see
-    # ``jaeger_os/personas/README.md``.
+    # ── Character pick ──────────────────────────────────────────────
+    # Characters ARE the persona (0.5): the pick prefills Step 1's
+    # identity defaults and binds the instance to the character at the
+    # end. (The 0.3 persona-template path was retired with it.)
     char_id, p_id = _pick_character()
-    persona = None  # characters replace the wizard's persona-template path
 
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
@@ -462,9 +435,7 @@ def run_wizard(
     # wasn't given explicitly. Slug → a clean folder name; a collision triggers
     # the same back-up prompt as an explicit name.
     if layout is None:
-        import re as _re
-        name = (_re.sub(r"[^a-z0-9_-]+", "-", agent_name.strip().lower())
-                .strip("-_") or "agent")
+        name = _slug(agent_name)
         layout = InstanceLayout(root=resolve_instance_dir(name))
         print()
         print(f"  → this agent's folder: {layout.root}/")
@@ -496,12 +467,6 @@ def run_wizard(
                 voice_default_idx = i
                 break
     voice_id = _ask_choice("Pick a voice", _VOICES, default=voice_default_idx)
-    identity = Identity(
-        name=agent_name, role=role,
-        personality=personality,
-        voice_tone=(p_id.voice_tone if p_id else "clear, even-keeled"),
-        voice_id=voice_id,
-    )
 
     # ── Step 2 · Model ──────────────────────────────────────────────
     _step(2, "Model")
@@ -605,8 +570,8 @@ def run_wizard(
     interaction_mode = _ask_choice(
         "Pick a mode",
         [
-            ("tui", "Type — terminal TUI is my default surface  (recommended)"),
-            ("gui", "Floating window — PyQt6 chat bubble"),
+            ("gui", "Desktop app — JaegerOS window + menu-bar tray  (recommended)"),
+            ("tui", "Terminal — text TUI (`jaeger --tui`)"),
             ("voice", "Voice — always-on mic + spoken responses  (experimental)"),
         ],
         default=0,
@@ -646,10 +611,13 @@ def run_wizard(
             "  Enable always-on voice now (you can flip in config.yaml later)?",
             False,
         )
-    elif interaction_mode == "gui":
+    elif interaction_mode == "tui":
+        # 0.6 Swift-first: a bare ``jaeger`` opens the desktop app when
+        # one is built; the terminal TUI is always one flag away. Say so
+        # here so the choice isn't read as "bare `jaeger` opens the TUI".
         print()
-        print("     ⚠  the PyQt6 GUI is planned for a future release;")
-        print("        for now `jaeger` will fall back to the TUI when invoked.")
+        print("     note: a bare `jaeger` opens the desktop app when it's")
+        print("           installed — run `jaeger --tui` for the terminal.")
 
     # ── Step 5 · Warm-up ────────────────────────────────────────────
     # Vision (Moondream2) is wired in code (core/tools/vision.py) but
@@ -698,69 +666,24 @@ def run_wizard(
         print("  Setup cancelled. Re-run to start over.")
         sys.exit(0)
 
-    # WIZ-5: ctx default raised 16384 → 32768. The 0.1.0 default plus
-    # the full tool surface guaranteed a ContextOverflow on the first
-    # message (tool schemas alone ate ~14K). 32K is comfortable on
-    # Apple Silicon and matches what the model trained on. See
-    # docs/ROADMAP_0.2.0.md → Group 2.
-    from jaeger_os.core.instance.schemas import DeepThinkConfig, VoiceConfig
-    config = Config(
-        instance_name=name,
-        model=ModelConfig(model_path=model_path, ctx=32768, gpu_layers=-1),
-        display=DisplayConfig(),
-        skills=SkillsConfig(),
-        retention=RetentionConfig(),
-        # 0.2.6: the asleep model is whatever the operator picked in
-        # Step 2's asleep prompt — either the tier recommendation, a
-        # different registry key, a discovered GGUF path, a custom
-        # path, or the same value as ``model_path`` (when "same as
-        # awake" was picked). DeepThinkConfig's default coder_model
-        # is now a fallback for upgrades from older instances.
-        deep_think=DeepThinkConfig(coder_model=asleep_path),
-        warmup=WarmupConfig(tts=warm_tts, stt=warm_stt, vision=warm_vision),
-        permissions=PermissionsConfig(mode=perm_mode),
-        interaction=InteractionConfig(default_mode=interaction_mode),
-        # VOICE-1/2: default OFF unless the user explicitly opted in
-        # during the interaction step. Re-flippable in config.yaml or
-        # via ``/voice on`` in the TUI.
-        voice=VoiceConfig(enabled=voice_enable_choice),
-    )
-    manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION,
-                        bound_character=char_id)
-
-    layout.root.mkdir(parents=True, exist_ok=True)
-    layout.ensure_dirs()
-    dump_yaml(layout.identity_path, identity)
-    dump_yaml(layout.config_path, config)
-    dump_json(layout.manifest_path, manifest)
-    # Characters are the persona — wire the instance to the chosen one so the
-    # running agent plays it (identity / soul / traits / name / voice).
-    from jaeger_os.personality.character import set_active_character
-    set_active_character(layout.root, char_id)
-    # INST-3 (0.2.0): record install provenance per instance.
-    # ``jaeger update`` rewrites ``last_updated_with_framework``;
-    # ``jaeger restore`` rewrites ``install_method`` + adds
-    # ``restored_from``. Idempotent — overwriting is fine.
-    from jaeger_os import __version__ as _jver
-    from jaeger_os.core.instance.instance import detect_install_method
-    install_method = detect_install_method()
-    dump_yaml(layout.distribution_path, DistributionConfig(
-        created_with_framework=_jver,
-        last_updated_with_framework=_jver,
-        install_method=install_method,
-        install_source=_install_source_for(install_method),
-    ))
-    # Write soul.md from the persona template (if any) AND / OR the
-    # role-overflow text (if any).  Both sources are optional and
-    # combine cleanly — see ``_initialise_soul_md``.  Short role +
-    # no persona → soul.md stays absent, identical to the
-    # pre-persona behaviour (the agent's ``update_soul`` tool can
-    # write one later if it ever needs to).
-    _initialise_soul_md(
-        layout.root,
-        agent_name,
-        persona_soul=persona.soul_md if persona else None,
-        role_overflow=role_overflow,
+    # All the writes live in ``create_instance`` — the single
+    # non-interactive core this wizard AND the bridge's onboarding
+    # command drive. The wizard passes the RAW role; truncation +
+    # soul.md overflow happen inside (same ``_truncate_role``, so the
+    # hint printed above matches what lands on disk).
+    layout = create_instance(
+        character_id=char_id,
+        name=name,
+        display_name=agent_name,
+        role=role_raw,
+        personality=personality,
+        voice_id=voice_id,
+        awake_model=model_path,
+        asleep_model=asleep_path,
+        permission_mode=perm_mode,
+        interaction_mode=interaction_mode,
+        voice_enabled=voice_enable_choice,
+        make_default=False,     # asked interactively below
     )
     # INST-4: populate the per-instance HOME jail if the user opted
     # in. Idempotent; safe to re-run.
@@ -772,14 +695,6 @@ def run_wizard(
             git_email=git_email,
             ssh_key_source=ssh_key_source,
         )
-    _git_init(layout.root)
-
-    # WIZ-4: drop a sourceable env file at ``~/.jaeger/jaeger.env`` so
-    # the user can opt into a stable ``JAEGER_INSTANCE_DIR`` without
-    # memorising the path. Silent on multi-instance setups where the
-    # user clearly already knows what they're doing (env var was set
-    # going in).
-    _write_env_file(layout.root, name)
 
     # Make this the default agent a bare `jaeger` runs? Default YES — you set
     # up an agent in order to run it. Writes the sticky active-instance pointer
@@ -866,6 +781,183 @@ def _prepare_and_verify(name: str) -> bool:
                 boot.cleanup()
             except Exception:  # noqa: BLE001
                 pass
+
+
+# ── the non-interactive core (shared with the bridge's onboarding) ──
+
+
+def _slug(display_name: str) -> str:
+    """A clean instance-folder name from an agent display name."""
+    import re
+    return (re.sub(r"[^a-z0-9_-]+", "-", display_name.strip().lower())
+            .strip("-_") or "agent")
+
+
+def setup_defaults() -> dict:
+    """Everything a non-interactive setup surface needs to render its
+    choices — served over the bridge as the ``setup_defaults`` query so
+    the native app's onboarding shows the same recommendations the CLI
+    wizard prints. Read-only; safe pre-instance."""
+    from jaeger_os.core.models.host_recommendation import (
+        classify_tier, detect_total_memory_gb, recommend_for_tier,
+    )
+    from jaeger_os.core.models.local_discovery import (
+        discover_local_gguf_files, match_to_registry,
+    )
+    detected_gb = detect_total_memory_gb()
+    rec = recommend_for_tier(classify_tier(detected_gb))
+    by_key = match_to_registry(discover_local_gguf_files())
+
+    def _pick(entry) -> dict:
+        found = by_key.get(entry.registry_key)
+        return {
+            "key": entry.registry_key,
+            "display_name": entry.display_name,
+            "size_gb": round(float(entry.size_gb), 1),
+            "notes": entry.notes,
+            "found_locally": found is not None,
+            "source": found.source if found is not None else None,
+        }
+
+    rows = _character_rows()
+    return {
+        "host_memory_gb": round(float(detected_gb), 1),
+        "tier_label": rec.tier_label,
+        "tier_description": rec.description,
+        "awake": _pick(rec.awake),
+        "asleep": _pick(rec.asleep),
+        "voices": [{"id": vid, "label": label} for vid, label in _VOICES],
+        "default_character": ("jarvis" if any(r[0] == "jarvis" for r in rows)
+                              else (rows[0][0] if rows else None)),
+        "permission_modes": [
+            {"id": "confirm", "label": "Ask me before each action"},
+            {"id": "allow", "label": "Auto-allow everything"},
+        ],
+    }
+
+
+def create_instance(
+    *,
+    character_id: str,
+    name: str | None = None,
+    display_name: str | None = None,
+    role: str | None = None,
+    personality: str | None = None,
+    voice_id: str | None = None,
+    awake_model: str | None = None,
+    asleep_model: str | None = None,
+    permission_mode: str = "confirm",
+    interaction_mode: str = "gui",
+    voice_enabled: bool = False,
+    make_default: bool = True,
+) -> InstanceLayout:
+    """Create a complete instance non-interactively — THE single write
+    path for first-run setup. ``run_wizard`` collects answers in the
+    terminal and calls this; the bridge's ``create_instance`` command
+    passes the native onboarding's answers straight through. Every
+    unset field falls back exactly like the wizard's Enter-through
+    defaults: identity from the character sheet, models from the host
+    tier recommendation.
+
+    Raises ``LookupError`` for an unknown character and
+    ``FileExistsError`` when the target instance already exists (the
+    caller decides about backups — this function never destroys)."""
+    shim = _character_shim(character_id)
+    display_name = (display_name or "").strip() or shim.display_name
+    role_raw = (role or "").strip() or shim.role
+    role_final, role_overflow = _truncate_role(role_raw)
+    personality = ((personality or "").strip()
+                   or shim.personality)
+    voice_id = (voice_id or "").strip() or shim.voice_id or _VOICES[0][0]
+    name = (name or "").strip() or _slug(display_name)
+
+    layout = InstanceLayout(root=resolve_instance_dir(name))
+    if layout.exists():
+        raise FileExistsError(
+            f"instance {name!r} already exists at {layout.root}")
+
+    # Models: fall back to the host-tier recommendation; when a chosen
+    # registry key already exists on disk (LM Studio, HF cache, …),
+    # symlink it into the in-repo models dir so the resolver finds it
+    # without a Hugging Face round-trip — same as the wizard.
+    from jaeger_os.core.models.host_recommendation import (
+        classify_tier, detect_total_memory_gb, recommend_for_tier,
+    )
+    from jaeger_os.core.models.local_discovery import (
+        discover_local_gguf_files, match_to_registry,
+    )
+    from jaeger_os.core.models.model_resolver import (
+        ensure_symlink_in_repo_models,
+    )
+    rec = recommend_for_tier(classify_tier(detect_total_memory_gb()))
+    awake_model = (awake_model or "").strip() or rec.awake.registry_key
+    asleep_model = (asleep_model or "").strip() or rec.asleep.registry_key
+    by_key = match_to_registry(discover_local_gguf_files())
+    for key in dict.fromkeys((awake_model, asleep_model)):  # ordered unique
+        if key in by_key:
+            ensure_symlink_in_repo_models(by_key[key].path, registry_key=key)
+
+    identity = Identity(
+        name=display_name, role=role_final,
+        personality=personality,
+        voice_tone=shim.voice_tone or "clear, even-keeled",
+        voice_id=voice_id,
+    )
+    # WIZ-5: ctx default raised 16384 → 32768 — the 0.1.0 default plus
+    # the full tool surface guaranteed a ContextOverflow on message #1.
+    # Warm-up policy is fixed (TTS+STT on, heavy vision opt-in via
+    # config.yaml) — same as the wizard's Step 5.
+    from jaeger_os.core.instance.schemas import DeepThinkConfig, VoiceConfig
+    config = Config(
+        instance_name=name,
+        model=ModelConfig(model_path=awake_model, ctx=32768, gpu_layers=-1),
+        display=DisplayConfig(),
+        skills=SkillsConfig(),
+        retention=RetentionConfig(),
+        # The asleep model swaps in during deep-think; "same as awake"
+        # (equal values) disables the swap.
+        deep_think=DeepThinkConfig(coder_model=asleep_model),
+        warmup=WarmupConfig(tts=True, stt=True, vision=False),
+        permissions=PermissionsConfig(mode=permission_mode),
+        interaction=InteractionConfig(default_mode=interaction_mode),
+        voice=VoiceConfig(enabled=voice_enabled),
+    )
+    manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION,
+                        bound_character=character_id)
+
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    dump_yaml(layout.identity_path, identity)
+    dump_yaml(layout.config_path, config)
+    dump_json(layout.manifest_path, manifest)
+    # Characters are the persona — wire the instance to the chosen one
+    # so the running agent plays it (identity / soul / traits / voice).
+    from jaeger_os.personality.character import set_active_character
+    set_active_character(layout.root, character_id)
+    # INST-3: record install provenance per instance. ``jaeger update``
+    # rewrites ``last_updated_with_framework``; ``jaeger restore``
+    # rewrites ``install_method`` + adds ``restored_from``.
+    from jaeger_os import __version__ as _jver
+    from jaeger_os.core.instance.instance import detect_install_method
+    install_method = detect_install_method()
+    dump_yaml(layout.distribution_path, DistributionConfig(
+        created_with_framework=_jver,
+        last_updated_with_framework=_jver,
+        install_method=install_method,
+        install_source=_install_source_for(install_method),
+    ))
+    # soul.md only when the role overflowed identity.role's cap — the
+    # character's own soul lives in its character sheet.
+    _initialise_soul_md(layout.root, display_name,
+                        persona_soul=None, role_overflow=role_overflow)
+    _git_init(layout.root)
+    # WIZ-4: a sourceable env file so shells can pin this instance
+    # without memorising the path.
+    _write_env_file(layout.root, name)
+    if make_default:
+        from jaeger_os.core.instance.instance import write_active_instance
+        write_active_instance(name)
+    return layout
 
 
 # ── soul.md initial-body writer (0.3.0) ──────────────────────────────

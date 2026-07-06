@@ -3,6 +3,11 @@ name: manim-video
 description: "Manim CE animations: 3Blue1Brown math/algo videos."
 version: 1.0.0
 platforms: [linux, macos, windows]
+tags: [manim, video, animation, math, visualization]
+requires_tools: [write_file, terminal]
+metadata:
+  jros:
+    related_skills: [p5js, comfyui, excalidraw]
 ---
 
 # Manim Video Production Pipeline

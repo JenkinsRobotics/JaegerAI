@@ -42,7 +42,6 @@ import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 from typing import Iterable
 
 
@@ -165,18 +164,10 @@ def _cmd_bench_compare_argv(argv: list[str]) -> int:
         print("\n--dry-run: not launching sweep.")
         return 0
 
-    # Write a temp file the sweep script can consume.
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", delete=False, encoding="utf-8",
-    ) as fh:
-        for p in selected:
-            fh.write(p + "\n")
-        models_file = fh.name
-
     repo = _repo_root()
-    sweep_script = repo / "dev/benchmark" / "run_model_sweep.py"
-    if not sweep_script.is_file():
-        print(f"[jaeger bench compare] sweep script missing at {sweep_script}",
+    bench_script = repo / "dev/benchmark" / "bench.py"
+    if not bench_script.is_file():
+        print(f"[jaeger bench compare] bench script missing at {bench_script}",
               file=sys.stderr)
         return 1
 
@@ -184,36 +175,28 @@ def _cmd_bench_compare_argv(argv: list[str]) -> int:
           f"(cold-load each time) — expect several minutes per model.\n")
 
     env = os.environ.copy()
-    # Pass tag + limit through env so the sweep script can forward to
-    # the inner ``run_flat_bench.py`` invocation. (The sweep accepts
-    # these as env vars rather than CLI flags so the script's surface
-    # stays stable for existing users.)
-    if args.tags:
-        env["JAEGER_BENCH_TAGS"] = args.tags
-    if args.limit:
-        env["JAEGER_BENCH_LIMIT"] = str(args.limit)
-    # macOS fork-safety. The sweep driver imports numpy + jaeger
-    # modules then fork()s each per-model bench subprocess. On
-    # macOS 26's new "xzone" allocator, fork() after complex
-    # allocation crashes the child in ``_malloc_fork_child``
-    # (libmalloc assertion). ``MallocNanoZone=0`` selects the older
-    # allocator that survives fork; ``OBJC_DISABLE_INITIALIZE_FORK_SAFETY``
-    # quiets the Metal/Obj-C fork guard. Both must be in the env at
-    # process START, so we set them on the env the sweep inherits —
-    # they propagate to its bench subprocesses too.
+    # macOS fork-safety. ``bench.py --models`` imports jaeger then
+    # spawns a per-model bench subprocess. On macOS 26's "xzone"
+    # allocator, spawn/fork after complex allocation can crash the child
+    # in ``_malloc_fork_child``. ``MallocNanoZone=0`` selects the older
+    # allocator that survives; ``OBJC_DISABLE_INITIALIZE_FORK_SAFETY``
+    # quiets the Metal/Obj-C fork guard.
     env.setdefault("MallocNanoZone", "0")
     env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-    rc = subprocess.call(
-        [sys.executable, str(sweep_script), models_file],
-        env=env,
-    )
+    cmd = [sys.executable, str(bench_script), "--models", ",".join(selected)]
+    if args.tags:
+        cmd += ["--category", args.tags]
+    if args.limit:
+        cmd += ["--limit", str(args.limit)]
+    rc = subprocess.call(cmd, env=env)
 
-    # Sweep writes its own report path; the script prints it. Surface
-    # the SWEEP_DIR for the operator if the rc was ok.
-    sweep_dir = repo / "dev/benchmark" / "sweep"
+    # bench.py writes per-model results under flat/ and refreshes
+    # HISTORY.md once at the end of the sweep.
     if rc == 0:
-        print(f"\nSweep complete. Reports under: {sweep_dir}")
+        print(f"\nSweep complete. Results under: "
+              f"{repo / 'dev/benchmark' / 'flat'}; leaderboard in "
+              f"{repo / 'dev/benchmark' / 'HISTORY.md'}")
     else:
         print(f"\n[jaeger bench compare] sweep exited rc={rc}",
               file=sys.stderr)

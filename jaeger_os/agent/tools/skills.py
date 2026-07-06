@@ -1,11 +1,12 @@
-"""The `skill` tool — discover and read playbook skills on demand.
+"""The `list_skills` tool — discover and read playbook skills on demand.
 
 A skill is an experienced playbook for a task — instructions plus, often,
 runnable shell/Python or a ``scripts/`` folder. There are dozens; they
-are NOT dumped into the prompt. The agent calls this tool to find the
-right skill for a task, then reads it and follows it with its normal
-tools (``terminal``, ``execute_code``, …). On-demand, so the skill
-library never bloats context.
+are NOT dumped into the prompt. The agent calls `list_skills` (action=
+list/search/view/curate) to find the right skill for a task, then reads
+it and follows it with its normal tools (``terminal``, ``execute_code``,
+…). Its counterpart `use_skill` loads ONE recipe to follow. On-demand,
+so the skill library never bloats context.
 """
 
 from __future__ import annotations
@@ -13,7 +14,9 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.agent.skill_registry import playbook_skills as _pb
+from jaeger_os.core.context import get_layout
 
 # Cap a single skill's instructions so one huge SKILL.md can't blow the
 # context window. Skills run long but rarely past this.
@@ -67,18 +70,22 @@ def _read_skill_file(folder: pathlib.Path, relpath: str) -> dict[str, Any]:
 
 def skill(action: str, name: str = "", query: str = "",
           file: str = "", category: str = "",
-          limit: int = 20, offset: int = 0) -> dict[str, Any]:
+          limit: int = 0, offset: int = 0) -> dict[str, Any]:
     """Discover and read playbook skills — experienced procedures for a
     task. ``action`` selects the operation:
 
-      - ``list``   — paginated catalog. Default returns category
-        counts + the first ``limit`` (default 20) skills.
-        Filter by ``category=...``; page with ``offset``.
-        With no args, ``list`` is a category summary only — the
-        full corpus is large (~87 playbooks) and dumping every
-        name burns prompt budget on every casual call.
+      - ``list``   — the FULL active catalog: every active skill,
+        enriched (name · category · description · tier · tools).
+        This is the research-step lookup — call it when
+        STARTING a non-trivial task to see everything available, then
+        follow a matching skill or plan a tool chain. ``category=`` /
+        ``limit`` / ``offset`` page it, but the DEFAULT is the complete
+        list: the routing intelligence is yours, not a filter's. It's
+        on-demand, so it costs tokens only when you research, not every
+        turn.
       - ``search`` — skills matching ``query`` (name / description /
-        tags / category). Use this FIRST when a task might have a skill.
+        tags / category) — a shortcut when you already know roughly what
+        you want.
       - ``view``   — the full instructions of skill ``name``, plus a
         ``files`` listing of its bundled scripts / references. Pass
         ``file="scripts/foo.py"`` to read one of those bundled files.
@@ -127,7 +134,8 @@ def skill(action: str, name: str = "", query: str = "",
             "limit": cap,
             "skills": [
                 {"name": s.name, "category": s.category,
-                 "description": s.description}
+                 "description": s.description, "tier": s.tier,
+                 "tools": s.requires_tools}
                 for s in page
             ],
         }
@@ -194,7 +202,7 @@ def skill(action: str, name: str = "", query: str = "",
             result["requires_toolsets"] = s.requires_toolsets
             # POLISH-4: auto-load the toolsets the skill declares it
             # needs. Without this the model has to round-trip a
-            # ``load_toolset`` call after every ``skill(view)`` —
+            # ``load_tools`` call after every ``skill(view)`` —
             # one wasted turn per skill. Auto-load is a no-op when
             # JAEGER_TOOLSET_SCOPING is off; when on, the tools are
             # visible on the agent's very next step.
@@ -211,8 +219,6 @@ def skill(action: str, name: str = "", query: str = "",
                     result["active_toolsets"] = sorted(active_toolset_names())
             except Exception:  # noqa: BLE001 — never let auto-load break view
                 pass
-        if s.fallback_for_tools:
-            result["fallback_for_tools"] = s.fallback_for_tools
         # Safety scan — a playbook is markdown the model is told to run.
         # Surface a warning so the model treats a flagged skill with
         # care; never blocks the read (the model still needs to see it).
@@ -239,3 +245,168 @@ def skill(action: str, name: str = "", query: str = "",
     return {"ok": False,
             "error": f"unknown skill action {action!r} — "
                      "use list / search / view"}
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main._register_builtins).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="list_skills", side_effect="read")
+def _t_skill(action: str = "list", name: str = "", query: str = "",
+             file: str = "") -> dict:
+    """LIST, SEARCH, and read your playbook skills — the skill-library
+    lookup (the read-only counterpart to ``use_skill``, which loads ONE
+    recipe to follow). ``action`` selects the operation:
+
+      - ``list``   — the FULL catalog of available skills (the default).
+        Call it when STARTING a non-trivial task to see what exists.
+      - ``search`` — skills matching ``query`` (name/description/tags).
+      - ``view``   — the full instructions of skill ``name`` (+ its
+        bundled files; pass ``file="references/x.md"`` to read one).
+      - ``curate`` — audit the library for STALE / unused skills.
+      - ``stats``  — which skills/tools get used most.
+
+    Does NOT create or edit skills (that's ``write_file`` + the
+    skill-builder recipe). Read-only. Reach for it whenever a task is
+    specialized ("inspect a codebase", "search arxiv", "check for stale
+    skills")."""
+    return skill(action=action, name=name, query=query, file=file)
+
+
+@register_tool_from_function(name="skill_note")
+def _t_skill_note(skill: str, outcome: str = "smooth", note: str = "",
+                  objective: str = "", calls: int = 0, procedure: str = "",
+                  errors: str = "", flag: bool = False) -> dict:
+    """Jot a post-use summary about a skill you just used — the journal that
+    feeds skill self-improvement. After a notable use:
+      • outcome   — smooth | slow | issues | failed (how it went)
+      • note      — one terse, concrete line
+      • calls     — how many tool calls this use took
+      • procedure — the brief ordered calls ("read,read,fetch")
+      • errors    — errors / retries / dead-ends you hit
+      • flag      — True to ask for a review NOW (a use that wasted real effort)
+    Cheap (one line, no model). Reviews fire on their own during idle; `flag`
+    fast-tracks one. Returns {ok, skill, outcome}."""
+    from jaeger_os.core.skill_improvement import skill_notes as _sn
+    layout = get_layout()
+    n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note,
+                     objective=objective, calls=calls, procedure=procedure,
+                     errors=errors, flag=flag)
+    result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
+    # A `flag`ged note fast-tracks a Deep Think review now; everything else
+    # defers to the idle sweep. No-op when opted out.
+    try:
+        from jaeger_os.agent.background import skill_review
+        proposed = skill_review.maybe_propose_on_note(layout, n)
+        if proposed and proposed.get("proposed"):
+            result["review_proposed"] = proposed
+    except Exception:  # noqa: BLE001 — the trigger never breaks a note write
+        pass
+    return result
+
+
+@register_tool_from_function(name="skill_notes", side_effect="read")
+def _t_skill_notes(skill: str = "") -> dict:
+    """Read accumulated skill-usage notes — pass a skill name for its recent
+    notes, or blank for a per-skill outcome tally across all skills (which
+    ones are struggling). Use it to decide whether a skill needs a Deep Think
+    improvement pass. Read-only."""
+    from jaeger_os.core.skill_improvement import skill_notes as _sn
+    layout = get_layout()
+    if (skill or "").strip():
+        notes = _sn.notes_for(layout, skill)
+        return {"skill": skill.strip(), "count": len(notes),
+                "notes": [{"outcome": n.outcome, "note": n.note, "ts": n.ts}
+                          for n in notes[-20:]]}
+    return {"summary": _sn.summary(layout)}
+
+
+@register_tool_from_function(name="request_skill_review")
+def _t_request_skill_review(skill: str) -> dict:
+    """Queue a Deep Think pass to IMPROVE a recipe-skill from its usage notes
+    — call it when you judge a skill keeps under-performing. It crafts a
+    measured task (baseline benchmark → write a new version → re-benchmark →
+    keep only if smoke passes AND the delta is positive, else revert). Lands
+    approved + ready under `auto` autonomy, else proposed in the backlog for
+    the operator. Deduped if a review's already queued. Returns the proposal."""
+    from jaeger_os.agent.background import skill_review
+    return skill_review.propose_review(get_layout(), skill, force=True)
+
+
+@register_tool_from_function(name="set_skill_review")
+def _t_set_skill_review(enabled: bool) -> dict:
+    """Turn autonomous skill self-improvement on/off. ON BY DEFAULT (opt-out):
+    a skill that accumulates enough issue/failure notes auto-proposes a Deep
+    Think pass that rewrites it, validated by smoke test + benchmark delta
+    before it's kept (else reverted) — every change recorded as a revision.
+    Set False to opt out: improvements then happen only when explicitly asked
+    and land in the backlog for the operator to approve. Returns {ok, enabled}."""
+    from jaeger_os.agent.background import skill_review
+    return skill_review.set_enabled(enabled)
+
+
+@register_tool_from_function(name="record_skill_revision")
+def _t_record_skill_revision(skill: str, version: str, summary: str = "",
+                             benchmark_delta: str = "") -> dict:
+    """Log that you modified a skill — call it AFTER you keep a new version
+    (smoke + benchmark passed). Records the revision so the skill's evolution
+    is inspectable + rollback-able: the new version (e.g. 'v3' — the revision
+    id), what changed, and the measured delta. See it via `jaeger skills
+    revisions`. Returns {ok, skill, version, ts}."""
+    from jaeger_os.core.skill_improvement import skill_revisions
+    r = skill_revisions.record(get_layout(), skill=skill,
+                               version=version, origin="self-improvement",
+                               summary=summary, delta=benchmark_delta)
+    return {"ok": True, "skill": r.skill, "version": r.version, "ts": r.ts}
+
+
+# ── use_skill: skill selection as a first-class, enum-constrained TOOL ──
+# Skills as callable-like-tools (per the 2026-07-02 refactor plan). The 87
+# playbook names become a schema ENUM on a real tool, so the model picks a
+# skill from its NATIVE ACTION SPACE the same structured way it picks any
+# tool — and the ~1.9k-token prose menu is dropped from the system prompt
+# (build_skill_index → a one-line pointer). use_skill(name) returns the
+# playbook recipe to follow (delegates to the skill(view) reader).
+def _register_use_skill() -> None:
+    import typing
+    from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+    skills = _pb.available_playbooks()
+    names = [s.name for s in skills]
+    if not names:
+        return
+    skill_name_enum = typing.Literal[tuple(names)]  # dynamic enum of names
+
+    def use_skill(name) -> str:
+        r = skill(action="view", name=str(name))
+        if not r.get("ok"):
+            return (f"Error loading skill '{name}': {r.get('error')}. "
+                    "Pick an exact name from the available list.")
+        recipe = f"PLAYBOOK RECIPE — {r.get('name')}:\n\n{r.get('instructions','')}"
+        # requires_tools guard: at call time the registry is complete, so we can
+        # tell the model up front if the skill's tools aren't available here
+        # (e.g. a macOS skill on Linux) instead of letting it follow a recipe
+        # that calls tools that don't exist.
+        need = r.get("requires_tools") or []
+        if need:
+            from jaeger_os.agent.schemas.tool_registry import get_tools
+            have = {t.name for t in get_tools()}
+            missing = [t for t in need if t not in have]
+            if missing:
+                recipe = (f"NOTE: this skill needs tools not available on this "
+                          f"system: {missing}. You likely can't complete it as "
+                          f"written — tell the operator, or use another approach."
+                          f"\n\n{recipe}")
+        return recipe
+
+    use_skill.__doc__ = (
+        "Load a specialized JROS playbook recipe and FOLLOW it. Call this BEFORE "
+        "raw tools for any specialized task (research, codebase analysis, "
+        "creative output, an app/service, macOS/desktop automation) — first scan "
+        "your skills for a match; only if NONE fits do you reach for raw tools. "
+        "Returns the playbook's step-by-step recipe; execute it with your normal "
+        "tools. `name` must be one of the available skills."
+    )
+    use_skill.__annotations__ = {"name": skill_name_enum, "return": str}
+    register_tool_from_function(side_effect="read")(use_skill)
+
+
+_register_use_skill()

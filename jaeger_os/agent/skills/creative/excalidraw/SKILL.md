@@ -6,10 +6,13 @@ author: Hermes Agent
 license: MIT
 dependencies: []
 platforms: [linux, macos, windows]
+requires_tools: [write_file, terminal]
 metadata:
   hermes:
     tags: [Excalidraw, Diagrams, Flowcharts, Architecture, Visualization, JSON]
     related_skills: []
+  jros:
+    related_skills: [architecture-diagram, sketch, p5js]
 
 ---
 

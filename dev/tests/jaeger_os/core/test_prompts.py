@@ -43,11 +43,51 @@ def test_load_soul_caps_runaway_length(tmp_path) -> None:
     assert "truncated" in soul
 
 
-def test_active_character_persona_folds_into_the_system_prompt(tmp_path) -> None:
-    """Characters are the only persona now — the active character (default
-    Jarvis) drives identity/soul; the instance no longer reads soul.md."""
+def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
+    """Workers run vanilla EXCEPT the name: the agent's NAME (identity.yaml)
+    is a fact (the output filter preserves facts verbatim, so a wrong name
+    can't be fixed downstream) and flows into the prompt as one line. The
+    persona BLOCK (soul/traits/voice) still stays out — it's applied by the
+    two-pass output filter, never the execution context. See
+    dev/docs/persona_compiler.md."""
+    (tmp_path / "identity.yaml").write_text(
+        "name: Jarvis\nrole: assistant\npersonality: plain\n",
+        encoding="utf-8",
+    )
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Jarvis" in sp
+    assert "Your name is Jarvis." in sp          # name-only fragment
+    assert "## My voice —" not in sp             # compiled persona stays out
+    # No persona prose leaks alongside the name (Jarvis' sheet mentions
+    # neither of these outside the compiled block, so absence is the canary).
+    assert "butler" not in sp.lower()
+
+
+def test_identity_name_never_overwritten_by_active_character(
+    tmp_path, monkeypatch,
+) -> None:
+    """Identity vs character (operator decision, 2026-07-05): the AGENT
+    NAME is identity.yaml's — the unique robot named at instance creation.
+    The character supplies personality only and must NEVER claim the name
+    ("a robot like Jarvis, but I will name him Ted"). The old
+    JAEGER_BENCH_NEUTRAL_IDENTITY flag is a no-op: identity.yaml-only is
+    the behaviour everywhere now, flag or not."""
+    import jaeger_os.personality.character as character
+
+    class _Hal:
+        name = "HAL 9000"
+
+    monkeypatch.setattr(character, "active_character", lambda root: _Hal())
+    (tmp_path / "identity.yaml").write_text(
+        "name: Ted\nrole: assistant\npersonality: plain\n",
+        encoding="utf-8",
+    )
+    sp = build_system_prompt(InstanceLayout(root=tmp_path))
+    assert "Your name is Ted." in sp                 # identity.yaml wins
+    assert "Your name is HAL 9000." not in sp        # character never names
+
+    monkeypatch.setenv("JAEGER_BENCH_NEUTRAL_IDENTITY", "1")
+    sp = build_system_prompt(InstanceLayout(root=tmp_path))
+    assert "Your name is Ted." in sp                 # flag changes nothing
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:
@@ -71,20 +111,20 @@ def test_prompt_defaults_to_unscoped_tool_surface(tmp_path, monkeypatch) -> None
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
     assert "full built-in tool surface is visible" in sp
-    assert "focused CORE set of tools" not in sp
+    assert "small CORE set of tools" not in sp
     assert "TOOL CATALOG" not in sp
 
 
 def test_prompt_scoped_when_explicit_env(tmp_path, monkeypatch) -> None:
     """``JAEGER_TOOLSET_SCOPING=1`` opts into the lean surface — the
     model sees CORE + a one-line-per-category catalog, can peek at any
-    schema via ``describe_tool``, and widen via ``load_toolset``.
+    schema via ``describe_tool``, and widen via ``load_tools``.
     Useful for context-tight runs; not the default while routing
     regressions are open."""
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "focused CORE set of tools" in sp
+    assert "small CORE set of tools" in sp
     assert "TOOL CATALOG" in sp
     assert "describe_tool" in sp
 

@@ -3,6 +3,11 @@ name: powerpoint
 description: "Create, read, edit .pptx decks, slides, notes, templates."
 license: Proprietary. LICENSE.txt has complete terms
 platforms: [linux, macos, windows]
+tags: [powerpoint, slides, presentation, office, pptx]
+requires_tools: [terminal, delegate_task]
+metadata:
+  jros:
+    related_skills: [ocr-and-documents, nano-pdf, google-workspace]
 ---
 
 # Powerpoint Skill

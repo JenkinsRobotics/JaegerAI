@@ -25,7 +25,7 @@ Categories:
 from __future__ import annotations
 
 # Framework wiring (call bind() once at startup)
-from ._common import (
+from jaeger_os.core.context import (
     SandboxError,
     _audit,
     _require_layout,
@@ -51,7 +51,7 @@ from .files import (
 from .time_and_math import calculate, get_time, system_status
 
 # Meta-tools — introspection over the agent's own tool registry.
-from .meta import describe_tool, load_toolset
+from .meta import describe_tool, load_tools
 
 # Memory
 from .memory import forget, list_facts, memory, recall, remember, search_memory
@@ -82,6 +82,10 @@ from .avatar import play_timeline, set_avatar_state, warm_avatar
 
 # Vision
 from .vision import generate_image, look_at
+
+# Cloud AI generation (fal.ai) — the paid, higher-quality counterpart
+# to the local vision tools. Plugin-provided (jaeger_os/plugins/ai_gen).
+from jaeger_os.plugins.ai_gen import generate_image_fal, generate_video_fal
 
 # macOS host control
 from .host import open_on_host
@@ -120,13 +124,16 @@ from .background import (
 from .deepthink_tools import list_deep_think_queue, propose_deep_think_task
 
 # Kanban task board
-from .board import board_add, board_move, board_update, board_view, kanban
+from .board import (
+    board_add, board_delete, board_move, board_update, board_view,
+)
 
 # Browser automation (Playwright) — one consolidated browser() tool
 from .browser import browser
 
 # Playbook skills — the skill() discover/read tool
 from .skills import skill
+from .reflect import reflect
 
 # In-session task list (planning scratchpad)
 from .todo import reset_todos, todo
@@ -170,6 +177,8 @@ __all__ = [
     "KOKORO_VOICE", "KOKORO_LANG", "KOKORO_SAMPLE_RATE",
     # vision
     "look_at", "generate_image",
+    # cloud AI generation (fal.ai plugin)
+    "generate_image_fal", "generate_video_fal",
     # host
     "open_on_host",
     # credentials
@@ -192,7 +201,7 @@ __all__ = [
     # deep think
     "propose_deep_think_task", "list_deep_think_queue",
     # kanban board
-    "board_view", "board_add", "board_move", "board_update", "kanban",
+    "board_view", "board_add", "board_move", "board_update", "board_delete",
     # browser automation
     "browser",
     # playbook skills

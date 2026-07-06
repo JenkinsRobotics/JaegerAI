@@ -23,10 +23,6 @@ from typing import Any
 # skills/ sits at the package root:  core/skills/ → core/ → jaeger_os/ → skills/
 _SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "agent" / "skills"
 
-# JROS code skills are named "<name>_v<N>" and carry a Python module —
-# skill_loader.py owns those; they are not playbooks.
-_VERSIONED = re.compile(r"_v\d+$")
-
 
 # Where a skill came from — for trust decisions and a future curator
 # that must never prune a user-written skill (audit gap #8).
@@ -44,13 +40,13 @@ class PlaybookSkill:
     # (the agent authored it), "marketplace" (installed from elsewhere).
     origin: str = "builtin"
     # Discovery metadata (all optional). ``platforms`` empty = every OS;
-    # otherwise a skill is hidden on a platform it does not list. The
-    # ``requires_*`` / ``fallback_for_tools`` fields are advisory — surfaced
-    # on `skill view` so the model knows a skill's prerequisites.
+    # otherwise a skill is hidden on a platform it does not list.
+    # ``requires_tools`` HIDES the skill when its tools aren't registered;
+    # ``requires_toolsets`` auto-loads the named toolsets on `skill view`.
     platforms: list[str] = field(default_factory=list)
     requires_tools: list[str] = field(default_factory=list)
     requires_toolsets: list[str] = field(default_factory=list)
-    fallback_for_tools: list[str] = field(default_factory=list)
+    tier: str = "standard"  # routing hint: native | preferred | standard | fallback
 
 
 def read_skill_origin(folder: Path) -> str:
@@ -93,22 +89,14 @@ def _parse_frontmatter(text: str) -> dict[str, Any]:
         return {}
 
 
-def _is_code_skill(folder: Path) -> bool:
-    """True for a JROS Python tool-registering skill (skill_loader's job)."""
-    if _VERSIONED.search(folder.name):
-        return True
-    try:
-        return any(p.suffix == ".py" for p in folder.iterdir() if p.is_file())
-    except OSError:
-        return False
-
-
 def _tags_of(fm: dict[str, Any]) -> list[str]:
     meta = fm.get("metadata")
     if isinstance(meta, dict):
-        hermes = meta.get("hermes")
-        if isinstance(hermes, dict) and isinstance(hermes.get("tags"), list):
-            return [str(t) for t in hermes["tags"]]
+        # JROS is the standard namespace; hermes kept for imported skills.
+        for ns in ("jros", "hermes"):
+            block = meta.get(ns)
+            if isinstance(block, dict) and isinstance(block.get("tags"), list):
+                return [str(t) for t in block["tags"]]
     if isinstance(fm.get("tags"), list):
         return [str(t) for t in fm["tags"]]
     return []
@@ -165,7 +153,7 @@ def _disabled_playbook_names() -> set[str]:
     instance config. Empty when no instance is bound."""
     try:
         from jaeger_os.core.instance.schemas import Config, load_yaml
-        from jaeger_os.agent.tools._common import get_layout
+        from jaeger_os.core.context import get_layout
 
         cfg = load_yaml(get_layout().config_path, Config)
         return {str(n) for n in cfg.skills.disabled_playbooks}
@@ -178,7 +166,7 @@ def _instance_skills_dir() -> Path | None:
     playbooks live (the agent's writes are sandboxed to it). ``None``
     when no instance is bound, or when it is the bundled dir itself."""
     try:
-        from jaeger_os.agent.tools._common import get_layout
+        from jaeger_os.core.context import get_layout
 
         d = get_layout().skills_dir.resolve()
         return d if d != _SKILLS_DIR.resolve() else None
@@ -231,13 +219,17 @@ def discover_playbooks() -> list[PlaybookSkill]:
             continue
         for md in root.rglob("SKILL.md"):
             folder = md.parent
-            if _is_code_skill(folder):
-                continue
+            # Presence-based unification: ANY folder with a SKILL.md is a recipe.
+            # A folder that ALSO ships a module registers tools (skill_loader) —
+            # so a skill can be both. No "code_skill vs playbook" split. See
+            # dev/docs/skill_unification.md.
             try:
                 text = md.read_text(encoding="utf-8")
             except OSError:
                 continue
             fm = _parse_frontmatter(text)
+            if fm.get("archived"):
+                continue  # retired skill — metadata flag, excluded from the surface
             try:
                 rel = folder.relative_to(root)
                 category = rel.parts[0] if len(rel.parts) > 1 else "general"
@@ -253,7 +245,7 @@ def discover_playbooks() -> list[PlaybookSkill]:
                 platforms=_normalize_platforms(_str_list(fm, "platforms")),
                 requires_tools=_str_list(fm, "requires_tools"),
                 requires_toolsets=_str_list(fm, "requires_toolsets"),
-                fallback_for_tools=_str_list(fm, "fallback_for_tools"),
+                tier=str(fm.get("tier") or "standard").strip().lower(),
             )
             by_name[skill.name] = skill
     result = sorted(by_name.values(), key=lambda s: (s.category, s.name))
@@ -320,14 +312,31 @@ def _format_skill_index(skills: list[PlaybookSkill]) -> str:
     return text
 
 
-def build_skill_index(available_tools: set[str] | None = None) -> str:
-    """A compact index of the available playbook skills for the system
-    prompt — so the model knows what procedures exist without a discovery
-    round-trip. Capped so it never crowds out the routing imperatives.
+def _short_function(desc: str) -> str:
+    """A 3-8 word 'what it does' for the always-on skill menu — first
+    clause of the SKILL.md description, trimmed."""
+    fn = (desc or "").strip().replace("\n", " ")
+    fn = fn.split(". ")[0].split(" — ")[0]
+    return (fn[:57].rstrip() + "…") if len(fn) > 58 else fn
 
-    Pass ``available_tools`` (active tool names) to hide skills whose
-    required tools aren't present."""
-    return _format_skill_index(available_playbooks(available_tools))
+
+def build_skill_index(available_tools: set[str] | None = None) -> str:
+    """A ONE-LINE skill pointer for the system prompt. The 87 playbook names
+    now live as an ENUM on the ``use_skill`` tool (the model's native action
+    space), so the old ~1.9k-token prose menu is gone — this just reminds the
+    model the capability exists and which tool loads a skill. ``skill(list)``
+    still gives the full enriched catalog on demand."""
+    skills = available_playbooks(available_tools)
+    if not skills:
+        return ""
+    return (
+        f"Skills: you have {len(skills)} specialized playbooks (research, "
+        "creative, codebase inspection, apps/services, macOS control, …), "
+        "exposed as the name enum on the use_skill tool. For any specialized "
+        'task, call use_skill(name="…") to load the recipe and follow it '
+        "BEFORE reaching for raw tools. skill(action=\"list\") shows the full "
+        "catalog with descriptions if you need to browse."
+    )
 
 
 def find_playbook(name: str) -> PlaybookSkill | None:

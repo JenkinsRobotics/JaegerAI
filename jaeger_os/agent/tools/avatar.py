@@ -30,7 +30,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 
 # ── default emotion → adapter+asset mapping ─────────────────────────
@@ -349,3 +350,26 @@ def _publish_animation(
         "asset": asset_path,
         "node_state": getattr(ack, "state", ""),
     }
+
+
+# ── Agent-tool wrappers (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="set_avatar_state", beta=True)
+def _t_set_avatar_state(
+    emotion: str = "neutral", hold_ms: int = 0, wait: bool = False,
+) -> dict:
+    """Switch the avatar's face expression. emotion is one of
+    "neutral", "happy", "sad", "focused", "thinking", "speaking",
+    "listening" (operator can add more via avatar/expressions.json).
+    hold_ms holds the state for that long (0 = until replaced);
+    wait=True blocks until the animation node acknowledges."""
+    return set_avatar_state(emotion=emotion, hold_ms=hold_ms, wait=wait)
+
+
+@register_tool_from_function(name="play_timeline", beta=True)
+def _t_play_timeline(name: str = "", wait: bool = False) -> dict:
+    """Play a multi-track avatar animation timeline stored at
+    <instance>/timelines/<name>.json. wait=True blocks until the
+    timeline completes; default runs it in the background."""
+    return play_timeline(name=name, wait=wait)

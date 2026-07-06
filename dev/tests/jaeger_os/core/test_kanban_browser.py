@@ -24,28 +24,30 @@ def bound(tmp_path):
     return layout
 
 
-# ── kanban — one tool, action-dispatch over the board ────────────────
+# ── board — five individual verbs (no action-dispatch umbrella) ──────
 
 
-def test_kanban_add_then_view(bound) -> None:
-    r = tools.kanban(action="add", title="ship the thing", priority="high")
+def test_board_add_then_view(bound) -> None:
+    r = tools.board_add(title="ship the thing", priority="high")
     assert r["ok"] is True
-    view = tools.kanban(action="view")
+    view = tools.board_view()
     assert view["ok"] is True
     assert any(c["title"] == "ship the thing" for c in view["cards"])
 
 
-def test_kanban_move_and_complete(bound) -> None:
-    cid = tools.kanban(action="add", title="a task")["card_id"]
-    moved = tools.kanban(action="move", card_id=cid, column="in_progress")
+def test_board_move_then_complete(bound) -> None:
+    cid = tools.board_add(title="a task")["card_id"]
+    moved = tools.board_move(card_id=cid, column="in_progress")
     assert moved["ok"] is True and moved["column"] == "in_progress"
-    done = tools.kanban(action="complete", card_id=cid)
+    done = tools.board_move(card_id=cid, column="done")
     assert done["ok"] is True and done["column"] == "done"
 
 
-def test_kanban_unknown_action(bound) -> None:
-    r = tools.kanban(action="teleport")
-    assert r["ok"] is False and "unknown" in r["error"]
+def test_board_delete(bound) -> None:
+    cid = tools.board_add(title="throwaway")["card_id"]
+    assert tools.board_delete(card_id=cid)["deleted"] is True
+    assert tools.board_delete(card_id=cid)["ok"] is False   # already gone
+    assert tools.board_delete(card_id="")["ok"] is False     # no id
 
 
 # ── browser — dispatch logic (no live browser) ───────────────────────

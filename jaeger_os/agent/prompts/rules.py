@@ -15,23 +15,21 @@ from __future__ import annotations
 
 
 RUNTIME_TOOLSET_SCOPED = """\
-- You see a focused CORE set of tools. The categories below list every
-  OTHER tool that's installed but not currently in your active set.
-  Two ways to reach them:
-    • `describe_tool("name")` — peek at one tool's exact schema
-      without loading anything. Cheap. Use this when you just need to
-      know "can I call X?" or "what args does X take?"
-    • `load_toolset("category")` — add a whole category to your
-      active set for the rest of the session. Use this when you'll
-      need several tools from the same area.
-  Tools you don't see do NOT mean a capability is missing — it just
-  means it's one `describe_tool` or `load_toolset` call away.
+- You see a small CORE set of tools, NOT every tool. Before you act on a task,
+  you MUST `list_tools("<keyword>")` to find the RIGHT tool — do not assume a
+  visible CORE tool is the best fit (searching "weather" finds `get_weather`,
+  not `web_search`; "speak" finds `text_to_speech`). Then:
+    • if the tool you found isn't visible, `load_tools("<its toolset>")` to
+      bring it in, THEN use it — `list_tools` tells you which toolset it's in.
+    • `describe_tool("name")` peeks at one tool's exact schema without loading.
+  Force-fitting a visible tool you didn't look up, or giving up because a tool
+  "isn't available", is a FAILURE. Search (`list_tools`), load, then act.
 """
 
 
 RUNTIME_TOOLSET_UNSCOPED = """\
 - The full built-in tool surface is visible. Pick the specific tool that
-  matches the request; do not call `load_toolset` unless you are explicitly
+  matches the request; do not call `load_tools` unless you are explicitly
   asked to inspect or widen toolsets.
 """
 

@@ -67,7 +67,7 @@ def test_describe_tool_returns_schema_basics():
 
 
 def test_describe_tool_surfaces_toolset():
-    """The new ``toolset`` field tells the model which load_toolset
+    """The new ``toolset`` field tells the model which load_tools
     call would bring in the tool's siblings."""
     out = describe_tool(name="_describe_probe")
     assert out["toolset"] == "diagnostics"

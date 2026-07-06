@@ -20,10 +20,12 @@ instance dir, giving the human a real authorship audit trail.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
-from ._common import (
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import (
     SandboxError,
     _audit,
     _display_path,
@@ -33,6 +35,7 @@ from ._common import (
     _resolve_write,
     git_autocommit,
 )
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 # Directories search_files never descends into — VCS internals, virtual
 # envs, caches, and the multi-GB model store would swamp a content grep.
@@ -387,26 +390,61 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
     if not needle:
         return {"searched": False, "error": "empty query"}
     try:
-        root = Path.cwd() if path == "." else _resolve_read(path)
+        # Default (".") searches the SANDBOX workspace — NOT ``Path.cwd()``.
+        # cwd is wherever the process launched (repo root, or the operator's
+        # home when the app is opened from Finder), so the old default let a
+        # "search my home for .env" prompt walk $HOME: a credential-sweep
+        # attempt AND an uninterruptible DoS. Confine to the sandbox like
+        # ``list_skill_dir`` does; explicit paths stay ``_resolve_read``-gated.
+        root = layout.skills_dir if path == "." else _resolve_read(path)
     except SandboxError as exc:
         return {"searched": False, "error": str(exc)}
+    # Refuse an over-broad root: the home dir or the filesystem root is the
+    # credential-sweep / DoS signature ("search my home for .env"), and no
+    # legitimate grep is rooted there. Narrow to a project/workspace path.
+    root = root.resolve()
+    if root == Path.home().resolve() or root.parent == root:
+        return {"searched": False,
+                "error": ("refused — that search root is too broad "
+                          f"({root}); narrow it to a project directory")}
     if not root.exists():
         return {"searched": True, "query": query, "matches": [], "count": 0}
 
     cap = max(1, min(int(max_results or 50), 500))
+    # Hard backstop on the traversal so a pathological tree can't hang the
+    # turn (the old ``sorted(root.rglob("*"))`` materialised the ENTIRE tree
+    # — descending into .venv/.git/the model store — before any filtering).
+    _MAX_SCAN = 50_000
     matches: list[dict[str, Any]] = []
-    candidates = [root] if root.is_file() else sorted(root.rglob("*"))
-    for child in candidates:
-        if not child.is_file():
-            continue
+
+    def _iter_files() -> "Any":
+        if root.is_file():
+            yield root
+            return
+        scanned = 0
+        # ``os.walk`` with in-place dir pruning: skip dirs are removed from
+        # the descent set so we NEVER walk into them (vs. filtering after a
+        # full rglob). Bounded by ``_MAX_SCAN`` files examined.
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _SEARCH_SKIP]
+            for fn in filenames:
+                scanned += 1
+                if scanned > _MAX_SCAN:
+                    return
+                yield Path(dirpath) / fn
+
+    from jaeger_os.core.safety.file_safety import is_sensitive_path
+    for child in _iter_files():
+        # Credential protection MUST apply to files DISCOVERED during the
+        # walk, not just the path argument — otherwise a broad grep
+        # (``search_files(query=".env", path=<dir>)``) reads the CONTENTS
+        # of any .env / id_rsa / .aws credential it walks past. The path-arg
+        # check in ``_resolve_read`` never saw these (safe-credential-leak,
+        # 2026-07-06).
         try:
-            rel_parts = child.relative_to(root).parts
-        except ValueError:
-            rel_parts = child.parts
-        if any(part in _SEARCH_SKIP for part in rel_parts):
-            continue
-        try:
-            if child.stat().st_size > 1_000_000:
+            if (not child.is_file()
+                    or is_sensitive_path(child)
+                    or child.stat().st_size > 1_000_000):
                 continue
             text = child.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -426,3 +464,88 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         "searched": True, "query": query, "matches": matches,
         "count": len(matches), "truncated": len(matches) >= cap,
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main.py::_register_builtins).
+# Private ``_t_*`` names + explicit ``name=`` override so the gated tool never
+# collides with the ungated logic fn above (used by internal callers).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="write_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="write_file",
+               summary="write a file in the skills workspace")
+def _t_write_file(path: str, content: str) -> dict:
+    """Write a text file in the sandboxed skills/ directory. Overwrites
+    if it already exists."""
+    return file_write(path=path, content=content)
+
+
+@register_tool_from_function(name="append_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="append_file",
+               summary="append to a file in the skills workspace")
+def _t_append_file(path: str, content: str) -> dict:
+    """Append text to an existing skills/ file."""
+    return append_file(path=path, content=content)
+
+
+@register_tool_from_function(name="patch")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="patch",
+               summary="edit a file in the skills workspace")
+def _t_patch(path: str, old: str, new: str, replace_all: bool = False) -> dict:
+    """Surgically edit an EXISTING skills/ file by find-and-replace.
+    Prefer this over write_file to change a file you've already
+    written — it swaps one region instead of regenerating the whole
+    file, so a long file can't be lost to a truncated rewrite. `old`
+    must be a snippet that occurs exactly once (pass a longer unique
+    snippet if it isn't), or set replace_all=true to change every
+    occurrence."""
+    return edit_file(path=path, old=old, new=new, replace_all=replace_all)
+
+
+@register_tool_from_function(name="delete_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="delete_file",
+               summary="delete a file from the skills workspace")
+def _t_delete_file(path: str) -> dict:
+    """Delete a file from the skills/ directory."""
+    return delete_file(path=path)
+
+
+@register_tool_from_function(name="read_file", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_file",
+               summary="read a workspace file")
+def _t_read_file(path: str, offset: int = 0, limit: int | None = None) -> dict:
+    """Read a text file from ANYWHERE on the machine — your own
+    source code, the whole repository you run from, the wider
+    system. Absolute paths and `~` work; reading is not sandboxed.
+    (Off-limits: the credentials/ store and OS secret files like
+    ~/.ssh.) For a large file, page it: `offset` is the 0-based
+    first line, `limit` the line count (default: the whole file)."""
+    return file_read(path=path, offset=offset, limit=limit)
+
+
+@register_tool_from_function(name="list_skill_dir", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="list_skill_dir",
+               summary="list contents of the skills directory")
+def _t_list_skill_dir(path: str = ".") -> dict:
+    """List a directory's contents. With no path, lists your instance
+    workspace; pass an ABSOLUTE path (or `~`) to browse ANY directory
+    — your repository, the wider system. Listing is not sandboxed.
+    Use for "list files", "show files", "what's in <dir>"."""
+    return list_skill_dir(path=path)
+
+
+@register_tool_from_function(name="search_files", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_files",
+               summary="search file contents under the skills directory")
+def _t_search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
+    """Recursively grep file CONTENTS — case-insensitive substring
+    match. With no path, searches the working directory; pass an
+    ABSOLUTE path to search ANY directory — e.g. your whole
+    repository. Searching is not sandboxed. Use this to find where
+    something is defined or used instead of reading files one by
+    one. Returns {file, line, text} matches."""
+    return search_files(query=query, path=path, max_results=max_results)

@@ -27,7 +27,7 @@ def _bind(layout: Any) -> None:
     probe can read its paths. Idempotent — harmless when the agent has
     already bound (it just re-points at the same layout)."""
     try:
-        from jaeger_os.agent.tools import _common as _tcommon
+        from jaeger_os.core import context as _tcommon
         from jaeger_os.core.memory import memory as _memmod
         _memmod.bind(layout)
         _tcommon._layout = layout

@@ -5,10 +5,13 @@ version: 1.0.0
 author: Hermes Agent (adapted from gsd-build/get-shit-done)
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [write_file, terminal, browser]
 metadata:
   hermes:
     tags: [sketch, mockup, design, ui, prototype, html, variants, exploration, wireframe, comparison]
     related_skills: [spike, claude-design, popular-web-designs, excalidraw]
+  jros:
+    related_skills: [popular-web-designs, claude-design, design-md]
 ---
 
 # Sketch

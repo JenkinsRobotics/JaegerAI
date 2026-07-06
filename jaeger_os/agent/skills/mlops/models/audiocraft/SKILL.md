@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [audiocraft, torch>=2.0.0, transformers>=4.30.0]
 platforms: [linux, macos]
+requires_tools: [execute_code, terminal]
 metadata:
   hermes:
     tags: [Multimodal, Audio Generation, Text-to-Music, Text-to-Audio, MusicGen]
+  jros:
+    related_skills: [heartmula, songsee, comfyui, songwriting-and-ai-music]
 
 ---
 

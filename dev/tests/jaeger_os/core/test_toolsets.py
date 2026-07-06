@@ -68,9 +68,14 @@ def test_full_tools_env_overrides_explicit_scoping(monkeypatch) -> None:
 def test_core_tools_always_visible() -> None:
     """CORE was slimmed: the umbrella ``memory`` replaced the five
     granular memory tools, and ``execute_code`` was promoted from
-    the ``code`` toolset. Pin the new membership."""
+    the ``code`` toolset. Pin the new membership — with names that
+    actually exist in CORE (the old ``kanban``/``skill`` entries here
+    kept passing vacuously via the unknown-name fail-open after those
+    tools were renamed/removed)."""
     for name in ("get_time", "memory", "web_search", "todo",
-                 "execute_code", "kanban", "skill", "load_toolset"):
+                 "execute_code", "board_add", "board_view",
+                 "list_skills", "load_tools"):
+        assert name in ts.CORE, f"{name} not in CORE"
         assert ts.tool_visible(name), name
 
 
@@ -140,7 +145,7 @@ def test_catalog_lists_built_ins_and_skills() -> None:
 # silently leave a tool fail-open instead of intentionally classified.
 _INTENTIONAL_FAIL_OPEN: frozenset[str] = frozenset({
     # Meta-introspection — always reachable.
-    "describe_tool", "load_toolset",
+    "describe_tool", "load_tools",
     # Umbrellas — they SUBSUME categories so by design they're outside
     # any single one.
     "memory", "kanban", "skill", "computer_use", "computer_do", "browser",

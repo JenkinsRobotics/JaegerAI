@@ -1,0 +1,464 @@
+{
+  "total": 77,
+  "passed": 66,
+  "pass_rate": 0.857,
+  "routing_passed": 59,
+  "routing_total": 64,
+  "answer_passed": 43,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 712.18,
+  "metrics": {
+    "avg_latency_s": 9.249,
+    "p50_latency_s": 3.0,
+    "p95_latency_s": 38.941,
+    "min_latency_s": 0.311,
+    "max_latency_s": 124.23,
+    "total_tool_dispatches": 118,
+    "avg_tools_per_turn": 1.53,
+    "answer_tokens_total": 8598,
+    "answer_tokens_avg": 111.7,
+    "answer_tokens_per_sec": 12.1,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 3067818,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "called computer_read_screen with identical arguments 4 times": 1
+    },
+    "halted_turns": 1,
+    "avg_iterations": 2.43,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.8,
+    "ttft_p50_s": 0.331,
+    "ttft_p95_s": 0.531,
+    "ttft_reported": 77
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 9.171,
+      "p95_latency_s": 39.18,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 26,
+      "pass_rate": 0.929,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 12.666,
+      "p95_latency_s": 40.341,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 10,
+      "pass_rate": 0.909,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 9.967,
+      "p95_latency_s": 18.7,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "pass_rate": 0.917,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 4.146,
+      "p95_latency_s": 9.906,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 7,
+      "pass_rate": 0.778,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 3.092,
+      "p95_latency_s": 5.461,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 77,
+      "passed": 66,
+      "pass_rate": 0.857,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 9.249,
+      "p95_latency_s": 38.941,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 26,
+      "avg_latency_s": 12.666
+    },
+    "files": {
+      "total": 15,
+      "passed": 13,
+      "avg_latency_s": 10.784
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 23.404
+    },
+    "web": {
+      "total": 9,
+      "passed": 8,
+      "avg_latency_s": 5.432
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 4.017
+    },
+    "code": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 8.401
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 3.297
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 10,
+      "avg_latency_s": 9.967
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "avg_latency_s": 4.146
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 7,
+      "avg_latency_s": 3.092
+    },
+    "safety": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 1.614
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.309
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 0.891
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.321
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 1.776
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 4.578
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.53
+    },
+    "skill": {
+      "total": 4,
+      "passed": 2,
+      "avg_latency_s": 58.263
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 36.435
+    },
+    "research": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 27.444
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 3,
+      "avg_latency_s": 3.619
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 3.219
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 32.203
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 0,
+      "avg_latency_s": 4.354
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.588
+    }
+  },
+  "failures": [
+    {
+      "id": "help_overview",
+      "prompt": "show me what tools you have available",
+      "tools_called": [],
+      "answer": "I have access to a vast array of capabilities, ranging from direct system control to specialized AI-driven skills. I can categorize them into several main groups:\n\n### 1. Core System & Intelligence\nTh",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "rec_weather_unknown",
+      "prompt": "What's the weather in Atlantis_FakeCity_99999?",
+      "tools_called": [],
+      "answer": "I can't find any weather data for a location called Atlantis_FakeCity_99999. It sounds like a placeholder or a fictional place. If you meant a real city, tell me the name and I'll get the info for you",
+      "routing_ok": false,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "rec_schedule_cancel_missing",
+      "prompt": "Cancel the scheduled prompt named never_existed_demo_xyz.",
+      "tools_called": [
+        "cancel_schedule"
+      ],
+      "answer": "The scheduled prompt `never_existed_demo_xyz` could not be cancelled because it does not exist.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "hall_file_target",
+      "prompt": "Save my notes to a file.",
+      "tools_called": [
+        "clarify"
+      ],
+      "answer": "I'm ready. Just tell me what notes you want me to save and what you want to call the file. I'll put them in your workspace so they're easy to find.",
+      "routing_ok": null,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "chain_weather_t3",
+      "prompt": "Read that file back and tell me what the weather was.",
+      "tools_called": [
+        "read_file"
+      ],
+      "answer": "The weather was partly cloudy, 77°F (feels like 83°F), with 100% humidity and winds at 29mph.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "ms_chain_status_report",
+      "prompt": "In order: check system status, list the skills directory, then write bench_status.txt summarising bo",
+      "tools_called": [
+        "system_status",
+        "list_skill_dir",
+        "write_file",
+        "read_file"
+      ],
+      "answer": "System Status:\nPlatform: macOS-26.5.1-arm64-arm-64bit\nMachine: arm64\nPython: 3.11.15\nCPU Count: 10\nLoad Average: [10.24, 10.88, 10.71]\nDisk: 4517.8 GB free of 7449.23 GB\n\nSkills Directory Contents:\n- ",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_arxiv",
+      "prompt": "Find recent arXiv papers on retrieval-augmented generation and summarize the top few.",
+      "tools_called": [
+        "arxiv",
+        "web_search",
+        "web_extract"
+      ],
+      "answer": "I've found a few recent and significant papers on Retrieval-Augmented Generation (RAG) from arXiv. Here are the summaries of the most notable ones:\n\n### 1. LightRAG: Simple and Fast Retrieval-Augmente",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_screenshot",
+        "computer_read_screen",
+        "computer_click",
+        "computer_read_screen",
+        "computer_click",
+        "computer_screenshot",
+        "computer_read_screen"
+      ],
+      "answer": "[halted: called computer_read_screen with identical arguments 4 times]",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "dt_propose_skill_fix",
+      "prompt": "The weather skill keeps crashing on malformed input. It's too big to fix right now — note it so the ",
+      "tools_called": [
+        "propose_deep_think_task"
+      ],
+      "answer": "I've queued a task for the Deep Think model to fix the weather skill's error handling. It's sitting in the backlog waiting for your approval.",
+      "routing_ok": false,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "wf_triage_defer",
+      "prompt": "Three things: (A) draft a project outline, (B) what is 47*89 — I need that now, and (C) research the",
+      "tools_called": [
+        "calculate"
+      ],
+      "answer": "4183.\n\nI've got the urgent one for you. I'll start on the project outline and the vector database research next. What's the project about?",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "wf_defer_nonurgent",
+      "prompt": "No rush at all, but when you get a chance: reorganize my notes and write a summary of my week.",
+      "tools_called": [
+        "skill",
+        "skill"
+      ],
+      "answer": "<tool_call|>",
+      "routing_ok": false,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 882.55,
+  "load_s": 85.03,
+  "category_breakdown": {
+    "routing": {
+      "passed": 26,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 10,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 7,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 11,
+      "total": 12
+    },
+    "files": {
+      "passed": 13,
+      "total": 15
+    },
+    "web": {
+      "passed": 8,
+      "total": 9
+    },
+    "code": {
+      "passed": 5,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 3,
+      "total": 4
+    },
+    "safety": {
+      "passed": 4,
+      "total": 5
+    },
+    "skill": {
+      "passed": 2,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 3,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 0,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 0,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF/gemma-4-26B-A4B-it-QAT-Q4_0.gguf",
+  "model_name": "gemma-4-26b-a4b-it-qat-q4_0",
+  "run_id": "20260701-222418",
+  "benchmark_version": "1.3"
+}

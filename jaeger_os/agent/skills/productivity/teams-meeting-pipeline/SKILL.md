@@ -4,6 +4,7 @@ description: "Operate the Teams meeting summary pipeline via Hermes CLI — summ
 version: 1.1.0
 author: Hermes Agent + Teknium
 license: MIT
+requires_tools: [terminal]
 prerequisites:
   env_vars: [MSGRAPH_TENANT_ID, MSGRAPH_CLIENT_ID, MSGRAPH_CLIENT_SECRET]
   commands: [hermes]
@@ -14,6 +15,8 @@ metadata:
       - /docs/guides/microsoft-graph-app-registration
       - /docs/user-guide/messaging/teams-meetings
       - /docs/guides/operate-teams-meeting-pipeline
+  jros:
+    related_skills: [google-workspace, webhook-subscriptions, notion]
 ---
 
 # Teams Meeting Pipeline

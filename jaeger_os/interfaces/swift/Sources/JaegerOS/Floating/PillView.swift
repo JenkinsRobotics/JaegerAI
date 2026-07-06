@@ -101,6 +101,7 @@ struct PillView: View {
                     .focused($inputFocused)
                     .submitLabel(.send)
                     .onSubmit(send)
+                    .frame(maxWidth: .infinity)   // fill the card, don't collapse
 
                 Menu("New Chat ▾") {
                     Button("Open Chat Window") { actions.openChatWindow() }
@@ -168,6 +169,7 @@ struct PillView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Pill.border, lineWidth: 1)
         )
+        .frame(width: 680)   // the panel is 720; fill it (was collapsing to text width)
     }
 
     @ViewBuilder

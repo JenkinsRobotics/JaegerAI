@@ -17,7 +17,9 @@ import platform
 import shutil
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
+from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 def get_time(timezone: str | None = None) -> dict[str, Any]:
@@ -52,6 +54,18 @@ _CALC_OPS: dict[type, Any] = {
     ast.FloorDiv: op.floordiv, ast.USub: op.neg, ast.UAdd: op.pos,
 }
 
+# Comparison + boolean operators. A model asked "is N even?" naturally
+# writes ``N % 2 == 0`` — without these the calculator raised
+# "unsupported expression", and a 4B derailed into a PLAN-retry that never
+# ran (py-math-check, scenario suite 2026-07-06). Supporting comparisons
+# lets the tool answer the boolean directly. Still pure/safe: no names,
+# no calls beyond the math whitelist.
+_CALC_CMP: dict[type, Any] = {
+    ast.Eq: op.eq, ast.NotEq: op.ne,
+    ast.Lt: op.lt, ast.LtE: op.le,
+    ast.Gt: op.gt, ast.GtE: op.ge,
+}
+
 # Whitelist of safe single-arg math calls. sqrt is the bench-driving case —
 # without it, Gemma free-texts "square root of N" because it correctly infers
 # the calculator can't handle `sqrt(...)`. abs / log / log10 / exp / sin / cos
@@ -72,6 +86,28 @@ def _calc_eval(node: Any) -> Any:
         return _CALC_OPS[type(node.op)](_calc_eval(node.left), _calc_eval(node.right))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _CALC_OPS:
         return _CALC_OPS[type(node.op)](_calc_eval(node.operand))
+    if isinstance(node, ast.Compare):
+        # Chained comparisons (a < b < c) are folded left-to-right the way
+        # Python does: every link must hold. Common single-link case
+        # (``x == 0``) is just one iteration.
+        left = _calc_eval(node.left)
+        for cmp_op, comparator in zip(node.ops, node.comparators):
+            fn = _CALC_CMP.get(type(cmp_op))
+            if fn is None:
+                raise ValueError(f"unsupported comparison: {type(cmp_op).__name__}")
+            right = _calc_eval(comparator)
+            if not fn(left, right):
+                return False
+            left = right
+        return True
+    if isinstance(node, ast.BoolOp):
+        # ``and`` / ``or`` over already-safe operands (e.g. "N>0 and N%2==0").
+        vals = [_calc_eval(v) for v in node.values]
+        if isinstance(node.op, ast.And):
+            return all(vals)
+        if isinstance(node.op, ast.Or):
+            return any(vals)
+        raise ValueError(f"unsupported boolean op: {type(node.op).__name__}")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         fn = _CALC_FUNCS.get(node.func.id)
         if fn is None:
@@ -131,3 +167,26 @@ def system_status() -> dict[str, Any]:
             "free_gb": round(free / 1024**3, 2),
         },
     }
+
+
+@register_tool_from_function(name="get_time", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="time", operation="get_time",
+               summary="read the current time")
+def _t_get_time(timezone: str | None = None) -> dict:
+    """The current date, day of the week, year, and time — the ONLY
+    source of truth for "what day/date/year/time is it", "what's
+    today", and similar. Your training data is frozen in the past, so
+    a date or year answered from memory will be WRONG — always call
+    this for anything about the present moment. Optional IANA
+    timezone (e.g. 'Asia/Shanghai')."""
+    return get_time(timezone=timezone)
+
+
+@register_tool_from_function(name="calculate", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="math", operation="calculate",
+               summary="evaluate an arithmetic expression")
+def _t_calculate(expression: str) -> dict:
+    """Evaluate a safe arithmetic expression. Supports + - * / ** % //
+    and single-arg sqrt/abs/log/log10/exp/sin/cos/tan/floor/ceil/round.
+    For "square root of N" call calculate("sqrt(N)")."""
+    return calculate(expression=expression)

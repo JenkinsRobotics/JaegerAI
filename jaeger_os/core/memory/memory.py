@@ -1,14 +1,15 @@
-"""Instance-scoped persistent memory.
+"""Instance-scoped persistent memory — the public facade over SQLite.
 
-Everything lives under <instance>/memory/:
-  facts.json       — key/value facts curated via remember()/recall()
-  episodic.jsonl   — per-turn append-only log
-  schedules.jsonl  — cron-style scheduled prompts (append + cancel rows)
+The store is ``<instance>/memory/state.db`` (see ``sqlite_store.py`` and
+dev/docs/memory_architecture.md): ``facts`` is the current subject-attributed
+view, ``fact_log`` the append-only assertion history, ``episodic`` +
+``episodic_embeddings`` the per-turn log with semantic search. The old flat
+files (``facts.json`` / ``episodic.jsonl`` / ``schedules.jsonl``) are legacy —
+read once by the ``_lazy_import_*`` helpers to migrate a pre-0.2.0 instance,
+never written.
 
-No cross-imports from the project root — Jaeger owns its memory store.
-The shapes mirror memory/memory_module.py at the project root, but the
-files live inside each instance dir so two Jaeger instances on one host
-never share state.
+No cross-imports from the project root — Jaeger owns its memory store, and
+files live inside each instance dir so two instances never share state.
 """
 
 from __future__ import annotations
@@ -164,32 +165,101 @@ def _lazy_import_facts_from_json() -> None:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with sqlite_store.writer() as wconn:
         for k, v in facts.items():
+            cat = _norm_category(cats.get(k))
             wconn.execute(
                 "INSERT OR REPLACE INTO facts "
                 "(key, value, category, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (k, str(v), _norm_category(cats.get(k)), now, now),
+                (k, str(v), cat, now, now),
+            )
+            # Seed the history log so imported facts are traceable —
+            # a fact with no fact_log row looks like it never existed.
+            wconn.execute(
+                "INSERT INTO fact_log "
+                "(subject, key, value, category, source, tags, note, ts) "
+                "VALUES ('user', ?, ?, ?, 'user', '', "
+                "'imported from facts.json', ?)",
+                (k, str(v), cat, now),
             )
 
 
-def remember(key: str, value: str, category: str | None = None) -> None:
-    """Store a fact. ``category`` groups it (e.g. 'contacts',
-    'preferences', 'projects') — omitted facts land in 'general'."""
+# Who is setting facts right now. Live operator turns leave it at "user";
+# the benchmark sets it to "benchmark" so its facts are tagged (and easy to
+# purge: DELETE FROM facts WHERE source='benchmark'), and never masquerade as
+# the operator's. The agent can pass source="agent" for things it inferred.
+_memory_source: str = "user"
+
+
+def set_memory_source(source: str) -> str:
+    """Set the source tag applied to subsequent ``remember`` writes (and the
+    filter ``recall`` applies). Returns the PREVIOUS value so callers can
+    restore it. Used by the bench to tag its facts 'benchmark'."""
+    global _memory_source
+    prev = _memory_source
+    _memory_source = (source or "user").strip().lower() or "user"
+    return prev
+
+
+def current_memory_source() -> str:
+    return _memory_source
+
+
+def _norm_subject(subject: str | None) -> str:
+    return (subject or "user").strip().lower() or "user"
+
+
+def _norm_tags(tags: Any) -> str:
+    """Normalise tags to a comma-separated string (accepts list or string)."""
+    if not tags:
+        return ""
+    if isinstance(tags, str):
+        parts = tags.replace(",", " ").split()
+    else:
+        parts = [str(t) for t in tags]
+    seen: list[str] = []
+    for t in parts:
+        t = t.strip().lower()
+        if t and t not in seen:
+            seen.append(t)
+    return ",".join(seen)
+
+
+def remember(key: str, value: str, category: str | None = None,
+             source: str | None = None, subject: str | None = None,
+             tags: Any = None, note: str = "") -> None:
+    """Store a fact and append it to the history log.
+
+    ``subject`` = who/what it's ABOUT (the operator by default, or another
+    person/thing). ``source`` = who SET it (defaults to the active memory
+    source — 'user' live, 'benchmark' during a bench run). ``category``
+    groups it; ``tags`` (list or comma string) + ``note`` carry context. The
+    current view (``facts``) is upserted; every call also appends to
+    ``fact_log`` so the value can be traced over time."""
     from jaeger_os.core.memory import sqlite_store
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cat = _norm_category(category)
+    src = (source or _memory_source or "user").strip().lower() or "user"
+    subj = _norm_subject(subject)
+    tag_str = _norm_tags(tags)
     with sqlite_store.writer() as conn:
-        # INSERT OR REPLACE preserves the row's created_at when the
-        # key already exists — handled by the SELECT below.
         existing = conn.execute(
-            "SELECT created_at FROM facts WHERE key = ?", (key,)
+            "SELECT created_at FROM facts "
+            "WHERE subject = ? AND key = ? AND source = ?",
+            (subj, key, src),
         ).fetchone()
         created_at = existing["created_at"] if existing else now
         conn.execute(
             "INSERT OR REPLACE INTO facts "
-            "(key, value, category, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (key, value, cat, created_at, now),
+            "(subject, key, value, category, source, tags, note, "
+            " created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (subj, key, value, cat, src, tag_str, note, created_at, now),
+        )
+        conn.execute(
+            "INSERT INTO fact_log "
+            "(subject, key, value, category, source, tags, note, ts) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (subj, key, value, cat, src, tag_str, note, now),
         )
 
 
@@ -197,23 +267,46 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"my", "the", "a", "an", "is", "of", "do", "i", "what", "this", "that"}
 
 
-def recall(key: str) -> str | None:
-    """Look up a fact by exact key, with fuzzy fallback.
+def _source_filter() -> tuple[str, tuple[str, ...]]:
+    """The operator's recall ignores 'benchmark' facts (and a bench run only
+    sees its own) — so the benchmark's favourite colour is never returned as
+    the operator's."""
+    if _memory_source == "benchmark":
+        return "source = ?", ("benchmark",)
+    return "source != ?", ("benchmark",)
+
+
+def recall(key: str, subject: str | None = None) -> str | None:
+    """Look up the CURRENT value of a fact by exact key, with fuzzy fallback.
+    ``subject`` scopes whose fact (the operator by default). For the value
+    OVER TIME, use :func:`recall_history`.
 
     The fuzzy path lets the agent ask for ``"birthday"`` and find
-    ``"users_birthday"`` — important because the model's phrasing
-    drifts. Order: exact key → substring match against keys →
-    word-overlap against keys (excluding common stopwords)."""
+    ``"users_birthday"`` — the model's phrasing drifts. Order: exact key →
+    substring match against keys → word-overlap (excluding stopwords)."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
+    subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
+    # Precedence when the same (subject, key) exists under several sources
+    # (user-stated vs agent-inferred): what the USER said wins; ties break
+    # by recency. Without an explicit ORDER BY the row returned is
+    # PK-storage order — effectively arbitrary.
+    _prec = "ORDER BY (source = 'user') DESC, updated_at DESC"
     # 1) Exact key.
-    row = conn.execute("SELECT value FROM facts WHERE key = ?", (key,)).fetchone()
+    row = conn.execute(
+        f"SELECT value FROM facts WHERE subject = ? AND key = ? AND {src_sql} "
+        f"{_prec} LIMIT 1",
+        (subj, key, *src_args),
+    ).fetchone()
     if row is not None:
         return row["value"]
-    # 2) Substring match across keys. Read all keys (we expect at most
-    #    thousands — a single SELECT is fine; if this ever becomes a
-    #    bottleneck we can add an FTS table).
-    all_rows = conn.execute("SELECT key, value FROM facts").fetchall()
+    # 2) Substring match across this subject's keys (precedence-ordered, so
+    #    the first hit is the authoritative row for its key).
+    all_rows = conn.execute(
+        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql} {_prec}",
+        (subj, *src_args),
+    ).fetchall()
     if not all_rows:
         return None
     needle = key.lower().strip()
@@ -241,29 +334,88 @@ def recall(key: str) -> str | None:
     return best_value if best_overlap >= 1 else None
 
 
-def forget(key: str) -> bool:
-    """Remove a fact by exact key. Returns True if the row existed."""
+def recall_history(key: str, subject: str | None = None) -> list[dict[str, str]]:
+    """The full timeline of a fact from ``fact_log`` — every value it has
+    held, oldest first, with when/who/tags/note. Lets the agent answer
+    "you said blue on d1 and black on d2; your colours are blue and black."
+    Subject-scoped; source-filtered like ``recall``."""
     from jaeger_os.core.memory import sqlite_store
+    conn = sqlite_store.connection()
+    subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
+    rows = conn.execute(
+        f"SELECT value, source, tags, note, ts FROM fact_log "
+        f"WHERE subject = ? AND key = ? AND {src_sql} ORDER BY ts",
+        (subj, key, *src_args),
+    ).fetchall()
+    return [
+        {"value": r["value"], "source": r["source"], "tags": r["tags"],
+         "note": r["note"], "when": r["ts"]}
+        for r in rows
+    ]
+
+
+def forget(key: str, subject: str | None = None) -> bool:
+    """Remove a fact by exact key (scoped to ``subject``, default the
+    operator). Returns True if a row existed. History in ``fact_log`` is
+    kept — forgetting the current value doesn't erase that it was once true.
+
+    Source-scoped like ``recall``: a benchmark run can only delete its own
+    facts, never the operator's (a bench "forget my hometown" case must not
+    reach through and destroy the real hometown row), and the operator's
+    forget never touches benchmark rows."""
+    from jaeger_os.core.memory import sqlite_store
+    subj = _norm_subject(subject)
+    src_sql, src_args = _source_filter()
     with sqlite_store.writer() as conn:
-        cur = conn.execute("DELETE FROM facts WHERE key = ?", (key,))
+        cur = conn.execute(
+            f"DELETE FROM facts WHERE subject = ? AND key = ? AND {src_sql}",
+            (subj, key, *src_args),
+        )
         return cur.rowcount > 0
 
 
-def list_facts() -> dict[str, str]:
-    """Every stored fact as a ``{key: value}`` dict."""
+def list_facts(subject: str | None = "user") -> dict[str, str]:
+    """Facts as a ``{key: value}`` dict — the OPERATOR's facts by default
+    (``subject="user"``). Pass another subject for their facts, or ``None``
+    for every subject with keys prefixed ``subject:key`` so different
+    subjects' facts can never silently clobber each other in the merged
+    dict (Alice's favorite_color must not read as the operator's).
+    Benchmark-sourced facts are always excluded."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
-    rows = conn.execute("SELECT key, value FROM facts ORDER BY key").fetchall()
+    src_sql, src_args = _source_filter()
+    if subject is None:
+        rows = conn.execute(
+            f"SELECT subject, key, value FROM facts WHERE {src_sql} "
+            f"ORDER BY subject, key", src_args
+        ).fetchall()
+        return {
+            (r["key"] if r["subject"] == "user"
+             else f'{r["subject"]}:{r["key"]}'): r["value"]
+            for r in rows
+        }
+    subj = _norm_subject(subject)
+    rows = conn.execute(
+        f"SELECT key, value FROM facts WHERE subject = ? AND {src_sql} "
+        f"ORDER BY key", (subj, *src_args)
+    ).fetchall()
     return {r["key"]: r["value"] for r in rows}
 
 
-def list_facts_by_category() -> dict[str, dict[str, str]]:
-    """Facts grouped by category — ``{category: {key: value}}``.
-    Categories are sorted with 'general' last."""
+def list_facts_by_category(subject: str | None = "user") -> dict[str, dict[str, str]]:
+    """Facts grouped by category — ``{category: {key: value}}`` — for one
+    subject (the operator by default; this feeds the system-prompt facts
+    snapshot, which must never present someone else's fact as the
+    operator's). Categories are sorted with 'general' last."""
     from jaeger_os.core.memory import sqlite_store
     conn = sqlite_store.connection()
+    src_sql, src_args = _source_filter()
+    subj = _norm_subject(subject)
     rows = conn.execute(
-        "SELECT key, value, category FROM facts ORDER BY category, key"
+        f"SELECT key, value, category FROM facts "
+        f"WHERE subject = ? AND {src_sql} "
+        f"ORDER BY category, key", (subj, *src_args)
     ).fetchall()
     grouped: dict[str, dict[str, str]] = {}
     for r in rows:
@@ -658,11 +810,19 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None) -> dict[s
         raise ValueError("cron_expr and prompt are required")
     if not croniter.is_valid(cron_expr):
         raise ValueError(f"invalid cron expression: {cron_expr!r}")
-    now = datetime.now(timezone.utc)
-    nxt = croniter(cron_expr, now).get_next(datetime)
+    # The agent authors cron expressions against LOCAL wall-clock time
+    # (``get_time`` returns local time, and its docstring tells the model
+    # to anchor the cron to "the real current wall time"). So croniter
+    # must interpret the cron fields in the LOCAL zone — anchoring to UTC
+    # here shifted every fire by the UTC offset (a "remind me in 1 minute"
+    # fired hours late). Store next_fire_at in UTC so the string-ordered
+    # comparison in claim_due_schedules stays consistent.
+    now_local = datetime.now().astimezone()
+    nxt = croniter(cron_expr, now_local).get_next(datetime)
+    now = now_local.astimezone(timezone.utc)
     name = (name or f"sched_{int(now.timestamp())}").strip()
     created_at = now.isoformat(timespec="seconds")
-    next_fire = nxt.isoformat(timespec="seconds")
+    next_fire = nxt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
     with sqlite_store.writer() as conn:
         # ``schedule_id`` is UNIQUE — re-adding under the same name
@@ -750,14 +910,16 @@ def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
         for row in due_rows:
             claimed.append(_schedule_row_to_dict(row))
             try:
-                nxt = croniter(row["cron"], now_dt).get_next(datetime)
+                # Recompute the next fire in LOCAL wall-clock (matching
+                # add_schedule), then store it back in UTC.
+                nxt = croniter(row["cron"], now_dt.astimezone()).get_next(datetime)
             except Exception:  # noqa: BLE001 — malformed cron, leave alone
                 continue
             conn.execute(
                 "UPDATE schedules SET next_fire_at = ?, last_fired_at = ? "
                 "WHERE id = ?",
-                (nxt.isoformat(timespec="seconds"),
-                 now_dt.isoformat(timespec="seconds"),
+                (nxt.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                 now_dt.astimezone(timezone.utc).isoformat(timespec="seconds"),
                  row["id"]),
             )
     return claimed

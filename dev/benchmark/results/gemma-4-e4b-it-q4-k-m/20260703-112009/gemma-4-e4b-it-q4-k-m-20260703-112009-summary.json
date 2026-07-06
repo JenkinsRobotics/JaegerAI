@@ -1,0 +1,152 @@
+{
+  "total": 6,
+  "passed": 3,
+  "pass_rate": 0.5,
+  "routing_passed": 0,
+  "routing_total": 0,
+  "answer_passed": 0,
+  "answer_total": 0,
+  "errors": 0,
+  "elapsed_s": 98.03,
+  "metrics": {
+    "avg_latency_s": 16.338,
+    "p50_latency_s": 9.155,
+    "p95_latency_s": 29.269,
+    "min_latency_s": 0.491,
+    "max_latency_s": 29.269,
+    "total_tool_dispatches": 11,
+    "avg_tools_per_turn": 1.83,
+    "answer_tokens_total": 2083,
+    "answer_tokens_avg": 347.2,
+    "answer_tokens_per_sec": 21.2,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 128638,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "hit the same computer_open_app failure 2 times": 1
+    },
+    "halted_turns": 1,
+    "avg_iterations": 2.67,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 1.578,
+    "ttft_p50_s": 0.158,
+    "ttft_p95_s": 8.204,
+    "ttft_reported": 6
+  },
+  "suites": {
+    "smoke": {
+      "total": 1,
+      "passed": 0,
+      "pass_rate": 0.0,
+      "threshold": 0.8,
+      "meets_threshold": false,
+      "avg_latency_s": 0.491,
+      "p95_latency_s": 0.491,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 1,
+      "passed": 0,
+      "pass_rate": 0.0,
+      "threshold": 0.85,
+      "meets_threshold": false,
+      "avg_latency_s": 0.491,
+      "p95_latency_s": 0.491,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "full": {
+      "total": 6,
+      "passed": 3,
+      "pass_rate": 0.5,
+      "threshold": 0.7,
+      "meets_threshold": false,
+      "avg_latency_s": 16.338,
+      "p95_latency_s": 29.269,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "skill": {
+      "total": 4,
+      "passed": 2,
+      "avg_latency_s": 16.273
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 26.175
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 29.269
+    },
+    "routing": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 0.491
+    },
+    "plan_first": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 16.468
+    }
+  },
+  "failures": [
+    {
+      "id": "skill_codebase_inspect",
+      "prompt": "Give me a structured inspection of this codebase's architecture and main modules.",
+      "tools_called": [],
+      "answer": "PLAN: use_skill(name=\"codebase-inspection\")\n<|tool_call>call:use_skill{name:<|\"|>codebase-inspection<|\"|>}",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": false,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [],
+      "answer": "PLAN: use_skill(name=\"macos-computer-use\")\n",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_open_app"
+      ],
+      "answer": "I am unable to proceed with the action because the `computer_open_app` tool is consistently failing with a validation error, indicating it requires a different argument structure than I am providing, ",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 98.03,
+  "load_s": 43.69,
+  "category_breakdown": {
+    "routing": {
+      "passed": 0,
+      "total": 1
+    },
+    "skill": {
+      "passed": 2,
+      "total": 4
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260703-112009",
+  "benchmark_version": "1.3"
+}

@@ -17,16 +17,11 @@
 import SwiftUI
 
 struct SettingsView: View {
+    // The agent-centric HUD replaces the old tabbed prefs, matching the PySide6
+    // agent_settings window. App prefs (below) remain reachable under "App".
     var body: some View {
-        TabView {
-            GeneralSettings()
-                .tabItem { Label("Preferences", systemImage: "gearshape") }
-            AgentSettingsInfo()
-                .tabItem { Label("Agent", systemImage: "brain.head.profile") }
-            AboutSettings()
-                .tabItem { Label("About", systemImage: "info.circle") }
-        }
-        .frame(width: 460, height: 320)
+        AgentSettingsHUD()
+            .frame(width: 900, height: 600)
     }
 }
 

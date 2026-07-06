@@ -5,10 +5,13 @@ version: 2.3.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [web_extract, execute_code, terminal, web_search]
 metadata:
   hermes:
     tags: [PDF, Documents, Research, Arxiv, Text-Extraction, OCR]
     related_skills: [powerpoint]
+  jros:
+    related_skills: [powerpoint, nano-pdf, arxiv]
 ---
 
 # PDF & Document Extraction

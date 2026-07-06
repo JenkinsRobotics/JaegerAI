@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+
 _STATUSES = {"pending", "in_progress", "completed", "cancelled"}
 
 
@@ -102,3 +104,17 @@ def todo(todos: list[dict[str, Any]] | None = None,
     }
     return {"ok": True, "todos": items,
             "summary": {"total": len(items), **counts}}
+
+
+@register_tool_from_function(name="todo")
+def _t_todo(todos: list[dict] | None = None, merge: bool = False) -> dict:
+    """Session task list — a scratchpad for multi-step jobs (3+
+    steps or several things at once). No args = read current
+    list. ``todos`` = list of ``{id, content, status}`` items
+    (pending / in_progress / completed / cancelled). ``merge=False``
+    (default) replaces the list; ``merge=True`` updates by id.
+
+    Keep exactly ONE item in_progress at a time; use the kanban
+    board for cross-session work. See ``describe_tool("todo")``
+    for the full contract."""
+    return todo(todos=todos, merge=merge)

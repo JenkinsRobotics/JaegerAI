@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
 from jaeger_os.core.safety.permissions import (
     ConfirmationProvider,
     PermissionPolicy,
@@ -113,10 +113,11 @@ def run_benchmark(
     here is a regression in the surface the user actually talks to.
 
     Args:
-      tags:  comma-separated subset of bench tags (e.g.
-             ``"routing,memory"``). Empty = full corpus. Available
-             tags: routing, multistep, multiturn, recovery, memory,
-             files, web, code, audio, schedule.
+      tags:  comma-separated subset of bench categories (e.g.
+             ``"routing,memory"``). Empty = full corpus. Categories:
+             routing, memory, multistep, recovery, multiturn, files,
+             web, code, schedule, safety, skill, kanban, deepthink,
+             self_improve, workflow, persona.
       limit: cap on the number of cases (after tag filtering).
              0 = no cap. Multi-turn sessions are kept whole.
       ids:   comma-separated case ids to run (e.g.

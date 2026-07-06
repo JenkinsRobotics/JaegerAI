@@ -16,7 +16,8 @@ import os
 import pathlib
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import _require_layout
 
 try:
     import yaml as _yaml  # PyYAML is already a hard dep
@@ -268,3 +269,27 @@ def setup_plugin(name: str) -> dict[str, Any]:
             for name in env_required
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Agent-facing tool wrappers (migrated from main._register_builtins).
+# ---------------------------------------------------------------------------
+@register_tool_from_function(name="list_plugins", side_effect="read")
+def _t_list_plugins() -> dict:
+    """Enumerate the bundled jaeger_os plugins (discord, telegram,
+    imessage, whisper_stt, kokoro_tts, mcp) with install + credential
+    status for each. Use this when the user asks what integrations
+    are available, or before suggesting a feature you'd need a
+    plugin for."""
+    return list_plugins()
+
+
+@register_tool_from_function(name="setup_plugin")
+def _t_setup_plugin(name: str) -> dict:
+    """Return step-by-step setup instructions for the named plugin
+    (e.g. ``discord``, ``telegram``, ``whisper_stt``). Surfaces
+    missing libraries to ``pip install`` and required env vars or
+    credentials that need values. Does NOT modify the user's
+    environment — the user runs the install commands and stores
+    credentials themselves."""
+    return setup_plugin(name=name)

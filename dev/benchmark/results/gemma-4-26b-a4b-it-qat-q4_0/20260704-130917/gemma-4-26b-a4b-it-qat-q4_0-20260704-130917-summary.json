@@ -1,0 +1,405 @@
+{
+  "total": 81,
+  "passed": 75,
+  "pass_rate": 0.926,
+  "routing_passed": 61,
+  "routing_total": 63,
+  "answer_passed": 47,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 710.08,
+  "metrics": {
+    "avg_latency_s": 8.766,
+    "p50_latency_s": 3.171,
+    "p95_latency_s": 41.792,
+    "min_latency_s": 0.32,
+    "max_latency_s": 141.122,
+    "total_tool_dispatches": 128,
+    "avg_tools_per_turn": 1.58,
+    "answer_tokens_total": 9320,
+    "answer_tokens_avg": 115.1,
+    "answer_tokens_per_sec": 13.1,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 3045874,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "called computer_do with identical arguments 4 times": 1,
+      "hit the same computer_do failure 2 times": 1
+    },
+    "halted_turns": 2,
+    "avg_iterations": 2.47,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.811,
+    "ttft_p50_s": 0.321,
+    "ttft_p95_s": 0.527,
+    "ttft_reported": 81
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 9.635,
+      "p95_latency_s": 41.792,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 26,
+      "pass_rate": 0.929,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 10.943,
+      "p95_latency_s": 41.792,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "pass_rate": 1.0,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 9.177,
+      "p95_latency_s": 24.665,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "pass_rate": 0.917,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 4.76,
+      "p95_latency_s": 8.686,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "pass_rate": 1.0,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 3.116,
+      "p95_latency_s": 7.125,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 81,
+      "passed": 75,
+      "pass_rate": 0.926,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 8.766,
+      "p95_latency_s": 41.792,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 26,
+      "avg_latency_s": 10.943
+    },
+    "files": {
+      "total": 15,
+      "passed": 14,
+      "avg_latency_s": 8.633
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 12.792
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 5.958
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 3.164
+    },
+    "code": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 7.9
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.856
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 9.177
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "avg_latency_s": 4.76
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 3.116
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 1.299
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.19
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 0.915
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.087
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 1.651
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 4.426
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.737
+    },
+    "skill": {
+      "total": 4,
+      "passed": 2,
+      "avg_latency_s": 64.845
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 14.359
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 47.866
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 3.019
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 5.98
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.944
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 2.458
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.146
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 16.974
+    }
+  },
+  "failures": [
+    {
+      "id": "help_overview",
+      "prompt": "show me what tools you have available",
+      "tools_called": [],
+      "answer": "I have access to a wide variety of tools categorized by their purpose. Since I am Jaeger OS, I use specialized \"skills\" (playbooks) for complex tasks and \"raw tools\" for direct actions.\n\n### CORE TOOL",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "chain_weather_t3",
+      "prompt": "Read that file back and tell me what the weather was.",
+      "tools_called": [
+        "read_file"
+      ],
+      "answer": "The weather recorded in the file was: Light drizzle 73°F (feels 56°F), humidity 89%, wind ↖17mph.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_codebase_inspect",
+      "prompt": "Give me a structured inspection of this codebase's architecture and main modules.",
+      "tools_called": [
+        "list_skill_dir",
+        "list_skill_dir",
+        "search_files",
+        "list_skill_dir",
+        "list_skill_dir"
+      ],
+      "answer": "I have performed a high-level inspection of the codebase structure. Based on the directory tree and file metadata, here is a structured overview of the Jaeger OS (JROS) architecture.\n\n### ARCHITECTURA",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_do",
+        "computer_read_screen",
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_do",
+        "computer_screenshot",
+        "vision_analyze",
+        "computer_look",
+        "computer_do",
+        "computer_do",
+        "computer_do",
+        "computer_do",
+        "computer_do"
+      ],
+      "answer": "[halted: called computer_do with identical arguments 4 times]",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "wf_triage_defer",
+      "prompt": "Three things: (A) draft a project outline, (B) what is 47*89 — I need that now, and (C) research the",
+      "tools_called": [],
+      "answer": "I'll handle the urgent calculation first.\n\n4183\n\nRegarding the others:\n(A) I have drafted a placeholder for your project outline. Please let me know the topic or details when you are ready to proceed.",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_do",
+        "computer_do"
+      ],
+      "answer": "[halted: hit the same computer_do failure 2 times]",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 783.58,
+  "load_s": 67.95,
+  "category_breakdown": {
+    "routing": {
+      "passed": 26,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 11,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 9,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 11,
+      "total": 12
+    },
+    "files": {
+      "passed": 14,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 5,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 2,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 4,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 1,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 1,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF/gemma-4-26B-A4B-it-QAT-Q4_0.gguf",
+  "model_name": "gemma-4-26b-a4b-it-qat-q4_0",
+  "run_id": "20260704-130917",
+  "benchmark_version": "1.3"
+}

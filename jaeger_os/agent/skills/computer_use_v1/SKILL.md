@@ -16,6 +16,11 @@ registers_tools:
   - computer_type_text(text) -> {ok, typed}
   - computer_press_key(key) -> {ok, pressed}
   - computer_menu_select(menu, item) -> {ok, selected}
+tags: [computer-use, desktop, gui, automation, screenshot]
+requires_tools: [computer_screenshot, computer_read_screen, computer_open_app, computer_click, computer_type_text, computer_press_key, computer_menu_select]
+metadata:
+  jros:
+    related_skills: [macos_computer, macos-computer-use, web-app-qa]
 ---
 
 # computer_use — universal screenshot path

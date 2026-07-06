@@ -27,7 +27,8 @@ import subprocess
 import time
 from typing import Any
 
-from ._common import _audit, _require_layout
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.runtime.tool_interrupt import ToolInterrupted, run_interruptible
@@ -181,3 +182,14 @@ def ssh_exec(host: str, command: str, timeout_s: float = 60.0) -> dict[str, Any]
         "timed_out": timed_out,
         "interrupted": interrupted,
     }
+
+
+@register_tool_from_function(name="remote_terminal")
+def _t_remote_terminal(host: str, command: str, timeout_s: float = 60.0) -> dict:
+    """Run one command on a REMOTE host over SSH. ``terminal`` runs
+    locally; this runs the same shape of command on another machine.
+    ``host`` follows ssh's destination grammar — ``[user@]host[:port]``
+    or any ``Host`` alias from ~/.ssh/config. Auth uses the local
+    user's ssh keychain (BatchMode=yes — no password prompts; missing
+    key fails fast). PRIVILEGED-tier, audited like ``terminal``."""
+    return ssh_exec(host=host, command=command, timeout_s=timeout_s)

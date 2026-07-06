@@ -131,3 +131,58 @@ def _compose_speech(patterns: tuple[str, ...]) -> str:
     if not bits:
         return ""
     return "## Speech patterns\n\n" + "\n".join(bits)
+
+
+# ── Persona Compiler: State (sliders) → View (prose) ────────────────
+#
+# compose_block above is the STATE view — the full numeric dump Studio shows
+# an operator editing a character. The functions below are the VIEW the live
+# model sees: raw floats compiled into behavioral prose, deviations only.
+# A base 4B model can't map "sarcasm: 0.40" to behavior, but it reads "wield
+# sharp sarcasm" fine. See dev/docs/persona_compiler.md.
+
+_HIGH = 0.60
+_LOW = 0.30
+
+# Per Expression trait: (low-band clause, high-band clause). None = that side
+# is the trait's natural default (e.g. 0.0 sarcasm), so it emits nothing.
+_EXPRESSION_CLAUSES: dict[str, tuple[str | None, str | None]] = {
+    "sarcasm":    (None, "wield sharp sarcasm and dry wit"),
+    "warmth":     ("keep a cool, detached tone", "be warm and encouraging"),
+    "verbosity":  ("keep replies short and clipped", "explain generously"),
+    "formality":  ("speak casually and skip the formalities", "keep your language formal and precise"),
+    "directness": ("soften and hedge your phrasing", "be blunt and direct"),
+    "humor":      (None, "lean into humor and levity"),
+    "empathy":    ("stay matter-of-fact", "lead with empathy"),
+    "aggression": (None, "be forceful and confrontational"),
+}
+
+PERSONA_BOUNDARY = (
+    "THE PERSONA BOUNDARY: this voice is for prose you address to the operator "
+    "ONLY. When you write a PLAN line, call a tool, fill a tool argument, or "
+    "write code, drop the persona entirely — there you are Jaeger OS: cold, "
+    "precise, literal."
+)
+
+
+def expression_clauses(e: Expression) -> list[str]:
+    """The deviating Expression sliders as behavioral clauses. Mid-band
+    (0.30–0.60) emits nothing — neutral is the default."""
+    out: list[str] = []
+    for trait, (low_c, high_c) in _EXPRESSION_CLAUSES.items():
+        v = max(0.0, min(1.0, float(getattr(e, trait))))
+        if v > _HIGH and high_c:
+            out.append(high_c)
+        elif v < _LOW and low_c:
+            out.append(low_c)
+    return out
+
+
+def domain_lens(d: Domains) -> str:
+    """High knowledge domains (>0.60) as a single 'lens' sentence, or ''."""
+    order = ("science", "philosophy", "technology", "art",
+             "politics", "psychology", "nature", "combat")
+    high = [name for name in order if float(getattr(d, name)) > _HIGH]
+    if not high:
+        return ""
+    return "You tend to frame things through " + ", ".join(high) + "."

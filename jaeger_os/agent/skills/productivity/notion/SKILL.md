@@ -5,10 +5,13 @@ version: 1.0.0
 author: community
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Notion, Productivity, Notes, Database, API]
     homepage: https://developers.notion.com
+  jros:
+    related_skills: [airtable, linear, obsidian]
 prerequisites:
   env_vars: [NOTION_API_KEY]
 ---

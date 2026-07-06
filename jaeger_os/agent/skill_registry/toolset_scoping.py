@@ -14,7 +14,7 @@ Two kinds of toolset:
 
 Why scope at all: routing accuracy on a local model degrades as the
 visible tool count grows. The CORE set (~17 common tools) covers most
-turns; ``load_toolset`` widens the view when a task needs more. The
+turns; ``load_tools`` widens the view when a task needs more. The
 active set only ever GROWS within a session, so the tool-schema KV
 prefix is re-prefilled at most once per widening, never thrashed.
 
@@ -53,11 +53,12 @@ def _scoping_enabled() -> bool:
     return val in ("1", "true", "yes", "on")
 
 
-# CORE — always visible when scoping is on. Curated to the umbrella
-# tools instead of granular siblings: ``memory`` instead of the five
-# fine-grained verbs, ``kanban`` instead of the four ``board_*``
-# operations, ``skill`` instead of skill-dir primitives. Lower
-# routing entropy, same capability surface.
+# CORE — always visible when scoping is on. Umbrellas where they route
+# well (``memory`` instead of the five fine-grained verbs, ``list_skills``
+# instead of skill-dir primitives), but INDIVIDUAL board verbs
+# (``board_add``/``board_view``) rather than an ``action=`` umbrella — a
+# local model routes over distinct named tools better than one tool's
+# action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
     # Time and math — the cheapest, most-routed pair.
     "get_time", "calculate",
@@ -70,23 +71,24 @@ CORE: frozenset[str] = frozenset({
     # via the ``web`` toolset for users that don't want it bloating
     # routing on quiet days.
     "web_search", "web_extract",
-    # Memory — umbrella ONLY. The five granular tools (remember /
-    # recall / forget / list_facts / search_memory) are still
-    # registered and callable but loadable via the
-    # ``memory_granular`` toolset — keeps routing concentrated on
-    # one tool instead of splitting across five.
-    "memory",
-    # Tasks + board — both umbrellas. Granular ``board_*`` tools
-    # load via the ``board`` toolset.
-    "todo", "kanban",
-    # Skill discovery (umbrella) + delegation. Heavy procedures live
-    # behind ``skill(action="view", name=…)``.
-    "skill", "delegate_task",
+    # Memory — umbrella + ``recall`` (the everyday read). The other
+    # granular verbs (forget / list_facts / search_memory) load via the
+    # ``memory_granular`` toolset. ``recall`` is CORE because scoped runs
+    # showed the umbrella alone lost the plain "what did I say" cases.
+    "memory", "recall",
+    # Tasks + board. Individual board verbs (a local model routes over
+    # distinct named tools better than one ``action=`` umbrella); the
+    # common two are CORE, the rest load via the ``board`` toolset.
+    "todo", "board_add", "board_view",
+    # Skill discovery (umbrella) + the enum-callable use_skill + delegation.
+    # Heavy procedures live behind ``skill(view)`` / ``use_skill(name=…)``.
+    "list_skills", "use_skill", "delegate_task",
     # User interaction.
     "clarify", "help_me",
-    # Meta — always visible so the model can grow its toolbox
-    # mid-session without needing a category-wide load_toolset.
-    "load_toolset", "describe_tool",
+    # Meta — the search + activate primitives, always visible so the model
+    # can FIND any tool (list_tools) and bring it in (load_tools) without
+    # ever force-fitting a visible tool for one it hasn't looked up.
+    "list_tools", "load_tools", "describe_tool",
     # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
     # toolset, not CORE — loaded on demand like ``run_benchmark``. The
     # old ``system_health`` was kept out entirely because "do a self
@@ -108,7 +110,7 @@ LEAN_CORE: frozenset[str] = frozenset({
     "read_file", "write_file", "patch", "search_files", "list_skill_dir",
     "web_search", "web_extract",
     "memory",
-    "todo", "clarify", "delegate_task", "kanban", "skill",
+    "todo", "clarify", "delegate_task", "board_add", "board_view", "list_skills",
     "computer_use", "browser",
     "vision_analyze", "image_generate", "text_to_speech",
 })
@@ -123,10 +125,10 @@ LEAN_CORE: frozenset[str] = frozenset({
 # doctor's tool-registry check); the actual gate the agent uses is
 # :func:`tool_visible`, opt-in via ``JAEGER_TOOLSET_SCOPING``.
 
-# Built-in tool classes — loaded on demand via load_toolset(name).
+# Built-in tool classes — loaded on demand via load_tools(name).
 # Every registered tool should appear in EXACTLY ONE of these
 # toolsets; intentional fail-open is reserved for the two meta-tools
-# (``describe_tool`` / ``load_toolset``) which are themselves in CORE.
+# (``describe_tool`` / ``load_tools``) which are themselves in CORE.
 # Classification is checked by ``test_every_registered_tool_is_classified``.
 TOOLSETS: dict[str, frozenset[str]] = {
     "files": frozenset({
@@ -144,6 +146,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "media": frozenset({
         "text_to_speech", "listen", "vision_analyze", "image_generate",
+        # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart
+        # to the local image_generate.
+        "generate_image_fal", "generate_video_fal",
     }),
     "avatar": frozenset({
         # BETA — these register with ``beta=True``, so they reach the
@@ -165,9 +170,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "remember", "recall", "forget", "list_facts", "search_memory",
     }),
     "board": frozenset({
-        # ``kanban`` umbrella is in CORE; the granular ``board_*``
-        # primitives load via this toolset.
-        "board_view", "board_add", "board_move", "board_update",
+        # board_add / board_view are CORE; the rest load on intent.
+        "board_move", "board_update", "board_delete",
     }),
     "scheduling": frozenset({
         "schedule_prompt", "list_schedules", "cancel_schedule",
@@ -191,10 +195,18 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # the revision log (feeds + records the Deep Think review loop).
         "skill_note", "skill_notes", "request_skill_review", "set_skill_review",
         "record_skill_revision",
+        # Task-level after-action reflection (the REFLECT loop step).
+        "reflect",
     }),
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
+    "smart_home": frozenset({
+        # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
+        # registered on import like send_message; loaded on intent.
+        "ha_list_entities", "ha_get_state", "ha_list_services",
+        "ha_call_service",
+    }),
     "people": frozenset({"remember_person", "get_person", "list_people"}),
     "models": frozenset({"list_models", "download_model", "model_location",
                          "set_mode", "get_mode", "set_autonomy", "get_autonomy"}),
@@ -204,15 +216,15 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "diagnostics": frozenset({"system_status", "self_check", "diagnostics"}),
 }
 
-# One-line description per built-in class — for the load_toolset catalog.
+# One-line description per built-in class — for the load_tools catalog.
 TOOLSET_SUMMARY: dict[str, str] = {
     "files": "append, delete, patch, search files; list the workspace",
     "code": "shell/terminal, ssh, install packages, venv exec",
-    "media": "text-to-speech, mic capture, vision, image generation",
+    "media": "text-to-speech, mic capture, vision, image/video generation (local + fal.ai cloud)",
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
-    "board": "granular board_view/add/move/update (kanban is always-on)",
+    "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
     "scheduling": "schedule, list, cancel cron prompts",
     "background": "long-running background processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",
@@ -220,6 +232,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
+    "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
               "set_autonomy (ask/scoped/auto)",

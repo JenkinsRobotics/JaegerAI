@@ -5,9 +5,12 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [macos]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Reminders, tasks, todo, macOS, Apple]
+  jros:
+    related_skills: [apple-notes, imessage, findmy]
 prerequisites:
   commands: [remindctl]
 ---

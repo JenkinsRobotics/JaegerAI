@@ -1,0 +1,62 @@
+{
+  "total": 2,
+  "passed": 2,
+  "pass_rate": 1.0,
+  "routing_passed": 0,
+  "routing_total": 0,
+  "answer_passed": 0,
+  "answer_total": 0,
+  "errors": 0,
+  "elapsed_s": 70.01,
+  "metrics": {
+    "avg_latency_s": 35.004,
+    "p50_latency_s": 34.393,
+    "p95_latency_s": 35.614,
+    "min_latency_s": 34.393,
+    "max_latency_s": 35.614,
+    "total_tool_dispatches": 4,
+    "avg_tools_per_turn": 2.0,
+    "answer_tokens_total": 748,
+    "answer_tokens_avg": 374.0,
+    "answer_tokens_per_sec": 10.7,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 113635,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 3.5,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 16.604,
+    "ttft_p50_s": 0.232,
+    "ttft_p95_s": 32.976,
+    "ttft_reported": 2
+  },
+  "suites": {
+    "full": {
+      "total": 2,
+      "passed": 2,
+      "pass_rate": 1.0,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 35.004,
+      "p95_latency_s": 35.614,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "plan_first": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 35.004
+    }
+  },
+  "failures": [],
+  "wall_s": 70.02,
+  "load_s": 41.91,
+  "category_breakdown": {},
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260704-142000",
+  "benchmark_version": "1.3"
+}

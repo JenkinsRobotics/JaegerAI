@@ -5,10 +5,13 @@ version: 1.0.0
 author: community
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [Smart-Home, Hue, Lights, IoT, Automation]
     homepage: https://www.openhue.io/cli
+  jros:
+    related_skills: [home-assistant, apple-reminders, imessage, findmy]
 prerequisites:
   commands: [openhue]
 ---

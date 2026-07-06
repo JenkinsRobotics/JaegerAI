@@ -3,13 +3,26 @@ name: kanban-worker
 description: Pitfalls, examples, and edge cases for Kanban workers. The lifecycle itself is auto-injected into every worker's system prompt (the kanban section of agent/prompts/framework_agent.md); this skill is what you load when you want deeper detail on specific scenarios.
 version: 2.0.0
 platforms: [linux, macos, windows]
+requires_tools: [board_view, board_add, board_move, board_update, memory, terminal]
 metadata:
   hermes:
     tags: [kanban, multi-agent, collaboration, workflow, pitfalls]
     related_skills: [kanban-orchestrator]
+  jros:
+    related_skills: [kanban-orchestrator, webhook-subscriptions]
 ---
 
 # Kanban Worker — Pitfalls and Examples
+
+## JROS TOOL MAPPING (read first — the recipe below uses legacy names)
+This playbook was written for Hermes' `kanban_*` tools. In JROS the board is
+five individual verbs — translate as you follow the steps:
+- `kanban_create(...)`  -> `board_add(title=…, description=…, priority=…)`
+- `kanban_show` / `kanban_list` -> `board_view()`
+- `kanban_complete(id)` -> `board_move(card_id=…, column="done")`
+- `kanban_block(id)`    -> `board_move(card_id=…, column="blocked")`
+- `kanban_comment(...)` -> `board_update(card_id=…, note=…)`
+- `kanban_link`         -> `board_update(card_id=…, note="depends on <id>")`
 
 > You're seeing this skill because the Hermes Kanban dispatcher spawned you as a worker with `--skills kanban-worker` — it's loaded automatically for every dispatched worker. The **lifecycle** (6 steps: orient → work → heartbeat → block/complete) also lives in the `KANBAN_GUIDANCE` block that's auto-injected into your system prompt. This skill is the deeper detail: good handoff shapes, retry diagnostics, edge cases.
 

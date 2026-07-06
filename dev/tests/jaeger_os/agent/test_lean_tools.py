@@ -6,14 +6,14 @@ catalog-plus-on-demand-describe pattern (~3K tokens).
 
 Pinned here:
   - The agent's ``tools`` property re-evaluates ``tool_visible`` every
-    access, so a mid-session ``load_toolset`` widens the view on the
+    access, so a mid-session ``load_tools`` widens the view on the
     very next turn.
   - The agent's ``all_tools`` keeps the FULL registered set so the
     loop can still validate + dispatch a call whose schema the model
     learned via ``describe_tool``.
   - The ``describe_tool`` meta-tool returns the schema of any registered
     tool — including ones currently hidden from the model.
-  - ``load_toolset`` + ``describe_tool`` both live in CORE so they're
+  - ``load_tools`` + ``describe_tool`` both live in CORE so they're
     reachable from any session, scoped or not.
 """
 
@@ -121,7 +121,7 @@ def test_full_tools_env_var_disables_the_filter(monkeypatch):
 
 
 def test_load_toolset_widens_view_on_the_next_access(monkeypatch, stub_tools):
-    """The point of the ``tools`` property: a load_toolset call DURING
+    """The point of the ``tools`` property: a load_tools call DURING
     a turn must reach the next call to ``tools`` without an agent
     rebuild. That's what makes the catalog-then-load pattern usable."""
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
@@ -132,7 +132,7 @@ def test_load_toolset_widens_view_on_the_next_access(monkeypatch, stub_tools):
     before = {t.name for t in agent.tools}
     assert "stub_hidden" not in before, "stub_hidden should start hidden"
 
-    # Simulate the load_toolset tool firing.
+    # Simulate the load_tools tool firing.
     assert ts.enable_toolset("code") is True
 
     after = {t.name for t in agent.tools}

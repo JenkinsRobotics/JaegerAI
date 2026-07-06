@@ -24,7 +24,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from ._common import SandboxError, _require_layout, _resolve_under
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 # Re-export plugin constants so existing imports keep working.
 from ...plugins.kokoro_tts import (
@@ -185,3 +186,20 @@ def _speak_via_bus(text: str) -> dict[str, Any]:
         "elapsed_s": ack.duration_s,
         "reason": ack.reason,
     }
+
+
+# ── Agent-tool wrapper (migrated from main.py::_register_builtins) ──
+
+
+@register_tool_from_function(name="text_to_speech")
+def _t_text_to_speech(text: str = "", path: str = "") -> dict:
+    """Speak text aloud through the default audio output via Kokoro
+    TTS. Use ONLY when the user explicitly asks to HEAR something
+    ("say…", "out loud", "narrate/read X aloud", "speak"). This is
+    NOT your reply channel — ordinary questions ("tell me a joke",
+    "what's the weather") are answered in text, not spoken.
+    Pass `text` for literal text, or `path` to narrate a file from
+    <instance>/skills/ ("read X out loud", "narrate X" with a named
+    file). `path` is sandbox-resolved and wins over `text` when both
+    are given. Supports minimal SSML: <break time="200ms"/>, <breath/>."""
+    return speak(text=text, path=path)

@@ -5,9 +5,9 @@
 #   jaeger                      run the ACTIVE agent (no --instance needed)
 #   jaeger --instance NAME      run a specific agent
 #   jaeger --voice ...          run the agent in voice mode
-#   jaeger --dev [flag]         boot the dev instance's in-process TUI
-#                               (delegates to launch.py: bare → --tui,
-#                               or pass --stop/--restart/--status/--health)
+#   jaeger dev [flag]           developer toolbox (jaeger_os.cli.devtools):
+#                               dev app/TUI boot, or pass
+#                               --stop/--status/--health/--dev-gui/…
 #   jaeger instances ...        manage agents: list / create / edit /
 #                               delete / set-default / show
 #   jaeger skills|personality|status|roadmap|avatar    operator console
@@ -16,7 +16,7 @@
 #
 # Management subcommands go to the console (jaeger_os.cli); everything
 # else runs the agent (jaeger_os.cli.run). Picks the repo's .venv interpreter
-# directly to sidestep pyenv shims (same pattern as ./launch).
+# directly to sidestep pyenv shims.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -5,9 +5,12 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [macos]
+requires_tools: [terminal, vision_analyze]
 metadata:
   hermes:
     tags: [FindMy, AirTag, location, tracking, macOS, Apple]
+  jros:
+    related_skills: [imessage, apple-reminders, macos-computer-use]
 ---
 
 # Find My (Apple)

@@ -5,10 +5,13 @@ version: 1.0.0
 author: BadTechBandit
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [write_file, read_file, browser]
 metadata:
   hermes:
     tags: [design, html, prototype, ux, ui, creative, artifact, deck, motion, design-system]
     related_skills: [design-md, popular-web-designs, excalidraw, architecture-diagram]
+  jros:
+    related_skills: [popular-web-designs, design-md, architecture-diagram]
 ---
 
 # Claude Design for CLI/API Agents

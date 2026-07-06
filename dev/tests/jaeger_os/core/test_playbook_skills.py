@@ -21,10 +21,13 @@ def test_playbooks_are_discovered() -> None:
     assert all(s.name and s.path.name == "SKILL.md" for s in skills)
 
 
-def test_code_skills_are_not_playbooks() -> None:
-    # macos_computer is a Python tool-registering skill — excluded.
+def test_a_skill_can_be_both_module_and_recipe() -> None:
+    # Presence-based unification: a folder that ships a module (registers tools)
+    # AND a SKILL.md is BOTH — its recipe is indexed too. No "code_skill vs
+    # playbook" mutual exclusion. See dev/docs/skill_unification.md.
     names = {s.name for s in pb.discover_playbooks()}
-    assert "computer_use" not in names
+    assert "computer_use" in names       # a module-providing skill's recipe...
+    assert "macos_computer" in names     # ...is now surfaced via use_skill too
 
 
 def test_find_playbook_is_fuzzy() -> None:
@@ -36,15 +39,15 @@ def test_find_playbook_is_fuzzy() -> None:
 
 
 def test_skill_list() -> None:
-    """``list`` now paginates — ``total`` carries the full corpus
-    count (which we expect to be ≥50 for the bundled library);
-    the response slice is at most ``limit`` (default 20)."""
+    """``list`` returns the FULL active catalog by default (limit=0) — the
+    coordinator doesn't gate scope; the agent is the routing intelligence.
+    ``total`` carries the full corpus count (≥50 for the bundled library)."""
     r = skill(action="list")
     assert r["ok"] is True
     assert r["total"] >= 50
-    # The slice respects the default limit so the response stays
-    # under control even when the library grows.
-    assert len(r["skills"]) <= r["limit"]
+    # Default is the complete list (no cap): every active skill returned.
+    assert r["limit"] == 0
+    assert len(r["skills"]) == r["total"]
     # Category counts are always included so the model can pick a
     # category before drilling in.
     assert isinstance(r["category_counts"], dict)
