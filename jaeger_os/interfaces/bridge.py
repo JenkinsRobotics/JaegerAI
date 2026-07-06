@@ -167,7 +167,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 "turn_separators": cfg.display.turn_separators,
                 "idle_minutes": cfg.deep_think.auto_idle_minutes,
                 "allow_lazy_installs": cfg.security.allow_lazy_installs,
-                "permission_mode": cfg.permissions.mode}
+                "permission_mode": cfg.permissions.mode,
+                # v1 additive — the two context-window knobs (tokens).
+                # model_ctx sizes the WORKER lane (agent loop KV);
+                # model_aux_ctx sizes the AUX lane (persona filter /
+                # finalizer / reflection side calls, 0 = disabled).
+                # Both apply on agent restart, not live.
+                "model_ctx": cfg.model.ctx,
+                "model_aux_ctx": cfg.model.aux_ctx}
     if what == "permissions":
         from jaeger_os.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
@@ -262,6 +269,9 @@ def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
         "idle_minutes": ("deep_think", "auto_idle_minutes"),
         "allow_lazy_installs": ("security", "allow_lazy_installs"),
         "permission_mode": ("permissions", "mode"),
+        # Context-window knobs (applies on restart — see ModelConfig).
+        "model_ctx": ("model", "ctx"),
+        "model_aux_ctx": ("model", "aux_ctx"),
     }
     for key, (section, attr) in fields.items():
         if key in m:

@@ -93,7 +93,26 @@ class ModelConfig(BaseModel):
             "containing config.json + weight shards."
         ),
     )
-    ctx: int = Field(8192, ge=512, le=131_072)
+    ctx: int = Field(
+        8192, ge=512, le=131_072,
+        description="Context window (tokens) for the WORKER lane — the "
+                    "agent loop's llama.cpp context. Bigger = longer "
+                    "conversations before compaction, at the cost of KV "
+                    "memory and cold-prefill time. Applies on restart.",
+    )
+    aux_ctx: int = Field(
+        4096, ge=0, le=131_072,
+        description="Context window (tokens) for the AUX lane — a second "
+                    "llama.cpp context on the SAME loaded model that runs "
+                    "the bounded side-channel calls (persona output "
+                    "filter, skip-final finalizer, reflection, deep-think "
+                    "planning, memory review) so they never evict the "
+                    "worker lane's warm KV prefix. Small on purpose: aux "
+                    "prompts are bounded, and every aux token is KV "
+                    "memory. 0 disables the lane (side calls then share "
+                    "the worker context and re-trigger full re-prefills). "
+                    "Applies on restart.",
+    )
     gpu_layers: int = Field(-1, description="-1 = offload all, 0 = CPU-only")
     n_batch: int = 512
     n_ubatch: int = 512
