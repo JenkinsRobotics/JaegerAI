@@ -168,6 +168,28 @@ def test_file_read_relative_falls_back_to_instance(bound_instance):
     assert r["read"] is True and "workspace file" in r["content"]
 
 
+def test_bare_relative_name_round_trips(bound_instance):
+    """Regression (tool-conditional, 2026-07-06): a bare relative name
+    must round-trip between write and read. ``file_write`` sends a bare
+    name to ``skills/``; a bare ``file_read`` of the same name must find
+    it there — previously the read only checked cwd + the instance root,
+    so ``write_file("status.txt")`` then ``read_file("status.txt")``
+    returned not-found."""
+    w = tools.file_write("status.txt", "CPU: NOMINAL\n")
+    assert w["written"] is True
+    r = tools.file_read("status.txt")
+    assert r["read"] is True, r
+    assert "CPU: NOMINAL" in r["content"]
+
+
+def test_workspace_prefixed_name_round_trips(bound_instance):
+    """A ``workspace/...`` write must also read back by the same bare
+    ``workspace/`` path (the write lands in the effective workspace dir)."""
+    tools.file_write("workspace/out.txt", "hello workspace\n")
+    r = tools.file_read("workspace/out.txt")
+    assert r["read"] is True and "hello workspace" in r["content"]
+
+
 # ── file_read pagination ─────────────────────────────────────────────
 
 

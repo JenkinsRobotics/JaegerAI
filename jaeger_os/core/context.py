@@ -233,9 +233,21 @@ def _resolve_read(path: str) -> Path:
     else:
         full = (Path.cwd() / p).resolve()
         if not full.exists() and _layout is not None:
-            inst = (_layout.root / p).resolve()
-            if inst.exists():
-                full = inst
+            # Fall back through the instance-relative roots a WRITE could
+            # have targeted, so a bare relative name round-trips with the
+            # write tools. ``_resolve_write`` sends bare names (e.g.
+            # ``status.txt``) to ``skills/`` and ``workspace/...`` paths to
+            # the effective workspace dir; a read of the same bare name must
+            # find them. Try each root in turn — first existing wins. Without
+            # the skills/ fallback, ``write_file("x.txt")`` then
+            # ``read_file("x.txt")`` missed (tool-conditional, 2026-07-06).
+            for base in (_layout.root,
+                         get_effective_workspace_dir(),
+                         _layout.skills_dir):
+                cand = (base / p).resolve()
+                if cand.exists():
+                    full = cand
+                    break
     if "credentials" in full.parts[:-1]:
         raise SandboxError(
             "credentials/ is off-limits to direct reads — "
