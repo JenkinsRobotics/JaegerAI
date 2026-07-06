@@ -22,6 +22,27 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def _setting(group: str, *, restart: bool = False,
+             advanced: bool = False) -> dict[str, Any]:
+    """Settings-catalog metadata for a Config leaf field.
+
+    The single-source settings surface (``core/settings/catalog.py``) walks
+    ``Config`` and emits a descriptor for every leaf field carrying this
+    metadata — CLI (``jaeger settings``) and the Swift app both render from
+    that one catalog, so a setting is defined ONCE, here, and nowhere else.
+
+      group     which settings page the field belongs to (model / display /
+                voice / tts / autonomy / permissions / retention / interaction).
+      restart   True if the change only takes effect after the agent reboots
+                (surfaces show a "restart required" badge).
+      advanced  True to tuck the field behind the "Advanced" disclosure.
+
+    A leaf WITHOUT this metadata is deliberately NOT exposed in the catalog
+    (identity keys, provenance, and the deferred hardware/avatar/plugin
+    blocks stay out until their own Phase-3 providers land)."""
+    return {"group": group, "restart": restart, "advanced": advanced}
+
+
 # Bumped whenever the on-disk shape of identity.yaml / config.yaml
 # (or any other instance-side file) changes in a way that needs a
 # migration.  Stored in manifest.json on instance creation; mismatch
@@ -95,6 +116,7 @@ class ModelConfig(BaseModel):
     )
     ctx: int = Field(
         8192, ge=512, le=131_072,
+        json_schema_extra=_setting("model", restart=True),
         description="Context window (tokens) for the WORKER lane — the "
                     "agent loop's llama.cpp context. Bigger = longer "
                     "conversations before compaction, at the cost of KV "
@@ -102,6 +124,7 @@ class ModelConfig(BaseModel):
     )
     aux_ctx: int = Field(
         4096, ge=0, le=131_072,
+        json_schema_extra=_setting("model", restart=True),
         description="Context window (tokens) for the AUX lane — a second "
                     "llama.cpp context on the SAME loaded model that runs "
                     "the bounded side-channel calls (persona output "
@@ -120,6 +143,7 @@ class ModelConfig(BaseModel):
     threads: int | None = None
     max_tokens: int = Field(
         4096, ge=16, le=32_768,
+        json_schema_extra=_setting("model", restart=True),
         description="Per-turn output cap the in-process adapter passes "
                     "as ``max_tokens`` into ``create_chat_completion``. "
                     "Default 4096 matches 0.1.0 behaviour — leaves "
@@ -158,32 +182,54 @@ class ModelConfig(BaseModel):
 
 class DisplayConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    show_latency: bool = False
-    show_tool_activity: bool = True
-    show_help_on_start: bool = True
+    show_latency: bool = Field(
+        False, json_schema_extra=_setting("display"),
+        description="Show per-turn wall-clock latency after each reply.")
+    show_tool_activity: bool = Field(
+        True, json_schema_extra=_setting("display"),
+        description="Show the agent's live tool-use activity during a turn.")
+    show_help_on_start: bool = Field(
+        True, json_schema_extra=_setting("display"),
+        description="Print the help banner when a chat surface opens.")
     # The live activity stream (thoughts + tool use) shown DURING a turn, and
     # what becomes of it once the final reply lands:
     #   "full"    — keep the whole dimmed trace above the reply (default)
     #   "summary" — collapse it to one dimmed "N steps · …" line
     #   "clear"   — show it live, remove it when the reply arrives
     #   "off"     — no live stream (just the spinner)
-    activity_trace: str = "full"
+    activity_trace: Literal["full", "summary", "clear", "off"] = Field(
+        "full", json_schema_extra=_setting("display"),
+        description="What becomes of the live thought/tool trace once the "
+                    "reply lands: full (keep it), summary (collapse to one "
+                    "line), clear (remove it), off (no live stream).")
     # Thin accent rule between turns in the windowed chat transcript
     # (operator-requested keeper, 2026-07-05). The TUI draws its own rules.
-    turn_separators: bool = True
+    turn_separators: bool = Field(
+        True, json_schema_extra=_setting("display"),
+        description="Draw a thin accent rule between turns in the windowed "
+                    "chat transcript.")
     # What pressing Enter does while the agent is mid-turn (hermes parity):
     #   "interrupt" — cancel the running turn, run the new message now
     #   "queue"     — run the new message after the current turn finishes
     #   "steer"     — inject the message into the running turn as guidance
-    busy_input_mode: str = "interrupt"
+    busy_input_mode: Literal["interrupt", "queue", "steer"] = Field(
+        "interrupt", json_schema_extra=_setting("display"),
+        description="What pressing Enter does mid-turn: interrupt (cancel + "
+                    "run now), queue (run after), steer (inject as guidance).")
 
 
 class RetentionConfig(BaseModel):
     """M3 will wire log rotation + memory cap to these; M1 just persists them."""
     model_config = ConfigDict(extra="forbid")
-    logs_keep_days: int = Field(30, ge=1)
-    logs_max_total_mb: int = Field(1024, ge=16)
-    memory_max_mb: int = Field(1024, ge=16)
+    logs_keep_days: int = Field(
+        30, ge=1, json_schema_extra=_setting("retention"),
+        description="Days of logs to keep before rotation prunes them.")
+    logs_max_total_mb: int = Field(
+        1024, ge=16, json_schema_extra=_setting("retention"),
+        description="Hard cap (MB) on total log size before oldest are pruned.")
+    memory_max_mb: int = Field(
+        1024, ge=16, json_schema_extra=_setting("retention"),
+        description="Hard cap (MB) on the agent's memory store.")
 
 
 class SkillsConfig(BaseModel):
@@ -212,10 +258,12 @@ class DeepThinkConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     coder_model: str = Field(
         "gemma-4-26b-a4b-it-qat-q4_0",
+        json_schema_extra=_setting("autonomy", advanced=True),
         description="Model swapped in for Deep Think skill authoring.",
     )
     auto_idle_minutes: int = Field(
         30, ge=0, le=240,
+        json_schema_extra=_setting("autonomy"),
         description=(
             "Minutes of no user input before the TUI auto-enters Deep "
             "Think (when there's approved queued work) — the Jaeger uses "
@@ -275,10 +323,12 @@ class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
     enabled: bool = Field(
         False,
+        json_schema_extra=_setting("voice"),
         description="Mic live from TUI boot. Off (default) = text-only TUI.",
     )
     speak_replies: bool = Field(
         True,
+        json_schema_extra=_setting("voice"),
         description=(
             "Speaker default: read each agent reply aloud (TTS) in the chat/"
             "avatar windows. On by default; the window's speaker toggle mirrors "
@@ -287,6 +337,7 @@ class VoiceConfig(BaseModel):
     )
     wake_word: bool = Field(
         True,
+        json_schema_extra=_setting("voice"),
         description=(
             "Require a wake phrase ('hey <name>') to address the agent. "
             "On (default) = the wake phrase is the addressed-to-me gate "
@@ -299,6 +350,7 @@ class VoiceConfig(BaseModel):
     )
     follow_up: bool = Field(
         True,
+        json_schema_extra=_setting("voice"),
         description=(
             "After a reply, open a short window where the user can speak "
             "again without re-saying the wake word."
@@ -306,6 +358,7 @@ class VoiceConfig(BaseModel):
     )
     barge_in: bool = Field(
         False,
+        json_schema_extra=_setting("voice"),
         description=(
             "Allow interrupting the agent mid-sentence by speaking. Uses "
             "echo cancellation (speexdsp) so the open mic doesn't hear the "
@@ -316,6 +369,7 @@ class VoiceConfig(BaseModel):
     )
     follow_up_seconds: float = Field(
         10.0, ge=2.0, le=120.0,
+        json_schema_extra=_setting("voice"),
         description=(
             "Length of the no-wake-word follow-up window.  Reduced from "
             "15s to 10s in 0.4.x to match the proven reference (shorter "
@@ -324,6 +378,7 @@ class VoiceConfig(BaseModel):
     )
     speech_engine: Literal["kokoro", "apple"] = Field(
         "kokoro",
+        json_schema_extra=_setting("tts"),
         description=(
             "Which synthesizer speaks agent replies in the native app. "
             "'kokoro' (default) = the agent's REAL voice: the Python-side "
@@ -336,6 +391,7 @@ class VoiceConfig(BaseModel):
     )
     audio_backend: Literal["sounddevice", "avaudio"] = Field(
         "sounddevice",
+        json_schema_extra=_setting("tts", advanced=True),
         description=(
             "Persistent TTS output backend. "
             "'sounddevice' = PortAudio via sounddevice (default; routes "
@@ -348,6 +404,7 @@ class VoiceConfig(BaseModel):
     )
     self_speech_filter: bool = Field(
         True,
+        json_schema_extra=_setting("voice", advanced=True),
         description=(
             "Self-speech rejection via similarity filter.  Compares "
             "each new transcribed phrase to the agent's most recent "
@@ -364,6 +421,7 @@ class VoiceConfig(BaseModel):
     )
     self_speech_threshold: float = Field(
         0.75, ge=0.5, le=1.0,
+        json_schema_extra=_setting("voice", advanced=True),
         description=(
             "Similarity ratio (0–1) above which a transcribed phrase "
             "is treated as the agent's own voice and dropped.  Only "
@@ -471,7 +529,10 @@ class PermissionsConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["confirm", "allow"] = "confirm"
+    mode: Literal["confirm", "allow"] = Field(
+        "confirm", json_schema_extra=_setting("permissions"),
+        description="confirm — ask before each tier-gated action; "
+                    "allow — auto-approve everything (trusted robot).")
 
 
 class SecurityConfig(BaseModel):
@@ -485,7 +546,11 @@ class SecurityConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    allow_lazy_installs: bool = False
+    allow_lazy_installs: bool = Field(
+        False, json_schema_extra=_setting("permissions"),
+        description="Allow the framework to pip-install a missing optional "
+                    "backend (Kokoro TTS, a vision model, the search client) "
+                    "into the instance venv on first use.")
 
 
 class DistributionConfig(BaseModel):
@@ -588,9 +653,13 @@ class InteractionConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    default_mode: Literal["tui", "gui", "voice"] = "tui"
+    default_mode: Literal["tui", "gui", "voice"] = Field(
+        "tui", json_schema_extra=_setting("interaction"),
+        description="Which surface a bare launch opens: tui (terminal REPL), "
+                    "gui (windowed chat), or voice (always-on mic).")
     ui: Literal["pyside6", "swift"] = Field(
         "swift",
+        json_schema_extra=_setting("interaction"),
         description=(
             "Windowed-app UI toolkit. 'swift' = the native SwiftUI app "
             "(interfaces/swift/); 'pyside6' = the Qt app. launch.py builds+runs "

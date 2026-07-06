@@ -49,7 +49,7 @@ private enum Tab: String, CaseIterable, Identifiable {
 
 struct AgentSettingsHUD: View {
     @ObservedObject private var agent = AgentBridge.shared
-    @StateObject private var store = SettingsStore(agent: AgentBridge.shared)
+    @ObservedObject private var store = SettingsStore.shared
     @State private var tab: Tab = .home
 
     private var name: String {
@@ -66,10 +66,15 @@ struct AgentSettingsHUD: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            agentPanel
+            if tab != .library {
+                agentPanel
+            }
         }
         .background(HUD.bg)
-        .task { await store.loadAll() }
+        .task { await store.loadInitial() }
+        .onChange(of: tab) { _, next in
+            Task { await loadForTab(next) }
+        }
     }
 
     @ViewBuilder private var page: some View {
@@ -122,6 +127,19 @@ struct AgentSettingsHUD: View {
         a.informativeText = "Jaeger Studio integration is coming soon."
         a.runModal()
     }
+
+    private func loadForTab(_ next: Tab) async {
+        switch next {
+        case .home, .library:
+            if store.characters.isEmpty { await store.loadCharacters() }
+        case .character, .traits:
+            if store.detail == nil { await store.loadDetail() }
+        case .app:
+            if store.settingsGroups.isEmpty { await store.loadSettingsCatalog() }
+        case .permissions:
+            if store.permissions == nil { await store.loadPermissions() }
+        }
+    }
 }
 
 // MARK: - shared bits
@@ -164,6 +182,7 @@ private func hudField(_ label: String, _ text: Binding<String>, multiline: Bool 
     }
 }
 
+@MainActor
 private func saveButton(_ title: String, _ action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Text(title).font(.system(size: 13, weight: .bold)).foregroundColor(Color(red: 0.02, green: 0.08, blue: 0.05))
@@ -192,48 +211,138 @@ private struct HomePage: View {
 
 private struct LibraryPage: View {
     @ObservedObject var store: SettingsStore
-    private let cols = [GridItem(.adaptive(minimum: 250), spacing: 16)]
+    private let cols = [GridItem(.adaptive(minimum: 276, maximum: 276), spacing: 18)]
     var body: some View {
-        HStack { HUD.section("Character Library"); Text("· \(store.characters.count)").foregroundStyle(HUD.inkDim); Spacer() }
+        HStack {
+            HUD.section("Character Library")
+            Text("· \(store.characters.count) characters")
+                .font(.system(size: 12))
+                .foregroundStyle(HUD.inkDim)
+            Spacer()
+        }
         LazyVGrid(columns: cols, spacing: 16) {
-            ForEach(store.characters) { c in card(c) }
+            ForEach(store.characters) { c in
+                CharacterLibraryCard(character: c, store: store)
+            }
         }
     }
-    private func card(_ c: CharacterSummary) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+}
+
+private struct CharacterLibraryCard: View {
+    let character: CharacterSummary
+    @ObservedObject var store: SettingsStore
+
+    private var artPath: String? { character.card ?? character.icon }
+    private var topStats: [CharacterSummary.Stat] {
+        Array(character.stats.sorted {
+            abs($0.val - 0.5) > abs($1.val - 0.5)
+        }.prefix(3))
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            artwork
+            LinearGradient(
+                colors: [.black.opacity(0.0), .black.opacity(0.50), .black.opacity(0.90)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             HStack {
-                Text("rev \(String(format: "%.1f", c.revision))").font(.system(size: 10)).foregroundStyle(HUD.inkDim)
+                badge("rev \(String(format: "%.1f", character.revision))", muted: true)
                 Spacer()
-                Text("Lv \(c.level)").font(.system(size: 11, weight: .bold)).foregroundColor(.black)
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(Capsule().fill(HUD.accent))
             }
-            Text(c.name.uppercased()).font(.system(size: 17, weight: .heavy)).foregroundStyle(HUD.ink)
-            Text(c.role).font(.system(size: 11)).foregroundStyle(HUD.inkDim).lineLimit(1)
-            HStack(spacing: 14) {
-                ForEach(Array(c.stats.sorted { abs($0.val - 0.5) > abs($1.val - 0.5) }.prefix(3)), id: \.key) { s in
-                    VStack(spacing: 0) {
-                        Text(String(s.key.prefix(4)).uppercased()).font(.system(size: 9, weight: .bold)).foregroundStyle(HUD.inkDim)
-                        Text("\(Int(s.val * 100))").font(.system(size: 14, weight: .bold)).foregroundStyle(HUD.ink)
+            .padding(14)
+            .frame(maxHeight: .infinity, alignment: .top)
+
+            badge("Lv \(character.level)", muted: false)
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text(character.name.uppercased())
+                    .font(.system(size: 19, weight: .heavy))
+                    .foregroundStyle(HUD.ink)
+                    .lineLimit(1)
+                Text(character.role.isEmpty ? "—" : character.role)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 0.79, green: 0.77, blue: 0.88))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 16) {
+                    ForEach(topStats, id: \.key) { stat in
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(String(stat.key.prefix(4)).uppercased())
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color(red: 0.64, green: 0.62, blue: 0.75))
+                            Text("\(Int((stat.val * 100).rounded()))")
+                                .font(.system(size: 14, weight: .heavy))
+                                .foregroundStyle(HUD.ink)
+                        }
                     }
                 }
+
+                HStack(spacing: 8) {
+                    cardButton(character.active ? "SELECTED" : "SELECT",
+                               filled: true,
+                               disabled: character.active) {
+                        Task { await store.select(character.id) }
+                    }
+                    cardButton(character.bound ? "DEFAULT" : "MAKE DEFAULT",
+                               filled: false,
+                               disabled: character.bound) {
+                        Task { await store.makeDefault(character.id) }
+                    }
+                }
+                .padding(.top, 3)
             }
-            HStack(spacing: 8) {
-                Button { Task { await store.select(c.id) } } label: {
-                    Text(c.active ? "✓ SELECTED" : "SELECT").font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.black).frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(c.active ? Color.green.opacity(0.8) : HUD.accent))
-                }.buttonStyle(.plain)
-                Button { Task { await store.makeDefault(c.id) } } label: {
-                    Text(c.bound ? "★ DEFAULT" : "MAKE DEFAULT").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(c.bound ? HUD.accent : HUD.ink).frame(maxWidth: .infinity).padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 8).stroke(c.bound ? HUD.accent : HUD.stroke, lineWidth: 1))
-                }.buttonStyle(.plain).disabled(c.bound)
-            }
+            .padding(16)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(c.active ? HUD.accent.opacity(0.10) : HUD.field))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(c.active ? HUD.accent : HUD.stroke, lineWidth: 1))
+        .frame(width: 276, height: 356)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .stroke(character.active ? HUD.accent : HUD.stroke, lineWidth: character.active ? 2 : 1))
+        .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 8)
+    }
+
+    @ViewBuilder private var artwork: some View {
+        if let path = artPath, let image = NSImage(contentsOfFile: path) {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 276, height: 356)
+        } else {
+            LinearGradient(colors: [HUD.field, HUD.panel],
+                           startPoint: .topLeading,
+                           endPoint: .bottomTrailing)
+        }
+    }
+
+    private func badge(_ text: String, muted: Bool) -> some View {
+        Text(text)
+            .font(.system(size: muted ? 10 : 11, weight: .bold))
+            .foregroundStyle(muted ? HUD.inkDim : Color.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(muted ? Color.black.opacity(0.36) : HUD.accent))
+    }
+
+    private func cardButton(_ text: String, filled: Bool, disabled: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 11, weight: .heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .foregroundStyle(filled ? Color.black : (disabled ? HUD.accent : HUD.ink))
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .background(RoundedRectangle(cornerRadius: 8)
+                    .fill(filled ? HUD.accent : Color.black.opacity(0.28)))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(disabled ? HUD.accent : (filled ? HUD.accent : HUD.stroke), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
     }
 }
 
@@ -300,29 +409,151 @@ private struct TraitsPage: View {
     }
 }
 
+/// The App Settings page — GENERICALLY rendered from the schema-derived
+/// catalog. Nothing here names a field: every control comes from a
+/// ``Setting`` descriptor the Python catalog produced, so a new setting is
+/// one annotated ``Field`` in ``schemas.py`` and it appears here for free.
 private struct AppPage: View {
     @ObservedObject var store: SettingsStore
-    @State private var c: AppConfig?
+    @State private var showAdvanced = false
+
     var body: some View {
-        HUD.section("App Settings")
-        if let cfg = Binding($c) {
-            Picker("Default interface", selection: cfg.default_mode) {
-                ForEach(["tui", "gui", "voice"], id: \.self) { Text($0) }
-            }.foregroundStyle(HUD.ink)
-            Picker("Windowed UI toolkit", selection: cfg.ui) {
-                ForEach(["swift", "pyside6"], id: \.self) { Text($0) }
-            }.foregroundStyle(HUD.ink)
-            Toggle("Voice input (mic) at boot", isOn: cfg.voice_enabled).tint(HUD.accent).foregroundStyle(HUD.ink)
-            Toggle("Speak replies (speaker)", isOn: cfg.speak_replies).tint(HUD.accent).foregroundStyle(HUD.ink)
-            Toggle("Show latency", isOn: cfg.show_latency).tint(HUD.accent).foregroundStyle(HUD.ink)
-            Toggle("Show tool activity", isOn: cfg.show_tool_activity).tint(HUD.accent).foregroundStyle(HUD.ink)
-            Toggle("Allow lazy installs", isOn: cfg.allow_lazy_installs).tint(HUD.accent).foregroundStyle(HUD.ink)
-            saveButton("Save settings") { if let v = c { Task { await store.saveConfig(v) } } }
-        } else {
-            Text("Loading…").foregroundStyle(HUD.inkDim)
+        HStack(alignment: .firstTextBaseline) {
+            HUD.section("App Settings")
+            Spacer()
+            if store.settingsRestartNeeded { restartBadge }
         }
-        Color.clear.frame(height: 1).onAppear { if c == nil { c = store.config } }
-            .onChange(of: store.config?.name) { _, _ in c = store.config }
+        if let err = store.settingsError {
+            Text(err).font(.system(size: 12)).foregroundStyle(Color.red)
+        }
+        if store.settingsGroups.isEmpty {
+            Text("Loading…").foregroundStyle(HUD.inkDim)
+        } else {
+            ForEach(store.settingsGroups) { group in
+                groupSection(group)
+            }
+            Toggle("Show advanced settings", isOn: $showAdvanced)
+                .tint(HUD.accent).foregroundStyle(HUD.inkDim)
+                .font(.system(size: 12)).padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder private func groupSection(_ group: SettingGroup) -> some View {
+        let basic = group.settings.filter { !$0.advanced }
+        let advanced = group.settings.filter { $0.advanced }
+        let visible = showAdvanced ? group.settings : basic
+        if !visible.isEmpty {
+            Spacer().frame(height: 10)
+            Text(group.name.uppercased())
+                .font(.system(size: 10, weight: .bold)).tracking(2)
+                .foregroundStyle(HUD.accent)
+            ForEach(basic) { SettingRow(setting: $0, store: store) }
+            if showAdvanced {
+                ForEach(advanced) { SettingRow(setting: $0, store: store) }
+            }
+        }
+    }
+
+    private var restartBadge: some View {
+        Text("RESTART REQUIRED")
+            .font(.system(size: 9, weight: .bold)).tracking(1)
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(HUD.accent))
+    }
+}
+
+/// One catalog descriptor, rendered by its ``type``. bool→Toggle,
+/// enum→Picker(choices), int/float→numeric field, str→text field. Commits
+/// through ``store.setSetting`` (validated by the schema on the Python side).
+private struct SettingRow: View {
+    let setting: Setting
+    @ObservedObject var store: SettingsStore
+    @State private var text = ""
+    @State private var boolVal = false
+    @State private var enumVal = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                control
+                if setting.restart {
+                    Text("⟳").font(.system(size: 11)).foregroundStyle(HUD.accent)
+                        .help("Restart required for this to take effect")
+                }
+                if setting.isOverridden {
+                    Text("•").font(.system(size: 13)).foregroundStyle(HUD.accent)
+                        .help("Changed from default")
+                }
+            }
+            if !setting.description.isEmpty {
+                Text(setting.description)
+                    .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 3)
+        .onAppear { sync() }
+        .onChange(of: setting.current) { _, _ in sync() }
+    }
+
+    @ViewBuilder private var control: some View {
+        switch setting.type {
+        case "bool":
+            Toggle(setting.label, isOn: Binding(
+                get: { boolVal },
+                set: { boolVal = $0; commit(.bool($0)) }))
+                .tint(HUD.accent).foregroundStyle(HUD.ink)
+        case "enum":
+            HStack {
+                Text(setting.label).foregroundStyle(HUD.ink)
+                    .font(.system(size: 13))
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { enumVal },
+                    set: { enumVal = $0; commit(.string($0)) })) {
+                    ForEach(setting.choices ?? [], id: \.self) { Text($0).tag($0) }
+                }.labelsHidden().tint(HUD.accent).frame(maxWidth: 180)
+            }
+        default:
+            HStack {
+                Text(setting.label).foregroundStyle(HUD.ink)
+                    .font(.system(size: 13))
+                Spacer()
+                TextField("", text: $text, onCommit: commitText)
+                    .textFieldStyle(.plain).multilineTextAlignment(.trailing)
+                    .font(.system(size: 13)).foregroundStyle(HUD.ink)
+                    .frame(maxWidth: 180).padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(HUD.field))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(HUD.stroke, lineWidth: 1))
+            }
+        }
+    }
+
+    private func sync() {
+        boolVal = setting.current.asBool
+        enumVal = setting.current.asString
+        text = setting.current.asString
+    }
+
+    private func commitText() {
+        switch setting.type {
+        case "int":
+            if let i = Int(text.trimmingCharacters(in: .whitespaces)) {
+                commit(.int(i))
+            } else { commit(.string(text)) }   // let the schema reject it
+        case "float":
+            if let d = Double(text.trimmingCharacters(in: .whitespaces)) {
+                commit(.double(d))
+            } else { commit(.string(text)) }
+        default:
+            commit(.string(text))
+        }
+    }
+
+    private func commit(_ value: SettingValue) {
+        Task { await store.setSetting(setting.path, value) }
     }
 }
 
@@ -337,8 +568,12 @@ private struct PermissionsPage: View {
         Text("confirm — ask before risky actions.  allow — auto-approve everything.")
             .font(.system(size: 12)).foregroundStyle(HUD.inkDim)
         saveButton("Save mode") {
-            var cfg = store.config; cfg?.permission_mode = mode
-            if let v = cfg { Task { await store.saveConfig(v); await store.loadPermissions() } }
+            Task {
+                // permissions.mode is a schema field — persist it through the
+                // SAME catalog everything else uses (no hardcoded save path).
+                await store.setSetting("permissions.mode", .string(mode))
+                await store.loadPermissions()
+            }
         }
         Spacer().frame(height: 10)
         HUD.section("Granted skills")

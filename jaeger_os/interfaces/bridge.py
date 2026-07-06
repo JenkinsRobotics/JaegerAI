@@ -175,6 +175,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 # Both apply on agent restart, not live.
                 "model_ctx": cfg.model.ctx,
                 "model_aux_ctx": cfg.model.aux_ctx}
+    if what == "settings_catalog":
+        # The schema-derived settings surface — the SAME catalog `jaeger
+        # settings` drives. Grouped {group: [descriptor, ...]}; the native
+        # app renders each descriptor by type (bool→Toggle, enum→Picker,
+        # int/float→field, str→field). No hand-enumerated field list on
+        # either side — a new setting is one annotated Field in schemas.py.
+        from jaeger_os.core.settings.catalog import catalog as _catalog
+        return _catalog(lay, advanced=bool(args.get("advanced", True)),
+                        group=args.get("group"))
     if what == "permissions":
         from jaeger_os.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
@@ -623,6 +632,27 @@ def main(argv: list[str] | None = None) -> int:
                     evt.set()
                 else:
                     ctx.early[rid] = str(req.get("answer") or "")
+                continue
+            if op == "command" and (req.get("cmd") or "") == "settings_set":
+                # Schema-derived settings write — validates + persists via
+                # core/settings/catalog.set_value (the SAME backend `jaeger
+                # settings set` calls). Handled here (not _command) so the
+                # result frame can carry ``restart_required`` in its data.
+                # Uses ctx.layout directly: settings work pre-boot / while
+                # the model warms, matching the fast-ready design.
+                a = req.get("args") or {}
+                try:
+                    from jaeger_os.core.settings.catalog import set_value
+                    res = set_value(ctx.layout, str(a.get("path") or ""),
+                                    a.get("value"))
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"),
+                        data={"restart_required": res["restart_required"],
+                              "path": res["path"], "value": res["value"]},
+                        ok=True))
+                except Exception as exc:  # noqa: BLE001 — reported, never crashes
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
                 continue
             if op == "command" and (req.get("cmd") or "") == "create_instance":
                 # Handled here (not in _command): it needs ctx + proto to

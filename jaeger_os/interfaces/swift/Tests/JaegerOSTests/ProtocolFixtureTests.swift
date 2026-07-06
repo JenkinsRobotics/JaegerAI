@@ -222,6 +222,52 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(args?["permission_mode"] as? String, "confirm")
     }
 
+    func testSettingsOpFixturesMatchWhatTheShellSends() throws {
+        // The schema-derived settings surface rides two additive v1 values:
+        // query "settings_catalog" (SettingsStore.loadSettingsCatalog) and
+        // command "settings_set" (SettingsStore.setSetting). Pin the shapes
+        // the shell serializes so a Python-side rename breaks here too.
+        let here = URL(fileURLWithPath: #filePath)
+        let url = here
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("protocol_v1_fixtures.json")
+        let root = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)) as? [String: Any]
+        let ops = root?["ops"] as? [String: Any]
+
+        guard let cat = ops?["query_settings_catalog"] as? [String: Any] else {
+            return XCTFail("query_settings_catalog op fixture missing")
+        }
+        XCTAssertEqual(cat["op"] as? String, "query")
+        XCTAssertEqual(cat["what"] as? String, "settings_catalog")
+
+        guard let set = ops?["command_settings_set"] as? [String: Any] else {
+            return XCTFail("command_settings_set op fixture missing")
+        }
+        XCTAssertEqual(set["op"] as? String, "command")
+        XCTAssertEqual(set["cmd"] as? String, "settings_set")
+        let args = set["args"] as? [String: Any]
+        XCTAssertEqual(args?["path"] as? String, "voice.speak_replies")
+        XCTAssertEqual(args?["value"] as? Bool, false)
+
+        // The settings_set RESULT frame carries restart_required in its data —
+        // SettingsStore reads that flag to raise the "restart required" badge.
+        guard case .result(let id, let ok, _, let data) =
+                try decode("result_settings_set") else {
+            return XCTFail("result_settings_set")
+        }
+        XCTAssertEqual(id, "r7")
+        XCTAssertTrue(ok)
+        let payload = data.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        XCTAssertEqual(payload?["restart_required"] as? Bool, true)
+        XCTAssertEqual(payload?["path"] as? String, "model.ctx")
+    }
+
     func testUnknownFrameTypeIsSkippedNotFatal() {
         let unknown = #"{"type":"telemetry_v9","payload":{}}"#.data(using: .utf8)!
         XCTAssertNil(ProtocolFrame.decode(unknown))
