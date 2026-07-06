@@ -44,11 +44,16 @@ def test_load_soul_caps_runaway_length(tmp_path) -> None:
 
 
 def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
-    """Workers run vanilla EXCEPT the name: the active character's NAME is a
-    fact (the output filter preserves facts verbatim, so a wrong name can't be
-    fixed downstream) and flows into the prompt as one line. The persona BLOCK
-    (soul/traits/voice) still stays out — it's applied by the two-pass output
-    filter, never the execution context. See dev/docs/persona_compiler.md."""
+    """Workers run vanilla EXCEPT the name: the agent's NAME (identity.yaml)
+    is a fact (the output filter preserves facts verbatim, so a wrong name
+    can't be fixed downstream) and flows into the prompt as one line. The
+    persona BLOCK (soul/traits/voice) still stays out — it's applied by the
+    two-pass output filter, never the execution context. See
+    dev/docs/persona_compiler.md."""
+    (tmp_path / "identity.yaml").write_text(
+        "name: Jarvis\nrole: assistant\npersonality: plain\n",
+        encoding="utf-8",
+    )
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
     assert "Your name is Jarvis." in sp          # name-only fragment
     assert "## My voice —" not in sp             # compiled persona stays out
@@ -57,12 +62,15 @@ def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
     assert "butler" not in sp.lower()
 
 
-def test_bench_neutral_identity_ignores_active_character(tmp_path, monkeypatch) -> None:
-    """Under JAEGER_BENCH_NEUTRAL_IDENTITY=1 (set by the bench runner) the
-    active character's name stays OUT of the prompt — the bench measures the
-    engine, not the costume. A character name tints free-text answers
-    (free_text_story regression, 2026-07-05: "story about a robot" → a story
-    about HAL 9000). Live turns (flag unset) keep the character's name."""
+def test_identity_name_never_overwritten_by_active_character(
+    tmp_path, monkeypatch,
+) -> None:
+    """Identity vs character (operator decision, 2026-07-05): the AGENT
+    NAME is identity.yaml's — the unique robot named at instance creation.
+    The character supplies personality only and must NEVER claim the name
+    ("a robot like Jarvis, but I will name him Ted"). The old
+    JAEGER_BENCH_NEUTRAL_IDENTITY flag is a no-op: identity.yaml-only is
+    the behaviour everywhere now, flag or not."""
     import jaeger_os.personality.character as character
 
     class _Hal:
@@ -70,16 +78,16 @@ def test_bench_neutral_identity_ignores_active_character(tmp_path, monkeypatch) 
 
     monkeypatch.setattr(character, "active_character", lambda root: _Hal())
     (tmp_path / "identity.yaml").write_text(
-        "name: Neutral\nrole: assistant\npersonality: plain\n",
+        "name: Ted\nrole: assistant\npersonality: plain\n",
         encoding="utf-8",
     )
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Your name is HAL 9000." in sp            # live: character wins
+    assert "Your name is Ted." in sp                 # identity.yaml wins
+    assert "Your name is HAL 9000." not in sp        # character never names
 
     monkeypatch.setenv("JAEGER_BENCH_NEUTRAL_IDENTITY", "1")
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Your name is HAL 9000." not in sp        # bench: character ignored
-    assert "Your name is Neutral." in sp             # identity.yaml fallback
+    assert "Your name is Ted." in sp                 # flag changes nothing
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:

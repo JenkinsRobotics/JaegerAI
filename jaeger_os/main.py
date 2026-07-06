@@ -1911,6 +1911,24 @@ def _apply_persona_filter(answer: str) -> str:
         if character is None:
             return answer
         block = character.character_block()
+        # Identity vs character (operator decision, 2026-07-05): the
+        # character supplies the PERSONA, never the agent's name — the
+        # name is identity.yaml's, set at instance creation ("a robot
+        # like Jarvis, but I will name him Ted"). Frame the filter
+        # context so the rewrite embodies the character's voice without
+        # claiming the character's name as its own.
+        try:
+            from jaeger_os.core.instance.schemas import Identity, load_yaml
+            agent_name = (load_yaml(layout.identity_path, Identity).name or "").strip()
+        except Exception:  # noqa: BLE001 — framing is optional, the voice isn't
+            agent_name = ""
+        if agent_name and agent_name.lower() != character.name.lower():
+            block = (
+                f"Your name is {agent_name}. You embody the persona and "
+                f"mannerisms of {character.name} — but YOUR name stays "
+                f"{agent_name}; never present yourself as {character.name}.\n\n"
+                + block
+            )
         from jaeger_os.agent.prompts.persona_filter import apply_persona_voice
         return apply_persona_voice(
             client, answer, block, max_chars=pconf.max_chars,
