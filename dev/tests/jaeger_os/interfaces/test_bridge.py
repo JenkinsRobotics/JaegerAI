@@ -418,6 +418,19 @@ def test_config_query_carries_speech_engine(monkeypatch):
 
     data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
     assert data["speech_engine"] == "kokoro"
+    # Display prefs the Swift chat renders by (operator keepers, 2026-07-05).
+    assert data["activity_trace"] == "full"
+    assert data["turn_separators"] is True
+
+    # save_config roundtrip: both display prefs persist.
+    ok, err = bridge._command(
+        "save_config",
+        {"activity_trace": "summary", "turn_separators": False},
+        type("B", (), {"layout": _Lay()})())
+    assert ok and err is None
+    data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
+    assert data["activity_trace"] == "summary"
+    assert data["turn_separators"] is False
 
 
 def test_reply_carries_turn_telemetry_when_available(monkeypatch):

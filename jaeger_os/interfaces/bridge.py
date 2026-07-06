@@ -163,6 +163,8 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 "speech_engine": cfg.voice.speech_engine,
                 "show_latency": cfg.display.show_latency,
                 "show_tool_activity": cfg.display.show_tool_activity,
+                "activity_trace": cfg.display.activity_trace,
+                "turn_separators": cfg.display.turn_separators,
                 "idle_minutes": cfg.deep_think.auto_idle_minutes,
                 "allow_lazy_installs": cfg.security.allow_lazy_installs,
                 "permission_mode": cfg.permissions.mode}
@@ -255,6 +257,8 @@ def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
         "speech_engine": ("voice", "speech_engine"),
         "show_latency": ("display", "show_latency"),
         "show_tool_activity": ("display", "show_tool_activity"),
+        "activity_trace": ("display", "activity_trace"),
+        "turn_separators": ("display", "turn_separators"),
         "idle_minutes": ("deep_think", "auto_idle_minutes"),
         "allow_lazy_installs": ("security", "allow_lazy_installs"),
         "permission_mode": ("permissions", "mode"),

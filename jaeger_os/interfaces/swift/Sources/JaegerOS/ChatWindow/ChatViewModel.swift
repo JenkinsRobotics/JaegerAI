@@ -78,6 +78,17 @@ final class ChatViewModel: ObservableObject {
     /// "ctx 18.3K/32.8K"; nil until the first telemetry-carrying reply.
     @Published private(set) var contextUsage: (used: Int, max: Int)? = nil
 
+    /// The instance's ``display.activity_trace`` setting (config.yaml,
+    /// read over the bridge) — what becomes of the tool/thought chips:
+    ///   "full"    keep them under the turn (default)
+    ///   "summary" collapse to "N steps · " on the reply's meta line
+    ///   "clear"   show live, remove when the reply lands
+    ///   "off"     never show them
+    @Published private(set) var activityTrace: String = "full"
+
+    /// ``display.turn_separators`` — the thin accent rule between turns.
+    @Published private(set) var turnSeparators: Bool = true
+
     /// The session key the agent uses to scope rolling history.  We
     /// keep this constant within one chat window's lifetime so the
     /// agent can correlate follow-up turns.
@@ -102,6 +113,30 @@ final class ChatViewModel: ObservableObject {
         // lifetime.
         self.eventToken = agent.addEventListener { [weak self] event in
             self?.handle(event: event)
+        }
+        // Pull the instance's display prefs (activity_trace + separators)
+        // once the transport is up. Best-effort — defaults stand on a miss.
+        Task { [weak self] in await self?.loadDisplayConfig() }
+    }
+
+    /// True once a config query has answered — used to retry the read on
+    /// the first send when the init-time fetch raced the connect.
+    private var displayConfigLoaded = false
+
+    /// Read ``display.*`` prefs over the bridge's config query. Public so a
+    /// future settings surface can re-call it after a save_config.
+    func loadDisplayConfig() async {
+        let result = await agent.query("config")
+        guard result.ok, let data = result.json,
+              let obj = (try? JSONSerialization.jsonObject(with: data))
+                as? [String: Any]
+        else { return }
+        displayConfigLoaded = true
+        if let trace = obj["activity_trace"] as? String, !trace.isEmpty {
+            activityTrace = trace
+        }
+        if let sep = obj["turn_separators"] as? Bool {
+            turnSeparators = sep
         }
     }
 
@@ -216,6 +251,9 @@ final class ChatViewModel: ObservableObject {
         case "turn.end":
             return
         case "thought.start", "deep_think.start", "thinking":
+            // Respect display.activity_trace — "off" hides the live
+            // stream entirely (the reply placeholder's dots remain).
+            guard activityTrace != "off" else { return }
             // One chip per in-flight turn — the busy `state` frames can
             // re-fire mid-turn (tool hops), and a duplicate chip per hop
             // reads as noise.
@@ -236,6 +274,7 @@ final class ChatViewModel: ObservableObject {
             // "thinking…" line under every reply.
             messages.removeAll { $0.author == .thinking }
         case "tool.call", "tool.start":
+            guard activityTrace != "off" else { return }
             let name = event.payload["tool"]?.get(String.self)
                 ?? event.payload["name"]?.get(String.self)
                 ?? "tool"
@@ -248,13 +287,18 @@ final class ChatViewModel: ObservableObject {
         case "tool.result", "tool.end", "tool.complete":
             // Close out the most recent in-flight tool-call chip
             // with a ✓ or ✗ depending on whether the agent flagged
-            // an error in the payload.
+            // an error in the payload, plus the tool's elapsed time
+            // ("🔧 write_file ✓ · 3.9s") when the bridge reported one.
             if let i = messages.lastIndex(where: {
                 $0.author == .toolCall && $0.isStreaming
             }) {
                 let ok = event.payload["ok"]?.get(Bool.self) ?? true
+                let elapsed = event.payload["elapsed_s"]?.get(Double.self) ?? 0
                 messages[i].isStreaming = false
                 messages[i].text = "\(messages[i].text) \(ok ? "✓" : "✗")"
+                if elapsed > 0.05 {
+                    messages[i].text += " · " + Self.fmtSeconds(elapsed)
+                }
             }
         case "token", "message.delta":
             // Streaming token — append to the most recent assistant
@@ -283,11 +327,16 @@ final class ChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         guard !isSending else { return }
 
+        // Late-bind the display prefs if the init-time fetch raced the
+        // transport coming up.
+        if !displayConfigLoaded { await loadDisplayConfig() }
+
         // User bubble lands now so the operator sees their message
         // immediately even if the agent is slow to reply.
+        let turnStarted = Date()
         messages.append(ChatMessage(
             author: .user,
-            timestamp: Date(),
+            timestamp: turnStarted,
             text: trimmed
         ))
 
@@ -318,11 +367,34 @@ final class ChatViewModel: ObservableObject {
             let reply = try await agent.sendChat(text: trimmed,
                                                  session: sessionKey)
             let replyText = reply.text
+
+            // display.activity_trace post-turn disposition for the tool
+            // chips this turn produced ("full" keeps them; "off" never
+            // made any):
+            //   "clear"   — drop them now that the reply is here
+            //   "summary" — drop them, fold "N steps · " into the meta
+            var stepsNote = ""
+            if activityTrace == "clear" || activityTrace == "summary" {
+                let turnChips = messages.filter {
+                    $0.author == .toolCall && $0.timestamp >= turnStarted
+                }
+                if !turnChips.isEmpty {
+                    if activityTrace == "summary" {
+                        stepsNote = "\(turnChips.count) step"
+                            + (turnChips.count == 1 ? "" : "s") + " · "
+                    }
+                    let ids = Set(turnChips.map(\.id))
+                    messages.removeAll { ids.contains($0.id) }
+                }
+            }
+
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text = replyText
                 messages[i].isStreaming = false
                 if let s = reply.elapsedS {
-                    messages[i].meta = "replied in " + Self.fmtSeconds(s)
+                    messages[i].meta = stepsNote + "replied in " + Self.fmtSeconds(s)
+                } else if !stepsNote.isEmpty {
+                    messages[i].meta = String(stepsNote.dropLast(3))   // strip " · "
                 }
             }
             if let used = reply.ctxUsed, let mx = reply.ctxMax {
