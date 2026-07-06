@@ -52,6 +52,10 @@ struct JaegerBanner: View {
 /// bubbled — the windowed echo of the Rich terminal TUI's turn log.
 struct TranscriptRow: View {
     let message: ChatMessage
+    /// Draw the thin accent rule ABOVE this row — the turn separator the
+    /// view puts before every user message after the first (config-gated
+    /// by ``display.turn_separators``).
+    var showTurnRule: Bool = false
 
     var body: some View {
         switch message.author {
@@ -64,15 +68,23 @@ struct TranscriptRow: View {
     }
 
     private var userRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("❯")
-                .font(Term.mono.weight(.bold))
-                .foregroundColor(Term.accent)
-            Text(message.text)
-                .font(Term.mono)
-                .foregroundColor(Term.ink)
-                .textSelection(.enabled)
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            if showTurnRule {
+                Rectangle()
+                    .fill(Term.rule)
+                    .frame(height: 1)
+                    .padding(.vertical, 2)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                Text("❯")
+                    .font(Term.mono.weight(.bold))
+                    .foregroundColor(Term.accent)
+                Text(message.text)
+                    .font(Term.mono)
+                    .foregroundColor(Term.ink)
+                    .textSelection(.enabled)
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -135,6 +147,7 @@ struct TranscriptRow: View {
     }
 
     /// Reasoning trail — dim italic mono, a leading ``…`` marker.
+    /// Indented under the turn's ``❯`` line (operator keeper, 2026-07-05).
     private var thinkingRow: some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "brain")
@@ -147,6 +160,7 @@ struct TranscriptRow: View {
             if message.isStreaming { ThinkingDots() }
             Spacer(minLength: 0)
         }
+        .padding(.leading, 18)
     }
 
     /// Tool-call line — accent-tinted mono with a ``⏵`` marker, the
@@ -170,6 +184,9 @@ struct TranscriptRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Term.accent.opacity(0.08))
         )
+        // Indent under the turn's ``❯`` line so the trace reads as
+        // nested activity, not sibling messages (operator keeper).
+        .padding(.leading, 18)
     }
 }
 

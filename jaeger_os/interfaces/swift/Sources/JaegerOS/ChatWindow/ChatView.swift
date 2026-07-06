@@ -90,8 +90,15 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity)
                     }
                     ForEach(chat.messages) { msg in
-                        TranscriptRow(message: msg)
-                            .id(msg.id)
+                        TranscriptRow(
+                            message: msg,
+                            // Thin accent rule before every turn after the
+                            // first — config-gated (display.turn_separators).
+                            showTurnRule: chat.turnSeparators
+                                && msg.author == .user
+                                && msg.id != chat.messages.first?.id
+                        )
+                        .id(msg.id)
                     }
                 }
                 .padding(.horizontal, 18)

@@ -149,6 +149,9 @@ class DisplayConfig(BaseModel):
     #   "clear"   — show it live, remove it when the reply arrives
     #   "off"     — no live stream (just the spinner)
     activity_trace: str = "full"
+    # Thin accent rule between turns in the windowed chat transcript
+    # (operator-requested keeper, 2026-07-05). The TUI draws its own rules.
+    turn_separators: bool = True
     # What pressing Enter does while the agent is mid-turn (hermes parity):
     #   "interrupt" — cancel the running turn, run the new message now
     #   "queue"     — run the new message after the current turn finishes
