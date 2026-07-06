@@ -399,6 +399,14 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         root = layout.skills_dir if path == "." else _resolve_read(path)
     except SandboxError as exc:
         return {"searched": False, "error": str(exc)}
+    # Refuse an over-broad root: the home dir or the filesystem root is the
+    # credential-sweep / DoS signature ("search my home for .env"), and no
+    # legitimate grep is rooted there. Narrow to a project/workspace path.
+    root = root.resolve()
+    if root == Path.home().resolve() or root.parent == root:
+        return {"searched": False,
+                "error": ("refused — that search root is too broad "
+                          f"({root}); narrow it to a project directory")}
     if not root.exists():
         return {"searched": True, "query": query, "matches": [], "count": 0}
 
@@ -425,9 +433,18 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
                     return
                 yield Path(dirpath) / fn
 
+    from jaeger_os.core.safety.file_safety import is_sensitive_path
     for child in _iter_files():
+        # Credential protection MUST apply to files DISCOVERED during the
+        # walk, not just the path argument — otherwise a broad grep
+        # (``search_files(query=".env", path=<dir>)``) reads the CONTENTS
+        # of any .env / id_rsa / .aws credential it walks past. The path-arg
+        # check in ``_resolve_read`` never saw these (safe-credential-leak,
+        # 2026-07-06).
         try:
-            if not child.is_file() or child.stat().st_size > 1_000_000:
+            if (not child.is_file()
+                    or is_sensitive_path(child)
+                    or child.stat().st_size > 1_000_000):
                 continue
             text = child.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
