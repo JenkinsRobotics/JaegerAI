@@ -6,11 +6,11 @@ other toolset. Two meta-tools make that pattern workable:
 
   - :func:`describe_tool` — peek at any registered tool's schema
     without changing the active set. Cheap.
-  - :func:`load_toolset` — widen the active set to include a whole
+  - :func:`load_tools` — widen the active set to include a whole
     category for the rest of the session.
 
 Both also exist when the lean surface is OFF — describe_tool stays
-useful as introspection, load_toolset is a no-op-by-config but won't
+useful as introspection, load_tools is a no-op-by-config but won't
 break.
 
 Why a separate ``meta.py`` instead of folding into ``_common.py``:
@@ -46,7 +46,7 @@ def describe_tool(name: str) -> dict[str, Any]:
         the model would see in its tools list
       * ``toolset`` — the category the tool belongs to (``"core"``,
         ``"files"``, ``"computer_use"``, etc.) so you know which
-        ``load_toolset`` call would bring its siblings in
+        ``load_tools`` call would bring its siblings in
       * ``permission_tier`` — ``READ_ONLY`` / ``WRITE_LOCAL`` /
         ``EXTERNAL_EFFECT`` / ``HARDWARE`` / ``PRIVILEGED``. Tells you
         whether calling it will need user confirmation.
@@ -118,7 +118,7 @@ def describe_tool(name: str) -> dict[str, Any]:
 
 
 @register_tool_from_function
-def load_toolset(name: str = "") -> dict[str, Any]:
+def load_tools(name: str = "") -> dict[str, Any]:
     """Make a group of extra tools visible. You start each turn with
     a small CORE toolset; everything else is grouped — built-in
     classes (``files``, ``code``, ``media``, …) and skills (each skill
@@ -149,4 +149,30 @@ def load_toolset(name: str = "") -> dict[str, Any]:
     }
 
 
-__all__ = ["describe_tool", "load_toolset"]
+@register_tool_from_function
+def list_tools(query: str = "") -> dict[str, Any]:
+    """Find a SPECIFIC tool by keyword when the exact tool a task needs isn't in
+    your current view — e.g. ``list_tools("weather")`` → ``get_weather`` in the
+    ``web`` toolset; then ``load_tools("web")`` to use it. It returns matching
+    tool names + their toolset, NOT a description of your capabilities — for
+    "what can you do / help" use ``help_me``, not this. When every tool is
+    already visible you rarely need it. Optional ``query`` filters by substring."""
+    from jaeger_os.agent.schemas.tool_registry import get_tools
+    from jaeger_os.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
+    where: dict[str, str] = {}
+    for ts, tools in TOOLSETS.items():
+        for t in tools:
+            where[t] = ts
+    q = (query or "").strip().lower()
+    rows = []
+    for t in sorted(get_tools(), key=lambda x: x.name):
+        desc = " ".join((t.description or "").split())[:80]
+        if q and q not in t.name.lower() and q not in desc.lower():
+            continue
+        loc = "CORE" if t.name in CORE else where.get(t.name, "other")
+        rows.append({"tool": t.name, "toolset": loc, "does": desc})
+    return {"ok": True, "count": len(rows), "tools": rows,
+            "note": "not-CORE tools: load their toolset with load_tools(<toolset>)"}
+
+
+__all__ = ["describe_tool", "load_tools", "list_tools"]

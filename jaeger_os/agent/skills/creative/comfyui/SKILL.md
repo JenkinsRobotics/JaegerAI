@@ -5,6 +5,7 @@ version: 5.0.0
 author: [kshitijk4poor, alt-glitch]
 license: MIT
 platforms: [macos, linux, windows]
+requires_tools: [terminal]
 compatibility: "Requires ComfyUI (local, Comfy Desktop, or Comfy Cloud) and comfy-cli (auto-installed via pipx/uvx by the setup script)."
 prerequisites:
   commands: ["python3"]
@@ -25,6 +26,8 @@ metadata:
       - video-generation
     related_skills: [stable-diffusion-image-generation, image_gen]
     category: creative
+  jros:
+    related_skills: [pixel-art, manim-video, p5js]
 ---
 
 # ComfyUI

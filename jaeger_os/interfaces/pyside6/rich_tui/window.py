@@ -76,12 +76,16 @@ class ChatWindow(QWidget):
     def __init__(self, ctx: Any) -> None:
         super().__init__()
         self.ctx = ctx
-        # The name hangs off the Tier-1 core (ctx is the chassis app);
-        # fall back to a ctx-level name, then a generic default.
-        self._agent_name = (
-            getattr(getattr(ctx, "core", None), "agent_name", None)
-            or getattr(ctx, "agent_name", None)
-            or "agent")
+        # Display name tracks the ACTIVE character (what the agent is playing),
+        # so the title / banner / reply prefix match the persona — not the
+        # boot-time core identity. Recomputed each time the window opens.
+        try:
+            from jaeger_os.interfaces.avatar_player.window import agent_name
+            self._agent_name = agent_name(ctx)
+        except Exception:  # noqa: BLE001
+            self._agent_name = (
+                getattr(getattr(ctx, "core", None), "agent_name", None)
+                or getattr(ctx, "agent_name", None) or "agent")
         self._messages: list[tuple[str, str]] = []   # (role, text) view-model
         # This window's conversation. One app-agent, many windows/chats —
         # the session scopes history + routes replies to this window. A

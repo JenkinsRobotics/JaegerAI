@@ -5,10 +5,13 @@ version: 1.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [GitHub, Authentication, Git, gh-cli, SSH, Setup]
     related_skills: [github-pr-workflow, github-code-review, github-issues, github-repo-management]
+  jros:
+    related_skills: [github-pr-workflow, github-code-review, github-repo-management]
 ---
 
 # GitHub Authentication Setup

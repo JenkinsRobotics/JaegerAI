@@ -689,7 +689,7 @@ def test_loop_health_metrics_in_summary():
 
 def test_v12_corpus_additions_present():
     from jaeger_os.core.bench.cases import BENCHMARK_VERSION, CASES, all_tags
-    assert BENCHMARK_VERSION == "1.2"
+    assert BENCHMARK_VERSION == "1.3"
     ids = {c.id for c in CASES}
     assert {"ms_chain_hours_file", "ms_chain_status_report",
             "par_three_reads", "par_two_reads",

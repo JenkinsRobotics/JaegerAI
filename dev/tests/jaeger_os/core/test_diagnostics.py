@@ -169,7 +169,7 @@ def test_check_memory_round_trip_succeeds_on_bound_layout(tmp_path):
     from types import SimpleNamespace
     from jaeger_os.core.memory import memory as memmod
     from jaeger_os.core.memory import sqlite_store
-    from jaeger_os.agent.tools import _common
+    from jaeger_os.core import context as _common
     from jaeger_os.core.diagnostics.probe import _check_memory
 
     sqlite_store.close()

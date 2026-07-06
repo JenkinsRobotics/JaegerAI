@@ -5,9 +5,12 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [search_files, read_file, terminal]
 metadata:
   hermes:
     tags: [debugging, hermes-agent, tui, slash-commands, typescript, python]
+    related_skills: [python-debugpy, node-inspect-debugger, systematic-debugging]
+  jros:
     related_skills: [python-debugpy, node-inspect-debugger, systematic-debugging]
 ---
 

@@ -7,11 +7,10 @@ statement so the two can never silently diverge.
 from jaeger_os.cli import entry
 
 PY = "/venv/bin/python"
-LAUNCH = "/repo/launch.py"
 
 
 def route(argv):
-    return entry._route(argv, PY, LAUNCH)
+    return entry._route(argv, PY)
 
 
 def test_console_subcommands_go_to_cli():
@@ -36,8 +35,8 @@ def test_bridge_and_mcp():
 
 
 def test_dev_defaults_to_tui_and_passes_flags():
-    assert route(["--dev"]) == [PY, LAUNCH, "--tui"]
-    assert route(["--dev", "--status"]) == [PY, LAUNCH, "--status"]
+    assert route(["--dev"]) == [PY, "-m", "jaeger_os.cli.devtools"]
+    assert route(["--dev", "--status"]) == [PY, "-m", "jaeger_os.cli.devtools", "--status"]
 
 
 def test_version_and_help_go_to_cli():

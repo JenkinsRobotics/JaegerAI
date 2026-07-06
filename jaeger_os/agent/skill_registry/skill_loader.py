@@ -640,7 +640,7 @@ def load_and_register(
         names = ", ".join(
             f"{s.name}@{s.version_str}({s.zone})" for s in registered
         )
-        print(f"[jaeger-skills] registered {len(registered)} tool-skill(s): {names}", flush=True)
+        print(f"[jaeger-skills] {len(registered)} skill(s) provide tools (registered): {names}", flush=True)
         stub_count = sum(1 for s in registered if s.is_legacy_stub)
         if stub_count:
             print(
@@ -649,17 +649,25 @@ def load_and_register(
                 "convenience (dev/docs/skill_schema_v3.md).",
                 flush=True,
             )
-    # Playbook skills (procedural SKILL.md docs the agent reads on
-    # demand via the ``skill`` tool) live alongside the tool-skills but
-    # are NOT registered as agent tools — they get discovered + indexed
-    # separately. Mention the count here so the operator sees the full
-    # surface, not just the Python-module slice.
+    # One skill model, two things a skill can carry: a module that provides
+    # tools (registered above) and/or a SKILL.md recipe the agent loads via
+    # use_skill. Recipe-only skills are indexed separately, not registered as
+    # tools. Count them so the operator sees the full surface.
+    pb_count = 0
     try:
         from jaeger_os.agent.skill_registry.playbook_skills import discover_playbooks
         pb_count = len(discover_playbooks())
         if pb_count:
-            print(f"[jaeger-skills] {pb_count} playbook skill(s) available "
-                  f"via the ``skill`` tool (action=list/view).", flush=True)
+            print(f"[jaeger-skills] {pb_count} skill(s) provide a recipe "
+                  f"(loadable via use_skill).", flush=True)
     except Exception:  # noqa: BLE001 — playbook discovery must not block boot
+        pass
+    # The full agentic surface in one line: tools + tool-providing + recipe skills.
+    try:
+        from jaeger_os.agent.schemas.tool_registry import get_tools
+        print(f"[jaeger-skills] agentic surface: {len(get_tools())} tools · "
+              f"{len(registered)} tool-providing skill(s) · {pb_count} recipe skill(s).",
+              flush=True)
+    except Exception:  # noqa: BLE001
         pass
     return SkillLoadReport(registered=registered, skipped=skipped)

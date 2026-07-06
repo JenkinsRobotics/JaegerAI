@@ -77,8 +77,6 @@ def test_edit_file_rejects_sandbox_escape(bound_instance):
 
 
 def test_search_files_finds_content(bound_instance):
-    # search_files now defaults to cwd (the repo) for codebase-wide
-    # grep; scope it to the instance skills dir explicitly here.
     skills = str(bound_instance.skills_dir)
     tools.file_write("a.py", "def hello():\n    return 1\n")
     tools.file_write("b.py", "def world():\n    return 2\n")
@@ -87,6 +85,49 @@ def test_search_files_finds_content(bound_instance):
     assert result["count"] == 1
     assert result["matches"][0]["file"].endswith("a.py")
     assert result["matches"][0]["line"] == 1
+
+
+def test_search_files_default_is_the_sandbox_not_cwd(bound_instance):
+    """The default path (".") searches the SANDBOX workspace, not
+    ``Path.cwd()``. (The old cwd default let a search walk the repo /
+    the operator's home — see the credential-sweep regression below.)"""
+    tools.file_write("here.py", "MARKER_IN_SANDBOX = 1\n")
+    result = tools.search_files("MARKER_IN_SANDBOX")   # no path → default
+    assert result["searched"] is True
+    assert result["count"] == 1
+    assert result["matches"][0]["file"].endswith("here.py")
+
+
+def test_search_files_skips_credential_files(bound_instance, tmp_path):
+    """Security regression (safe-credential-leak, 2026-07-06). Search is
+    *unconfined by design* — like ``file_read`` it can reach the wider
+    repo/system, so it is NOT the sandbox boundary. What it MUST guarantee
+    is narrower: a credential-named file is never surfaced, even when its
+    containing directory is searched, and even when addressed directly.
+    (The original credential-sweep bug walked $HOME reading everything.)"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "id_rsa").write_text("PRIVATE_KEY_SECRET_XYZ\n")   # credential-named
+    (outside / "plain.txt").write_text("PRIVATE_KEY_SECRET_XYZ\n")
+
+    # Searching the dir surfaces the plain file but NEVER the credential one.
+    r = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=str(outside))
+    assert r["searched"] is True
+    names = {m["file"].rsplit("/", 1)[-1] for m in r["matches"]}
+    assert names == {"plain.txt"}, r
+
+    # Pointing search straight at the credential file is refused.
+    r2 = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=str(outside / "id_rsa"))
+    assert r2.get("count", 0) == 0
+
+
+def test_search_files_refuses_dos_broad_roots(bound_instance):
+    """A search rooted at ``~`` or the filesystem root is refused — that
+    was the uninterruptible credential-sweep DoS. Narrow roots are fine."""
+    for broad in ("~", "/"):
+        r = tools.search_files("anything", path=broad)
+        assert r["searched"] is False
+        assert "too broad" in r["error"]
 
 
 def test_search_files_is_case_insensitive(bound_instance):
@@ -138,6 +179,28 @@ def test_file_read_relative_falls_back_to_instance(bound_instance):
     tools.file_write("note.txt", "workspace file\n")
     r = tools.file_read("skills/note.txt")
     assert r["read"] is True and "workspace file" in r["content"]
+
+
+def test_bare_relative_name_round_trips(bound_instance):
+    """Regression (tool-conditional, 2026-07-06): a bare relative name
+    must round-trip between write and read. ``file_write`` sends a bare
+    name to ``skills/``; a bare ``file_read`` of the same name must find
+    it there — previously the read only checked cwd + the instance root,
+    so ``write_file("status.txt")`` then ``read_file("status.txt")``
+    returned not-found."""
+    w = tools.file_write("status.txt", "CPU: NOMINAL\n")
+    assert w["written"] is True
+    r = tools.file_read("status.txt")
+    assert r["read"] is True, r
+    assert "CPU: NOMINAL" in r["content"]
+
+
+def test_workspace_prefixed_name_round_trips(bound_instance):
+    """A ``workspace/...`` write must also read back by the same bare
+    ``workspace/`` path (the write lands in the effective workspace dir)."""
+    tools.file_write("workspace/out.txt", "hello workspace\n")
+    r = tools.file_read("workspace/out.txt")
+    assert r["read"] is True and "hello workspace" in r["content"]
 
 
 # ── file_read pagination ─────────────────────────────────────────────

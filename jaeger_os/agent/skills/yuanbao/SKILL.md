@@ -3,10 +3,13 @@ name: yuanbao
 description: "Yuanbao (元宝) groups: @mention users, query info/members."
 version: 1.0.0
 platforms: [linux, macos, windows]
+requires_tools: []
 metadata:
   hermes:
     tags: [yuanbao, mention, at, group, members, 元宝, 派, 艾特]
     related_skills: []
+  jros:
+    related_skills: [imessage, xurl, himalaya]
 ---
 
 # Yuanbao Group Interaction

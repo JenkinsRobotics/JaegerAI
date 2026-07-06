@@ -18,6 +18,7 @@
 //
 
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -29,8 +30,17 @@ final class ChatWindowController {
     static let shared = ChatWindowController()
 
     private var window: NSWindow?
+    private var titleSub: AnyCancellable?
 
     private init() {}
+
+    /// Window title leads with the AGENT's name (identity.yaml — the robot
+    /// the operator named), not the character it's playing: "Jaeger — Ted".
+    /// Falls back to the character until the identity query answers.
+    private static func title(for status: AgentStatus?) -> String {
+        if let name = status?.displayName { return "Jaeger — \(name)" }
+        return "Jaeger"
+    }
 
     /// Show (or raise) the chat window, wiring the SwiftUI ``ChatView``
     /// to the shared ``AgentBridge``.
@@ -55,8 +65,16 @@ final class ChatWindowController {
             backing: .buffered,
             defer: false
         )
-        win.title = "Jaeger"
+        win.title = Self.title(for: agent.status)
         win.titlebarAppearsTransparent = true
+        // The content is a hard dark terminal canvas regardless of the
+        // system theme — pin the WINDOW to dark too, or under the light
+        // appearance the titlebar draws near-black title text over the
+        // dark canvas ("Jaeger — …" was unreadable) and system-coloured
+        // controls collapse the same way.
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.backgroundColor = NSColor(
+            red: 0.043, green: 0.055, blue: 0.078, alpha: 1.0) // Term.canvas
         win.isReleasedWhenClosed = false
         win.contentViewController = hosting
         win.center()
@@ -64,6 +82,10 @@ final class ChatWindowController {
         win.minSize = NSSize(width: 460, height: 480)
 
         window = win
+        // Re-title live on character switches (status is @Published).
+        titleSub = agent.$status.sink { [weak win] status in
+            win?.title = Self.title(for: status)
+        }
         NSApp.activate(ignoringOtherApps: true)
         win.makeKeyAndOrderFront(nil)
     }

@@ -258,20 +258,20 @@ def test_compare_picker_cancelled_returns_two(tmp_path, monkeypatch, capsys):
     assert "cancelled" in err.lower()
 
 
-def test_compare_forwards_tags_and_limit_via_env(tmp_path, monkeypatch, capsys):
-    """``--tags`` / ``--limit`` get passed to the sweep script via env
-    vars (the sweep forwards them to the inner ``run_flat_bench``)."""
+def test_compare_forwards_tags_and_limit_as_flags(tmp_path, monkeypatch, capsys):
+    """``--tags`` / ``--limit`` get forwarded to ``bench.py --models`` as
+    ``--category`` / ``--limit`` CLI flags."""
     m = _make_gguf(tmp_path, "x.gguf")
     captured: dict[str, str] = {}
     def _spy(cmd, env=None, **_kw):
-        if env is not None:
-            captured["TAGS"] = env.get("JAEGER_BENCH_TAGS", "")
-            captured["LIMIT"] = env.get("JAEGER_BENCH_LIMIT", "")
+        if "--category" in cmd:
+            captured["TAGS"] = cmd[cmd.index("--category") + 1]
+        if "--limit" in cmd:
+            captured["LIMIT"] = cmd[cmd.index("--limit") + 1]
         return 0
     monkeypatch.setattr(bcv.subprocess, "call", _spy)
-    # _repo_root must point at something with benchmark/run_model_sweep.py
-    # — patch it to use the real repo so the "missing script" branch
-    # doesn't fire.
+    # _repo_root must point at something with benchmark/bench.py — patch
+    # it to the real repo so the "missing script" branch doesn't fire.
     real_repo = pathlib.Path(__file__).resolve().parents[5]
     monkeypatch.setattr(bcv, "_repo_root", lambda: real_repo)
     rc = bcv._cmd_bench_compare_argv([

@@ -6,11 +6,14 @@ version: 1.0.0
 author: SHL0MS
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [write_file, terminal]
 metadata:
   hermes:
     tags: [Creative, Ideation, Projects, Brainstorming, Inspiration]
     category: creative
     requires_toolsets: []
+  jros:
+    related_skills: [sketch, spike, p5js]
 ---
 
 # Creative Ideation

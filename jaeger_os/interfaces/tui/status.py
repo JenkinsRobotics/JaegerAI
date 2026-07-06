@@ -76,7 +76,7 @@ def _visible_tool_groups() -> tuple[dict[str, list[str]], int, int]:
     group renders in full — same as before. With scoping on, each
     group is filtered to its CORE intersection (umbrella tools
     only); empty groups drop out. The hidden bulk is still
-    REGISTERED and reachable via ``load_toolset``; the panel just
+    REGISTERED and reachable via ``load_tools``; the panel just
     matches what the model's schema view contains.
 
     POLISH-2 in docs/ROADMAP_0.2.0.md.
@@ -123,7 +123,7 @@ def boot_panel(
     tools_header = Text("▼ Available Tools", style=ACCENT_BOLD)
     if visible_count < total_count:
         # Lean surface is on — note that the model sees a subset, and
-        # the remaining tools auto-load via ``load_toolset(name)``.
+        # the remaining tools auto-load via ``load_tools(name)``.
         tools_header.append(
             f"  ({visible_count}/{total_count}  ·  lean surface ON  ·  "
             f"others load on demand)",

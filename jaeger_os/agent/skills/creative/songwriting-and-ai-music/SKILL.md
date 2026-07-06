@@ -3,6 +3,10 @@ name: songwriting-and-ai-music
 description: "Songwriting craft and Suno AI music prompts."
 tags: [songwriting, music, suno, parody, lyrics, creative]
 platforms: [linux, macos, windows]
+requires_tools: [write_file]
+metadata:
+  jros:
+    related_skills: [humanizer, comfyui, ideation]
 triggers:
   - writing a song
   - song lyrics

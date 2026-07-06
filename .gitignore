@@ -62,6 +62,7 @@ models/*
 # 0.2.6: dev/benchmark/ (was benchmark/). Suite code committed; run
 # output is local-only.
 dev/benchmark/**/BENCHMARK_*.md
+dev/benchmark/**/*-transcript.md
 dev/benchmark/**/*_rows.jsonl
 dev/benchmark/**/*.jsonl
 dev/benchmark/**/*.log
@@ -112,3 +113,7 @@ sandbox/
 
 # Chassis runtime: PID slot + child registry
 .run/
+
+# built app bundles (symlink at root, bundles in swift/.build)
+/JaegerOS-dev.app
+/JaegerOS.app

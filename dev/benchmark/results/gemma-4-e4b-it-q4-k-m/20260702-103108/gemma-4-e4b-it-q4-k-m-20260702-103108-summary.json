@@ -1,0 +1,195 @@
+{
+  "total": 31,
+  "passed": 29,
+  "pass_rate": 0.935,
+  "routing_passed": 25,
+  "routing_total": 25,
+  "answer_passed": 14,
+  "answer_total": 14,
+  "errors": 0,
+  "elapsed_s": 270.49,
+  "metrics": {
+    "avg_latency_s": 8.725,
+    "p50_latency_s": 3.403,
+    "p95_latency_s": 31.686,
+    "min_latency_s": 0.354,
+    "max_latency_s": 40.8,
+    "total_tool_dispatches": 39,
+    "avg_tools_per_turn": 1.26,
+    "answer_tokens_total": 4569,
+    "answer_tokens_avg": 147.4,
+    "answer_tokens_per_sec": 16.9,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 1141428,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.16,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 1.389,
+    "ttft_p50_s": 0.168,
+    "ttft_p95_s": 0.256,
+    "ttft_reported": 31
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 9.015,
+      "p95_latency_s": 39.244,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "pass_rate": 0.964,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 6.596,
+      "p95_latency_s": 39.244,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "full": {
+      "total": 31,
+      "passed": 29,
+      "pass_rate": 0.935,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 8.725,
+      "p95_latency_s": 31.686,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "avg_latency_s": 6.596
+    },
+    "files": {
+      "total": 3,
+      "passed": 3,
+      "avg_latency_s": 3.797
+    },
+    "audio": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.024
+    },
+    "web": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 12.367
+    },
+    "memory": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 4.639
+    },
+    "code": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.592
+    },
+    "schedule": {
+      "total": 3,
+      "passed": 3,
+      "avg_latency_s": 2.586
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.816
+    },
+    "skill": {
+      "total": 4,
+      "passed": 2,
+      "avg_latency_s": 31.647
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 31.608
+    },
+    "research": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 31.686
+    }
+  },
+  "failures": [
+    {
+      "id": "skill_arxiv",
+      "prompt": "Find recent arXiv papers on retrieval-augmented generation and summarize the top few.",
+      "tools_called": [
+        "web_search",
+        "web_extract"
+      ],
+      "answer": "The first paper I found, \"Retrieval-Augmented Generation: A Comprehensive Survey of Architectures, Enhancements, and Robustness Frontiers,\" is an excellent, very recent survey that covers the breadth ",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_menu_select",
+        "terminal",
+        "terminal"
+      ],
+      "answer": "The Dark Mode should now be active. I've run the necessary commands to change the system appearance and force the change to take effect.\n\nLet me know if you need anything else!",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 272.66,
+  "load_s": 67.87,
+  "category_breakdown": {
+    "routing": {
+      "passed": 27,
+      "total": 28
+    },
+    "memory": {
+      "passed": 4,
+      "total": 4
+    },
+    "files": {
+      "passed": 3,
+      "total": 3
+    },
+    "web": {
+      "passed": 2,
+      "total": 2
+    },
+    "code": {
+      "passed": 1,
+      "total": 1
+    },
+    "schedule": {
+      "passed": 3,
+      "total": 3
+    },
+    "skill": {
+      "passed": 2,
+      "total": 4
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260702-103108",
+  "benchmark_version": "1.3"
+}

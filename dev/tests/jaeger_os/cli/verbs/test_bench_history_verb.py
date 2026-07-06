@@ -23,7 +23,7 @@ def fake_repo(tmp_path, monkeypatch):
     """Build a minimal ``benchmark/`` tree the verb can scan."""
     bench = tmp_path / "dev/benchmark"
     (bench / "sweep").mkdir(parents=True)
-    (bench / "flat").mkdir()
+    (bench / "results").mkdir()
     monkeypatch.setattr(bhv, "_repo_root", lambda: tmp_path)
     return tmp_path
 
@@ -52,10 +52,10 @@ def _write_flat_summary(
     ``summary.json``. The walker handles both.
     """
     if nested_under:
-        run = bench_dir / "flat" / nested_under / ts
+        run = bench_dir / "results" / nested_under / ts
         prefix = f"{nested_under}-{ts}"
     else:
-        run = bench_dir / "flat" / ts
+        run = bench_dir / "results" / ts
         prefix = f"unknown-{ts}"
     run.mkdir(parents=True, exist_ok=True)
     filename = f"{prefix}-summary.json" if use_new_filename else "summary.json"
@@ -179,7 +179,7 @@ def test_flat_summaries_skips_dirs_without_summary(fake_repo):
     """A run dir with rows.jsonl but no summary.json is incomplete
     (interrupted run). Skip silently."""
     bench = fake_repo / "dev/benchmark"
-    (bench / "flat" / "20260527-broken").mkdir()
+    (bench / "results" / "20260527-broken").mkdir()
     out = list(bhv._from_flat_summaries(fake_repo))
     assert out == []
 
@@ -345,7 +345,7 @@ def test_render_produces_markdown_table(fake_repo):
          "latest_cases": 51, "run_count": 2},
     ]
     md = bhv._render(rows, all_entries=[], total_entries=2)
-    assert "# Jaeger-OS bench history" in md
+    assert "# Jaeger-OS Benchmark Leaderboard" in md
     assert "gemma-4-E4B" in md
     assert "92.0%" in md
     assert "Runs" in md
@@ -560,7 +560,7 @@ def test_history_write_persists_history_md(fake_repo, capsys):
     assert rc == 0
     written = fake_repo / "dev/benchmark" / "HISTORY.md"
     assert written.exists()
-    assert "# Jaeger-OS bench history" in written.read_text(encoding="utf-8")
+    assert "# Jaeger-OS Benchmark Leaderboard" in written.read_text(encoding="utf-8")
 
 
 # ── --since / --min-cases filters (2026-05-27) ───────────────
@@ -572,10 +572,10 @@ def test_since_filter_excludes_old_runs(fake_repo, capsys):
     (51-case 1.0) isn't apples-to-apples with the current full corpus."""
     bench = fake_repo / "dev/benchmark"
     # sweep_rows infer version from CASE COUNT (metadata-only path): 51 -> 1.0
-    # (old, dropped), 65 -> current full corpus (ranked).
+    # (old, dropped), 77 -> current full corpus (ranked).
     _write_sweep_row(bench, name="may28-model", cases=51, route_ok=40,
                      ts="2026-05-28T10:00:00")
-    _write_sweep_row(bench, name="may30-model", cases=65, route_ok=54,
+    _write_sweep_row(bench, name="may30-model", cases=77, route_ok=54,
                      ts="2026-05-30T10:00:00")
     # Default cutoff is 2026-05-29 → only may30 (current corpus) shows.
     rc = bhv._cmd_bench_history_argv([])
@@ -595,10 +595,10 @@ def test_since_explicit_date(fake_repo, capsys):
     Both rows are current-corpus so the bench-version filter keeps them;
     --since is the relevant filter under test."""
     bench = fake_repo / "dev/benchmark"
-    # 65 cases -> current corpus (sweep rows infer version from case count).
-    _write_sweep_row(bench, name="m1", cases=65, route_ok=40,
+    # 77 cases -> current corpus (sweep rows infer version from case count).
+    _write_sweep_row(bench, name="m1", cases=77, route_ok=40,
                      ts="2026-05-30T10:00:00")
-    _write_sweep_row(bench, name="m2", cases=65, route_ok=48,
+    _write_sweep_row(bench, name="m2", cases=77, route_ok=48,
                      ts="2026-06-01T10:00:00")
     rc = bhv._cmd_bench_history_argv(["--since", "2026-05-31"])
     out = capsys.readouterr().out
@@ -671,7 +671,7 @@ def test_write_history_md_silent_helper(fake_repo, capsys):
     captured = capsys.readouterr()
     assert out_path is not None
     assert out_path.exists()
-    assert "# Jaeger-OS bench history" in out_path.read_text(encoding="utf-8")
+    assert "# Jaeger-OS Benchmark Leaderboard" in out_path.read_text(encoding="utf-8")
     # Silent: nothing printed to stdout/stderr.
     assert captured.out == ""
     assert captured.err == ""

@@ -2,7 +2,7 @@
 and the compact prompt-side skill index.
 
 Skills gained discovery metadata: ``platforms`` (with ``macos`` first-class),
-``requires_tools`` / ``requires_toolsets`` / ``fallback_for_tools``, and a
+``requires_tools`` / ``requires_toolsets``, and a
 config-driven disabled list. ``available_playbooks`` is the agent-facing
 view — discovered skills minus those for another OS and those disabled in
 config — and ``build_skill_index`` renders a compact index for the prompt.
@@ -113,4 +113,6 @@ def test_discovery_and_index_run_against_the_real_library():
     index = build_skill_index()
     assert isinstance(index, str)
     if available:
-        assert "Skill library" in index
+        # the always-on block is now a ONE-LINE pointer (the 87 names moved
+        # into the use_skill tool's name enum, dropping the ~1.9k prose menu)
+        assert "use_skill" in index and "playbooks" in index

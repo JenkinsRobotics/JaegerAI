@@ -3,10 +3,13 @@ name: p5js
 description: "p5.js sketches: gen art, shaders, interactive, 3D."
 version: 1.0.0
 platforms: [linux, macos, windows]
+requires_tools: [write_file, terminal, list_skills]
 metadata:
   hermes:
     tags: [creative-coding, generative-art, p5js, canvas, interactive, visualization, webgl, shaders, animation]
     related_skills: [ascii-video, manim-video, excalidraw]
+  jros:
+    related_skills: [manim-video, pretext, comfyui]
 ---
 
 # p5.js Production Pipeline
@@ -491,7 +494,7 @@ When building p5.js sketches:
 5. **Headless export** — `node scripts/export-frames.js sketch.html --frames 300` for automated frame capture (sketch must use `noLoop()` + `_p5Ready`)
 6. **MP4 rendering** — `bash scripts/render.sh sketch.html output.mp4 --duration 30`
 7. **Iterative refinement** — edit the HTML file, user refreshes browser to see changes
-8. **Load references on demand** — use `skill_view(name="p5js", file_path="references/...")` to load specific reference files as needed during implementation
+8. **Load references on demand** — use `list_skills(action="view", name="p5js", file="references/...")` to load specific reference files as needed during implementation
 
 ## Performance Targets
 

@@ -20,7 +20,7 @@ import pytest
 
 from jaeger_os.transport import topics
 from jaeger_os.agent.tools import avatar
-from jaeger_os.agent.tools import _common as tool_common
+from jaeger_os.core import context as tool_common
 from jaeger_os.nodes import runtime as node_runtime
 from jaeger_os.transport import InProcBus
 

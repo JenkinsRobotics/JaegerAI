@@ -25,12 +25,14 @@ per case (single-turn purity).
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import re
 import shutil
 import tempfile
 import time
 from contextlib import redirect_stdout
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -74,6 +76,11 @@ class BenchRow:
     halt_reason: str | None = None
     iterations: int = 0
     skipped_final: bool = False
+    # Skill selection (the 'skill' category): which playbooks the agent
+    # pulled via skill(view), and whether it selected the ones the case
+    # expected. ``skill_ok`` is None when the case sets no expected_skills.
+    skills_viewed: list[str] = field(default_factory=list)
+    skill_ok: bool | None = None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -111,11 +118,17 @@ def _matches_tool_set(observed: list[str], expected: list[str],
     return False
 
 
+# Digit-group separators: a model may write "9,999" where a check wants "9999".
+# Strip commas that sit BETWEEN digits so the numeric answer still matches.
+_THOUSANDS_SEP = re.compile(r"(?<=\d),(?=\d)")
+
+
 def _contains_any(haystack: str, needles: list[str]) -> bool:
     if not needles:
         return True
     lower = (haystack or "").lower()
-    return any(n.lower() in lower for n in needles)
+    normalized = _THOUSANDS_SEP.sub("", lower)
+    return any(n.lower() in lower or n.lower() in normalized for n in needles)
 
 
 def _contains_all(haystack: str, needles: list[str]) -> bool:
@@ -195,6 +208,7 @@ def _drive_one(
     elapsed = time.perf_counter() - started
 
     tools: list[str] = []
+    skills_viewed: list[str] = []
     for msg in (out.get("new_messages") or []):
         if msg.get("role") != "assistant":
             continue
@@ -202,6 +216,31 @@ def _drive_one(
             name = tc.get("name") or ""
             if name:
                 tools.append(name)
+            # Skill selection: a skill(view/use, name=...) call is the
+            # agent choosing a specific playbook. Capture WHICH one so
+            # the 'skill' category can assert it picked the right skill,
+            # not just that it researched. (Tool names alone can't tell
+            # skill('ascii-art') from skill('arxiv').) Applies to playbook
+            # AND tool-skills — skill-first means both get viewed before use.
+            if name in ("list_skills", "use_skill"):
+                args = tc.get("arguments") or {}
+                # Adapters may hand arguments back as a JSON string rather
+                # than a dict — parse so a skill call is NEVER missed
+                # (flag skill use as reliably as a tool call).
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except (ValueError, TypeError):
+                        args = {}
+                if not isinstance(args, dict):
+                    args = {}
+                # use_skill(name=…) is a direct enum selection; skill(view,
+                # name=…) is the meta-tool form. Both = viewing a playbook.
+                if name == "use_skill" or str(args.get("action") or "").lower() in (
+                        "view", "use", "read", "get", "open"):
+                    target = str(args.get("name") or args.get("query") or "").strip()
+                    if target:
+                        skills_viewed.append(target)
 
     answer = out.get("answer", "") or ""
     prompt_tokens = int(out.get("prompt_tokens") or 0)
@@ -211,6 +250,7 @@ def _drive_one(
         "halt_reason": out.get("halt_reason"),
         "iterations": int(out.get("iterations") or 0),
         "skipped_final": bool(out.get("skipped", False)),
+        "skills_viewed": skills_viewed,
     }
     return tools, answer, elapsed, error, prompt_tokens, completion_tokens, meta
 
@@ -246,14 +286,27 @@ def _visible_output_clean(answer: str) -> bool:
 
 
 def _score(case: BenchCase, tools: list[str], answer: str,
-           error: str | None, elapsed_s: float) -> BenchRow:
+           error: str | None, elapsed_s: float,
+           skills_viewed: list[str] | None = None) -> BenchRow:
     """Apply each of the case's optional checks; roll up to ``case_pass``."""
+    skills_viewed = skills_viewed or []
     routing_ok: bool | None = None
     ordered_ok: bool | None = None
     if case.expected_tools:
         routing_ok = _matches_tool_set(tools, case.expected_tools, ordered=False)
         if case.ordered:
             ordered_ok = _matches_tool_set(tools, case.expected_tools, ordered=True)
+
+    # Skill selection ('skill' category): every expected skill must have
+    # been viewed. Substring-tolerant so a case can say 'ascii-art' and
+    # match a viewed 'ascii-art' regardless of category prefixing.
+    skill_ok: bool | None = None
+    if case.expected_skills:
+        viewed_l = [s.lower() for s in skills_viewed]
+        skill_ok = all(
+            any(want.lower() in v or v in want.lower() for v in viewed_l)
+            for want in case.expected_skills
+        )
 
     answer_ok: bool | None = None
     if case.answer_contains_any or case.answer_contains_all:
@@ -293,6 +346,8 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         pieces.append(routing_ok)
     if ordered_ok is not None:
         pieces.append(ordered_ok)
+    if skill_ok is not None:
+        pieces.append(skill_ok)
     if answer_ok is not None:
         pieces.append(answer_ok)
     if safety_ok is not None:
@@ -305,6 +360,7 @@ def _score(case: BenchCase, tools: list[str], answer: str,
         routing_ok=routing_ok, ordered_ok=ordered_ok, answer_ok=answer_ok,
         no_hallucination=no_hallucination, clean_output=clean_output,
         safety_ok=safety_ok, error=error, case_pass=case_pass,
+        skills_viewed=list(skills_viewed), skill_ok=skill_ok,
     )
 
 
@@ -382,7 +438,49 @@ _MUTABLE_MEMORY_FILES: tuple[str, ...] = (
     "board.json",
     "schedules.json",
     "episodic.jsonl",
+    # The REAL memory backend is SQLite (facts.json/episodic.jsonl are the
+    # legacy files, lazy-migrated in). Without snapshotting the .db (+ its
+    # WAL sidecars) the bench's writes leaked into the operator's live memory
+    # and NEVER rolled back — that baked stale "favorite color" facts into
+    # state.db and broke corpus B's recall cases (they read the pollution,
+    # not the store). 2026-07-03.
+    "state.db", "state.db-wal", "state.db-shm",
+    "sessions.db", "sessions.db-wal", "sessions.db-shm",
 )
+
+
+def _checkpoint_sqlite() -> None:
+    """Fold the state.db WAL into the main db file so a plain file copy
+    of ``state.db`` is a complete, consistent snapshot. Best-effort."""
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import sqlite_store
+        if sqlite_store.is_bound():
+            sqlite_store.connection().execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def _close_sqlite_stores() -> bool:
+    """Close the process's live SQLite connections (state.db singleton +
+    the sessions.db store) so the on-disk files can be safely replaced.
+    Returns True when something was closed (caller should re-bind)."""
+    closed = False
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import sqlite_store
+        if sqlite_store.is_bound():
+            sqlite_store.close()
+            closed = True
+    with contextlib.suppress(Exception):
+        from jaeger_os.core import sessions
+        sessions.reset_for_tests()   # closes + clears the lazy singleton
+    return closed
+
+
+def _rebind_sqlite_stores(layout: Any) -> None:
+    """Reopen the memory store against the (restored) files. The sessions
+    store reopens lazily on its next ``get_store`` call."""
+    with contextlib.suppress(Exception):
+        from jaeger_os.core.memory import memory as _memory_mod
+        _memory_mod.bind(layout)
 
 
 @contextlib.contextmanager
@@ -390,6 +488,13 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
     """Snapshot the mutable memory files on entry; restore them on
     exit. Any bench-driven writes between are invisible to the user's
     live state after the ``with`` block.
+
+    SQLite handling (the part that bit us): a WAL database CANNOT be
+    safely copied or replaced under an open connection — the page cache
+    and mmap'd -shm index would disagree with disk, corrupting the file
+    or resurrecting bench rows. So we ``wal_checkpoint(TRUNCATE)`` before
+    the snapshot (making the bare .db a complete copy), and on restore we
+    CLOSE the live connections first, swap the files, then re-bind.
 
     Best-effort throughout — if a snapshot or restore fails (no
     permission, disk full, etc.) we log and let the run continue.
@@ -407,6 +512,7 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
         yield
         return
 
+    _checkpoint_sqlite()
     snapshot_dir = Path(tempfile.mkdtemp(prefix=".bench_snapshot_",
                                          dir=str(memory_dir)))
     saved: dict[str, Path] = {}
@@ -424,6 +530,9 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
                     pass
         yield
     finally:
+        # Close the live SQLite connections BEFORE touching their files —
+        # restoring under an open connection is undefined behaviour.
+        rebind = _close_sqlite_stores()
         # Restore: copy each snapshotted file back. If snapshot was
         # missing (file didn't exist pre-run) AND the bench created
         # it, remove the bench-created file so the live state stays
@@ -444,6 +553,8 @@ def _hermetic_memory(layout: Any) -> Iterator[None]:
                     live.unlink()
                 except OSError:
                     pass
+        if rebind:
+            _rebind_sqlite_stores(layout)
         try:
             shutil.rmtree(snapshot_dir, ignore_errors=True)
         except OSError:
@@ -497,14 +608,75 @@ def run_bench(
         except Exception:  # noqa: BLE001 — snapshot is opt-in convenience
             pass
 
-    with snapshot_ctx:
+    # Tag every fact the bench writes as source='benchmark' so it never
+    # masquerades as the operator's (and is trivially purgeable). Belt-and-
+    # suspenders with the hermetic snapshot, which rolls the writes back.
+    try:
+        from jaeger_os.core.memory import memory as _mem
+        _prev_source = _mem.set_memory_source("benchmark")
+    except Exception:  # noqa: BLE001
+        _mem = None
+        _prev_source = None
+
+    @contextlib.contextmanager
+    def _memory_source_guard(mod: Any, prev: str | None) -> Iterator[None]:
+        """Restore the live process's memory source EVEN IF the run raises —
+        leaking source='benchmark' would silently mis-tag the operator's
+        subsequent remembers and hide their real facts from recall."""
+        try:
+            yield
+        finally:
+            if mod is not None and prev is not None:
+                with contextlib.suppress(Exception):
+                    mod.set_memory_source(prev)
+
+    @contextlib.contextmanager
+    def _neutral_identity_guard() -> Iterator[None]:
+        """Bench turns run under a NEUTRAL identity: the plain identity.yaml
+        name, never the active character's. The bench measures the engine,
+        not the costume — a character name in the worker prompt tints
+        free-text answers (free_text_story wrote its story about HAL 9000)
+        and answer_contains checks false-negative on the styled output.
+
+        The prompt fragment reads ``JAEGER_BENCH_NEUTRAL_IDENTITY``; the
+        pipeline's system prompt was assembled at boot, so it is rebuilt
+        here under the flag and restored after — same try/finally shape as
+        the memory-source guard above. Live behavior is untouched."""
+        prev_env = os.environ.get("JAEGER_BENCH_NEUTRAL_IDENTITY")
+        os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
+        prev_prompt: str | None = None
+        pipeline: Any = None
+        try:
+            from jaeger_os.agent.prompts.prompts import build_system_prompt
+            from jaeger_os.main import _pipeline
+            layout = _pipeline.get("layout")
+            if layout is not None:
+                prev_prompt = _pipeline.get("system_prompt")
+                _pipeline["system_prompt"] = build_system_prompt(layout)
+                pipeline = _pipeline
+        except Exception:  # noqa: BLE001 — raw fixtures have no pipeline
+            pass
+        try:
+            yield
+        finally:
+            if prev_env is None:
+                os.environ.pop("JAEGER_BENCH_NEUTRAL_IDENTITY", None)
+            else:
+                os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = prev_env
+            if pipeline is not None and prev_prompt is not None:
+                with contextlib.suppress(Exception):
+                    pipeline["system_prompt"] = prev_prompt
+
+    with snapshot_ctx, _memory_source_guard(_mem, _prev_source), \
+            _neutral_identity_guard():
         for idx, case in enumerate(selected):
             session_key = case.session or f"bench_{case.id}"
             tools, answer, elapsed, error, ptok, ctok, meta = _drive_one(
                 client, case.prompt,
                 agent_cache=agent_cache, session_key=session_key,
             )
-            row = _score(case, tools, answer, error, elapsed)
+            row = _score(case, tools, answer, error, elapsed,
+                         skills_viewed=meta.get("skills_viewed") or [])
             row.prompt_tokens = ptok
             row.completion_tokens = ctok
             ttft = meta.get("ttft_s")

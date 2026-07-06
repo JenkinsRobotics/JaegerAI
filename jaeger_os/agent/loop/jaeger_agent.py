@@ -27,6 +27,7 @@ from typing import Callable
 from jaeger_os.agent.adapters.base import ProviderAdapter
 from jaeger_os.agent.loop.callbacks import AgentCallbacks
 from jaeger_os.agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
+from jaeger_os.agent.loop import verify_gate
 from jaeger_os.agent.loop.loop_backstop import (
     call_signature,
     loop_halt_reason,
@@ -79,7 +80,7 @@ class JaegerAgent:
         # ``_all_tools`` holds the FULL registered set the agent can
         # dispatch + validate against. ``tools`` (the property below)
         # filters this per access through :func:`tool_visible` so a
-        # mid-session ``load_toolset`` call expands what the model sees
+        # mid-session ``load_tools`` call expands what the model sees
         # on the very next turn — without rebuilding the agent.
         # Beta gating: tools marked ``beta=True`` (still stabilising —
         # avatar / animation while Mochi is the testbed) are excluded
@@ -170,6 +171,14 @@ class JaegerAgent:
         # repeat with the SAME result counts toward the identical-call
         # halt. Write-side tools keep the strict pre-dispatch count.
         self._read_result_hashes: dict[str, str] = {}
+        # Verify gate (station 2 — see loop/verify_gate.py): tool names
+        # that SUCCEEDED this turn (feeds the claim-vs-action check) and
+        # the once-per-turn nudge latch. ``_pending_nudge_text`` is
+        # whichever synthetic nudge is currently in history awaiting
+        # removal (post-tool or verify — they share the lifecycle).
+        self._turn_tool_successes: set[str] = set()
+        self._verify_nudge_used = False
+        self._pending_nudge_text: str | None = None
 
         # Diagnostic surface — populated by the most recent ``run_turn``.
         # ``last_halt_reason`` is None on a clean finish; a string when
@@ -209,7 +218,7 @@ class JaegerAgent:
     def tools(self) -> list[ToolDef]:
         """The tools visible to the model THIS turn.
 
-        Recomputed on every access so a mid-session ``load_toolset``
+        Recomputed on every access so a mid-session ``load_tools``
         call (which mutates the shared visibility state in
         :mod:`jaeger_os.agent.skill_registry.toolset_scoping`) takes effect on the
         next turn without rebuilding the agent. The full set the agent
@@ -280,6 +289,9 @@ class JaegerAgent:
         self._turn_messages = []
         self._post_tool_nudge_used = False
         self._nudge_pending = False
+        self._pending_nudge_text = None
+        self._turn_tool_successes.clear()
+        self._verify_nudge_used = False
         self._failed_mutations.clear()
         self.last_halt_reason = None
         self.last_iteration_count = 0
@@ -418,6 +430,7 @@ class JaegerAgent:
                 ):
                     self._post_tool_nudge_used = True
                     self._nudge_pending = True
+                    self._pending_nudge_text = self._POST_TOOL_NUDGE
                     self._append_message({
                         "role": "user", "content": self._POST_TOOL_NUDGE,
                     })
@@ -439,7 +452,30 @@ class JaegerAgent:
             self.callbacks.on_step(iteration, assistant_msg)
 
             if not tool_calls:
-                # 5: model produced a final answer.
+                # 5: candidate final answer. Station-2 verify gate first
+                # (see loop/verify_gate.py): catch a narrated PLAN with no
+                # call, or a claimed action no tool performed, with at most
+                # ONE soft nudge per turn. If the model still answers the
+                # same way after the nudge, its answer stands — the gate
+                # informs, it never denies.
+                if (not self._verify_nudge_used
+                        and verify_gate.gate_enabled()):
+                    nudge = verify_gate.verify_final(
+                        final_text,
+                        self._turn_tool_successes,
+                        {getattr(t, "name", "") for t in (self._all_tools or [])},
+                        user_prompt=user_message,
+                    )
+                    if nudge is not None:
+                        self._verify_nudge_used = True
+                        self._nudge_pending = True
+                        self._pending_nudge_text = nudge
+                        self._append_message({"role": "user", "content": nudge})
+                        self.callbacks.on_thinking(
+                            "[verify gate: plan/claim without action — "
+                            "nudging once]"
+                        )
+                        continue
                 return self._apply_mutation_footer(final_text)
 
             # 5a: skip-final short-circuit. When the FIRST iteration
@@ -740,14 +776,18 @@ class JaegerAgent:
         return self._final_text_or_halt()
 
     def _discard_pending_nudge(self) -> None:
-        """Remove the synthetic post-tool nudge from history once the
-        model has answered it (or the turn is bailing). The nudge is
-        plumbing, not user-authored content — it must never persist."""
+        """Remove the synthetic nudge (post-tool OR verify-gate) from
+        history once the model has answered it (or the turn is bailing).
+        A nudge is plumbing, not user-authored content — it must never
+        persist."""
         if not self._nudge_pending:
             return
         self._nudge_pending = False
+        expected = self._pending_nudge_text
+        self._pending_nudge_text = None
         tail = self._turn_messages[-1] if self._turn_messages else None
-        if tail is not None and tail.get("content") == self._POST_TOOL_NUDGE:
+        if (tail is not None and expected is not None
+                and tail.get("content") == expected):
             self._pop_message()
 
     def _wind_down_summary(self) -> str:
@@ -1483,6 +1523,10 @@ class JaegerAgent:
         if isinstance(content, dict) and content.get("ok") is False:
             _ok = False
             _err = str(content.get("error") or "") or None
+        if _ok:
+            # Verify-gate bookkeeping: the claim-vs-action check compares
+            # the final answer's claims against what actually succeeded.
+            self._turn_tool_successes.add(name)
         self.callbacks.on_tool_done(
             name, dict(args) if isinstance(args, dict) else {},
             content, _ok, _err, round(elapsed, 6),

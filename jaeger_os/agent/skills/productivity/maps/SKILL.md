@@ -5,12 +5,15 @@ version: 1.2.0
 author: Mibayy
 license: MIT
 platforms: [linux, macos, windows]
+requires_tools: [terminal, web_search]
 metadata:
   hermes:
     tags: [maps, geocoding, places, routing, distance, directions, nearby, location, openstreetmap, nominatim, overpass, osrm]
     category: productivity
     requires_toolsets: [terminal]
     supersedes: [find-nearby]
+  jros:
+    related_skills: [google-workspace, airtable, notion]
 ---
 
 # Maps Skill

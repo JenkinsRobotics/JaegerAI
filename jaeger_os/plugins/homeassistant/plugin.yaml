@@ -1,0 +1,18 @@
+name: homeassistant
+version: 1
+description: |
+  Home Assistant REST bridge. Registers individual agent tools —
+  ha_list_entities, ha_get_state, ha_list_services, ha_call_service —
+  to read and control any device Home Assistant manages (lights,
+  climate, locks, covers, media players, sensors).
+requires:
+  libraries: [requests]
+  env: [HASS_TOKEN]
+  env_optional: [HASS_URL]
+  notes: |
+    HASS_TOKEN is a long-lived access token (Home Assistant: Profile →
+    Security → Long-lived access tokens). HASS_URL defaults to
+    http://homeassistant.local:8123. Both resolve instance-credential-
+    store first (set_credential), env var second.
+provides:
+  tools: [ha_list_entities, ha_get_state, ha_list_services, ha_call_service]

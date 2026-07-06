@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [llama-cpp-python>=0.2.0]
 platforms: [linux, macos, windows]
+requires_tools: [terminal, web_extract, execute_code]
 metadata:
   hermes:
     tags: [llama.cpp, GGUF, Quantization, Hugging Face Hub, CPU Inference, Apple Silicon, Edge Deployment, AMD GPUs, Intel GPUs, NVIDIA, URL-first]
+  jros:
+    related_skills: [huggingface-hub, serving-llms-vllm, obliteratus]
 ---
 
 # llama.cpp + GGUF

@@ -3,6 +3,10 @@ name: pokemon-player
 description: "Play Pokemon via headless emulator + RAM reads."
 tags: [gaming, pokemon, emulator, pyboy, gameplay, gameboy]
 platforms: [linux, macos, windows]
+requires_tools: [terminal, vision_analyze, memory]
+metadata:
+  jros:
+    related_skills: [minecraft-modpack-server]
 ---
 # Pokemon Player
 

@@ -18,48 +18,6 @@
 
 import SwiftUI
 
-/// The Rich terminal TUI's palette, ported 1:1 so the windowed surface
-/// reads as "the same app in a clean window."  Accent is the TUI's
-/// ``theme._ACCENT_HEX`` (#3aa0ff); the canvas is a near-black terminal
-/// ground rather than the system window colour.
-private enum Term {
-    static let accent  = Color(red: 0.227, green: 0.627, blue: 1.000) // #3aa0ff
-    static let canvas  = Color(red: 0.043, green: 0.055, blue: 0.078) // #0B0E14
-    static let panel   = Color(red: 0.075, green: 0.090, blue: 0.122) // #131720
-    static let ink     = Color(red: 0.866, green: 0.886, blue: 0.918) // #DDE2EA
-    static let inkDim  = Color(red: 0.533, green: 0.560, blue: 0.612) // #888F9C
-    static let rule    = Color(red: 0.227, green: 0.627, blue: 1.000).opacity(0.25)
-    static let mono    = Font.system(size: 13, design: .monospaced)
-}
-
-/// The JAEGER ASCII banner — same art the terminal TUI prints at boot
-/// (``interfaces/tui/banner.py``).  Sized small enough that all 70
-/// columns fit the chat window's min width.
-private struct JaegerBanner: View {
-    private static let art = """
-     ██╗ █████╗ ███████╗ ██████╗ ███████╗██████╗       ██████╗ ███████╗
-     ██║██╔══██╗██╔════╝██╔════╝ ██╔════╝██╔══██╗     ██╔═══██╗██╔════╝
-     ██║███████║█████╗  ██║  ███╗█████╗  ██████╔╝     ██║   ██║███████╗
-██   ██║██╔══██║██╔══╝  ██║   ██║██╔══╝  ██╔══██╗     ██║   ██║╚════██║
-╚█████╔╝██║  ██║███████╗╚██████╔╝███████╗██║  ██║ ██╗ ╚██████╔╝███████║
- ╚════╝ ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═╝  ╚═════╝ ╚══════╝
-"""
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(Self.art)
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundColor(Term.accent)
-                .fixedSize()
-                .minimumScaleFactor(0.4)
-                .lineLimit(6)
-            Text("✦  real-world local agentic agent framework  ✦")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(Term.accent.opacity(0.6))
-        }
-    }
-}
-
 struct ChatView: View {
     @EnvironmentObject private var agent: AgentBridge
     @StateObject private var chat: ChatViewModel
@@ -132,8 +90,15 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity)
                     }
                     ForEach(chat.messages) { msg in
-                        TranscriptRow(message: msg)
-                            .id(msg.id)
+                        TranscriptRow(
+                            message: msg,
+                            // Thin accent rule before every turn after the
+                            // first — config-gated (display.turn_separators).
+                            showTurnRule: chat.turnSeparators
+                                && msg.author == .user
+                                && msg.id != chat.messages.first?.id
+                        )
+                        .id(msg.id)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -168,11 +133,19 @@ struct ChatView: View {
                 .padding(.leading, 4)
                 .padding(.bottom, 8)
 
-            TextField("Message…", text: $chat.composerText, axis: .vertical)
+            // Explicit prompt Text: the default placeholder renders in the
+            // system's label colour, which collapses to near-black on the
+            // Term.canvas ground when the window inherits a light
+            // appearance. Styling it Term.inkDim keeps it legible no
+            // matter what appearance AppKit hands us.
+            TextField(text: $chat.composerText,
+                      prompt: Text("Message…").foregroundColor(Term.inkDim),
+                      axis: .vertical) { Text("Message") }
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .font(Term.mono)
                 .foregroundColor(Term.ink)
+                .tint(Term.accent)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
@@ -204,7 +177,10 @@ struct ChatView: View {
                       ? "stop.circle.fill"
                       : "mic.circle.fill")
                     .font(.system(size: 28))
-                    .foregroundStyle(voice.isRecording ? .red : .secondary)
+                    // Term palette, not `.secondary` — the system secondary
+                    // colour is a dark grey under a light appearance and
+                    // vanishes on the dark canvas.
+                    .foregroundStyle(voice.isRecording ? Color.red : Term.inkDim)
                     .symbolEffect(.pulse, isActive: voice.isRecording)
             }
             .buttonStyle(.plain)
@@ -262,6 +238,23 @@ struct ChatView: View {
                 .fill(agent.isConnected ? Color.green : Term.inkDim)
                 .frame(width: 7, height: 7)
             if agent.isConnected {
+                // AGENT-name-first identity (identity.yaml — the robot the
+                // operator named), with the character as secondary flavor:
+                // "Ted · playing HAL 9000 · <model>".
+                if let name = agent.status?.displayName {
+                    Text(name)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Term.accent)
+                    if let character = agent.status?.character,
+                       character.caseInsensitiveCompare(name) != .orderedSame {
+                        Text("· playing \(character)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Term.inkDim)
+                    }
+                    Text("·")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Term.inkDim.opacity(0.7))
+                }
                 Text(agent.status?.modelName ?? "connected")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
@@ -270,8 +263,10 @@ struct ChatView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Term.inkDim.opacity(0.7))
                 }
-                if agent.status?.isBooting == true {
-                    Text("· booting…")
+                if agent.isAgentBooting {
+                    // Real signal now: the fast handshake connects before
+                    // the model loads; agent_state streams the transition.
+                    Text("· warming up…")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Term.inkDim.opacity(0.7))
                 }
@@ -281,6 +276,13 @@ struct ChatView: View {
                     .foregroundColor(Term.inkDim)
             }
             Spacer()
+            // Context gauge — the TUI status bar's "ctx 18.3K/32.8K",
+            // fed by the reply frame's v1 telemetry.
+            if let ctx = chat.contextUsage {
+                Text("ctx \(ChatViewModel.fmtTokens(ctx.used))/\(ChatViewModel.fmtTokens(ctx.max))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Term.inkDim)
+            }
             if chat.isSending {
                 ProgressView()
                     .controlSize(.mini)
@@ -304,172 +306,5 @@ struct ChatView: View {
         let text = chat.composerText
         chat.composerText = ""
         Task { await chat.send(text) }
-    }
-}
-
-
-// MARK: - TranscriptRow
-
-/// One transcript line in the terminal aesthetic.  Roles are left-aligned
-/// and prefixed (``❯`` for you, the agent name for replies) rather than
-/// bubbled — the windowed echo of the Rich terminal TUI's turn log.
-struct TranscriptRow: View {
-    let message: ChatMessage
-
-    var body: some View {
-        switch message.author {
-        case .user:      userRow
-        case .assistant: assistantRow
-        case .system:    systemRow
-        case .thinking:  thinkingRow
-        case .toolCall:  toolRow
-        }
-    }
-
-    private var userRow: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("❯")
-                .font(Term.mono.weight(.bold))
-                .foregroundColor(Term.accent)
-            Text(message.text)
-                .font(Term.mono)
-                .foregroundColor(Term.ink)
-                .textSelection(.enabled)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var assistantRow: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            if message.text.isEmpty && message.isStreaming {
-                ThinkingDots()
-            } else {
-                // Markdown so **bold**, *italics*, `code` land formatted;
-                // permissive parser falls back to plain on malformed input.
-                markdownText
-                    .font(Term.mono)
-                    .foregroundColor(Term.ink)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // Manual "speak this" — finished rows only.  The agent's
-                // own Kokoro tool stays the primary TTS path.
-                if !message.text.isEmpty {
-                    Button(action: { TTSManager.shared.speak(message.text) }) {
-                        Image(systemName: "speaker.wave.2")
-                            .font(.system(size: 11))
-                            .foregroundColor(Term.inkDim)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Speak this reply")
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private var markdownText: some View {
-        if let attr = try? AttributedString(
-            markdown: message.text,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        ) {
-            Text(attr)
-        } else {
-            Text(message.text)
-        }
-    }
-
-    private var systemRow: some View {
-        Text(message.text)
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundColor(Term.inkDim)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Reasoning trail — dim italic mono, a leading ``…`` marker.
-    private var thinkingRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "brain")
-                .font(.system(size: 11))
-                .foregroundColor(Term.inkDim)
-            Text(message.text)
-                .font(.system(size: 12, design: .monospaced))
-                .italic()
-                .foregroundColor(Term.inkDim)
-            if message.isStreaming { ThinkingDots() }
-            Spacer(minLength: 0)
-        }
-    }
-
-    /// Tool-call line — accent-tinted mono with a ``⏵`` marker, the
-    /// windowed echo of the TUI's live tool-progress print.
-    private var toolRow: some View {
-        HStack(spacing: 6) {
-            Text("⏵")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Term.accent)
-            Text(message.text)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Term.accent.opacity(0.9))
-            if message.isStreaming {
-                ProgressView().controlSize(.mini)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Term.accent.opacity(0.08))
-        )
-    }
-}
-
-
-/// Thin one-pixel bar showing the mic's current peak level — sits
-/// at the bottom of the composer field while recording.  Cheap and
-/// readable; doesn't compete with the chat content.
-private struct LevelBar: View {
-    let level: Float
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.red.opacity(0.15))
-                Capsule()
-                    .fill(Color.red.opacity(0.75))
-                    .frame(width: geo.size.width * CGFloat(level))
-                    .animation(.linear(duration: 0.05), value: level)
-            }
-        }
-    }
-}
-
-
-/// Three pulsing dots while we wait for the agent's reply.
-private struct ThinkingDots: View {
-    @State private var phase: Int = 0
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Term.accent)
-                    .frame(width: 6, height: 6)
-                    .opacity(phase == i ? 1.0 : 0.3)
-            }
-        }
-        .onAppear {
-            Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 350_000_000)
-                    await MainActor.run { phase = (phase + 1) % 3 }
-                }
-            }
-        }
     }
 }

@@ -6,6 +6,10 @@ author: Hugging Face
 license: MIT
 tags: [huggingface, hf, models, datasets, hub, mlops]
 platforms: [linux, macos, windows]
+requires_tools: [terminal]
+metadata:
+  jros:
+    related_skills: [llama-cpp, serving-llms-vllm, evaluating-llms-harness]
 ---
 
 # Hugging Face CLI (`hf`) Reference Guide

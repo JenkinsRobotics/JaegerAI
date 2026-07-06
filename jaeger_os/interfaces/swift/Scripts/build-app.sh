@@ -34,8 +34,23 @@
 set -euo pipefail
 
 CONFIG="debug"
-if [[ "${1:-}" == "--release" ]]; then
-    CONFIG="release"
+INSTALL=0
+DEV=0
+for arg in "$@"; do
+    case "$arg" in
+        --release) CONFIG="release" ;;
+        --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
+        --dev)     DEV=1 ;;   # JaegerOS-dev.app: jros-dev instance, debug-fast
+    esac
+done
+
+# Two apps, one pipeline (operator call 2026-07-05): JaegerOS.app is the
+# PRODUCT (default instance); JaegerOS-dev.app is the dev shell pinned to
+# the repo's jros-dev instance via LSEnvironment. Separate bundle ids so
+# both can run side by side, each single-instanced.
+APP_NAME="JaegerOS"
+if [[ "$DEV" == "1" ]]; then
+    APP_NAME="JaegerOS-dev"
 fi
 
 # Resolve paths — APP_ROOT is jaeger_os/interfaces/swift, REPO_ROOT is the
@@ -101,15 +116,34 @@ if icon_needs_rebuild; then
 fi
 
 # Step 3 — Assemble the .app bundle.
-APP_BUNDLE="$BUILD_DIR/JaegerOS.app"
+APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 echo "[build-app] assembling $APP_BUNDLE"
 
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Info.plist — copy from Resources/ (the canonical source).
+# Info.plist — copy from Resources/ (the canonical source), then stamp
+# the REAL version: CFBundleShortVersionString from jaeger_os.__version__
+# (the single source of truth), CFBundleVersion suffixed with the git SHA
+# so two builds of the same release line are distinguishable.
 cp "$APP_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_os/__init__.py")"
+GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
+if [[ -n "$JROS_VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JROS_VERSION" \
+        -c "Set :CFBundleVersion $JROS_VERSION+$GIT_SHA" \
+        "$APP_BUNDLE/Contents/Info.plist"
+fi
+if [[ "$DEV" == "1" ]]; then
+    /usr/libexec/PlistBuddy \
+        -c "Set :CFBundleIdentifier com.jenkinsrobotics.JaegerOS.dev" \
+        -c "Set :CFBundleName JaegerOS-dev" \
+        -c "Set :CFBundleDisplayName JaegerOS Dev" \
+        -c "Add :LSEnvironment dict" \
+        -c "Add :LSEnvironment:JAEGER_INSTANCE_NAME string jros-dev" \
+        "$APP_BUNDLE/Contents/Info.plist"
+fi
 
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerOS"
@@ -155,9 +189,28 @@ fi
 # Info.plist privacy strings get ignored).  Sign inner bundles
 # first, then the outer .app, since codesign needs each contained
 # bundle to be valid before the outer signature is computed.
-echo "[build-app] ad-hoc codesign"
-codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
-codesign --force --sign - "$APP_BUNDLE" 2>&1 || \
+# Signing.  Default: ad-hoc (dev builds — TCC prompts fire, no Gatekeeper
+# story).  Distribution: export JAEGER_SIGN_IDENTITY="Developer ID
+# Application: <name> (<team>)" for a real signature; then notarize with
+#   xcrun notarytool submit <zip> --keychain-profile jaeger-notary --wait
+#   xcrun stapler staple JaegerOS.app
+SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
+echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
+codesign --force --sign "$SIGN_IDENTITY" \
+    "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
+codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
+
+# Keep the dev app VISIBLE at the repo root (gitignored symlink) — the
+# bundle itself lives in swift/.build, which nobody should have to find.
+if [[ "$DEV" == "1" ]]; then
+    ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS-dev.app"
+fi
+
+if [[ "$INSTALL" == "1" ]]; then
+    echo "[build-app] installing -> /Applications/$APP_NAME.app"
+    rm -rf "/Applications/$APP_NAME.app"
+    ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
+fi
 
 echo "$APP_BUNDLE"

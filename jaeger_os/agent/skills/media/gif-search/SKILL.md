@@ -8,9 +8,12 @@ platforms: [linux, macos, windows]
 prerequisites:
   env_vars: [TENOR_API_KEY]
   commands: [curl, jq]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [GIF, Media, Search, Tenor, API]
+  jros:
+    related_skills: [spotify, youtube-content, songsee]
 ---
 
 # GIF Search (Tenor API)

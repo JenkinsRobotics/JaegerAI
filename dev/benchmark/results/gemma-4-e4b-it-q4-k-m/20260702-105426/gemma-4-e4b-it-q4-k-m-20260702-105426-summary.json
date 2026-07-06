@@ -1,0 +1,224 @@
+{
+  "total": 31,
+  "passed": 27,
+  "pass_rate": 0.871,
+  "routing_passed": 22,
+  "routing_total": 25,
+  "answer_passed": 13,
+  "answer_total": 14,
+  "errors": 0,
+  "elapsed_s": 282.4,
+  "metrics": {
+    "avg_latency_s": 9.11,
+    "p50_latency_s": 3.175,
+    "p95_latency_s": 33.274,
+    "min_latency_s": 0.336,
+    "max_latency_s": 89.979,
+    "total_tool_dispatches": 42,
+    "avg_tools_per_turn": 1.35,
+    "answer_tokens_total": 3567,
+    "answer_tokens_avg": 115.1,
+    "answer_tokens_per_sec": 12.6,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 1010153,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "hit the same list_skill_dir failure 2 times": 1,
+      "called computer_read_screen with identical arguments 4 times": 1
+    },
+    "halted_turns": 2,
+    "avg_iterations": 2.29,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 1.175,
+    "ttft_p50_s": 0.151,
+    "ttft_p95_s": 0.225,
+    "ttft_reported": 31
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 7.966,
+      "p95_latency_s": 33.274,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 24,
+      "pass_rate": 0.857,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 7.877,
+      "p95_latency_s": 33.274,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "full": {
+      "total": 31,
+      "passed": 27,
+      "pass_rate": 0.871,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 9.11,
+      "p95_latency_s": 33.274,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 24,
+      "avg_latency_s": 7.877
+    },
+    "files": {
+      "total": 3,
+      "passed": 3,
+      "avg_latency_s": 3.253
+    },
+    "audio": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 3.907
+    },
+    "web": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 6.234
+    },
+    "memory": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 2.794
+    },
+    "code": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 2.16
+    },
+    "schedule": {
+      "total": 3,
+      "passed": 3,
+      "avg_latency_s": 2.71
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 3.88
+    },
+    "skill": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 37.954
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 38.535
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 17.169
+    }
+  },
+  "failures": [
+    {
+      "id": "memory_search",
+      "prompt": "search your memory for anything we said about youtube",
+      "tools_called": [],
+      "answer": "PLAN: memory(action=\"search\", query=\"youtube\")\n",
+      "routing_ok": false,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "python_fib",
+      "prompt": "run a python snippet that prints the first 8 fibonacci numbers",
+      "tools_called": [],
+      "answer": "PLAN: execute_code(code=\"def fib(n):\\n    a, b = 0, 1\\n    result = []\\n    for _ in range(n):\\n        result.append(a)\\n        a, b = b, a + b\\n    return result\\n\\nprint(fib(8))\", timeout_s=10)\n",
+      "routing_ok": false,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "par_two_reads",
+      "prompt": "Answer both at once: what time is it, and what is 99*101?",
+      "tools_called": [
+        "get_time"
+      ],
+      "answer": "The time is 10:51 AM PDT on Thursday, July 2, 2026. And 99 * 101 is 9999.",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_native_tier",
+      "prompt": "On this Mac, open System Settings and turn on Dark Mode for me.",
+      "tools_called": [
+        "computer_open_app",
+        "computer_read_screen",
+        "computer_click",
+        "computer_read_screen",
+        "computer_click",
+        "computer_read_screen",
+        "computer_click",
+        "computer_read_screen"
+      ],
+      "answer": "PLAN: use_skill(name=\"macos-computer-use\") -> computer_open_app -> computer_click",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 284.67,
+  "load_s": 52.4,
+  "category_breakdown": {
+    "routing": {
+      "passed": 24,
+      "total": 28
+    },
+    "memory": {
+      "passed": 3,
+      "total": 4
+    },
+    "files": {
+      "passed": 3,
+      "total": 3
+    },
+    "web": {
+      "passed": 2,
+      "total": 2
+    },
+    "code": {
+      "passed": 0,
+      "total": 1
+    },
+    "schedule": {
+      "passed": 3,
+      "total": 3
+    },
+    "skill": {
+      "passed": 3,
+      "total": 4
+    }
+  },
+  "model_path": "gemma-4-e4b-it-q4_k_m",
+  "model_name": "gemma-4-e4b-it-q4-k-m",
+  "run_id": "20260702-105426",
+  "benchmark_version": "1.3"
+}

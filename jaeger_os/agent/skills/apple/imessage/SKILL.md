@@ -5,9 +5,12 @@ version: 1.0.0
 author: Hermes Agent
 license: MIT
 platforms: [macos]
+requires_tools: [terminal]
 metadata:
   hermes:
     tags: [iMessage, SMS, messaging, macOS, Apple]
+  jros:
+    related_skills: [apple-notes, apple-reminders, findmy]
 prerequisites:
   commands: [imsg]
 ---

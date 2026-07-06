@@ -110,38 +110,47 @@ def _three_laws(_ctx: FragmentContext) -> str:
     return THREE_LAWS_PROMPT_BLOCK
 
 
-def _personality_block(ctx: FragmentContext) -> str:
-    # A broken personality file must NEVER take down the boot — the operator
-    # just gets the prompt without it and can fix the file at leisure.
+# NOTE: there is deliberately NO character/persona fragment here. The persona is
+# applied by the two-pass OUTPUT FILTER (re-voicing the final reply), not injected
+# into the worker prompt — a 4B's execution degrades ~7% with a character in
+# context (measured: dev/docs/persona_compiler.md). Workers run vanilla; the
+# character's compiled View (Character.character_block()) feeds the filter, which
+# lives in the response path, not prompt assembly.
+#
+# The one exception is the NAME (below): a name is a fact, not a persona, and
+# the output filter's "preserve facts verbatim" rule means it faithfully keeps
+# a WRONG name — so the name has to be right at the source. Before this
+# fragment the prompt carried no name at all; framework_agent.md's "the
+# name/persona above are who you are" pointed at nothing, and "what's your
+# name" answered with the framework line ("Jaeger OS") no matter which
+# character was active.
+
+
+def _identity_name(ctx: FragmentContext) -> str:
+    """The agent's NAME — identity.yaml's ``name``, ALWAYS.
+
+    The active character NEVER supplies the name: a character is a persona
+    (voice + mannerisms, applied by the output filter), while identity.yaml
+    is the unique robot the operator named at instance creation — "I might
+    want a robot like Jarvis but I will name him Ted; the character prompt
+    gives the personality but the unique instance info isn't overwritten"
+    (operator, 2026-07-05). The character prompt must never overwrite it.
+
+    Name ONLY: soul/traits/voice stay out of the worker prompt (station 3,
+    dev/docs/agentic_runners.md — the measured ~7-point execution tax); the
+    persona output filter supplies the voice.
+
+    ``JAEGER_BENCH_NEUTRAL_IDENTITY`` is now a NO-OP kept for bench-runner
+    compatibility: it used to force exactly this identity.yaml-only
+    behaviour (a character name in the prompt tinted free-text answers —
+    the 2026-07-05 free_text_story A/B), which is simply the behaviour
+    everywhere now."""
     try:
-        from pathlib import Path
-        from jaeger_os.personality import compose_block
-        from jaeger_os.personality.character import active_character
-        # Trait-driven: the active character's HEXACO/SPECIAL/Expression/Domains
-        # sliders, rendered into prose ("medium-high sarcasm", ...).
-        ch = active_character(Path(ctx.layout.root))
-        return (compose_block(ch.personality) or "") if ch is not None else ""
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _active_char(ctx: "FragmentContext") -> "Any":
-    try:
-        from pathlib import Path
-        from jaeger_os.personality.character import active_character
-        return active_character(Path(ctx.layout.root))
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _identity_fragment(ctx: "FragmentContext") -> str:
-    ch = _active_char(ctx)
-    return ch.identity_block() if ch is not None else ""
-
-
-def _soul_fragment(ctx: "FragmentContext") -> str:
-    ch = _active_char(ctx)
-    return ch.soul_block() if ch is not None else ""
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        name = (load_yaml(ctx.layout.identity_path, Identity).name or "").strip()
+    except Exception:  # noqa: BLE001 — a broken identity never breaks the prompt
+        name = ""
+    return f"Your name is {name}." if name else ""
 
 
 # ── the registry: order here IS the prompt order ──────────────────────
@@ -166,19 +175,9 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
         _subagent_only, "sub-agents, when context is supplied",
     ),
     PromptFragment(
-        "identity", "instance", "<active character>",
-        _identity_fragment, _all,
-        "who this agent is — every mode",
-    ),
-    PromptFragment(
-        "soul", "instance", "<active character>",
-        _soul_fragment, _non_subagent,
-        "voice / persona — skipped for sub-agents",
-    ),
-    PromptFragment(
-        "personality", "instance", "<active character>",
-        _personality_block, _non_subagent,
-        "trait-driven persona block from the active character",
+        "identity_name", "instance", "(generated: identity.yaml)",
+        _identity_name, _non_subagent,
+        "the agent's NAME only (never the character's) — persona stays in the output filter",
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",

@@ -15,9 +15,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import (
+    QColor, QIcon, QPainter, QPainterPath, QPixmap, QPolygon,
+)
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -43,6 +47,36 @@ _STATE_DISPLAY: dict[str, tuple[str, str]] = {
 }
 _DEFAULT_DOT = "#8E8E93"
 
+# Monochrome line icons for the header row (chat · avatar · settings).
+_ICON_SVG = {
+    "chat": '<path d="M20 14a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
+    "avatar": ('<circle cx="12" cy="8" r="3.4"/>'
+               '<path d="M5 20c0-3.5 3-5.6 7-5.6s7 2.1 7 5.6"/>'),
+    "settings": (
+        '<circle cx="12" cy="12" r="3"/>'
+        '<path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0'
+        '-2.9 1.2V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-2.9-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1'
+        'A1.7 1.7 0 0 0 4.6 14H4a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.1-2.9l-.1-.1a2 2 0 1 1 2.8-2.8'
+        'l.1.1a1.7 1.7 0 0 0 2.9-1.1V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 2.9 1.1l.1-.1a2 2 0 1 1 2.8 2.8'
+        'l-.1.1a1.7 1.7 0 0 0-.4 1.9z"/>'),
+    "power": '<path d="M18.4 6.6a9 9 0 1 1-12.77 0"/><path d="M12 2v10"/>',
+    "input": '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+}
+_ICON_WRAP = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+              'stroke="{color}" stroke-width="1.7" stroke-linecap="round" '
+              'stroke-linejoin="round">{paths}</svg>')
+
+
+def _svg_icon(name: str, color: str = "#8E8E93", size: int = 18) -> QIcon:
+    svg = _ICON_WRAP.format(color=color, paths=_ICON_SVG[name])
+    r = QSvgRenderer(QByteArray(svg.encode()))
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    r.render(p, QRectF(0, 0, size, size))
+    p.end()
+    return QIcon(pm)
+
 
 def _circular_pixmap(src_path: str, size: int) -> QPixmap:
     """Clip ``src_path`` to a circle at ``size`` px — the avatar slot."""
@@ -66,16 +100,23 @@ def _circular_pixmap(src_path: str, size: int) -> QPixmap:
 class TrayMenu(QWidget):
     """Frameless dropdown card. Dismisses on focus loss."""
 
-    def __init__(self, *, agent_name: str, instance_name: str,
+    def __init__(self, *, agent_name: str, avatar_path: str | None = None,
                  on_quick_input: Callable[[], None],
                  on_open_chat: Callable[[], None],
                  on_quit: Callable[[], None],
-                 on_settings: Callable[[], None] | None = None,
-                 on_open_studio: Callable[[], None] | None = None,
-                 on_open_windows: Callable[[], None] | None = None) -> None:
+                 on_restart: Callable[[], None] | None = None,
+                 on_open_companion: Callable[[], None] | None = None,
+                 on_settings: Callable[[], None] | None = None) -> None:
         super().__init__()
         self._on_open_chat = on_open_chat
+        self._on_open_companion = on_open_companion
+        self._on_quick_input = on_quick_input
         self._on_settings = on_settings
+        self._on_quit = on_quit
+        self._on_restart = on_restart
+        self._caret_x = 160  # updated by popup_under() to point at the tray icon
+        self._can_dismiss = False  # grace flag: no click-away close during open
+        self._click_filter_installed = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -86,7 +127,7 @@ class TrayMenu(QWidget):
         self.setFixedWidth(320)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setContentsMargins(12, 15, 12, 12)  # top room for the caret
 
         card = QFrame()
         card.setObjectName("MenuCard")
@@ -101,99 +142,107 @@ class TrayMenu(QWidget):
         body.setContentsMargins(14, 14, 14, 10)
         body.setSpacing(10)
 
-        body.addLayout(self._header(agent_name, instance_name))
-        body.addWidget(self._status_card())
-        body.addWidget(self._action("Quick input…", on_quick_input))
-        body.addWidget(self._action("Open chat window", on_open_chat))
-        if on_open_studio is not None:
-            body.addWidget(self._action("Jaeger Studio", on_open_studio))
-        if on_open_windows is not None:
-            body.addWidget(self._action("Dev windows…", on_open_windows))
-        body.addWidget(self._action("Quit JROS", on_quit, danger=True))
+        body.addLayout(self._header(agent_name, avatar_path))
+        body.addWidget(self._action_bar())   # chat · agent · quick-input
 
         outer.addWidget(card)
         self.set_state("idle")
 
     # ── sections ──────────────────────────────────────────────────
-    def _header(self, agent_name: str, instance_name: str) -> QHBoxLayout:
+    def _header(self, agent_name: str, avatar_path: str | None) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(10)
 
         avatar = QLabel()
         avatar.setObjectName("Avatar")
         avatar.setFixedSize(40, 40)
-        avatar_path = asset_path(_AVATAR_ASSET) or icon_path_for(TrayState.RUNNING)
-        if avatar_path:
-            avatar.setPixmap(_circular_pixmap(avatar_path, 40))
+        path = avatar_path or asset_path(_AVATAR_ASSET) or icon_path_for(TrayState.RUNNING)
+        if path:
+            avatar.setPixmap(_circular_pixmap(str(path), 40))
+        self._avatar_label = avatar
         row.addWidget(avatar)
 
         text = QVBoxLayout()
-        text.setSpacing(0)
+        text.setSpacing(2)
         name = QLabel(agent_name)
         name.setObjectName("Name")
-        sub = QLabel(instance_name)
-        sub.setObjectName("Sub")
+        self._name_label = name
         text.addWidget(name)
-        text.addWidget(sub)
+        # status replaces the old subtitle: dot + live state, set by set_state().
+        status = QHBoxLayout()
+        status.setSpacing(6)
+        self._dot = QLabel("●")
+        self._dot.setObjectName("StatusDot")
+        self._state_label = QLabel("Standing by")
+        self._state_label.setObjectName("StatusState")
+        status.addWidget(self._dot)
+        status.addWidget(self._state_label)
+        status.addStretch(1)
+        text.addLayout(status)
         row.addLayout(text)
         row.addStretch()
 
-        gear = QPushButton("⚙")
-        gear.setObjectName("GearBtn")
-        gear.setCursor(Qt.CursorShape.PointingHandCursor)
-        gear.setFlat(True)
-        gear.setToolTip("Settings")
-        gear.clicked.connect(self._open_settings)
-        row.addWidget(gear)
+        row.addWidget(self._icon_btn("settings", "Settings", self._open_settings))
+        row.addWidget(self._icon_btn("power", "Power — restart / quit", self._power))
         return row
+
+    def _action_bar(self) -> QFrame:
+        """The row that used to show Agent Status — now the launcher icons:
+        chat · agent, with quick-input on the far right."""
+        frame = QFrame()
+        frame.setObjectName("ActionCard")
+        h = QHBoxLayout(frame)
+        h.setContentsMargins(10, 7, 10, 7)
+        h.setSpacing(4)
+        h.addWidget(self._icon_btn("chat", "Open chat window", self._open_chat))
+        if self._on_open_companion is not None:
+            h.addWidget(self._icon_btn("avatar", "Agent — avatar + chat",
+                                       self._open_companion))
+        h.addStretch(1)
+        h.addWidget(self._icon_btn("input", "Quick input", self._quick_input))
+        return frame
+
+    def _quick_input(self) -> None:
+        self.hide()
+        self._on_quick_input()
+
+    def _icon_btn(self, name: str, tooltip: str,
+                  slot: Callable[[], None]) -> QPushButton:
+        btn = QPushButton()
+        btn.setObjectName("IconBtn")
+        btn.setIcon(_svg_icon(name))
+        btn.setIconSize(QSize(18, 18))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFlat(True)
+        btn.setToolTip(tooltip)
+        btn.clicked.connect(slot)
+        return btn
 
     def _open_settings(self) -> None:
         self.hide()
         if self._on_settings is not None:
             self._on_settings()
 
-    def _status_card(self) -> QFrame:
-        frame = QFrame()
-        frame.setObjectName("StatusCard")
-        lay = QHBoxLayout(frame)
-        lay.setContentsMargins(12, 10, 12, 10)
-        lay.setSpacing(10)
+    def _open_chat(self) -> None:
+        self.hide()
+        self._on_open_chat()
 
-        icon = QLabel("◴")
-        icon.setObjectName("StatusIcon")
-        lay.addWidget(icon)
+    def _open_companion(self) -> None:
+        self.hide()
+        if self._on_open_companion is not None:
+            self._on_open_companion()
 
-        col = QVBoxLayout()
-        col.setSpacing(1)
-        title = QLabel("Agent Status")
-        title.setObjectName("StatusTitle")
-        # dot + text on one line — set live by set_state().
-        line = QHBoxLayout()
-        line.setSpacing(6)
-        self._dot = QLabel("●")
-        self._dot.setObjectName("StatusDot")
-        self._state_label = QLabel("Standing by")
-        self._state_label.setObjectName("StatusState")
-        line.addWidget(self._dot)
-        line.addWidget(self._state_label)
-        line.addStretch()
-        col.addWidget(title)
-        col.addLayout(line)
-        lay.addLayout(col)
-        lay.addStretch()
-
-        chevron = QLabel("›")
-        chevron.setObjectName("Chevron")
-        lay.addWidget(chevron)
-        return frame
-
-    def _action(self, label: str, slot: Callable[[], None],
-                danger: bool = False) -> QPushButton:
-        btn = QPushButton(label)
-        btn.setObjectName("DangerRow" if danger else "ActionRow")
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.clicked.connect(lambda: (self.hide(), slot()))
-        return btn
+    def _power(self) -> None:
+        """Power icon → restart or quit the agent/app."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        if self._on_restart is not None:
+            menu.addAction("Restart", lambda: (self.hide(), self._on_restart()))
+        menu.addAction("Quit JROS", lambda: (self.hide(), self._on_quit()))
+        btn = self.sender()
+        anchor = btn.mapToGlobal(btn.rect().bottomLeft()) if btn is not None \
+            else self.mapToGlobal(QPoint(0, 0))
+        menu.exec(anchor)
 
     # ── live state ────────────────────────────────────────────────
     def set_state(self, state: str) -> None:
@@ -201,33 +250,138 @@ class TrayMenu(QWidget):
         self._state_label.setText(text)
         self._dot.setStyleSheet(f"color: {colour}; font-size: 11px;")
 
+    def update_brand(self, name: str, avatar_path: str | None) -> None:
+        """Refresh the header to the current character (name + profile icon)."""
+        self._name_label.setText(name)
+        path = avatar_path or asset_path(_AVATAR_ASSET) or icon_path_for(TrayState.RUNNING)
+        if path:
+            self._avatar_label.setPixmap(_circular_pixmap(str(path), 40))
+
+    def _arm_dismiss(self) -> None:
+        self._can_dismiss = True
+
+    def _install_click_filter(self) -> None:
+        if self._click_filter_installed:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.installEventFilter(self)
+        self._click_filter_installed = True
+
+    def _remove_click_filter(self) -> None:
+        if not self._click_filter_installed:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+        self._click_filter_installed = False
+
+    def _event_global_pos(self, watched: object, event: object) -> QPoint | None:
+        if hasattr(event, "globalPosition"):
+            return event.globalPosition().toPoint()
+        if hasattr(event, "globalPos"):
+            return event.globalPos()
+        if isinstance(watched, QWidget) and hasattr(event, "position"):
+            return watched.mapToGlobal(event.position().toPoint())
+        return None
+
+    def _event_is_inside_menu(self, watched: object, event: object) -> bool:
+        pos = self._event_global_pos(watched, event)
+        if pos is not None:
+            return self.frameGeometry().contains(pos)
+        return watched is self or (
+            isinstance(watched, QWidget) and self.isAncestorOf(watched)
+        )
+
     # ── positioning ───────────────────────────────────────────────
     def popup_under(self, anchor: "QRectF | object | None") -> None:
-        """Show top-right-aligned under the menu-bar icon (``anchor`` is the
-        icon's screen QRect); fall back to the primary screen's top-right."""
+        """Centre the card under the menu-bar icon with the caret pointing at it
+        (``anchor`` is the icon's screen QRect); clamp to the screen but keep the
+        caret aimed at the icon. Falls back to the primary screen's top-right."""
         from PySide6.QtWidgets import QApplication
 
         self.adjustSize()
-        x = y = None
+        screen = QApplication.primaryScreen()
+        geo = screen.availableGeometry() if screen else None
+
+        icon_cx = x = y = None
         if anchor is not None and not anchor.isEmpty():
-            x = anchor.right() - self.width() + 12
-            y = anchor.bottom()
+            icon_cx = anchor.center().x()
+            x = icon_cx - self.width() / 2
+            y = anchor.bottom() - 2  # tuck the caret just under the icon
         if x is None:
-            screen = QApplication.primaryScreen()
-            geo = screen.availableGeometry() if screen else None
             if geo is not None:
                 x = geo.right() - self.width() - 8
                 y = geo.top() + 4
             else:
                 x, y = 100, 40
+            icon_cx = x + self.width() / 2
+
+        if geo is not None:  # keep on-screen…
+            x = max(geo.left() + 6, min(x, geo.right() - self.width() - 6))
+        self._caret_x = max(16, min(self.width() - 16, icon_cx - x))  # …caret still aims
+        self.update()
         self.move(int(x), int(y))
         self.show()
         self.raise_()
         self.activateWindow()
+        self._install_click_filter()
+        # Don't let the open sequence's own deactivation close us (happens when
+        # another window — the TUI — was focused). Arm click-away after a beat.
+        self._can_dismiss = False
+        QTimer.singleShot(300, self._arm_dismiss)
+
+    def paintEvent(self, event: object) -> None:  # noqa: N802 — Qt override
+        """Draw the caret pointing up at the tray icon (card is a child frame)."""
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx, apex_y, base_y, half = int(self._caret_x), 5, 15, 9
+        tri = QPolygon([QPoint(cx - half, base_y), QPoint(cx + half, base_y),
+                        QPoint(cx, apex_y)])
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#FFFFFF"))
+        p.drawPolygon(tri)
+        p.setPen(QColor("#E5E7EB"))
+        p.drawLine(cx - half, base_y, cx, apex_y)
+        p.drawLine(cx + half, base_y, cx, apex_y)
+        p.end()
 
     def focusOutEvent(self, event: object) -> None:  # noqa: N802 — Qt override
-        self.hide()
+        if self._can_dismiss:
+            self.hide()
         super().focusOutEvent(event)
+
+    def event(self, e: object) -> bool:  # noqa: N802 — Qt override
+        # A frameless Tool popup often never gets keyboard focus on macOS, so
+        # focusOutEvent alone won't fire on click-away. WindowDeactivate fires
+        # whenever the popup loses activation (click anywhere else) → close —
+        # but only once armed, so opening over the TUI doesn't self-close.
+        from PySide6.QtCore import QEvent
+        if e.type() == QEvent.Type.WindowDeactivate and self._can_dismiss:
+            self.hide()
+        return super().event(e)
+
+    def eventFilter(self, watched: object, event: object) -> bool:  # noqa: N802
+        from PySide6.QtCore import QEvent
+        if (self.isVisible()
+                and self._can_dismiss
+                and event.type() in {
+                    QEvent.Type.MouseButtonPress,
+                    QEvent.Type.MouseButtonDblClick,
+                    QEvent.Type.TouchBegin,
+                }
+                and not self._event_is_inside_menu(watched, event)):
+            self.hide()
+        return super().eventFilter(watched, event)
+
+    def hideEvent(self, event: object) -> None:  # noqa: N802 — Qt override
+        self._remove_click_filter()
+        super().hideEvent(event)
+
+    def closeEvent(self, event: object) -> None:  # noqa: N802 — Qt override
+        self._remove_click_filter()
+        super().closeEvent(event)
 
 
 _STYLE = """
@@ -238,7 +392,7 @@ _STYLE = """
     }
     QLabel#Name { font-size: 14px; font-weight: 600; color: #1F2937; }
     QLabel#Sub  { font-size: 11px; color: #8E8E93; }
-    QFrame#StatusCard {
+    QFrame#StatusCard, QFrame#ActionCard {
         background-color: #F7F7F8;
         border: 1px solid #ECECEE;
         border-radius: 10px;
@@ -252,6 +406,11 @@ _STYLE = """
         font-size: 17px; color: #8E8E93; padding: 2px 4px;
     }
     QPushButton#GearBtn:hover { color: #1F2937; }
+    QPushButton#IconBtn {
+        border: none; background: transparent;
+        padding: 4px; border-radius: 7px;
+    }
+    QPushButton#IconBtn:hover { background-color: #F0F0F2; }
     QPushButton#ActionRow, QPushButton#DangerRow {
         text-align: left;
         border: none;

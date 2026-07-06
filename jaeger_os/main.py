@@ -40,6 +40,7 @@ from jaeger_os.core.memory import memory as mem
 from jaeger_os.agent.prompts import prompts as prompt_module
 from jaeger_os.core.runtime import tool_interrupt
 from .agent import tools as jaeger_tools
+from jaeger_os.core import context as _context
 from jaeger_os.agent.background.cron_runner import CronRunner
 from jaeger_os.core.instance.instance import (
     CoreVersionMismatch,
@@ -293,6 +294,10 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         if not result.get("ok"):
             return f"Couldn't update card: {result.get('error', 'unknown')}"
         return f"Updated {result.get('card_id')} ({', '.join(result.get('updated') or [])})."
+    if name == "board_delete":
+        if not result.get("ok"):
+            return f"Couldn't delete card: {result.get('error', 'unknown')}"
+        return f"Deleted card {result.get('card_id')}."
     return str(result)
 
 
@@ -840,35 +845,8 @@ def _register_builtins(client: Any) -> None:
     """
     t = jaeger_tools
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="time", operation="get_time",
-                   summary="read the current time")
-    def get_time(timezone: str | None = None) -> dict:
-        """The current date, day of the week, year, and time — the ONLY
-        source of truth for "what day/date/year/time is it", "what's
-        today", and similar. Your training data is frozen in the past, so
-        a date or year answered from memory will be WRONG — always call
-        this for anything about the present moment. Optional IANA
-        timezone (e.g. 'Asia/Shanghai')."""
-        return t.get_time(timezone=timezone)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="math", operation="calculate",
-                   summary="evaluate an arithmetic expression")
-    def calculate(expression: str) -> dict:
-        """Evaluate a safe arithmetic expression. Supports + - * / ** % //
-        and single-arg sqrt/abs/log/log10/exp/sin/cos/tan/floor/ceil/round.
-        For "square root of N" call calculate("sqrt(N)")."""
-        return t.calculate(expression=expression)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="host", operation="system_status",
-                   summary="read machine + instance dir status")
-    def system_status() -> dict:
-        """Machine health only: CPU, memory, disk, and instance metadata.
-        Do NOT use this to list workspace files; use list_skill_dir for
-        "list the workspace", "show files", or "what files are here"."""
-        return t.system_status()
 
     @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="host",
@@ -890,270 +868,34 @@ def _register_builtins(client: Any) -> None:
             "boot_readiness": _pipeline.get("readiness"),
         }
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
-                   operation="write_file",
-                   summary="write a file in the skills workspace")
-    def write_file(path: str, content: str) -> dict:
-        """Write a text file in the sandboxed skills/ directory. Overwrites
-        if it already exists."""
-        return t.file_write(path=path, content=content)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
-                   operation="append_file",
-                   summary="append to a file in the skills workspace")
-    def append_file(path: str, content: str) -> dict:
-        """Append text to an existing skills/ file."""
-        return t.append_file(path=path, content=content)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
-                   operation="patch",
-                   summary="edit a file in the skills workspace")
-    def patch(path: str, old: str, new: str, replace_all: bool = False) -> dict:
-        """Surgically edit an EXISTING skills/ file by find-and-replace.
-        Prefer this over write_file to change a file you've already
-        written — it swaps one region instead of regenerating the whole
-        file, so a long file can't be lost to a truncated rewrite. `old`
-        must be a snippet that occurs exactly once (pass a longer unique
-        snippet if it isn't), or set replace_all=true to change every
-        occurrence."""
-        return t.edit_file(path=path, old=old, new=new, replace_all=replace_all)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
-                   operation="delete_file",
-                   summary="delete a file from the skills workspace")
-    def delete_file(path: str) -> dict:
-        """Delete a file from the skills/ directory."""
-        return t.delete_file(path=path)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_file",
-                   summary="read a workspace file")
-    def read_file(path: str, offset: int = 0, limit: int | None = None) -> dict:
-        """Read a text file from ANYWHERE on the machine — your own
-        source code, the whole repository you run from, the wider
-        system. Absolute paths and `~` work; reading is not sandboxed.
-        (Off-limits: the credentials/ store and OS secret files like
-        ~/.ssh.) For a large file, page it: `offset` is the 0-based
-        first line, `limit` the line count (default: the whole file)."""
-        return t.file_read(path=path, offset=offset, limit=limit)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="list_skill_dir",
-                   summary="list contents of the skills directory")
-    def list_skill_dir(path: str = ".") -> dict:
-        """List a directory's contents. With no path, lists your instance
-        workspace; pass an ABSOLUTE path (or `~`) to browse ANY directory
-        — your repository, the wider system. Listing is not sandboxed.
-        Use for "list files", "show files", "what's in <dir>"."""
-        return t.list_skill_dir(path=path)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_files",
-                   summary="search file contents under the skills directory")
-    def search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
-        """Recursively grep file CONTENTS — case-insensitive substring
-        match. With no path, searches the working directory; pass an
-        ABSOLUTE path to search ANY directory — e.g. your whole
-        repository. Searching is not sandboxed. Use this to find where
-        something is defined or used instead of reading files one by
-        one. Returns {file, line, text} matches."""
-        return t.search_files(query=query, path=path, max_results=max_results)
 
-    @register_tool_from_function
-    def remember(key: str, value: str, category: str = "") -> dict:
-        """MANDATORY when the user states a preference, identity fact,
-        plan, or anything they might recall later. Call this proactively
-        — do not just acknowledge "OK, I'll remember" in text. Pick a
-        descriptive snake_case key.
 
-        Set `category` to keep memory organised — a short label like
-        `contacts`, `preferences`, `projects`, `schedule`; omit it for a
-        miscellaneous fact. Examples: "my favorite color is teal"
-        (preferences), "Sara's number is 555-0142" (contacts), "I'll be
-        in Tokyo next week" (schedule). For YOUR OWN name use set_name,
-        not this."""
-        return t.remember(key=key, value=value, category=category)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="recall",
-                   summary="recall a fact by key")
-    def recall(key: str) -> dict:
-        """MANDATORY when the user asks about something they told you
-        earlier ("what did I say my…", "do you remember…", "what's my
-        favorite X", "what video length do I prefer?"). Call BEFORE
-        answering — the persisted store is the source of truth.
-        Fuzzy match supported, so close-but-not-exact keys still hit."""
-        return t.recall(key=key)
 
-    @register_tool_from_function
-    def forget(key: str) -> dict:
-        """MANDATORY when the user asks to remove a stored fact
-        ("forget my X", "remove my X preference", "I changed my mind
-        about X"). Call this — don't just acknowledge in text."""
-        return t.forget(key=key)
 
-    @register_tool_from_function
-    def set_name(name: str) -> dict:
-        """Change your OWN name. Use when the user renames you ("your
-        name is …", "I'll call you …", "rename yourself"). Writes your
-        real identity (identity.yaml). Do NOT use remember() for your own
-        name — remember() is for facts about the USER."""
-        return t.set_name(name=name)
 
-    @register_tool_from_function
-    def update_soul(content: str) -> dict:
-        """Rewrite your soul.md — who you are: character, values, voice,
-        self-narrative. Your current soul is in your system prompt; read
-        it, revise it, and pass the COMPLETE new text. Personality and
-        durable facts about YOURSELF go here, not in remember()."""
-        return t.update_soul(content=content)
 
-    @register_tool_from_function(side_effect="read")
-    @requires_tier(PermissionTier.READ_ONLY, skill="memory", operation="list_facts",
-                   summary="list every stored fact")
-    def list_facts() -> dict:
-        """MANDATORY for open-ended "what do you know about me?" or
-        "what have I told you?" questions. Returns the full k/v store.
-        Use this before falling back to free-text 'I don't know'."""
-        return t.list_facts()
 
-    @register_tool_from_function
-    def memory(action: str, key: str = "", value: str = "",
-               query: str = "", category: str = "") -> dict:
-        """The agent's persistent memory — one tool, action-dispatched.
-        ``action`` ∈ remember / recall / forget / list / search.
-        ``remember`` takes key+value (and optional category);
-        ``recall`` / ``forget`` take key; ``search`` takes query.
-        See ``describe_tool("memory")`` for the full when-to-call
-        contract — the prompt's MANDATORY_TOOL_RULES section also
-        covers it."""
-        return t.memory(action=action, key=key, value=value,
-                        query=query, category=category)
 
-    @register_tool_from_function
-    def schedule_prompt(cron_expr: str, prompt: str, name: str | None = None) -> dict:
-        """Schedule a prompt for unattended execution on a cron expression."""
-        return t.schedule_prompt(cron_expr=cron_expr, prompt=prompt, name=name)
 
-    @register_tool_from_function
-    def list_schedules() -> dict:
-        """List every active scheduled prompt."""
-        return t.list_schedules()
 
-    @register_tool_from_function
-    def cancel_schedule(name: str) -> dict:
-        """Cancel a previously-scheduled prompt by name."""
-        return t.cancel_schedule(name=name)
 
-    @register_tool_from_function(side_effect="read")
-    def web_search(query: str, max_results: int = 5) -> dict:
-        """Web search (multi-backend, no API key). Returns titles + URLs
-        + snippets. Use this to FIND relevant pages, then web_extract to
-        actually READ one."""
-        return t.web_search(query=query, max_results=max_results)
 
-    @register_tool_from_function(side_effect="read")
-    def web_extract(url: str, max_chars: int = 8000) -> dict:
-        """Fetch a web page and return its readable text. This is the
-        research tool — web_search finds which pages matter, web_extract
-        reads one. Use it to pull library docs, API references, Stack
-        Overflow answers, READMEs — anything you need to understand
-        before writing code for an unfamiliar task."""
-        return t.web_fetch(url=url, max_chars=max_chars)
 
-    @register_tool_from_function(side_effect="read")
-    def get_weather(location: str) -> dict:
-        """Look up current weather via wttr.in (no API key)."""
-        return t.get_weather(location=location)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="code",
-                   operation="execute_code",
-                   summary="run Python code in the skills workspace")
-    def execute_code(code: str, timeout_s: float = 10.0) -> dict:
-        """Run Python code and return its output. Reach for this for
-        computational work: arithmetic that can't be done with
-        `calculate`, string transforms, quick logic — and to run files
-        you wrote with write_file (code runs IN the skills/ workspace,
-        so `import name` and `open('file')` see them). 10s default
-        timeout. Isolated from packages installed via install_package.
 
-        For the current date / day / time / timezone, use `get_time` —
-        it's the ONLY source of truth, not Python's clock."""
-        return t.run_python(code=code, timeout_s=timeout_s)
 
-    @register_tool_from_function
-    def terminal(command: str, timeout_s: float = 60.0) -> dict:
-        """Run a non-Python command-line program — git, npm, brew,
-        ffmpeg. For Python code use execute_code; for files use
-        write_file / read_file / list_skill_dir. PRIVILEGED-tier: each
-        call prompts the user, so reach for it only when the task
-        genuinely needs a shell program."""
-        return t.run_shell(command=command, timeout_s=timeout_s)
 
-    @register_tool_from_function
-    def remote_terminal(host: str, command: str, timeout_s: float = 60.0) -> dict:
-        """Run one command on a REMOTE host over SSH. ``terminal`` runs
-        locally; this runs the same shape of command on another machine.
-        ``host`` follows ssh's destination grammar — ``[user@]host[:port]``
-        or any ``Host`` alias from ~/.ssh/config. Auth uses the local
-        user's ssh keychain (BatchMode=yes — no password prompts; missing
-        key fails fast). PRIVILEGED-tier, audited like ``terminal``."""
-        return t.ssh_exec(host=host, command=command, timeout_s=timeout_s)
 
-    @register_tool_from_function
-    def install_package(package: str) -> dict:
-        """Install a third-party Python package into this instance's
-        own venv (isolated from the framework). Use when a skill you're
-        building needs a library — e.g. `discord.py` for a Discord
-        integration. PRIVILEGED tier: routes through the confirmation
-        flow. After installing, use run_in_venv (not run_python) to run
-        code that imports it."""
-        return t.install_package(package=package)
 
-    @register_tool_from_function
-    def list_venv_packages() -> dict:
-        """List packages installed in this instance's venv. Read-only —
-        check here before install_package to see if a dependency is
-        already available."""
-        return t.list_venv_packages()
 
-    @register_tool_from_function
-    def run_in_venv(code: str, timeout_s: float = 30.0) -> dict:
-        """Execute Python against this instance's venv interpreter so
-        packages installed via install_package ARE importable. Sandboxed
-        cwd, 30s default timeout (max 300s). Use this — not run_python —
-        for code that depends on installed libraries."""
-        return t.run_in_venv(code=code, timeout_s=timeout_s)
 
-    @register_tool_from_function(side_effect="read")
-    def list_models() -> dict:
-        """List the LLM models in the registry with role (realtime /
-        coder) and cache status. Read-only — use this to tell the user
-        what's available, or to back a model recommendation."""
-        return t.list_models()
-
-    @register_tool_from_function
-    def download_model(name: str) -> dict:
-        """Download a registered model from HuggingFace Hub. PRIVILEGED
-        tier — routes through confirmation. Only call this when the user
-        has explicitly asked for a model OR agreed to one you
-        recommended; never speculatively. Recommend first, let the user
-        decide, then call. Use list_models for valid names."""
-        return t.download_model(name=name)
-
-    @register_tool_from_function
-    def model_location(action: str, path: str = "") -> dict:
-        """Register a custom directory JROS scans for local .gguf models
-        — so a folder you point it at (a non-standard LM Studio / Ollama
-        install, your own model stash) shows up in /models and the model
-        picker. action: 'add' / 'remove' / 'list'. Persisted to the
-        instance config; survives restarts."""
-        return t.model_location(action=action, path=path)
 
     # Skill-tree / marketplace tools — BETA while the 0.5.x skill tree
     # evolution is in flight (marketplace repo isn't live, most skill
@@ -1162,217 +904,24 @@ def _register_builtins(client: Any) -> None:
     # wander into half-built skill plumbing. The PLAYBOOK machinery
     # (``skill``, ``reload_skills``, ``list_skill_dir``) is the proven
     # 0.1.0 path and stays un-gated.
-    @register_tool_from_function(beta=True)
-    def package_skill(name: str) -> dict:
-        """Bundle a skill you built into a portable, shareable .zip with
-        a generated manifest (name, version, deps, smoke-test status).
-        Use this once a skill is proven and worth sharing. The bundle
-        installs on any Jaeger-OS instance. Publishing it to the
-        marketplace is a later step (the marketplace repo isn't live
-        yet — see docs/marketplace_spec.md)."""
-        return t.package_skill(name=name)
 
-    @register_tool_from_function(beta=True)
-    def benchmark_skill(name: str) -> dict:
-        """Run a skill's scored benchmark (tests/benchmark.py) and track
-        the delta vs. its last run. Use this when revising a skill:
-        benchmark the old version, write the new one, benchmark again —
-        `delta > 0` proves the revision helped. Same principle as the
-        repo's level benchmarks, scoped to one skill."""
-        return t.benchmark_skill(name=name)
 
-    @register_tool_from_function
-    def propose_deep_think_task(description: str) -> dict:
-        """Queue a skill-development task for Deep Think to work later.
-        Use when you notice something worth building/fixing that's too
-        big for the current turn. The task is added UNAPPROVED — the
-        user approves it before Deep Think runs it. You propose; the
-        user decides."""
-        return t.propose_deep_think_task(description=description)
 
-    @register_tool_from_function(side_effect="read")
-    def list_deep_think_queue() -> dict:
-        """Read the Deep Think task queue with status counts. Read-only."""
-        return t.list_deep_think_queue()
 
-    @register_tool_from_function
-    def skill_note(skill: str, outcome: str = "smooth", note: str = "",
-                   objective: str = "", calls: int = 0, procedure: str = "",
-                   errors: str = "", flag: bool = False) -> dict:
-        """Jot a post-use summary about a skill you just used — the journal that
-        feeds skill self-improvement. After a notable use:
-          • outcome   — smooth | slow | issues | failed (how it went)
-          • note      — one terse, concrete line
-          • calls     — how many tool calls this use took
-          • procedure — the brief ordered calls ("read,read,fetch")
-          • errors    — errors / retries / dead-ends you hit
-          • flag      — True to ask for a review NOW (a use that wasted real effort)
-        Cheap (one line, no model). Reviews fire on their own during idle; `flag`
-        fast-tracks one. Returns {ok, skill, outcome}."""
-        from jaeger_os.core.skill_improvement import skill_notes as _sn
-        layout = _pipeline.get("layout")
-        n = _sn.add_note(layout, skill=skill, outcome=outcome, note=note,
-                         objective=objective, calls=calls, procedure=procedure,
-                         errors=errors, flag=flag)
-        result = {"ok": True, "skill": n.skill, "outcome": n.outcome}
-        # A `flag`ged note fast-tracks a Deep Think review now; everything else
-        # defers to the idle sweep. No-op when opted out.
-        try:
-            from jaeger_os.agent.background import skill_review
-            proposed = skill_review.maybe_propose_on_note(layout, n)
-            if proposed and proposed.get("proposed"):
-                result["review_proposed"] = proposed
-        except Exception:  # noqa: BLE001 — the trigger never breaks a note write
-            pass
-        return result
 
-    @register_tool_from_function(side_effect="read")
-    def skill_notes(skill: str = "") -> dict:
-        """Read accumulated skill-usage notes — pass a skill name for its recent
-        notes, or blank for a per-skill outcome tally across all skills (which
-        ones are struggling). Use it to decide whether a skill needs a Deep Think
-        improvement pass. Read-only."""
-        from jaeger_os.core.skill_improvement import skill_notes as _sn
-        layout = _pipeline.get("layout")
-        if (skill or "").strip():
-            notes = _sn.notes_for(layout, skill)
-            return {"skill": skill.strip(), "count": len(notes),
-                    "notes": [{"outcome": n.outcome, "note": n.note, "ts": n.ts}
-                              for n in notes[-20:]]}
-        return {"summary": _sn.summary(layout)}
 
-    @register_tool_from_function
-    def request_skill_review(skill: str) -> dict:
-        """Queue a Deep Think pass to IMPROVE a recipe-skill from its usage notes
-        — call it when you judge a skill keeps under-performing. It crafts a
-        measured task (baseline benchmark → write a new version → re-benchmark →
-        keep only if smoke passes AND the delta is positive, else revert). Lands
-        approved + ready under `auto` autonomy, else proposed in the backlog for
-        the operator. Deduped if a review's already queued. Returns the proposal."""
-        from jaeger_os.agent.background import skill_review
-        return skill_review.propose_review(_pipeline.get("layout"), skill, force=True)
 
-    @register_tool_from_function
-    def set_skill_review(enabled: bool) -> dict:
-        """Turn autonomous skill self-improvement on/off. ON BY DEFAULT (opt-out):
-        a skill that accumulates enough issue/failure notes auto-proposes a Deep
-        Think pass that rewrites it, validated by smoke test + benchmark delta
-        before it's kept (else reverted) — every change recorded as a revision.
-        Set False to opt out: improvements then happen only when explicitly asked
-        and land in the backlog for the operator to approve. Returns {ok, enabled}."""
-        from jaeger_os.agent.background import skill_review
-        return skill_review.set_enabled(enabled)
 
-    @register_tool_from_function
-    def record_skill_revision(skill: str, version: str, summary: str = "",
-                              benchmark_delta: str = "") -> dict:
-        """Log that you modified a skill — call it AFTER you keep a new version
-        (smoke + benchmark passed). Records the revision so the skill's evolution
-        is inspectable + rollback-able: the new version (e.g. 'v3' — the revision
-        id), what changed, and the measured delta. See it via `jaeger skills
-        revisions`. Returns {ok, skill, version, ts}."""
-        from jaeger_os.core.skill_improvement import skill_revisions
-        r = skill_revisions.record(_pipeline.get("layout"), skill=skill,
-                                   version=version, origin="self-improvement",
-                                   summary=summary, delta=benchmark_delta)
-        return {"ok": True, "skill": r.skill, "version": r.version, "ts": r.ts}
 
-    @register_tool_from_function
-    def kanban(action: str, card_id: str = "", title: str = "",
-               description: str = "", column: str = "", tag: str = "",
-               priority: str = "", note: str = "") -> dict:
-        """The kanban task board — ONE tool. `action` selects the op:
-          • view — read the board (optional `column`/`tag` filter)
-          • add — add a card (`title`, optional `description`/`priority`
-            low|med|high/`tag`)
-          • move — move card `card_id` to `column`
-          • update — edit / log on `card_id` (`note` appends a line)
-          • complete — mark `card_id` done
-          • block / unblock — mark `card_id` blocked, or send it back
-        Columns: backlog / ready / in_progress / blocked / done. Lay a
-        multi-step task out as cards so you and the user can track it."""
-        return t.kanban(action=action, card_id=card_id, title=title,
-                        description=description, column=column, tag=tag,
-                        priority=priority, note=note)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="browser",
-                   operation="browser",
-                   summary="drive a real web browser")
-    def browser(action: str, url: str = "", element: int = 0,
-                text: str = "", direction: str = "down",
-                key: str = "Enter") -> dict:
-        """Drive a real web browser — one tool, action-dispatched.
-        Actions: open / snapshot / click / type / scroll / back /
-        press / close. Open a page → read its returned elements →
-        click/type by index. See ``describe_tool("browser")`` for
-        the full action map + per-action args."""
-        return t.browser(action=action, url=url, element=element,
-                         text=text, direction=direction, key=key)
 
-    @register_tool_from_function(side_effect="read")
-    def skill(action: str, name: str = "", query: str = "",
-              file: str = "") -> dict:
-        """Discover and read playbook skills — experienced procedures
-        for a task. ``action`` ∈ list / search / view. Use ``search``
-        FIRST when a task might have a matching playbook (the
-        OPERATING_DISCIPLINE rule). ``view`` returns the full skill
-        body + its bundled-file listing; pass ``file=...`` to read
-        one. See ``describe_tool("skill")`` for the full contract."""
-        return t.skill(action=action, name=name, query=query, file=file)
 
-    @register_tool_from_function(side_effect="read")
-    def board_view(column: str = "", tag: str = "") -> dict:
-        """Read the kanban task board — what work is queued (ready),
-        in_progress, blocked, or done. Optionally filter by `column` or
-        `tag`. Deep Think jobs show here too (tag 'deepthink')."""
-        return t.board_view(column=column, tag=tag)
 
-    @register_tool_from_function
-    def board_add(
-        title: str, description: str = "",
-        tags: list[str] | None = None, priority: str = "med",
-    ) -> dict:
-        """Add a card to the kanban board (lands in `ready`, set to
-        work). Use this to lay out a multi-step task as cards so you and
-        the user can track progress. `priority` is low/med/high."""
-        return t.board_add(title=title, description=description,
-                           tags=tags, priority=priority)
 
-    @register_tool_from_function
-    def board_move(card_id: str, column: str) -> dict:
-        """Move a board card: `in_progress` when you start it, `done`
-        when finished, `blocked` when it needs the user. You cannot move
-        a card `backlog → ready` — that is the user's approval step."""
-        return t.board_move(card_id=card_id, column=column)
 
-    @register_tool_from_function
-    def board_update(
-        card_id: str, title: str = "", description: str = "",
-        priority: str = "", add_tag: str = "", note: str = "",
-        result: str = "",
-    ) -> dict:
-        """Edit a board card or log progress on it. `note` appends to
-        the card's running log; `result` records the outcome. Empty
-        arguments are left unchanged."""
-        return t.board_update(card_id=card_id, title=title,
-                              description=description, priority=priority,
-                              add_tag=add_tag, note=note, result=result)
 
-    @register_tool_from_function
-    def todo(todos: list[dict] | None = None, merge: bool = False) -> dict:
-        """Session task list — a scratchpad for multi-step jobs (3+
-        steps or several things at once). No args = read current
-        list. ``todos`` = list of ``{id, content, status}`` items
-        (pending / in_progress / completed / cancelled). ``merge=False``
-        (default) replaces the list; ``merge=True`` updates by id.
 
-        Keep exactly ONE item in_progress at a time; use the kanban
-        board for cross-session work. See ``describe_tool("todo")``
-        for the full contract."""
-        return t.todo(todos=todos, merge=merge)
-
-    # NB: ``describe_tool`` and ``load_toolset`` are NOT redefined here.
+    # NB: ``describe_tool`` and ``load_tools`` are NOT redefined here.
     # Both are owned by :mod:`jaeger_os.agent.tools.meta` and registered
     # at module-import time. The pre-Phase-9 pattern of wrapping each
     # built-in tool inside this closure created two copies (one in
@@ -1380,53 +929,11 @@ def _register_builtins(client: Any) -> None:
     # now the single source of truth. See finding #11 in
     # docs/code_review_2026_05_24.md.
 
-    @register_tool_from_function
-    def start_background(code: str, name: str = "") -> dict:
-        """Launch Python code as a background process that OUTLIVES this
-        turn. Use this — not run_python / run_in_venv (which are capped
-        and synchronous) — for work that takes minutes or longer: a long
-        render, a bot that stays connected, a watcher. Runs against the
-        instance venv. Returns a process_id; monitor with
-        check_background, end with stop_background."""
-        return t.start_background(code=code, name=name)
 
-    @register_tool_from_function(side_effect="read")
-    def list_background() -> dict:
-        """List every background process with live status (running /
-        exited / stopped, exit code, elapsed)."""
-        return t.list_background()
 
-    @register_tool_from_function(side_effect="read")
-    def check_background(process_id: str, lines: int = 20) -> dict:
-        """Status of one background process + the last `lines` lines of
-        its output (default 20, max 2000 — raise it for fuller output).
-        Use it to see whether a process you started is still running and
-        what it produced."""
-        return t.check_background(process_id=process_id, lines=lines)
 
-    @register_tool_from_function
-    def stop_background(process_id: str) -> dict:
-        """Terminate a running background process by id."""
-        return t.stop_background(process_id=process_id)
 
-    @register_tool_from_function(side_effect="read")
-    def pending_background() -> dict:
-        """Drain the queue of background tasks that finished since the
-        last check. Each completion is surfaced at most once. Returns
-        ``{completions: [...], count: N}`` — empty when nothing new has
-        finished. Faster than polling ``check_background`` in a loop."""
-        return t.pending_background()
 
-    @register_tool_from_function
-    def self_check(deep: bool = False) -> dict:
-        """Run the agent's doctor — the SAME engine as ``jaeger doctor``:
-        deps + config + the runtime substrate (memory round-trip, tool
-        registry, skills, drift parser). ``deep=True`` also drives a few
-        live-agent turns to confirm the agent can actually answer, not
-        just that the substrate is healthy. Pairs with ``run_benchmark``
-        (substrate health vs. answer quality). See
-        ``describe_tool("self_check")`` for the full contract."""
-        return t.self_check(deep=deep)
 
     @register_tool_from_function
     def run_benchmark(tags: str = "", limit: int = 0,
@@ -1449,126 +956,24 @@ def _register_builtins(client: Any) -> None:
         """Capability overview — call when asked 'what can you do?'."""
         return t.help_me()
 
-    @register_tool_from_function
-    def get_credential(name: str) -> dict:
-        """Look up a secret (API key, token) by name from the instance's
-        credentials/ store. NEVER read credential files directly — this is
-        the only sanctioned access path. The returned value is for tool
-        use only; do NOT echo it back to the user in your reply.
-        """
-        return creds.get_credential_tool_result(_pipeline["layout"], name=name)
 
-    @register_tool_from_function(side_effect="read")
-    def list_credentials() -> dict:
-        """List the names of every credential currently stored. Values
-        are never returned by this tool — use get_credential(name) for
-        the actual value, and never echo the value in your reply."""
-        return {"credentials": creds.list_credentials(_pipeline["layout"])}
 
-    @register_tool_from_function(side_effect="write")
-    def set_credential(name: str, value: str) -> dict:
-        """Save a secret (API key, token, chat ID) the user gave you into
-        the instance's credentials/ store, by name. Use this to PERSIST a
-        credential the user just provided — do NOT tell them to run a CLI
-        or set an env var; store it here. The value is written 0600 and is
-        NEVER echoed back (the result returns only the name). Pick a clear
-        UPPER_SNAKE name matching what the plugin / setup_plugin expects
-        (e.g. TELEGRAM_BOT_TOKEN). Returns {saved, name} or {saved:false,
-        error} — never raises."""
-        try:
-            creds.set_credential(_pipeline["layout"], name, value)
-        except Exception as exc:  # noqa: BLE001 — surface as a tool error, never raise
-            return {"saved": False, "name": name, "error": str(exc)}
-        return {"saved": True, "name": name}
 
     # ------------------------------------------------------------------
     # Parity ports from python_pydantic_ai — TTS, vision, host, sub-agent,
     # semantic memory. Each tool's docstring is what the LLM sees.
     # ------------------------------------------------------------------
-    @register_tool_from_function
-    def text_to_speech(text: str = "", path: str = "") -> dict:
-        """Speak text aloud through the default audio output via Kokoro
-        TTS. Use ONLY when the user explicitly asks to HEAR something
-        ("say…", "out loud", "narrate/read X aloud", "speak"). This is
-        NOT your reply channel — ordinary questions ("tell me a joke",
-        "what's the weather") are answered in text, not spoken.
-        Pass `text` for literal text, or `path` to narrate a file from
-        <instance>/skills/ ("read X out loud", "narrate X" with a named
-        file). `path` is sandbox-resolved and wins over `text` when both
-        are given. Supports minimal SSML: <break time="200ms"/>, <breath/>."""
-        return t.speak(text=text, path=path)
 
     # Avatar / animation tools — BETA while Mochi is the animation
     # testbed. ``beta=True`` keeps them out of the agent's catalogue
     # (invisible to the model, undispatchable) unless the process runs
     # with JAEGER_DEV_MODE=1, so an unstable animation path can't
     # break a daily-driver session. Promote by dropping the flag.
-    @register_tool_from_function(beta=True)
-    def set_avatar_state(
-        emotion: str = "neutral", hold_ms: int = 0, wait: bool = False,
-    ) -> dict:
-        """Switch the avatar's face expression. emotion is one of
-        "neutral", "happy", "sad", "focused", "thinking", "speaking",
-        "listening" (operator can add more via avatar/expressions.json).
-        hold_ms holds the state for that long (0 = until replaced);
-        wait=True blocks until the animation node acknowledges."""
-        return t.set_avatar_state(emotion=emotion, hold_ms=hold_ms, wait=wait)
 
-    @register_tool_from_function(beta=True)
-    def play_timeline(name: str = "", wait: bool = False) -> dict:
-        """Play a multi-track avatar animation timeline stored at
-        <instance>/timelines/<name>.json. wait=True blocks until the
-        timeline completes; default runs it in the background."""
-        return t.play_timeline(name=name, wait=wait)
 
-    @register_tool_from_function
-    def vision_analyze(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
-        """Look at a workspace image and answer a question about it.
-        Default backbone: Moondream2 (~1.9B VLM, Apache-2.0). image_path is
-        sandbox-resolved under <instance>/skills/. First call lazy-loads
-        the VLM on CPU."""
-        return t.look_at(image_path=image_path, question=question)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.WRITE_LOCAL, skill="vision",
-                   operation="image_generate",
-                   summary="generate an image into the skills workspace")
-    def image_generate(
-        prompt: str,
-        out_path: str = "generated.png",
-        num_inference_steps: int = 1,
-        guidance_scale: float = 0.0,
-        seed: int | None = None,
-    ) -> dict:
-        """Generate an image from a text prompt and save under skills/.
-        Default backbone: SDXL-Turbo (1-step). First call downloads ~6 GB
-        of weights; subsequent calls are 1-3s per image."""
-        return t.generate_image(
-            prompt=prompt, out_path=out_path,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale, seed=seed,
-        )
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="host",
-                   operation="open_on_host",
-                   summary="open a URL / file / app on the host")
-    def open_on_host(target: str, kind: str = "auto") -> dict:
-        """Open something on the host (macOS). One verb for three cases:
-        a URL in the default browser, a workspace file in its default
-        app, or a macOS application by name. `kind` is "auto" (default),
-        "url", "file", or "app" — "auto" classifies the target (http →
-        URL, an existing skills/ file → file, else → app name). File
-        targets are sandbox-resolved under <instance>/skills/."""
-        return t.open_on_host(target=target, kind=kind)
 
-    @register_tool_from_function(side_effect="read")
-    def search_memory(query: str, k: int = 5) -> dict:
-        """Semantic search over this instance's episodic conversation log.
-        Use when `recall` (exact key) misses — e.g. "what did we talk
-        about yesterday?", "did I tell you about my dog?". Returns top-k
-        past turns with cosine-similarity scores."""
-        return t.search_memory(query=query, k=k)
 
     @register_tool_from_function
     def delegate_task(subtasks: list[str]) -> dict:
@@ -1587,44 +992,17 @@ def _register_builtins(client: Any) -> None:
             return _delegate_internal(client, clean[0])
         return _delegate_parallel(client, clean)
 
-    @register_tool_from_function
-    @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="messaging",
-                   operation="send_message",
-                   summary="send a message on an external channel")
-    def send_message(channel: str, recipient: str, text: str) -> dict:
-        """Send a proactive message to a user on a messaging channel.
+    # send_message + certify_admin now live in tools/messaging.py — importing
+    # it registers them (they reach runtime state via core.context accessors,
+    # not a client closure, so they belong in tools/ like every other tool).
+    from jaeger_os.agent.tools import messaging as _messaging  # noqa: F401
 
-        Available `channel` values depend on which bridges are live in
-        this process — typically "discord", "telegram", "imessage".
-        `recipient` is the channel-specific ID (numeric Discord user ID,
-        Telegram chat ID, or iMessage phone/Apple-ID handle).
-
-        Use this together with `schedule_prompt` to send unattended
-        notifications: schedule a prompt that says "send the weather to
-        Discord user 12345" and the cron runner will fire it on time.
-        """
-        text_clean = (text or "").strip()
-        channel_clean = (channel or "").strip().lower()
-        recipient_clean = (recipient or "").strip()
-        if not channel_clean or not recipient_clean or not text_clean:
-            return {"sent": False, "error": "channel, recipient, and text are all required"}
-        try:
-            from .plugins import get_bridge, list_bridges
-        except Exception as exc:
-            return {"sent": False, "error": f"messaging plugin not importable: {exc}"}
-        bridge = get_bridge(channel_clean)
-        if bridge is None:
-            return {
-                "sent": False,
-                "error": (f"no {channel_clean!r} bridge is running in this process. "
-                          f"Start it with activate_plugin({channel_clean!r}) — it reads "
-                          f"the credential you saved with set_credential. Live bridges: "
-                          f"{list_bridges()}"),
-            }
-        try:
-            return bridge.send(recipient_clean, text_clean)
-        except Exception as exc:
-            return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
+    # Home Assistant plugin tools (ha_list_entities / ha_get_state /
+    # ha_list_services / ha_call_service) — same pattern: importing
+    # registers them. They resolve HASS_URL/HASS_TOKEN at call time and
+    # return a friendly setup error when unconfigured, so always-on
+    # registration costs nothing for users without a HA instance.
+    from jaeger_os.plugins import homeassistant as _homeassistant  # noqa: F401
 
     @register_tool_from_function
     def activate_plugin(name: str) -> dict:
@@ -1639,135 +1017,12 @@ def _register_builtins(client: Any) -> None:
         set_credential it, then retry — never invent a token."""
         return activate_plugin_inprocess(name)
 
-    @register_tool_from_function
-    def set_mode(mode: str) -> dict:
-        """Switch the agent's runtime mode — model + voice profile:
-          • normal — small fast model (gemma-12B) + voice (the default)
-          • high — larger model (gemma-26B), voice off; heavier reasoning
-          • deep-sleep — high model + work the Deep Think queue
-        Use when the user asks to switch ("use the bigger model", "go high
-        agentic mode", "back to normal mode"). The model swap is SLOW (~60-90s)
-        — tell the user it's switching, it's not stuck. Returns {ok, mode,
-        model, voice} or {ok:false, error}."""
-        from jaeger_os.core.runtime.modes import set_mode as _set_mode
-        return _set_mode(mode)
 
-    @register_tool_from_function(side_effect="read")
-    def get_mode() -> dict:
-        """Report the agent's CURRENT runtime mode + its model/voice profile —
-        use this to answer "what mode are you in?" / "which model is running?"
-        from fact, never guess. Returns {mode, model, voice, options}."""
-        from jaeger_os.core.runtime.modes import mode_info
-        return mode_info()
 
-    @register_tool_from_function
-    def set_autonomy(mode: str) -> dict:
-        """Set how autonomously you EXECUTE once a task is agreed:
-          • ask    — pause for approval before EVERY outward/hardware/destructive action
-          • scoped — agree the risky scope up front, then run autonomously within it;
-                     anything new prompts once, out-of-scope or missing info → ask (default)
-          • auto   — fully autonomous: act without pausing, reach out only when blocked
-        The PLAN is settled up front regardless; this governs execution only.
-        Switching is INSTANT (no model swap). Returns {ok, mode} or {ok:false,
-        error}."""
-        from jaeger_os.core.runtime.autonomy import set_autonomy as _set_autonomy
-        return _set_autonomy(mode)
 
-    @register_tool_from_function(side_effect="read")
-    def get_autonomy() -> dict:
-        """Report your CURRENT autonomy mode (ask | scoped | auto) — answer "how
-        autonomous are you / will you ask before acting?" from fact, never guess.
-        Returns {autonomy, options, description}."""
-        from jaeger_os.core.runtime.autonomy import autonomy_info
-        return autonomy_info()
 
-    @register_tool_from_function
-    def certify_admin(channel: str, identifier: str) -> dict:
-        """Certify a remote messaging account as the OWNER (admin) — e.g.
-        certify_admin("telegram", "8777030623") or ("discord", "<user id>").
 
-        ADMIN-ONLY: this only works when YOU run it from an admin context (the
-        desktop / TUI, or an already-certified account). A stranger on the bot
-        CANNOT self-certify — it's denied for non-admin sessions. After this,
-        that account gets slash commands + approvals + higher-tier actions;
-        everyone else stays conversation-only. Stores the id in the channel's
-        <CHANNEL>_ADMIN_IDS credential. Returns {ok, channel, admins}."""
-        cur = _pipeline.get("current_session", "")
-        from jaeger_os.core.safety.session_trust import is_admin_session, mark_session
-        if not is_admin_session(cur):
-            return {"ok": False, "error": "not authorized — only the owner (an admin "
-                                          "session) can certify admins"}
-        ch = (channel or "").strip().lower()
-        if ch not in ("telegram", "discord", "imessage"):
-            return {"ok": False, "error": f"unknown channel {ch!r} (telegram/discord/imessage)"}
-        ident = (identifier or "").strip()
-        if not ident:
-            return {"ok": False, "error": "identifier required (the account id / handle)"}
-        layout = _pipeline.get("layout")
-        cred = f"{ch.upper()}_ADMIN_IDS"
-        from jaeger_os.core import credentials as creds
-        try:
-            existing = creds.get_credential(layout, cred)
-        except Exception:  # noqa: BLE001 — not set yet
-            existing = ""
-        ids = {x.strip() for x in existing.split(",") if x.strip()}
-        ids.add(ident)
-        creds.set_credential(layout, cred, ",".join(sorted(ids)))
-        mark_session(f"{ch}:{ident}", True)   # instant effect for a live session
-        # Also record the owner in the person index (one source of truth).
-        try:
-            from jaeger_os.core import people
-            people.upsert_person(_pipeline.get("layout"), name="Owner",
-                                 access="admin", channel=ch, handle=ident)
-        except Exception:  # noqa: BLE001 — best-effort
-            pass
-        return {"ok": True, "channel": ch, "admins": sorted(ids)}
 
-    @register_tool_from_function
-    def remember_person(name: str, note: str = "", like: str = "", access: str = "",
-                        channel: str = "", handle: str = "") -> dict:
-        """Build or update a PROFILE of a person you interact with (the owner, a
-        guest) in your person index — which you grow over time the way you grow
-        skills. Use it whenever you learn something durable about someone:
-          • note     — a durable fact about them (appended)
-          • like     — something they like (appended)
-          • access   — admin | member | blocked (their trust level)
-          • channel + handle — link a messaging account to them (e.g. "telegram"
-            + their chat id), so you know which accounts are this person.
-        Distinct from CHARACTERS (the personas YOU play). Returns the profile."""
-        from dataclasses import asdict
-        from jaeger_os.core import people
-        layout = _pipeline.get("layout")
-        if layout is None:
-            return {"ok": False, "error": "no instance bound"}
-        p = people.upsert_person(layout, name=name, note=note, like=like,
-                                 access=(access or None), channel=channel.strip().lower(),
-                                 handle=handle)
-        return {"ok": True, "person": asdict(p)}
-
-    @register_tool_from_function(side_effect="read")
-    def get_person(name: str) -> dict:
-        """Look up a person's profile (by name / alias) from your person index —
-        answer "who is X?" / "what does X like?" from FACT, not a guess. Returns
-        the profile or {found: false}."""
-        from dataclasses import asdict
-        from jaeger_os.core import people
-        layout = _pipeline.get("layout")
-        p = people.find_by_name(layout, name) if layout is not None else None
-        if p is None:
-            return {"found": False, "name": name}
-        return {"found": True, "person": asdict(p)}
-
-    @register_tool_from_function(side_effect="read")
-    def list_people() -> dict:
-        """List everyone in your person index — names + access level. Use to
-        recall who you know."""
-        from jaeger_os.core import people
-        layout = _pipeline.get("layout")
-        if layout is None:
-            return {"people": []}
-        return {"people": [{"id": p.id, "name": p.name, "access": p.access}
-                           for p in people.list_people(layout)]}
 
     @register_tool_from_function
     def reload_skills() -> dict:
@@ -1809,36 +1064,8 @@ def _register_builtins(client: Any) -> None:
             "total_registered": len(after),
         }
 
-    @register_tool_from_function(side_effect="read")
-    def list_plugins() -> dict:
-        """Enumerate the bundled jaeger_os plugins (discord, telegram,
-        imessage, whisper_stt, kokoro_tts, mcp) with install + credential
-        status for each. Use this when the user asks what integrations
-        are available, or before suggesting a feature you'd need a
-        plugin for."""
-        return t.list_plugins()
 
-    @register_tool_from_function
-    def setup_plugin(name: str) -> dict:
-        """Return step-by-step setup instructions for the named plugin
-        (e.g. ``discord``, ``telegram``, ``whisper_stt``). Surfaces
-        missing libraries to ``pip install`` and required env vars or
-        credentials that need values. Does NOT modify the user's
-        environment — the user runs the install commands and stores
-        credentials themselves."""
-        return t.setup_plugin(name=name)
 
-    @register_tool_from_function
-    def listen(seconds: int = 5) -> dict:
-        """Record N seconds of microphone audio and return the transcript.
-
-        Use when the user asks you to listen, or when you need to capture
-        spoken input mid-chat. Atomic: mic opens, records, closes — no
-        always-on listening. Cap is 60s; for hands-free conversation, tell
-        the user to launch ``python -m jaeger_os --voice`` instead.
-
-        Returns ``{ok, transcript, seconds, model, elapsed_s}`` on success."""
-        return t.listen(seconds=seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -1994,6 +1221,7 @@ _DETERMINISTIC_FINAL_TOOLS = frozenset({
     "get_time", "calculate", "list_facts", "recall", "remember", "forget",
     "delete_file", "list_credentials", "schedule_prompt", "cancel_schedule",
     "reload_skills", "listen", "board_add", "board_move", "board_update",
+    "board_delete",
 })
 
 
@@ -2042,10 +1270,10 @@ def _fast_finalize_sync(
             temperature=0.2,
             top_p=0.9,
             stream=False,
-            # Carry the decide call's tool schemas so this finalize
-            # renders the identical <system + tools> prefix and reuses
-            # the warm KV instead of evicting it.
-            tools=_pipeline.get("openai_tools"),
+            # No ``tools=`` here: this runs on the client's AUX lane
+            # (its own context), so the worker's <system + tools> KV
+            # prefix is safe without replaying ~10K tokens of schemas —
+            # which wouldn't fit the aux window anyway (aux_ctx 4096).
         )
         text = (getattr(result, "text", None) or "").strip()
         # Strip any drift tool-call markup the model leaked into the
@@ -2664,17 +1892,58 @@ def _preflight_log() -> None:
 _jaeger_agents_by_session: dict[str, Any] = {}
 
 
-def _run_turn_via_jaeger_agent(
-    client: Any,
-    user_text: str,
-    *,
-    session_key: str,
-) -> dict[str, Any]:
-    """Phase-6 parallel implementation of :func:`_run_turn` that drives
-    the loop through :class:`JaegerAgent`. Returns the exact same dict
-    shape so ``run_command`` / ``run_for_voice`` don't need to know
-    which loop ran."""
-    from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
+def _apply_persona_filter(answer: str) -> str:
+    """Station 3 (dev/docs/agentic_runners.md): restyle the final answer in
+    the active character's voice via ONE bounded clean-context call.
+    Everything is best-effort and fail-open — no character, filter disabled,
+    or any error returns the plain answer unchanged."""
+    try:
+        config = _pipeline.get("config")
+        client = _pipeline.get("client")
+        layout = _pipeline.get("layout")
+        if config is None or client is None or layout is None:
+            return answer
+        pconf = getattr(config, "persona", None)
+        if pconf is None or not pconf.output_filter or pconf.max_chars <= 0:
+            return answer
+        from jaeger_os.personality.character import active_character
+        character = active_character(layout.root)
+        if character is None:
+            return answer
+        block = character.character_block()
+        # Identity vs character (operator decision, 2026-07-05): the
+        # character supplies the PERSONA, never the agent's name — the
+        # name is identity.yaml's, set at instance creation ("a robot
+        # like Jarvis, but I will name him Ted"). Frame the filter
+        # context so the rewrite embodies the character's voice without
+        # claiming the character's name as its own.
+        try:
+            from jaeger_os.core.instance.schemas import Identity, load_yaml
+            agent_name = (load_yaml(layout.identity_path, Identity).name or "").strip()
+        except Exception:  # noqa: BLE001 — framing is optional, the voice isn't
+            agent_name = ""
+        if agent_name and agent_name.lower() != character.name.lower():
+            block = (
+                f"Your name is {agent_name}. You embody the persona and "
+                f"mannerisms of {character.name} — but YOUR name stays "
+                f"{agent_name}; never present yourself as {character.name}.\n\n"
+                + block
+            )
+        from jaeger_os.agent.prompts.persona_filter import apply_persona_voice
+        return apply_persona_voice(
+            client, answer, block, max_chars=pconf.max_chars,
+        )
+    except Exception:  # noqa: BLE001 — voice is optional, the answer is not
+        return answer
+
+
+def _ensure_session_agent(client: Any, session_key: str) -> Any:
+    """Build (or fetch) the per-session :class:`JaegerAgent` — the exact
+    object the next turn on ``session_key`` drives. Factored out of
+    :func:`_run_turn_via_jaeger_agent` so :func:`prewarm_session` can
+    construct the REAL first-turn agent at boot (prefix-exact KV warm)
+    instead of approximating it."""
+    from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent
 
     key = session_key
     # First call per session builds + caches a JaegerAgent. Force the
@@ -2861,7 +2130,85 @@ def _run_turn_via_jaeger_agent(
                 {"role": "assistant",
                  "content": "Noted — picking up from the earlier session."},
             ])
-    jaeger_agent = _jaeger_agents_by_session[key]
+    return _jaeger_agents_by_session[key]
+
+
+def prewarm_session(client: Any, session_key: str = "desktop-app") -> None:
+    """Prime the KV cache with the EXACT prompt prefix ``session_key``'s
+    first turn will send — so message #1 pays zero cold prefill.
+
+    :func:`prewarm` approximates the turn (bare boot-time system prompt +
+    unfiltered registry tool schemas, via ``create_chat_completion``).
+    Close — but the REAL first turn goes through the per-session agent:
+    the session system prompt (facts snapshot appended at construction,
+    then the character-signature refresh), the availability/toolset-
+    filtered tool list, the adapter's own dialect rendering, and the
+    session-resume digest seeded into ``messages``. llama.cpp reuses the
+    KV cache only up to the first BYTE of divergence, and ~10K tokens of
+    tool schemas sit after the system text — so a prefix that diverges in
+    the system block re-prefills the whole tool catalogue on message #1
+    (~30 s on 12B-class hardware). That was the bridge's bug: it prewarmed
+    one prefix and ran a different one.
+
+    So: build the SAME session agent the first turn will use, format the
+    SAME prompt through the SAME adapter, run a 1-token call. The prefix
+    cache then matches the first real turn up to the user message.
+    Fail-open and idempotent; ``agent.messages`` is not mutated, so the
+    session transcript stays clean."""
+    done: set = _pipeline.setdefault("session_prewarmed", set())
+    if session_key in done:
+        return
+    # Only in-process backends have a KV cache to prime. This also guards
+    # the bridge's test path, where a fake boot hands over a bare object().
+    if (getattr(client, "llm", None) is None
+            and getattr(client, "_mlx_model", None) is None):
+        return
+    started = time.perf_counter()
+    try:
+        agent = _ensure_session_agent(client, session_key)
+        # Seed the character signature + rebuild exactly as turn 1 will —
+        # after this, turn 1's _refresh_character_prompt is a no-op and
+        # the prompt below is byte-identical to the one it sends.
+        _refresh_character_prompt(agent)
+        adapter = agent.primary_adapter
+        messages = [*agent.messages, {"role": "user", "content": "ready"}]
+        formatted = adapter.format_messages(
+            messages, agent.tools, agent.system_prompt)
+        lock = _pipeline.get("llm_lock")
+        if lock is not None:
+            with lock:
+                adapter.call(formatted, threading.Event(),
+                             stale_timeout=None, max_tokens=1, temperature=0.0)
+        else:
+            adapter.call(formatted, threading.Event(),
+                         stale_timeout=None, max_tokens=1, temperature=0.0)
+    except Exception as exc:  # noqa: BLE001 — prewarm is an optimization, never a boot failure
+        print(f"[jaeger] session prewarm skipped: {exc}", flush=True)
+        return
+    done.add(session_key)
+    # The generic two-pass prewarm is redundant behind this (its prefix is
+    # a strict approximation of ours) — stop late callers (voice_loop /
+    # messaging_gateway plugin starts) from re-running it.
+    _pipeline["prewarmed"] = True
+    print(f"[jaeger] session '{session_key}' prewarmed in "
+          f"{time.perf_counter() - started:.1f}s — first turn is prefix-hot",
+          flush=True)
+
+
+def _run_turn_via_jaeger_agent(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+) -> dict[str, Any]:
+    """Phase-6 parallel implementation of :func:`_run_turn` that drives
+    the loop through :class:`JaegerAgent`. Returns the exact same dict
+    shape so ``run_command`` / ``run_for_voice`` don't need to know
+    which loop ran."""
+    from jaeger_os.agent.loop.runtime_bridge import drive_one_turn
+
+    key = session_key
+    jaeger_agent = _ensure_session_agent(client, key)
 
     lock = _pipeline["llm_lock"]
     started = time.perf_counter()
@@ -2874,6 +2221,7 @@ def _run_turn_via_jaeger_agent(
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
+        _context.set_current_session(key)    # same, for tools that live in tools/
         _refresh_character_prompt(jaeger_agent)
         _tag_confirm_session(key)   # route a mid-turn approval to this channel
         if lock is not None:
@@ -2906,6 +2254,14 @@ def _run_turn_via_jaeger_agent(
     first_decision = result["first_decision"]
     elapsed = result["elapsed_s"]
     skipped = result["skipped"]
+
+    # Station 3 — the persona output filter (dev/docs/agentic_runners.md).
+    # Applied ONLY here, the user-facing boundary: the bench and
+    # delegate_task sub-agents drive the loop directly and never pass
+    # through, so the engine is always measured persona-off. Skip-final
+    # deterministic answers stay instant. Fail-open by construction.
+    if answer and not skipped:
+        answer = _apply_persona_filter(answer)
 
     # Tool time we can fill — summed from the ``tool_progress("done")``
     # callback via the per-turn accumulator. ``decision`` / ``final``
@@ -3011,17 +2367,19 @@ def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any
     return _run_turn_via_jaeger_agent(client, user_text, session_key=session_key)
 
 
-def run_command(client: Any, user_text: str, session_key: str | None = None) -> None:
+def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
     """Run a turn and print the answer + tool activity to stdout.
     Thin output adapter over :func:`_run_turn` — used by the one-shot
-    CLI, the cron runner, and the daemon."""
+    CLI, the cron runner, and the daemon. Returns the final answer text
+    ("" on error) so callers like the Deep Think daemon can VERIFY the
+    outcome instead of trusting that returning == succeeding."""
     out = _run_turn(client, user_text,
                     session_key=session_key or _DEFAULT_SESSION_KEY)
     if out["error"]:
         print(f"Jaeger agent failed: {out['error']}")
         if _pipeline.get("show_latency"):
             print_latency(out["report"])
-        return
+        return ""
     if _pipeline.get("show_tool_activity", True):
         for line in out["tool_activity"]:
             print(line)
@@ -3031,6 +2389,7 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         print_latency(out["report"])
         if out["skipped_final"]:
             print("  (final-LLM skipped — tool result returned directly)")
+    return out["text"] or ""
 
 
 def _tag_confirm_session(session: str) -> None:
@@ -3258,11 +2617,49 @@ class LlamaCppPythonClient:
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="llama",
         )
+        # Aux lane (0.6.0): every bounded side-channel call (persona
+        # output filter, skip-final finalizer, reflection, deep-think
+        # planning, memory review, goal eval) runs on a SECOND
+        # llama_context sharing THIS loaded model — so a clean-context
+        # aux prompt can never evict the worker context's warm KV
+        # prefix (measured: filter-ON turns paid ~40s re-prefill vs
+        # 0.3-0.4s warm with it OFF). Spawned lazily on first use;
+        # ``aux_ctx: 0`` disables the lane (aux calls then share the
+        # worker context — the pre-0.6.0 behaviour).
+        self._aux_kwargs = {
+            "n_ctx": int(getattr(model_cfg, "aux_ctx", 4096) or 0),
+            "n_batch": model_cfg.n_batch,
+            "n_ubatch": model_cfg.n_ubatch,
+            "flash_attn": model_cfg.flash_attn,
+        }
+        self._aux_llm: Any = None
+        self._aux_lock = threading.Lock()
         if warmup:
             self.llm.create_chat_completion(
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=1, temperature=0.0,
             )
+
+    def _aux_lane(self) -> Any:
+        """Build (once) and return the aux-lane ``Llama``, or ``None``
+        when the lane is disabled (``model.aux_ctx: 0``) or the spawn
+        failed — callers then fall back to the worker context."""
+        if self._aux_llm is not None:
+            return self._aux_llm
+        if self._aux_kwargs["n_ctx"] <= 0:
+            return None
+        with self._aux_lock:
+            if self._aux_llm is None:
+                try:
+                    from jaeger_os.core.models.aux_lane import spawn_aux_context
+                    self._aux_llm = spawn_aux_context(self.llm, **self._aux_kwargs)
+                except Exception as exc:  # noqa: BLE001 — lane is an optimisation
+                    print(f"[jaeger] aux lane unavailable "
+                          f"({type(exc).__name__}: {exc}); side-channel "
+                          "calls will share the worker context.", flush=True)
+                    self._aux_kwargs["n_ctx"] = 0  # don't retry every call
+                    return None
+        return self._aux_llm
 
     def chat(
         self,
@@ -3275,14 +2672,27 @@ class LlamaCppPythonClient:
         grammar: str | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> _ChatResult:
-        """Minimal chat completion wrapper (ThinkingRunner, _fast_finalize).
-        Ignores `stream` and `grammar`. Returns text + wall-clock latency.
+        """THE AUX LANE — every bounded side-channel completion in JROS
+        enters here (persona filter, skip-final finalizer, reflection,
+        deep-think planning/digests, memory review, goal clarify/eval,
+        ThinkingRunner). Ignores `stream` and `grammar`. Returns text +
+        wall-clock latency.
 
-        Pass ``tools`` to render the SAME ``<system + tools>`` prompt
-        prefix the agent's decide call uses — that keeps the tool-schema
-        KV cache resident across decide/finalize instead of evicting it
-        (a system-only finalize forces the next decide to cold-prefill
-        all ~60 tool schemas, ~12s)."""
+        Runs on the aux context (:meth:`_aux_lane`) — a second, small
+        llama_context on the same loaded model — NEVER on the worker
+        context the agent loop decodes on. That isolation is the whole
+        point: a clean-context aux prompt on the worker context evicts
+        its single-slot KV prefix and the next turn re-prefills ~20K
+        tokens (~40s measured). Keep it this way — new aux calls must
+        route through here, and the worker lane (the adapter's
+        ``create_chat_completion`` on ``self.llm``) must never be used
+        for side-channel prompts.
+
+        Aux prompts are bounded by design (``model.aux_ctx``, default
+        4096 tokens). An oversized prompt raises — every caller is
+        fail-open, so the turn survives and the aux feature degrades."""
+        aux = self._aux_lane()
+        llm = aux if aux is not None else self.llm
         started = time.perf_counter()
         kwargs: dict[str, Any] = {
             "messages": messages, "max_tokens": max_tokens,
@@ -3291,7 +2701,13 @@ class LlamaCppPythonClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        completion = self.llm.create_chat_completion(**kwargs)
+        if aux is not None:
+            # Serialise aux-vs-aux (background threads may overlap);
+            # aux-vs-worker needs no lock — separate contexts.
+            with self._aux_lock:
+                completion = llm.create_chat_completion(**kwargs)
+        else:
+            completion = llm.create_chat_completion(**kwargs)
         elapsed = time.perf_counter() - started
         text = completion["choices"][0]["message"].get("content") or ""
         return _ChatResult(text=text.strip(), latency_s=elapsed)
@@ -3903,7 +3319,7 @@ def boot_for_tui(
         # can't reach for ``send_message`` when Discord isn't set
         # up. The wiring is idempotent + best-effort.
         try:
-            from jaeger_os.agent.tools.availability import wire_availability_checks
+            from jaeger_os.agent.availability import wire_availability_checks
             wired = wire_availability_checks(agent)
             if wired:
                 print(f"[jaeger] availability wired for {wired} plugin-backed tool(s)",
@@ -4090,14 +3506,21 @@ def run_daemon(*, instance_name: str | None = None,
                           f"{task.description}", flush=True)
                     outcome = "done"
                     try:
-                        run_command(
-                            client,
-                            f"Deep Think task — complete it fully, writing "
-                            f"files into skills/ and installing deps as "
-                            f"needed:\n\n{task.description}",
-                            session_key=f"daemon_{task.id}",
+                        # Runner 2, the staged assembly line
+                        # (agentic_runners.md): PLAN (artifact saved) →
+                        # plan-informed EXECUTE in the task's clean session
+                        # → VERIFY on observable evidence + per-task-type
+                        # receipts → SETTLE (done / one informed retry /
+                        # failed). Never trust-by-return.
+                        from jaeger_os.agent.background.deepthink_runner import (
+                            run_one_task,
                         )
-                        queue.mark_done(task.id, "completed by daemon")
+                        outcome = run_one_task(
+                            client, queue, layout, task,
+                            run_command_fn=run_command,
+                        )
+                        print(f"[jaeger-daemon] {task.id}: {outcome}",
+                              flush=True)
                     except Exception as exc:  # noqa: BLE001
                         outcome = f"failed: {exc}"
                         queue.mark_failed(task.id, str(exc))
@@ -4133,6 +3556,41 @@ def run_daemon(*, instance_name: str | None = None,
     return 0
 
 
+def _swift_app_binary() -> "Path | None":
+    """The built PRODUCT app's inner binary, or None. ``jaeger`` is the
+    end-user command, so it only ever launches JaegerOS.app (installed,
+    then a checkout's product build) — never the dev bundle; JaegerOS-dev
+    .app is exclusively ``jaeger dev``'s surface (cli/devtools). Running
+    the inner binary (not ``open``) keeps stdout attached for terminal
+    users."""
+    from pathlib import Path as _P
+    swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
+    candidates = [
+        _P("/Applications/JaegerOS.app"),
+        swift / "JaegerOS.app",
+    ]
+    for app in candidates:
+        binary = app / "Contents" / "MacOS" / "JaegerOS"
+        if binary.exists():
+            return binary
+    return None
+
+
+def _launch_swift_app(binary: "Path", instance_name: str) -> int:
+    """Run the built JaegerOS.app's inner binary (stdout stays attached
+    for terminal users) and forward its exit code. Pins
+    ``JAEGER_INSTANCE_NAME`` to the instance THIS process resolved (and,
+    on first run, just created via the wizard) so the app's bridge child
+    boots exactly that instance — without the pin, a wizard-created
+    instance and the bridge's own default resolution could disagree."""
+    if instance_name:
+        os.environ["JAEGER_INSTANCE_NAME"] = instance_name
+    print(f"[jros] launching {binary.parent.parent.parent.name} — "
+          "menu-bar tray + chat window…", file=sys.stderr, flush=True)
+    import subprocess as _sp
+    return _sp.run([str(binary)]).returncode
+
+
 def _windowed_available() -> bool:
     """Whether the Pattern-1 windowed app can run here. Needs PySide6 and a
     display. Honours ``JAEGER_NO_GUI`` and ``QT_QPA_PLATFORM=offscreen`` as
@@ -4152,6 +3610,29 @@ def _windowed_available() -> bool:
 
 
 def main() -> int:
+    """CLI entry — dispatch, then the F1 exit mitigation.
+
+    F1 (STATUS.md, 2026-05-22; upstream llama.cpp PR #17869): when the
+    in-process ggml/Metal runtime (llama.cpp, whisper.cpp) has been
+    loaded, letting the interpreter exit normally runs C++ static
+    destructors (``__cxa_finalize``) which abort in
+    ``ggml_metal_device_free`` — SIGABRT + a macOS crash report on
+    EVERY quit and every bench run. All orderly cleanup (model free,
+    DB close, audit flush) has already happened by the time we get
+    here; ``os._exit`` just skips the doomed destructors, exactly as
+    ``_shakedown.py`` and the tray quit paths already do."""
+    rc = _main_dispatch()
+    if "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:  # noqa: BLE001 — never let a flush block the exit
+            pass
+        os._exit(rc)
+    return rc
+
+
+def _main_dispatch() -> int:
     # Daemon subcommands — ``jaeger start | stop | status | restart`` —
     # peel off BEFORE argparse so they don't collide with the positional
     # ``prompt`` argument the legacy CLI takes. Standalone ``jaeger``
@@ -4270,10 +3751,22 @@ def main() -> int:
         layout.ensure_dirs()
         return self_test(layout)
 
-    # First-run / missing-instance: auto-fire the wizard. Explicit
-    # ``jaeger setup`` runs through the daemon-cli dispatcher and
-    # never reaches this branch.
+    # First-run / missing-instance: auto-fire the wizard — BEFORE any
+    # surface launch, the same contract old bare-``jaeger`` had
+    # (wizard → boot). Explicit ``jaeger setup`` runs through the
+    # daemon-cli dispatcher and never reaches this branch.
+    #
+    # One exception: no terminal to ask questions in (stdin isn't a
+    # tty — launched from a .app/launcher/IDE) on a bare invocation
+    # headed for the native app. The wizard's ``input()`` would crash
+    # on the closed stdin; the Swift app's onboarding owns first-run
+    # there, so launch it directly.
     if not layout.exists():
+        _bare = not " ".join(args.prompt).strip()
+        _app = (_swift_app_binary()
+                if _bare and not os.environ.get("JAEGER_NO_GUI") else None)
+        if _app is not None and not sys.stdin.isatty():
+            return _launch_swift_app(_app, instance_name)
         layout = run_wizard(force=False, instance_name=instance_name)
 
     # Manifest gate. On version mismatch try the migration runner; only
@@ -4337,11 +3830,21 @@ def main() -> int:
                 return voice_main()
             finally:
                 sys.argv = _orig_argv
-        # 0.5: the windowed app (Pattern 1 — PySide6 chat window + tray) is
-        # the default interactive surface. Fall back to the TUI when there's
-        # no display (headless / SSH) or PySide6 is absent; ``--tui`` (handled
-        # above) opts into the terminal explicitly. The instance is threaded
-        # via the env the windowed core resolves through.
+        # 0.6: SWIFT-FIRST — the windowed surface is JaegerOS.app (splash,
+        # menu-bar tray, fast-ready bridge). Bare ``jaeger`` launches the
+        # built app: the dev bundle in a checkout, /Applications when
+        # installed. Falls back to the PySide6 shell, then the TUI. (This
+        # routing lived in the deleted launch.py and never made it into the
+        # product path — bare ``./jaeger`` was still booting the old Qt
+        # shell in-process, with no splash.)
+        # ``JAEGER_NO_GUI`` is the headless escape hatch (SSH boxes,
+        # CI): never spawn a GUI app; fall through to the TUI below.
+        swift_app = (None if os.environ.get("JAEGER_NO_GUI")
+                     else _swift_app_binary())
+        if swift_app is not None:
+            return _launch_swift_app(swift_app, instance_name)
+        # PySide6 fallback (no built Swift app). ``--tui`` (handled above)
+        # opts into the terminal explicitly.
         if _windowed_available():
             if args.instance:
                 os.environ["JAEGER_INSTANCE_NAME"] = args.instance

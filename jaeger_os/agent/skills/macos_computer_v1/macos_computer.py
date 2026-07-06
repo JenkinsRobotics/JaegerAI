@@ -160,8 +160,14 @@ def register(host: Any) -> None:
     See ``SKILL.md`` for the design contract. The skill loader
     calls this with the host's registry-binding object once the
     skill's smoke tests pass."""
+    import sys
     from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
     from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
+
+    # The registered tools share their names with the module-level
+    # implementations they delegate to; reach the impls through the module
+    # object so the local defs below don't shadow (or recurse into) them.
+    _impl = sys.modules[__name__]
 
     @register_tool_from_function
     @requires_tier(
@@ -169,11 +175,11 @@ def register(host: Any) -> None:
         skill="macos_computer", operation="computer_do",
         summary="drive macOS UI through the capability ladder",
     )
-    def _computer_do(goal: Any) -> dict:
+    def computer_do(goal: Any) -> dict:
         """Run a plan (string or list of action dicts) through the
         AppleScript → browser → AX → vision capability ladder.
         Picks the fastest available engine per step. Tier-2."""
-        return computer_do(goal)
+        return _impl.computer_do(goal)
 
     @register_tool_from_function
     @requires_tier(
@@ -181,19 +187,19 @@ def register(host: Any) -> None:
         skill="macos_computer", operation="computer_use",
         summary="dispatch one computer action through the ladder",
     )
-    def _computer_use(action: str, target: str = "", **kwargs: Any) -> dict:
+    def computer_use(action: str, target: str = "", **kwargs: Any) -> dict:
         """Dispatch ONE action through the capability ladder. Kind
         examples: press / open_url / move_window / click_xy. Tier-2."""
-        return computer_use(action=action, target=target, **kwargs)
+        return _impl.computer_use(action=action, target=target, **kwargs)
 
     @register_tool_from_function
-    def _computer_look(app: str = "", include_screenshot: bool = False) -> dict:
+    def computer_look(app: str = "", include_screenshot: bool = False) -> dict:
         """Read-only snapshot — running apps + the focused window
         (title / position / size / shallow child summary).
         ``app=...`` returns the focused window OF THAT APP;
         ``include_screenshot=True`` adds a one-shot PNG path. Read-
         only, no clicks."""
-        return computer_look(app=app, include_screenshot=include_screenshot)
+        return _impl.computer_look(app=app, include_screenshot=include_screenshot)
 
 
 __all__ = [

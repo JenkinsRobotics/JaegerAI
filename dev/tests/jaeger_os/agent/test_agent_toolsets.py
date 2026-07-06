@@ -75,7 +75,7 @@ def test_atomic_toolsets_have_no_includes():
     expected_atomic = {
         "time", "math", "host", "files", "web", "memory",
         "memory_umbrella_only", "code", "schedule", "planning",
-        "kanban", "kanban_umbrella_only", "browser", "skills",
+        "kanban", "browser", "skills",
         "media", "delegate", "comm", "host_ui", "computer",
         "computer_umbrella_only", "toolset_mgmt",
     }

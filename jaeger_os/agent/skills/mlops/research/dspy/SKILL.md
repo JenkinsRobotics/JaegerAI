@@ -6,9 +6,12 @@ author: Orchestra Research
 license: MIT
 dependencies: [dspy, openai, anthropic]
 platforms: [linux, macos, windows]
+requires_tools: [execute_code, terminal]
 metadata:
   hermes:
     tags: [Prompt Engineering, DSPy, Declarative Programming, RAG, Agents, Prompt Optimization, LM Programming, Stanford NLP, Automatic Optimization, Modular AI]
+  jros:
+    related_skills: [evaluating-llms-harness, weights-and-biases, research-paper-writing]
 
 ---
 

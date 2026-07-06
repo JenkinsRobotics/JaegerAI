@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 
 _ILLEGAL_NAME_CHARS = set('/\\:*?"<>|')
@@ -111,3 +112,21 @@ def _apply_identity_change() -> None:
         refresh_identity()
     except Exception:  # noqa: BLE001
         pass
+
+
+@register_tool_from_function(name="set_name")
+def _t_set_name(name: str) -> dict:
+    """Change your OWN name. Use when the user renames you ("your
+    name is …", "I'll call you …", "rename yourself"). Writes your
+    real identity (identity.yaml). Do NOT use remember() for your own
+    name — remember() is for facts about the USER."""
+    return set_name(name=name)
+
+
+@register_tool_from_function(name="update_soul")
+def _t_update_soul(content: str) -> dict:
+    """Rewrite your soul.md — who you are: character, values, voice,
+    self-narrative. Your current soul is in your system prompt; read
+    it, revise it, and pass the COMPLETE new text. Personality and
+    durable facts about YOURSELF go here, not in remember()."""
+    return update_soul(content=content)

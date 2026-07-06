@@ -203,16 +203,14 @@ def test_board_add_rejects_unknown_kind(tmp_path, monkeypatch):
     assert "deepthought" in out["error"]
 
 
-def test_kanban_action_dispatch_passes_kind_through(tmp_path, monkeypatch):
-    """The unified ``kanban(action="add", kind="deepthink", ...)`` API
-    must forward ``kind`` to board_add — otherwise a model that only
-    calls the umbrella tool can't create deep-think cards."""
+def test_board_add_passes_kind_through(tmp_path, monkeypatch):
+    """``board_add(kind="deepthink")`` must forward ``kind`` so a
+    deep-think card lands in ``backlog`` for the user to approve."""
     layout = _make_layout(tmp_path)
     import jaeger_os.agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
-    out = board_tool.kanban(action="add", title="hard task",
-                            kind="deepthink")
+    out = board_tool.board_add(title="hard task", kind="deepthink")
     assert out["ok"] is True
     assert out["kind"] == "deepthink"
     assert out["column"] == "backlog"

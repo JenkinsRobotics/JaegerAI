@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._common import _require_layout
+from jaeger_os.core.context import _require_layout, get_layout
+from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 
 _LAYERS = ("hexaco", "special", "expression", "domains")
 
@@ -58,3 +59,52 @@ def adjust_trait(layer: str, field: str, value: float) -> dict[str, Any]:
     cur[field] = v
     save_character_traits(c.root, {layer: cur})
     return {"ok": True, "character": c.name, "layer": layer, "field": field, "value": v}
+
+
+@register_tool_from_function(name="remember_person")
+def _t_remember_person(name: str, note: str = "", like: str = "", access: str = "",
+                       channel: str = "", handle: str = "") -> dict:
+    """Build or update a PROFILE of a person you interact with (the owner, a
+    guest) in your person index — which you grow over time the way you grow
+    skills. Use it whenever you learn something durable about someone:
+      • note     — a durable fact about them (appended)
+      • like     — something they like (appended)
+      • access   — admin | member | blocked (their trust level)
+      • channel + handle — link a messaging account to them (e.g. "telegram"
+        + their chat id), so you know which accounts are this person.
+    Distinct from CHARACTERS (the personas YOU play). Returns the profile."""
+    from dataclasses import asdict
+    from jaeger_os.core import people
+    layout = get_layout()
+    if layout is None:
+        return {"ok": False, "error": "no instance bound"}
+    p = people.upsert_person(layout, name=name, note=note, like=like,
+                             access=(access or None), channel=channel.strip().lower(),
+                             handle=handle)
+    return {"ok": True, "person": asdict(p)}
+
+
+@register_tool_from_function(name="get_person", side_effect="read")
+def _t_get_person(name: str) -> dict:
+    """Look up a person's profile (by name / alias) from your person index —
+    answer "who is X?" / "what does X like?" from FACT, not a guess. Returns
+    the profile or {found: false}."""
+    from dataclasses import asdict
+    from jaeger_os.core import people
+    layout = get_layout()
+    p = people.find_by_name(layout, name) if layout is not None else None
+    if p is None:
+        return {"found": False, "name": name}
+    return {"found": True, "person": asdict(p)}
+
+
+@register_tool_from_function(name="list_people", side_effect="read")
+def _t_list_people() -> dict:
+    """List everyone in your person index — names + access level. Use to
+    recall who you know."""
+    from jaeger_os.core import people
+    layout = get_layout()
+    if layout is None:
+        return {"people": []}
+    return {"people": [{"id": p.id, "name": p.name, "access": p.access}
+                       for p in people.list_people(layout)]}

@@ -45,6 +45,9 @@ struct ChatMessage: Identifiable, Equatable {
     /// (Week 2.5 wiring — we keep the field now so the view can fade in
     /// a cursor / spinner when the streaming pass lands.)
     var isStreaming: Bool = false
+    /// Dimmed telemetry line under an assistant reply ("replied in 3s")
+    /// — nil when the core sent no telemetry for the turn.
+    var meta: String? = nil
 }
 
 
@@ -70,6 +73,22 @@ final class ChatViewModel: ObservableObject {
     /// shows a "transcribing…" indicator in the status bar.
     @Published private(set) var isTranscribing: Bool = false
 
+    /// Context usage after the most recent reply — ``(used, max)`` tokens
+    /// off the reply frame's v1 telemetry.  Rendered in the status bar as
+    /// "ctx 18.3K/32.8K"; nil until the first telemetry-carrying reply.
+    @Published private(set) var contextUsage: (used: Int, max: Int)? = nil
+
+    /// The instance's ``display.activity_trace`` setting (config.yaml,
+    /// read over the bridge) — what becomes of the tool/thought chips:
+    ///   "full"    keep them under the turn (default)
+    ///   "summary" collapse to "N steps · " on the reply's meta line
+    ///   "clear"   show live, remove when the reply lands
+    ///   "off"     never show them
+    @Published private(set) var activityTrace: String = "full"
+
+    /// ``display.turn_separators`` — the thin accent rule between turns.
+    @Published private(set) var turnSeparators: Bool = true
+
     /// The session key the agent uses to scope rolling history.  We
     /// keep this constant within one chat window's lifetime so the
     /// agent can correlate follow-up turns.
@@ -94,6 +113,30 @@ final class ChatViewModel: ObservableObject {
         // lifetime.
         self.eventToken = agent.addEventListener { [weak self] event in
             self?.handle(event: event)
+        }
+        // Pull the instance's display prefs (activity_trace + separators)
+        // once the transport is up. Best-effort — defaults stand on a miss.
+        Task { [weak self] in await self?.loadDisplayConfig() }
+    }
+
+    /// True once a config query has answered — used to retry the read on
+    /// the first send when the init-time fetch raced the connect.
+    private var displayConfigLoaded = false
+
+    /// Read ``display.*`` prefs over the bridge's config query. Public so a
+    /// future settings surface can re-call it after a save_config.
+    func loadDisplayConfig() async {
+        let result = await agent.query("config")
+        guard result.ok, let data = result.json,
+              let obj = (try? JSONSerialization.jsonObject(with: data))
+                as? [String: Any]
+        else { return }
+        displayConfigLoaded = true
+        if let trace = obj["activity_trace"] as? String, !trace.isEmpty {
+            activityTrace = trace
+        }
+        if let sep = obj["turn_separators"] as? Bool {
+            turnSeparators = sep
         }
     }
 
@@ -208,6 +251,15 @@ final class ChatViewModel: ObservableObject {
         case "turn.end":
             return
         case "thought.start", "deep_think.start", "thinking":
+            // Respect display.activity_trace — "off" hides the live
+            // stream entirely (the reply placeholder's dots remain).
+            guard activityTrace != "off" else { return }
+            // One chip per in-flight turn — the busy `state` frames can
+            // re-fire mid-turn (tool hops), and a duplicate chip per hop
+            // reads as noise.
+            guard !messages.contains(where: { $0.author == .thinking }) else {
+                return
+            }
             messages.append(ChatMessage(
                 author: .thinking,
                 timestamp: Date(),
@@ -215,11 +267,14 @@ final class ChatViewModel: ObservableObject {
                 isStreaming: true
             ))
         case "thought.end", "deep_think.end":
-            // Mark the most recent thinking chip as done.
-            if let i = messages.lastIndex(where: { $0.author == .thinking }) {
-                messages[i].isStreaming = false
-            }
+            // The chip is TRANSIENT — typing-dots semantics. It exists
+            // only while the turn is in flight; when the agent stops
+            // thinking (reply landed / turn ended) it leaves the
+            // transcript entirely instead of lingering as a stale
+            // "thinking…" line under every reply.
+            messages.removeAll { $0.author == .thinking }
         case "tool.call", "tool.start":
+            guard activityTrace != "off" else { return }
             let name = event.payload["tool"]?.get(String.self)
                 ?? event.payload["name"]?.get(String.self)
                 ?? "tool"
@@ -232,13 +287,18 @@ final class ChatViewModel: ObservableObject {
         case "tool.result", "tool.end", "tool.complete":
             // Close out the most recent in-flight tool-call chip
             // with a ✓ or ✗ depending on whether the agent flagged
-            // an error in the payload.
+            // an error in the payload, plus the tool's elapsed time
+            // ("🔧 write_file ✓ · 3.9s") when the bridge reported one.
             if let i = messages.lastIndex(where: {
                 $0.author == .toolCall && $0.isStreaming
             }) {
                 let ok = event.payload["ok"]?.get(Bool.self) ?? true
+                let elapsed = event.payload["elapsed_s"]?.get(Double.self) ?? 0
                 messages[i].isStreaming = false
                 messages[i].text = "\(messages[i].text) \(ok ? "✓" : "✗")"
+                if elapsed > 0.05 {
+                    messages[i].text += " · " + Self.fmtSeconds(elapsed)
+                }
             }
         case "token", "message.delta":
             // Streaming token — append to the most recent assistant
@@ -267,33 +327,79 @@ final class ChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         guard !isSending else { return }
 
+        // Late-bind the display prefs if the init-time fetch raced the
+        // transport coming up.
+        if !displayConfigLoaded { await loadDisplayConfig() }
+
         // User bubble lands now so the operator sees their message
         // immediately even if the agent is slow to reply.
+        let turnStarted = Date()
         messages.append(ChatMessage(
             author: .user,
-            timestamp: Date(),
+            timestamp: turnStarted,
             text: trimmed
         ))
 
         // Placeholder assistant bubble — we'll fill in once the
         // response lands.  Marked as streaming so the view can show a
-        // cursor / spinner if it wants to.
-        let placeholderIndex = messages.count
-        messages.append(ChatMessage(
+        // cursor / spinner if it wants to.  Tracked BY ID, not index —
+        // thinking chips come and go mid-turn (they're transient now),
+        // so a captured index could drift.
+        let placeholder = ChatMessage(
             author: .assistant,
             timestamp: Date(),
             text: "",
             isStreaming: true
-        ))
+        )
+        messages.append(placeholder)
 
         isSending = true
-        defer { isSending = false }
+        defer {
+            isSending = false
+            // Belt-and-braces: no thinking chip survives past its turn.
+            messages.removeAll { $0.author == .thinking }
+        }
 
         do {
-            // One turn over the bridge → the reply text.
-            let replyText = try await agent.sendChat(text: trimmed)
-            messages[placeholderIndex].text = replyText
-            messages[placeholderIndex].isStreaming = false
+            // One turn over the bridge → the reply (text + optional
+            // telemetry). The session key keeps THIS window's
+            // conversation isolated on the Python side.
+            let reply = try await agent.sendChat(text: trimmed,
+                                                 session: sessionKey)
+            let replyText = reply.text
+
+            // display.activity_trace post-turn disposition for the tool
+            // chips this turn produced ("full" keeps them; "off" never
+            // made any):
+            //   "clear"   — drop them now that the reply is here
+            //   "summary" — drop them, fold "N steps · " into the meta
+            var stepsNote = ""
+            if activityTrace == "clear" || activityTrace == "summary" {
+                let turnChips = messages.filter {
+                    $0.author == .toolCall && $0.timestamp >= turnStarted
+                }
+                if !turnChips.isEmpty {
+                    if activityTrace == "summary" {
+                        stepsNote = "\(turnChips.count) step"
+                            + (turnChips.count == 1 ? "" : "s") + " · "
+                    }
+                    let ids = Set(turnChips.map(\.id))
+                    messages.removeAll { ids.contains($0.id) }
+                }
+            }
+
+            if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
+                messages[i].text = replyText
+                messages[i].isStreaming = false
+                if let s = reply.elapsedS {
+                    messages[i].meta = stepsNote + "replied in " + Self.fmtSeconds(s)
+                } else if !stepsNote.isEmpty {
+                    messages[i].meta = String(stepsNote.dropLast(3))   // strip " · "
+                }
+            }
+            if let used = reply.ctxUsed, let mx = reply.ctxMax {
+                contextUsage = (used, mx)
+            }
 
             // Voice-loop completion: speak the reply through TTS so
             // the operator hears it.  Respects the operator's auto-
@@ -308,9 +414,23 @@ final class ChatViewModel: ObservableObject {
                 NSLog("[ChatViewModel] TTS skipped — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) empty=\(replyText.isEmpty)")
             }
         } catch {
-            messages[placeholderIndex].text =
-                "⚠ agent error: \(error.localizedDescription)"
-            messages[placeholderIndex].isStreaming = false
+            if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
+                messages[i].text =
+                    "⚠ agent error: \(error.localizedDescription)"
+                messages[i].isStreaming = false
+            }
         }
+    }
+
+    // MARK: - Formatting
+
+    /// "3.2s" under ten seconds, "42s" above — the TUI's compact style.
+    static func fmtSeconds(_ s: Double) -> String {
+        s < 10 ? String(format: "%.1fs", s) : "\(Int(s.rounded()))s"
+    }
+
+    /// "18.3K" / "512" — thousands shortened, the TUI's ctx gauge style.
+    static func fmtTokens(_ n: Int) -> String {
+        n >= 1000 ? String(format: "%.1fK", Double(n) / 1000.0) : "\(n)"
     }
 }

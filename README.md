@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.5.2-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.7.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -34,33 +34,42 @@ no Docker, no special OS versions, no dependency hell. **One curl line
 installs the whole stack.**
 
 - 🧠 **Local-first** — runs entirely on-device on an in-process LLM. No cloud account required.
-- 🛠️ **~70 built-in tools across 11 toolset categories** — files (read / write / edit / search), memory, web, code execution, scheduling, background processes, kanban, delegation. A 20-tool CORE is always visible; the rest are reachable via `describe_tool` / `load_toolset` when scoping is enabled.
+- 🛠️ **~100 built-in tools + 99 recipe skills** — files (read / write / edit / search), memory, web, code execution, scheduling, background processes, kanban, delegation, computer use. A CORE set is always visible; the rest are reachable via `describe_tool` / `load_toolset` when scoping is enabled.
 - 📋 **Kanban task board** — the agent plans multi-step work as cards; Deep Think jobs live on the same board. `/board` to view it.
 - 📚 **Self-authored skills** — the agent researches, writes, smoke-tests, benchmarks, and versions its own skills.
 - 🖥️ **Computer use** — the flagship skill: drive any macOS app through the accessibility tree (see the screen, click, type, work menus).
-- 🌙 **Deep Think** — an idle "deep sleep" mode that swaps to a heavier coder model and drains a skill-development queue.
+- 🌙 **Deep Think** — an idle "deep sleep" mode that swaps to a heavier model and drains a skill-development queue via a staged plan→execute→verify runner.
 - 🔌 **Model-agnostic** — opt into LM Studio, an OpenAI-compatible endpoint, or Anthropic Claude. Local stays the default.
-- 🔒 **6-tier permission ladder** — every tool is gated; high-risk actions are confirmation-prompted and audit-logged.
+- 🔒 **Permission-gated** — every tool is gated; risky actions are confirmation-prompted and audit-logged. Two modes: `confirm` (ask first) and `allow`.
+- 🎭 **Agent ≠ character** — the agent's name and profile picture are the instance's own; a character is only the persona it plays, swappable without changing the agent's identity.
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.5.2` released; `0.6.0` in progress.** The agent is alive
-> (animation, personality, self-improving skills), and the product around it now
-> behaves like real software: a clean one-command install, in-place
-> `jaeger update` with `--rollback`, `jaeger autostart` (boot/login),
-> `jaeger reinstall` / `jaeger uninstall`, and a clickable macOS launcher.
-> Operators manage **agents** (`jaeger agent …`) — each plays a *character*.
+> **Status — `0.7.0` (Swift-first + the two-runner core).** JROS is now a
+> **native Mac app**: `JaegerOS.app` is the primary UI (menu-bar resident,
+> splash → chat/settings windows, quit-from-tray), talking to the Python core
+> over a versioned NDJSON bridge (ready in ~0.5s; the model warms behind it).
+> `JaegerOS-dev.app` is pinned to the dev instance. The agentic core runs a
+> **two-runner** architecture: a soft-loop/hard-boundary realtime runner
+> (verify gate + persona output filter) and a staged plan→execute→verify
+> Deep Think pipeline, with **dual-context inference lanes** (persona-ON warm
+> ttft **45.6s → 0.71s**). Benched at **E4B 79/81** (routing corpus) plus a
+> new **51-case hermetic scenario suite** (security 14/15 on the 4B, 15/15 on
+> the 26B). Operators manage **agents** (`jaeger agent …`) — each *plays* a
+> character: the agent's **name and profile picture** are the instance's own
+> (identity.yaml) and never change with the persona ("name your robot Ted, it
+> plays HAL"). 99 self-improvable skills, subject-attributed SQL memory,
+> HomeAssistant / fal.ai plugins.
 >
 > The recent arc: **0.4.0** introduced the node architecture (the `ZmqBus` +
-> body contract); **0.5.0** folded the Mochi project in (Jaeger Studio GUI,
-> the character system, animation/media nodes); **0.6.0** is the
-> install/update/lifecycle theme plus agentic polish (autonomy modes, a person
-> index, and a measured skill self-improvement loop).
+> body contract); **0.5.0** folded the Mochi project in (character system,
+> animation/media nodes); **0.6.x** delivered the install/update/lifecycle
+> theme; **0.7.0** shipped the Swift-first app, the measured two-runner core,
+> the identity-vs-character split across every surface, and the scenario
+> benchmark. Jaeger Studio was extracted to its own repo.
 >
 > Full per-release write-ups live in
 > [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/); the running
-> changelog is [`CHANGELOG.md`](CHANGELOG.md). The archived Swift desktop app
-> and the parked `rich_tui` surface remain in tree but are not wired into
-> install/run.
+> changelog is [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
@@ -205,23 +214,31 @@ launch path matches what you're doing.
 ./jaeger --agent lilith --no-voice # text-only (no mic, no Kokoro warm)
 ```
 
-**Sandbox dev loop** — for working on JROS itself.  The `./launch`
-wrapper boots the in-repo sandbox at `sandbox/.jaeger_os/instances/jros-dev/`
-with a real-verification boot scroll, then hands the terminal to the
-TUI.  Daily flags:
+**Dev loop** — for working on JROS itself (one line to set up):
 
 ```bash
-./launch                           # boot the sandbox TUI
-./launch --status                  # what's running across modes
-./launch --stop                    # kill a lingering TUI singleton
-./launch --restart                 # stop, then boot
-./launch --health                  # preflight checks and exit
-./launch --reset-audio             # sudo killall coreaudiod
-./launch --clean-logs              # truncate <instance>/run/jaeger.log
-./launch --no-voice                # tell the TUI to skip voice startup
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/install.sh | bash
 ```
 
-The `./launch` boot scroll runs every check before handing off:
+That clones the repo, builds the venv, and produces **`JaegerOS-dev.app`**
+at the repo root — the windowed dev shell, pinned to the gitignored
+`jros-dev` instance. Double-click it, or drive everything through the
+`jaeger` CLI:
+
+```bash
+open JaegerOS-dev.app              # the windowed dev shell (menu-bar tray)
+./jaeger dev                       # same, from the terminal
+./jaeger dev --tui                 # the terminal (TUI) agent
+./jaeger update                    # git pull + reinstall deps + rebuild app as needed
+./jaeger dev --health              # preflight checks and exit
+./jaeger dev --status / --stop     # singleton management
+./jaeger dev --reset-audio         # sudo killall coreaudiod
+```
+
+The end-user app is `JaegerOS.app` (default instance) — built with
+`jaeger_os/interfaces/swift/Scripts/build-app.sh --release --install`.
+
+The `jaeger dev --health` preflight runs every check before handing off:
 sandbox bundle, library import resolution, instance manifest schema,
 GGUF model on disk, AVAudioEngine bridge import, Whisper assets,
 Kokoro package, skill registry walk, TUI module import.  A red row
@@ -240,22 +257,23 @@ voice:
 Or override per-run without editing the config:
 
 ```bash
-JAEGER_AUDIO_BACKEND=avaudio ./launch
-JAEGER_AUDIO_OUTPUT="Mac Studio Speakers" ./launch   # sounddevice device override
+JAEGER_AUDIO_BACKEND=avaudio ./jaeger
+JAEGER_AUDIO_OUTPUT="Mac Studio Speakers" ./jaeger   # sounddevice device override
 ```
 
-**Bench against the model registry leaderboard** — runs the full
-59-case flat bench and updates `dev/benchmark/HISTORY.md`:
+**Bench the agent** — two complementary suites:
 
 ```bash
-./dev/benchmark/run_flat_bench.py             # full corpus
-./dev/benchmark/run_flat_bench.py --limit 5   # 5-case smoke
-./dev/benchmark/run_flat_bench.py --tags routing,multistep
+./dev/benchmark/bench.py                       # routing corpus (E4B 79/81)
+./dev/benchmark/scenarios.py                    # 51-case hermetic scenario suite
+./dev/benchmark/scenarios.py --lane security    # the 15 security gates only
+./dev/benchmark/scenarios.py --list             # list cases, no model boot
 ```
 
-The 2026-06-04 leaderboard row for `gemma-4-26B-A4B-it-Q4_K_M` is
-**55/59 (93 %)** at `permissions.mode=allow`; bench history is
-regenerated on every run.
+`bench.py` is the routing corpus (the ≥79/81 gate for any agentic-pipeline
+change). `scenarios.py` is the full-system suite — multi-turn, run against a
+throwaway temp instance so it can't touch live state; a security-gate failure
+exits non-zero.
 
 ---
 
@@ -412,39 +430,25 @@ upgrade.
 
 ---
 
-## Benchmarking models locally
+## Benchmarking the agent locally
 
-JROS ships two complementary benches under `benchmark/` for picking
-which local model to run:
+JROS ships **two benchmark types** under `dev/benchmark/`:
 
-- **`run_flat_bench.py` + `run_model_sweep.py`** — *task* benchmark.
-  Runs the 59-case corpus (routing, multistep, recovery, multi-turn,
-  context, safety, hallucination, cross-turn) per model and writes
-  per-run rows + summary under `benchmark/flat/<model>/<ts>/`. The
-  sweep auto-runs hybrid thinking models (Qwen3.x, gemma-4) in BOTH
-  modes — once with thinking ON, once OFF — so the leaderboard shows
-  the deep-think vs direct-mode tradeoff side-by-side.
-- **`run_model_sanity.py`** — *hardware-health* benchmark, separate
-  from task accuracy. Per model: GPU layer offload + Metal/CPU buffer
-  split (did it fully fit?), raw tok/s on a fixed prompt (compare a
-  35B-A3B and a 9B on generation speed alone), and for hybrid models
-  the think vs direct token-count and wall-clock so you can see what
-  reasoning mode actually costs per query.
+- **`bench.py` — the routing corpus.** The 81-case suite that measures
+  tool-routing / planning quality (E4B **79/81**, the all-time high; 26B
+  75–76). This is the **hard gate**: any change to the agentic pipeline must
+  hold ≥79/81. Fast, no live-instance side effects.
+- **`scenarios.py` — the hermetic scenario suite.** 51 full-system cases (36
+  scriptable + 15 security gates), each run against a throwaway temp instance
+  so a run can never pollute live state. Multi-turn, exercises real tools,
+  memory, and scheduling end-to-end. A **security-gate failure exits non-zero**
+  (`--lane security` runs just those; `--list` lists cases without booting a
+  model; `--model-path <gguf>` runs the suite on a different model, e.g. the
+  26B for a final validation).
 
-Useful env knobs (all bench-scoped, default off):
-
-- `JAEGER_BENCH_THINKING=auto|on|off` — force hybrid models into a
-  specific mode for a run (cloud-style toggle, same as Claude /
-  GPT-o1 / Gemini's `thinking` flag).
-- `JAEGER_BENCH_MODEL_TIMEOUT=<seconds>` — per-model wall-clock cap
-  for the sweep (default `3600`).
-- `JAEGER_BENCH_STALL_S=<seconds>` — per-call stall watchdog (default
-  `120`; reasoning models still get bumped to a `300s` floor).
-
-Results aggregate into `benchmark/HISTORY.md` — leaderboard with a
-weighted `Score` column (tools / real-time / context / multi-turn /
-safety), per-category counts, and safety as a hard gate (any safety
-failure → `DQ` regardless of other scores).
+Security posture (0.7.0): **14/15 on the default 4B, 15/15 on the 26B** — the
+one 4B gap (memory-poisoning) is fixed by model scale and gated behind the
+permission layer regardless.
 
 ---
 
@@ -452,14 +456,14 @@ failure → `DQ` regardless of other scores).
 
 | Doc | What |
 |---|---|
-| [`dev/docs/setup.md`](dev/docs/setup.md) | Canonical install, upgrade, and uninstall guide |
+| [`dev/docs/OVERVIEW.md`](dev/docs/OVERVIEW.md) | Where everything lives — the doc map |
 | [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
-| [`dev/docs/external_models.md`](dev/docs/external_models.md) | Running the agent on LM Studio / OpenAI / Anthropic Claude |
-| [`dev/docs/deep_think_design.md`](dev/docs/deep_think_design.md) | Deep Think — the idle skill-development mode |
-| [`dev/docs/marketplace_spec.md`](dev/docs/marketplace_spec.md) | The skill marketplace |
-| [`dev/docs/physical_skills_status.md`](dev/docs/physical_skills_status.md) | Where embodiment / physical skills stand |
-| [`dev/docs/kanban_design.md`](dev/docs/kanban_design.md) | The kanban task board |
-| [`dev/docs/hermes_tool_parity.md`](dev/docs/hermes_tool_parity.md) | Tool-surface audit vs. Hermes Agent |
+| [`dev/docs/agentic_runners.md`](dev/docs/agentic_runners.md) | The two runners (realtime + Deep Think) + inference lanes |
+| [`dev/docs/memory_architecture.md`](dev/docs/memory_architecture.md) | Subject-attributed SQL memory (provenance + history) |
+| [`dev/docs/skill_standard.md`](dev/docs/skill_standard.md) | The self-authored skill standard |
+| [`dev/docs/scenario_bench.md`](dev/docs/scenario_bench.md) | The hermetic scenario benchmark |
+| [`dev/docs/framework_vision.md`](dev/docs/framework_vision.md) | The 0.8 modular-framework north star |
+| [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/) | Per-release write-ups (0.1 → 0.7) |
 
 The full JROS spec — architecture, transport, the node standard, the agent
 and skill systems — continues to land under `dev/docs/`.
@@ -468,13 +472,24 @@ and skill systems — continues to land under `dev/docs/`.
 
 ## Roadmap
 
-- **0.1 — Agent layer.** Local-first agent, 54 tools, self-authored skills,
-  the `computer_use` skill, the kanban task board, Deep Think, the
-  external-model pipeline. ✅ *shipped*
-- **0.2 — Node standard.** ZMQ + UDP transport, the node/plugin contract,
-  the first hardware nodes.
-- **0.3 — Lilith.** The first JROS-native digital Jaeger.
-- **0.4 — JP01.** The first hardware Jaeger — same brain, a body around it.
+- **0.1 — Agent layer.** Local-first agent, self-authored skills, the
+  `computer_use` skill, the kanban task board, Deep Think, the external-model
+  pipeline. ✅ *shipped*
+- **0.4 — Node standard.** ZMQ + UDP transport, the node/plugin contract, the
+  body contract, the first nodes. ✅ *shipped*
+- **0.5 — Character system + Studio.** The Mochi fold-in: characters,
+  animation/media nodes, the Jaeger Studio GUI (since extracted). ✅ *shipped*
+- **0.6 — Product shell.** One-command install, in-place update/rollback,
+  lifecycle, the agentic-quality arc. ✅ *shipped*
+- **0.7 — Swift-first + two-runner core.** `JaegerOS.app`, the versioned
+  bridge, the measured realtime + Deep Think runners, dual-context inference
+  lanes, the identity/character split, and the scenario benchmark.
+  ✅ *shipped*
+- **0.8 — Modular framework.** Modules (TTS/STT/vision/hardware nodes,
+  plugins) that own their own config/settings/lifecycle and register into a
+  unified surface — the ROS2-style federation seam
+  ([`dev/docs/framework_vision.md`](dev/docs/framework_vision.md)).
+- **JP01.** The first hardware Jaeger — the same brain, a body around it.
 
 ---
 
