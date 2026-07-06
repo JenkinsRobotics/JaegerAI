@@ -66,19 +66,41 @@ def _model_name(boot: Any) -> str | None:
 
 
 def _active_character(boot: Any) -> tuple[str | None, str | None]:
-    """The active character's (display name, profile-icon path) — for the native
-    client's tray/header. Best-effort; a miss is cosmetic."""
+    """The active character's display name + the agent's effective avatar path
+    (see ``_effective_icon``) — for the native client's tray/header. Best-effort;
+    a miss is cosmetic."""
     try:
         from jaeger_os.personality.character import active_character
         root = getattr(getattr(boot, "layout", None), "root", None)
         if root is not None:
             c = active_character(root)
             if c is not None:
-                icon = c.icon_path()
-                return c.name, (str(icon) if icon else None)
+                return c.name, _effective_icon(boot, c)
     except Exception:  # noqa: BLE001
         pass
     return None, None
+
+
+def _effective_icon(boot: Any, character: Any) -> str | None:
+    """The agent's avatar path: the instance profile picture (identity.avatar)
+    if set and present, else the active character's card. So the agent keeps
+    its own face once the operator sets one, while a fresh instance still shows
+    the character card as a default (which follows a persona switch)."""
+    from pathlib import Path
+    try:
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        lay = getattr(boot, "layout", None)
+        avatar = (load_yaml(lay.identity_path, Identity).avatar or "").strip()
+        if avatar:
+            p = Path(avatar)
+            if not p.is_absolute():
+                p = Path(lay.root) / avatar
+            if p.is_file():
+                return str(p)
+    except Exception:  # noqa: BLE001 — cosmetic; fall back to the character card
+        pass
+    icon = character.icon_path() if character is not None else None
+    return str(icon) if icon else None
 
 
 _LAYERS = ("hexaco", "special", "expression", "domains")

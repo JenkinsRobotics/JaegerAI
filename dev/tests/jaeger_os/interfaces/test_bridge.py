@@ -46,6 +46,40 @@ def _instance_on_disk(tmp_path, monkeypatch):
     return root
 
 
+def test_effective_icon_prefers_instance_avatar_over_character_card(tmp_path):
+    """The agent's face is instance-owned: identity.avatar wins when set +
+    present; otherwise the active character's card is the default."""
+    import types
+
+    from jaeger_os.core.instance.instance import InstanceLayout
+    from jaeger_os.core.instance.schemas import Identity, dump_yaml
+    from jaeger_os.interfaces import bridge
+
+    lay = InstanceLayout(root=tmp_path / "inst2")
+    lay.root.mkdir(parents=True)
+    lay.ensure_dirs()
+    card = tmp_path / "card.png"
+    card.write_bytes(b"x")
+    char = types.SimpleNamespace(icon_path=lambda: card)
+    boot = types.SimpleNamespace(layout=lay)
+
+    # No instance avatar → the character card is the default face.
+    dump_yaml(lay.identity_path, Identity(name="Ted", role="r", personality="p"))
+    assert bridge._effective_icon(boot, char) == str(card)
+
+    # A custom instance avatar (relative to the instance dir) wins.
+    pic = lay.root / "me.png"
+    pic.write_bytes(b"y")
+    dump_yaml(lay.identity_path,
+              Identity(name="Ted", role="r", personality="p", avatar="me.png"))
+    assert bridge._effective_icon(boot, char) == str(pic)
+
+    # A set-but-missing avatar path falls back to the card (never a broken icon).
+    dump_yaml(lay.identity_path,
+              Identity(name="Ted", role="r", personality="p", avatar="gone.png"))
+    assert bridge._effective_icon(boot, char) == str(card)
+
+
 class _SlowStdin:
     """An iterable stdin that holds the FIRST line back briefly — lets a
     test deterministically lose the stdin-vs-boot-thread race (the boot

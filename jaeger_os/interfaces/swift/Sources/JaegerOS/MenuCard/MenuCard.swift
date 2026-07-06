@@ -82,8 +82,9 @@ struct MenuCard: View {
         }
     }
 
-    /// The active character's face, clipped to a circle. Falls back to the
-    /// bundled agent image, then the drawn mech mark.
+    /// The agent's effective avatar (instance profile picture if set, else the
+    /// active character's card), clipped to a circle. Falls back to the bundled
+    /// agent image, then the drawn mech mark.
     private var avatar: some View {
         Group {
             if let path = agent.status?.iconPath, let img = NSImage(contentsOfFile: path) {

@@ -79,6 +79,13 @@ class Identity(BaseModel):
     # don't share the same voice.
     voice_id: str | None = Field(None, max_length=64,
                                  description="Kokoro voice id (am_*, af_*)")
+    # The instance's profile picture — the agent's OWN face, independent of
+    # whatever character it's playing. Absolute, or relative to the instance
+    # dir. ``None`` → surfaces fall back to the active character's card, so a
+    # fresh instance always has a face; switching persona changes that default
+    # only until the operator sets a picture here.
+    avatar: str | None = Field(None, max_length=512,
+                               description="Path to the instance profile picture")
 
     @field_validator("name")
     @classmethod
