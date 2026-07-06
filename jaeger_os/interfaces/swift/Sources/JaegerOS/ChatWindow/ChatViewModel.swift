@@ -208,6 +208,12 @@ final class ChatViewModel: ObservableObject {
         case "turn.end":
             return
         case "thought.start", "deep_think.start", "thinking":
+            // One chip per in-flight turn — the busy `state` frames can
+            // re-fire mid-turn (tool hops), and a duplicate chip per hop
+            // reads as noise.
+            guard !messages.contains(where: { $0.author == .thinking }) else {
+                return
+            }
             messages.append(ChatMessage(
                 author: .thinking,
                 timestamp: Date(),
@@ -215,10 +221,12 @@ final class ChatViewModel: ObservableObject {
                 isStreaming: true
             ))
         case "thought.end", "deep_think.end":
-            // Mark the most recent thinking chip as done.
-            if let i = messages.lastIndex(where: { $0.author == .thinking }) {
-                messages[i].isStreaming = false
-            }
+            // The chip is TRANSIENT — typing-dots semantics. It exists
+            // only while the turn is in flight; when the agent stops
+            // thinking (reply landed / turn ended) it leaves the
+            // transcript entirely instead of lingering as a stale
+            // "thinking…" line under every reply.
+            messages.removeAll { $0.author == .thinking }
         case "tool.call", "tool.start":
             let name = event.payload["tool"]?.get(String.self)
                 ?? event.payload["name"]?.get(String.self)
@@ -277,25 +285,33 @@ final class ChatViewModel: ObservableObject {
 
         // Placeholder assistant bubble — we'll fill in once the
         // response lands.  Marked as streaming so the view can show a
-        // cursor / spinner if it wants to.
-        let placeholderIndex = messages.count
-        messages.append(ChatMessage(
+        // cursor / spinner if it wants to.  Tracked BY ID, not index —
+        // thinking chips come and go mid-turn (they're transient now),
+        // so a captured index could drift.
+        let placeholder = ChatMessage(
             author: .assistant,
             timestamp: Date(),
             text: "",
             isStreaming: true
-        ))
+        )
+        messages.append(placeholder)
 
         isSending = true
-        defer { isSending = false }
+        defer {
+            isSending = false
+            // Belt-and-braces: no thinking chip survives past its turn.
+            messages.removeAll { $0.author == .thinking }
+        }
 
         do {
             // One turn over the bridge → the reply text. The session key
             // keeps THIS window's conversation isolated on the Python side.
             let replyText = try await agent.sendChat(text: trimmed,
                                                      session: sessionKey)
-            messages[placeholderIndex].text = replyText
-            messages[placeholderIndex].isStreaming = false
+            if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
+                messages[i].text = replyText
+                messages[i].isStreaming = false
+            }
 
             // Voice-loop completion: speak the reply through TTS so
             // the operator hears it.  Respects the operator's auto-
@@ -310,9 +326,11 @@ final class ChatViewModel: ObservableObject {
                 NSLog("[ChatViewModel] TTS skipped — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) empty=\(replyText.isEmpty)")
             }
         } catch {
-            messages[placeholderIndex].text =
-                "⚠ agent error: \(error.localizedDescription)"
-            messages[placeholderIndex].isStreaming = false
+            if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
+                messages[i].text =
+                    "⚠ agent error: \(error.localizedDescription)"
+                messages[i].isStreaming = false
+            }
         }
     }
 }

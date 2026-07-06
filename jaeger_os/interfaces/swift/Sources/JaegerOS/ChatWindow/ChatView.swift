@@ -126,11 +126,19 @@ struct ChatView: View {
                 .padding(.leading, 4)
                 .padding(.bottom, 8)
 
-            TextField("Message…", text: $chat.composerText, axis: .vertical)
+            // Explicit prompt Text: the default placeholder renders in the
+            // system's label colour, which collapses to near-black on the
+            // Term.canvas ground when the window inherits a light
+            // appearance. Styling it Term.inkDim keeps it legible no
+            // matter what appearance AppKit hands us.
+            TextField(text: $chat.composerText,
+                      prompt: Text("Message…").foregroundColor(Term.inkDim),
+                      axis: .vertical) { Text("Message") }
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .font(Term.mono)
                 .foregroundColor(Term.ink)
+                .tint(Term.accent)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
@@ -162,7 +170,10 @@ struct ChatView: View {
                       ? "stop.circle.fill"
                       : "mic.circle.fill")
                     .font(.system(size: 28))
-                    .foregroundStyle(voice.isRecording ? .red : .secondary)
+                    // Term palette, not `.secondary` — the system secondary
+                    // colour is a dark grey under a light appearance and
+                    // vanishes on the dark canvas.
+                    .foregroundStyle(voice.isRecording ? Color.red : Term.inkDim)
                     .symbolEffect(.pulse, isActive: voice.isRecording)
             }
             .buttonStyle(.plain)
