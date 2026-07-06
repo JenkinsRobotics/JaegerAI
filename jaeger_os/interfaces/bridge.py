@@ -376,6 +376,42 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     ctx.booted.set()
 
 
+# Slash commands the bridge serves itself (the TUI's handlers, captured to
+# text) — a SAFE subset of interfaces/tui/slash_commands.py: read-only /
+# reporting handlers that never call ``console.input()``. The bridge's stdin
+# is the protocol stream, so an interactive handler would eat protocol
+# frames; anything conversational (goal / deepthink dialogs, model picker)
+# and anything needing the live TUI (reboot, instance hot-switch) stays
+# TUI-only and reports as such.
+_SLASH_SAFE = ("help", "tools", "skills", "facts", "plugins",
+               "instance", "instances", "models", "board", "config")
+
+
+def _run_slash(text: str, ctx: "_Ctx") -> str:
+    """Dispatch one slash line through the TUI's registry and return the
+    rendered output as plain text. Python stays the single source of truth
+    for slash behaviour — the client just displays what comes back."""
+    from rich.console import Console
+    from jaeger_os.interfaces.tui import slash_commands as sc
+
+    name = (text.lstrip("/").split(None, 1) or [""])[0].lower()
+    known = name in sc._BY_NAME  # noqa: SLF001 — same package family
+    if known and name not in _SLASH_SAFE:
+        return (f"/{name} needs the terminal TUI — it isn't available over "
+                "the app bridge.\nAvailable here: "
+                + "  ".join("/" + n for n in _SLASH_SAFE))
+    # Capture the handler's Rich output as plain text (no ANSI, no markup).
+    import io as _io
+    console = Console(file=_io.StringIO(), record=True, width=88,
+                      force_terminal=False, highlight=False)
+    root = getattr(ctx.layout, "root", None)
+    sctx = sc.SlashContext(console=console, instance_dir=root)
+    result = sc.dispatch(text, sctx)
+    if result.message:
+        console.print(result.message)
+    return console.export_text().rstrip() or "(no output)"
+
+
 def _turn_worker(proto: TextIO, ctx: _Ctx,
                  turns: "_queue.Queue[dict[str, Any] | None]") -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
@@ -388,6 +424,19 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             return
         text = (req.get("text") or "").strip()
         session = req.get("session") or "desktop-app"
+        # Slash pre-dispatch — same contract as the TUI REPL: a leading
+        # ``/`` is a command, never a prompt for the model. Runs before
+        # the boot wait so ``/help`` answers even while the model loads.
+        if text.startswith("/"):
+            _emit(proto, protocol.state_frame(True, session))
+            try:
+                reply = _run_slash(text, ctx)
+                _emit(proto, protocol.reply_frame(reply, None, session))
+            except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
+                _emit(proto, protocol.reply_frame("", str(exc), session))
+            finally:
+                _emit(proto, protocol.state_frame(False, session))
+            continue
         ctx.booted.wait()
         if ctx.client is None:
             _emit(proto, protocol.reply_frame(
