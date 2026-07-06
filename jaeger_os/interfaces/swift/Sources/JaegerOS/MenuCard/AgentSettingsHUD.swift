@@ -31,12 +31,14 @@ enum HUD {
 }
 
 private enum Tab: String, CaseIterable, Identifiable {
-    case home = "Home", library = "Library", character = "Character"
-    case traits = "Traits", app = "App Settings", permissions = "Permissions"
+    case home = "Home", instance = "Instance", library = "Library"
+    case character = "Character", traits = "Traits"
+    case app = "App Settings", permissions = "Permissions"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .home: return "house"
+        case .instance: return "at"
         case .library: return "square.grid.2x2"
         case .character: return "person.crop.circle"
         case .traits: return "chart.bar"
@@ -83,6 +85,7 @@ struct AgentSettingsHUD: View {
     @ViewBuilder private var page: some View {
         switch tab {
         case .home: HomePage(store: store, agent: agent, name: name)
+        case .instance: InstancePage(store: store, agent: agent, name: name)
         case .library: LibraryPage(store: store)
         case .character: CharacterPage(store: store)
         case .traits: TraitsPage(store: store)
@@ -133,7 +136,7 @@ struct AgentSettingsHUD: View {
 
     private func loadForTab(_ next: Tab) async {
         switch next {
-        case .home, .library:
+        case .home, .instance, .library:
             if store.characters.isEmpty { await store.loadCharacters() }
         case .character, .traits:
             if store.detail == nil { await store.loadDetail() }
@@ -196,40 +199,32 @@ private func saveButton(_ title: String, _ action: @escaping () -> Void) -> some
 
 // MARK: - pages
 
-/// The instance overview — the agent (identity.yaml) front and center: its
-/// profile picture + name, the character it's PLAYING as a secondary
-/// reference, and the instance settings the operator can change (name +
-/// picture). The persona's characteristics stay below as a reference.
+/// The Home page — the instance's CURRENT STATUS at a glance (not a settings
+/// form): the agent (identity.yaml) front and center with its picture + name,
+/// the character it's PLAYING, the live agent status, the model, and a few
+/// live counters. Editing the instance lives in the Instance tab.
 private struct HomePage: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var agent: AgentBridge
     let name: String
-    @State private var draftName: String = ""
-    @State private var didSeedName = false
 
     private var character: String? { agent.status?.character }
     private var model: String? { agent.status?.modelName }
 
-    var body: some View {
-        overview
-        Spacer().frame(height: 10)
-        instanceSettings
-        Spacer().frame(height: 14)
-        HUD.section("Persona — \(character ?? "…")")
-        Text("The personality this instance is playing. Edit it in the "
-             + "Character and Traits tabs; it never changes the agent's name.")
-            .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
-        Spacer().frame(height: 6)
-        let active = store.characters.first(where: { $0.active })
-        ForEach(Array((active?.stats ?? [])
-            .sorted { abs($0.val - 0.5) > abs($1.val - 0.5) }.prefix(6)),
-                id: \.key) { s in
-            traitRow(s.key, s.val)
+    private var status: (text: String, color: Color) {
+        switch agent.state {
+        case .disconnected:            return ("Offline", .gray)
+        case .connecting:              return ("Connecting…", .orange)
+        case .failed, .terminated:     return ("Something went wrong", .red)
+        case .ready:
+            if case .failed = agent.agentState { return ("Something went wrong", .red) }
+            if agent.isAgentBooting { return ("Warming up…", .orange) }
+            if agent.isBusy { return ("In deep thought…", .orange) }
+            return ("Standing by", .green)
         }
     }
 
-    // Picture + name + "playing X" + model.
-    private var overview: some View {
+    var body: some View {
         HStack(alignment: .center, spacing: 18) {
             InstanceAvatar(path: agent.status?.iconPath, size: 76)
             VStack(alignment: .leading, spacing: 4) {
@@ -240,42 +235,100 @@ private struct HomePage: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(HUD.accent)
                 }
-                if let model {
-                    Text(model).font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+                HStack(spacing: 7) {
+                    Circle().fill(status.color).frame(width: 8, height: 8)
+                    Text(status.text).font(.system(size: 12)).foregroundStyle(HUD.inkDim)
                 }
             }
             Spacer()
         }
+        Spacer().frame(height: 16)
+        HUD.section("Status")
+        statusGrid
+        Spacer().frame(height: 16)
+        HUD.section("Persona — \(character ?? "…")")
+        let active = store.characters.first(where: { $0.active })
+        ForEach(Array((active?.stats ?? [])
+            .sorted { abs($0.val - 0.5) > abs($1.val - 0.5) }.prefix(6)),
+                id: \.key) { s in
+            traitRow(s.key, s.val)
+        }
     }
 
-    // The editable instance settings: agent name + profile picture.
-    private var instanceSettings: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HUD.section("Instance")
-            HStack(alignment: .bottom, spacing: 10) {
-                hudField("Agent name", $draftName)
-                saveButton("Save") {
-                    let n = draftName.trimmingCharacters(in: .whitespaces)
-                    guard !n.isEmpty, n != name else { return }
-                    Task { await store.saveAgentName(n) }
-                }
-            }
-            HStack(spacing: 10) {
-                Text("PROFILE PICTURE").font(.system(size: 10, weight: .semibold))
-                    .tracking(1).foregroundStyle(HUD.inkDim)
-                Spacer()
-                Button("Change…") {
+    // Read-only live facts — model, uptime, turns, character level.
+    private var statusGrid: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            statusRow("Model", model ?? "—")
+            statusRow("Playing", character ?? "—")
+            statusRow("Level", "\(store.detail?.level ?? store.characters.first(where: { $0.active })?.level ?? 1)")
+            if let up = agent.status?.uptimeSeconds { statusRow("Uptime", Self.uptime(up)) }
+            if let turns = agent.status?.turnCount { statusRow("Turns", "\(turns)") }
+        }
+    }
+
+    private func statusRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label.uppercased()).font(.system(size: 10, weight: .semibold))
+                .tracking(1).foregroundStyle(HUD.inkDim)
+                .frame(width: 90, alignment: .leading)
+            Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(HUD.ink)
+                .lineLimit(1)
+            Spacer()
+        }
+    }
+
+    private static func uptime(_ s: Double) -> String {
+        let t = Int(s), h = t / 3600, m = (t % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : (m > 0 ? "\(m)m" : "\(t)s")
+    }
+}
+
+/// The Instance tab — the instance settings the operator OWNS: the agent's
+/// name (identity.yaml) and its profile picture, both independent of the
+/// character being played. The persona itself is edited in Character/Traits.
+private struct InstancePage: View {
+    @ObservedObject var store: SettingsStore
+    @ObservedObject var agent: AgentBridge
+    let name: String
+    @State private var draftName: String = ""
+    @State private var didSeedName = false
+
+    private var character: String? { agent.status?.character }
+
+    var body: some View {
+        HUD.section("Instance")
+        Text("Your agent's own identity — its name and picture stay the same "
+             + "no matter which character it plays.")
+            .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+        Spacer().frame(height: 12)
+
+        HStack(alignment: .center, spacing: 18) {
+            InstanceAvatar(path: agent.status?.iconPath, size: 72)
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Change picture…") {
                     if let p = pickImageFile() { Task { await store.setAvatar(path: p) } }
                 }.buttonStyle(.plain).foregroundStyle(HUD.accent)
                 if agent.status?.hasCustomAvatar == true {
-                    Button("Use character card") { Task { await store.clearAvatar() } }
-                        .buttonStyle(.plain).foregroundStyle(HUD.inkDim)
+                    Button("Use \(character ?? "character") card") {
+                        Task { await store.clearAvatar() }
+                    }.buttonStyle(.plain).foregroundStyle(HUD.inkDim)
                 }
+                Text(agent.status?.hasCustomAvatar == true
+                     ? "Using a custom picture."
+                     : "Using \(character ?? "the character")'s card as the default.")
+                    .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
             }
-            Text(agent.status?.hasCustomAvatar == true
-                 ? "Using a custom picture."
-                 : "Using \(character ?? "the character")'s card as the default.")
-                .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+            Spacer()
+        }
+        Spacer().frame(height: 16)
+
+        HStack(alignment: .bottom, spacing: 10) {
+            hudField("Agent name", $draftName)
+            saveButton("Save") {
+                let n = draftName.trimmingCharacters(in: .whitespaces)
+                guard !n.isEmpty, n != name else { return }
+                Task { await store.saveAgentName(n) }
+            }
         }
         .onAppear { if !didSeedName { draftName = name; didSeedName = true } }
         .onChange(of: name) { _, n in draftName = n }
