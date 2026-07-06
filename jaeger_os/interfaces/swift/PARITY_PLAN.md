@@ -60,8 +60,17 @@ live orb data (tts amplitude / audio frames / agent-state phases).
 3. **Tray parity** — bring `MenuCard` to the new tray: character avatar+name+status,
    action bar (chat·agent·quick-input), settings + power. Caret + click-away.
 4. **Avatar+chat window** — orb + chat split + mic/speaker toggles.
-5. **Character system** — active character drives name/icon everywhere (bridge should
-   report the active character; or Swift reads active_character).
+5. **Character system** — active character drives icon/persona everywhere (bridge
+   reports it). 2026-07-05 standardization: surfaces LEAD with the AGENT name
+   (identity.yaml, `agent_name` off the identity query) — the character is
+   secondary flavor ("Ted · playing HAL 9000"). Chat + avatar windows done;
+   **tray MenuCard still character-first — operator follow-up** (operator's file).
+
+Done since (2026-07-05, chat window): slash commands over the bridge (`/help`
+& the safe read-only subset, Python-side dispatch), reply telemetry ("replied
+in 3.2s" per reply + "ctx 18.3K/32.8K" in the status bar — v1 additive
+`elapsed_s`/`ctx_used`/`ctx_max` on the reply frame), transient thinking chip,
+dark-appearance window + Term-palette contrast pass.
 
 ## 5. Phases (revised — most of 1–2 already exist)
 
