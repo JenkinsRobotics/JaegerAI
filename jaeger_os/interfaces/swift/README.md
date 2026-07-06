@@ -1,7 +1,9 @@
 # JaegerOS — native macOS desktop app
 
-> The DEFAULT windowed UI since 0.6.0 (`interaction.ui = "swift"`;
-> `launch.py` builds + runs it, PySide6 is the fallback).
+> The primary UI since 0.7.0. `JaegerOS.app` (default instance) and
+> `JaegerOS-dev.app` (the `jros-dev` dev instance) are built from this
+> package; `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
+> terminal first-class. (`launch.py` was removed in 0.7.)
 
 One Swift process owns the tray card, the chat window, the avatar orb,
 the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`

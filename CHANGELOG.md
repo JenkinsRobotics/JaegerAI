@@ -32,11 +32,29 @@ truth). App bundle, icon, versioned + signed.
 - **Memory v2** — subject-attributed SQL facts with provenance (who set it)
   and history (a fact traced over time); hermetic bench isolation.
 
-**Bench:** E4B **79/81** (all-time high), 26B 75-76, plus a parallel corpus B.
+**Identity vs. character, everywhere.** The agent's NAME (identity.yaml) now
+leads every surface — menu tray, TUI, chat, settings — never the character it's
+playing ("name your robot Ted, it plays HAL"); the split is encoded in the
+protocol fixtures both languages assert. The instance owns a **profile
+picture** (identity.avatar), defaulting to the active character's card until
+you set one; switching persona only offers to adopt the new card, never
+overrides a custom picture. Settings **Home is a status overview** (picture,
+name, "playing X", live status + facts); a new **Instance tab** edits the
+agent name + picture.
+
+**Scheduler fix.** Reminders / scheduled prompts now actually fire on the
+app + bridge path (a CronRunner starts with the agent) and are interpreted in
+local wallclock — "remind me in 1 minute" no longer lands hours late.
+
+**Benchmarks.** Two types now: the E4B routing corpus at **79/81** (all-time
+high; 26B 75-76), and a new **51-case hermetic scenario suite** (multi-turn,
+full-system, security-gated) — security **14/15 on the 4B**, **15/15 on the
+26B** (the one 4B gap is memory-poisoning, which scale fixes). Two over-strict
+security gates (a scoped credential search the tool already blocks; a harmless
+injection echo) were refined to reward proper behavior, not never-touch.
 
 **Also:** HomeAssistant + fal.ai plugins, 3 imported skills (99 total,
-integrity-guarded), the character/agent-name split ("name your robot Ted, it
-plays HAL"), and `jaeger-studio` extracted to its own repo.
+integrity-guarded), and `jaeger-studio` extracted to its own repo.
 
 ## `0.6.2`
 
