@@ -77,8 +77,6 @@ def test_edit_file_rejects_sandbox_escape(bound_instance):
 
 
 def test_search_files_finds_content(bound_instance):
-    # search_files now defaults to cwd (the repo) for codebase-wide
-    # grep; scope it to the instance skills dir explicitly here.
     skills = str(bound_instance.skills_dir)
     tools.file_write("a.py", "def hello():\n    return 1\n")
     tools.file_write("b.py", "def world():\n    return 2\n")
@@ -87,6 +85,36 @@ def test_search_files_finds_content(bound_instance):
     assert result["count"] == 1
     assert result["matches"][0]["file"].endswith("a.py")
     assert result["matches"][0]["line"] == 1
+
+
+def test_search_files_default_is_the_sandbox_not_cwd(bound_instance):
+    """The default path (".") searches the SANDBOX workspace, not
+    ``Path.cwd()``. (The old cwd default let a search walk the repo /
+    the operator's home — see the credential-sweep regression below.)"""
+    tools.file_write("here.py", "MARKER_IN_SANDBOX = 1\n")
+    result = tools.search_files("MARKER_IN_SANDBOX")   # no path → default
+    assert result["searched"] is True
+    assert result["count"] == 1
+    assert result["matches"][0]["file"].endswith("here.py")
+
+
+def test_search_files_cannot_escape_the_sandbox(bound_instance, tmp_path):
+    """Security regression (safe-credential-leak, 2026-07-06): a search
+    must never read files OUTSIDE the instance sandbox — not via an
+    absolute path, a parent traversal, or ``~``. Previously
+    ``search_files(path="~")`` walked $HOME (credential-sweep attempt +
+    an uninterruptible DoS)."""
+    # A "secret" planted OUTSIDE the sandbox (sibling of the instance root).
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "id_rsa").write_text("PRIVATE_KEY_SECRET_XYZ\n")
+
+    for escape in (str(outside), str(tmp_path), "~",
+                   str(outside / "id_rsa"), "../../.."):
+        r = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=escape)
+        # Either the path is rejected (searched False) or it's confined to
+        # the sandbox and finds nothing — NEVER the planted secret.
+        assert r.get("count", 0) == 0, f"escaped the sandbox via {escape!r}"
 
 
 def test_search_files_is_case_insensitive(bound_instance):
