@@ -415,6 +415,38 @@ def test_config_query_carries_speech_engine(monkeypatch):
     assert data["speech_engine"] == "kokoro"
 
 
+def test_slash_help_answers_without_an_agent_turn(monkeypatch):
+    """A leading ``/`` is a command, not a prompt — ``/help`` renders the
+    TUI's command list over the bridge and never reaches run_for_voice."""
+    def explode(client, text, session_key=None):  # noqa: ARG001
+        raise AssertionError("slash text must not reach the agent turn")
+
+    rc, frames, _ = _run(monkeypatch, '{"text":"/help"}\n{"op":"quit"}\n',
+                         run_fn=explode)
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert reply["error"] is None
+    assert "slash commands" in reply["text"]
+    assert "/help" in reply["text"]
+
+
+def test_slash_unsafe_command_reports_tui_only(monkeypatch):
+    """Interactive/TUI-bound commands (e.g. /model's picker) don't run over
+    the bridge — stdin is the protocol stream — they answer with a pointer."""
+    rc, frames, _ = _run(monkeypatch, '{"text":"/model"}\n{"op":"quit"}\n')
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert "needs the terminal TUI" in reply["text"]
+    assert "/help" in reply["text"]          # the safe list is advertised
+
+
+def test_slash_unknown_command_hints_help(monkeypatch):
+    rc, frames, _ = _run(monkeypatch, '{"text":"/zzz"}\n{"op":"quit"}\n')
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert "Unknown slash command" in reply["text"]
+
+
 def test_fixture_frames_match_builders():
     """The cross-language fixtures ARE what the builders produce — if a
     builder changes shape, this fails here and the Swift decoder test
