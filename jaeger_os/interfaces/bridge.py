@@ -84,6 +84,17 @@ def _active_character(boot: Any) -> tuple[str | None, str | None]:
 _LAYERS = ("hexaco", "special", "expression", "domains")
 
 
+def _agent_name(boot: Any) -> str | None:
+    """The AGENT's own name (identity.yaml — the unique robot the operator
+    named), NEVER the character. Every branded surface leads with this."""
+    try:
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        lay = getattr(boot, "layout", None)
+        return (load_yaml(lay.identity_path, Identity).name or "").strip() or None
+    except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
+        return None
+
+
 def _instance_root(boot: Any) -> Any:
     return getattr(getattr(boot, "layout", None), "root", None)
 
@@ -135,13 +146,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # the persona being played; surfaces lead with agent_name and show
         # the character as secondary flavor ("Ted · playing HAL 9000").
         name, icon = _active_character(boot)
-        agent_name = None
-        try:
-            from jaeger_os.core.instance.schemas import Identity, load_yaml
-            agent_name = (load_yaml(lay.identity_path, Identity).name or "").strip() or None
-        except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
-            agent_name = None
-        return {"agent_name": agent_name, "character": name, "icon": icon,
+        return {"agent_name": _agent_name(boot), "character": name, "icon": icon,
                 "model": _model_name(boot)}
     if what == "characters":
         active_id = active_character_id(root) if root else None
@@ -457,7 +462,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     name, icon = _active_character(boot)
     _emit(proto, protocol.agent_state_frame(
-        "ready", model=_model_name(boot), character=name, icon=icon))
+        "ready", model=_model_name(boot), character=name, icon=icon,
+        agent_name=_agent_name(boot)))
     ctx.booted.set()
 
 
@@ -587,7 +593,10 @@ def main(argv: list[str] | None = None) -> int:
         ctx.layout = None
 
     # FAST READY: the transport is usable now; the agent streams in behind.
-    _emit(proto, protocol.ready_frame(instance, None, agent="booting"))
+    # Carry the agent's name (identity.yaml, on disk pre-boot) from the very
+    # first frame so the tray/header never flashes the character name.
+    _emit(proto, protocol.ready_frame(instance, None, agent="booting",
+                                      agent_name=_agent_name(ctx)))
 
     # FIRST-RUN GUARD: with no instance on disk, ``boot_for_tui`` would
     # auto-fire the INTERACTIVE CLI wizard, whose ``input()`` reads

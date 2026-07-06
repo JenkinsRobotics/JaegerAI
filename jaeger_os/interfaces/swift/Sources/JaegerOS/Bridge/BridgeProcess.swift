@@ -26,17 +26,19 @@ import Foundation
 struct BridgeReady: Sendable {
     let instance: String
     let model: String?
-    let character: String?   // active character's display name
-    let icon: String?        // absolute path to its profile image
+    let character: String?   // active character's display name (the persona)
+    let icon: String?        // absolute path to the effective avatar
     let proto: String        // protocol version the bridge speaks
     let capabilities: [String]
     let agent: String        // "ready" | "booting"
+    let agentName: String?   // the AGENT's name (identity.yaml) — lead with this
 }
 
 /// Agent lifecycle, decoupled from transport readiness.
 enum AgentLifecycle: Sendable, Equatable {
     case booting
-    case ready(model: String?, character: String?, icon: String?)
+    case ready(model: String?, character: String?, icon: String?,
+               agentName: String?)
     case failed(String)
 }
 

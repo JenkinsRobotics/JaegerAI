@@ -52,8 +52,10 @@ struct AgentSettingsHUD: View {
     @ObservedObject private var store = SettingsStore.shared
     @State private var tab: Tab = .home
 
+    /// The AGENT's name (identity.yaml), never the character. ``store.detail``
+    /// is the active CHARACTER's detail, so it must not lead here.
     private var name: String {
-        store.detail?.name ?? agent.status?.character
+        agent.status?.agentName ?? agent.status?.character
             ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }
 

@@ -71,19 +71,22 @@ final class ProtocolFixtureTests: XCTestCase {
             return XCTFail("wrong case")
         }
         XCTAssertEqual(warm.agent, "ready")
-        XCTAssertEqual(warm.character, "Jarvis")
+        // The split: lead with the agent's name, character is the persona.
+        XCTAssertEqual(warm.agentName, "Jarvis")
+        XCTAssertEqual(warm.character, "HAL 9000")
     }
 
     func testAgentStateLifecycle() throws {
         guard case .agentState(.booting) = try decode("agent_state_booting") else {
             return XCTFail("booting")
         }
-        guard case .agentState(.ready(let model, let character, _)) =
+        guard case .agentState(.ready(let model, let character, _, let agentName)) =
                 try decode("agent_state_ready") else {
             return XCTFail("ready")
         }
         XCTAssertEqual(model, "gemma-4-E4B-it-Q4_K_M.gguf")
-        XCTAssertEqual(character, "Jarvis")
+        XCTAssertEqual(character, "HAL 9000")
+        XCTAssertEqual(agentName, "Jarvis")
         guard case .agentState(.failed(let reason)) =
                 try decode("agent_state_failed") else {
             return XCTFail("failed")

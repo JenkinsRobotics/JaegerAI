@@ -53,6 +53,10 @@ final class SplashWindowController {
         model.fail(id, detail: detail, progress: progress)
     }
 
+    func advance(_ id: String, detail: String, progress: Double) {
+        model.advance(id, detail: detail, progress: progress)
+    }
+
     func finish(_ detail: String) async {
         model.finish(detail)
         // Hold the SYSTEM ONLINE state long enough to actually read it
@@ -79,7 +83,21 @@ private final class SplashBootModel: ObservableObject {
     @Published var headline = "Booting JaegerOS"
     @Published var detail = "Initializing JROS runtime"
     @Published var progress = 0.04
-    @Published var stages: [SplashStage] = []
+    @Published var stages: [SplashStage] = SplashBootModel.bootStages
+    let quips = SplashQuips.all.shuffled()
+
+    private static let bootStages: [SplashStage] = [
+        SplashStage(id: "interface", title: "Interface core",
+                    detail: "Queued for startup"),
+        SplashStage(id: "bridge", title: "Agent bridge",
+                    detail: "Queued for startup"),
+        SplashStage(id: "model", title: "Agent model",
+                    detail: "Queued for startup"),
+        SplashStage(id: "settings", title: "Settings cache",
+                    detail: "Queued for startup"),
+        SplashStage(id: "hotkey", title: "Operator controls",
+                    detail: "Queued for startup"),
+    ]
 
     func start(_ id: String, _ title: String, detail: String, progress: Double) {
         upsert(id, title, detail: detail, phase: .running)
@@ -91,19 +109,25 @@ private final class SplashBootModel: ObservableObject {
     func complete(_ id: String, detail: String, progress: Double) {
         set(id, detail: detail, phase: .done)
         self.detail = detail
-        self.progress = progress
+        setProgress(progress)
+    }
+
+    func advance(_ id: String, detail: String, progress: Double) {
+        set(id, detail: detail, phase: .running)
+        self.detail = detail
+        setProgress(progress)
     }
 
     func fail(_ id: String, detail: String, progress: Double) {
         set(id, detail: detail, phase: .failed)
         headline = "Continuing offline"
         self.detail = detail
-        self.progress = progress
+        setProgress(progress)
     }
 
     func finish(_ detail: String) {
         headline = "SYSTEM ONLINE"
-        self.detail = detail
+        self.detail = detail.isEmpty ? "All systems online" : detail
         progress = 1.0
     }
 
@@ -121,6 +145,10 @@ private final class SplashBootModel: ObservableObject {
         guard let index = stages.firstIndex(where: { $0.id == id }) else { return }
         stages[index].detail = detail
         stages[index].phase = phase
+    }
+
+    private func setProgress(_ value: Double) {
+        progress = min(max(progress, value), 1.0)
     }
 }
 
@@ -170,17 +198,16 @@ private struct SplashWindowView: View {
     private var bootPanel: some View {
         HStack(alignment: .bottom, spacing: 24) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 14) {
-                    JaegerMechIcon(size: 46)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("REAL-WORLD LOCAL AGENTIC AGENT FRAMEWORK")
-                            .font(.system(size: 11, weight: .semibold))
-                            .kerning(1.4)
-                            .foregroundStyle(Color.white.opacity(0.65))
-                        Text("JAEGER OS")
-                            .font(.system(size: 36, weight: .heavy))
-                            .foregroundStyle(.white)
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("REAL-WORLD LOCAL AGENTIC AGENT FRAMEWORK")
+                        .font(.system(size: 10, weight: .semibold))
+                        .kerning(1.0)
+                        .foregroundStyle(Color.white.opacity(0.65))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Text("JAEGER OS")
+                        .font(.system(size: 36, weight: .heavy))
+                        .foregroundStyle(.white)
                 }
                 Text(model.headline)
                     .font(.system(size: 14, weight: .bold))
@@ -189,18 +216,16 @@ private struct SplashWindowView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Color.white.opacity(0.62))
                     .lineLimit(1)
-                ProgressView(value: model.progress)
-                    .progressViewStyle(.linear)
-                    .tint(Color(red: 0.35, green: 0.95, blue: 0.70))
-                    .frame(width: 310)
+                splashProgressBar
+                    .frame(width: 310, height: 9)
                 // The fun line: robot humor rotating along the bottom
                 // while the boot grinds — a new quip every few seconds
                 // (frozen once the system is online).
                 TimelineView(.periodic(from: .now, by: 4)) { context in
                     let idx = Int(context.date.timeIntervalSinceReferenceDate / 4)
-                        % SplashQuips.all.count
+                        % model.quips.count
                     Text(model.progress >= 1.0 ? "All systems nominal."
-                                               : SplashQuips.all[idx])
+                                               : model.quips[idx])
                         .font(.system(size: 11, weight: .medium).italic())
                         .foregroundStyle(Color.white.opacity(0.45))
                         .lineLimit(1)
@@ -227,7 +252,7 @@ private struct SplashWindowView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(stage.title)
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(stage.phase == .pending ? 0.42 : 0.88))
+                    .foregroundStyle(.white.opacity(stage.phase == .pending ? 0.68 : 0.88))
                 Text(stage.detail)
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.45))
@@ -236,10 +261,28 @@ private struct SplashWindowView: View {
         }
     }
 
+    private var splashProgressBar: some View {
+        GeometryReader { geo in
+            let clamped = min(max(model.progress, 0.0), 1.0)
+            let fill = model.progress >= 1.0
+                ? Color(red: 0.35, green: 0.95, blue: 0.70)
+                : Color(red: 0.45, green: 0.78, blue: 1.0)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.22))
+                Capsule()
+                    .fill(fill)
+                    .frame(width: max(9, geo.size.width * clamped))
+                    .shadow(color: fill.opacity(model.progress >= 1.0 ? 0.70 : 0.35),
+                            radius: model.progress >= 1.0 ? 7 : 4)
+            }
+            .animation(.easeInOut(duration: 0.35), value: model.progress)
+        }
+    }
+
     private func statusDot(_ phase: SplashPhase) -> some View {
         let color: Color = {
             switch phase {
-            case .pending: return Color.white.opacity(0.22)
+            case .pending: return Color(red: 0.22, green: 0.50, blue: 0.95)
             case .running: return Color(red: 0.45, green: 0.78, blue: 1.0)
             case .done: return Color(red: 0.35, green: 0.95, blue: 0.70)
             case .failed: return Color(red: 1.0, green: 0.48, blue: 0.42)
@@ -248,7 +291,8 @@ private struct SplashWindowView: View {
         return Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .shadow(color: color.opacity(0.55), radius: phase == .running ? 6 : 0)
+            .shadow(color: color.opacity(0.55),
+                    radius: phase == .pending || phase == .running ? 6 : 0)
     }
 }
 
@@ -271,6 +315,26 @@ enum SplashQuips {
         "Polishing the chrome dome.",
         "Rebooting my sense of humor.",
         "Spinning up the fun cortex.",
+        "Negotiating with the local electrons.",
+        "Convincing the model to wear its helmet.",
+        "Loading tiny hard hats for the tool calls.",
+        "Checking if the bridge remembered its keys.",
+        "Preheating the local brain furnace.",
+        "Sorting bolts by emotional maturity.",
+        "Teaching the agent where the floor is.",
+        "Making sure the dashboard blinks responsibly.",
+        "Tuning the optimism dampers.",
+        "Running a vibe check on the runtime.",
+        "Dusting off the command neurons.",
+        "Asking the cache to please be normal.",
+        "Priming the action relays.",
+        "Letting the robot finish its coffee.",
+        "Calibrating the dramatic startup pause.",
+        "Aligning the local-first compass.",
+        "Waking up the toolbelt.",
+        "Checking that all opinions are torqued to spec.",
+        "Teaching the status lights choreography.",
+        "Loading emergency confidence.",
     ]
     static let pick: String = all.randomElement() ?? "Booting…"
 }

@@ -144,7 +144,10 @@ private struct AvatarChatView: View {
                 // (takes effect on restart), same honest behaviour as the
                 // PySide6 window. The live voice loop lands with STT wiring.
                 let on = micOn
-                Task { await agent.command("save_config", args: ["voice_enabled": on]) }
+                Task {
+                    await agent.command("settings_set",
+                        args: ["path": "voice.enabled", "value": on])
+                }
             }
             toggle(on: tts.autoSpeakEnabled, onSymbol: "speaker.wave.2.fill",
                    offSymbol: "speaker.slash",
