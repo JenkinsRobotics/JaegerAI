@@ -127,35 +127,29 @@ def _three_laws(_ctx: FragmentContext) -> str:
 
 
 def _identity_name(ctx: FragmentContext) -> str:
-    """The agent's NAME — the active character's, falling back to
-    identity.yaml. Name ONLY: soul/traits/voice stay out of the worker
-    prompt (station 3, dev/docs/agentic_runners.md — the measured ~7-point
-    execution tax); the persona output filter supplies the voice.
+    """The agent's NAME — identity.yaml's ``name``, ALWAYS.
 
-    Under ``JAEGER_BENCH_NEUTRAL_IDENTITY=1`` (set by the bench runner for
-    the duration of a run) the active character is IGNORED and the plain
-    identity.yaml name is used: the bench measures the engine, not the
-    costume. A character name here tints free-text answers (measured:
-    free_text_story wrote its story about HAL 9000, deterministic 2/2 A/B
-    on E4B, 2026-07-05) and answer_contains checks false-negative on the
-    styled output. Live turns always keep the character's name."""
-    import os
+    The active character NEVER supplies the name: a character is a persona
+    (voice + mannerisms, applied by the output filter), while identity.yaml
+    is the unique robot the operator named at instance creation — "I might
+    want a robot like Jarvis but I will name him Ted; the character prompt
+    gives the personality but the unique instance info isn't overwritten"
+    (operator, 2026-07-05). The character prompt must never overwrite it.
 
-    name = ""
-    if os.environ.get("JAEGER_BENCH_NEUTRAL_IDENTITY") != "1":
-        try:
-            from jaeger_os.personality.character import active_character
-            ch = active_character(ctx.layout.root)
-            if ch is not None:
-                name = (ch.name or "").strip()
-        except Exception:  # noqa: BLE001 — a broken sheet never breaks the prompt
-            name = ""
-    if not name:
-        try:
-            from jaeger_os.core.instance.schemas import Identity, load_yaml
-            name = (load_yaml(ctx.layout.identity_path, Identity).name or "").strip()
-        except Exception:  # noqa: BLE001
-            name = ""
+    Name ONLY: soul/traits/voice stay out of the worker prompt (station 3,
+    dev/docs/agentic_runners.md — the measured ~7-point execution tax); the
+    persona output filter supplies the voice.
+
+    ``JAEGER_BENCH_NEUTRAL_IDENTITY`` is now a NO-OP kept for bench-runner
+    compatibility: it used to force exactly this identity.yaml-only
+    behaviour (a character name in the prompt tinted free-text answers —
+    the 2026-07-05 free_text_story A/B), which is simply the behaviour
+    everywhere now."""
+    try:
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        name = (load_yaml(ctx.layout.identity_path, Identity).name or "").strip()
+    except Exception:  # noqa: BLE001 — a broken identity never breaks the prompt
+        name = ""
     return f"Your name is {name}." if name else ""
 
 
@@ -181,9 +175,9 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
         _subagent_only, "sub-agents, when context is supplied",
     ),
     PromptFragment(
-        "identity_name", "instance", "(generated: active character / identity.yaml)",
+        "identity_name", "instance", "(generated: identity.yaml)",
         _identity_name, _non_subagent,
-        "the agent's NAME only — persona stays in the output filter",
+        "the agent's NAME only (never the character's) — persona stays in the output filter",
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",
