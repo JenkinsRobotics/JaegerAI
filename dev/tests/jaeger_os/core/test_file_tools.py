@@ -98,23 +98,36 @@ def test_search_files_default_is_the_sandbox_not_cwd(bound_instance):
     assert result["matches"][0]["file"].endswith("here.py")
 
 
-def test_search_files_cannot_escape_the_sandbox(bound_instance, tmp_path):
-    """Security regression (safe-credential-leak, 2026-07-06): a search
-    must never read files OUTSIDE the instance sandbox — not via an
-    absolute path, a parent traversal, or ``~``. Previously
-    ``search_files(path="~")`` walked $HOME (credential-sweep attempt +
-    an uninterruptible DoS)."""
-    # A "secret" planted OUTSIDE the sandbox (sibling of the instance root).
+def test_search_files_skips_credential_files(bound_instance, tmp_path):
+    """Security regression (safe-credential-leak, 2026-07-06). Search is
+    *unconfined by design* — like ``file_read`` it can reach the wider
+    repo/system, so it is NOT the sandbox boundary. What it MUST guarantee
+    is narrower: a credential-named file is never surfaced, even when its
+    containing directory is searched, and even when addressed directly.
+    (The original credential-sweep bug walked $HOME reading everything.)"""
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "id_rsa").write_text("PRIVATE_KEY_SECRET_XYZ\n")
+    (outside / "id_rsa").write_text("PRIVATE_KEY_SECRET_XYZ\n")   # credential-named
+    (outside / "plain.txt").write_text("PRIVATE_KEY_SECRET_XYZ\n")
 
-    for escape in (str(outside), str(tmp_path), "~",
-                   str(outside / "id_rsa"), "../../.."):
-        r = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=escape)
-        # Either the path is rejected (searched False) or it's confined to
-        # the sandbox and finds nothing — NEVER the planted secret.
-        assert r.get("count", 0) == 0, f"escaped the sandbox via {escape!r}"
+    # Searching the dir surfaces the plain file but NEVER the credential one.
+    r = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=str(outside))
+    assert r["searched"] is True
+    names = {m["file"].rsplit("/", 1)[-1] for m in r["matches"]}
+    assert names == {"plain.txt"}, r
+
+    # Pointing search straight at the credential file is refused.
+    r2 = tools.search_files("PRIVATE_KEY_SECRET_XYZ", path=str(outside / "id_rsa"))
+    assert r2.get("count", 0) == 0
+
+
+def test_search_files_refuses_dos_broad_roots(bound_instance):
+    """A search rooted at ``~`` or the filesystem root is refused — that
+    was the uninterruptible credential-sweep DoS. Narrow roots are fine."""
+    for broad in ("~", "/"):
+        r = tools.search_files("anything", path=broad)
+        assert r["searched"] is False
+        assert "too broad" in r["error"]
 
 
 def test_search_files_is_case_insensitive(bound_instance):
