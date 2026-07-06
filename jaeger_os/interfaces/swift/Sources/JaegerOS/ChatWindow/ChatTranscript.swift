@@ -89,6 +89,14 @@ struct TranscriptRow: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Telemetry trail — the TUI's "replied in 3s" line, dimmed
+                // under the reply. Only exists when the core sent it.
+                if let meta = message.meta {
+                    Text(meta)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Term.inkDim.opacity(0.8))
+                }
+
                 // Manual "speak this" — finished rows only.  The agent's
                 // own Kokoro tool stays the primary TTS path.
                 if !message.text.isEmpty {

@@ -415,6 +415,23 @@ def test_config_query_carries_speech_engine(monkeypatch):
     assert data["speech_engine"] == "kokoro"
 
 
+def test_reply_carries_turn_telemetry_when_available(monkeypatch):
+    """``run_for_voice`` reports elapsed_s — the bridge forwards it on the
+    reply frame (v1 additive). ctx_used/ctx_max are absent here because the
+    faked pipeline has no session agent / loaded model — absence, not null,
+    is the contract for unknown telemetry."""
+    def timed_run(client, text, session_key=None):  # noqa: ARG001
+        return {"text": "pong", "error": None, "elapsed_s": 2.5}
+
+    rc, frames, _ = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n',
+                         run_fn=timed_run)
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert reply["text"] == "pong"
+    assert reply["elapsed_s"] == 2.5
+    assert "ctx_used" not in reply and "ctx_max" not in reply
+
+
 def test_slash_help_answers_without_an_agent_turn(monkeypatch):
     """A leading ``/`` is a command, not a prompt — ``/help`` renders the
     TUI's command list over the bridge and never reaches run_for_voice."""
@@ -476,6 +493,12 @@ def test_fixture_frames_match_builders():
         "It's 3:48 PM PDT.", None, "desktop-app")
     assert frames["reply_error"] == protocol.reply_frame(
         "", "model exploded", "desktop-app")
+    # v1 additive reply telemetry — keys present only when supplied, so the
+    # base "reply" fixture above (no telemetry keys) stays byte-identical.
+    assert frames["reply_telemetry"] == protocol.reply_frame(
+        "It's 3:48 PM PDT.", None, "desktop-app",
+        elapsed_s=3.21, ctx_used=18300, ctx_max=32768)
+    assert "elapsed_s" not in protocol.reply_frame("hi")
     assert frames["request_approval"] == protocol.request_frame(
         "perm1", "approval", "Allow files.write_file?", ("allow", "deny"))
     assert frames["fatal_boot"] == protocol.fatal_frame("model file missing")

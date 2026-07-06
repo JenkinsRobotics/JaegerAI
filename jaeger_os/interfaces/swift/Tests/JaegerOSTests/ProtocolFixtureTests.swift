@@ -96,15 +96,27 @@ final class ProtocolFixtureTests: XCTestCase {
             return XCTFail("state")
         }
         XCTAssertTrue(busy)
-        guard case .reply(let text, let error) = try decode("reply") else {
+        guard case .reply(let text, let error, let elapsed0, let used0, let max0) =
+                try decode("reply") else {
             return XCTFail("reply")
         }
         XCTAssertEqual(text, "It's 3:48 PM PDT.")
         XCTAssertNil(error)
-        guard case .reply(_, let err2) = try decode("reply_error") else {
+        // v1 additive telemetry: ABSENT keys must keep decoding (nil).
+        XCTAssertNil(elapsed0)
+        XCTAssertNil(used0)
+        XCTAssertNil(max0)
+        guard case .reply(_, let err2, _, _, _) = try decode("reply_error") else {
             return XCTFail("reply_error")
         }
         XCTAssertEqual(err2, "model exploded")
+        guard case .reply(_, _, let elapsed, let used, let mx) =
+                try decode("reply_telemetry") else {
+            return XCTFail("reply_telemetry")
+        }
+        XCTAssertEqual(elapsed ?? -1, 3.21, accuracy: 0.001)
+        XCTAssertEqual(used, 18300)
+        XCTAssertEqual(mx, 32768)
         guard case .tool(let name, let phase, let elapsed) = try decode("tool") else {
             return XCTFail("tool")
         }

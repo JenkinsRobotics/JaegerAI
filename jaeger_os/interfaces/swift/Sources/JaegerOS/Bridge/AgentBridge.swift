@@ -246,14 +246,18 @@ final class AgentBridge: ObservableObject {
         status = AgentStatus(rawDict: raw)
     }
 
-    /// Run one chat turn; returns the reply text. ``session`` isolates
-    /// this conversation on the Python side (sessions.db) so multiple
-    /// windows / saved chats never collapse into one history.
-    func sendChat(text: String, session: String = "desktop-app") async throws -> String {
+    /// Run one chat turn; returns the reply (text + optional telemetry:
+    /// elapsed seconds and context usage, when the core sent them).
+    /// ``session`` isolates this conversation on the Python side
+    /// (sessions.db) so multiple windows / saved chats never collapse
+    /// into one history.
+    func sendChat(text: String, session: String = "desktop-app") async throws -> TurnResult {
         guard let bridge else { throw BridgeError.notRunning }
-        let (reply, error) = await bridge.runTurn(text, session: session)
-        if let error, !error.isEmpty { throw BridgeError.bootFailed(error) }
-        return reply
+        let result = await bridge.runTurn(text, session: session)
+        if let error = result.error, !error.isEmpty {
+            throw BridgeError.bootFailed(error)
+        }
+        return result
     }
 
     // MARK: - Agent lifecycle + death detection

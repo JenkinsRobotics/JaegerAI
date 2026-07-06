@@ -45,6 +45,9 @@ struct ChatMessage: Identifiable, Equatable {
     /// (Week 2.5 wiring — we keep the field now so the view can fade in
     /// a cursor / spinner when the streaming pass lands.)
     var isStreaming: Bool = false
+    /// Dimmed telemetry line under an assistant reply ("replied in 3s")
+    /// — nil when the core sent no telemetry for the turn.
+    var meta: String? = nil
 }
 
 
@@ -69,6 +72,11 @@ final class ChatViewModel: ObservableObject {
     /// True while a STT pass is running.  Disables the send button,
     /// shows a "transcribing…" indicator in the status bar.
     @Published private(set) var isTranscribing: Bool = false
+
+    /// Context usage after the most recent reply — ``(used, max)`` tokens
+    /// off the reply frame's v1 telemetry.  Rendered in the status bar as
+    /// "ctx 18.3K/32.8K"; nil until the first telemetry-carrying reply.
+    @Published private(set) var contextUsage: (used: Int, max: Int)? = nil
 
     /// The session key the agent uses to scope rolling history.  We
     /// keep this constant within one chat window's lifetime so the
@@ -304,13 +312,21 @@ final class ChatViewModel: ObservableObject {
         }
 
         do {
-            // One turn over the bridge → the reply text. The session key
-            // keeps THIS window's conversation isolated on the Python side.
-            let replyText = try await agent.sendChat(text: trimmed,
-                                                     session: sessionKey)
+            // One turn over the bridge → the reply (text + optional
+            // telemetry). The session key keeps THIS window's
+            // conversation isolated on the Python side.
+            let reply = try await agent.sendChat(text: trimmed,
+                                                 session: sessionKey)
+            let replyText = reply.text
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text = replyText
                 messages[i].isStreaming = false
+                if let s = reply.elapsedS {
+                    messages[i].meta = "replied in " + Self.fmtSeconds(s)
+                }
+            }
+            if let used = reply.ctxUsed, let mx = reply.ctxMax {
+                contextUsage = (used, mx)
             }
 
             // Voice-loop completion: speak the reply through TTS so
@@ -332,5 +348,17 @@ final class ChatViewModel: ObservableObject {
                 messages[i].isStreaming = false
             }
         }
+    }
+
+    // MARK: - Formatting
+
+    /// "3.2s" under ten seconds, "42s" above — the TUI's compact style.
+    static func fmtSeconds(_ s: Double) -> String {
+        s < 10 ? String(format: "%.1fs", s) : "\(Int(s.rounded()))s"
+    }
+
+    /// "18.3K" / "512" — thousands shortened, the TUI's ctx gauge style.
+    static func fmtTokens(_ n: Int) -> String {
+        n >= 1000 ? String(format: "%.1fK", Double(n) / 1000.0) : "\(n)"
     }
 }

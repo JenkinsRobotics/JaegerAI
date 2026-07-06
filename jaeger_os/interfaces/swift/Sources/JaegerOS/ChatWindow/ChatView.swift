@@ -262,6 +262,13 @@ struct ChatView: View {
                     .foregroundColor(Term.inkDim)
             }
             Spacer()
+            // Context gauge — the TUI status bar's "ctx 18.3K/32.8K",
+            // fed by the reply frame's v1 telemetry.
+            if let ctx = chat.contextUsage {
+                Text("ctx \(ChatViewModel.fmtTokens(ctx.used))/\(ChatViewModel.fmtTokens(ctx.max))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Term.inkDim)
+            }
             if chat.isSending {
                 ProgressView()
                     .controlSize(.mini)
