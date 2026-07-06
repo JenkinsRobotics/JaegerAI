@@ -477,6 +477,68 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
     assert not ok and err
 
 
+def _write_valid_instance(root):
+    """Overwrite the fixture's ``{}`` config/identity with schema-valid
+    files so the settings catalog (which loads the real ``Config``) works."""
+    from jaeger_os.core.instance.schemas import (
+        Config, Identity, ModelConfig, dump_yaml)
+    dump_yaml(root / "config.yaml",
+              Config(instance_name="t", model=ModelConfig(model_path="/dev/null")))
+    dump_yaml(root / "identity.yaml",
+              Identity(name="T", role="r", personality="p"))
+
+
+def test_settings_catalog_query_returns_grouped_descriptors(monkeypatch,
+                                                            _instance_on_disk):
+    """``query what=settings_catalog`` serves the schema-derived catalog the
+    native app renders — grouped, typed descriptors, no hand-enumerated list.
+    The SAME backend `jaeger settings` drives."""
+    _write_valid_instance(_instance_on_disk)
+    stdin = ('{"op":"query","what":"settings_catalog","id":"r1"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    data = result["data"]
+    # The eight spec groups are live.
+    assert {"model", "display", "voice", "tts", "autonomy",
+            "permissions", "retention", "interaction"} <= set(data)
+    engine = next(d for d in data["tts"] if d["path"] == "voice.speech_engine")
+    assert engine["type"] == "enum" and engine["choices"] == ["kokoro", "apple"]
+    assert rc == 0
+
+
+def test_settings_set_command_roundtrip(monkeypatch, _instance_on_disk):
+    """``command cmd=settings_set`` validates + persists through the Pydantic
+    model and reports ``restart_required``. Proves single-source: the write
+    lands in config.yaml, readable by every other surface."""
+    from jaeger_os.core.instance.schemas import Config, load_yaml
+    _write_valid_instance(_instance_on_disk)
+    stdin = ('{"op":"command","cmd":"settings_set",'
+             '"args":{"path":"voice.speak_replies","value":false},"id":"r1"}\n'
+             '{"op":"command","cmd":"settings_set",'
+             '"args":{"path":"model.ctx","value":16384},"id":"r2"}\n'
+             '{"op":"command","cmd":"settings_set",'
+             '"args":{"path":"model.ctx","value":999999},"id":"r3"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    results = {f["id"]: f for f in frames if f["type"] == "result"}
+    # voice pref: ok, no restart.
+    assert results["r1"]["ok"] is True
+    assert results["r1"]["data"]["restart_required"] is False
+    assert results["r1"]["data"]["value"] is False
+    # model.ctx: ok, restart REQUIRED (schema-annotated).
+    assert results["r2"]["ok"] is True
+    assert results["r2"]["data"]["restart_required"] is True
+    # out-of-range rejected through the model — error, not a crash.
+    assert results["r3"]["ok"] is False and results["r3"]["error"]
+    # Persisted values round-trip; the bad write never landed.
+    cfg = load_yaml(_instance_on_disk / "config.yaml", Config)
+    assert cfg.voice.speak_replies is False
+    assert cfg.model.ctx == 16384
+    assert rc == 0
+
+
 def test_reply_carries_turn_telemetry_when_available(monkeypatch):
     """``run_for_voice`` reports elapsed_s — the bridge forwards it on the
     reply frame (v1 additive). ctx_used/ctx_max are absent here because the
@@ -571,6 +633,10 @@ def test_fixture_frames_match_builders():
         "no instance named 'default' exists yet — first-run setup required",
         kind="no_instance")
     assert frames["bye"] == protocol.bye_frame()
+    # v1 additive: the settings_set result carries restart_required in data.
+    assert frames["result_settings_set"] == protocol.result_frame(
+        "r7", data={"restart_required": True, "path": "model.ctx",
+                    "value": 16384}, ok=True)
     assert fx["ops"]["send"] == protocol.send_op("hello", "desktop-app")
     assert fx["ops"]["respond"] == protocol.respond_op("perm1", "allow")
     assert fx["ops"]["quit"] == protocol.quit_op()
