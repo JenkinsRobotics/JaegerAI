@@ -130,8 +130,19 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
         # this instead of waiting for the next agent_state frame).
+        # v1 additive ``agent_name``: the AGENT's name (identity.yaml —
+        # the unique robot named at instance creation). ``character`` is
+        # the persona being played; surfaces lead with agent_name and show
+        # the character as secondary flavor ("Ted · playing HAL 9000").
         name, icon = _active_character(boot)
-        return {"character": name, "icon": icon, "model": _model_name(boot)}
+        agent_name = None
+        try:
+            from jaeger_os.core.instance.schemas import Identity, load_yaml
+            agent_name = (load_yaml(lay.identity_path, Identity).name or "").strip() or None
+        except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
+            agent_name = None
+        return {"agent_name": agent_name, "character": name, "icon": icon,
+                "model": _model_name(boot)}
     if what == "characters":
         active_id = active_character_id(root) if root else None
         bound_id = bound_character_id(root) if root else None

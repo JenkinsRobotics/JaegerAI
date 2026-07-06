@@ -186,7 +186,8 @@ def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
-    assert set(result["data"]) == {"character", "icon", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "icon", "model"}
+    assert result["data"]["agent_name"] is None   # no identity.yaml yet
 
 
 def test_instance_exists_query_both_states(monkeypatch, tmp_path,
@@ -327,17 +328,21 @@ def test_permission_request_respond_roundtrip(monkeypatch):
     assert rc == 0
 
 
-def test_identity_query_roundtrip(monkeypatch):
+def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
     """``{"op":"query","what":"identity"}`` answers with a result frame
-    carrying character/icon/model — the additive read the Swift shell uses
-    to refresh tray/header branding after a character switch. Works even
-    with no character configured (all-None payload, ok=True)."""
+    carrying agent_name/character/icon/model — the additive read the Swift
+    shell uses to refresh tray/header branding. ``agent_name`` is the
+    AGENT's own name (identity.yaml — never the character's); surfaces
+    lead with it and show the character as secondary flavor."""
+    (_instance_on_disk / "identity.yaml").write_text(
+        "name: Ted\nrole: assistant\npersonality: plain\n", encoding="utf-8")
     stdin = '{"op":"query","what":"identity","id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["id"] == "r1"
     assert result["ok"] is True
-    assert set(result["data"]) == {"character", "icon", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "icon", "model"}
+    assert result["data"]["agent_name"] == "Ted"
     assert rc == 0
 
 
