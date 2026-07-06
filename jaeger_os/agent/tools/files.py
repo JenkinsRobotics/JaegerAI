@@ -20,6 +20,7 @@ instance dir, giving the human a real authorship audit trail.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -389,26 +390,44 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
     if not needle:
         return {"searched": False, "error": "empty query"}
     try:
-        root = Path.cwd() if path == "." else _resolve_read(path)
+        # Default (".") searches the SANDBOX workspace — NOT ``Path.cwd()``.
+        # cwd is wherever the process launched (repo root, or the operator's
+        # home when the app is opened from Finder), so the old default let a
+        # "search my home for .env" prompt walk $HOME: a credential-sweep
+        # attempt AND an uninterruptible DoS. Confine to the sandbox like
+        # ``list_skill_dir`` does; explicit paths stay ``_resolve_read``-gated.
+        root = layout.skills_dir if path == "." else _resolve_read(path)
     except SandboxError as exc:
         return {"searched": False, "error": str(exc)}
     if not root.exists():
         return {"searched": True, "query": query, "matches": [], "count": 0}
 
     cap = max(1, min(int(max_results or 50), 500))
+    # Hard backstop on the traversal so a pathological tree can't hang the
+    # turn (the old ``sorted(root.rglob("*"))`` materialised the ENTIRE tree
+    # — descending into .venv/.git/the model store — before any filtering).
+    _MAX_SCAN = 50_000
     matches: list[dict[str, Any]] = []
-    candidates = [root] if root.is_file() else sorted(root.rglob("*"))
-    for child in candidates:
-        if not child.is_file():
-            continue
+
+    def _iter_files() -> "Any":
+        if root.is_file():
+            yield root
+            return
+        scanned = 0
+        # ``os.walk`` with in-place dir pruning: skip dirs are removed from
+        # the descent set so we NEVER walk into them (vs. filtering after a
+        # full rglob). Bounded by ``_MAX_SCAN`` files examined.
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _SEARCH_SKIP]
+            for fn in filenames:
+                scanned += 1
+                if scanned > _MAX_SCAN:
+                    return
+                yield Path(dirpath) / fn
+
+    for child in _iter_files():
         try:
-            rel_parts = child.relative_to(root).parts
-        except ValueError:
-            rel_parts = child.parts
-        if any(part in _SEARCH_SKIP for part in rel_parts):
-            continue
-        try:
-            if child.stat().st_size > 1_000_000:
+            if not child.is_file() or child.stat().st_size > 1_000_000:
                 continue
             text = child.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
