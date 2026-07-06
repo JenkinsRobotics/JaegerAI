@@ -203,7 +203,8 @@ def _drive_turn(agent: Any, prompt: str, timeout_s: float):
 # ── one scenario ────────────────────────────────────────────────────
 
 
-def _run_scenario(client: Any, case: Any, layout: Any) -> ScenarioResult:
+def _run_scenario(client: Any, case: Any, layout: Any,
+                  *, dump: bool = False) -> ScenarioResult:
     from jaeger_os.core.bench.scenarios import Transcript
 
     workspace = _workspace_dir(layout)
@@ -223,6 +224,13 @@ def _run_scenario(client: Any, case: Any, layout: Any) -> ScenarioResult:
         transcript.turns.append(turn)
         if turn.timed_out:
             break
+
+    if dump:
+        for ti, turn in enumerate(transcript.turns, 1):
+            print(f"    ┌ turn {ti} prompt: {turn.prompt!r}", flush=True)
+            for tc in turn.tool_calls:
+                print(f"    │  tool: {tc.name}({tc.arguments})", flush=True)
+            print(f"    └ answer: {turn.answer!r}", flush=True)
 
     tools = transcript.tools()
     if transcript.timed_out:
@@ -343,6 +351,11 @@ def _run(args: argparse.Namespace) -> int:
     live_before = _live_signature(live_dir)
 
     hermetic = build_hermetic_instance(live_dir)
+    if args.model_path:
+        _override_model_path(hermetic.instance_dir / "config.yaml",
+                             args.model_path)
+        print(f"[scenario] model override:            {args.model_path}",
+              flush=True)
     print(f"[scenario] hermetic temp instance:   {hermetic.instance_dir}",
           flush=True)
     os.environ["JAEGER_INSTANCE_DIR"] = str(hermetic.instance_dir)
@@ -370,7 +383,7 @@ def _run(args: argparse.Namespace) -> int:
         for i, case in enumerate(selected, 1):
             print(f"\n[{i}/{len(selected)}] {case.id} ({case.lane}) …",
                   flush=True)
-            res = _run_scenario(boot.client, case, boot.layout)
+            res = _run_scenario(boot.client, case, boot.layout, dump=args.dump)
             results.append(res)
             print(f"    -> {res.status.upper()}  ({res.elapsed_s:.1f}s)  "
                   f"{res.detail}", flush=True)
@@ -404,6 +417,14 @@ def _run(args: argparse.Namespace) -> int:
     return _print_report(results)
 
 
+def _override_model_path(cfg_path: pathlib.Path, model_path: str) -> None:
+    """Rewrite model.model_path in the (already-copied, hermetic) config."""
+    import yaml
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    data.setdefault("model", {})["model_path"] = model_path
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
@@ -418,6 +439,13 @@ def main() -> int:
                    help="Skip the LLM KV-cache prewarm (slower first turn).")
     p.add_argument("--keep-temp", action="store_true",
                    help="Do not delete the temp instance (for debugging).")
+    p.add_argument("--dump", action="store_true",
+                   help="Print each scenario's full transcript (answer + tool "
+                        "calls with args) — for debugging a gate verdict.")
+    p.add_argument("--model-path", default=None,
+                   help="Override model.model_path in the hermetic config "
+                        "(e.g. the 26B gguf for a final validation run). "
+                        "The live config is never touched.")
     args = p.parse_args()
     return _run(args)
 
