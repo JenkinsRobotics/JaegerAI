@@ -134,7 +134,7 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
             reason = check_hardline(str(cmd or ""))
             if reason:
                 try:
-                    from jaeger_os.agent.tools._common import _audit
+                    from jaeger_os.core.context import _audit
                     _audit("hardline_block",
                            {"command": str(cmd)[:500], "reason": reason})
                 except Exception:  # noqa: BLE001 — audit is best-effort

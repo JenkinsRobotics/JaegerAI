@@ -100,3 +100,31 @@ def _reset_agent_status() -> None:
     except Exception:  # noqa: BLE001 — agent_status is optional during partial migrations
         return
     set_agent_status("ready", "")
+
+
+@_pytest.fixture(scope="session")
+def _full_tool_registry_snapshot():
+    """The COMPLETE tool registry, captured once: module-registered tools
+    (registered as an import side-effect in tools/*.py, which CANNOT be
+    re-run after a clear_registry() because the modules are import-cached)
+    PLUS the remaining main.py builtins."""
+    import jaeger_os.agent.tools  # noqa: F401 — module-level tool registrations
+    from jaeger_os.agent.schemas import tool_registry as R
+    try:
+        from jaeger_os.main import _register_builtins
+        _register_builtins(None)   # register-only; client is unused at def time
+    except Exception:  # noqa: BLE001
+        pass
+    return dict(R._registry)
+
+
+@_pytest.fixture(autouse=True)
+def _restore_tool_registry(_full_tool_registry_snapshot):
+    """Restore the full tool registry after every test. Post
+    tool-standardization, most tools register on module import; a test that
+    calls clear_registry() would otherwise strand those module tools for the
+    whole rest of the session (imports are cached, so they can't re-fire)."""
+    from jaeger_os.agent.schemas import tool_registry as R
+    yield
+    R._registry.clear()
+    R._registry.update(_full_tool_registry_snapshot)
