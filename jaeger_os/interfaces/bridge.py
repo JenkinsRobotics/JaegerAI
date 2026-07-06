@@ -296,6 +296,7 @@ class _Ctx:
         self.layout: Any = None
         self.boot: Any = None
         self.client: Any = None
+        self.cron: Any = None                 # CronRunner — fires scheduled prompts
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
         # Pending permission requests: id → (event, answer-slot). An answer
@@ -403,6 +404,56 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         prewarm_session(boot.client, session_key="desktop-app")
     except Exception:  # noqa: BLE001 — an optimization, never a boot failure
         pass
+
+    # Scheduled prompts (reminders / timed tasks) fire here. The daemon
+    # and the messaging gateway start a CronRunner; the bridge — now the
+    # PRIMARY surface behind the native app — never did, so a
+    # ``schedule_prompt`` persisted but nothing ever fired it. Start one
+    # whose callback runs the scheduled prompt as a normal turn and
+    # SURFACES the result as a reply frame, so a fired reminder shows up
+    # in the chat (and speaks, when the instance voices its replies).
+    #
+    # ``llm_lock=None`` on purpose: ``_run_turn`` already serializes every
+    # turn on ``_pipeline['llm_lock']`` internally, so a cron turn and a
+    # user turn can't decode against the same KV cache at once. Handing
+    # the SAME lock to the CronRunner would re-enter that non-reentrant
+    # lock (cron acquires → callback → _run_turn re-acquires → deadlock).
+    def _cron_cb(prompt: str, session_key: str | None = None) -> None:
+        session = session_key or "cron"
+        try:
+            _emit(proto, protocol.state_frame(True, session))
+            try:
+                from jaeger_os.main import run_for_voice
+                result = run_for_voice(ctx.client, prompt, session_key=session)
+                text = result.get("text") or ""
+                _emit(proto, protocol.reply_frame(
+                    text, result.get("error"), session,
+                    elapsed_s=result.get("elapsed_s")))
+                # Speak a fired reminder when the instance voices its
+                # replies and the turn didn't already speak via a tool.
+                if text and not result.get("spoke_via_tool"):
+                    try:
+                        from jaeger_os.main import _pipeline
+                        cfg = _pipeline.get("config")
+                        if cfg is not None and cfg.voice.speak_replies:
+                            from jaeger_os.agent.tools.speak import speak
+                            speak(text=text)
+                    except Exception as exc:  # noqa: BLE001 — TTS is best-effort
+                        print(f"[bridge] cron speak failed: {exc}",
+                              file=sys.stderr, flush=True)
+            finally:
+                _emit(proto, protocol.state_frame(False, session))
+        except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
+            print(f"[bridge] cron turn failed: {exc}",
+                  file=sys.stderr, flush=True)
+
+    try:
+        from jaeger_os.agent.background.cron_runner import CronRunner
+        ctx.cron = CronRunner(_cron_cb, llm_lock=None)
+        ctx.cron.start()
+    except Exception as exc:  # noqa: BLE001 — no cron is degraded, not fatal
+        print(f"[bridge] cron runner skipped: {exc}",
+              file=sys.stderr, flush=True)
 
     name, icon = _active_character(boot)
     _emit(proto, protocol.agent_state_frame(
@@ -687,6 +738,13 @@ def main(argv: list[str] | None = None) -> int:
         # clean, then leave through os._exit if the Metal runtime is
         # loaded (its C++ static destructors abort — F1).
         ctx.booted.wait(timeout=180)
+        # Stop the scheduled-prompt thread before tearing down the agent
+        # it fires turns against.
+        if ctx.cron is not None:
+            try:
+                ctx.cron.shutdown(wait=False)
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
         turns.put(None)
         worker.join(timeout=30)
         if ctx.boot_error:

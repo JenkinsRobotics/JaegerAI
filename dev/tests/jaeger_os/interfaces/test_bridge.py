@@ -160,6 +160,58 @@ def test_lock_conflict_gets_the_locked_kind(monkeypatch):
     assert rc == 1
 
 
+class _FakeCron:
+    """Records the bridge's CronRunner lifecycle without a real thread.
+    ``start`` synchronously fires one scheduled prompt so the callback's
+    reply-frame surfacing is exercised end-to-end."""
+
+    instances: list["_FakeCron"] = []
+
+    def __init__(self, cb, *, poll_s=30.0, llm_lock=None, housekeeping=None):
+        self.cb = cb
+        self.llm_lock = llm_lock
+        self.started = False
+        self.stopped = False
+        _FakeCron.instances.append(self)
+
+    def start(self):
+        self.started = True
+        # Simulate a due schedule firing while the agent is live.
+        self.cb("check the logs", session_key="cron:reminder")
+
+    def shutdown(self, wait=True):
+        self.stopped = True
+
+
+def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
+    """Job-1 regression: the bridge must start a CronRunner (so scheduled
+    prompts actually fire), surface a fired prompt as a reply frame on its
+    ``cron:*`` session, and stop the runner on teardown. Passing the runner
+    ``llm_lock=None`` is load-bearing — ``_run_turn`` serializes turns on
+    ``_pipeline['llm_lock']`` internally, so handing the SAME lock here
+    would deadlock the fired turn."""
+    _FakeCron.instances.clear()
+    monkeypatch.setattr(
+        "jaeger_os.agent.background.cron_runner.CronRunner", _FakeCron,
+        raising=False)
+
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
+    assert rc == 0
+
+    assert len(_FakeCron.instances) == 1
+    cron = _FakeCron.instances[0]
+    assert cron.started is True
+    assert cron.stopped is True          # stopped on teardown
+    assert cron.llm_lock is None         # no re-entrant deadlock
+
+    # The fired prompt surfaced as a reply frame on the cron session, so a
+    # reminder shows up in the chat.
+    cron_replies = [f for f in frames
+                    if f["type"] == "reply" and f["session"] == "cron:reminder"]
+    assert cron_replies, f"no cron reply frame surfaced: {frames}"
+    assert cron_replies[0]["text"] == "echo:check the logs"
+
+
 def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path):
     """First-run: the resolved instance isn't on disk. The bridge must NOT
     reach ``boot_for_tui`` (which would auto-fire the interactive wizard

@@ -34,7 +34,7 @@ class CronRunner(threading.Thread):
         self._callback = callback
         self._poll_s = max(1.0, float(poll_s))
         self._lock = llm_lock
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self._housekeeping = housekeeping
         # Track the UTC day we last ran housekeeping for. None = not yet
         # this process. We set this to today on startup (housekeeping
@@ -43,19 +43,19 @@ class CronRunner(threading.Thread):
         self._last_housekeeping_day = datetime.now(timezone.utc).date()
 
     def shutdown(self, wait: bool = True) -> None:
-        self._stop.set()
+        self._stop_event.set()
         if wait:
             self.join(timeout=5.0)
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 claimed = mem.claim_due_schedules(now=datetime.now(timezone.utc))
             except Exception as exc:
                 print(f"[jaeger-cron] claim error: {exc}", flush=True)
                 claimed = []
             for sched in claimed:
-                if self._stop.is_set():
+                if self._stop_event.is_set():
                     break
                 name = sched.get("name") or "?"
                 prompt = sched.get("prompt") or ""
@@ -72,7 +72,7 @@ class CronRunner(threading.Thread):
                     print(f"[jaeger-cron] {name!r} callback failed: {exc}", flush=True)
 
             self._maybe_run_housekeeping()
-            self._stop.wait(self._poll_s)
+            self._stop_event.wait(self._poll_s)
 
     def _invoke(self, prompt: str, schedule_name: str) -> None:
         key = f"cron:{schedule_name}"

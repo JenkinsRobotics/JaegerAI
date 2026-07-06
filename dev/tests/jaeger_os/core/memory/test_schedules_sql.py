@@ -181,6 +181,85 @@ def test_claim_due_skips_future(bound):
     assert mem.claim_due_schedules() == []
 
 
+# ── local wall-clock anchoring (scheduler tz bug) ────────────────
+
+
+def test_near_future_cron_fires_soon_not_a_day_late(bound):
+    """Regression: the agent authors cron from LOCAL wall-clock (``get_time``
+    returns local time). ``add_schedule`` used to anchor croniter to UTC, so
+    a "remind me in 1 minute" style one-shot fired hours late (off by the UTC
+    offset). Build a one-shot ~1 minute out and assert next_run_at lands
+    ~60s ahead — not most of a day away."""
+    from datetime import datetime, timezone, timedelta
+
+    now_local = datetime.now().astimezone()
+    tgt = now_local + timedelta(minutes=1)
+    cron = f"{tgt.minute} {tgt.hour} {tgt.day} {tgt.month} *"
+    out = mem.add_schedule(cron, "check logs", name="soon")
+
+    nxt = datetime.fromisoformat(out["next_run_at"])
+    delta = (nxt - now_local).total_seconds()
+    assert 0 < delta <= 120, f"expected ~1 min, got {delta}s (tz bug)"
+
+
+def test_claim_reissues_next_fire_in_local_wallclock(bound):
+    """After a fire, the recomputed next_fire_at must also honour local
+    wall-clock — a daily 'M H * * *' schedule fires at the local hour."""
+    from datetime import datetime, timezone, timedelta
+
+    now_local = datetime.now().astimezone()
+    tgt = now_local + timedelta(minutes=1)
+    # Daily at the local minute/hour one minute from now.
+    cron = f"{tgt.minute} {tgt.hour} * * *"
+    mem.add_schedule(cron, "daily ping", name="daily")
+    # Force it due, then claim.
+    with sqlite_store.writer() as wconn:
+        wconn.execute(
+            "UPDATE schedules SET next_fire_at = '2020-01-01T00:00:00+00:00' "
+            "WHERE schedule_id = 'daily'"
+        )
+    mem.claim_due_schedules()
+    row = sqlite_store.connection().execute(
+        "SELECT next_fire_at FROM schedules WHERE schedule_id='daily'"
+    ).fetchone()
+    nxt = datetime.fromisoformat(row["next_fire_at"])
+    # Next fire is within the next 24h and matches the local target minute.
+    assert nxt.astimezone().hour == tgt.hour
+    assert nxt.astimezone().minute == tgt.minute
+
+
+def test_cron_runner_fires_persisted_schedule_via_callback(bound):
+    """End-to-end at the runner level: a persisted, overdue schedule gets
+    claimed and the CronRunner invokes the callback with the prompt and a
+    ``cron:<name>`` session key (the shape the bridge relies on)."""
+    import threading
+    from jaeger_os.agent.background.cron_runner import CronRunner
+
+    mem.add_schedule("* * * * *", "fire me", name="rm")
+    with sqlite_store.writer() as wconn:
+        wconn.execute(
+            "UPDATE schedules SET next_fire_at = '2020-01-01T00:00:00+00:00' "
+            "WHERE schedule_id = 'rm'"
+        )
+
+    fired: list[tuple[str, str | None]] = []
+    done = threading.Event()
+
+    def _cb(prompt, session_key=None):
+        fired.append((prompt, session_key))
+        done.set()
+
+    runner = CronRunner(_cb, poll_s=1.0)
+    runner.start()
+    try:
+        assert done.wait(timeout=5.0), "cron callback never fired"
+    finally:
+        runner.shutdown(wait=True)
+
+    assert fired[0][0] == "fire me"
+    assert fired[0][1] == "cron:rm"
+
+
 # ── lazy import from schedules.jsonl ─────────────────────────────
 
 

@@ -810,11 +810,19 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None) -> dict[s
         raise ValueError("cron_expr and prompt are required")
     if not croniter.is_valid(cron_expr):
         raise ValueError(f"invalid cron expression: {cron_expr!r}")
-    now = datetime.now(timezone.utc)
-    nxt = croniter(cron_expr, now).get_next(datetime)
+    # The agent authors cron expressions against LOCAL wall-clock time
+    # (``get_time`` returns local time, and its docstring tells the model
+    # to anchor the cron to "the real current wall time"). So croniter
+    # must interpret the cron fields in the LOCAL zone — anchoring to UTC
+    # here shifted every fire by the UTC offset (a "remind me in 1 minute"
+    # fired hours late). Store next_fire_at in UTC so the string-ordered
+    # comparison in claim_due_schedules stays consistent.
+    now_local = datetime.now().astimezone()
+    nxt = croniter(cron_expr, now_local).get_next(datetime)
+    now = now_local.astimezone(timezone.utc)
     name = (name or f"sched_{int(now.timestamp())}").strip()
     created_at = now.isoformat(timespec="seconds")
-    next_fire = nxt.isoformat(timespec="seconds")
+    next_fire = nxt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
     with sqlite_store.writer() as conn:
         # ``schedule_id`` is UNIQUE — re-adding under the same name
@@ -902,14 +910,16 @@ def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
         for row in due_rows:
             claimed.append(_schedule_row_to_dict(row))
             try:
-                nxt = croniter(row["cron"], now_dt).get_next(datetime)
+                # Recompute the next fire in LOCAL wall-clock (matching
+                # add_schedule), then store it back in UTC.
+                nxt = croniter(row["cron"], now_dt.astimezone()).get_next(datetime)
             except Exception:  # noqa: BLE001 — malformed cron, leave alone
                 continue
             conn.execute(
                 "UPDATE schedules SET next_fire_at = ?, last_fired_at = ? "
                 "WHERE id = ?",
-                (nxt.isoformat(timespec="seconds"),
-                 now_dt.isoformat(timespec="seconds"),
+                (nxt.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                 now_dt.astimezone(timezone.utc).isoformat(timespec="seconds"),
                  row["id"]),
             )
     return claimed
