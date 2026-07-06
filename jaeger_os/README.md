@@ -4,20 +4,19 @@ Jaeger is a Pydantic-AI-based agent that can extend its own capabilities
 by writing new skill files at runtime, with a hard safety boundary
 between framework code (read-only) and agent state (writable).
 
-## Phase-1 contract
+## The framework / state split
 
-**[`docs/unified_architecture.md`](../../docs/unified_architecture.md)
-is the authoritative spec for what this package looks like at the end
-of phase 1.** During phase 1, Jaeger-OS and Lilith are both being
-aligned to share the same vocabulary, the same folder shape, and the
-same patterns — but they remain two separate packages. Jaeger's source
-hasn't been finalized yet; Lilith-flavored content does NOT migrate
-into this package during phase 1.
+`jaeger_os/` is the **framework** (read-only at runtime, upgraded in place by
+`jaeger update`). Operator state lives entirely under the sibling
+`.jaeger_os/instances/<name>/` (each agent's identity, config, memory, skills,
+workspace, logs, credentials) and is never touched by an upgrade. That
+boundary is the safety contract: the agent can write its own skills + state,
+never the framework code.
 
-If you're touching this package, read the unified arch doc first.
-Jaeger's phase-1 changes are small (gains `embodiment/` layer and
-`@requires_tier` on tools); most of the work in this phase lands in
-the Lilith package.
+For the current architecture and per-release history, see
+[`../dev/docs/OVERVIEW.md`](../dev/docs/OVERVIEW.md),
+[`../dev/docs/agentic_runners.md`](../dev/docs/agentic_runners.md), and
+[`../dev/docs/revision_summaries/`](../dev/docs/revision_summaries/).
 
 ## Directory tour
 
