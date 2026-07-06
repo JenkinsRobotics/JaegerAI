@@ -1270,10 +1270,10 @@ def _fast_finalize_sync(
             temperature=0.2,
             top_p=0.9,
             stream=False,
-            # Carry the decide call's tool schemas so this finalize
-            # renders the identical <system + tools> prefix and reuses
-            # the warm KV instead of evicting it.
-            tools=_pipeline.get("openai_tools"),
+            # No ``tools=`` here: this runs on the client's AUX lane
+            # (its own context), so the worker's <system + tools> KV
+            # prefix is safe without replaying ~10K tokens of schemas —
+            # which wouldn't fit the aux window anyway (aux_ctx 4096).
         )
         text = (getattr(result, "text", None) or "").strip()
         # Strip any drift tool-call markup the model leaked into the
@@ -2617,11 +2617,49 @@ class LlamaCppPythonClient:
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="llama",
         )
+        # Aux lane (0.6.0): every bounded side-channel call (persona
+        # output filter, skip-final finalizer, reflection, deep-think
+        # planning, memory review, goal eval) runs on a SECOND
+        # llama_context sharing THIS loaded model — so a clean-context
+        # aux prompt can never evict the worker context's warm KV
+        # prefix (measured: filter-ON turns paid ~40s re-prefill vs
+        # 0.3-0.4s warm with it OFF). Spawned lazily on first use;
+        # ``aux_ctx: 0`` disables the lane (aux calls then share the
+        # worker context — the pre-0.6.0 behaviour).
+        self._aux_kwargs = {
+            "n_ctx": int(getattr(model_cfg, "aux_ctx", 4096) or 0),
+            "n_batch": model_cfg.n_batch,
+            "n_ubatch": model_cfg.n_ubatch,
+            "flash_attn": model_cfg.flash_attn,
+        }
+        self._aux_llm: Any = None
+        self._aux_lock = threading.Lock()
         if warmup:
             self.llm.create_chat_completion(
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=1, temperature=0.0,
             )
+
+    def _aux_lane(self) -> Any:
+        """Build (once) and return the aux-lane ``Llama``, or ``None``
+        when the lane is disabled (``model.aux_ctx: 0``) or the spawn
+        failed — callers then fall back to the worker context."""
+        if self._aux_llm is not None:
+            return self._aux_llm
+        if self._aux_kwargs["n_ctx"] <= 0:
+            return None
+        with self._aux_lock:
+            if self._aux_llm is None:
+                try:
+                    from jaeger_os.core.models.aux_lane import spawn_aux_context
+                    self._aux_llm = spawn_aux_context(self.llm, **self._aux_kwargs)
+                except Exception as exc:  # noqa: BLE001 — lane is an optimisation
+                    print(f"[jaeger] aux lane unavailable "
+                          f"({type(exc).__name__}: {exc}); side-channel "
+                          "calls will share the worker context.", flush=True)
+                    self._aux_kwargs["n_ctx"] = 0  # don't retry every call
+                    return None
+        return self._aux_llm
 
     def chat(
         self,
@@ -2634,14 +2672,27 @@ class LlamaCppPythonClient:
         grammar: str | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> _ChatResult:
-        """Minimal chat completion wrapper (ThinkingRunner, _fast_finalize).
-        Ignores `stream` and `grammar`. Returns text + wall-clock latency.
+        """THE AUX LANE — every bounded side-channel completion in JROS
+        enters here (persona filter, skip-final finalizer, reflection,
+        deep-think planning/digests, memory review, goal clarify/eval,
+        ThinkingRunner). Ignores `stream` and `grammar`. Returns text +
+        wall-clock latency.
 
-        Pass ``tools`` to render the SAME ``<system + tools>`` prompt
-        prefix the agent's decide call uses — that keeps the tool-schema
-        KV cache resident across decide/finalize instead of evicting it
-        (a system-only finalize forces the next decide to cold-prefill
-        all ~60 tool schemas, ~12s)."""
+        Runs on the aux context (:meth:`_aux_lane`) — a second, small
+        llama_context on the same loaded model — NEVER on the worker
+        context the agent loop decodes on. That isolation is the whole
+        point: a clean-context aux prompt on the worker context evicts
+        its single-slot KV prefix and the next turn re-prefills ~20K
+        tokens (~40s measured). Keep it this way — new aux calls must
+        route through here, and the worker lane (the adapter's
+        ``create_chat_completion`` on ``self.llm``) must never be used
+        for side-channel prompts.
+
+        Aux prompts are bounded by design (``model.aux_ctx``, default
+        4096 tokens). An oversized prompt raises — every caller is
+        fail-open, so the turn survives and the aux feature degrades."""
+        aux = self._aux_lane()
+        llm = aux if aux is not None else self.llm
         started = time.perf_counter()
         kwargs: dict[str, Any] = {
             "messages": messages, "max_tokens": max_tokens,
@@ -2650,7 +2701,13 @@ class LlamaCppPythonClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        completion = self.llm.create_chat_completion(**kwargs)
+        if aux is not None:
+            # Serialise aux-vs-aux (background threads may overlap);
+            # aux-vs-worker needs no lock — separate contexts.
+            with self._aux_lock:
+                completion = llm.create_chat_completion(**kwargs)
+        else:
+            completion = llm.create_chat_completion(**kwargs)
         elapsed = time.perf_counter() - started
         text = completion["choices"][0]["message"].get("content") or ""
         return _ChatResult(text=text.strip(), latency_s=elapsed)

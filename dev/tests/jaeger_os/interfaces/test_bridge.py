@@ -433,6 +433,50 @@ def test_config_query_carries_speech_engine(monkeypatch):
     assert data["turn_separators"] is False
 
 
+def test_config_query_carries_context_window_knobs(monkeypatch):
+    """v1 additive — ``model_ctx`` (worker lane) and ``model_aux_ctx``
+    (aux lane: persona filter / finalizer / reflection side calls) ride
+    the existing config query + save_config, HUD-ready. Both apply on
+    restart; the bridge only persists them."""
+    import pathlib
+    import tempfile
+
+    from jaeger_os.core.instance.schemas import (
+        Config, Identity, ModelConfig, dump_yaml, load_yaml)
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    dump_yaml(tmp / "config.yaml", Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null")))
+    dump_yaml(tmp / "identity.yaml", Identity(
+        name="T", role="r", personality="p", voice_tone="v"))
+
+    class _Lay:
+        config_path = tmp / "config.yaml"
+        identity_path = tmp / "identity.yaml"
+        root = tmp
+
+    data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
+    assert data["model_ctx"] == 8192       # ModelConfig defaults
+    assert data["model_aux_ctx"] == 4096
+
+    # save_config roundtrip: both knobs persist and re-read.
+    ok, err = bridge._command(
+        "save_config", {"model_ctx": 65_536, "model_aux_ctx": 2048},
+        type("B", (), {"layout": _Lay()})())
+    assert ok and err is None
+    data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
+    assert data["model_ctx"] == 65_536
+    assert data["model_aux_ctx"] == 2048
+    cfg = load_yaml(tmp / "config.yaml", Config)
+    assert cfg.model.ctx == 65_536 and cfg.model.aux_ctx == 2048
+
+    # Schema bounds still enforced through the bridge (ge=0 / le=131072).
+    ok, err = bridge._command(
+        "save_config", {"model_ctx": 999_999},
+        type("B", (), {"layout": _Lay()})())
+    assert not ok and err
+
+
 def test_reply_carries_turn_telemetry_when_available(monkeypatch):
     """``run_for_voice`` reports elapsed_s — the bridge forwards it on the
     reply frame (v1 additive). ctx_used/ctx_max are absent here because the
