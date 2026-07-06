@@ -91,5 +91,25 @@ def main(argv: list[str] | None = None) -> int:
     return run(instance_name=args.instance)
 
 
+def _exit(rc: int) -> "int":
+    """The F1 exit mitigation (STATUS.md, main.py ``main()``): when the
+    in-process ggml/Metal runtime was loaded, a normal interpreter exit
+    runs C++ static destructors that abort in ``ggml_metal_device_free``
+    — SIGABRT + a crash report on every quit. ``jaeger dev --tui`` execs
+    straight into this module, so the guard in ``jaeger_os.main.main()``
+    never runs on that path (the operator's log: abort right after
+    "shutdown complete"). All orderly cleanup has already happened here;
+    flush and skip the doomed destructors."""
+    import os
+    if "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules:
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:  # noqa: BLE001 — never let a flush block the exit
+            pass
+        os._exit(rc)
+    return rc
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_exit(main()))
