@@ -126,14 +126,36 @@ def make_surface(ctx: Any, spec: Any = None) -> FloatingAvatarPlayer:  # noqa: A
 # ── framed standalone avatar window (Chat-window chrome) ───────────────
 
 def agent_name(ctx: Any) -> str:
-    """Display name = the ACTIVE character's name (what the agent is playing),
-    so every surface's title/header tracks the current character. Falls back to
-    the core/instance name, then a generic default."""
+    """Display name = the agent's NAME from identity.yaml (the unique instance
+    the operator named), NEVER the active character. A character is only the
+    persona being played — its name is a secondary reference, not the agent's
+    identity ("name your robot Ted, it plays HAL" — operator 2026-07-05; see
+    ``assemble._identity_name``). Falls back to the active character's name
+    only if identity has none, then the core/instance name, then a default."""
+    name = _identity_display_name(ctx)
+    if name:
+        return name
     c = resolve_character(ctx)
     if c is not None:
         return c.name
     return (getattr(getattr(ctx, "core", None), "agent_name", None)
             or getattr(ctx, "agent_name", None) or "agent")
+
+
+def _identity_display_name(ctx: Any) -> str:
+    """``identity.yaml`` ``name`` for the ctx's instance (its layout, else the
+    process's current instance dir). Empty string if unavailable/unset."""
+    try:
+        from jaeger_os.core.instance.instance import (
+            InstanceLayout, resolve_instance_dir,
+        )
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        id_path = getattr(getattr(ctx, "layout", None), "identity_path", None)
+        if id_path is None:
+            id_path = InstanceLayout(root=resolve_instance_dir()).identity_path
+        return (load_yaml(id_path, Identity).name or "").strip()
+    except Exception:  # noqa: BLE001 — a broken identity never breaks a title
+        return ""
 
 
 def resolve_character(ctx: Any) -> Any:

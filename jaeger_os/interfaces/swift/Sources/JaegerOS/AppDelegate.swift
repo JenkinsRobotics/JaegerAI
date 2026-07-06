@@ -43,8 +43,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          progress: 0.32)
             await AgentBridge.shared.tryConnect()
             if AgentBridge.shared.isConnected {
-                let model = AgentBridge.shared.status?.modelName ?? "model online"
-                splash.complete("bridge", detail: model, progress: 0.68)
+                // Fast-ready: the transport connects in ~0.5s while the
+                // model (gemma + whisper + kokoro warm) loads BEHIND it.
+                // The splash must ride the real lifecycle — hold here
+                // until agent_state leaves ``booting`` so it can't
+                // dismiss over a still-loading agent.
+                splash.complete("bridge", detail: "Bridge connected",
+                                progress: 0.45)
+                splash.start("model", "Agent model",
+                             detail: "Loading model + voice stack "
+                                     + "(the long pole)…",
+                             progress: 0.5)
+                let modelBootStarted = Date()
+                while AgentBridge.shared.isAgentBooting {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    let elapsed = Date().timeIntervalSince(modelBootStarted)
+                    let estimate = min(0.66, 0.50 + (elapsed / 45.0 * 0.16))
+                    splash.advance("model",
+                                   detail: "Loading model + voice stack…",
+                                   progress: estimate)
+                }
+                if case .failed(let why) = AgentBridge.shared.agentState {
+                    splash.fail("model", detail: why, progress: 0.68)
+                } else {
+                    let model = AgentBridge.shared.status?.modelName
+                        ?? "model online"
+                    splash.complete("model", detail: model, progress: 0.68)
+                }
                 splash.start("settings", "Settings cache",
                              detail: "Preloading characters, app config, and permissions",
                              progress: 0.74)
@@ -70,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             splash.complete("hotkey", detail: "Operator controls ready", progress: 0.97)
 
             await splash.finish(AgentBridge.shared.isConnected
-                                ? "Standing by"
+                                ? "All systems online"
                                 : "Offline shell ready")
         }
     }

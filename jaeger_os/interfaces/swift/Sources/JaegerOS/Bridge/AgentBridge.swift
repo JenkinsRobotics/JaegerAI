@@ -161,13 +161,15 @@ final class AgentBridge: ObservableObject {
             lastError = nil
             if ready.agent == "ready" {          // already-warm core (attach)
                 agentState = .ready(model: ready.model,
-                                    character: ready.character, icon: ready.icon)
+                                    character: ready.character, icon: ready.icon,
+                                    agentName: ready.agentName)
             }
             status = AgentStatus(rawDict: [
                 "instance": ready.instance,
                 "model": ready.model as Any,
                 "character": ready.character as Any,
                 "icon": ready.icon as Any,
+                "agent_name": ready.agentName as Any,
             ])
             // Attach-to-warm-core path: agent_state won't stream again,
             // so fetch the agent's name (identity.yaml) here.
@@ -272,16 +274,16 @@ final class AgentBridge: ObservableObject {
 
     private func handleAgentState(_ lifecycle: AgentLifecycle) {
         agentState = lifecycle
-        if case .ready(let model, let character, let icon) = lifecycle {
+        if case .ready(let model, let character, let icon, let agentName) = lifecycle {
             // Enrich the status the fast handshake couldn't fill yet.
             var raw = status?.rawDict ?? [:]
             raw["model"] = model as Any
             raw["character"] = character as Any
             raw["icon"] = icon as Any
+            if let agentName { raw["agent_name"] = agentName }
             status = AgentStatus(rawDict: raw)
-            // The agent_state frame doesn't carry the AGENT's name
-            // (identity.yaml) — pull it via the identity query so the
-            // chat header / status bar can lead with it.
+            // Belt-and-suspenders: the frame now carries agent_name, but a
+            // refresh also picks up any post-boot identity edit.
             Task { await self.refreshIdentity() }
         }
         if case .failed(let reason) = lifecycle {

@@ -3,8 +3,8 @@
 //  JaegerOS / MenuCard
 //
 //  The rich menu-bar dropdown — the Swift twin of the PySide6
-//  ``tray/menu.py`` card. Header: the ACTIVE CHARACTER's avatar + name over a
-//  live status line (● + words). Then an action bar: chat · agent, with
+//  ``tray/menu.py`` card. Header: the AGENT's avatar + name (identity.yaml,
+//  not the character) over a live status line (● + words). Then an action bar: chat · agent, with
 //  quick-input on the right. Settings + power live in the header.
 //
 
@@ -15,9 +15,11 @@ struct MenuCard: View {
     @ObservedObject var agent: AgentBridge
     @ObservedObject var tts: TTSManager
 
-    /// Display name = the active character, else instance, else a default.
+    /// Display name = the AGENT's name (identity.yaml), never the character —
+    /// the character is only the persona it's playing. Falls back to the
+    /// character while the identity query is in flight, then instance/default.
     private var displayName: String {
-        agent.status?.character ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
+        agent.status?.displayName ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }
 
     /// One derived status for the header row — words + dot colour matching

@@ -103,7 +103,8 @@ enum ProtocolFrame {
                 icon: obj["icon"] as? String,
                 proto: obj["proto"] as? String ?? "0",
                 capabilities: obj["capabilities"] as? [String] ?? [],
-                agent: obj["agent"] as? String ?? "ready"))
+                agent: obj["agent"] as? String ?? "ready",
+                agentName: obj["agent_name"] as? String))
         case "agent_state":
             switch obj["state"] as? String ?? "" {
             case "booting":
@@ -111,7 +112,8 @@ enum ProtocolFrame {
             case "ready":
                 return .agentState(.ready(model: obj["model"] as? String,
                                           character: obj["character"] as? String,
-                                          icon: obj["icon"] as? String))
+                                          icon: obj["icon"] as? String,
+                                          agentName: obj["agent_name"] as? String))
             case "failed":
                 return .agentState(.failed(obj["error"] as? String ?? "agent failed"))
             default:

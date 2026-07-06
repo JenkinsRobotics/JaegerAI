@@ -147,7 +147,7 @@ def test_boot_failure_streams_failed_then_fatal(monkeypatch):
     assert types == ["ready", "agent_state", "agent_state", "fatal", "bye"]
     assert frames[2] == {"type": "agent_state", "state": "failed",
                          "model": None, "character": None, "icon": None,
-                         "error": "model file missing"}
+                         "error": "model file missing", "agent_name": None}
     assert frames[3]["kind"] == "boot"
 
 
@@ -652,13 +652,15 @@ def test_fixture_frames_match_builders():
     assert fx["proto"] == protocol.PROTOCOL_VERSION
     assert frames["ready"] == protocol.ready_frame(
         "jros-dev", None, agent="booting")
+    # The split: agent_name (the instance the operator named) is DISTINCT from
+    # character (the persona it plays) — "Jarvis playing HAL 9000".
     assert frames["ready_warm"] == protocol.ready_frame(
-        "jros-dev", "gemma-4-E4B-it-Q4_K_M.gguf", "Jarvis",
-        "/tmp/jarvis.png", agent="ready")
+        "jros-dev", "gemma-4-E4B-it-Q4_K_M.gguf", "HAL 9000",
+        "/tmp/hal.png", agent="ready", agent_name="Jarvis")
     assert frames["agent_state_booting"] == protocol.agent_state_frame("booting")
     assert frames["agent_state_ready"] == protocol.agent_state_frame(
         "ready", model="gemma-4-E4B-it-Q4_K_M.gguf",
-        character="Jarvis", icon="/tmp/jarvis.png")
+        character="HAL 9000", icon="/tmp/hal.png", agent_name="Jarvis")
     assert frames["agent_state_failed"] == protocol.agent_state_frame(
         "failed", error="model file missing")
     assert frames["state_busy"] == protocol.state_frame(True, "desktop-app")
