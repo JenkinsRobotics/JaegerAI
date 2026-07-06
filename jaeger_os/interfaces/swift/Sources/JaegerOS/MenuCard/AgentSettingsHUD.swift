@@ -11,6 +11,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - palette
 
@@ -81,7 +82,7 @@ struct AgentSettingsHUD: View {
 
     @ViewBuilder private var page: some View {
         switch tab {
-        case .home: HomePage(store: store, name: name)
+        case .home: HomePage(store: store, agent: agent, name: name)
         case .library: LibraryPage(store: store)
         case .character: CharacterPage(store: store)
         case .traits: TraitsPage(store: store)
@@ -195,20 +196,120 @@ private func saveButton(_ title: String, _ action: @escaping () -> Void) -> some
 
 // MARK: - pages
 
+/// The instance overview — the agent (identity.yaml) front and center: its
+/// profile picture + name, the character it's PLAYING as a secondary
+/// reference, and the instance settings the operator can change (name +
+/// picture). The persona's characteristics stay below as a reference.
 private struct HomePage: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var agent: AgentBridge
     let name: String
+    @State private var draftName: String = ""
+    @State private var didSeedName = false
+
+    private var character: String? { agent.status?.character }
+    private var model: String? { agent.status?.modelName }
+
     var body: some View {
-        Text(name.uppercased()).font(.system(size: 34, weight: .heavy)).foregroundStyle(HUD.ink)
-        Text("LVL \(store.detail?.level ?? 1)  ·  agent overview")
-            .font(.system(size: 12)).foregroundStyle(HUD.inkDim)
-        Spacer().frame(height: 12)
-        HUD.section("Characteristics")
+        overview
+        Spacer().frame(height: 10)
+        instanceSettings
+        Spacer().frame(height: 14)
+        HUD.section("Persona — \(character ?? "…")")
+        Text("The personality this instance is playing. Edit it in the "
+             + "Character and Traits tabs; it never changes the agent's name.")
+            .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+        Spacer().frame(height: 6)
         let active = store.characters.first(where: { $0.active })
-        ForEach(Array((active?.stats ?? []).sorted { abs($0.val - 0.5) > abs($1.val - 0.5) }.prefix(10)), id: \.key) { s in
+        ForEach(Array((active?.stats ?? [])
+            .sorted { abs($0.val - 0.5) > abs($1.val - 0.5) }.prefix(6)),
+                id: \.key) { s in
             traitRow(s.key, s.val)
         }
     }
+
+    // Picture + name + "playing X" + model.
+    private var overview: some View {
+        HStack(alignment: .center, spacing: 18) {
+            InstanceAvatar(path: agent.status?.iconPath, size: 76)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.system(size: 32, weight: .heavy))
+                    .foregroundStyle(HUD.ink).lineLimit(1)
+                if let character {
+                    Text("playing \(character)")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(HUD.accent)
+                }
+                if let model {
+                    Text(model).font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+                }
+            }
+            Spacer()
+        }
+    }
+
+    // The editable instance settings: agent name + profile picture.
+    private var instanceSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HUD.section("Instance")
+            HStack(alignment: .bottom, spacing: 10) {
+                hudField("Agent name", $draftName)
+                saveButton("Save") {
+                    let n = draftName.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty, n != name else { return }
+                    Task { await store.saveAgentName(n) }
+                }
+            }
+            HStack(spacing: 10) {
+                Text("PROFILE PICTURE").font(.system(size: 10, weight: .semibold))
+                    .tracking(1).foregroundStyle(HUD.inkDim)
+                Spacer()
+                Button("Change…") {
+                    if let p = pickImageFile() { Task { await store.setAvatar(path: p) } }
+                }.buttonStyle(.plain).foregroundStyle(HUD.accent)
+                if agent.status?.hasCustomAvatar == true {
+                    Button("Use character card") { Task { await store.clearAvatar() } }
+                        .buttonStyle(.plain).foregroundStyle(HUD.inkDim)
+                }
+            }
+            Text(agent.status?.hasCustomAvatar == true
+                 ? "Using a custom picture."
+                 : "Using \(character ?? "the character")'s card as the default.")
+                .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+        }
+        .onAppear { if !didSeedName { draftName = name; didSeedName = true } }
+        .onChange(of: name) { _, n in draftName = n }
+    }
+}
+
+/// A circular avatar from a file path, with a mech-mark fallback.
+private struct InstanceAvatar: View {
+    let path: String?
+    let size: CGFloat
+    var body: some View {
+        Group {
+            if let path, let img = NSImage(contentsOfFile: path) {
+                Image(nsImage: img).resizable().interpolation(.high).scaledToFill()
+            } else {
+                JaegerMechIcon(size: size)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(HUD.stroke, lineWidth: 1))
+    }
+}
+
+/// Native image picker for the profile picture. Returns the chosen file path.
+@MainActor
+private func pickImageFile() -> String? {
+    let panel = NSOpenPanel()
+    panel.allowedContentTypes = [.image]
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    panel.prompt = "Choose"
+    panel.message = "Choose a profile picture for this instance"
+    return panel.runModal() == .OK ? panel.url?.path : nil
 }
 
 private struct LibraryPage: View {
@@ -288,7 +389,10 @@ private struct CharacterLibraryCard: View {
                     cardButton(character.active ? "SELECTED" : "SELECT",
                                filled: true,
                                disabled: character.active) {
-                        Task { await store.select(character.id) }
+                        Task {
+                            await store.select(character.id)
+                            await maybeOfferCardAsPicture()
+                        }
                     }
                     cardButton(character.bound ? "DEFAULT" : "MAKE DEFAULT",
                                filled: false,
@@ -305,6 +409,24 @@ private struct CharacterLibraryCard: View {
         .overlay(RoundedRectangle(cornerRadius: 16)
             .stroke(character.active ? HUD.accent : HUD.stroke, lineWidth: character.active ? 2 : 1))
         .shadow(color: .black.opacity(0.25), radius: 14, x: 0, y: 8)
+    }
+
+    /// After a persona switch, OFFER to adopt this character's card as the
+    /// profile picture — but ONLY if the operator set a custom one (otherwise
+    /// the avatar already follows the card by default). Opt-in, never
+    /// automatic: the default action keeps the existing picture.
+    @MainActor private func maybeOfferCardAsPicture() async {
+        guard AgentBridge.shared.status?.hasCustomAvatar == true,
+              let card = artPath else { return }
+        let a = NSAlert()
+        a.messageText = "Now playing \(character.name)"
+        a.informativeText = "Use \(character.name)'s picture as your profile "
+            + "picture? Your current custom picture will be replaced."
+        a.addButton(withTitle: "Use \(character.name)'s picture")
+        a.addButton(withTitle: "Keep mine")
+        if a.runModal() == .alertFirstButtonReturn {
+            await store.setAvatar(path: card)
+        }
     }
 
     @ViewBuilder private var artwork: some View {

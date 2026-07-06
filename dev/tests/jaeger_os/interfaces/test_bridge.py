@@ -80,6 +80,42 @@ def test_effective_icon_prefers_instance_avatar_over_character_card(tmp_path):
     assert bridge._effective_icon(boot, char) == str(card)
 
 
+def test_save_identity_sets_name_and_copies_avatar(tmp_path):
+    """The instance settings tab's write: agent NAME + profile PICTURE. The
+    picked image is copied INTO the instance dir; a cleared avatar falls back
+    to the character card; an illegal name is rejected by the schema."""
+    import types
+
+    from jaeger_os.core.instance.instance import InstanceLayout
+    from jaeger_os.core.instance.schemas import Identity, dump_yaml, load_yaml
+    from jaeger_os.interfaces import bridge
+
+    lay = InstanceLayout(root=tmp_path / "inst3")
+    lay.root.mkdir(parents=True)
+    lay.ensure_dirs()
+    dump_yaml(lay.identity_path, Identity(name="jarvis", role="r", personality="p"))
+    boot = types.SimpleNamespace(layout=lay, client=None)
+
+    picked = tmp_path / "picked.png"
+    picked.write_bytes(b"IMG")
+    ok, err = bridge._command("save_identity",
+                              {"name": "Ted", "avatar": str(picked)}, boot)
+    assert ok, err
+    ident = load_yaml(lay.identity_path, Identity)
+    assert ident.name == "Ted"
+    assert ident.avatar == "avatar.png"           # copied in, stored relative
+    assert (lay.root / "avatar.png").is_file()
+
+    # Clearing the avatar keeps the name and falls back to the character card.
+    ok, _ = bridge._command("save_identity", {"avatar": ""}, boot)
+    assert ok and load_yaml(lay.identity_path, Identity).avatar is None
+    assert load_yaml(lay.identity_path, Identity).name == "Ted"
+
+    # A path-illegal name is refused by the Identity validator.
+    ok, err = bridge._command("save_identity", {"name": "bad/name"}, boot)
+    assert not ok and "path-illegal" in (err or "")
+
+
 class _SlowStdin:
     """An iterable stdin that holds the FIRST line back briefly — lets a
     test deterministically lose the stdin-vs-boot-thread race (the boot
@@ -272,7 +308,7 @@ def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
-    assert set(result["data"]) == {"agent_name", "character", "icon", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "icon", "avatar", "model"}
     assert result["data"]["agent_name"] is None   # no identity.yaml yet
 
 
@@ -427,7 +463,7 @@ def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
     result = next(f for f in frames if f["type"] == "result")
     assert result["id"] == "r1"
     assert result["ok"] is True
-    assert set(result["data"]) == {"agent_name", "character", "icon", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "icon", "avatar", "model"}
     assert result["data"]["agent_name"] == "Ted"
     assert rc == 0
 

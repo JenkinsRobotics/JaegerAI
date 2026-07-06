@@ -318,6 +318,28 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    // MARK: - instance identity (agent name + profile picture)
+
+    /// Rename the agent (identity.yaml ``name``). Refreshes the live status so
+    /// the tray/header/HUD pick up the new name immediately.
+    @discardableResult
+    func saveAgentName(_ name: String) async -> Bool {
+        let ok = await run("save_identity", ["name": name])
+        if ok { await agent.refreshIdentity() }
+        return ok
+    }
+    /// Set a custom profile picture from a file the operator picked (copied
+    /// into the instance dir by the bridge). Empty path clears it → the
+    /// effective avatar falls back to the active character's card.
+    @discardableResult
+    func setAvatar(path: String) async -> Bool {
+        let ok = await run("save_identity", ["avatar": path])
+        if ok { await agent.refreshIdentity() }
+        return ok
+    }
+    @discardableResult
+    func clearAvatar() async -> Bool { await setAvatar(path: "") }
+
     @discardableResult
     private func run(_ cmd: String, _ args: [String: any Sendable]) async -> Bool {
         busy = true
