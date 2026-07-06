@@ -3,6 +3,41 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.7.0` — Swift-first + the two-runner agentic core
+
+The line that grew past a patch series. Two themes: **JROS became a native
+Mac app**, and **the agentic pipeline became a measured two-runner system**.
+
+**Swift-first app.** `JaegerOS.app` is now the primary UI (menu-bar resident,
+splash → chat/settings windows, quit-from-tray), with `JaegerOS-dev.app`
+pinned to the dev instance. The Python core talks over a hardened, versioned
+NDJSON bridge (protocol v1: fast-ready in ~0.5s while the model warms behind
+it, typed frames with cross-language fixtures, a real connection state
+machine, interactive permissions, clean-exit markers). Bare `jaeger` launches
+the app; `jaeger --tui` / `jaeger dev` keep the terminal first-class for
+SSH/headless. `launch.py`/`./launch` removed; one-line install + `jaeger
+update`. iOS-style first-run onboarding (Python stays the wizard's source of
+truth). App bundle, icon, versioned + signed.
+
+**Two-runner agentic core** (dev/docs/agentic_runners.md):
+- **Realtime runner** — "soft loop, hard boundary": the fluid loop plus a
+  runner-owned VERIFY GATE (catches PLAN-halt + claim-without-action with one
+  soft nudge) and a PERSONA output filter (character voice restored without
+  the ~7-point worker tax).
+- **Deep Think runner** — a staged assembly line (plan artifact → execute →
+  evidence-verified completion → one replan cycle), no longer trust-by-return.
+- **Inference lanes** — one loaded model, two KV contexts: the aux lane runs
+  the persona filter / finalizer / reflection so they never evict the worker's
+  warm prefix. Persona-ON warm ttft **45.6s → 0.71s**.
+- **Memory v2** — subject-attributed SQL facts with provenance (who set it)
+  and history (a fact traced over time); hermetic bench isolation.
+
+**Bench:** E4B **79/81** (all-time high), 26B 75-76, plus a parallel corpus B.
+
+**Also:** HomeAssistant + fal.ai plugins, 3 imported skills (99 total,
+integrity-guarded), the character/agent-name split ("name your robot Ted, it
+plays HAL"), and `jaeger-studio` extracted to its own repo.
+
 ## `0.6.2`
 
 **Install fix.** The standardized operator install (`scripts/install.sh`)
