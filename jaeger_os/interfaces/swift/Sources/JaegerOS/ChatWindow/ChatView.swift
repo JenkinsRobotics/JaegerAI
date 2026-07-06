@@ -231,12 +231,19 @@ struct ChatView: View {
                 .fill(agent.isConnected ? Color.green : Term.inkDim)
                 .frame(width: 7, height: 7)
             if agent.isConnected {
-                // Character-first identity, the windowed echo of the rich
-                // TUI's "jros · <name> · local" header.
-                if let character = agent.status?.character {
-                    Text(character)
+                // AGENT-name-first identity (identity.yaml — the robot the
+                // operator named), with the character as secondary flavor:
+                // "Ted · playing HAL 9000 · <model>".
+                if let name = agent.status?.displayName {
+                    Text(name)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(Term.accent)
+                    if let character = agent.status?.character,
+                       character.caseInsensitiveCompare(name) != .orderedSame {
+                        Text("· playing \(character)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Term.inkDim)
+                    }
                     Text("·")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(Term.inkDim.opacity(0.7))

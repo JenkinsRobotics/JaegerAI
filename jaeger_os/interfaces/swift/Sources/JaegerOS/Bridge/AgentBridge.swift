@@ -169,6 +169,11 @@ final class AgentBridge: ObservableObject {
                 "character": ready.character as Any,
                 "icon": ready.icon as Any,
             ])
+            // Attach-to-warm-core path: agent_state won't stream again,
+            // so fetch the agent's name (identity.yaml) here.
+            if ready.agent == "ready" {
+                Task { await self.refreshIdentity() }
+            }
         } catch {
             state = .failed(error.localizedDescription)
             throw error
@@ -231,15 +236,18 @@ final class AgentBridge: ObservableObject {
         return result
     }
 
-    /// Re-ask the bridge for the active character + model and fold the
-    /// answer into ``status``. Cheap (one small query); safe to call from
-    /// any surface's appear hook.
+    /// Re-ask the bridge for the agent name + active character + model and
+    /// fold the answer into ``status``. Cheap (one small query); safe to
+    /// call from any surface's appear hook. ``agent_name`` (v1 additive) is
+    /// the AGENT's own name (identity.yaml) — surfaces lead with it; the
+    /// character is the persona being played, secondary flavor.
     func refreshIdentity() async {
         let result = await query("identity")
         guard result.ok, let data = result.json,
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return }
         var raw = status?.rawDict ?? [:]
+        raw["agent_name"] = obj["agent_name"] as? String as Any
         raw["character"] = obj["character"] as? String as Any
         raw["icon"] = obj["icon"] as? String as Any
         if let model = obj["model"] as? String { raw["model"] = model as Any }
@@ -271,6 +279,10 @@ final class AgentBridge: ObservableObject {
             raw["character"] = character as Any
             raw["icon"] = icon as Any
             status = AgentStatus(rawDict: raw)
+            // The agent_state frame doesn't carry the AGENT's name
+            // (identity.yaml) — pull it via the identity query so the
+            // chat header / status bar can lead with it.
+            Task { await self.refreshIdentity() }
         }
         if case .failed(let reason) = lifecycle {
             lastError = reason
@@ -376,8 +388,16 @@ struct AgentStatus {
 
     var instance: String? { rawDict["instance"] as? String }
     var modelName: String? { rawDict["model"] as? String }
-    /// Active character's display name — the agent's name in the tray/header.
+    /// The AGENT's own name — identity.yaml's ``name``, the unique robot
+    /// named at instance creation (v1 additive ``agent_name`` off the
+    /// identity query). Surfaces lead with this.
+    var agentName: String? { rawDict["agent_name"] as? String }
+    /// Active character's display name — the PERSONA being played,
+    /// secondary flavor next to ``agentName`` ("Ted · playing HAL 9000").
     var character: String? { rawDict["character"] as? String }
+    /// What the header should lead with: the agent's name, falling back
+    /// to the character while the identity query is still in flight.
+    var displayName: String? { agentName ?? character }
     /// Absolute path to the active character's profile image, if any.
     var iconPath: String? { rawDict["icon"] as? String }
     var uptimeSeconds: Double? { rawDict["uptime"] as? Double }
