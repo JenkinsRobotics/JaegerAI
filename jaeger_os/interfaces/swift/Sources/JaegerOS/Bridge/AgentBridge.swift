@@ -400,8 +400,14 @@ struct AgentStatus {
     /// What the header should lead with: the agent's name, falling back
     /// to the character while the identity query is still in flight.
     var displayName: String? { agentName ?? character }
-    /// Absolute path to the active character's profile image, if any.
+    /// Absolute path to the agent's effective avatar (instance profile
+    /// picture if set, else the active character's card).
     var iconPath: String? { rawDict["icon"] as? String }
+    /// The raw CUSTOM profile picture (identity.avatar), if the operator set
+    /// one. nil → the effective ``iconPath`` is the character card, so a
+    /// persona switch may offer to adopt the new character's card.
+    var customAvatar: String? { rawDict["avatar"] as? String }
+    var hasCustomAvatar: Bool { !(customAvatar ?? "").isEmpty }
     var uptimeSeconds: Double? { rawDict["uptime"] as? Double }
     var turnCount: Int? { rawDict["turns"] as? Int }
 }

@@ -168,8 +168,17 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # the persona being played; surfaces lead with agent_name and show
         # the character as secondary flavor ("Ted · playing HAL 9000").
         name, icon = _active_character(boot)
+        # ``avatar`` = the raw CUSTOM profile picture (None → the effective
+        # ``icon`` is the character card). Surfaces use it to decide whether a
+        # persona switch should OFFER to adopt the new character's card.
+        avatar = None
+        try:
+            from jaeger_os.core.instance.schemas import Identity, load_yaml
+            avatar = load_yaml(lay.identity_path, Identity).avatar
+        except Exception:  # noqa: BLE001
+            avatar = None
         return {"agent_name": _agent_name(boot), "character": name, "icon": icon,
-                "model": _model_name(boot)}
+                "avatar": avatar, "model": _model_name(boot)}
     if what == "characters":
         active_id = active_character_id(root) if root else None
         bound_id = bound_character_id(root) if root else None
@@ -184,7 +193,13 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         from jaeger_os.core.instance.schemas import Config, Identity, load_yaml
         cfg = load_yaml(lay.config_path, Config)
         ident = load_yaml(lay.identity_path, Identity)
+        # v1 additive: ``avatar`` = the raw custom profile picture (None → the
+        # tab shows "using the character card"); ``avatar_effective`` = the
+        # resolved path actually displayed (custom, else the character card).
         return {"name": ident.name, "role": ident.role,
+                "avatar": ident.avatar,
+                "avatar_effective": _effective_icon(
+                    boot, active_character(root) if root else None),
                 "default_mode": cfg.interaction.default_mode, "ui": cfg.interaction.ui,
                 "voice_enabled": cfg.voice.enabled, "speak_replies": cfg.voice.speak_replies,
                 "speech_engine": cfg.voice.speech_engine,
@@ -256,6 +271,30 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             cfg = load_yaml(lay.config_path, Config)
             _apply_config(cfg, args)
             dump_yaml(lay.config_path, Config.model_validate(cfg.model_dump()))
+            return True, None
+        if cmd == "save_identity":
+            # Instance-owned identity: the agent's NAME and profile PICTURE
+            # (never the character). An avatar source path is copied INTO the
+            # instance dir so the picture travels with the instance; a
+            # falsy/empty avatar clears it (→ fall back to the character card).
+            from pathlib import Path
+            import shutil
+
+            from jaeger_os.core.instance.schemas import Identity, dump_yaml, load_yaml
+            data = load_yaml(lay.identity_path, Identity).model_dump()
+            name = str(args.get("name") or "").strip()
+            if name:
+                data["name"] = name
+            if "avatar" in args:
+                src = args.get("avatar")
+                srcp = Path(str(src)).expanduser() if src else None
+                if srcp is not None and srcp.is_file():
+                    dst = Path(lay.root) / f"avatar{srcp.suffix.lower() or '.png'}"
+                    shutil.copy2(srcp, dst)
+                    data["avatar"] = dst.name          # relative to the instance
+                else:
+                    data["avatar"] = None              # cleared → character card
+            dump_yaml(lay.identity_path, Identity.model_validate(data))
             return True, None
         if cmd == "revoke_permission":
             from jaeger_os.core.safety.permissions import PermissionGrants
