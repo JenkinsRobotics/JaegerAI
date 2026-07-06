@@ -65,6 +65,14 @@ final class ChatWindowController {
         )
         win.title = Self.title(for: agent.status)
         win.titlebarAppearsTransparent = true
+        // The content is a hard dark terminal canvas regardless of the
+        // system theme — pin the WINDOW to dark too, or under the light
+        // appearance the titlebar draws near-black title text over the
+        // dark canvas ("Jaeger — …" was unreadable) and system-coloured
+        // controls collapse the same way.
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.backgroundColor = NSColor(
+            red: 0.043, green: 0.055, blue: 0.078, alpha: 1.0) // Term.canvas
         win.isReleasedWhenClosed = false
         win.contentViewController = hosting
         win.center()
