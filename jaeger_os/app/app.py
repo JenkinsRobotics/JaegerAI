@@ -188,6 +188,15 @@ class JaegerApp:
 
     def _build_bus(self) -> None:
         self.bus = InProcBus()
+        # 0.8 U3: inject this chassis's bus into the brain-side runtime
+        # singleton (jaeger_os.nodes.runtime) so ``ensure_tts_node`` /
+        # ``ensure_animation_node`` / ``ensure_audio_session_node`` — and
+        # the AgentCore's AgentBridge, which reads ``self.bus`` — all
+        # share the ONE bus instead of two disconnected InProcBus
+        # instances (the pre-U3 windowed-app duality). Lazy import: the
+        # chassis stays importable without pulling in TTS/animation deps.
+        from jaeger_os.nodes import runtime as node_runtime
+        node_runtime.set_bus(self.bus)
 
     def _init_core(self) -> None:
         """Boot the Tier-1 core (manifest ``[core]``) on the MAIN thread,
