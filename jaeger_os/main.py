@@ -3751,21 +3751,17 @@ def _main_dispatch() -> int:
         layout.ensure_dirs()
         return self_test(layout)
 
-    # First-run / missing-instance: auto-fire the wizard — BEFORE any
-    # surface launch, the same contract old bare-``jaeger`` had
-    # (wizard → boot). Explicit ``jaeger setup`` runs through the
-    # daemon-cli dispatcher and never reaches this branch.
-    #
-    # One exception: no terminal to ask questions in (stdin isn't a
-    # tty — launched from a .app/launcher/IDE) on a bare invocation
-    # headed for the native app. The wizard's ``input()`` would crash
-    # on the closed stdin; the Swift app's onboarding owns first-run
-    # there, so launch it directly.
+    # First-run / missing-instance: the Swift app's onboarding owns
+    # first-run whenever the app is available (0.7.1 — GUI-first; the
+    # bridge reports ``no_instance`` and the app presents the setup
+    # window). The CLI wizard remains the path for headless installs
+    # and explicit terminal surfaces: ``--tui`` peeled off above,
+    # ``JAEGER_NO_GUI``, no built app, or a one-shot prompt.
     if not layout.exists():
         _bare = not " ".join(args.prompt).strip()
         _app = (_swift_app_binary()
                 if _bare and not os.environ.get("JAEGER_NO_GUI") else None)
-        if _app is not None and not sys.stdin.isatty():
+        if _app is not None:
             return _launch_swift_app(_app, instance_name)
         layout = run_wizard(force=False, instance_name=instance_name)
 

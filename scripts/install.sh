@@ -155,10 +155,8 @@ $JAEGER_SRC — delete it any time.)
 
 Next steps:
   cd $JAEGER_HOME
-  ./jaeger agent create    # create your first agent (the wizard)
-  ./jaeger                 # run the active agent (windowed app; --tui for terminal)
-  ./jaeger agent list      # manage agents: create / list / use / inspect / delete
-  ./jaeger doctor          # environment + readiness check
+  ./jaeger agent create    # create your first agent
+  ./jaeger                 # run it   (--tui for terminal)
 
 Upgrade later:
   curl -fsSL $RAW_URL | JAEGER_HOME=$JAEGER_HOME JAEGER_REF=$JAEGER_REF bash
