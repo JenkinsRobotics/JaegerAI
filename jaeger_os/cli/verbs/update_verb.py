@@ -222,11 +222,39 @@ def _update_download(home: Path, *, ref: str | None = None,
                 return rc
         else:
             print("[jaeger update] dependencies unchanged — skipped reinstall.")
+        _rebuild_swift_app(home)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     verb = "reinstalled" if force else "now at"
     print(f"[jaeger update] {verb} {ref}. Restart `jaeger` to apply.")
     return 0
+
+
+def _rebuild_swift_app(home: Path) -> None:
+    """Rebuild JaegerOS.app after a product swap (0.7.3). The .app bundle
+    is a BUILD ARTIFACT, not a product file — the release tarball can't
+    carry it, so without a rebuild the app silently lags the core it
+    talks to. Best-effort: no prior build (user never had the app) or no
+    swift toolchain (Linux/headless) → skip; only the stale-app case
+    warns."""
+    built = home / "jaeger_os" / "interfaces" / "swift" / ".build" / "JaegerOS.app"
+    script = home / "jaeger_os" / "interfaces" / "swift" / "Scripts" / "build-app.sh"
+    if not built.exists() or not script.exists():
+        return
+    if shutil.which("swift") is None:
+        print("[jaeger update] ⚠ swift toolchain missing — JaegerOS.app NOT "
+              "rebuilt and now lags the core; rebuild when available:",
+              file=sys.stderr)
+        print(f"                 bash {script} --release", file=sys.stderr)
+        return
+    print("[jaeger update] rebuilding JaegerOS.app…")
+    rc = subprocess.run(["bash", str(script), "--release"],
+                        stdout=subprocess.DEVNULL).returncode
+    if rc == 0:
+        print("[jaeger update] ✓ JaegerOS.app rebuilt")
+    else:
+        print(f"[jaeger update] ⚠ app rebuild exited {rc} — rerun: "
+              f"bash {script} --release", file=sys.stderr)
 
 
 def _do_rollback(home: Path) -> int:
@@ -242,6 +270,7 @@ def _do_rollback(home: Path) -> int:
     restored = _restore(home, prev, items)
     print(f"[jaeger update] rolled back {len(restored)} item(s).")
     _reinstall_deps(home)
+    _rebuild_swift_app(home)   # the built app must match the restored core
     shutil.rmtree(prev, ignore_errors=True)
     print("[jaeger update] restart `jaeger` to apply the rolled-back version.")
     return 0
@@ -413,7 +442,15 @@ def _cmd_update_argv(argv: list[str]) -> int:
         return _do_rollback(PACKAGE_ROOT.parent)
 
     method = _detect_method()
-    print(f"[jaeger update] install method: {method}")
+    # ``dev-checkout`` is the detector's name for ANY source-tree run,
+    # but a clean curl install has no .git and updates by tarball —
+    # label it honestly so operators don't think they're on a git clone.
+    label = method
+    if method == "dev-checkout":
+        from jaeger_os.core.instance.instance import PACKAGE_ROOT
+        if not (PACKAGE_ROOT.parent / ".git").exists():
+            label = "clean install (download + apply)"
+    print(f"[jaeger update] install method: {label}")
 
     stale = _list_stale_instances()
     if stale:

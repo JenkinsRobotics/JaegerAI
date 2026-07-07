@@ -3,6 +3,17 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.7.3` — updater rebuilds the app
+
+- **`jaeger update` now rebuilds `JaegerOS.app`** after applying a release
+  (and after `--rollback`). The .app bundle is a build artifact the release
+  tarball can't carry — updating 0.7.1 → 0.7.2 left the app binary stale
+  against the new core. Skips quietly when the app was never built; warns
+  loudly when a built app exists but the Swift toolchain is missing.
+- Honest updater label: a clean curl install now reports
+  `install method: clean install (download + apply)` instead of
+  `dev-checkout`.
+
 ## `0.7.2` — one-shot reminders, scheduling SOP, skill-call chips, close-the-terminal launch
 
 - **Native one-shot reminders.** "Remind me in 1 minute" was being scheduled
