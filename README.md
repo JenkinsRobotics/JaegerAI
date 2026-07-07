@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.7.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.7.2-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -42,9 +42,20 @@ installs the whole stack.**
 - 🔌 **Model-agnostic** — opt into LM Studio, an OpenAI-compatible endpoint, or Anthropic Claude. Local stays the default.
 - 🔒 **Permission-gated** — every tool is gated; risky actions are confirmation-prompted and audit-logged. Two modes: `confirm` (ask first) and `allow`.
 - 🎭 **Agent ≠ character** — the agent's name and profile picture are the instance's own; a character is only the persona it plays, swappable without changing the agent's identity.
+- ⏰ **Reminders & scheduled tasks** — "remind me in 5 minutes" fires once and completes itself (native one-shot, 0.7.2); cron expressions cover recurring automations. Scheduled prompts run as full agent turns — they can speak, message, or use any tool.
+- 🔗 **Third-party API** — embed a JROS agent in your own app: a single-file, zero-dependency Python client ([`clients/python/jros_client.py`](clients/python/jros_client.py)) over the `jaeger bridge` NDJSON protocol, the same fixture-pinned contract the native Mac app speaks. See [Third-party apps](#third-party-apps--integrate-jros).
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.7.0` (Swift-first + the two-runner core).** JROS is now a
+> **Status — `0.7.2`.** The 0.7.x patch line polished the out-of-box flow:
+> end-user installs build the product `JaegerOS.app` and first-run setup is
+> the app's setup window (0.7.1); a third-party client API shipped
+> (`clients/python/jros_client.py` + the documented bridge protocol, 0.7.1);
+> reminders got a native one-shot (`in_minutes`/`at` — no more cron
+> arithmetic for "in 5 minutes"), skill loads show in the chat as
+> "skill · view scheduling" chips, and `./jaeger` now detaches from the
+> terminal so the window can close (0.7.2).
+>
+> **`0.7.0` (Swift-first + the two-runner core).** JROS is now a
 > **native Mac app**: `JaegerOS.app` is the primary UI (menu-bar resident,
 > splash → chat/settings windows, quit-from-tray), talking to the Python core
 > over a versioned NDJSON bridge (ready in ~0.5s; the model warms behind it).
@@ -241,8 +252,10 @@ web UIs and clients that can't spawn a subprocess.
 ## Daily use
 
 `jaeger` (or `./jaeger` from the install dir) is the operator surface — it
-boots the agent app; `--tui` runs it in the terminal instead. Pick whichever
-launch path matches what you're doing.
+boots the agent app **detached**, so the terminal window can be closed (app
+log: `.jaeger_os/logs/JaegerOS.log`; `JAEGER_ATTACH=1` to keep it attached).
+`--tui` runs it in the terminal instead. `./jaeger autostart enable` makes it
+launch at login. Pick whichever launch path matches what you're doing.
 
 **Run a named agent** — the production flow:
 

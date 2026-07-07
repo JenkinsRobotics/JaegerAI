@@ -310,3 +310,49 @@ def test_lazy_import_skipped_when_sql_has_rows(tmp_path):
     mem.bind(SimpleNamespace(memory_dir=mem_dir))
     names = {s["name"] for s in mem.list_schedules()}
     assert names == {"real"}
+
+
+# ── one-shot (@once, 0.7.2) ───────────────────────────────────────
+
+
+def test_add_schedule_at_creates_one_shot(bound):
+    when = (datetime.now().astimezone()
+            + timedelta(minutes=5)).isoformat(timespec="seconds")
+    out = mem.add_schedule("", "ping once", name="dinner", at=when)
+    assert out["cron"] == mem.ONCE_CRON
+    assert out["next_run_at"]           # scheduled at the requested moment
+    assert out["cancelled"] is False
+
+
+def test_add_schedule_at_naive_is_local(bound):
+    naive = (datetime.now() + timedelta(minutes=5)).isoformat(timespec="seconds")
+    out = mem.add_schedule("", "ping", at=naive)
+    fire = datetime.fromisoformat(out["next_run_at"])
+    delta = abs((fire - datetime.now(timezone.utc)).total_seconds() - 300)
+    assert delta < 5    # ~5 minutes out in UTC → local was assumed
+
+
+def test_add_schedule_at_rejects_garbage(bound):
+    with pytest.raises(ValueError, match="invalid 'at'"):
+        mem.add_schedule("", "ping", at="teatime")
+
+
+def test_one_shot_fires_once_then_done(bound):
+    past = (datetime.now().astimezone()
+            - timedelta(seconds=1)).isoformat(timespec="seconds")
+    mem.add_schedule("", "say dinner", name="dinner", at=past)
+
+    claimed = mem.claim_due_schedules()
+    assert [s["name"] for s in claimed] == ["dinner"]
+
+    # Fired once → done: not active, never claimable again.
+    assert mem.list_schedules() == []
+    assert mem.claim_due_schedules() == []
+
+
+def test_one_shot_future_not_claimed_early(bound):
+    future = (datetime.now().astimezone()
+              + timedelta(hours=1)).isoformat(timespec="seconds")
+    mem.add_schedule("", "later", name="later", at=future)
+    assert mem.claim_due_schedules() == []
+    assert [s["name"] for s in mem.list_schedules()] == ["later"]
