@@ -79,7 +79,9 @@ enum ProtocolFrame {
     case ready(BridgeReady)
     case agentState(AgentLifecycle)
     case state(busy: Bool)
-    case tool(name: String, phase: String, elapsed: Double)
+    /// ``detail`` is a v1 ADDITIVE optional — short human context for the
+    /// activity chip (today: which skill loaded, e.g. "view scheduling").
+    case tool(name: String, phase: String, elapsed: Double, detail: String?)
     /// ``telemetry`` fields are v1 ADDITIVE optionals — a core that
     /// doesn't send them (or an older fixture) decodes to nils.
     case reply(text: String, error: String?,
@@ -124,7 +126,8 @@ enum ProtocolFrame {
         case "tool":
             return .tool(name: obj["name"] as? String ?? "",
                          phase: obj["phase"] as? String ?? "start",
-                         elapsed: (obj["elapsed_s"] as? Double) ?? 0)
+                         elapsed: (obj["elapsed_s"] as? Double) ?? 0,
+                         detail: obj["detail"] as? String)
         case "reply":
             return .reply(text: obj["text"] as? String ?? "",
                           error: obj["error"] as? String,

@@ -278,10 +278,13 @@ final class ChatViewModel: ObservableObject {
             let name = event.payload["tool"]?.get(String.self)
                 ?? event.payload["name"]?.get(String.self)
                 ?? "tool"
+            // v1 additive: `detail` names WHICH skill loaded
+            // ("skill · view scheduling") — absent for other tools.
+            let detail = event.payload["detail"]?.get(String.self) ?? ""
             messages.append(ChatMessage(
                 author: .toolCall,
                 timestamp: Date(),
-                text: "🔧 \(name)",
+                text: detail.isEmpty ? "🔧 \(name)" : "🔧 \(name) · \(detail)",
                 isStreaming: true
             ))
         case "tool.result", "tool.end", "tool.complete":
