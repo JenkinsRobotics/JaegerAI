@@ -391,3 +391,66 @@ def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monke
     monkeypatch.setattr(U, "_reinstall_deps", lambda h: deps.append(h) or 0)
     assert U._update_download(home, ref="9.9.9", force=True) == 0
     assert deps == [home]      # force resyncs deps even though requirements match
+
+
+# ── Swift app rebuild after product swap (0.7.3) ───────────────────
+
+
+def _swift_layout(home: Path) -> Path:
+    """A fake built app + build script under HOME; returns the script."""
+    swift = home / "jaeger_os" / "interfaces" / "swift"
+    (swift / ".build" / "JaegerOS.app").mkdir(parents=True)
+    script = swift / "Scripts" / "build-app.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/bash\nexit 0\n")
+    return script
+
+
+def test_update_download_rebuilds_swift_app(tmp_path, monkeypatch):
+    home = tmp_path
+    (home / "jaeger_os").mkdir()
+    (home / "requirements.txt").write_text("same")
+    _swift_layout(home)
+
+    def fake_extract(tarball, staging):
+        (staging / "jaeger_os").mkdir(parents=True)
+        (staging / "requirements.txt").write_text("same")
+        return ["jaeger_os", "requirements.txt"]
+
+    monkeypatch.setattr(U, "_download_tarball",
+                        lambda repo, ref, dest: dest.write_bytes(b""))
+    monkeypatch.setattr(U, "_extract_product", fake_extract)
+    rebuilds: list = []
+    monkeypatch.setattr(U, "_rebuild_swift_app", lambda h: rebuilds.append(h))
+    assert U._update_download(home, ref="9.9.9") == 0
+    assert rebuilds == [home]   # rebuild runs on the swapped-in install
+
+
+def test_rebuild_swift_app_skips_when_never_built(tmp_path, monkeypatch, capsys):
+    calls: list = []
+    monkeypatch.setattr(U.subprocess, "run",
+                        lambda *a, **k: calls.append(a))
+    U._rebuild_swift_app(tmp_path)      # no .build/JaegerOS.app → no-op
+    assert calls == []
+    assert capsys.readouterr().err == ""
+
+
+def test_rebuild_swift_app_runs_build_script(tmp_path, monkeypatch, capsys):
+    script = _swift_layout(tmp_path)
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--release"]]
+    assert "rebuilt" in capsys.readouterr().out
+
+
+def test_rebuild_swift_app_warns_without_toolchain(tmp_path, monkeypatch, capsys):
+    _swift_layout(tmp_path)
+    monkeypatch.setattr(U.shutil, "which", lambda name: None)
+    U._rebuild_swift_app(tmp_path)
+    assert "NOT rebuilt" in capsys.readouterr().err
