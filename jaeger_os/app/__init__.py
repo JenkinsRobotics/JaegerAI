@@ -43,7 +43,7 @@ from jaeger_os.transport import Bus, InProcBus
 from .app import JaegerApp
 from .config import load_config
 from .core import Core, CoreMainThreadError
-from .health import HealthCache, NodeHealth
+from .health import HealthCache
 from .logging import LogLine, log
 from .manifest import (
     AppSpec, BusSpec, CoreSpec, NodeSpec, SurfaceSpec, load_manifest,
@@ -65,6 +65,6 @@ __all__ = [
     "AppSpec", "NodeSpec", "SurfaceSpec", "BusSpec", "CoreSpec",
     "load_manifest",
     "load_config",
-    "NodeHealth", "HealthCache",
+    "HealthCache",
     "LogLine", "log",
 ]
