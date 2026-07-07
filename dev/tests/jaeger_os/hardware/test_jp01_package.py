@@ -139,6 +139,15 @@ def test_bus_light_path_through_light_node(jp01):
 
 
 def test_node_health_heartbeats_publish(jp01):
+    """jp01's own per-controller heartbeat (``_start_health_heartbeat``,
+    kept — not retired — by 0.8 U3; see its docstring) covers every
+    controller, including vcc01 which has no dedicated node at all, and
+    carries real ``link_connected``. 0.8 U3 ALSO made every
+    ``nodes.base.Node`` heartbeat generically (mc01/avc01's MotorNode/
+    LightNode now additionally publish as ``jp01-motor``/``jp01-light``
+    with no hardware knowledge — ``link_connected=False`` there is
+    correct, not a bug), so the link-state assertion below is scoped to
+    jp01's own per-controller messages, not every message on the topic."""
     rt, bus = jp01
     seen: list = []
     bus.subscribe(topics.SENSE_NODE_HEALTH, seen.append)
@@ -150,7 +159,9 @@ def test_node_health_heartbeats_publish(jp01):
         time.sleep(0.05)
     nodes = {m.node for m in seen}
     assert {"jp01-mc01", "jp01-avc01", "jp01-vcc01"} <= nodes
-    assert all(m.link_connected for m in seen)
+    controller_beats = [m for m in seen
+                        if m.node in {"jp01-mc01", "jp01-avc01", "jp01-vcc01"}]
+    assert all(m.link_connected for m in controller_beats)
 
 
 def test_telemetry_read_carries_heartbeats_and_estop(jp01):

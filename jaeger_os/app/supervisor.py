@@ -37,6 +37,8 @@ import threading
 import time
 from typing import Any, Callable
 
+import msgspec
+
 from .health import HealthCache
 from .logging import log
 from .manifest import NodeSpec
@@ -278,7 +280,11 @@ class Supervisor:
             "failures_in_window": len(recent),
             "crash_loop": len(recent) >= _BURST_LIMIT,
             "last_error": h.last_error,
-            "health": (latest.details if latest else {}),
+            # 0.8 U3: ``latest`` is now the canon ``topics.NodeHealth``
+            # msgspec Struct (was a dataclass with a ``.details`` dict) —
+            # ``msgspec.structs.asdict`` gives the same opaque-dict shape
+            # callers already expect.
+            "health": (msgspec.structs.asdict(latest) if latest else {}),
             "health_age_s": (
                 self._health.age_s(node_id) if self._health else None
             ),

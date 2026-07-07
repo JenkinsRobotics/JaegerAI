@@ -24,7 +24,8 @@ from jaeger_os.app.app import SecondInstanceError, resolve_ref  # noqa: E402
 from jaeger_os.app.core import Core, CoreMainThreadError  # noqa: E402
 from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.app.config import load_config, slice_for  # noqa: E402
-from jaeger_os.app.health import NodeHealth  # noqa: E402
+from jaeger_os.app.health import HealthCache  # noqa: E402
+from jaeger_os.transport import topics  # noqa: E402
 from jaeger_os.app.manifest import load_manifest  # noqa: E402
 from jaeger_os.nodes.base import FrameNode, Node, NodeState  # noqa: E402
 from jaeger_os.app import supervisor as supervisor_mod  # noqa: E402
@@ -428,6 +429,22 @@ def test_app_boots_runs_verbs_and_shuts_down(tmp_path):
     assert not (tmp_path / ".run" / "conftest-app.pid").exists()
 
 
+def test_boot_injects_bus_into_node_runtime_singleton(tmp_path):
+    """0.8 U3: JaegerApp._build_bus injects ``self.bus`` into
+    ``jaeger_os.nodes.runtime`` so ``ensure_tts_node`` / the windowed
+    app's AgentBridge share ONE bus instead of two disconnected
+    InProcBus instances (the pre-U3 windowed-app duality)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()   # start from a clean singleton
+    app = JaegerApp(_write_app(tmp_path)).boot()
+    try:
+        assert node_runtime.get_bus() is app.bus
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()   # reset singleton for later tests
+
+
 def test_second_instance_refused(tmp_path):
     root = _write_app(tmp_path)
     app1 = JaegerApp(root).boot()
@@ -491,9 +508,38 @@ def test_reap_stale_kills_leftover_children(tmp_path):
 
 
 def test_node_health_message_shape():
-    h = NodeHealth(node="x", state="running", details={"a": 1}, ts=1.0)
-    assert h.topic == "/sys/node_health"
-    assert dataclasses.asdict(h)["details"] == {"a": 1}
+    """Canon NodeHealth (0.8 U3): ``transport.topics`` msgspec Struct on
+    ``/sense/node_health``. The plain-dataclass twin that used to live
+    in ``app/health.py`` (on the different, unpublished ``/sys/node_health``
+    topic) is gone — every ``nodes.base.Node`` now heartbeats this type."""
+    h = topics.NodeHealth(node="x", state="running", detail="ok")
+    assert h.topic == "/sense/node_health"
+    assert h.node == "x" and h.state == "running" and h.detail == "ok"
+
+
+def test_health_cache_receives_a_real_base_node_heartbeat():
+    """0.8 U3: every ``nodes.base.Node`` heartbeats ``topics.NodeHealth``
+    on ``/sense/node_health`` from inside its OWN ``run()`` loop —
+    HealthCache (subscribed there) must observe it from a REAL node on a
+    REAL InProcBus, no mocking of either side."""
+    bus = InProcBus()
+    cache = HealthCache(bus)
+    node = TickerNode(bus=bus)
+    import threading
+    t = threading.Thread(target=node.run, daemon=True)
+    t.start()
+    try:
+        assert _wait_for(lambda: cache.latest(node.name) is not None,
+                          timeout_s=3.0)
+        latest = cache.latest(node.name)
+        assert latest.state == "running"
+        assert latest.topic == "/sense/node_health"
+        age = cache.age_s(node.name)
+        assert age is not None and age >= 0.0
+    finally:
+        node.stop()
+        t.join(timeout=2.0)
+        bus.close()
 
 
 # ── core (Tier-1 host role) ────────────────────────────────────────
