@@ -26,7 +26,7 @@ from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.app.config import load_config, slice_for  # noqa: E402
 from jaeger_os.app.health import NodeHealth  # noqa: E402
 from jaeger_os.app.manifest import load_manifest  # noqa: E402
-from jaeger_os.app.node import FrameNode, Node, NodeState  # noqa: E402
+from jaeger_os.nodes.base import FrameNode, Node, NodeState  # noqa: E402
 from jaeger_os.app import supervisor as supervisor_mod  # noqa: E402
 from jaeger_os.app.supervisor import (  # noqa: E402
     Supervisor,
@@ -34,6 +34,8 @@ from jaeger_os.app.supervisor import (  # noqa: E402
     reap_stale,
 )
 from jaeger_os.app.manifest import NodeSpec  # noqa: E402
+import jaeger_os.app as app_pkg  # noqa: E402
+import jaeger_os.nodes.base as nodes_base_mod  # noqa: E402
 
 
 def _wait_for(cond, timeout_s=3.0):
@@ -290,6 +292,40 @@ def test_frame_node_update_render_split_and_pacing():
         # be PACED, not a busy loop.
         assert 0.1 < elapsed < 2.0
         assert node.health()["fps_target"] == 50.0
+    finally:
+        bus.close()
+
+
+def test_app_node_is_the_real_nodes_base_node():
+    """0.8 U2: the chassis's Node/NodeState/FrameNode were a
+    strict-subset duplicate of the real ``jaeger_os.nodes.base``
+    classes (app/node.py). That duality is gone — there is exactly
+    one Node, one NodeState, one FrameNode, and ``jaeger_os.app`` just
+    re-exports them."""
+    assert app_pkg.Node is nodes_base_mod.Node
+    assert app_pkg.NodeState is nodes_base_mod.NodeState
+    assert app_pkg.FrameNode is nodes_base_mod.FrameNode
+    assert Node is nodes_base_mod.Node
+    assert NodeState is nodes_base_mod.NodeState
+    assert FrameNode is nodes_base_mod.FrameNode
+
+
+def test_frame_node_tick_increments_frames_rendered():
+    """FrameNode, moved into nodes/base.py, still runs a real
+    update/render tick loop against a real bus."""
+    class Blinker(nodes_base_mod.FrameNode):
+        def render_tick(self, ts: float) -> None:
+            pass
+
+    bus = InProcBus()
+    try:
+        node = Blinker(bus=bus, fps=50, name="blinker")
+        import threading
+        t = threading.Thread(target=node.run, daemon=True)
+        t.start()
+        assert _wait_for(lambda: node.frames_rendered >= 2)
+        node.stop()
+        t.join(timeout=2.0)
     finally:
         bus.close()
 
