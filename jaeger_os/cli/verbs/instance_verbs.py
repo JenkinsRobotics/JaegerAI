@@ -37,6 +37,7 @@ Verbs added in 0.2.0:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -85,7 +86,9 @@ def _print_agent_usage() -> None:
         "  config, and model. (The character is the persona; the agent runs it.)\n"
         "\n"
         "commands:\n"
-        "  create [name] [--force]  run the setup wizard for a new/rebuilt agent\n"
+        "  create [name] [--tui]    create an agent — the app's setup window\n"
+        "                           when built; --tui for the terminal wizard\n"
+        "  create [name] --force    rebuild an existing agent (terminal wizard)\n"
         "  list                     show every agent (active one starred)\n"
         "  use <name>               set the default agent\n"
         "  inspect <name>           print identity + config (no model boot)\n"
@@ -202,6 +205,28 @@ def _cmd_agent_argv(argv: list[str]) -> int:
         # Friendly positional: `agent create <name>` → setup --name <name>.
         if rest and not rest[0].startswith("-"):
             rest = ["--name", rest[0], *rest[1:]]
+        # 0.7.1 GUI-first: creating an agent opens the Swift app's setup
+        # window when the product app is built and the target instance
+        # doesn't exist yet — the app pins JAEGER_INSTANCE_NAME, the
+        # bridge reports ``no_instance``, and onboarding takes over.
+        # ``--tui`` / ``--force`` / headless / ``jaeger setup`` keep the
+        # terminal wizard.
+        if "--tui" in rest:
+            rest.remove("--tui")
+            return _cmd_setup_argv(rest)
+        if "--force" not in rest and not os.environ.get("JAEGER_NO_GUI"):
+            from jaeger_os.core.instance.instance import (
+                InstanceLayout, default_instance_name, resolve_instance_dir,
+            )
+            from jaeger_os.main import _launch_swift_app, _swift_app_binary
+            name = default_instance_name()
+            if "--name" in rest and rest.index("--name") + 1 < len(rest):
+                name = rest[rest.index("--name") + 1]
+            app = _swift_app_binary()
+            if (app is not None
+                    and not InstanceLayout(
+                        root=resolve_instance_dir(name)).exists()):
+                return _launch_swift_app(app, name)
         return _cmd_setup_argv(rest)
     if verb in ("list", "use", "inspect", "delete", "clear"):
         return _cmd_instance_argv(argv)   # argv[0] is the verb
