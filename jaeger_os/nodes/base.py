@@ -239,3 +239,54 @@ class Node(abc.ABC):
         readable.  Routes to stderr so it doesn't fight the TUI's
         stdout."""
         print(f"[node:{self.name}] {msg}", file=sys.stderr, flush=True)
+
+
+class FrameNode(Node):
+    """Render-loop specialization — the MochiNodeBase shape, formatted.
+
+    Fixed-rate scheduling (deadline-based, so render cost doesn't
+    drift the frame rate) with the update/render split Mochi's nodes
+    already use:
+
+        update_tick(ts)   advance state — scripts, state machines
+        render_tick(ts)   produce + publish one frame
+
+    A node that falls behind resyncs to "now" rather than spiraling.
+    """
+
+    def __init__(self, *, bus: Any, fps: float = 30.0,
+                 **kwargs: Any) -> None:
+        super().__init__(bus=bus,
+                         tick_interval_s=1.0 / max(float(fps), 0.5),
+                         **kwargs)
+        self.fps = float(fps)
+        self.frames_rendered = 0
+        self._next_deadline: float | None = None
+
+    # override these two, not tick():
+
+    def update_tick(self, ts: float) -> None:
+        """Advance state. Default: nothing."""
+
+    def render_tick(self, ts: float) -> None:
+        """Produce + publish one frame. Default: nothing."""
+
+    def tick(self) -> None:
+        now = time.monotonic()
+        if self._next_deadline is None:
+            self._next_deadline = now
+        self.update_tick(now)
+        self.render_tick(now)
+        self.frames_rendered += 1
+        self._next_deadline += self._tick_interval_s
+        sleep_s = self._next_deadline - time.monotonic()
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+        else:
+            self._next_deadline = time.monotonic()   # fell behind; resync
+
+    def health(self) -> dict[str, Any]:
+        base = super().health()
+        base["fps_target"] = self.fps
+        base["frames_rendered"] = self.frames_rendered
+        return base

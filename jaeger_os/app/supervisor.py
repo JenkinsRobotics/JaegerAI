@@ -40,7 +40,7 @@ from typing import Any, Callable
 from .health import HealthCache
 from .logging import log
 from .manifest import NodeSpec
-from .node import Node, NodeState
+from jaeger_os.nodes.base import Node, NodeState
 
 _BACKOFF_BASE_S = 1.0
 _BACKOFF_CAP_S = 30.0

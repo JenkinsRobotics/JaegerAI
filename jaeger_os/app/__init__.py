@@ -10,14 +10,15 @@ Copy-ability rules (enforced by tests/test_app_format.py):
   * every copy carries the FRAMEWORK_FORMAT stamp below; an app's
     jaeger.toml declares ``requires_framework`` against it.
   * modules import only the stdlib, pyyaml, and each other —
-    RELATIVELY — with ONE exception: the bus, which is
-    ``jaeger_os.transport`` (0.8 U1: shared with the real nodes
-    instead of a chassis-local duplicate; see below).
+    RELATIVELY — with TWO exceptions, both shared with the real
+    nodes instead of a chassis-local duplicate: the bus
+    (``jaeger_os.transport``, since 0.8 U1) and Node/NodeState/
+    FrameNode (``jaeger_os.nodes.base``, since 0.8 U2 — the chassis's
+    ``node.py`` was a strict subset of the real Node and was deleted).
 
 Layout:
   app.py         the chassis — manifest → config → bus → nodes →
                  surfaces → run → teardown
-  node.py        Node + NodeState (the universal lifecycle contract)
   supervisor.py  NodeHandle + thread/subprocess backends, restart
                  policy (never|on_failure|always + backoff), diagnose
   manifest.py    jaeger.toml loader + validator
@@ -47,7 +48,7 @@ from .logging import LogLine, log
 from .manifest import (
     AppSpec, BusSpec, CoreSpec, NodeSpec, SurfaceSpec, load_manifest,
 )
-from .node import FrameNode, Node, NodeState
+from jaeger_os.nodes.base import FrameNode, Node, NodeState
 from .supervisor import NodeHandle, Supervisor
 
 # The copy's format stamp — what jaeger.toml's `requires_framework`
