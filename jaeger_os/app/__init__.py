@@ -7,10 +7,12 @@ design system, many independent codebases. Nothing imports this
 across repositories.
 
 Copy-ability rules (enforced by tests/test_app_format.py):
-  * modules import only the stdlib, pyyaml, optional pyzmq, and each
-    other — RELATIVELY. Paste this directory anywhere and it works.
   * every copy carries the FRAMEWORK_FORMAT stamp below; an app's
     jaeger.toml declares ``requires_framework`` against it.
+  * modules import only the stdlib, pyyaml, and each other —
+    RELATIVELY — with ONE exception: the bus, which is
+    ``jaeger_os.transport`` (0.8 U1: shared with the real nodes
+    instead of a chassis-local duplicate; see below).
 
 Layout:
   app.py         the chassis — manifest → config → bus → nodes →
@@ -20,18 +22,24 @@ Layout:
                  policy (never|on_failure|always + backoff), diagnose
   manifest.py    jaeger.toml loader + validator
   config.py      config.yaml loader (refuse loudly)
-  bus/           Bus ABC + in-process and ZMQ-broker backends
   surfaces.py    Surface contract + SurfaceManager + bus→Qt bridge
   health.py      NodeHealth heartbeats + the liveness cache
   logging.py     one log-line shape + the /sys/log bus mirror
-  child.py       subprocess-node entry helper
+
+The bus is ``jaeger_os.transport`` (0.8 U1 deleted the duplicate
+``app/bus/`` and the chassis-ZMQ path it carried — unexercised, since
+both shipped manifests run ``[bus] backend = "inproc"``; transport's
+ZMQ is the canon for any later cross-process work). The
+subprocess-node ZMQ bootstrap helper (``child.py``) went with it —
+no manifest in this repo ever configured a subprocess node, so it
+was dead weight once the bus it bootstrapped was gone.
 """
 
 from __future__ import annotations
 
+from jaeger_os.transport import Bus, InProcBus
+
 from .app import JaegerApp
-from .bus.api import Bus, MessageRegistry, RawMessage
-from .bus.inproc import InProcBus
 from .config import load_config
 from .core import Core, CoreMainThreadError
 from .health import HealthCache, NodeHealth
@@ -52,7 +60,7 @@ __all__ = [
     "Node", "FrameNode", "NodeState",
     "Core", "CoreMainThreadError",
     "Supervisor", "NodeHandle",
-    "Bus", "InProcBus", "MessageRegistry", "RawMessage",
+    "Bus", "InProcBus",
     "AppSpec", "NodeSpec", "SurfaceSpec", "BusSpec", "CoreSpec",
     "load_manifest",
     "load_config",

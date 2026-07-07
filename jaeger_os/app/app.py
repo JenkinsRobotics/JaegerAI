@@ -24,8 +24,8 @@ import signal
 import sys
 from typing import Any
 
-from .bus.api import Bus, MessageRegistry
-from .bus.inproc import InProcBus
+from jaeger_os.transport import Bus, InProcBus
+
 from .config import load_config, slice_for
 from .core import Core
 from .health import HealthCache
@@ -60,8 +60,6 @@ class JaegerApp:
     def __init__(
         self,
         manifest_path: str | pathlib.Path,
-        *,
-        registry: MessageRegistry | None = None,
     ) -> None:
         # A file path is honored verbatim (an app may carry more than one
         # manifest — e.g. jaeger.sim.toml, jaeger.windowed.toml); a dir
@@ -71,7 +69,6 @@ class JaegerApp:
         self.root = (manifest_path.parent if manifest_path.is_file()
                      else manifest_path)
         self.spec: AppSpec = load_manifest(manifest_path)
-        self.registry = registry or MessageRegistry()
         self.config: dict[str, Any] = {}
         self.bus: Bus | None = None
         self.health: HealthCache | None = None
@@ -190,17 +187,7 @@ class JaegerApp:
             self._slot_held = False
 
     def _build_bus(self) -> None:
-        if self.spec.bus.backend == "zmq":
-            from .bus.zmq import (
-                DEFAULT_XPUB, DEFAULT_XSUB, Broker, ZmqBus,
-            )
-            xsub = self.spec.bus.xsub or DEFAULT_XSUB
-            xpub = self.spec.bus.xpub or DEFAULT_XPUB
-            self._broker = Broker(xsub=xsub, xpub=xpub)
-            self._broker.start()
-            self.bus = ZmqBus(self.registry, xsub=xsub, xpub=xpub)
-        else:
-            self.bus = InProcBus()
+        self.bus = InProcBus()
 
     def _init_core(self) -> None:
         """Boot the Tier-1 core (manifest ``[core]``) on the MAIN thread,

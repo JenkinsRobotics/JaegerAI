@@ -22,22 +22,18 @@ import pytest
 from jaeger_os.app import FRAMEWORK_FORMAT, JaegerApp  # noqa: E402
 from jaeger_os.app.app import SecondInstanceError, resolve_ref  # noqa: E402
 from jaeger_os.app.core import Core, CoreMainThreadError  # noqa: E402
-from jaeger_os.app.bus.api import MessageRegistry, RawMessage  # noqa: E402
-from jaeger_os.app.bus.inproc import InProcBus  # noqa: E402
+from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.app.config import load_config, slice_for  # noqa: E402
-from jaeger_os.app.health import HealthCache, NodeHealth  # noqa: E402
+from jaeger_os.app.health import NodeHealth  # noqa: E402
 from jaeger_os.app.manifest import load_manifest  # noqa: E402
 from jaeger_os.app.node import FrameNode, Node, NodeState  # noqa: E402
 from jaeger_os.app import supervisor as supervisor_mod  # noqa: E402
 from jaeger_os.app.supervisor import (  # noqa: E402
-    SubprocessHandle,
     Supervisor,
     ThreadHandle,
     reap_stale,
 )
 from jaeger_os.app.manifest import NodeSpec  # noqa: E402
-
-REPO = pathlib.Path(__file__).resolve().parents[4]  # dev/tests/jaeger_os/app/ → repo root
 
 
 def _wait_for(cond, timeout_s=3.0):
@@ -198,29 +194,26 @@ def test_config_slices(tmp_path):
     assert slice_for(cfg, "") == {}
 
 
-# ── message registry ───────────────────────────────────────────────
+# ── bus (inproc) ─────────────────────────────────────────────────────
+#
+# MessageRegistry/RawMessage were the ZMQ wire-decode registry (0.8 U1
+# deleted app/bus/ + the chassis-ZMQ path); the in-process bus is a
+# pass-through — it never needs a registry, it just delivers whatever
+# dataclass you published. These two tests now prove exactly that: a
+# real publish -> subscribe delivery of a plain dataclass message.
 
 
-def test_registry_roundtrip_and_fallback():
-    reg = MessageRegistry()
-    reg.register(Ping)
-    wire = reg.encode(Ping(n=7))
-    back = reg.decode("/test/ping", wire)
-    assert isinstance(back, Ping) and back.n == 7
-    raw = reg.decode("/not/registered", b'{"x": 1, "topic": "/not/registered"}')
-    assert isinstance(raw, RawMessage) and raw.data == {"x": 1}
-
-
-def test_registry_refuses_topicless_dataclass():
-    @dataclasses.dataclass
-    class NoTopic:
-        x: int = 0
-
-    with pytest.raises(ValueError, match="topic"):
-        MessageRegistry().register(NoTopic)
-
-
-# ── bus (inproc) ───────────────────────────────────────────────────
+def test_inproc_bus_delivers_plain_dataclass_messages_untouched():
+    bus = InProcBus()
+    try:
+        got: list[Any] = []
+        bus.subscribe("/test/ping", got.append)
+        msg = Ping(n=7)
+        bus.publish(msg)
+        assert _wait_for(lambda: got)
+        assert got[0] is msg and got[0].n == 7   # object passed through, not re-decoded
+    finally:
+        bus.close()
 
 
 def test_inproc_bus_routes_and_isolates_bad_subscribers():
@@ -442,73 +435,23 @@ def test_reap_stale_kills_leftover_children(tmp_path):
             child.kill()
 
 
-# ── subprocess backend + zmq bus, end to end ───────────────────────
-
-
-@pytest.fixture
-def zmq_stack():
-    pytest.importorskip("zmq")
-    from jaeger_os.app.bus.zmq import Broker, ZmqBus
-    from dev.tests.jaeger_os.app._worker_node import MESSAGES
-
-    broker = Broker(xsub="tcp://127.0.0.1:7791", xpub="tcp://127.0.0.1:7792")
-    broker.start()
-    bus = ZmqBus(MESSAGES, xsub=broker.xsub_endpoint,
-                 xpub=broker.xpub_endpoint)
-    yield broker, bus
-    bus.close()
-    broker.stop()
-
-
-def test_subprocess_node_roundtrip_crash_and_supervised_restart(
-        zmq_stack, tmp_path, monkeypatch):
-    monkeypatch.setattr(supervisor_mod, "_BACKOFF_BASE_S", 0.1)
-    broker, bus = zmq_stack
-    from dev.tests.jaeger_os.app._worker_node import TestCmd
-
-    health = HealthCache(bus)
-    sup = Supervisor(health=health, bus=bus)
-    spec = NodeSpec(id="worker", backend="subprocess",
-                    module="dev.tests.jaeger_os.app._worker_node", restart="on_failure")
-    handle = SubprocessHandle(
-        spec, env_extra=broker.env(), cwd=REPO,
-        registry_file=tmp_path / "children.json",
-    )
-    sup.add(handle)
-    sup.start_all()
-    try:
-        # Liveness: heartbeats arrive over the wire.
-        assert _wait_for(lambda: health.latest("worker") is not None,
-                         timeout_s=8.0), "no heartbeat from child"
-        # Roundtrip: command in, echo out.
-        echoes: list[Any] = []
-        bus.subscribe("/test/echo", echoes.append)
-        deadline = time.monotonic() + 8.0
-        while not echoes and time.monotonic() < deadline:
-            bus.publish(TestCmd(cmd="ping"))
-            time.sleep(0.3)
-        assert echoes and echoes[0].cmd == "pong"
-        first_pid = echoes[0].pid
-
-        # Crash it — the supervisor's restart policy takes over.
-        bus.publish(TestCmd(cmd="die"))
-        assert _wait_for(lambda: handle.restarts >= 1, timeout_s=10.0), \
-            "supervisor never restarted the crashed child"
-        echoes.clear()
-        deadline = time.monotonic() + 8.0
-        while not echoes and time.monotonic() < deadline:
-            bus.publish(TestCmd(cmd="ping"))
-            time.sleep(0.3)
-        assert echoes, "restarted child never answered"
-        assert echoes[0].pid != first_pid   # genuinely a new process
-    finally:
-        sup.stop_all()
-        assert handle.state().startswith(("off", "exited"))
-        # Registry is clean — no orphans on disk.
-        leftovers = [p for p in
-                     (tmp_path / "children.json",) if p.exists()
-                     and p.read_text() not in ("{}", "")]
-        assert not leftovers
+# NOTE (0.8 U1): the subprocess-backend + chassis-ZMQ end-to-end test
+# that lived here (spawning a real subprocess node wired over
+# jaeger_os.app.bus.zmq.Broker/ZmqBus + app.child.child_main) was
+# removed along with app/bus/ and app/child.py. That path was never
+# exercised in production — both shipped manifests run
+# `[bus] backend = "inproc"`, and no manifest in this repo ever
+# configured a subprocess node — so the test now exercised only
+# dropped code. Its fixture module
+# (dev/tests/jaeger_os/app/_worker_node.py) is deleted too. Repointing
+# it onto transport's ZMQBus instead of deleting it would need
+# NodeHealth/LogLine (and the worker's TestCmd/TestEcho) converted to
+# msgspec Structs registered in transport.topics — out of scope here
+# (U1 keeps the message dataclasses plain; msgspec conversion is later,
+# alongside the Transcript/NodeHealth overlap noted for U3).
+# `test_manifest_refuses_subprocess_on_inproc_bus` above still covers
+# the manifest-validation half (subprocess needs backend="zmq") since
+# that logic lives in manifest.py, untouched by this change.
 
 
 def test_node_health_message_shape():
