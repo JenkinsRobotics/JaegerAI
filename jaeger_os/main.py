@@ -3257,6 +3257,16 @@ def boot_for_tui(
     extensions — keeping the surface small so the boot is fast and
     the failure modes match ``cli_loop`` 1:1.
     """
+    # 0.8 U3: establish the ONE process bus before anything below can
+    # lazily mint its own. When a chassis (JaegerApp / AgentCore) called
+    # this — the windowed path — ``get_bus()`` already returns its
+    # injected bus, so ``set_bus`` here is a no-op that just keeps the
+    # boot-root contract explicit. On the bare TUI/daemon path (no
+    # chassis) this adopts ``get_bus()``'s own lazily-minted bus as the
+    # injected one, so every later ``ensure_*`` call shares it.
+    from jaeger_os.nodes import runtime as _node_runtime
+    _node_runtime.set_bus(_node_runtime.get_bus())
+
     instance_name = instance_name or default_instance_name()
     root = resolve_instance_dir(instance_name)
     layout = InstanceLayout(root=root)

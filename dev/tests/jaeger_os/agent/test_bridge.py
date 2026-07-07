@@ -15,7 +15,7 @@ import pytest
 
 import jaeger_os.agent.loop.bridge as bridge_mod
 from jaeger_os.agent.loop.bridge import AgentBridge
-from jaeger_os.transport import InProcBus
+from jaeger_os.transport import InProcBus, topics
 from jaeger_os.core.messages import ChatMessage, ChatReply
 
 
@@ -132,6 +132,42 @@ def test_bounded_inbox_emits_busy_when_full() -> None:
             except queue.Empty:
                 pass
         assert any("busy" in s for s in seen), seen
+    finally:
+        _stop(b, bus)
+
+
+# ── transcript collision guard (0.8 U3): partials ignored, final taken ──
+
+
+def test_partial_transcript_is_ignored() -> None:
+    """A voice partial (is_final=False) must NOT become a chat turn —
+    the audio_session node streams several of these per utterance before
+    the final; treating each as a turn would fire once per fragment."""
+    bus = InProcBus()
+    replies: "queue.Queue[str]" = queue.Queue()
+    bus.subscribe(ChatReply.topic, lambda m: replies.put(m.text))
+    b = _bridge(bus, run_turn=lambda c, t, session_key=None: {"text": f"echo: {t}"})
+    try:
+        bus.publish(topics.Transcript(text="hel", is_final=False))
+        bus.publish(topics.Transcript(text="hello wor", is_final=False))
+        with pytest.raises(queue.Empty):
+            replies.get(timeout=0.5)
+        assert b.turns == 0
+    finally:
+        _stop(b, bus)
+
+
+def test_final_transcript_becomes_a_chat_turn() -> None:
+    """The final transcript (default is_final=True) drives a real turn,
+    tagged with source 'voice' into the same inbox as chat."""
+    bus = InProcBus()
+    replies: "queue.Queue[str]" = queue.Queue()
+    bus.subscribe(ChatReply.topic, lambda m: replies.put(m.text))
+    b = _bridge(bus, run_turn=lambda c, t, session_key=None: {"text": f"echo: {t}"})
+    try:
+        bus.publish(topics.Transcript(text="hello world", is_final=True))
+        assert replies.get(timeout=3.0) == "echo: hello world"
+        assert b.turns == 1
     finally:
         _stop(b, bus)
 

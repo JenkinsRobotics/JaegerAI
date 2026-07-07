@@ -138,6 +138,8 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         m, "run_for_voice",
         lambda c, t, session_key="gui": {"text": f"echo: {t}", "error": None})
 
+    from jaeger_os.nodes import runtime as node_runtime
+
     repo = pathlib.Path(__file__).resolve().parents[4]
     app = JaegerApp(repo / "jaeger.windowed.toml")
     assert app.spec.name == "jros-windowed"
@@ -148,12 +150,16 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         assert app.core is not None
         assert app.core.__class__.__name__ == "AgentCore"
         assert app.core.bridge is not None
+        # 0.8 U3: _build_bus injects app.bus into nodes.runtime — one bus
+        # per process, not two disconnected InProcBus instances.
+        assert node_runtime.get_bus() is app.bus
         replies = []
         app.bus.subscribe(ChatReply.topic, lambda msg: replies.append(msg.text))
         app.bus.publish(ChatMessage(text="hi core", source="gui"))
         assert _pump(qapp, lambda: replies == ["echo: hi core"])
     finally:
         app.shutdown()
+        node_runtime.shutdown()   # reset the singleton for later tests
     assert cleaned == [True]   # the core drained + cleaned up the model
 
 
