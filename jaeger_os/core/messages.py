@@ -104,6 +104,9 @@ class ToolEvent:
     phase: str = "start"
     elapsed_s: float = 0.0
     session: str = ""
+    # Short human context for the chip/line — today only skill calls set
+    # it ("view scheduling"), so surfaces can show WHICH skill loaded.
+    detail: str = ""
     topic: str = "/sense/tool"
 
 

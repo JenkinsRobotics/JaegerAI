@@ -737,6 +737,11 @@ def test_fixture_frames_match_builders():
     assert frames["state_idle"] == protocol.state_frame(False, "desktop-app")
     assert frames["tool"] == protocol.tool_frame(
         "web_search", "done", 1.25, "desktop-app")
+    # v1 additive tool detail — key present only when supplied, so the base
+    # "tool" fixture above (no detail key) stays byte-identical.
+    assert frames["tool_skill_detail"] == protocol.tool_frame(
+        "skill", "start", 0.0, "desktop-app", detail="view scheduling")
+    assert "detail" not in protocol.tool_frame("web_search", "done")
     assert frames["reply"] == protocol.reply_frame(
         "It's 3:48 PM PDT.", None, "desktop-app")
     assert frames["reply_error"] == protocol.reply_frame(

@@ -442,7 +442,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                 _emit(proto, protocol.tool_frame(
                     str(payload.get("name", "")),
                     str(payload.get("phase", "start")),
-                    float(payload.get("elapsed_s") or 0.0)))
+                    float(payload.get("elapsed_s") or 0.0),
+                    detail=str(payload.get("detail", ""))))
 
     try:
         from jaeger_os.main import _pipeline
