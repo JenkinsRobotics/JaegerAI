@@ -16,10 +16,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from jaeger_os.app.bus.api import MessageRegistry
-from jaeger_os.app.health import NodeHealth
-from jaeger_os.app.logging import LogLine
-
 
 @dataclass
 class ChatMessage:
@@ -134,18 +130,7 @@ class ModeState:
     topic: str = "/sense/mode"
 
 
-# Registered for the ZMQ wire codec (the in-process bus passes objects
-# through untouched and never consults the registry). NodeHealth + LogLine
-# are chassis-standard ``/sys/*`` topics, registered so a surface can show
-# ``/sys/log`` / node health later.
-MESSAGES = MessageRegistry()
-MESSAGES.register_all([
-    ChatMessage, ChatReply, Transcript, AgentState, ToolEvent, AgentActivity,
-    ModeState, AgentRequest, AgentResponse,
-    NodeHealth, LogLine,
-])
-
 __all__ = [
-    "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
+    "ChatMessage", "ChatReply", "Transcript", "AgentState",
     "ToolEvent", "AgentActivity", "ModeState", "AgentRequest", "AgentResponse",
 ]

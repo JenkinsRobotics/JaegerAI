@@ -26,7 +26,7 @@ from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from jaeger_os.agent.loop.bridge import AgentBridge  # noqa: E402
-from jaeger_os.app.bus.inproc import InProcBus  # noqa: E402
+from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.core.messages import AgentState, ChatReply  # noqa: E402
 from jaeger_os.interfaces.pyside6.pill.qt import Pill  # noqa: E402
 from jaeger_os.interfaces.pyside6.rich_tui.window import ChatWindow  # noqa: E402
@@ -129,7 +129,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
 
     import jaeger_os.main as m
     from jaeger_os.app import JaegerApp
-    from jaeger_os.core.messages import MESSAGES, ChatMessage, ChatReply
+    from jaeger_os.core.messages import ChatMessage, ChatReply
 
     cleaned = []
     monkeypatch.setattr(m, "boot_for_tui", lambda **kw: types.SimpleNamespace(
@@ -139,11 +139,12 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         lambda c, t, session_key="gui": {"text": f"echo: {t}", "error": None})
 
     repo = pathlib.Path(__file__).resolve().parents[4]
-    app = JaegerApp(repo / "jaeger.windowed.toml", registry=MESSAGES)
+    app = JaegerApp(repo / "jaeger.windowed.toml")
     assert app.spec.name == "jros-windowed"
     assert app.spec.event_loop == "qt"
     app.boot()   # init_core builds the AgentCore (main thread) + bridge
     try:
+        assert isinstance(app.bus, InProcBus)   # 0.8 U1: chassis on transport.InProcBus
         assert app.core is not None
         assert app.core.__class__.__name__ == "AgentCore"
         assert app.core.bridge is not None
