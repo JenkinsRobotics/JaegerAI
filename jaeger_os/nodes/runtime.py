@@ -48,6 +48,7 @@ from jaeger_os.transport import Bus, InProcBus
 
 _lock = threading.Lock()
 _bus: Optional[Bus] = None
+_bus_owned: bool = True   # False once a chassis/other boot root injects its bus
 _tts_node: Optional[TTSNode] = None
 _tts_thread: Optional[threading.Thread] = None
 _synth = None  # KokoroTTS instance owned by the node
@@ -152,14 +153,49 @@ _audio_thread_factory: Callable[[AudioSessionNode], threading.Thread] = (
 def get_bus() -> Bus:
     """Return the brain's singleton Bus, creating it on first call.
 
-    Today: always :class:`InProcBus`.  Track A.7 will introduce a
-    ZMQ variant chosen by the operator's ``--mode`` flag.
+    Today: always :class:`InProcBus` unless :func:`set_bus` already
+    injected one (a chassis's ``JaegerApp`` or ``boot_for_tui``).  Track
+    A.7 will introduce a ZMQ variant chosen by the operator's ``--mode``
+    flag.
     """
-    global _bus
+    global _bus, _bus_owned
     with _lock:
         if _bus is None:
             _bus = _bus_factory()
+            _bus_owned = True
         return _bus
+
+
+def set_bus(bus: Bus) -> None:
+    """Inject the ONE process bus another boot root already owns, so
+    every ``ensure_*`` call below — and the tools that invoke them
+    (``speak``, ``avatar``, the audio session) — shares it instead of
+    :func:`get_bus` lazily minting a second, disconnected ``InProcBus``.
+    That duality was the pre-0.8-U3 windowed-app bug: the chassis
+    (``JaegerApp``) built its own bus for the agent bridge while this
+    module minted a completely separate one for TTS/animation, so
+    neither side ever saw the other's messages.
+
+    Call this from every boot root, in order:
+
+    * ``JaegerApp._build_bus`` — right after constructing ``self.bus``.
+    * ``boot_for_tui`` — via ``set_bus(get_bus())``; when no chassis ran
+      first this just adopts ``get_bus()``'s own lazily-minted bus as
+      the injected one (a no-op), formalising it as the ONE process bus
+      for every subsequent caller (bridge, daemon, voice) on this path.
+
+    Idempotent: calling again with the SAME bus object is a no-op.
+    Marks the bus as chassis-owned (NOT owned by this module) so
+    :func:`shutdown` never closes a bus its chassis is responsible for
+    closing on its own teardown path — only the boot root that actually
+    minted the bus may close it.
+    """
+    global _bus, _bus_owned
+    with _lock:
+        if _bus is bus:
+            return
+        _bus = bus
+        _bus_owned = False
 
 
 def ensure_tts_node(*, warm: bool = False) -> TTSNode:
@@ -405,9 +441,11 @@ def shutdown_audio_session_node() -> None:
 
 
 def shutdown() -> None:
-    """Stop the TTS, audio session, animation node, close the bus.
+    """Stop the TTS, audio session, animation node; close the bus ONLY
+    if this module minted it — a bus injected via :func:`set_bus` is a
+    chassis's responsibility to close on its own teardown path.
     Idempotent."""
-    global _bus, _tts_node, _tts_thread, _synth
+    global _bus, _bus_owned, _tts_node, _tts_thread, _synth
     global _audio_session_node, _audio_session_thread, _audio_session
     global _animation_node, _animation_thread, _animation_bridge
     global _avatar_auto_driver
@@ -421,6 +459,7 @@ def shutdown() -> None:
         node = _tts_node
         thread = _tts_thread
         bus = _bus
+        bus_owned = _bus_owned
         _audio_session_node = None
         _audio_session_thread = None
         _audio_session = None
@@ -431,6 +470,7 @@ def shutdown() -> None:
         _tts_node = None
         _tts_thread = None
         _bus = None
+        _bus_owned = True
         _synth = None
     if auto_driver is not None:
         auto_driver.stop()
@@ -448,5 +488,5 @@ def shutdown() -> None:
         node.stop()
         if thread is not None:
             thread.join(timeout=3.0)
-    if bus is not None:
+    if bus is not None and bus_owned:
         bus.close()
