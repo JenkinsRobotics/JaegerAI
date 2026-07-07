@@ -133,8 +133,9 @@ final class AgentBridge: ObservableObject {
         await proc.setOnState { [weak self] busy in
             Task { @MainActor in self?.fanout(state: busy) }
         }
-        await proc.setOnTool { [weak self] name, phase, elapsed in
-            Task { @MainActor in self?.fanout(tool: name, phase: phase, elapsed: elapsed) }
+        await proc.setOnTool { [weak self] name, phase, elapsed, detail in
+            Task { @MainActor in self?.fanout(tool: name, phase: phase,
+                                              elapsed: elapsed, detail: detail) }
         }
         await proc.setOnAgentState { [weak self] lifecycle in
             Task { @MainActor in self?.handleAgentState(lifecycle) }
@@ -358,13 +359,18 @@ final class AgentBridge: ObservableObject {
 
     /// Map a ``tool`` frame onto the tool-chip event vocabulary
     /// ``ChatViewModel.handle`` already renders (tool.start / tool.complete).
-    private func fanout(tool name: String, phase: String, elapsed: Double) {
+    private func fanout(tool name: String, phase: String, elapsed: Double,
+                        detail: String?) {
         let evName = phase == "start" ? "tool.start" : "tool.complete"
-        let event = Event(name: evName, payload: [
+        var payload: [String: AnyDecodable] = [
             "tool": AnyDecodable(name),
             "ok": AnyDecodable(phase != "error"),
             "elapsed_s": AnyDecodable(elapsed),
-        ])
+        ]
+        if let detail, !detail.isEmpty {
+            payload["detail"] = AnyDecodable(detail)
+        }
+        let event = Event(name: evName, payload: payload)
         for cb in listeners.values { cb(event) }
     }
 

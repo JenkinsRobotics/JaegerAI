@@ -3,6 +3,32 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.7.2` — one-shot reminders, scheduling SOP, skill-call chips, close-the-terminal launch
+
+- **Native one-shot reminders.** "Remind me in 1 minute" was being scheduled
+  as `*/1 * * * *` — firing every minute (duration ≠ frequency). Fixed at
+  the root: `schedule_prompt` takes `in_minutes=N` or `at="ISO time"` — the
+  schedule fires exactly once (stored as cron `@once`), then completes
+  itself. No cron arithmetic, no yearly re-fire, no cleanup prompt. The
+  model only builds cron expressions for genuinely recurring intent.
+- **Scheduling skill** (`productivity/scheduling`): the agent now has an SOP
+  for reminders, timers, and recurring tasks — leading with the one-shot vs
+  recurring distinction — instead of claiming timed actions are impossible.
+  First of the core-tool SOP skills; the rest of the toolsets (files, code,
+  media, background, …) are an 0.8 pass.
+- **Chat chips show WHICH skill loaded.** `tool` frames gain a v1-additive
+  `detail` field — set only for `skill` calls ("skill · view scheduling") —
+  threaded main loop → bus → bridge → Swift chip, pinned in the protocol
+  fixtures both suites assert. Visibility stays behind the existing
+  `show_tool_activity` setting.
+- **`./jaeger` no longer holds the terminal hostage.** From an interactive
+  terminal the app now launches detached (own session, log at
+  `.jaeger_os/logs/JaegerOS.log`) and the window can be closed;
+  `JAEGER_ATTACH=1` restores attached mode. Non-tty callers stay attached —
+  the `jaeger autostart` LaunchAgent (KeepAlive) supervises the process and
+  must not be detached from. Login autolaunch was already there:
+  `./jaeger autostart enable`.
+
 ## `0.7.1` — GUI-first first-run + third-party client
 
 Patch from a fresh-Mac walk of the one-line installer.

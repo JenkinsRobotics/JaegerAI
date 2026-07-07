@@ -57,6 +57,7 @@ class _BusEventAdapter:
                 phase=str(payload.get("phase", "start")),
                 elapsed_s=float(payload.get("elapsed_s") or 0.0),
                 session=self.current_session,
+                detail=str(payload.get("detail", "")),
             ))
         elif event == "agent.activity":
             # The live progress stream — thoughts + tool actions the windowed
