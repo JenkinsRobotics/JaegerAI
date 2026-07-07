@@ -139,6 +139,77 @@ def test_shutdown_then_get_bus_creates_fresh_bus():
         runtime.shutdown()
 
 
+# ── bus injection (0.8 U3) ──────────────────────────────────────────
+
+
+def test_set_bus_injects_and_get_bus_returns_it():
+    """A chassis (or boot_for_tui) injects its OWN bus; get_bus() must
+    hand that exact object back, not mint a second one."""
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        assert runtime.get_bus() is injected
+    finally:
+        runtime.shutdown()
+        injected.close()
+
+
+def test_set_bus_is_idempotent_with_the_same_bus():
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        runtime.set_bus(injected)   # no-op, doesn't raise or swap
+        assert runtime.get_bus() is injected
+    finally:
+        runtime.shutdown()
+        injected.close()
+
+
+def test_get_bus_then_set_bus_same_object_is_a_noop():
+    """The boot_for_tui pattern: get_bus() mints, then set_bus(get_bus())
+    re-injects the SAME object — formalising it as owned-by-runtime
+    without disturbing ownership."""
+    runtime.shutdown()
+    try:
+        minted = runtime.get_bus()
+        runtime.set_bus(minted)
+        assert runtime.get_bus() is minted
+        assert runtime._bus_owned is True   # still runtime's to close
+    finally:
+        runtime.shutdown()
+
+
+def test_shutdown_does_not_close_an_injected_bus():
+    """runtime.shutdown() must never close a chassis-owned bus — only
+    the chassis that minted it may close it."""
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        runtime.shutdown()
+        assert runtime._bus is None          # singleton cleared
+        assert injected._closed is False     # NOT closed by runtime
+    finally:
+        injected.close()
+
+
+def test_shutdown_closes_a_self_minted_bus():
+    """The bare TUI/daemon path: nothing ever injected a foreign bus, so
+    shutdown() DOES close the one runtime minted for itself."""
+    runtime.shutdown()
+    bus = runtime.get_bus()
+    runtime.shutdown()
+    assert runtime._bus is None
+    assert bus._closed is True
+    fresh = runtime.get_bus()
+    try:
+        assert fresh is not bus
+    finally:
+        runtime.shutdown()
+
+
 def test_ensure_tts_node_starts_node_and_installs_subscriber(monkeypatch):
     created = _install_mock_runtime(monkeypatch)
     try:

@@ -8,16 +8,20 @@ from jaeger_os.core.messages import (
     AgentState,
     ChatMessage,
     ChatReply,
-    Transcript,
 )
-from jaeger_os.transport import InProcBus
+from jaeger_os.transport import InProcBus, topics
 
 
 def test_topics_follow_act_sense_convention() -> None:
     assert ChatMessage.topic == "/act/chat"      # operator → agent
     assert ChatReply.topic == "/sense/chat"      # agent → surfaces
     assert AgentState.topic == "/sense/agent_state"
-    assert Transcript.topic == "/sense/transcript"
+    # Transcript is transport.topics' msgspec type (0.8 U3 deleted the
+    # core.messages dataclass shadow) — AgentBridge subscribes to it
+    # directly; pin the topic string here too. (msgspec Struct fields
+    # are class-level descriptors, not the default value — check an
+    # instance, same as ``topics.SENSE_TRANSCRIPT``.)
+    assert topics.Transcript().topic == topics.SENSE_TRANSCRIPT == "/sense/transcript"
 
 
 def test_chat_message_round_trips_over_the_bus() -> None:
