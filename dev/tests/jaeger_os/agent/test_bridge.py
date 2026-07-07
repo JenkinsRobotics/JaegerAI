@@ -15,7 +15,7 @@ import pytest
 
 import jaeger_os.agent.loop.bridge as bridge_mod
 from jaeger_os.agent.loop.bridge import AgentBridge
-from jaeger_os.app.bus.inproc import InProcBus
+from jaeger_os.transport import InProcBus
 from jaeger_os.core.messages import ChatMessage, ChatReply
 
 
