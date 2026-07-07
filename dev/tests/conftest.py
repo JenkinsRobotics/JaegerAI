@@ -30,6 +30,9 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Never launch the native app from a test: 0.7.1's GUI-first paths
+# (bare ``jaeger``, ``agent create``) honour this as the headless gate.
+os.environ.setdefault("JAEGER_NO_GUI", "1")
 
 
 # Path-based marker rules. Order matters — first match wins.
