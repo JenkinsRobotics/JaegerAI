@@ -798,18 +798,25 @@ def _schedule_row_to_dict(row: Any) -> dict[str, Any]:
     }
 
 
-def add_schedule(cron_expr: str, prompt: str, name: str | None = None) -> dict[str, Any]:
+ONCE_CRON = "@once"   # sentinel in the cron column: fire once, then done
+
+
+def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
+                 at: str | None = None) -> dict[str, Any]:
     """Register a new scheduled prompt. Same contract as the
-    JSONL-era function; returns the row in legacy dict shape."""
+    JSONL-era function; returns the row in legacy dict shape.
+
+    ``at`` (0.7.2) makes it a ONE-SHOT: an ISO datetime (naive = local
+    time) stored as cron ``@once`` — it fires once at that moment and
+    the row flips to ``done`` (no yearly cron re-fire, no cleanup
+    prompt needed). ``cron_expr`` is ignored when ``at`` is given."""
     from croniter import croniter
     from jaeger_os.core.memory import sqlite_store
 
     cron_expr = (cron_expr or "").strip()
     prompt = (prompt or "").strip()
-    if not cron_expr or not prompt:
-        raise ValueError("cron_expr and prompt are required")
-    if not croniter.is_valid(cron_expr):
-        raise ValueError(f"invalid cron expression: {cron_expr!r}")
+    if not prompt or not (cron_expr or at):
+        raise ValueError("prompt and (cron_expr or at) are required")
     # The agent authors cron expressions against LOCAL wall-clock time
     # (``get_time`` returns local time, and its docstring tells the model
     # to anchor the cron to "the real current wall time"). So croniter
@@ -818,7 +825,18 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None) -> dict[s
     # fired hours late). Store next_fire_at in UTC so the string-ordered
     # comparison in claim_due_schedules stays consistent.
     now_local = datetime.now().astimezone()
-    nxt = croniter(cron_expr, now_local).get_next(datetime)
+    if at:
+        try:
+            nxt = datetime.fromisoformat(str(at).strip())
+        except ValueError as exc:
+            raise ValueError(f"invalid 'at' datetime: {at!r}") from exc
+        if nxt.tzinfo is None:                 # naive = operator-local
+            nxt = nxt.replace(tzinfo=now_local.tzinfo)
+        cron_expr = ONCE_CRON
+    else:
+        if not croniter.is_valid(cron_expr):
+            raise ValueError(f"invalid cron expression: {cron_expr!r}")
+        nxt = croniter(cron_expr, now_local).get_next(datetime)
     now = now_local.astimezone(timezone.utc)
     name = (name or f"sched_{int(now.timestamp())}").strip()
     created_at = now.isoformat(timespec="seconds")
@@ -909,6 +927,17 @@ def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
         ).fetchall()
         for row in due_rows:
             claimed.append(_schedule_row_to_dict(row))
+            fired_at = (now_dt.astimezone(timezone.utc)
+                        .isoformat(timespec="seconds"))
+            if row["cron"] == ONCE_CRON:
+                # One-shot: this fire IS the schedule's whole life —
+                # flip to done, never recompute.
+                conn.execute(
+                    "UPDATE schedules SET status = 'done', "
+                    "next_fire_at = NULL, last_fired_at = ? WHERE id = ?",
+                    (fired_at, row["id"]),
+                )
+                continue
             try:
                 # Recompute the next fire in LOCAL wall-clock (matching
                 # add_schedule), then store it back in UTC.
@@ -919,8 +948,7 @@ def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
                 "UPDATE schedules SET next_fire_at = ?, last_fired_at = ? "
                 "WHERE id = ?",
                 (nxt.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                 now_dt.astimezone(timezone.utc).isoformat(timespec="seconds"),
-                 row["id"]),
+                 fired_at, row["id"]),
             )
     return claimed
 

@@ -3,14 +3,19 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
-## `0.7.2` — scheduling SOP, skill-call chips, close-the-terminal launch
+## `0.7.2` — one-shot reminders, scheduling SOP, skill-call chips, close-the-terminal launch
 
+- **Native one-shot reminders.** "Remind me in 1 minute" was being scheduled
+  as `*/1 * * * *` — firing every minute (duration ≠ frequency). Fixed at
+  the root: `schedule_prompt` takes `in_minutes=N` or `at="ISO time"` — the
+  schedule fires exactly once (stored as cron `@once`), then completes
+  itself. No cron arithmetic, no yearly re-fire, no cleanup prompt. The
+  model only builds cron expressions for genuinely recurring intent.
 - **Scheduling skill** (`productivity/scheduling`): the agent now has an SOP
-  for reminders, timers, and recurring tasks — "remind me in 10 minutes"
-  builds a one-shot cron via `schedule_prompt` (with `get_time` anchoring
-  and self-cleanup via `cancel_schedule`) instead of claiming timed actions
-  are impossible. First of the core-tool SOP skills; the rest of the
-  toolsets (files, code, media, background, …) are an 0.8 pass.
+  for reminders, timers, and recurring tasks — leading with the one-shot vs
+  recurring distinction — instead of claiming timed actions are impossible.
+  First of the core-tool SOP skills; the rest of the toolsets (files, code,
+  media, background, …) are an 0.8 pass.
 - **Chat chips show WHICH skill loaded.** `tool` frames gain a v1-additive
   `detail` field — set only for `skill` calls ("skill · view scheduling") —
   threaded main loop → bus → bridge → Swift chip, pinned in the protocol
