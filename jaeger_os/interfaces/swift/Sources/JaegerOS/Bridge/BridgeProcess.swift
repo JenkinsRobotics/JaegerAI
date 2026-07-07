@@ -115,7 +115,7 @@ actor BridgeProcess {
     // MARK: - Callbacks (set by AgentBridge)
 
     var onState: (@Sendable (Bool) -> Void)?
-    var onTool: (@Sendable (String, String, Double) -> Void)?
+    var onTool: (@Sendable (String, String, Double, String?) -> Void)?
     var onAgentState: (@Sendable (AgentLifecycle) -> Void)?
     var onRequest: (@Sendable (BridgeRequest) -> Void)?
     /// Fired for every ``fatal`` frame with its ``kind`` — the transport
@@ -127,7 +127,7 @@ actor BridgeProcess {
     var onTermination: (@Sendable (_ clean: Bool) -> Void)?
 
     func setOnState(_ cb: @escaping @Sendable (Bool) -> Void) { onState = cb }
-    func setOnTool(_ cb: @escaping @Sendable (String, String, Double) -> Void) { onTool = cb }
+    func setOnTool(_ cb: @escaping @Sendable (String, String, Double, String?) -> Void) { onTool = cb }
     func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
     func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
     func setOnFatal(_ cb: @escaping @Sendable (String, String) -> Void) { onFatal = cb }
@@ -346,8 +346,8 @@ actor BridgeProcess {
                     .resume(returning: QueryResult(ok: ok, error: error, json: data))
             case .state(let busy):
                 onState?(busy)
-            case .tool(let name, let phase, let elapsed):
-                onTool?(name, phase, elapsed)
+            case .tool(let name, let phase, let elapsed, let detail):
+                onTool?(name, phase, elapsed, detail)
             case .reply(let text, let error, let elapsed, let used, let mx):
                 replyCont?.resume(returning: TurnResult(
                     text: text, error: error,

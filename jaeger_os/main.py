@@ -1990,6 +1990,15 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                         for k in ("elapsed_s", "args_preview", "result_preview"):
                             if k in data:
                                 payload[k] = data[k]
+                        # Skill calls carry WHICH skill in their args —
+                        # surface it so the chat chip reads
+                        # "skill · view scheduling", not a bare "skill".
+                        # Deliberately skill-only: generic args can be
+                        # long or sensitive (paths, message text).
+                        if name == "skill" and phase == "start":
+                            payload["detail"] = " ".join(
+                                str(data.get(k, "")).strip()
+                                for k in ("action", "name")).strip()[:60]
                     bus.publish("tool.progress", **payload)
                     if phase == "start":
                         ap = payload.get("args_preview")
@@ -3577,18 +3586,41 @@ def _swift_app_binary() -> "Path | None":
 
 
 def _launch_swift_app(binary: "Path", instance_name: str) -> int:
-    """Run the built JaegerOS.app's inner binary (stdout stays attached
-    for terminal users) and forward its exit code. Pins
-    ``JAEGER_INSTANCE_NAME`` to the instance THIS process resolved (and,
-    on first run, just created via the wizard) so the app's bridge child
-    boots exactly that instance — without the pin, a wizard-created
-    instance and the bridge's own default resolution could disagree."""
+    """Launch the built JaegerOS.app DETACHED (0.7.2): the app gets its
+    own session and a log file, ``./jaeger`` returns immediately, and
+    the terminal window can be closed without killing the agent.
+    ``JAEGER_ATTACH=1`` keeps the pre-0.7.2 behaviour — stdout in the
+    terminal, exit code forwarded — for debugging.
+
+    Pins ``JAEGER_INSTANCE_NAME`` to the instance THIS process resolved
+    (and, on first run, the one the setup window is about to create) so
+    the app's bridge child boots exactly that instance — without the
+    pin, a wizard-created instance and the bridge's own default
+    resolution could disagree."""
     if instance_name:
         os.environ["JAEGER_INSTANCE_NAME"] = instance_name
-    print(f"[jros] launching {binary.parent.parent.parent.name} — "
-          "menu-bar tray + chat window…", file=sys.stderr, flush=True)
+    app_name = binary.parent.parent.parent.name
     import subprocess as _sp
-    return _sp.run([str(binary)]).returncode
+    # Detach ONLY from an interactive terminal. Non-tty callers stay
+    # attached: launchd's autostart LaunchAgent has KeepAlive=true and
+    # supervises this process — detaching there would make launchd
+    # respawn `jaeger` (and the app) in a loop.
+    if os.environ.get("JAEGER_ATTACH") or not sys.stdin.isatty():
+        print(f"[jros] launching {app_name} (attached) — "
+              "menu-bar tray + chat window…", file=sys.stderr, flush=True)
+        return _sp.run([str(binary)]).returncode
+    from pathlib import Path as _P
+    log = (_P(__file__).resolve().parent.parent
+           / ".jaeger_os" / "logs" / "JaegerOS.log")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "ab") as fh:
+        _sp.Popen([str(binary)], stdout=fh, stderr=fh,
+                  start_new_session=True)
+    print(f"[jros] {app_name} launched — menu-bar tray + chat window.\n"
+          f"       This terminal can be closed. (app log: {log};\n"
+          "       JAEGER_ATTACH=1 to run attached)",
+          file=sys.stderr, flush=True)
+    return 0
 
 
 def _windowed_available() -> bool:
