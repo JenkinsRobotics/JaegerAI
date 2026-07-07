@@ -23,6 +23,35 @@ def test_agent_create_passes_flags_through(monkeypatch):
     assert seen["argv"] == ["--force"]                 # flags untouched
 
 
+def test_agent_create_gui_first(monkeypatch, tmp_path):
+    """0.7.1: with the product app built and the target instance missing,
+    `agent create <name>` launches the app (pinned to <name>) instead of
+    the terminal wizard."""
+    from pathlib import Path
+
+    import jaeger_os.core.instance.instance as inst
+    import jaeger_os.main as M
+
+    monkeypatch.delenv("JAEGER_NO_GUI", raising=False)
+    monkeypatch.setattr(M, "_swift_app_binary", lambda: Path("/fake/app"))
+    seen: dict = {}
+    monkeypatch.setattr(M, "_launch_swift_app",
+                        lambda app, name: seen.update(name=name) or 0)
+    monkeypatch.setattr(inst, "resolve_instance_dir",
+                        lambda name: tmp_path / name)   # never exists
+    assert I._cmd_agent_argv(["create", "jarvis"]) == 0
+    assert seen == {"name": "jarvis"}
+
+
+def test_agent_create_tui_flag_forces_terminal_wizard(monkeypatch):
+    monkeypatch.delenv("JAEGER_NO_GUI", raising=False)
+    seen: dict = {}
+    monkeypatch.setattr(I, "_cmd_setup_argv",
+                        lambda argv: seen.update(argv=argv) or 0)
+    assert I._cmd_agent_argv(["create", "jarvis", "--tui"]) == 0
+    assert seen["argv"] == ["--name", "jarvis"]        # --tui consumed
+
+
 def test_agent_verbs_delegate_to_instance(monkeypatch):
     seen: dict = {}
     monkeypatch.setattr(I, "_cmd_instance_argv",
