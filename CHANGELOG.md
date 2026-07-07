@@ -3,6 +3,30 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.7.1` — GUI-first first-run + third-party client
+
+Patch from a fresh-Mac walk of the one-line installer.
+
+- **End-user installs now build the product `JaegerOS.app`.** `install.sh`
+  detects its audience (a git checkout has `dev/`; the clean install never
+  does): dev checkouts keep building `JaegerOS-dev.app`; end-user installs
+  build the release `JaegerOS.app`. Previously a fresh install built only
+  the dev bundle — which `./jaeger` never launches — so first run fell back
+  to the terminal and dev next-steps leaked into the installer output.
+- **First run is GUI-first.** Bare `./jaeger` with no instance launches the
+  app and its setup window (onboarding) instead of the terminal wizard —
+  now also in a tty. `--tui`, `JAEGER_NO_GUI`, no built app, and
+  `jaeger setup` keep the terminal wizard.
+- **`jaeger agent create [name]` opens the setup window** when the app is
+  built and the target agent doesn't exist yet; `--tui` forces the terminal
+  wizard, `--force` rebuilds stay terminal.
+- **Third-party integration:** new single-file, stdlib-only
+  `clients/python/jros_client.py` — copy it into any Python app to drive an
+  existing JROS install over `jaeger bridge`; fixture-pinned to protocol v1.
+  New README section ("Third-party apps — integrate JROS"). A localhost
+  HTTP/WebSocket gateway (`jaeger serve`) is planned for 0.8.
+- Installer next-steps output aligned with the README quick start.
+
 ## `0.7.0` — Swift-first + the two-runner agentic core
 
 The line that grew past a patch series. Two themes: **JROS became a native

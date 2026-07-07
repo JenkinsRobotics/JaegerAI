@@ -110,38 +110,40 @@ mkdir -p "$REPO_ROOT/.jaeger_os/instances"
 
 echo
 echo "✓ Local install complete"
-echo
-echo "Next steps:"
-echo "  ./jaeger agent create # create an agent (the wizard)"
-echo "  ./jaeger              # run the active agent"
-echo "  ./jaeger agent list   # manage agents (list/use/delete/clear)"
-echo "  ./jaeger doctor       # environment + readiness check"
-echo
-echo "Optional — add to your shell rc for global access:"
-echo "  export PATH=\"\$PATH:$REPO_ROOT\""
-case "$(uname -s)" in
-  Darwin)
-    echo
-    echo "Optional — macOS: a clickable app in your Dock / Launchpad:"
-    echo "  ./jaeger launcher install"
-    echo "Optional — run unattended at login:"
-    echo "  ./jaeger autostart enable" ;;
-  Linux)
-    echo
-    echo "Optional — run unattended at boot:"
-    echo "  ./jaeger autostart enable" ;;
-esac
 
-# Build the dev app so the first thing a developer sees works.
-if command -v swift >/dev/null 2>&1; then
-  echo; echo "building JaegerOS-dev.app…"
-  "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
-    && echo "✓ JaegerOS-dev.app ready (symlinked at repo root)" \
-    || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
+# Two audiences, one script: a git checkout has the dev tree (dev/); the
+# clean end-user install assembled by scripts/install.sh never does.
+if [[ -d "$REPO_ROOT/dev" ]]; then
+  # Dev checkout — build the dev shell so the first thing a developer
+  # sees works.
+  if command -v swift >/dev/null 2>&1; then
+    echo; echo "building JaegerOS-dev.app…"
+    "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
+      && echo "✓ JaegerOS-dev.app ready (symlinked at repo root)" \
+      || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
+  fi
+  echo
+  echo "Next steps:"
+  echo "  open JaegerOS-dev.app     the windowed dev shell (menu-bar tray)"
+  echo "  ./jaeger dev --tui        the terminal agent"
+  echo "  ./jaeger update           pull + reinstall deps + rebuild as needed"
+  echo "  ./jaeger dev --health     verify the install"
+else
+  # End-user install — build the PRODUCT app; it's what `./jaeger`
+  # launches. No Swift toolchain (Linux/headless) → terminal remains
+  # the surface, quietly.
+  if command -v swift >/dev/null 2>&1; then
+    echo; echo "building JaegerOS.app (first build takes a minute)…"
+    "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
+      && echo "✓ JaegerOS.app ready" \
+      || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
+  fi
+  echo
+  echo "Next steps:"
+  echo "  ./jaeger agent create   # create your first agent"
+  echo "  ./jaeger                # run it   (--tui for terminal)"
+  echo
+  echo "Optional:"
+  echo "  export PATH=\"\$PATH:$REPO_ROOT\"   # 'jaeger' from anywhere"
+  echo "  ./jaeger autostart enable          # run unattended at login"
 fi
-echo
-echo "Next steps:"
-echo "  open JaegerOS-dev.app     the windowed dev shell (menu-bar tray)"
-echo "  ./jaeger dev --tui        the terminal agent"
-echo "  ./jaeger update           pull + reinstall deps + rebuild as needed"
-echo "  ./jaeger dev --health     verify the install"

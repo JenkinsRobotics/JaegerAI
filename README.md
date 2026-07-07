@@ -121,8 +121,9 @@ Then:
 
 ```bash
 cd ~/jaeger
-./jaeger agent create    # create your first agent — the wizard picks a
-                         # character, memory tier, model, and voice.
+./jaeger agent create    # create your first agent — opens the setup app
+                         # (character, model, permissions); --tui for the
+                         # terminal wizard
 ./jaeger                 # launch the default agent
 ```
 
@@ -198,6 +199,42 @@ cd ~/jaeger
 ./jaeger agent create   # create your first agent
 ./jaeger                # launch it
 ```
+
+---
+
+## Third-party apps — integrate JROS
+
+Any app can embed a JROS agent by driving the install's `jaeger bridge` — a
+stdio NDJSON transport speaking the v1 client protocol (the same one the
+native Swift app uses). Your app ships **no** JROS code and installs **no**
+second copy: it drives the existing `~/jaeger` install and runtime.
+
+**Python apps** — copy the single-file client
+[`clients/python/jros_client.py`](clients/python/jros_client.py) into your
+project (stdlib only, zero dependencies):
+
+```python
+from jros_client import JrosClient
+
+with JrosClient() as jros:            # finds ~/jaeger (or $JAEGER_HOME)
+    reply = jros.turn("hello", session="myapp")
+    print(reply["text"])
+```
+
+Pick an agent with `JrosClient(instance="lilith")`; stream tool/state events
+and answer the agent's permission prompts via the `turn()` callbacks.
+
+**Any other language** — spawn `~/jaeger/jaeger bridge` and speak the NDJSON
+frames documented in
+[`jaeger_os/interfaces/protocol.py`](jaeger_os/interfaces/protocol.py)
+(pinned by `protocol_v1_fixtures.json`, the same contract fixtures the Swift
+client is tested against). The Swift app under `jaeger_os/interfaces/swift/`
+is a complete worked example.
+
+**MCP hosts** — `jaeger mcp` exposes the agent as an MCP server.
+
+A localhost HTTP/WebSocket gateway (`jaeger serve`) is planned for 0.8, for
+web UIs and clients that can't spawn a subprocess.
 
 ---
 
