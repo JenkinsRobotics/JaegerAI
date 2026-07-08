@@ -71,7 +71,9 @@ config_key = "agent"
 id = "tts"
 tier = 3
 backend = "thread"
-factory = "jaeger_os.nodes.kokoro_tts:make_tts_node"
+slot = "tts"                 # 0.8 M2a: resolved via discover_modules()
+                              # (kokoro_tts/module.yaml) instead of a
+                              # hardcoded factory string.
 restart = "on_failure"
 config_key = "tts"
 enabled = true
