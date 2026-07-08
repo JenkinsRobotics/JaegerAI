@@ -16,40 +16,55 @@ wasn't installed.
 Since 0.8 M1, ``kokoro_tts`` graduated from a plugin to a core
 engine-module (``jaeger_os/nodes/kokoro_tts/``, declared via
 ``module.yaml``) — it no longer shows up in ``list_plugins()``, so
-its tools are gated on module *discovery* instead:
-``text_to_speech`` is available iff a discovered module declares it
-in its ``tools:`` list; the internal helpers ``speak`` and
-``warm_kokoro`` (not agent-facing names in module.yaml, so not
-listed there) are gated on the ``kokoro_tts`` module's mere presence
-in :data:`_MODULE_PRESENCE_TOOLS`. :func:`_module_ready` runs first
-for every check; only when no module claims the tool does the check
-fall back to the plugin mechanism below — this is what closes the
-fail-open regression where losing the ``kokoro_tts`` *plugin*
-entry made these tools "available" for the wrong reason (unknown
-plugin = fail open) rather than because the engine is actually
-there.
+its tools (``text_to_speech``, plus the internal helpers ``speak``
+and ``warm_kokoro``) are gated on module *readiness* instead, via
+:data:`_TOOL_TO_MODULE` and :func:`_module_ready`.
+
+A module-owned tool is judged ready iff:
+
+  1. the owning module is actually discovered on disk (a
+     ``module.yaml`` exists and parses), AND
+  2. every library it declares in its own ``requires_libraries``
+     (module.yaml's analogue of a plugin's ``requires: libraries:``)
+     actually imports (probed via ``importlib.util.find_spec``, not
+     a bare presence check on the module directory).
+
+Crucially, :func:`_module_ready` returning ``False`` for a
+module-owned tool is FINAL — it never falls back to the plugin
+mechanism. That fallback is what caused the fail-open regression:
+losing the ``kokoro_tts`` *plugin* entry made ``_plugin_ready``
+treat it as an "unknown plugin" (fail-open by design, for forward
+compatibility) rather than "engine not there" (should fail closed).
+Only tools with NO module entry in :data:`_TOOL_TO_MODULE` fall
+through to :func:`_plugin_ready`.
+
+Both the module-discovery walk and the per-library import probe are
+cached with :func:`functools.lru_cache` — module.yaml files and the
+Python environment don't change mid-process, so re-parsing YAML and
+re-importing libraries on every single availability check (every
+tool-schema build, every turn) would be wasted disk/import I/O.
+:func:`clear_availability_caches` drops both caches for tests or
+dev hot-reload workflows.
 
 This module deliberately stays declarative — the maps are the spec.
 Adding a new plugin-backed tool means one line in
-:data:`_TOOL_TO_PLUGIN`, not a sweep across the codebase.
+:data:`_TOOL_TO_PLUGIN`; adding a new module-backed tool means one
+line in :data:`_TOOL_TO_MODULE`.
 """
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 from typing import Any
 
 
 # Tool name → plugin name. Both sides are the agent-facing names —
 # the same strings the model would see in the tool registry and
-# ``list_plugins()`` output.
+# ``list_plugins()`` output. Module-owned tools (kokoro_tts) are
+# NOT listed here — see :data:`_TOOL_TO_MODULE` instead; a tool
+# should be gated by exactly one mechanism.
 _TOOL_TO_PLUGIN: dict[str, str] = {
-    # Voice — Kokoro TTS (now module-gated, see _MODULE_PRESENCE_TOOLS
-    # and _module_ready below; these plugin-name entries are the
-    # fallback and stay for documentation / belt-and-suspenders) +
-    # Whisper STT (still a real plugin).
-    "text_to_speech": "kokoro_tts",
-    "speak":          "kokoro_tts",     # legacy alias
-    "warm_kokoro":    "kokoro_tts",
     "listen":         "whisper_stt",
     # Messaging — discord / telegram / imessage. ``send_message``
     # is generic; it's gated on ANY messaging plugin being ready
@@ -70,19 +85,34 @@ _TOOL_TO_PLUGIN: dict[str, str] = {
 _PLUGIN_READY_OVERRIDES: dict[str, list[str]] = {}
 
 
-# Tool name → owning module name, for tools that are internal
-# helpers around a module rather than the agent-facing name declared
-# in that module's ``module.yaml`` ``tools:`` list. ``speak`` and
-# ``warm_kokoro`` are voice-loop internals, not something the model
-# calls directly, so kokoro_tts's module.yaml only lists
-# ``text_to_speech`` — keeping module.yaml honest about what it
-# actually exposes to the agent. Gating these two on the module's
-# mere presence in discovery is the cleaner alternative to padding
-# module.yaml with names nobody calls.
-_MODULE_PRESENCE_TOOLS: dict[str, str] = {
-    "speak": "kokoro_tts",
-    "warm_kokoro": "kokoro_tts",
+# Tool name → owning module name. Covers both the agent-facing tool
+# a module declares in its own ``tools:`` list (``text_to_speech``)
+# and internal helpers around it that aren't agent-facing names in
+# module.yaml (``speak``, ``warm_kokoro`` — voice-loop internals,
+# not something the model calls directly). This mapping is what lets
+# :func:`_module_ready` answer "unavailable" for a tool whose module
+# has been removed entirely, instead of falling back to the plugin
+# mechanism's fail-open default.
+_TOOL_TO_MODULE: dict[str, str] = {
+    "text_to_speech": "kokoro_tts",
+    "speak":          "kokoro_tts",     # legacy alias
+    "warm_kokoro":    "kokoro_tts",
 }
+
+
+@functools.lru_cache(maxsize=1)
+def _discover_modules_cached() -> tuple[Any, ...]:
+    """The real discovery walk, cached for the process lifetime —
+    module.yaml files don't change mid-process, so there's no need
+    to re-walk ``nodes/`` and re-parse YAML on every availability
+    check. Call :func:`clear_availability_caches` to force a
+    re-scan (tests, dev hot-reload)."""
+    try:
+        from jaeger_os.core.modules import discover_modules
+        modules = discover_modules()
+    except Exception:  # noqa: BLE001 — discovery must never crash the gate
+        return ()
+    return tuple(spec for specs in modules.values() for spec in specs)
 
 
 def _discovered_modules() -> list[Any]:
@@ -90,32 +120,56 @@ def _discovered_modules() -> list[Any]:
     the default modules root. Never raises — discovery must never
     crash the availability gate; a broken module just falls back to
     the plugin mechanism (or the schema default) for its tools."""
+    return list(_discover_modules_cached())
+
+
+@functools.lru_cache(maxsize=None)
+def _library_importable(name: str) -> bool:
+    """True iff ``name`` resolves to an importable module, probed
+    via ``importlib.util.find_spec`` (no actual import — cheaper,
+    and avoids running a heavy package's module-level side effects
+    just to answer an availability question). Cached per name since
+    this runs on every availability check."""
     try:
-        from jaeger_os.core.modules import discover_modules
-        modules = discover_modules()
-    except Exception:  # noqa: BLE001 — discovery must never crash the gate
-        return []
-    return [spec for specs in modules.values() for spec in specs]
+        return importlib.util.find_spec(name) is not None
+    except Exception:  # noqa: BLE001 — a broken finder must not crash the gate
+        return False
+
+
+def clear_availability_caches() -> None:
+    """Drop both the module-discovery and library-probe caches.
+    Call this after monkeypatching discovery or ``find_spec`` in
+    tests, or in dev workflows where modules/libraries change
+    without restarting the process."""
+    _discover_modules_cached.cache_clear()
+    _library_importable.cache_clear()
+
+
+def _requires_satisfied(spec: Any) -> bool:
+    """True iff every library ``spec`` declares in its
+    ``requires_libraries`` actually imports. A module with no
+    declared requirements is trivially satisfied (present == ready)."""
+    libraries = getattr(spec, "requires_libraries", None) or []
+    return all(_library_importable(lib) for lib in libraries)
 
 
 def _module_ready(tool_name: str) -> bool | None:
-    """True/False if a discovered module accounts for ``tool_name``;
-    ``None`` if no module claims it, meaning the caller should fall
-    back to the plugin mechanism.
+    """True/False if ``tool_name`` is owned by a module (per
+    :data:`_TOOL_TO_MODULE`); ``None`` if it isn't, meaning the
+    caller should fall back to the plugin mechanism.
 
-    A tool is claimed by a module either because the module declares
-    it in its own ``tools:`` list (the agent-facing case, e.g.
-    ``text_to_speech`` via kokoro_tts's module.yaml), or — for
-    internal helpers in :data:`_MODULE_PRESENCE_TOOLS` — because the
-    owning module was discovered at all."""
-    modules = _discovered_modules()
-    for spec in modules:
-        if tool_name in spec.tools:
-            return True
-    owning_module = _MODULE_PRESENCE_TOOLS.get(tool_name)
-    if owning_module is not None:
-        return any(spec.module == owning_module for spec in modules)
-    return None
+    For a module-owned tool this is authoritative and FINAL — the
+    caller must not fall back to :func:`_plugin_ready` regardless of
+    the result. That's what keeps a removed/broken module fail-closed
+    instead of degrading to the plugin mechanism's fail-open default
+    for unknown plugins."""
+    owning_module = _TOOL_TO_MODULE.get(tool_name)
+    if owning_module is None:
+        return None
+    for spec in _discovered_modules():
+        if spec.module == owning_module:
+            return _requires_satisfied(spec)
+    return False  # module-owned tool, but the module isn't discovered
 
 
 def _plugin_ready(plugin_name: str) -> bool:
@@ -128,7 +182,7 @@ def _plugin_ready(plugin_name: str) -> bool:
     try:
         from jaeger_os.agent.tools.plugins import list_plugins
         report = list_plugins() or {}
-    except Exception:  # noqa: BLE001 — listing must never crash the gate
+    except Exception:  # noqa: BLE001
         return True   # fail-open: don't hide tools because the gate broke
     rows = report.get("plugins") or []
     if plugin_name == "messaging":
@@ -147,10 +201,11 @@ def _plugin_ready(plugin_name: str) -> bool:
 
 def _make_check_fn(tool_name: str, plugin_name: str):
     """Closure that captures ``tool_name`` + ``plugin_name`` and
-    queries readiness on every call. Module discovery is consulted
-    first (:func:`_module_ready`) since it's authoritative for
-    module-owned tools like ``text_to_speech``; only when no module
-    claims the tool does this fall back to the plugin mechanism."""
+    queries readiness on every call. Module ownership is consulted
+    first (:func:`_module_ready`) since it's authoritative and FINAL
+    for module-owned tools like ``text_to_speech`` — only when the
+    tool isn't module-owned at all does this fall back to the plugin
+    mechanism."""
     def _check() -> bool:
         module_result = _module_ready(tool_name)
         if module_result is not None:
@@ -161,9 +216,9 @@ def _make_check_fn(tool_name: str, plugin_name: str):
 
 def wire_availability_checks(agent: Any) -> int:
     """Walk ``agent``'s tool registry and patch ``check_fn`` on
-    every declared plugin-backed tool. Returns the number of tools
-    actually wired (others fall through to the schema's default —
-    "always available").
+    every declared plugin- or module-backed tool. Returns the number
+    of tools actually wired (others fall through to the schema's
+    default — "always available").
 
     Called once at boot, after every tool is registered. Safe to
     call multiple times — re-wiring just overwrites the same
@@ -178,12 +233,13 @@ def wire_availability_checks(agent: Any) -> int:
         return 0
     for name, tool in list(registered.items()):
         plugin_name = _TOOL_TO_PLUGIN.get(name)
+        module_owned = name in _TOOL_TO_MODULE
         # MCP prefix — every ``mcp:server/tool`` is gated on the
         # MCP plugin being ready (the user's MCP servers may have
         # their own readiness; that gets checked at call time).
-        if plugin_name is None and name.startswith("mcp:"):
+        if plugin_name is None and not module_owned and name.startswith("mcp:"):
             plugin_name = "mcp"
-        if plugin_name is None:
+        if plugin_name is None and not module_owned:
             continue
         try:
             tool.check_fn = _make_check_fn(name, plugin_name)
@@ -193,4 +249,9 @@ def wire_availability_checks(agent: Any) -> int:
     return wired
 
 
-__all__ = ["wire_availability_checks", "_TOOL_TO_PLUGIN"]
+__all__ = [
+    "wire_availability_checks",
+    "clear_availability_caches",
+    "_TOOL_TO_PLUGIN",
+    "_TOOL_TO_MODULE",
+]
