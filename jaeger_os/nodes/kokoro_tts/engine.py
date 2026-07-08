@@ -1,17 +1,22 @@
-"""Kokoro TTS — synthesizes text via Kokoro KPipeline, plays through sounddevice.
+"""Kokoro TTS engine — synthesizes text via Kokoro KPipeline, plays through
+sounddevice (or AVAudioEngine — see ``persistent_player.py``).
 
-This module is the plugin's actual implementation. It's a relocation of
-the pipeline + playback code that used to live in `core/tools/speak.py`.
-The agent-callable `speak()` / `speak_file()` Tools still live there, but
-they now delegate into this plugin.
+0.8 M1: this is the ``kokoro_tts`` engine-module's engine — moved here
+(verbatim, minus the wrapper docstring) from the old ``jaeger_os/plugins/
+kokoro_tts/`` plugin. The module IS the engine now: ``jaeger_os/nodes/
+kokoro_tts/`` owns the generic node (``node.py``), this engine, the
+persistent player, its own config slice (``config.py``), and its
+``module.yaml``. There's no separate "plugin" framing anymore — the
+agent-callable ``speak()`` tool (``agent/tools/speak.py``) talks to the
+``tts`` slot's node over the bus, which wraps whichever engine module is
+mounted there (today: this one).
 
-Why a plugin and not a core tool? Per the vocabulary contract, this
-component bridges the agent to an external library (`kokoro`) + external
-model files + speaker hardware. That's the plugin pattern. When we deploy
-to robot hardware, this same plugin will graduate to a separate-process
-ZMQ node on the Jetson while the rest of the framework stays put.
+When we deploy to robot hardware, this module graduates to a
+separate-process ZMQ node on the Jetson while the rest of the framework
+stays put — see ``jaeger_os/nodes/base.py``'s Node/Bus split.
 
-Public surface (consumed by core/tools/speak.py):
+Public surface (consumed by ``node.py``'s ``Synthesizer`` Protocol via
+``runtime.py``'s ``_default_synth_factory``):
   • KokoroTTS()              — lazy-loaded singleton in practice
   • .warm()                  — pre-load weights so the first speak() is fast
   • .speak(text)             — synthesize + play, returns result dict
