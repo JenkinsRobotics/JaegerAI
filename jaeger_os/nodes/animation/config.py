@@ -19,9 +19,9 @@ test_settings_catalog.py::test_unexposed_fields_are_absent`` pins
 house rule for when/if avatar fields ARE promoted to the catalog later.
 
 Import-cycle note: same shape as ``kokoro_tts/config.py`` — this module
-has no import-time dependency on ``schemas.py`` (it doesn't even need
-``_setting`` today, but the import is kept as a no-op placeholder-free
-choice: simply omitted, since nothing here calls it yet).
+must never import ``schemas.py``. ``_setting`` is simply not imported here
+because no field is catalog-exposed yet; when one is, import it from
+``setting_meta``.
 """
 
 from __future__ import annotations
