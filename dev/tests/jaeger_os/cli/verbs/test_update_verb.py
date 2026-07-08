@@ -446,11 +446,68 @@ def test_rebuild_swift_app_runs_build_script(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
     U._rebuild_swift_app(tmp_path)
     assert ran == [["bash", str(script), "--release"]]
-    assert "rebuilt" in capsys.readouterr().out
+    assert "ready" in capsys.readouterr().out
+
+
+def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys):
+    """A failed install-time build must not exempt a station forever:
+    script present + app absent -> BUILD (this was the 'never even
+    installed' half of the deployed-station bug)."""
+    import shutil as _sh
+    script = _swift_layout(tmp_path)
+    _sh.rmtree(tmp_path / "jaeger_os" / "interfaces" / "swift" / ".build")
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--release"]]
+    assert "building" in capsys.readouterr().out
+
+
+def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
+    """Flavor follows the install: dev/ present -> JaegerOS-dev.app via --dev
+    (mirrors install.sh); a git-clone station gets the dev shell."""
+    script = _swift_layout(tmp_path)
+    (tmp_path / "dev").mkdir()
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--dev"]]
+
+
+def test_rebuild_swift_app_only_if_stale_skips_fresh(tmp_path, monkeypatch):
+    _swift_layout(tmp_path)
+    from jaeger_os.cli import _common
+    monkeypatch.setattr(_common, "swift_app_is_stale", lambda repo, bundle: False)
+    ran: list = []
+    monkeypatch.setattr(U.subprocess, "run", lambda *a, **k: ran.append(a))
+    U._rebuild_swift_app(tmp_path, only_if_stale=True)
+    assert ran == []
 
 
 def test_rebuild_swift_app_warns_without_toolchain(tmp_path, monkeypatch, capsys):
     _swift_layout(tmp_path)
     monkeypatch.setattr(U.shutil, "which", lambda name: None)
     U._rebuild_swift_app(tmp_path)
-    assert "NOT rebuilt" in capsys.readouterr().err
+    assert "NOT (re)built" in capsys.readouterr().err
+
+
+def test_swift_app_is_stale_basics(tmp_path):
+    """Missing executable -> stale; no .git (tarball install) -> never stale
+    (that path rebuilds explicitly after every product swap)."""
+    from jaeger_os.cli._common import swift_app_is_stale
+    bundle = tmp_path / "JaegerOS.app"
+    assert swift_app_is_stale(tmp_path, bundle) is True   # no exe
+    exe = bundle / "Contents" / "MacOS" / "JaegerOS"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert swift_app_is_stale(tmp_path, bundle) is False  # exe, but no .git
