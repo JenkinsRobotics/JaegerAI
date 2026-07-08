@@ -42,7 +42,7 @@ from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
 from jaeger_os.nodes.animation import bridge as animation_bridge
 from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
-from jaeger_os.nodes.tts import Synthesizer, TTSNode
+from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
 from jaeger_os.transport import Bus, InProcBus
 
 
@@ -69,10 +69,23 @@ def _default_bus_factory() -> Bus:
 def _default_synth_factory() -> Synthesizer:
     # Late import — speak.py imports from this module, so a module-level
     # import would be circular.
-    from jaeger_os.plugins.kokoro_tts import KOKORO_LANG, KokoroTTS
+    from jaeger_os.nodes.kokoro_tts import KokoroTTS, KokoroTTSConfig
     from jaeger_os.agent.tools.speak import _resolve_voice
+    from jaeger_os.core.context import _require_layout
 
-    return KokoroTTS(voice=_resolve_voice(), lang=KOKORO_LANG)
+    # 0.8 M1: lang comes from Config.kokoro_tts instead of a hardcoded
+    # constant — the settings-catalog "kokoro_tts" group is only real
+    # if changing it actually changes what gets built here. Voice
+    # resolution (Identity.voice_id wins, module config is the
+    # fallback default) lives in ``_resolve_voice`` itself.
+    lang = KokoroTTSConfig().lang
+    try:
+        layout = _require_layout()
+        from jaeger_os.core.instance.schemas import Config, load_yaml
+        lang = load_yaml(layout.config_path, Config).kokoro_tts.lang
+    except Exception:  # noqa: BLE001 — fresh/unconfigured instance
+        pass
+    return KokoroTTS(voice=_resolve_voice(), lang=lang)
 
 
 def _default_tts_node_factory(

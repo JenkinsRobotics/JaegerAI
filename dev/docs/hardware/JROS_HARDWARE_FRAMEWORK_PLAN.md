@@ -275,7 +275,7 @@ the missing act topics as packages need them (`/act/lights`,
 `/act/servo`), each a msgspec struct with a validator-backed schema.
 Request/response capabilities (e.g. `GT` telemetry pull) use the
 bus's existing `request(…, ack_topic=…)` correlation pattern
-(`SpeechCommand`/`SpokenAck` precedent in `nodes/tts/node.py`).
+(`SpeechCommand`/`SpokenAck` precedent in `nodes/kokoro_tts/node.py`).
 
 **Telemetry (up):** push-primary. Nodes parse controller heartbeats
 (AVC01/MC01 emit a status line every 30 s per their `.ino` files;
