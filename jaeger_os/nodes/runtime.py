@@ -376,6 +376,50 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     return node
 
 
+def _load_audio_session_config() -> AudioSessionConfig:
+    """Build the real :class:`AudioSessionConfig` from the instance's
+    settings instead of construction defaults — closes the 0.8 M2b
+    Task B routing gap (``_build_audio_session_node`` previously always
+    passed ``AudioSessionConfig()``).
+
+    Engine fields (``stt_mode``, ``fast_model_name``,
+    ``accurate_model_name``) come from ``Config.whisper_stt``;
+    slot-generic session fields come from ``Config.voice`` — mirrors
+    the ``_require_layout()`` + ``load_yaml`` pattern
+    ``kokoro_tts/engine.py``'s ``_resolve_backend``/
+    ``_default_synth_factory`` already use for the sibling TTS module.
+
+    ``wake_phrases`` is deliberately left at the dataclass default
+    (``()``) — ``AudioSession._build_adapter`` falls back to
+    ``_default_wake_phrases()`` when empty, and ``VoiceConfig`` carries
+    no phrase-list field to route here.
+
+    Falls back to ``AudioSessionConfig()`` defaults on any load failure
+    (fresh/unconfigured instance) — same fallback shape as kokoro's
+    synth factory; boot must not hard-fail because settings haven't
+    been written yet.
+    """
+    try:
+        from jaeger_os.core.context import _require_layout
+        from jaeger_os.core.instance.schemas import Config, load_yaml
+
+        layout = _require_layout()
+        cfg = load_yaml(layout.config_path, Config)
+    except Exception:  # noqa: BLE001 — fresh/unconfigured instance
+        return AudioSessionConfig()
+    return AudioSessionConfig(
+        stt_mode=cfg.whisper_stt.stt_mode,
+        fast_model_name=cfg.whisper_stt.fast_model_name,
+        accurate_model_name=cfg.whisper_stt.accurate_model_name,
+        require_wake_word=cfg.voice.wake_word,
+        followup_window_s=cfg.voice.follow_up_seconds,
+        barge_in=cfg.voice.barge_in,
+        audio_backend=cfg.voice.audio_backend,
+        self_speech_filter=cfg.voice.self_speech_filter,
+        self_speech_threshold=cfg.voice.self_speech_threshold,
+    )
+
+
 def _build_audio_session_node(
     bus: Bus, config: dict[str, Any],
 ) -> AudioSessionNode:
@@ -385,14 +429,16 @@ def _build_audio_session_node(
     call :func:`ensure_audio_session_node` (recursion into
     ``supervisor.start("audio_session")`` mid-``start()``).
 
-    ``config`` isn't routed into :class:`AudioSessionConfig` yet — J5A's
-    default-config coupling (see ``make_audio_session_node``'s
-    docstring); the manifest-to-dataclass wiring is future work,
-    unrelated to 0.8 U3b's supervisor-ownership change.
+    0.8 M2b Task B: ``AudioSessionConfig`` is now built from real
+    settings via :func:`_load_audio_session_config` instead of
+    construction defaults — the manifest ``config`` dict param stays
+    unused here (mirrors ``_build_tts_node``'s ``warm`` flag being the
+    only manifest-config field it reads; audio_session's manifest node
+    config carries no comparable per-boot flag today).
     """
     global _audio_session, _audio_session_node
     ensure_tts_node()  # dependency: shares the TTS synth's reference_buffer
-    session = _audio_session_factory(AudioSessionConfig())
+    session = _audio_session_factory(_load_audio_session_config())
     node = _audio_session_node_factory(bus=bus, session=session)
     with _lock:
         _audio_session = session
