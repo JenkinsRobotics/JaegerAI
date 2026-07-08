@@ -664,31 +664,6 @@ class InteractionConfig(BaseModel):
     )
 
 
-class AvatarConfig(BaseModel):
-    """0.5: AnimationNode + FrameBridge configuration.
-
-    Controls whether the avatar pipeline auto-starts at boot.
-
-    **Default OFF (2026-06-14):** the avatar / animation node (the
-    Lilith face) is a beta, dev-mode feature — its ``set_avatar_state``
-    /timeline tools are ``beta``-gated (visible only under
-    ``JAEGER_DEV_MODE=1``) and the MathScript renderer is still a
-    prototype. So the daily-driver agent does NOT warm the AnimationNode
-    by default. Set ``avatar.enabled = true`` in the instance config to
-    spin up the AnimationNode + WebSocket bridge when developing it;
-    promote to default-on once the renderer is stable.
-
-    ``./launch --no-avatar`` also forces it off regardless of config.
-    """
-    model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    bridge_host: str = "127.0.0.1"
-    bridge_port: int = Field(8765, ge=1024, le=65535)
-    # Default emotion the wizard suggests; AnimationNode will publish
-    # this on boot when set_avatar_state hasn't been called yet.
-    default_emotion: str = "neutral"
-
-
 class HardwareConfig(BaseModel):
     """Hardware package selection (dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
 
@@ -778,6 +753,29 @@ except ImportError:
         stt_mode: str = "two_pass"
         fast_model_name: str = "base.en"
         accurate_model_name: str = "medium.en"
+
+
+# 0.8 M2c: animation is the third engine-module nested this way — same
+# shape/rationale as the kokoro_tts and whisper_stt import blocks above.
+# ``AvatarConfig`` moved to ``jaeger_os/nodes/animation/config.py``
+# verbatim (same fields/defaults; still carries NO ``_setting()``
+# catalog metadata — the avatar/animation pipeline stays an unexposed,
+# beta, dev-mode block, same as before this move).
+try:
+    from jaeger_os.nodes.animation.config import AvatarConfig
+except ImportError:
+    # 0.8 M2a-style guard: the animation directory (config.py included)
+    # can be deleted entirely. Structurally identical to the real leaf
+    # so an existing config.yaml's ``avatar:`` block — or the
+    # default_factory below — still parses cleanly under
+    # ``extra="forbid"``; the values are inert since nothing can drive
+    # the avatar without the module present.
+    class AvatarConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        enabled: bool = False
+        bridge_host: str = "127.0.0.1"
+        bridge_port: int = Field(8765, ge=1024, le=65535)
+        default_emotion: str = "neutral"
 
 
 class Config(BaseModel):

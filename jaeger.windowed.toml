@@ -93,9 +93,15 @@ enabled = false   # real mic + Whisper load at setup() — see note above
 id = "animation"
 tier = 3
 backend = "thread"
-factory = "jaeger_os.nodes.animation:make_animation_node"
+slot = "animation"           # 0.8 M2c: resolved via discover_modules()
+                              # (animation/module.yaml) instead of a
+                              # hardcoded factory string.
 restart = "on_failure"
-config_key = "animation"
+config_key = "avatar"        # 0.8 M2c: was "animation" (matched no
+                              # Config field — AvatarConfig lives at
+                              # Config.avatar); fixed so a real
+                              # instance config.yaml's avatar: block
+                              # actually reaches make_animation_node.
 enabled = true
 
 # ── surfaces: ONE shell process; the window + tray are objects in it.
