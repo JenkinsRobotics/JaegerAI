@@ -1,4 +1,4 @@
-"""Plugin readiness → tool availability wiring.
+"""Plugin/module readiness → tool availability wiring.
 
 When a plugin isn't ready (missing libs, missing creds, wrong
 platform), the tools backed by it must report ``is_available() ==
@@ -11,6 +11,10 @@ This file pins:
   * a tool whose plugin is "ready" stays available
   * a tool whose plugin is missing libs / creds becomes unavailable
   * MCP-prefixed dynamic tools route through the ``mcp`` plugin gate
+  * ``text_to_speech``/``speak``/``warm_kokoro`` (kokoro_tts — a
+    module since 0.8 M1, not a plugin) are gated on module
+    discovery instead, and the plugin path stays exercised via a
+    real remaining plugin-backed tool (``listen`` / ``whisper_stt``)
 """
 
 from __future__ import annotations
@@ -90,31 +94,36 @@ def test_wiring_is_idempotent():
 
 def test_unavailable_plugin_makes_tool_unavailable(monkeypatch):
     """When ``list_plugins`` says the backing plugin needs setup,
-    the wired tool's ``is_available()`` returns False."""
-    tools = {"text_to_speech": _td("text_to_speech")}
+    the wired tool's ``is_available()`` returns False.
+
+    Uses ``listen``/``whisper_stt`` (a real remaining plugin) —
+    ``text_to_speech`` moved to module-gating in 0.8 M1 (see the
+    module-discovery tests below) so it no longer exercises this
+    path against the real repo."""
+    tools = {"listen": _td("listen")}
     wire_availability_checks(_StubAgent(tools))
-    # Patch the plugin lister to report kokoro_tts as not ready.
+    # Patch the plugin lister to report whisper_stt as not ready.
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
-            {"name": "kokoro_tts", "status": "needs_install"},
+            {"name": "whisper_stt", "status": "needs_install"},
         ]}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
-    assert tools["text_to_speech"].is_available() is False
+    assert tools["listen"].is_available() is False
 
 
 def test_ready_plugin_keeps_tool_available(monkeypatch):
-    tools = {"text_to_speech": _td("text_to_speech")}
+    tools = {"listen": _td("listen")}
     wire_availability_checks(_StubAgent(tools))
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
-            {"name": "kokoro_tts", "status": "ready"},
+            {"name": "whisper_stt", "status": "ready"},
         ]}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
-    assert tools["text_to_speech"].is_available() is True
+    assert tools["listen"].is_available() is True
 
 
 def test_messaging_aggregates_across_bridges(monkeypatch):
@@ -149,11 +158,65 @@ def test_unknown_plugin_fails_open(monkeypatch):
     output (e.g. someone added a tool mapping but the plugin
     isn't bundled yet) defaults to AVAILABLE — don't punish
     forward compatibility."""
-    tools = {"text_to_speech": _td("text_to_speech")}
+    tools = {"listen": _td("listen")}
     wire_availability_checks(_StubAgent(tools))
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list_empty():
         return {"plugins": []}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list_empty)
+    assert tools["listen"].is_available() is True
+
+
+# ── module discovery gates kokoro_tts tools (0.8 M1) ──────────────
+
+
+def test_text_to_speech_available_when_module_discovered():
+    """``text_to_speech`` is declared in the real kokoro_tts
+    module.yaml's ``tools:`` list — with that module present on
+    disk (as it is in this repo), the tool must be available
+    regardless of the (now nonexistent) kokoro_tts *plugin*."""
+    tools = {"text_to_speech": _td("text_to_speech")}
+    wire_availability_checks(_StubAgent(tools))
     assert tools["text_to_speech"].is_available() is True
+
+
+def test_text_to_speech_unavailable_when_module_missing(monkeypatch):
+    """If module discovery finds no module declaring
+    ``text_to_speech``, the tool must NOT silently stay available
+    via plugin fail-open — this is the regression 0.8 M1 closes."""
+    from jaeger_os.agent import availability as _avail_mod
+
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
+    tools = {"text_to_speech": _td("text_to_speech")}
+    wire_availability_checks(_StubAgent(tools))
+    # No module claims it, and "kokoro_tts" is absent from
+    # list_plugins() (it's not a plugin anymore) — old code fell
+    # back to fail-open here; confirm this path degrades safely by
+    # forcing the plugin lookup to also report it not ready.
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+    monkeypatch.setattr(
+        _plugins_mod, "list_plugins",
+        lambda: {"plugins": [{"name": "kokoro_tts", "status": "needs_install"}]},
+    )
+    assert tools["text_to_speech"].is_available() is False
+
+
+def test_speak_and_warm_kokoro_gated_on_module_presence():
+    """``speak``/``warm_kokoro`` aren't in module.yaml's ``tools:``
+    list (they're internal helpers) — they're gated on the
+    kokoro_tts module's mere presence instead."""
+    tools = {"speak": _td("speak"), "warm_kokoro": _td("warm_kokoro")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["speak"].is_available() is True
+    assert tools["warm_kokoro"].is_available() is True
+
+
+def test_speak_and_warm_kokoro_unavailable_when_module_missing(monkeypatch):
+    from jaeger_os.agent import availability as _avail_mod
+
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
+    tools = {"speak": _td("speak"), "warm_kokoro": _td("warm_kokoro")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["speak"].is_available() is False
+    assert tools["warm_kokoro"].is_available() is False
