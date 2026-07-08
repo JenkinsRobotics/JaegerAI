@@ -44,9 +44,30 @@ def test_all_eight_spec_groups_are_live(layout):
 
 def test_group_output_is_page_ordered(layout):
     order = [g["name"] for g in groups(layout)]
-    # model leads, interaction trails — the eight-group page order.
+    # model leads, interaction trails the NAMED eight-group page order —
+    # spill-over groups an engine-module contributes (0.8 M1: "kokoro_tts",
+    # nested at Config.kokoro_tts) sort alphabetically after it, per
+    # GROUP_ORDER's own "eight spec groups, then any spill-over" contract.
     assert order.index("model") < order.index("display") < order.index("voice")
-    assert order.index("interaction") == len(order) - 1
+    named_order = [g for g in order if g != "kokoro_tts"]
+    assert named_order.index("interaction") == len(named_order) - 1
+    assert "kokoro_tts" in order
+    assert order.index("kokoro_tts") > order.index("interaction")
+
+
+def test_kokoro_tts_engine_module_group_is_live(layout):
+    """0.8 M1: nesting ``KokoroTTSConfig`` under ``Config.kokoro_tts``
+    (jaeger_os/nodes/kokoro_tts/config.py) must expose its ``kokoro_tts``
+    group with zero catalog-code edits — the whole point of the
+    single-source design this file pins."""
+    rows = {g["name"]: g["count"] for g in groups(layout)}
+    assert rows.get("kokoro_tts") == 3
+    voice = describe(layout, "kokoro_tts.voice")
+    assert voice["type"] == "str" and voice["group"] == "kokoro_tts"
+    lang = describe(layout, "kokoro_tts.lang")
+    assert lang["type"] == "str"
+    rate = describe(layout, "kokoro_tts.sample_rate")
+    assert rate["type"] == "int" and rate["advanced"] is True
 
 
 def test_enum_descriptor_carries_choices_from_literal(layout):

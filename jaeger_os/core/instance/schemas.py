@@ -21,26 +21,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-def _setting(group: str, *, restart: bool = False,
-             advanced: bool = False) -> dict[str, Any]:
-    """Settings-catalog metadata for a Config leaf field.
-
-    The single-source settings surface (``core/settings/catalog.py``) walks
-    ``Config`` and emits a descriptor for every leaf field carrying this
-    metadata — CLI (``jaeger settings``) and the Swift app both render from
-    that one catalog, so a setting is defined ONCE, here, and nowhere else.
-
-      group     which settings page the field belongs to (model / display /
-                voice / tts / autonomy / permissions / retention / interaction).
-      restart   True if the change only takes effect after the agent reboots
-                (surfaces show a "restart required" badge).
-      advanced  True to tuck the field behind the "Advanced" disclosure.
-
-    A leaf WITHOUT this metadata is deliberately NOT exposed in the catalog
-    (identity keys, provenance, and the deferred hardware/avatar/plugin
-    blocks stay out until their own Phase-3 providers land)."""
-    return {"group": group, "restart": restart, "advanced": advanced}
+# ``_setting``'s canonical definition moved to ``setting_meta.py`` at 0.8
+# M1 so an engine-module's config slice (e.g. ``jaeger_os/nodes/
+# kokoro_tts/config.py``) can carry catalog metadata without importing
+# this file — breaking what would otherwise be a schemas <-> module
+# circular import (see this file's ``Config`` import site, below).
+# Re-exported here so every existing ``_setting(...)`` call in this file
+# is unchanged.
+from jaeger_os.core.instance.setting_meta import _setting
 
 
 # Bumped whenever the on-disk shape of identity.yaml / config.yaml
@@ -740,6 +728,25 @@ class PersonaConfig(BaseModel):
     )
 
 
+# 0.8 M1: kokoro_tts is the first "engine-module" — its config model
+# (``KokoroTTSConfig``) lives beside its node/engine code in
+# ``jaeger_os/nodes/kokoro_tts/config.py``, not here. Importing it here
+# to nest it into ``Config`` (below) pulls in ``jaeger_os.nodes`` (this
+# import forces that package's ``__init__.py`` to run, which imports
+# ``jaeger_os.nodes.kokoro_tts``). The FIRST cut of this had
+# ``config.py`` import ``_setting`` straight from this file — a
+# textbook two-file cycle (schemas -> module -> schemas) that broke
+# with an ``ImportError`` on whichever side happened to import first.
+# Fixed by moving ``_setting`` to ``setting_meta.py``, a zero-dependency
+# leaf both sides import from — ``jaeger_os/nodes/kokoro_tts/config.py``
+# has no import-time dependency on this file, so this import direction
+# is now a plain one-way edge, not a cycle. Any FUTURE engine-module
+# nested here the same way should follow the same shape: its config.py
+# imports catalog metadata from ``setting_meta.py``, never from
+# ``schemas.py`` directly.
+from jaeger_os.nodes.kokoro_tts.config import KokoroTTSConfig
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -761,6 +768,7 @@ class Config(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

@@ -47,7 +47,7 @@ Pipeline diagrams live in [`../infographic/`](../infographic/).
 | [0.4.0_review_patch_prompt.md](audio/0.4.0_review_patch_prompt.md) | ⚪ | 0.4.0 review-findings patch |
 
 > Active audio work now lives in code (`plugins/whisper_stt/` method layer,
-> `nodes/tts`, `core/audio`) + [`../infographic/voice_in_asr.md`](../infographic/voice_in_asr.md)
+> `nodes/kokoro_tts`, `core/audio`) + [`../infographic/voice_in_asr.md`](../infographic/voice_in_asr.md)
 > · [`stt_llm_tts.md`](../infographic/stt_llm_tts.md). These docs are the 0.4.0 history.
 
 ## avatar — animation · media · Studio/GUI · characters
