@@ -27,15 +27,20 @@
 #   * J1-J4 + J5A landed format-0.1 CONFORMANCE — chassis copy at
 #     jaeger_os/app/, manifest validates, factory refs resolve, all
 #     25 conformance tests pass.
-#   * Actual chassis INTEGRATION (launch.py calling JaegerApp.boot()
-#     directly) is blocked by bus duality — JaegerApp builds its own
-#     InProcBus while JROS's existing runtime uses
-#     jaeger_os.transport.inproc_bus. Unifying the two is a separate
-#     refactor beyond J5's scope; the chassis copy sits next to
-#     JROS's existing infrastructure, available for future use
-#     (real-time hardware node supervision, diagnostics-tab telemetry,
-#     external-surface attach) without forcing a boot-model rewrite
-#     today.
+#   * Actual chassis INTEGRATION started with the windowed app
+#     (jaeger.windowed.toml, 0.8 U3b): its [[node]] tts/animation
+#     entries are supervisor-owned there, real ``JaegerApp.boot()``.
+#     The bus duality that used to block this — JaegerApp minting its
+#     own InProcBus while jaeger_os.nodes.runtime minted a second,
+#     disconnected one for TTS/animation — was resolved in 0.8 U1-U3
+#     (runtime.set_bus() injection; see
+#     dev/docs/JROS_0.8_U3_SUPERVISION_PLAN.md). THIS manifest's nodes
+#     stay disabled below regardless: `./launch --tui` (Pattern 0)
+#     doesn't build a JaegerApp at all — it's JROS's own Rich loop,
+#     with no chassis Supervisor to hand these nodes to — so enabling
+#     them here would declare a topology nothing here supervises.
+#     Graduating THIS manifest waits on the TUI path itself adopting
+#     a chassis boot root, a separate piece of work from U3.
 #
 # JROS keeps the existing `jaeger_os/` package; the format chassis
 # lives at `jaeger_os/app/` (J2). Both surfaces coexist intentionally.
@@ -88,12 +93,22 @@ backend = "inproc"
 # The make_*_node factories (added in J5A) bridge the chassis
 # (bus, config) → Node contract to those existing singletons.
 #
-# enabled = false on every [[node]] because the chassis supervisor
-# is not the current owner: starting these via JaegerApp.boot() would
-# spawn a second thread per node (the chassis's threading.Thread +
-# the ensure_*_node singleton's own thread). Re-enabling waits on
-# the bus unification refactor noted in the header. The declarations
-# remain so the manifest describes JROS's topology truthfully.
+# enabled = false on every [[node]] because the TUI (`./launch`,
+# Pattern 0) doesn't boot a JaegerApp/Supervisor at all — JROS's own
+# runtime.py singleton (ensure_*_node) still owns these threads
+# directly, called on-demand by the agent's speak/listen/avatar
+# tools. The bus-duality + double-spawn blocker that used to justify
+# leaving these disabled was resolved in 0.8 U1-U3 (runtime.set_bus()
+# injection + ensure_* delegating to a registered supervisor instead
+# of always spawning its own thread — see runtime.py's
+# set_supervisor()); the windowed app (jaeger.windowed.toml, 0.8 U3b)
+# is the FIRST manifest where the chassis Supervisor owns tts/
+# animation for real. Re-enabling these HERE waits on the TUI path
+# itself adopting a chassis boot root — until then there's no
+# Supervisor here for ensure_* to delegate to, so starting them via a
+# JaegerApp nothing here even builds would be meaningless. The
+# declarations remain so the manifest describes JROS's topology
+# truthfully.
 
 [[node]]
 id = "hardware_jp01"
@@ -103,7 +118,7 @@ factory = "jaeger_os.hardware.boot:make_jp01_hardware"
 args = { package = "jp01" }
 restart = "on_failure"
 config_key = "hardware"
-enabled = false   # chassis supervision blocked by bus duality
+enabled = false   # TUI path has no chassis boot root yet — see header
 
 [[node]]
 id = "animation"
@@ -112,7 +127,7 @@ backend = "thread"
 factory = "jaeger_os.nodes.animation:make_animation_node"
 restart = "on_failure"
 config_key = "animation"
-enabled = false   # chassis supervision blocked by bus duality
+enabled = false   # TUI path has no chassis boot root yet — see header
 
 [[node]]
 id = "tts"
@@ -121,7 +136,7 @@ backend = "thread"
 factory = "jaeger_os.nodes.tts:make_tts_node"
 restart = "on_failure"
 config_key = "tts"
-enabled = false   # chassis supervision blocked by bus duality
+enabled = false   # TUI path has no chassis boot root yet — see header
 
 [[node]]
 id = "audio_session"
@@ -130,7 +145,7 @@ backend = "thread"
 factory = "jaeger_os.nodes.audio_session:make_audio_session_node"
 restart = "on_failure"
 config_key = "audio_session"
-enabled = false   # chassis supervision blocked by bus duality
+enabled = false   # TUI path has no chassis boot root yet — see header
 
 # ── Surfaces ──────────────────────────────────────────────────────
 # JROS's existing surfaces — the TUI is the main; tray is additional.

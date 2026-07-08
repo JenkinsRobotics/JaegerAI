@@ -9,8 +9,9 @@
 #  TUI); it does NOT use a chassis manifest — JROS owns that loop
 #  directly. The full descriptive topology (hardware/animation/tts/
 #  audio nodes, parked) lives in jaeger.toml. This manifest is the
-#  focused windowed shape: one core, two surfaces. "A different shape
-#  is a different manifest" (manifest.py) — like jaeger.sim.toml.
+#  focused windowed shape: one core, supervisor-owned tts/animation
+#  nodes (0.8 U3b), two surfaces. "A different shape is a different
+#  manifest" (manifest.py) — like jaeger.sim.toml.
 
 [app]
 name = "jros-windowed"
@@ -37,6 +38,61 @@ backend = "inproc"            # fused mode, one process — the chassis
 [core]
 factory = "jaeger_os.agent.loop.agent_core:make_core"
 config_key = "agent"
+
+# ── nodes: Tier-3 voice/animation subsystems, supervisor-owned ──────
+#    0.8 U3b: the windowed path graduates from jaeger_os/nodes/
+#    runtime.py's own lazy ensure_*_node singletons to the chassis
+#    Supervisor for these — `supervisor.ls()`/diagnose()/restart
+#    policy now see real liveness. ensure_*_node() (still what the
+#    agent's speak/listen/avatar tools call) delegates to the SAME
+#    supervisor-managed node instead of spawning a second thread —
+#    see jaeger_os/nodes/runtime.py's set_supervisor().
+#
+#    tts + animation are headless/CI-safe (Kokoro weight load is
+#    lazy — only on warm()/first speak(); a failed WebSocket bind is
+#    caught, non-fatal) so they start eagerly at boot here.
+#
+#    audio_session opens a REAL microphone + loads Whisper STT models
+#    SYNCHRONOUSLY in its node setup (no hardware-unavailable degrade
+#    path today — see AudioSession.build()/_MicStream). Enabling it
+#    here would make every windowed-app launch open the mic
+#    immediately (a behavior change from today's on-demand listen())
+#    and would hang/fail in a bare CI container. Declared — the
+#    manifest stays a truthful description of the app's topology —
+#    but disabled pending either (a) a hardware-unavailable degrade
+#    path in AudioSession, or (b) an eager-vs-on-demand distinction
+#    in the node-spec format so a declared node isn't force-started
+#    at boot just by being enabled.
+#
+#    hardware_jp01 stays out entirely — opt-in, humanoid-specific,
+#    not part of the desktop app's shape.
+
+[[node]]
+id = "tts"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.tts:make_tts_node"
+restart = "on_failure"
+config_key = "tts"
+enabled = true
+
+[[node]]
+id = "audio_session"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.audio_session:make_audio_session_node"
+restart = "on_failure"
+config_key = "audio_session"
+enabled = false   # real mic + Whisper load at setup() — see note above
+
+[[node]]
+id = "animation"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.animation:make_animation_node"
+restart = "on_failure"
+config_key = "animation"
+enabled = true
 
 # ── surfaces: ONE shell process; the window + tray are objects in it.
 #    Both speak the bus only (jaeger_os.core.messages). ──────────────
