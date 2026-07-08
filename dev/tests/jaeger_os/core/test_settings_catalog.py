@@ -45,14 +45,20 @@ def test_all_eight_spec_groups_are_live(layout):
 def test_group_output_is_page_ordered(layout):
     order = [g["name"] for g in groups(layout)]
     # model leads, interaction trails the NAMED eight-group page order —
-    # spill-over groups an engine-module contributes (0.8 M1: "kokoro_tts",
-    # nested at Config.kokoro_tts) sort alphabetically after it, per
-    # GROUP_ORDER's own "eight spec groups, then any spill-over" contract.
+    # spill-over groups an engine-module contributes (0.8 M1: "kokoro_tts"
+    # nested at Config.kokoro_tts; 0.8 M2b: "whisper_stt" nested at
+    # Config.whisper_stt) sort alphabetically after it, per GROUP_ORDER's
+    # own "eight spec groups, then any spill-over" contract.
     assert order.index("model") < order.index("display") < order.index("voice")
-    named_order = [g for g in order if g != "kokoro_tts"]
+    spillover = {"kokoro_tts", "whisper_stt"}
+    named_order = [g for g in order if g not in spillover]
     assert named_order.index("interaction") == len(named_order) - 1
     assert "kokoro_tts" in order
+    assert "whisper_stt" in order
     assert order.index("kokoro_tts") > order.index("interaction")
+    assert order.index("whisper_stt") > order.index("interaction")
+    # alphabetical among the spill-over groups themselves
+    assert order.index("kokoro_tts") < order.index("whisper_stt")
 
 
 def test_kokoro_tts_engine_module_group_is_live(layout):
@@ -68,6 +74,21 @@ def test_kokoro_tts_engine_module_group_is_live(layout):
     assert lang["type"] == "str"
     rate = describe(layout, "kokoro_tts.sample_rate")
     assert rate["type"] == "int" and rate["advanced"] is True
+
+
+def test_whisper_stt_engine_module_group_is_live(layout):
+    """0.8 M2b Task B: nesting ``WhisperSTTConfig`` under
+    ``Config.whisper_stt`` (jaeger_os/nodes/whisper_stt/config.py) must
+    expose its ``whisper_stt`` group with zero catalog-code edits —
+    same single-source contract the kokoro_tts test above pins."""
+    rows = {g["name"]: g["count"] for g in groups(layout)}
+    assert rows.get("whisper_stt") == 3
+    stt_mode = describe(layout, "whisper_stt.stt_mode")
+    assert stt_mode["type"] == "str" and stt_mode["group"] == "whisper_stt"
+    fast = describe(layout, "whisper_stt.fast_model_name")
+    assert fast["type"] == "str"
+    accurate = describe(layout, "whisper_stt.accurate_model_name")
+    assert accurate["type"] == "str"
 
 
 def test_enum_descriptor_carries_choices_from_literal(layout):

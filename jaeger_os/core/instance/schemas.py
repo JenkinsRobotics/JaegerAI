@@ -760,6 +760,26 @@ except ImportError:
         sample_rate: int = 24000
 
 
+# 0.8 M2b Task B: whisper_stt is the second engine-module nested this
+# way (see the kokoro_tts import block above for the full import-cycle
+# rationale — same shape, same ``setting_meta`` leaf, same guarded
+# ImportError fallback so a deleted ``nodes/whisper_stt/`` directory
+# degrades instead of breaking config load).
+try:
+    from jaeger_os.nodes.whisper_stt.config import WhisperSTTConfig
+except ImportError:
+    # Structurally identical to the real leaf (same fields/defaults) so
+    # an existing config.yaml's ``whisper_stt:`` block — or the
+    # default_factory below — still parses cleanly under
+    # ``extra="forbid"``; the values are inert since nothing can listen
+    # without the module present.
+    class WhisperSTTConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        stt_mode: str = "two_pass"
+        fast_model_name: str = "base.en"
+        accurate_model_name: str = "medium.en"
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -782,6 +802,7 @@ class Config(BaseModel):
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
+    whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

@@ -316,6 +316,145 @@ def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
         runtime.shutdown()
 
 
+# ── config routing (0.8 M2b Task B) ──────────────────────────────────
+#
+# ``_build_audio_session_node`` used to always pass a construction-
+# default ``AudioSessionConfig()`` — the "config isn't routed" gap
+# recorded in the plan. These tests pin that the real
+# ``Config.whisper_stt`` + ``Config.voice`` values now reach the
+# ``AudioSessionConfig`` the audio session factory receives, and that
+# an untouched config still produces today's byte-identical defaults
+# (regression pin).
+
+
+def _fake_layout(cfg_path):
+    return type("_FakeLayout", (), {"config_path": cfg_path})()
+
+
+def test_build_audio_session_node_routes_custom_config(monkeypatch, tmp_path):
+    from jaeger_os.core.instance.schemas import (
+        Config, ModelConfig, VoiceConfig, dump_yaml)
+    from jaeger_os.nodes.whisper_stt.config import WhisperSTTConfig
+    import jaeger_os.core.context as context
+
+    cfg_path = tmp_path / "config.yaml"
+    dump_yaml(cfg_path, Config(
+        instance_name="t",
+        model=ModelConfig(model_path="/dev/null"),
+        whisper_stt=WhisperSTTConfig(
+            stt_mode="continuous",
+            fast_model_name="tiny.en",
+            accurate_model_name="small.en",
+        ),
+        voice=VoiceConfig(
+            wake_word=False,
+            follow_up_seconds=5.0,
+            barge_in=True,
+            audio_backend="avaudio",
+            self_speech_filter=False,
+            self_speech_threshold=0.9,
+        ),
+    ))
+    monkeypatch.setattr(
+        context, "_require_layout", lambda: _fake_layout(cfg_path),
+    )
+
+    _install_mock_runtime(monkeypatch)
+    captured: dict[str, AudioSessionConfig] = {}
+
+    def fake_audio_factory(config):
+        captured["config"] = config
+        return _MockAudioSession()
+
+    monkeypatch.setattr(runtime, "_audio_session_factory", fake_audio_factory)
+    try:
+        bus = runtime.get_bus()
+        runtime._build_audio_session_node(bus, {})
+        got = captured["config"]
+        assert got.stt_mode == "continuous"
+        assert got.fast_model_name == "tiny.en"
+        assert got.accurate_model_name == "small.en"
+        assert got.require_wake_word is False
+        assert got.followup_window_s == 5.0
+        assert got.barge_in is True
+        assert got.audio_backend == "avaudio"
+        assert got.self_speech_filter is False
+        assert got.self_speech_threshold == 0.9
+        # wake_phrases preserved at the dataclass default — no VoiceConfig
+        # phrase-list field to route through.
+        assert got.wake_phrases == ()
+    finally:
+        runtime.shutdown()
+
+
+def test_build_audio_session_node_defaults_match_config_defaults(
+    monkeypatch, tmp_path,
+):
+    """Untouched config -> an ``AudioSessionConfig`` mirroring the real
+    ``Config.voice`` / ``Config.whisper_stt`` field defaults.
+
+    NOT a blanket ``== AudioSessionConfig()`` regression pin: that
+    dataclass's own standalone default is ``require_wake_word=False``,
+    while ``VoiceConfig.wake_word`` (the field this task routes it
+    from) defaults ``True``. That silent mismatch was exactly the
+    routing gap Task B closes — pre-fix, ``_build_audio_session_node``
+    always passed ``AudioSessionConfig()`` regardless of
+    ``Config.voice.wake_word``, so wake-word gating silently defaulted
+    OFF for any supervisor-owned audio_session node even though a
+    freshly-written config.yaml says ON. Every OTHER field happens to
+    line up between the two defaults today, so this still pins them
+    byte-for-byte; only ``require_wake_word`` intentionally flips.
+    """
+    from jaeger_os.core.instance.schemas import Config, ModelConfig, dump_yaml
+    import jaeger_os.core.context as context
+
+    cfg_path = tmp_path / "config.yaml"
+    dump_yaml(cfg_path, Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null"),
+    ))
+    monkeypatch.setattr(
+        context, "_require_layout", lambda: _fake_layout(cfg_path),
+    )
+
+    _install_mock_runtime(monkeypatch)
+    captured: dict[str, AudioSessionConfig] = {}
+
+    def fake_audio_factory(config):
+        captured["config"] = config
+        return _MockAudioSession()
+
+    monkeypatch.setattr(runtime, "_audio_session_factory", fake_audio_factory)
+    try:
+        bus = runtime.get_bus()
+        runtime._build_audio_session_node(bus, {})
+        expected = AudioSessionConfig(
+            stt_mode="two_pass",
+            fast_model_name="base.en",
+            accurate_model_name="medium.en",
+            require_wake_word=True,
+            followup_window_s=10.0,
+            barge_in=False,
+            audio_backend="sounddevice",
+            self_speech_filter=True,
+            self_speech_threshold=0.75,
+        )
+        assert captured["config"] == expected
+    finally:
+        runtime.shutdown()
+
+
+def test_load_audio_session_config_falls_back_on_load_failure(monkeypatch):
+    """No instance layout available (fresh/unconfigured) -> the loader
+    degrades to construction defaults instead of raising."""
+    import jaeger_os.core.context as context
+
+    def _raise():
+        raise RuntimeError("no active instance")
+
+    monkeypatch.setattr(context, "_require_layout", _raise)
+    assert runtime._load_audio_session_config() == AudioSessionConfig()
+
+
 # ── supervisor-backed ensure_* delegation (0.8 U3b) ──────────────────
 #
 # A duck-typed fake stands in for jaeger_os.app.supervisor.Supervisor
