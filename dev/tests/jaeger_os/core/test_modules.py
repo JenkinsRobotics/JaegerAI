@@ -53,6 +53,7 @@ def test_load_module_real_kokoro_tts():
     assert spec.tools == ["text_to_speech"]
     assert spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
     assert spec.config == "kokoro_tts"
+    assert spec.requires_libraries == ["kokoro", "sounddevice", "numpy"]
 
 
 def test_load_module_happy_path(tmp_path):
@@ -61,6 +62,13 @@ def test_load_module_happy_path(tmp_path):
     assert spec.module == "widget"
     assert spec.slot == "widgets"
     assert spec.tools == ["use_widget"]
+    assert spec.requires_libraries == []
+
+
+def test_load_module_parses_requires_libraries(tmp_path):
+    text = _GOOD_YAML + "requires_libraries: [foo, bar]\n"
+    spec = load_module(_write_module(tmp_path, text=text))
+    assert spec.requires_libraries == ["foo", "bar"]
 
 
 def test_load_module_missing_file(tmp_path):
