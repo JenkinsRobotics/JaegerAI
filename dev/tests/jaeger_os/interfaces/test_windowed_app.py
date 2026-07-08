@@ -165,6 +165,13 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         assert rows["tts"]["state"] == "running"
         assert rows["animation"]["state"] == "running"
         assert rows["audio_session"]["state"] == "off"   # disabled, not started
+        # 0.8 M2a: the tts node binds by `slot = "tts"` now, not a
+        # hardcoded factory string — prove _make_handle resolved it via
+        # discover_modules() to kokoro_tts's real factory before the
+        # supervisor ever started it.
+        tts_spec = next(n for n in app.spec.nodes if n.id == "tts")
+        assert tts_spec.slot == "tts"
+        assert tts_spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
         # ensure_*_node() (what the agent's speak/avatar tools call)
         # must delegate to the SAME supervisor-managed objects — no
         # double-spawn (the pre-U3b reason these nodes stayed disabled).
