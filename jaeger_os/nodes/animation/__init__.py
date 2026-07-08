@@ -21,18 +21,27 @@ Adapter levels (operator-locked 2026-06-08):
 
 See ``dev/docs/library_review/mochi_demo.md`` for the vendoring
 audit + per-adapter origin.
+
+0.8 M2c: "the module IS the engine" (kokoro_tts M1 / whisper_stt M2b
+precedent) — this package's own ``module.yaml`` (slot ``animation``)
+declares its topics/tools/factory/``requires_libraries``, and its
+settings-catalog config slice (``config.py``'s ``AvatarConfig``, moved
+here verbatim from ``core/instance/schemas.py``) is nested at
+``Config.avatar`` via a guarded import in ``schemas.py``.
 """
 
 from typing import Any
 
 from .auto_state import AvatarAutoStateDriver
 from .base import AnimationAdapter, FrameBuffer
+from .config import AvatarConfig
 from .node import AnimationNode
 
 __all__ = [
     "AnimationAdapter",
     "AnimationNode",
     "AvatarAutoStateDriver",
+    "AvatarConfig",
     "FrameBuffer",
     "make_animation_node",
 ]

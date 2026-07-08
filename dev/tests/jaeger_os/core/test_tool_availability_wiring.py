@@ -348,3 +348,96 @@ def test_listen_unavailable_when_required_library_missing(monkeypatch):
     wire_availability_checks(_StubAgent(tools))
     assert tools["listen"].is_available() is False
     _avail_mod._library_importable.cache_clear()
+
+
+# ── module discovery gates animation tools (0.8 M2c) ──────────────
+#
+# Before 0.8 M2c, set_avatar_state/play_timeline/warm_avatar were
+# UNGATED entirely — no plugin entry, no module entry, so the beta
+# gate was the only thing hiding them (and warm_avatar isn't even
+# beta-gated, since it's not agent-facing). Same regression class
+# 0.8 M1/M2b closed for kokoro_tts/whisper_stt.
+
+
+def test_avatar_tools_available_when_module_discovered():
+    """The 3 avatar tools are declared in the real animation
+    module.yaml's ``tools:`` list (or, for ``warm_avatar``, an
+    internal helper gated the same way ``speak``/``warm_kokoro``
+    are) — with that module present on disk (as it is in this
+    repo), all 3 must be available."""
+    tools = {
+        "set_avatar_state": _td("set_avatar_state"),
+        "play_timeline": _td("play_timeline"),
+        "warm_avatar": _td("warm_avatar"),
+    }
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["set_avatar_state"].is_available() is True
+    assert tools["play_timeline"].is_available() is True
+    assert tools["warm_avatar"].is_available() is True
+
+
+def test_avatar_tools_unavailable_when_module_missing(monkeypatch):
+    """If module discovery finds no ``animation`` module at all, all
+    3 avatar tools must be unavailable WITHOUT any help from the
+    plugin mechanism — these tools have no plugin entry at all, so
+    before 0.8 M2c a missing/broken module wouldn't hide them."""
+    from jaeger_os.agent import availability as _avail_mod
+
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
+    tools = {
+        "set_avatar_state": _td("set_avatar_state"),
+        "play_timeline": _td("play_timeline"),
+        "warm_avatar": _td("warm_avatar"),
+    }
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["set_avatar_state"].is_available() is False
+    assert tools["play_timeline"].is_available() is False
+    assert tools["warm_avatar"].is_available() is False
+
+
+def test_avatar_tools_available_when_module_present_and_libs_importable(
+    monkeypatch,
+):
+    """A discovered module claiming the avatar tools with every
+    declared ``requires_libraries`` entry importable is available."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="animation", slot="animation", factory="pkg.mod:make",
+        tools=["set_avatar_state", "play_timeline", "warm_avatar"],
+        requires_libraries=["websockets", "PIL", "numpy"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+    monkeypatch.setattr(_avail_mod, "_library_importable", lambda name: True)
+    tools = {"set_avatar_state": _td("set_avatar_state")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["set_avatar_state"].is_available() is True
+
+
+def test_avatar_tools_unavailable_when_required_library_missing(monkeypatch):
+    """The module is discovered and claims the avatar tools, but a
+    library it declares in ``requires_libraries`` doesn't import —
+    fails closed rather than reporting available on mere module
+    presence."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="animation", slot="animation", factory="pkg.mod:make",
+        tools=["set_avatar_state", "play_timeline", "warm_avatar"],
+        requires_libraries=["websockets", "PIL", "numpy"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+
+    def _fake_find_spec(name):
+        return None if name == "websockets" else object()
+
+    monkeypatch.setattr(
+        _avail_mod.importlib.util, "find_spec", _fake_find_spec,
+    )
+    _avail_mod._library_importable.cache_clear()
+    tools = {"play_timeline": _td("play_timeline")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["play_timeline"].is_available() is False
+    _avail_mod._library_importable.cache_clear()

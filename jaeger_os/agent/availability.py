@@ -95,10 +95,13 @@ _PLUGIN_READY_OVERRIDES: dict[str, list[str]] = {}
 # whose module has been removed entirely, instead of falling back to
 # the plugin mechanism's fail-open default.
 _TOOL_TO_MODULE: dict[str, str] = {
-    "text_to_speech": "kokoro_tts",
-    "speak":          "kokoro_tts",     # legacy alias
-    "warm_kokoro":    "kokoro_tts",
-    "listen":         "whisper_stt",    # 0.8 M2b: plugin -> module
+    "text_to_speech":   "kokoro_tts",
+    "speak":            "kokoro_tts",    # legacy alias
+    "warm_kokoro":      "kokoro_tts",
+    "listen":           "whisper_stt",   # 0.8 M2b: plugin -> module
+    "set_avatar_state": "animation",     # 0.8 M2c: was UNGATED entirely
+    "play_timeline":    "animation",
+    "warm_avatar":      "animation",
 }
 
 
