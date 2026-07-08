@@ -139,6 +139,14 @@ class JaegerApp:
             pass
         if self.supervisor is not None:
             self.supervisor.stop_all()
+        # 0.8 U3b: clear the delegation target + tear down the
+        # AnimationNode bridge/auto-driver sidecars the supervisor
+        # doesn't know about (see runtime.set_supervisor's docstring).
+        try:
+            from jaeger_os.nodes import runtime as node_runtime
+            node_runtime.set_supervisor(None)
+        except Exception:  # noqa: BLE001
+            pass
         if self.core is not None:
             try:
                 self.core.stop()
@@ -216,6 +224,15 @@ class JaegerApp:
         for node_spec in self.spec.nodes:
             self.supervisor.add(self._make_handle(node_spec))
         self.supervisor.start_all()
+        # 0.8 U3b: register AFTER start_all() so jaeger_os.nodes.runtime's
+        # ensure_tts_node/ensure_audio_session_node/ensure_animation_node —
+        # called by the agent's speak/listen/avatar tools — delegate to
+        # THIS supervisor for any node the manifest declares + enables,
+        # instead of spawning a second thread per node (the pre-U3b
+        # windowed-app double-spawn this manifest's [[node]] entries used
+        # to guard against by staying disabled).
+        from jaeger_os.nodes import runtime as node_runtime
+        node_runtime.set_supervisor(self.supervisor)
 
     def _make_handle(self, node_spec: NodeSpec):
         cfg = slice_for(self.config, node_spec.config_key)

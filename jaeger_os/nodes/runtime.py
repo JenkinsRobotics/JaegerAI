@@ -49,6 +49,7 @@ from jaeger_os.transport import Bus, InProcBus
 _lock = threading.Lock()
 _bus: Optional[Bus] = None
 _bus_owned: bool = True   # False once a chassis/other boot root injects its bus
+_supervisor: Optional[Any] = None  # jaeger_os.app.supervisor.Supervisor, once registered
 _tts_node: Optional[TTSNode] = None
 _tts_thread: Optional[threading.Thread] = None
 _synth = None  # KokoroTTS instance owned by the node
@@ -198,6 +199,90 @@ def set_bus(bus: Bus) -> None:
         _bus_owned = False
 
 
+def set_supervisor(sup: Any | None) -> None:
+    """Register the chassis's ``Supervisor`` (0.8 U3b — "the windowed
+    path graduates") so every ``ensure_*`` below delegates a
+    manifest-declared, enabled node's lifecycle to it instead of
+    spawning its own thread the way this module always has.
+
+    Call from :meth:`JaegerApp.boot` right after ``supervisor.start_all()``
+    returns — deliberately AFTER, not before: ``start_all()`` is what
+    invokes ``make_tts_node``/``make_audio_session_node``/
+    ``make_animation_node`` (the manifest's node factories) for the
+    first time, and those factories construct their node DIRECTLY
+    (see ``_build_tts_node`` et al.) rather than calling back into
+    ``ensure_*_node`` — so there is no ordering hazard either way, but
+    registering after keeps a clean "supervisor is fully up before
+    anyone can be told to ask it for things" story. Call again with
+    ``sup=None`` from :meth:`JaegerApp.shutdown` to clear the
+    registration.
+
+    No supervisor registered, or the manifest doesn't declare/enable
+    the node in question → ``ensure_*`` falls back to today's
+    byte-identical thread-spawn path. The TUI/bridge/daemon boot roots
+    never call this at all, so they're unaffected either way.
+
+    Clearing (``sup=None``) also tears down the AnimationNode's
+    WebSocket bridge + :class:`AvatarAutoStateDriver` sidecars if this
+    process ever built them under supervisor ownership — those two
+    aren't part of what ``Supervisor.stop_all()`` tears down (it only
+    knows about the ``AnimationNode`` object via its ``ThreadHandle``),
+    so a supervised windowed-app shutdown would otherwise leak the
+    bridge's daemon thread / bus subscriptions.
+    """
+    global _supervisor, _animation_bridge, _avatar_auto_driver
+    with _lock:
+        prior = _supervisor
+        _supervisor = sup
+        bridge_instance = None
+        auto_driver = None
+        if sup is None and prior is not None:
+            bridge_instance = _animation_bridge
+            auto_driver = _avatar_auto_driver
+            _animation_bridge = None
+            _avatar_auto_driver = None
+    if auto_driver is not None:
+        auto_driver.stop()
+    if bridge_instance is not None:
+        bridge_instance.stop()
+
+
+def _build_tts_node(bus: Bus, config: dict[str, Any]) -> TTSNode:
+    """Construct a :class:`TTSNode` directly on ``bus`` — the shape
+    ``make_tts_node`` (the manifest's chassis-contract factory) hands
+    the supervisor's ``ThreadHandle``.
+
+    Deliberately does NOT call :func:`ensure_tts_node`: the supervisor
+    invokes this factory from inside ``ThreadHandle.start()``, which
+    is itself what ``ensure_tts_node``'s supervisor-delegation branch
+    would call — recursing back in here would recurse into
+    ``supervisor.start("tts")`` a second time while the first call is
+    still on the stack (and ``self._node`` isn't assigned yet, so
+    ``alive()`` can't short-circuit it). Constructing directly sidesteps
+    the cycle entirely. Registers the synth/node into this module's
+    globals so :func:`get_synth` (read by ``ensure_audio_session_node``'s
+    session factory) and a later :func:`ensure_tts_node` call both see
+    the SAME objects the supervisor is running.
+    """
+    global _synth, _tts_node
+    synth = _synth_factory()
+    node = _tts_node_factory(bus=bus, synthesizer=synth)
+    if bool(config.get("warm", False)):
+        try:
+            synth.warm()
+        except Exception:  # noqa: BLE001
+            import sys
+            print(
+                "[runtime] kokoro warm at supervisor build failed; "
+                "first speak() will pay the load tax",
+                file=sys.stderr, flush=True,
+            )
+    with _lock:
+        _synth = synth
+        _tts_node = node
+    return node
+
+
 def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     """Make sure a TTS node is running on the bus.  Idempotent.
 
@@ -208,6 +293,28 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     weight-load tax.
     """
     global _tts_node, _tts_thread, _synth
+    sup = _supervisor
+    if sup is not None and sup.has("tts") and sup.enabled("tts"):
+        if not sup.is_running("tts"):
+            sup.start("tts")
+        node = sup.node("tts")
+        if node is not None:
+            with _lock:
+                _tts_node = node
+            if warm and _synth is not None:
+                try:
+                    _synth.warm()
+                except Exception:  # noqa: BLE001
+                    import sys
+                    print(
+                        "[runtime] kokoro warm at ensure_tts_node failed; "
+                        "first speak() will pay the load tax",
+                        file=sys.stderr, flush=True,
+                    )
+            return node
+        # Supervisor declared "tts" but couldn't produce a live node
+        # (setup failed) — fall through to the legacy path so callers
+        # still get SOME usable node rather than propagating None.
     bus = get_bus()
     synth_to_warm: Any = None
     with _lock:
@@ -235,6 +342,30 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     return node
 
 
+def _build_audio_session_node(
+    bus: Bus, config: dict[str, Any],
+) -> AudioSessionNode:
+    """Construct an :class:`AudioSessionNode` directly on ``bus`` — the
+    shape ``make_audio_session_node`` hands the supervisor's
+    ``ThreadHandle``. See :func:`_build_tts_node` for why this doesn't
+    call :func:`ensure_audio_session_node` (recursion into
+    ``supervisor.start("audio_session")`` mid-``start()``).
+
+    ``config`` isn't routed into :class:`AudioSessionConfig` yet — J5A's
+    default-config coupling (see ``make_audio_session_node``'s
+    docstring); the manifest-to-dataclass wiring is future work,
+    unrelated to 0.8 U3b's supervisor-ownership change.
+    """
+    global _audio_session, _audio_session_node
+    ensure_tts_node()  # dependency: shares the TTS synth's reference_buffer
+    session = _audio_session_factory(AudioSessionConfig())
+    node = _audio_session_node_factory(bus=bus, session=session)
+    with _lock:
+        _audio_session = session
+        _audio_session_node = node
+    return node
+
+
 def ensure_audio_session_node(
     *,
     config: AudioSessionConfig,
@@ -247,6 +378,17 @@ def ensure_audio_session_node(
     """
     global _audio_session_node, _audio_session_thread, _audio_session
     ensure_tts_node()
+    sup = _supervisor
+    if sup is not None and sup.has("audio_session") and sup.enabled("audio_session"):
+        if not sup.is_running("audio_session"):
+            sup.start("audio_session")
+        node = sup.node("audio_session")
+        if node is not None:
+            with _lock:
+                _audio_session_node = node
+            return node
+        # fall through to the legacy path if the supervisor couldn't
+        # produce a live node (setup failed).
     bus = get_bus()
     with _lock:
         if _audio_session_node is None:
@@ -281,6 +423,124 @@ def _wait_for_node_running(node: TTSNode, *, timeout_s: float) -> None:
     raise TimeoutError("TTS node did not reach RUNNING state")
 
 
+def _construct_animation_components(
+    bus: Bus,
+    *,
+    bridge_host: str,
+    bridge_port: int,
+    enable_bridge: bool,
+) -> tuple[AnimationNode, "animation_bridge.FrameBridge | None"]:
+    """Pure construction: bridge + skill registry + ``AnimationNode`` +
+    registered adapters. No locking, no thread spawn, no global writes
+    — shared by the legacy :func:`ensure_animation_node` singleton path
+    and the supervisor-facing :func:`_build_animation_node` factory so
+    both build the exact same node shape."""
+    # Start the bridge first so the node's frame_callback can plug
+    # into it.  Bridge runs on a daemon thread; failures are non-fatal
+    # (animation still works, just no renderer receives frames).
+    bridge_instance: animation_bridge.FrameBridge | None = None
+    if enable_bridge:
+        try:
+            bridge_instance = animation_bridge.FrameBridge(
+                host=bridge_host, port=bridge_port,
+            )
+            bridge_instance.start()
+        except Exception:  # noqa: BLE001
+            bridge_instance = None
+
+    # Build the registry once so XP grants land on the same
+    # tree the CLI + Swift app read.
+    skill_registry: Any | None = None
+    try:
+        from jaeger_os.skill_tree import (
+            SkillTreeRegistry, seed_default_tree,
+        )
+        from jaeger_os.core.instance.instance import (
+            InstanceLayout, default_instance_name,
+            resolve_instance_dir,
+        )
+        layout = InstanceLayout(
+            root=resolve_instance_dir(default_instance_name()),
+        )
+        skill_registry = SkillTreeRegistry.for_instance(layout)
+        seed_default_tree(skill_registry)
+    except Exception:  # noqa: BLE001
+        skill_registry = None
+
+    frame_callback = (
+        bridge_instance.publish_frame if bridge_instance else None
+    )
+
+    node = AnimationNode(
+        bus=bus,
+        skill_registry=skill_registry,
+        frame_callback=frame_callback,
+    )
+
+    # Register the L1-L4 adapter set so the brain can route
+    # to any of them by name.
+    try:
+        from jaeger_os.nodes.animation.adapters import (
+            BitmapAdapter, GifAdapter, ImageAdapter,
+            MathAdapter, SpriteAdapter,
+        )
+        node.register_adapter("image", ImageAdapter())
+        node.register_adapter("bitmap", BitmapAdapter())
+        node.register_adapter("sprite", SpriteAdapter())
+        node.register_adapter("gif", GifAdapter())
+        node.register_adapter("math", MathAdapter())
+    except Exception:  # noqa: BLE001
+        pass
+
+    return node, bridge_instance
+
+
+def _build_animation_node(
+    bus: Bus,
+    *,
+    bridge_host: str = "127.0.0.1",
+    bridge_port: int = 8765,
+    enable_bridge: bool = True,
+) -> AnimationNode:
+    """Construct an :class:`AnimationNode` directly on ``bus`` — the
+    shape ``make_animation_node`` hands the supervisor's
+    ``ThreadHandle`` (no thread spawn — ``ThreadHandle.start()`` owns
+    that; calling :func:`ensure_animation_node` here would recurse
+    into ``supervisor.start("animation")`` mid-``start()``, same
+    hazard as :func:`_build_tts_node`).
+
+    Tears down + rebuilds the bridge/:class:`AvatarAutoStateDriver`
+    sidecars fresh on every call rather than trying to reuse them —
+    matching ``ThreadHandle.restart()``'s own philosophy ("never reuse
+    a torn-down node object"). Without this, a supervisor-driven
+    restart (crash → fresh ``AnimationNode`` from this factory) would
+    leak the PRIOR bridge's daemon thread + the prior auto-driver's
+    bus subscriptions, since neither is owned by the ``AnimationNode``
+    object the supervisor's ``ThreadHandle`` tracks.
+    """
+    global _animation_bridge, _avatar_auto_driver
+    with _lock:
+        old_bridge = _animation_bridge
+        old_driver = _avatar_auto_driver
+        _animation_bridge = None
+        _avatar_auto_driver = None
+    if old_driver is not None:
+        old_driver.stop()
+    if old_bridge is not None:
+        old_bridge.stop()
+
+    node, bridge_instance = _construct_animation_components(
+        bus, bridge_host=bridge_host, bridge_port=bridge_port,
+        enable_bridge=enable_bridge,
+    )
+    auto_driver = AvatarAutoStateDriver(bus=bus)
+    auto_driver.start()
+    with _lock:
+        _animation_bridge = bridge_instance
+        _avatar_auto_driver = auto_driver
+    return node
+
+
 def ensure_animation_node(
     *,
     bridge_host: str = "127.0.0.1",
@@ -298,70 +558,35 @@ def ensure_animation_node(
     Adapter registration: registers all L1-L4 vendored adapters
     (image, bitmap, sprite, gif, math) so the brain's
     ``set_avatar_state`` tool can route to any of them.
+
+    0.8 U3b: if a supervisor is registered AND the manifest declares
+    + enables an "animation" node, delegates to it (starting it if
+    not already running) and returns the SAME live object the
+    supervisor manages — so a supervisor-driven restart is reflected
+    here too, not a stale cached node.
     """
     global _animation_node, _animation_thread, _animation_bridge
+    global _avatar_auto_driver
+    sup = _supervisor
+    if sup is not None and sup.has("animation") and sup.enabled("animation"):
+        if not sup.is_running("animation"):
+            sup.start("animation")
+        node = sup.node("animation")
+        if node is not None:
+            with _lock:
+                _animation_node = node
+            return node
+        # fall through to the legacy path if the supervisor couldn't
+        # produce a live node (setup failed).
     bus = get_bus()
     with _lock:
         if _animation_node is not None:
             return _animation_node
 
-        # Start the bridge first so the node's frame_callback can
-        # plug into it.  Bridge runs on a daemon thread; failures
-        # are non-fatal (animation still works, just no renderer
-        # receives frames).
-        bridge_instance: animation_bridge.FrameBridge | None = None
-        if enable_bridge:
-            try:
-                bridge_instance = animation_bridge.FrameBridge(
-                    host=bridge_host, port=bridge_port,
-                )
-                bridge_instance.start()
-            except Exception:  # noqa: BLE001
-                bridge_instance = None
-
-        # Build the registry once so XP grants land on the same
-        # tree the CLI + Swift app read.
-        skill_registry: Any | None = None
-        try:
-            from jaeger_os.skill_tree import (
-                SkillTreeRegistry, seed_default_tree,
-            )
-            from jaeger_os.core.instance.instance import (
-                InstanceLayout, default_instance_name,
-                resolve_instance_dir,
-            )
-            layout = InstanceLayout(
-                root=resolve_instance_dir(default_instance_name()),
-            )
-            skill_registry = SkillTreeRegistry.for_instance(layout)
-            seed_default_tree(skill_registry)
-        except Exception:  # noqa: BLE001
-            skill_registry = None
-
-        frame_callback = (
-            bridge_instance.publish_frame if bridge_instance else None
+        node, bridge_instance = _construct_animation_components(
+            bus, bridge_host=bridge_host, bridge_port=bridge_port,
+            enable_bridge=enable_bridge,
         )
-
-        node = AnimationNode(
-            bus=bus,
-            skill_registry=skill_registry,
-            frame_callback=frame_callback,
-        )
-
-        # Register the L1-L4 adapter set so the brain can route
-        # to any of them by name.
-        try:
-            from jaeger_os.nodes.animation.adapters import (
-                BitmapAdapter, GifAdapter, ImageAdapter,
-                MathAdapter, SpriteAdapter,
-            )
-            node.register_adapter("image", ImageAdapter())
-            node.register_adapter("bitmap", BitmapAdapter())
-            node.register_adapter("sprite", SpriteAdapter())
-            node.register_adapter("gif", GifAdapter())
-            node.register_adapter("math", MathAdapter())
-        except Exception:  # noqa: BLE001
-            pass
 
         thread = threading.Thread(
             target=node.run,
@@ -376,7 +601,6 @@ def ensure_animation_node(
         # done.  Without this the avatar wouldn't react to TTS
         # unless the brain explicitly fired set_avatar_state
         # each turn.
-        global _avatar_auto_driver
         auto_driver = AvatarAutoStateDriver(bus=bus)
         auto_driver.start()
         _avatar_auto_driver = auto_driver
@@ -444,12 +668,18 @@ def shutdown() -> None:
     """Stop the TTS, audio session, animation node; close the bus ONLY
     if this module minted it — a bus injected via :func:`set_bus` is a
     chassis's responsibility to close on its own teardown path.
-    Idempotent."""
+    Idempotent.
+
+    Also clears any registered supervisor (0.8 U3b) — a full runtime
+    reset (the TUI/test pattern) shouldn't leave a stale delegation
+    target behind for the next ``ensure_*`` call in the same process.
+    """
     global _bus, _bus_owned, _tts_node, _tts_thread, _synth
     global _audio_session_node, _audio_session_thread, _audio_session
     global _animation_node, _animation_thread, _animation_bridge
-    global _avatar_auto_driver
+    global _avatar_auto_driver, _supervisor
     with _lock:
+        _supervisor = None
         audio_node = _audio_session_node
         audio_thread = _audio_session_thread
         anim_node = _animation_node

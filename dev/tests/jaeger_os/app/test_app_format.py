@@ -445,6 +445,101 @@ def test_boot_injects_bus_into_node_runtime_singleton(tmp_path):
         node_runtime.shutdown()   # reset singleton for later tests
 
 
+# ── supervisor-backed ensure_* delegation (0.8 U3b) ─────────────────
+#
+# Uses the REAL "animation" node factory (jaeger_os.nodes.animation:
+# make_animation_node) — it's the lightweight one of the three
+# graduated nodes (no LLM/Whisper/mic hardware); enable_bridge=false
+# in config keeps it from binding a real WebSocket port in CI. The
+# unit-level fake-supervisor tests in dev/tests/jaeger_os/nodes/
+# test_runtime.py cover the "no supervisor" / "undeclared" /
+# "disabled" fallback branches; these two exercise the REAL
+# Supervisor + ThreadHandle end to end.
+
+_ANIMATION_APP_MANIFEST = """
+[app]
+name = "conftest-animation-app"
+version = "0.0.1"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "animation"
+tier = 3
+backend = "thread"
+factory = "jaeger_os.nodes.animation:make_animation_node"
+restart = "on_failure"
+config_key = "animation"
+"""
+
+
+def _write_animation_app(tmp_path: pathlib.Path) -> pathlib.Path:
+    (tmp_path / "jaeger.toml").write_text(
+        _ANIMATION_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        "animation:\n  enable_bridge: false\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_supervisor_backed_ensure_animation_node_returns_supervisor_object(
+    tmp_path,
+):
+    """The manifest-declared "animation" node is supervisor-owned —
+    ``ensure_animation_node()`` (still what the agent's avatar tools
+    call) must delegate to the SAME live node the supervisor manages,
+    not spawn a second thread (the pre-U3b reason these nodes stayed
+    disabled — see jaeger.toml's header)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()
+    app = JaegerApp(_write_animation_app(tmp_path)).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        supervised_node = app.supervisor.node("animation")
+        assert supervised_node is not None
+
+        ensured_node = node_runtime.ensure_animation_node()
+        assert ensured_node is supervised_node   # no double-spawn
+        assert node_runtime._animation_node is supervised_node
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+def test_supervisor_backed_ensure_animation_node_reflects_restart(tmp_path):
+    """The new seam this delegation adds: a supervisor-driven restart
+    produces a FRESH AnimationNode object (ThreadHandle.restart()'s
+    "never reuse a torn-down node object" contract) —
+    ``ensure_animation_node()`` must track the NEW object, not a
+    cached-stale one (``get_synth``/``get_audio_session`` depend on
+    the equivalent for tts/audio_session)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()
+    app = JaegerApp(_write_animation_app(tmp_path)).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        node1 = node_runtime.ensure_animation_node()
+
+        app.supervisor.restart("animation")
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+
+        node2 = node_runtime.ensure_animation_node()
+        assert node2 is not node1
+        assert node2 is app.supervisor.node("animation")
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
 def test_second_instance_refused(tmp_path):
     root = _write_app(tmp_path)
     app1 = JaegerApp(root).boot()
