@@ -12,9 +12,12 @@ This file pins:
   * a tool whose plugin is missing libs / creds becomes unavailable
   * MCP-prefixed dynamic tools route through the ``mcp`` plugin gate
   * ``text_to_speech``/``speak``/``warm_kokoro`` (kokoro_tts — a
-    module since 0.8 M1, not a plugin) are gated on module
-    discovery instead, and the plugin path stays exercised via a
-    real remaining plugin-backed tool (``listen`` / ``whisper_stt``)
+    module since 0.8 M1) and ``listen`` (whisper_stt — a module
+    since 0.8 M2b) are gated on module discovery instead; the
+    generic plugin-mechanism tests below monkeypatch a synthetic
+    entry into ``_TOOL_TO_PLUGIN`` since ``send_message`` (the only
+    tool left there) is gated on the aggregate ``messaging`` name,
+    not a single plugin's status.
 """
 
 from __future__ import annotations
@@ -50,13 +53,13 @@ def _td(name: str) -> ToolDef:
 
 
 def test_wiring_attaches_check_fn_to_declared_tools():
-    """Every name in ``_TOOL_TO_PLUGIN`` should pick up a check_fn
-    after the wiring pass. Other tools are untouched (default = always
-    available)."""
+    """Every name in ``_TOOL_TO_PLUGIN`` OR ``_TOOL_TO_MODULE`` should
+    pick up a check_fn after the wiring pass. Other tools are
+    untouched (default = always available)."""
     tools = {
-        "text_to_speech":   _td("text_to_speech"),
-        "listen":           _td("listen"),
-        "send_message":     _td("send_message"),
+        "text_to_speech":   _td("text_to_speech"),  # module (kokoro_tts)
+        "listen":           _td("listen"),          # module (whisper_stt)
+        "send_message":     _td("send_message"),    # plugin (messaging)
         "unrelated_tool":   _td("unrelated_tool"),
     }
     wired = wire_availability_checks(_StubAgent(tools))
@@ -96,34 +99,38 @@ def test_unavailable_plugin_makes_tool_unavailable(monkeypatch):
     """When ``list_plugins`` says the backing plugin needs setup,
     the wired tool's ``is_available()`` returns False.
 
-    Uses ``listen``/``whisper_stt`` (a real remaining plugin) —
-    ``text_to_speech`` moved to module-gating in 0.8 M1 (see the
-    module-discovery tests below) so it no longer exercises this
-    path against the real repo."""
-    tools = {"listen": _td("listen")}
+    Neither remaining real plugin-backed tool (``send_message`` is
+    gated on the aggregate ``messaging`` name, not a single plugin)
+    exercises a plain single-plugin gate anymore — both ``listen``
+    (0.8 M2b) and ``text_to_speech`` (0.8 M1) moved to module-gating.
+    A synthetic ``_TOOL_TO_PLUGIN`` entry keeps this generic mechanism
+    covered."""
+    monkeypatch.setitem(_TOOL_TO_PLUGIN, "probe_tool", "probe_plugin")
+    tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
-    # Patch the plugin lister to report whisper_stt as not ready.
+    # Patch the plugin lister to report probe_plugin as not ready.
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
-            {"name": "whisper_stt", "status": "needs_install"},
+            {"name": "probe_plugin", "status": "needs_install"},
         ]}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
-    assert tools["listen"].is_available() is False
+    assert tools["probe_tool"].is_available() is False
 
 
 def test_ready_plugin_keeps_tool_available(monkeypatch):
-    tools = {"listen": _td("listen")}
+    monkeypatch.setitem(_TOOL_TO_PLUGIN, "probe_tool", "probe_plugin")
+    tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
-            {"name": "whisper_stt", "status": "ready"},
+            {"name": "probe_plugin", "status": "ready"},
         ]}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
-    assert tools["listen"].is_available() is True
+    assert tools["probe_tool"].is_available() is True
 
 
 def test_messaging_aggregates_across_bridges(monkeypatch):
@@ -158,14 +165,15 @@ def test_unknown_plugin_fails_open(monkeypatch):
     output (e.g. someone added a tool mapping but the plugin
     isn't bundled yet) defaults to AVAILABLE — don't punish
     forward compatibility."""
-    tools = {"listen": _td("listen")}
+    monkeypatch.setitem(_TOOL_TO_PLUGIN, "probe_tool", "probe_plugin")
+    tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
     from jaeger_os.agent.tools import plugins as _plugins_mod
 
     def _fake_list_empty():
         return {"plugins": []}
     monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list_empty)
-    assert tools["listen"].is_available() is True
+    assert tools["probe_tool"].is_available() is True
 
 
 # ── module discovery gates kokoro_tts tools (0.8 M1) ──────────────
@@ -264,3 +272,79 @@ def test_speak_and_warm_kokoro_unavailable_when_module_missing(monkeypatch):
     wire_availability_checks(_StubAgent(tools))
     assert tools["speak"].is_available() is False
     assert tools["warm_kokoro"].is_available() is False
+
+
+# ── module discovery gates whisper_stt tools (0.8 M2b) ────────────
+
+
+def test_listen_available_when_module_discovered():
+    """``listen`` is declared in the real whisper_stt module.yaml's
+    ``tools:`` list — with that module present on disk (as it is in
+    this repo), the tool must be available regardless of the (now
+    nonexistent) whisper_stt *plugin*."""
+    tools = {"listen": _td("listen")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["listen"].is_available() is True
+
+
+def test_listen_unavailable_when_module_missing(monkeypatch):
+    """If module discovery finds no ``whisper_stt`` module at all,
+    ``listen`` must be unavailable WITHOUT any help from the plugin
+    mechanism — same regression class 0.8 M1 closed for kokoro_tts.
+    ``list_plugins`` is untouched (and genuinely has no ``whisper_stt``
+    entry in this repo, since it's not a plugin anymore) to prove the
+    module-owned path never falls through to the plugin's
+    unknown-plugin fail-open default."""
+    from jaeger_os.agent import availability as _avail_mod
+
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
+    tools = {"listen": _td("listen")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["listen"].is_available() is False
+
+
+def test_listen_available_when_module_present_and_libs_importable(
+    monkeypatch,
+):
+    """A discovered module claiming ``listen`` with every declared
+    ``requires_libraries`` entry importable is available."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="whisper_stt", slot="stt", factory="pkg.mod:make",
+        tools=["listen"],
+        requires_libraries=["pywhispercpp", "webrtcvad", "sounddevice", "numpy"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+    monkeypatch.setattr(_avail_mod, "_library_importable", lambda name: True)
+    tools = {"listen": _td("listen")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["listen"].is_available() is True
+
+
+def test_listen_unavailable_when_required_library_missing(monkeypatch):
+    """The module is discovered and claims ``listen``, but a library
+    it declares in ``requires_libraries`` doesn't import (``find_spec``
+    returns ``None``) — fails closed rather than reporting available
+    on mere module presence."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="whisper_stt", slot="stt", factory="pkg.mod:make",
+        tools=["listen"], requires_libraries=["pywhispercpp", "webrtcvad"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+
+    def _fake_find_spec(name):
+        return None if name == "webrtcvad" else object()
+
+    monkeypatch.setattr(
+        _avail_mod.importlib.util, "find_spec", _fake_find_spec,
+    )
+    _avail_mod._library_importable.cache_clear()
+    tools = {"listen": _td("listen")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["listen"].is_available() is False
+    _avail_mod._library_importable.cache_clear()

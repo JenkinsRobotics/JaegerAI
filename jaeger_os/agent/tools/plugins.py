@@ -277,18 +277,18 @@ def setup_plugin(name: str) -> dict[str, Any]:
 @register_tool_from_function(name="list_plugins", side_effect="read")
 def _t_list_plugins() -> dict:
     """Enumerate the bundled jaeger_os plugins (discord, telegram,
-    imessage, whisper_stt, mcp) with install + credential status for
+    imessage, mcp) with install + credential status for
     each. Use this when the user asks what integrations are available,
     or before suggesting a feature you'd need a plugin for. (kokoro_tts
-    graduated from a plugin to a core engine-module at 0.8 M1 — it's
-    always present, not listed here.)"""
+    and whisper_stt graduated from plugins to core engine-modules at
+    0.8 M1 / M2b — they're always present, not listed here.)"""
     return list_plugins()
 
 
 @register_tool_from_function(name="setup_plugin")
 def _t_setup_plugin(name: str) -> dict:
     """Return step-by-step setup instructions for the named plugin
-    (e.g. ``discord``, ``telegram``, ``whisper_stt``). Surfaces
+    (e.g. ``discord``, ``telegram``, ``mcp``). Surfaces
     missing libraries to ``pip install`` and required env vars or
     credentials that need values. Does NOT modify the user's
     environment — the user runs the install commands and stores

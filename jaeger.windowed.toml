@@ -82,7 +82,9 @@ enabled = true
 id = "audio_session"
 tier = 3
 backend = "thread"
-factory = "jaeger_os.nodes.audio_session:make_audio_session_node"
+slot = "stt"                 # 0.8 M2b: resolved via discover_modules()
+                              # (whisper_stt/module.yaml) instead of a
+                              # hardcoded factory string.
 restart = "on_failure"
 config_key = "audio_session"
 enabled = false   # real mic + Whisper load at setup() — see note above

@@ -1,6 +1,6 @@
 """Plugin/module readiness → tool availability wiring.
 
-Each plugin-backed tool (``listen``, ``send_message``, ``browser``,
+Each plugin-backed tool (``send_message``, ``browser``,
 ``vision_analyze``, ``image_generate``) declares which plugin it
 depends on via the :data:`_TOOL_TO_PLUGIN` map below. At boot time,
 after every tool has been registered, :func:`wire_availability_checks`
@@ -18,7 +18,9 @@ engine-module (``jaeger_os/nodes/kokoro_tts/``, declared via
 ``module.yaml``) — it no longer shows up in ``list_plugins()``, so
 its tools (``text_to_speech``, plus the internal helpers ``speak``
 and ``warm_kokoro``) are gated on module *readiness* instead, via
-:data:`_TOOL_TO_MODULE` and :func:`_module_ready`.
+:data:`_TOOL_TO_MODULE` and :func:`_module_ready`. 0.8 M2b ports
+``whisper_stt`` the same way — ``listen`` moved from
+:data:`_TOOL_TO_PLUGIN` to :data:`_TOOL_TO_MODULE`.
 
 A module-owned tool is judged ready iff:
 
@@ -61,11 +63,10 @@ from typing import Any
 
 # Tool name → plugin name. Both sides are the agent-facing names —
 # the same strings the model would see in the tool registry and
-# ``list_plugins()`` output. Module-owned tools (kokoro_tts) are
-# NOT listed here — see :data:`_TOOL_TO_MODULE` instead; a tool
-# should be gated by exactly one mechanism.
+# ``list_plugins()`` output. Module-owned tools (kokoro_tts,
+# whisper_stt) are NOT listed here — see :data:`_TOOL_TO_MODULE`
+# instead; a tool should be gated by exactly one mechanism.
 _TOOL_TO_PLUGIN: dict[str, str] = {
-    "listen":         "whisper_stt",
     # Messaging — discord / telegram / imessage. ``send_message``
     # is generic; it's gated on ANY messaging plugin being ready
     # (separate from per-bridge availability which the tool checks
@@ -86,17 +87,18 @@ _PLUGIN_READY_OVERRIDES: dict[str, list[str]] = {}
 
 
 # Tool name → owning module name. Covers both the agent-facing tool
-# a module declares in its own ``tools:`` list (``text_to_speech``)
-# and internal helpers around it that aren't agent-facing names in
-# module.yaml (``speak``, ``warm_kokoro`` — voice-loop internals,
-# not something the model calls directly). This mapping is what lets
-# :func:`_module_ready` answer "unavailable" for a tool whose module
-# has been removed entirely, instead of falling back to the plugin
-# mechanism's fail-open default.
+# a module declares in its own ``tools:`` list (``text_to_speech``,
+# ``listen``) and internal helpers around it that aren't agent-facing
+# names in module.yaml (``speak``, ``warm_kokoro`` — voice-loop
+# internals, not something the model calls directly). This mapping is
+# what lets :func:`_module_ready` answer "unavailable" for a tool
+# whose module has been removed entirely, instead of falling back to
+# the plugin mechanism's fail-open default.
 _TOOL_TO_MODULE: dict[str, str] = {
     "text_to_speech": "kokoro_tts",
     "speak":          "kokoro_tts",     # legacy alias
     "warm_kokoro":    "kokoro_tts",
+    "listen":         "whisper_stt",    # 0.8 M2b: plugin -> module
 }
 
 
