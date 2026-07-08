@@ -180,7 +180,7 @@ class AudioSession:
         wake_phrases = config.wake_phrases or _default_wake_phrases()
         # The STT method registry is the single swap point — flip variants
         # by name via config.stt_mode (unknown name -> two_pass).
-        from jaeger_os.plugins.whisper_stt.registry import get
+        from jaeger_os.nodes.whisper_stt.engine.registry import get
 
         return get(config.stt_mode).make(
             config, aec, reference_buffer, wake_phrases)
@@ -328,6 +328,6 @@ class AudioSession:
 
 
 def _default_wake_phrases() -> tuple[str, ...]:
-    from jaeger_os.plugins.whisper_stt._base import DEFAULT_WAKE_PHRASES
+    from jaeger_os.nodes.whisper_stt.engine._base import DEFAULT_WAKE_PHRASES
 
     return DEFAULT_WAKE_PHRASES

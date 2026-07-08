@@ -40,7 +40,6 @@ from typing import Any, Callable, Optional
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
 from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
 from jaeger_os.nodes.animation import bridge as animation_bridge
-from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
 try:
     from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
@@ -55,6 +54,16 @@ except ImportError:
     # module installed — the same failure mode as before, just later.
     Synthesizer = None  # type: ignore[assignment,misc]
     TTSNode = None  # type: ignore[assignment,misc]
+try:
+    from jaeger_os.nodes.whisper_stt import AudioSessionNode
+except ImportError:
+    # 0.8 M2b: same tolerance as the kokoro_tts guard above — every
+    # use of AudioSessionNode below is either a type annotation
+    # (stringified, never evaluated) or reached only through
+    # ``_default_audio_session_node_factory``'s own construction call,
+    # which the availability gate (``listen`` -> whisper_stt module
+    # discovery) already keeps unreachable when the module is gone.
+    AudioSessionNode = None  # type: ignore[assignment,misc]
 from jaeger_os.transport import Bus, InProcBus
 
 
