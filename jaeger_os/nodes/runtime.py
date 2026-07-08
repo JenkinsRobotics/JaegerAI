@@ -38,9 +38,24 @@ import time
 from typing import Any, Callable, Optional
 
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
-from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
-from jaeger_os.nodes.animation import bridge as animation_bridge
 from jaeger_os.nodes.base import NodeState
+try:
+    from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
+    from jaeger_os.nodes.animation import bridge as animation_bridge
+except ImportError:
+    # 0.8 M2c: same tolerance as the kokoro_tts/whisper_stt guards below
+    # — every use of AnimationNode/AvatarAutoStateDriver/animation_bridge
+    # is either a type annotation (stringified by the ``from __future__
+    # import annotations`` above, so never evaluated) or reached only
+    # through ``_construct_animation_components``/``_build_animation_node``,
+    # which the availability gate (set_avatar_state/play_timeline/
+    # warm_avatar -> animation module discovery) already keeps
+    # unreachable when the module (or a library it requires, e.g.
+    # websockets) is gone. None/inert here is the same failure mode as
+    # before, just later.
+    AnimationNode = None  # type: ignore[assignment,misc]
+    AvatarAutoStateDriver = None  # type: ignore[assignment,misc]
+    animation_bridge = None  # type: ignore[assignment]
 try:
     from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
 except ImportError:

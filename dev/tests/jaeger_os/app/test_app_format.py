@@ -503,9 +503,9 @@ backend = "inproc"
 id = "animation"
 tier = 3
 backend = "thread"
-factory = "jaeger_os.nodes.animation:make_animation_node"
+slot = "animation"
 restart = "on_failure"
-config_key = "animation"
+config_key = "avatar"
 """
 
 
@@ -513,7 +513,7 @@ def _write_animation_app(tmp_path: pathlib.Path) -> pathlib.Path:
     (tmp_path / "jaeger.toml").write_text(
         _ANIMATION_APP_MANIFEST, encoding="utf-8")
     (tmp_path / "config.yaml").write_text(
-        "animation:\n  enable_bridge: false\n", encoding="utf-8")
+        "avatar:\n  enable_bridge: false\n", encoding="utf-8")
     return tmp_path
 
 
@@ -566,6 +566,60 @@ def test_supervisor_backed_ensure_animation_node_reflects_restart(tmp_path):
         node2 = node_runtime.ensure_animation_node()
         assert node2 is not node1
         assert node2 is app.supervisor.node("animation")
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+def test_animation_config_key_avatar_routes_bridge_port_to_the_factory(
+    tmp_path, monkeypatch,
+):
+    """0.8 M2c: the manifests' animation node used to declare
+    ``config_key = "animation"`` — a key matching no field on
+    ``Config`` (``AvatarConfig`` lives at ``Config.avatar``), so a real
+    instance config.yaml's ``avatar:`` section (bridge_host/bridge_port)
+    could never reach ``make_animation_node`` through this chassis path.
+    Fixed to ``config_key = "avatar"``. This proves the full chain —
+    manifest -> ``_make_handle`` -> ``slice_for`` -> the factory ``fn``
+    ``ThreadHandle`` invokes -> ``_build_animation_node`` — actually
+    honors a custom ``bridge_port`` from the node's config slice, without
+    binding a real socket (``FrameBridge`` itself is faked so
+    ``enable_bridge: true`` is safe here)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    captured: dict[str, Any] = {}
+
+    class _FakeBridge:
+        def __init__(self, *, host: str = "127.0.0.1", port: int = 8765,
+                     path: str = "/frames") -> None:
+            captured["host"] = host
+            captured["port"] = port
+
+        def start(self, *, ready_timeout_s: float = 5.0) -> None:
+            pass
+
+        def stop(self, *, timeout_s: float = 5.0) -> None:
+            pass
+
+        def publish_frame(self, frame: Any) -> None:
+            pass
+
+    monkeypatch.setattr(node_runtime.animation_bridge, "FrameBridge", _FakeBridge)
+
+    (tmp_path / "jaeger.toml").write_text(
+        _ANIMATION_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        "avatar:\n  bridge_host: 0.0.0.0\n  bridge_port: 9911\n"
+        "  enable_bridge: true\n",
+        encoding="utf-8",
+    )
+
+    node_runtime.shutdown()
+    app = JaegerApp(tmp_path).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        assert captured == {"host": "0.0.0.0", "port": 9911}
     finally:
         app.shutdown()
         node_runtime.shutdown()
