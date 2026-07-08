@@ -48,13 +48,14 @@ def test_every_bundled_plugin_manifest_validates():
 def test_audit_returns_one_row_per_plugin():
     rows = audit_plugin_dir(_BUNDLED_PLUGINS_ROOT)
     # Pinned so an accidental commit that drops one or adds an
-    # unannounced one is noticed. kokoro_tts graduated from a plugin
-    # to a core engine-module at 0.8 M1 (jaeger_os/nodes/kokoro_tts/)
-    # and is intentionally no longer in this set.
+    # unannounced one is noticed. kokoro_tts (0.8 M1) and whisper_stt
+    # (0.8 M2b) both graduated from a plugin to a core engine-module
+    # (jaeger_os/nodes/kokoro_tts/, jaeger_os/nodes/whisper_stt/) and
+    # are intentionally no longer in this set.
     names = {r["name"] for r in rows}
-    assert {"discord", "telegram", "imessage", "mcp",
-            "whisper_stt"} <= names
+    assert {"discord", "telegram", "imessage", "mcp"} <= names
     assert "kokoro_tts" not in names
+    assert "whisper_stt" not in names
 
 
 # ── schema behaviour ──────────────────────────────────────────────

@@ -15,7 +15,7 @@ Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 The in-process TUI loads the plugin stack directly:
 
    - persistent Kokoro player + avaudio_io bridge       (kokoro_tts/)
-   - Whisper STT hardening (two-pass + fast/accurate)   (whisper_stt/)
+   - Whisper STT hardening (two-pass + fast/accurate)   (nodes/whisper_stt/engine/)
    - persona prefill framework                          (instance bundle)
    - skill system v3 (multi-axis manifest)              (agent/skill_registry/)
    - Gemma 4 + updated registry                         (core/models/)
@@ -238,7 +238,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_os.plugins.whisper_stt.two_pass`` loads at TUI boot."""
+    ``jaeger_os.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401
