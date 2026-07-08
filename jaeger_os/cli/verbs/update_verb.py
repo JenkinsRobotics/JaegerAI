@@ -230,31 +230,47 @@ def _update_download(home: Path, *, ref: str | None = None,
     return 0
 
 
-def _rebuild_swift_app(home: Path) -> None:
-    """Rebuild JaegerOS.app after a product swap (0.7.3). The .app bundle
+def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
+    """(Re)build the station's Swift app after an update. The .app bundle
     is a BUILD ARTIFACT, not a product file — the release tarball can't
     carry it, so without a rebuild the app silently lags the core it
-    talks to. Best-effort: no prior build (user never had the app) or no
-    swift toolchain (Linux/headless) → skip; only the stale-app case
-    warns."""
-    built = home / "jaeger_os" / "interfaces" / "swift" / ".build" / "JaegerOS.app"
-    script = home / "jaeger_os" / "interfaces" / "swift" / "Scripts" / "build-app.sh"
-    if not built.exists() or not script.exists():
+    talks to. A MISSING bundle is built too (a failed install-time build
+    must not exempt the station from ever getting the app); only a missing
+    Swift toolchain (Linux/headless) skips, loudly. ``only_if_stale``
+    consults the bundle's build-commit stamp (git installs) and skips the
+    rebuild when the Swift tree hasn't changed since the app was built.
+
+    Flavor follows the install: a dev checkout (``dev/`` present) uses the
+    dev shell (JaegerOS-dev.app, ``--dev``); a clean product install uses
+    JaegerOS.app (``--release``) — mirrors install.sh."""
+    swift_dir = home / "jaeger_os" / "interfaces" / "swift"
+    script = swift_dir / "Scripts" / "build-app.sh"
+    if not script.exists():
         return
+    if (home / "dev").exists():
+        app_name, flag = "JaegerOS-dev.app", "--dev"
+    else:
+        app_name, flag = "JaegerOS.app", "--release"
+    built = swift_dir / ".build" / app_name
+    if only_if_stale:
+        from jaeger_os.cli._common import swift_app_is_stale
+        if not swift_app_is_stale(home, built):
+            return
     if shutil.which("swift") is None:
-        print("[jaeger update] ⚠ swift toolchain missing — JaegerOS.app NOT "
-              "rebuilt and now lags the core; rebuild when available:",
+        print(f"[jaeger update] ⚠ swift toolchain missing — {app_name} NOT "
+              "(re)built and now lags the core; build when available:",
               file=sys.stderr)
-        print(f"                 bash {script} --release", file=sys.stderr)
+        print(f"                 bash {script} {flag}", file=sys.stderr)
         return
-    print("[jaeger update] rebuilding JaegerOS.app…")
-    rc = subprocess.run(["bash", str(script), "--release"],
+    verb = "rebuilding" if built.exists() else "building"
+    print(f"[jaeger update] {verb} {app_name}…")
+    rc = subprocess.run(["bash", str(script), flag],
                         stdout=subprocess.DEVNULL).returncode
     if rc == 0:
-        print("[jaeger update] ✓ JaegerOS.app rebuilt")
+        print(f"[jaeger update] ✓ {app_name} ready")
     else:
-        print(f"[jaeger update] ⚠ app rebuild exited {rc} — rerun: "
-              f"bash {script} --release", file=sys.stderr)
+        print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
+              f"bash {script} {flag}", file=sys.stderr)
 
 
 def _do_rollback(home: Path) -> int:
@@ -297,7 +313,12 @@ def _update_editable(*, ref: str | None = None) -> int:
         print("[jaeger update] git pull --ff-only failed (diverged?) — resolve manually.",
               file=sys.stderr)
         return pull.returncode
-    return _reinstall_deps(repo)
+    rc = _reinstall_deps(repo)
+    # The .app is a build artifact the pull can't deliver — rebuild whenever
+    # the Swift tree moved past the built bundle's stamp (also catches pulls
+    # done by hand and installs whose first build failed → missing app).
+    _rebuild_swift_app(repo, only_if_stale=True)
+    return rc
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:

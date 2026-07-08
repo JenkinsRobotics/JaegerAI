@@ -184,6 +184,12 @@ if [[ -d "$SPM_BUNDLE_SRC" ]]; then
 EOF
 fi
 
+# Stamp the bundle with the commit it was built from — update/launch paths
+# compare this against the Swift tree to decide staleness (rebuilds keyed to
+# "what did this pull change" miss manual pulls and failed builds). Must be
+# written BEFORE codesign: adding a file afterwards invalidates the signature.
+git -C "$REPO_ROOT" rev-parse HEAD > "$APP_BUNDLE/Contents/Resources/build-commit" 2>/dev/null || true
+
 # Ad-hoc code-sign with the new entitlements (required on Apple
 # Silicon for TCC prompts to actually fire — an unsigned app's
 # Info.plist privacy strings get ignored).  Sign inner bundles

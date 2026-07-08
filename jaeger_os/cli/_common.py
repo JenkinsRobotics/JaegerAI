@@ -108,3 +108,38 @@ def bar(value: float, *, width: int = 16, ch_full: str = "█",
 def kv(label: str, value: str, *, label_width: int = 20) -> str:
     """Render a key:value line for status outputs."""
     return f"  {label.ljust(label_width)} {value}"
+
+
+def swift_app_is_stale(repo: Path, bundle: Path) -> bool:
+    """True when the built Swift app predates the current Swift sources.
+
+    The bundle carries a ``Contents/Resources/build-commit`` stamp written by
+    build-app.sh. The app is stale when the Swift tree
+    (``jaeger_os/interfaces/swift/``) differs between that commit and HEAD —
+    which catches manual ``git pull``s that no update command saw. Missing
+    executable or missing stamp (pre-stamp build) → stale. No ``.git``
+    (clean/tarball install) → False; the tarball updater rebuilds explicitly
+    after every product swap instead.
+    """
+    import subprocess
+
+    exe = bundle / "Contents" / "MacOS" / "JaegerOS"
+    if not exe.exists():
+        return True
+    if not (repo / ".git").exists():
+        return False
+    stamp = bundle / "Contents" / "Resources" / "build-commit"
+    try:
+        have = stamp.read_text().strip()
+    except OSError:
+        have = ""
+    if not have:
+        return True
+    diff = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--quiet", have, "HEAD",
+         "--", "jaeger_os/interfaces/swift"],
+        capture_output=True,
+    )
+    # 0 = tree unchanged since the build; anything else (1 = differs,
+    # >1 = unknown commit after a history rewrite) → rebuild.
+    return diff.returncode != 0
