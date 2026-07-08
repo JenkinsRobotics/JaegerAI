@@ -4,7 +4,9 @@ version: 1.0.0
 tools: [send_message]
 factory: jaeger_os.plugins.imessage.bridge:IMessageBridge
 # 0.8 M3b: graduated from plugin.yaml (deleted) — see discord/module.yaml
-# for the full multi-module-slot rationale. `factory` is metadata only;
+# for the full multi-module-slot rationale. `factory` names the real bridge class but no manifest should bind
+# this slot (bridges are not factory(bus, config) nodes — a [[node]]
+# slot="messaging" would misconstruct them);
 # no [[node]] entry binds this slot (bridges are agent-side threads,
 # not chassis nodes).
 #
