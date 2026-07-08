@@ -42,7 +42,19 @@ from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
 from jaeger_os.nodes.animation import bridge as animation_bridge
 from jaeger_os.nodes.audio_session import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
-from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
+try:
+    from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
+except ImportError:
+    # 0.8 M2a: tolerate the kokoro_tts engine-module being removed —
+    # every use below is either a type annotation (stringified by the
+    # ``from __future__ import annotations`` above, so never evaluated)
+    # or reached only through ``_default_synth_factory``'s OWN lazy
+    # import (line ~72, unchanged), which is gated by the availability
+    # check before the agent ever calls into TTS. So None here is
+    # inert unless something actually tries to synthesize with no
+    # module installed — the same failure mode as before, just later.
+    Synthesizer = None  # type: ignore[assignment,misc]
+    TTSNode = None  # type: ignore[assignment,misc]
 from jaeger_os.transport import Bus, InProcBus
 
 
