@@ -15,12 +15,17 @@ This file pins:
     module since 0.8 M1) and ``listen`` (whisper_stt — a module
     since 0.8 M2b) are gated on module discovery instead; the
     generic plugin-mechanism tests below monkeypatch a synthetic
-    entry into ``_TOOL_TO_PLUGIN`` since ``send_message`` (the only
-    tool left there) is gated on the aggregate ``messaging`` name,
-    not a single plugin's status.
+    entry into ``_TOOL_TO_PLUGIN`` since neither of those tools uses
+    it anymore
+  * ``send_message`` (0.8 M3b) is gated on the ``messaging`` SLOT —
+    ANY-OF across every discovered module declaring
+    ``slot: messaging`` (discord/telegram/imessage), fail-closed when
+    none are ready or the slot is empty entirely
 """
 
 from __future__ import annotations
+
+import sys
 
 from pydantic import BaseModel
 
@@ -59,7 +64,7 @@ def test_wiring_attaches_check_fn_to_declared_tools():
     tools = {
         "text_to_speech":   _td("text_to_speech"),  # module (kokoro_tts)
         "listen":           _td("listen"),          # module (whisper_stt)
-        "send_message":     _td("send_message"),    # plugin (messaging)
+        "send_message":     _td("send_message"),    # slot (messaging)
         "unrelated_tool":   _td("unrelated_tool"),
     }
     wired = wire_availability_checks(_StubAgent(tools))
@@ -133,31 +138,40 @@ def test_ready_plugin_keeps_tool_available(monkeypatch):
     assert tools["probe_tool"].is_available() is True
 
 
-def test_messaging_aggregates_across_bridges(monkeypatch):
-    """``send_message`` is gated on the synthetic ``messaging``
-    plugin name — True iff ANY of discord/telegram/imessage is
-    ready, so the tool stays usable when at least one bridge is
-    configured."""
+def test_messaging_any_of_across_modules(monkeypatch):
+    """``send_message`` is gated on the ``messaging`` SLOT (0.8 M3b) —
+    True iff ANY discovered module declaring ``slot: messaging`` has
+    its requires met, so the tool stays usable when at least one
+    bridge's library is importable, and fails closed when none are."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    discord = ModuleSpec(
+        module="discord", slot="messaging", factory="pkg.mod:make",
+        tools=["send_message"], requires_libraries=["discord"],
+    )
+    telegram = ModuleSpec(
+        module="telegram", slot="messaging", factory="pkg.mod:make",
+        tools=["send_message"], requires_libraries=["telegram"],
+    )
+    imessage = ModuleSpec(
+        module="imessage", slot="messaging", factory="pkg.mod:make",
+        tools=["send_message"], requires_platform=["darwin"],
+    )
+    monkeypatch.setattr(
+        _avail_mod, "_discovered_modules",
+        lambda: [discord, telegram, imessage],
+    )
+    monkeypatch.setattr(_avail_mod, "_library_importable", lambda name: False)
+    monkeypatch.setattr(sys, "platform", "linux")
     tools = {"send_message": _td("send_message")}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_os.agent.tools import plugins as _plugins_mod
+    assert tools["send_message"].is_available() is False  # none ready
 
-    def _fake_list_no_bridge():
-        return {"plugins": [
-            {"name": "discord", "status": "needs_credentials"},
-            {"name": "telegram", "status": "needs_install"},
-            {"name": "imessage", "status": "needs_install"},
-        ]}
-    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list_no_bridge)
-    assert tools["send_message"].is_available() is False
-
-    def _fake_list_one_ready():
-        return {"plugins": [
-            {"name": "discord", "status": "ready"},
-            {"name": "telegram", "status": "needs_install"},
-        ]}
-    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list_one_ready)
-    assert tools["send_message"].is_available() is True
+    monkeypatch.setattr(
+        _avail_mod, "_library_importable", lambda name: name == "discord",
+    )
+    assert tools["send_message"].is_available() is True  # discord now ready
 
 
 def test_unknown_plugin_fails_open(monkeypatch):
@@ -547,3 +561,72 @@ def test_avatar_tools_unavailable_when_required_library_missing(monkeypatch):
     wire_availability_checks(_StubAgent(tools))
     assert tools["play_timeline"].is_available() is False
     _avail_mod._library_importable.cache_clear()
+
+
+# ── module discovery gates send_message via the messaging SLOT ────
+# (0.8 M3b — discord/telegram/imessage graduated from plugin.yaml to
+# module.yaml as the first multi-module slot; the tests above already
+# cover the ANY-OF-across-real-modules shape via
+# ``test_messaging_any_of_across_modules``. These pin the fail-closed
+# empty-slot case and imessage's platform gate specifically.)
+
+
+def test_send_message_unavailable_when_messaging_slot_empty(monkeypatch):
+    """No modules discovered AT ALL (not even unready ones) — the
+    ``messaging`` slot is empty, so ``send_message`` must fail
+    closed, mirroring a vanished module for a single-module tool."""
+    from jaeger_os.agent import availability as _avail_mod
+
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
+    tools = {"send_message": _td("send_message")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["send_message"].is_available() is False
+
+
+def test_imessage_module_unready_on_non_darwin_platform(monkeypatch):
+    """imessage declares ``requires_platform: [darwin]`` and no
+    ``requires_libraries`` at all (trivially lib-satisfied) — on a
+    non-darwin host it must NOT count toward the messaging ANY-OF."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    imessage = ModuleSpec(
+        module="imessage", slot="messaging", factory="pkg.mod:make",
+        tools=["send_message"], requires_platform=["darwin"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [imessage])
+    monkeypatch.setattr(sys, "platform", "linux")
+    tools = {"send_message": _td("send_message")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["send_message"].is_available() is False
+
+
+def test_imessage_module_ready_on_darwin_platform(monkeypatch):
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    imessage = ModuleSpec(
+        module="imessage", slot="messaging", factory="pkg.mod:make",
+        tools=["send_message"], requires_platform=["darwin"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [imessage])
+    monkeypatch.setattr(sys, "platform", "darwin")
+    tools = {"send_message": _td("send_message")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["send_message"].is_available() is True
+
+
+def test_send_message_real_discovery_finds_three_messaging_modules():
+    """No monkeypatching: the REAL ``discover_modules()`` walking the
+    REAL ``jaeger_os/plugins/`` tree finds all 3 graduated messaging
+    modules under the ``messaging`` slot (sanity check that the
+    multi-root discovery wiring in ``core/modules.py`` actually
+    reaches the wired availability gate, not just the test doubles
+    above)."""
+    from jaeger_os.agent import availability as _avail_mod
+
+    names = {
+        spec.module for spec in _avail_mod._discovered_modules()
+        if spec.slot == "messaging"
+    }
+    assert names == {"discord", "telegram", "imessage"}

@@ -1,11 +1,11 @@
 """Plugin/module readiness → tool availability wiring.
 
-Each plugin-backed tool (``send_message``, ``browser``,
-``vision_analyze``, ``image_generate``) declares which plugin it
-depends on via the :data:`_TOOL_TO_PLUGIN` map below. At boot time,
-after every tool has been registered, :func:`wire_availability_checks`
-walks the registry and patches each declared tool's ``check_fn`` to
-query that plugin's readiness.
+Each plugin-backed tool (``browser``, ``vision_analyze``,
+``image_generate``) declares which plugin it depends on via the
+:data:`_TOOL_TO_PLUGIN` map below. At boot time, after every tool has
+been registered, :func:`wire_availability_checks` walks the registry
+and patches each declared tool's ``check_fn`` to query that plugin's
+readiness.
 
 The effect: when the model asks for its available tools, the
 adapter filters through ``ToolDef.is_available()`` and hides
@@ -38,7 +38,20 @@ losing the ``kokoro_tts`` *plugin* entry made ``_plugin_ready``
 treat it as an "unknown plugin" (fail-open by design, for forward
 compatibility) rather than "engine not there" (should fail closed).
 Only tools with NO module entry in :data:`_TOOL_TO_MODULE` fall
-through to :func:`_plugin_ready`.
+through to :func:`_slot_ready_for_tool`, then :func:`_plugin_ready`.
+
+0.8 M3b graduates ``discord``/``telegram``/``imessage`` from plugins
+(plugin.yaml, deleted) to the FIRST multi-module slot: each declares
+``slot: messaging`` in its own ``module.yaml`` under
+``jaeger_os/plugins/<name>/`` (``discover_modules()`` now walks BOTH
+``jaeger_os/nodes/`` and ``jaeger_os/plugins/``, see
+``jaeger_os/core/modules.py``). ``send_message`` is generic across
+all three channels, so it can't be owned by a single module — instead
+:data:`_TOOL_TO_SLOT` maps it to the ``messaging`` slot and
+:func:`_slot_ready` is ANY-OF: available iff at least one discovered
+module in that slot has its requires (libraries + platform) met.
+Same FINAL semantics as module ownership — an empty/unready slot
+fails closed rather than falling back to the plugin mechanism.
 
 Both the module-discovery walk and the per-library import probe are
 cached with :func:`functools.lru_cache` — module.yaml files and the
@@ -65,13 +78,10 @@ from typing import Any
 # the same strings the model would see in the tool registry and
 # ``list_plugins()`` output. Module-owned tools (kokoro_tts,
 # whisper_stt) are NOT listed here — see :data:`_TOOL_TO_MODULE`
-# instead; a tool should be gated by exactly one mechanism.
+# instead; slot-owned tools (send_message, 0.8 M3b) are NOT listed
+# here either — see :data:`_TOOL_TO_SLOT`; a tool should be gated by
+# exactly one mechanism.
 _TOOL_TO_PLUGIN: dict[str, str] = {
-    # Messaging — discord / telegram / imessage. ``send_message``
-    # is generic; it's gated on ANY messaging plugin being ready
-    # (separate from per-bridge availability which the tool checks
-    # at call time).
-    "send_message":   "messaging",
     # Home Assistant — pure agent-tool bundle (plugins/homeassistant).
     # 0.8 M3a: was absent here entirely, so wiring never touched these
     # tools and they defaulted to "always available" regardless of
@@ -114,6 +124,18 @@ _TOOL_TO_MODULE: dict[str, str] = {
     "set_avatar_state": "animation",     # 0.8 M2c: was UNGATED entirely
     "play_timeline":    "animation",
     "warm_avatar":      "animation",
+}
+
+
+# Tool name → owning SLOT (0.8 M3b). Unlike :data:`_TOOL_TO_MODULE`
+# (one tool, one module), a slot can hold several modules at once —
+# ``messaging`` holds discord/telegram/imessage, all declaring
+# ``tools: [send_message]`` in their own module.yaml. Readiness here
+# is ANY-OF: the tool is available iff at least one module in the
+# slot has its requires met (see :func:`_slot_ready`). Also FINAL —
+# same fail-closed contract as :func:`_module_ready`.
+_TOOL_TO_SLOT: dict[str, str] = {
+    "send_message": "messaging",
 }
 
 
@@ -189,25 +211,41 @@ def _module_ready(tool_name: str) -> bool | None:
     return False  # module-owned tool, but the module isn't discovered
 
 
+def _slot_ready(slot: str) -> bool:
+    """True iff AT LEAST ONE discovered module in ``slot`` has every
+    declared library importable AND its platform requirement (if any)
+    satisfied by the running host. Fail-closed: an empty slot (no
+    modules discovered at all) returns ``False``, same as a single
+    module-owned tool whose module vanished."""
+    from jaeger_os.core.modules import module_platform_ok
+    for spec in _discovered_modules():
+        if spec.slot != slot:
+            continue
+        if _requires_satisfied(spec) and module_platform_ok(spec):
+            return True
+    return False
+
+
+def _slot_ready_for_tool(tool_name: str) -> bool | None:
+    """True/False if ``tool_name`` is owned by a slot (per
+    :data:`_TOOL_TO_SLOT`); ``None`` if it isn't, meaning the caller
+    should fall back to the plugin mechanism. FINAL for slot-owned
+    tools, mirroring :func:`_module_ready`."""
+    slot = _TOOL_TO_SLOT.get(tool_name)
+    if slot is None:
+        return None
+    return _slot_ready(slot)
+
+
 def _plugin_ready(plugin_name: str) -> bool:
     """Query ``list_plugins()`` and return True iff the named
-    plugin is ``status == "ready"`` AND the platform supports it.
-
-    The synthetic ``"messaging"`` plugin name resolves to
-    "any of discord / telegram / imessage is ready" — that's the
-    correct gate for the generic ``send_message`` tool."""
+    plugin is ``status == "ready"`` AND the platform supports it."""
     try:
         from jaeger_os.agent.tools.plugins import list_plugins
         report = list_plugins() or {}
     except Exception:  # noqa: BLE001
         return True   # fail-open: don't hide tools because the gate broke
     rows = report.get("plugins") or []
-    if plugin_name == "messaging":
-        for row in rows:
-            if (row.get("name") in ("discord", "telegram", "imessage")
-                    and row.get("status") == "ready"):
-                return True
-        return False
     for row in rows:
         if row.get("name") == plugin_name:
             return row.get("status") == "ready"
@@ -216,17 +254,21 @@ def _plugin_ready(plugin_name: str) -> bool:
     return True
 
 
-def _make_check_fn(tool_name: str, plugin_name: str):
+def _make_check_fn(tool_name: str, plugin_name: str | None):
     """Closure that captures ``tool_name`` + ``plugin_name`` and
     queries readiness on every call. Module ownership is consulted
     first (:func:`_module_ready`) since it's authoritative and FINAL
-    for module-owned tools like ``text_to_speech`` — only when the
-    tool isn't module-owned at all does this fall back to the plugin
-    mechanism."""
+    for module-owned tools like ``text_to_speech``; slot ownership
+    (:func:`_slot_ready_for_tool`, e.g. ``send_message``) is checked
+    next and is equally FINAL — only when the tool is owned by
+    neither does this fall back to the plugin mechanism."""
     def _check() -> bool:
         module_result = _module_ready(tool_name)
         if module_result is not None:
             return module_result
+        slot_result = _slot_ready_for_tool(tool_name)
+        if slot_result is not None:
+            return slot_result
         return _plugin_ready(plugin_name)
     return _check
 
@@ -251,12 +293,14 @@ def wire_availability_checks(agent: Any) -> int:
     for name, tool in list(registered.items()):
         plugin_name = _TOOL_TO_PLUGIN.get(name)
         module_owned = name in _TOOL_TO_MODULE
+        slot_owned = name in _TOOL_TO_SLOT
         # MCP prefix — every ``mcp:server/tool`` is gated on the
         # MCP plugin being ready (the user's MCP servers may have
         # their own readiness; that gets checked at call time).
-        if plugin_name is None and not module_owned and name.startswith("mcp:"):
+        if (plugin_name is None and not module_owned and not slot_owned
+                and name.startswith("mcp:")):
             plugin_name = "mcp"
-        if plugin_name is None and not module_owned:
+        if plugin_name is None and not module_owned and not slot_owned:
             continue
         try:
             tool.check_fn = _make_check_fn(name, plugin_name)
@@ -271,4 +315,5 @@ __all__ = [
     "clear_availability_caches",
     "_TOOL_TO_PLUGIN",
     "_TOOL_TO_MODULE",
+    "_TOOL_TO_SLOT",
 ]

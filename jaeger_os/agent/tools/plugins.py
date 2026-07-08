@@ -276,12 +276,14 @@ def setup_plugin(name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @register_tool_from_function(name="list_plugins", side_effect="read")
 def _t_list_plugins() -> dict:
-    """Enumerate the bundled jaeger_os plugins (discord, telegram,
-    imessage, mcp) with install + credential status for
-    each. Use this when the user asks what integrations are available,
-    or before suggesting a feature you'd need a plugin for. (kokoro_tts
-    and whisper_stt graduated from plugins to core engine-modules at
-    0.8 M1 / M2b — they're always present, not listed here.)"""
+    """Enumerate the bundled jaeger_os plugins (homeassistant, ai_gen,
+    mcp) with install + credential status for each. Use this when the
+    user asks what integrations are available, or before suggesting a
+    feature you'd need a plugin for. (kokoro_tts and whisper_stt
+    graduated from plugins to core engine-modules at 0.8 M1 / M2b;
+    discord/telegram/imessage graduated the same way at 0.8 M3b as the
+    ``messaging`` module slot — none of them are listed here anymore,
+    they're always present / gated on module discovery instead.)"""
     return list_plugins()
 
 
