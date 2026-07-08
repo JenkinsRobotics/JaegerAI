@@ -101,7 +101,7 @@ mic ─► AudioSessionNode (own STT thread) ─► /sense/transcript ─► voi
 - `nodes/kokoro_tts/` — `KokoroTTS` synthesizer + `PersistentKokoroPlayer`
   (`persistent_player.py`). Publishes synthesized `AudioOutFrame` on
   `/act/audio_out` (24 kHz float32 PCM).
-- `plugins/avaudio_io/{input_stream,output_stream}.py` — default macOS audio
+- `core/audio/avaudio_io/{input_stream,output_stream}.py` — default macOS audio
   backend (`InputStream`/`OutputStream`, PyObjC `AVAudioEngine`, sounddevice-
   shaped API). Mic at 16 kHz; `voice_processing=True` enables Apple's built-in
   AEC+NS+AGC. `portaudio` (sounddevice) is the off-macOS default / fallback

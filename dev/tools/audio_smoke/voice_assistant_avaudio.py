@@ -2,7 +2,7 @@
 """Google-Home-style local voice assistant — AVAUDIO BRIDGE TEST.
 
 Same pipeline as ``voice_assistant.py`` but with the audio I/O layer
-routed through ``jaeger_os.plugins.avaudio_io`` (PyObjC AVAudioEngine)
+routed through ``jaeger_os.core.audio.avaudio_io`` (PyObjC AVAudioEngine)
 instead of sounddevice/PortAudio.
 
 Purpose: isolate the bridge from the full ``voice_loop.py`` stack so
@@ -38,7 +38,7 @@ from pathlib import Path
 # Self-bootstrap so the script runs from any cwd without needing
 # ``PYTHONPATH=.``.  The repo root is two parents up from this file
 # (``dev/tools/audio_smoke/voice_assistant_avaudio.py``); prepend it
-# to sys.path so ``from jaeger_os.plugins.avaudio_io import ...``
+# to sys.path so ``from jaeger_os.core.audio.avaudio_io import ...``
 # resolves cleanly.
 _REPO_ROOT = _osp.dirname(_osp.dirname(_osp.dirname(_osp.abspath(__file__))))
 if _REPO_ROOT not in sys.path:
@@ -131,7 +131,7 @@ class MicStream:
     """
 
     def __init__(self) -> None:
-        from jaeger_os.plugins.avaudio_io import InputStream as _AVInputStream
+        from jaeger_os.core.audio.avaudio_io import InputStream as _AVInputStream
 
         self.q: queue.Queue[np.ndarray] = queue.Queue()
         self.paused = False

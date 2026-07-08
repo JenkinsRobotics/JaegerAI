@@ -229,7 +229,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_os.plugins.avaudio_io import OutputStream, InputStream  # noqa: F401
+        from jaeger_os.core.audio.avaudio_io import OutputStream, InputStream  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         return False, f"import failed: {exc}"
     return True, "OutputStream + InputStream importable (PyObjC)"

@@ -415,6 +415,112 @@ def test_avatar_tools_available_when_module_present_and_libs_importable(
     assert tools["set_avatar_state"].is_available() is True
 
 
+
+# ── plugin discovery gates homeassistant / ai_gen tools (0.8 M3a) ──
+#
+# Before 0.8 M3a, ha_list_entities/ha_get_state/ha_list_services/
+# ha_call_service (homeassistant) and generate_image_fal/
+# generate_video_fal (ai_gen) had NO entry in ``_TOOL_TO_PLUGIN`` at
+# all — ``wire_availability_checks`` skipped them entirely, so they
+# defaulted to "always available" regardless of HASS_TOKEN/FAL_KEY.
+# Both plugins keep their real ``plugin.yaml`` (correct shape for a
+# tool bundle); the fix is just the missing map entries — the actual
+# readiness logic (``_plugin_ready`` → ``list_plugins()`` → real
+# env/library probing) was already fail-closed for a *listed* plugin,
+# it just never got consulted for these tool names.
+
+
+def test_homeassistant_tools_available_when_ready(monkeypatch):
+    tools = {name: _td(name) for name in (
+        "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+    )}
+    wire_availability_checks(_StubAgent(tools))
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+
+    def _fake_list():
+        return {"plugins": [{"name": "homeassistant", "status": "ready"}]}
+    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
+    for name in tools:
+        assert tools[name].is_available() is True
+
+
+def test_homeassistant_tools_unavailable_when_requirements_unmet(monkeypatch):
+    """Missing ``HASS_TOKEN`` (or the ``requests`` library) makes
+    ``list_plugins()`` report a non-``ready`` status — the wired tools
+    must fail closed rather than defaulting to available."""
+    tools = {name: _td(name) for name in (
+        "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
+    )}
+    wire_availability_checks(_StubAgent(tools))
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+
+    def _fake_list():
+        return {"plugins": [
+            {"name": "homeassistant", "status": "needs_credentials"},
+        ]}
+    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
+    for name in tools:
+        assert tools[name].is_available() is False
+
+
+def test_ai_gen_tools_available_when_ready(monkeypatch):
+    tools = {name: _td(name) for name in (
+        "generate_image_fal", "generate_video_fal",
+    )}
+    wire_availability_checks(_StubAgent(tools))
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+
+    def _fake_list():
+        return {"plugins": [{"name": "ai_gen", "status": "ready"}]}
+    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
+    for name in tools:
+        assert tools[name].is_available() is True
+
+
+def test_ai_gen_tools_unavailable_when_fal_key_missing(monkeypatch):
+    """Missing ``FAL_KEY`` makes ``list_plugins()`` report
+    ``needs_credentials`` — the wired tools must fail closed."""
+    tools = {name: _td(name) for name in (
+        "generate_image_fal", "generate_video_fal",
+    )}
+    wire_availability_checks(_StubAgent(tools))
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+
+    def _fake_list():
+        return {"plugins": [{"name": "ai_gen", "status": "needs_credentials"}]}
+    monkeypatch.setattr(_plugins_mod, "list_plugins", _fake_list)
+    for name in tools:
+        assert tools[name].is_available() is False
+
+
+def test_homeassistant_and_ai_gen_real_list_plugins_env_roundtrip(monkeypatch):
+    """End-to-end through the *real* ``list_plugins()`` (no stub) —
+    env present makes both plugins report ready, env absent makes
+    them report a non-ready status, and the wired tool availability
+    tracks that in both directions."""
+    from jaeger_os.agent.tools import plugins as _plugins_mod
+
+    monkeypatch.delenv("HASS_TOKEN", raising=False)
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    # No credential store configured in this process either — patch
+    # the credentials lookup out so it can't accidentally satisfy env.
+    monkeypatch.setattr(
+        _plugins_mod, "_credential_status", lambda names: {n: False for n in names},
+    )
+    tools = {
+        "ha_list_entities": _td("ha_list_entities"),
+        "generate_image_fal": _td("generate_image_fal"),
+    }
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["ha_list_entities"].is_available() is False
+    assert tools["generate_image_fal"].is_available() is False
+
+    monkeypatch.setenv("HASS_TOKEN", "test-token")
+    monkeypatch.setenv("FAL_KEY", "test-key")
+    assert tools["ha_list_entities"].is_available() is True
+    assert tools["generate_image_fal"].is_available() is True
+
+
 def test_avatar_tools_unavailable_when_required_library_missing(monkeypatch):
     """The module is discovered and claims the avatar tools, but a
     library it declares in ``requires_libraries`` doesn't import —

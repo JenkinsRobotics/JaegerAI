@@ -72,6 +72,18 @@ _TOOL_TO_PLUGIN: dict[str, str] = {
     # (separate from per-bridge availability which the tool checks
     # at call time).
     "send_message":   "messaging",
+    # Home Assistant — pure agent-tool bundle (plugins/homeassistant).
+    # 0.8 M3a: was absent here entirely, so wiring never touched these
+    # tools and they defaulted to "always available" regardless of
+    # HASS_TOKEN/requests being present — closing that fail-open hole.
+    "ha_list_entities":   "homeassistant",
+    "ha_get_state":       "homeassistant",
+    "ha_list_services":   "homeassistant",
+    "ha_call_service":    "homeassistant",
+    # ai_gen — fal.ai image/video generation (plugins/ai_gen). Same
+    # 0.8 M3a fix: FAL_KEY missing used to be invisible to the model.
+    "generate_image_fal": "ai_gen",
+    "generate_video_fal": "ai_gen",
     # MCP — dynamically registered tools.
     # (MCP tools name themselves ``mcp:<server>/<tool>``; the
     # generic wiring below catches them automatically by prefix.)
