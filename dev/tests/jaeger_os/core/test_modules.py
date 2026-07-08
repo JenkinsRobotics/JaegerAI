@@ -18,7 +18,9 @@ from jaeger_os.core.modules import ModuleSpec, discover_modules, load_module
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _KOKORO_DIR = _REPO_ROOT / "jaeger_os" / "nodes" / "kokoro_tts"
+_IMESSAGE_DIR = _REPO_ROOT / "jaeger_os" / "plugins" / "imessage"
 _NODES_ROOT = _REPO_ROOT / "jaeger_os" / "nodes"
+_PLUGINS_ROOT = _REPO_ROOT / "jaeger_os" / "plugins"
 
 
 _GOOD_YAML = """
@@ -69,6 +71,28 @@ def test_load_module_parses_requires_libraries(tmp_path):
     text = _GOOD_YAML + "requires_libraries: [foo, bar]\n"
     spec = load_module(_write_module(tmp_path, text=text))
     assert spec.requires_libraries == ["foo", "bar"]
+
+
+def test_load_module_requires_platform_defaults_empty(tmp_path):
+    spec = load_module(_write_module(tmp_path))
+    assert spec.requires_platform == []
+
+
+def test_load_module_parses_requires_platform(tmp_path):
+    text = _GOOD_YAML + "requires_platform: [darwin]\n"
+    spec = load_module(_write_module(tmp_path, text=text))
+    assert spec.requires_platform == ["darwin"]
+
+
+def test_load_module_real_imessage_is_messaging_slot_platform_gated():
+    """0.8 M3b: imessage graduated from plugin.yaml to module.yaml —
+    slot ``messaging``, darwin-only."""
+    spec = load_module(_IMESSAGE_DIR)
+    assert spec.module == "imessage"
+    assert spec.slot == "messaging"
+    assert spec.tools == ["send_message"]
+    assert spec.requires_libraries == []
+    assert spec.requires_platform == ["darwin"]
 
 
 def test_load_module_missing_file(tmp_path):
@@ -144,6 +168,57 @@ def test_discover_modules_missing_root_returns_empty(tmp_path):
     assert discover_modules(tmp_path / "does_not_exist") == {}
 
 
-def test_discover_modules_uses_real_nodes_dir_by_default_arg():
-    """Sanity check the computed default matches the repo layout."""
-    assert discover_modules(_NODES_ROOT) == discover_modules()
+def test_discover_modules_single_path_still_accepted():
+    """A lone ``pathlib.Path`` (not a tuple) still works — normalized
+    internally to a one-tuple. Existing callers passing a single root
+    keep working unchanged."""
+    found = discover_modules(_NODES_ROOT)
+    assert "tts" in found
+    names = {spec.module for spec in found["tts"]}
+    assert "kokoro_tts" in names
+
+
+# ── 0.8 M3b: messaging — the first multi-module slot, multi-root ───
+
+
+def test_discover_modules_nodes_root_alone_has_four_slots_no_messaging():
+    """The nodes/ root by itself still surfaces exactly the 4 engine
+    slots — messaging modules live under plugins/, not nodes/."""
+    found = discover_modules(_NODES_ROOT)
+    assert set(found) == {"tts", "stt", "animation", "media"}
+    assert "messaging" not in found
+
+
+def test_discover_modules_plugins_root_alone_is_messaging_only():
+    found = discover_modules(_PLUGINS_ROOT)
+    assert set(found) == {"messaging"}
+    names = {spec.module for spec in found["messaging"]}
+    assert names == {"discord", "telegram", "imessage"}
+
+
+def test_discover_modules_default_roots_cover_both_nodes_and_messaging():
+    """The default (no-args) call walks BOTH ``NODES_DIR`` and
+    ``PLUGINS_DIR`` — nodes-root modules stay discovered (4 slots
+    intact) AND the new multi-module ``messaging`` slot shows up with
+    all 3 real discord/telegram/imessage module.yaml files."""
+    found = discover_modules()
+    assert set(found) >= {"tts", "stt", "animation", "media", "messaging"}
+    messaging_names = {spec.module for spec in found["messaging"]}
+    assert messaging_names == {"discord", "telegram", "imessage"}
+    for spec in found["messaging"]:
+        assert spec.slot == "messaging"
+        assert spec.tools == ["send_message"]
+
+
+def test_discover_modules_accepts_explicit_roots_tuple(tmp_path):
+    """The plural ``roots=`` tuple form scans every root given, keying
+    everything by slot the same way the walker always has — a synthetic
+    tmp_path root alongside the real plugins root proves both are
+    consulted in one call."""
+    _write_module(tmp_path, "widget_a", _GOOD_YAML)
+    found = discover_modules((tmp_path, _PLUGINS_ROOT))
+    assert set(found) == {"widgets", "messaging"}
+    assert [spec.module for spec in found["widgets"]] == ["widget"]
+    assert {spec.module for spec in found["messaging"]} == {
+        "discord", "telegram", "imessage",
+    }
