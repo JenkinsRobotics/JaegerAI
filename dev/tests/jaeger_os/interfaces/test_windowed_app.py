@@ -153,6 +153,25 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         # 0.8 U3: _build_bus injects app.bus into nodes.runtime — one bus
         # per process, not two disconnected InProcBus instances.
         assert node_runtime.get_bus() is app.bus
+        # 0.8 U3b: the windowed path graduates tts + animation to
+        # supervisor ownership (audio_session stays declared-but-
+        # disabled — real mic + Whisper load, no headless degrade path
+        # yet; see jaeger.windowed.toml's node-block comment).
+        # ThreadHandle.start() (called synchronously from boot()'s
+        # supervisor.start_all()) already blocks until RUNNING/FAILED,
+        # so no polling wait is needed here.
+        rows = {row["id"]: row for row in app.supervisor.ls()}
+        assert set(rows) == {"tts", "audio_session", "animation"}
+        assert rows["tts"]["state"] == "running"
+        assert rows["animation"]["state"] == "running"
+        assert rows["audio_session"]["state"] == "off"   # disabled, not started
+        # ensure_*_node() (what the agent's speak/avatar tools call)
+        # must delegate to the SAME supervisor-managed objects — no
+        # double-spawn (the pre-U3b reason these nodes stayed disabled).
+        assert node_runtime.ensure_tts_node() is app.supervisor.node("tts")
+        assert (node_runtime.ensure_animation_node()
+                is app.supervisor.node("animation"))
+
         replies = []
         app.bus.subscribe(ChatReply.topic, lambda msg: replies.append(msg.text))
         app.bus.publish(ChatMessage(text="hi core", source="gui"))

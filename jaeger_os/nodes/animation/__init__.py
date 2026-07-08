@@ -41,16 +41,16 @@ __all__ = [
 def make_animation_node(bus: Any, config: dict[str, Any]) -> AnimationNode:
     """Chassis-contract factory ``(bus, config) -> AnimationNode``.
 
-    J5A — points jaeger.toml's [[node]] animation entry at a callable
-    matching the format 0.1 chassis contract. Delegates to
-    ``jaeger_os.nodes.runtime.ensure_animation_node`` which owns the
-    idempotent singleton lifecycle (and the FrameBridge WebSocket
-    sidecar). The chassis ``bus`` argument is accepted but not
-    propagated — JROS's runtime uses the legacy global bus until
-    J5B unifies the two.
+    0.8 U3b: constructs the node DIRECTLY on the chassis-injected
+    ``bus`` via ``runtime._build_animation_node`` rather than calling
+    ``ensure_animation_node()`` — same recursion hazard as
+    ``make_tts_node``: the supervisor's ``ThreadHandle.start()`` calls
+    this factory, and ``ensure_animation_node()``'s supervisor branch
+    would call right back into ``supervisor.start("animation")``.
     """
-    from jaeger_os.nodes.runtime import ensure_animation_node
-    return ensure_animation_node(
+    from jaeger_os.nodes.runtime import _build_animation_node
+    return _build_animation_node(
+        bus,
         bridge_host=str(config.get("bridge_host", "127.0.0.1")),
         bridge_port=int(config.get("bridge_port", 8765)),
         enable_bridge=bool(config.get("enable_bridge", True)),

@@ -314,3 +314,174 @@ def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
         assert runtime._tts_node is not None
     finally:
         runtime.shutdown()
+
+
+# ── supervisor-backed ensure_* delegation (0.8 U3b) ──────────────────
+#
+# A duck-typed fake stands in for jaeger_os.app.supervisor.Supervisor
+# here — these tests exercise ONLY runtime.py's delegation logic
+# (has/enabled/is_running/node/start), not the real Supervisor/
+# ThreadHandle machinery (that's covered end-to-end in
+# dev/tests/jaeger_os/app/test_app_format.py's supervisor-backed
+# JaegerApp tests).
+
+
+class _FakeSupervisorNode:
+    """Duck-types jaeger_os.app.supervisor.Supervisor just enough for
+    runtime.py's ensure_*_node delegation branch: has/enabled/
+    is_running/node/start. ``factory`` is whatever runtime._build_*
+    function the real make_*_node would call — start() invokes it
+    fresh each time, mirroring ThreadHandle.start()/.restart()'s "never
+    reuse a torn-down node object" contract."""
+
+    def __init__(self, node_id: str, factory, *, enabled: bool = True):
+        self.node_id = node_id
+        self.factory = factory
+        self._enabled = enabled
+        self._running = False
+        self._node = None
+        self.start_calls = 0
+
+    def has(self, node_id: str) -> bool:
+        return node_id == self.node_id
+
+    def enabled(self, node_id: str) -> bool:
+        return node_id == self.node_id and self._enabled
+
+    def is_running(self, node_id: str) -> bool:
+        return node_id == self.node_id and self._running
+
+    def start(self, node_id: str) -> None:
+        assert node_id == self.node_id
+        self.start_calls += 1
+        self._node = self.factory()
+        self._running = True
+
+    def node(self, node_id: str):
+        return self._node if node_id == self.node_id else None
+
+    def crash_and_prepare_restart(self) -> None:
+        """Simulate the Supervisor's watch thread observing a dead
+        node: alive() goes False so the next ensure_* call re-starts
+        it (via a FRESH factory() call, per ThreadHandle.restart())."""
+        self._running = False
+
+
+def test_ensure_tts_node_delegates_to_registered_supervisor(monkeypatch):
+    created = _install_mock_runtime(monkeypatch)
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(bus, {}),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_tts_node()
+        assert fake.start_calls == 1
+        assert node is fake.node("tts")
+        assert node is runtime._tts_node
+        assert runtime._synth is created["synth"]
+
+        # Idempotent: a second call must NOT re-start the supervised
+        # node (no double-spawn) — it just reads the live object again.
+        node_again = runtime.ensure_tts_node()
+        assert fake.start_calls == 1
+        assert node_again is node
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_reflects_a_supervisor_restart(monkeypatch):
+    """The seam this delegation adds: after the supervisor restarts a
+    crashed node (fresh object from a fresh factory() call),
+    ensure_tts_node() must return the NEW live object, not a stale
+    cached one — get_synth()/get_audio_session() depend on this."""
+    _install_mock_runtime(monkeypatch)
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(bus, {}),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node1 = runtime.ensure_tts_node()
+        fake.crash_and_prepare_restart()
+        node2 = runtime.ensure_tts_node()
+        assert fake.start_calls == 2
+        assert node2 is not node1
+        assert node2 is fake.node("tts")
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_falls_back_when_no_supervisor_registered(monkeypatch):
+    """Default state (no chassis ever called set_supervisor — the
+    TUI/bridge/daemon boot roots) — byte-identical thread-spawn path."""
+    created = _install_mock_runtime(monkeypatch)
+    assert runtime._supervisor is None
+    try:
+        node = runtime.ensure_tts_node()
+        assert node is created["node"]
+        assert runtime._tts_node is node
+    finally:
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_ignores_an_undeclared_supervisor():
+    """A supervisor IS registered, but its manifest never declared a
+    "tts" node (e.g. a manifest without the tts entry) — falls back to
+    the legacy path rather than erroring."""
+    class _NothingDeclared:
+        def has(self, node_id):
+            return False
+    runtime.shutdown()
+    runtime.set_supervisor(_NothingDeclared())
+    try:
+        bus = runtime.get_bus()
+        assert isinstance(bus, InProcBus)
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_ignores_a_disabled_supervised_node(monkeypatch):
+    """The node is declared but enabled = false (e.g. root jaeger.toml's
+    still-parked entries) — delegation must not force-start it; falls
+    back to the legacy spawn instead."""
+    created = _install_mock_runtime(monkeypatch)
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(runtime.get_bus(), {}),
+        enabled=False,
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_tts_node()
+        assert fake.start_calls == 0          # never force-started
+        assert node is created["node"]        # legacy path built it
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_animation_node_delegates_to_registered_supervisor(monkeypatch):
+    """Same delegation shape for the animation node — also exercises
+    _build_animation_node's bridge/auto-driver rebuild-fresh-each-call
+    path (enable_bridge=False so no real socket is bound)."""
+    runtime.shutdown()
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "animation",
+        lambda: runtime._build_animation_node(bus, enable_bridge=False),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_animation_node(enable_bridge=False)
+        assert fake.start_calls == 1
+        assert node is fake.node("animation")
+        assert node is runtime._animation_node
+        node_again = runtime.ensure_animation_node(enable_bridge=False)
+        assert fake.start_calls == 1
+        assert node_again is node
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
