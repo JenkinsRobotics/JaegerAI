@@ -24,4 +24,4 @@ flowchart TB
 
 **LLM:** local `llama-cpp-python` (GGUF, default) or external (Anthropic/OpenAI) with fallback to local. **TTS:** Kokoro v0.19; voice resolved from the active character's `voice_id`.
 
-**Key files:** `agent/loop/bridge.py` · `main.py:_run_turn_via_jaeger_agent` · `agent/loop/jaeger_agent.py` · `agent/tools/speak.py` · `nodes/tts/node.py` · `plugins/kokoro_tts/`. Full path is real — the `/sense/tts_chunk` amplitude is a sin-wave proxy (see `lip_sync.md`).
+**Key files:** `agent/loop/bridge.py` · `main.py:_run_turn_via_jaeger_agent` · `agent/loop/jaeger_agent.py` · `agent/tools/speak.py` · `nodes/kokoro_tts/node.py` · `nodes/kokoro_tts/engine.py`. Full path is real — the `/sense/tts_chunk` amplitude is a sin-wave proxy (see `lip_sync.md`).

@@ -272,7 +272,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_os.plugins.kokoro_tts.persistent_player import (
+        from jaeger_os.nodes.kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401

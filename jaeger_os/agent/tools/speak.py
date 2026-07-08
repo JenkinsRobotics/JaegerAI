@@ -27,11 +27,11 @@ from typing import Any
 from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
-# Re-export plugin constants so existing imports keep working.
-from ...plugins.kokoro_tts import (
+# Re-export the module's constants so existing imports keep working.
+from ...nodes.kokoro_tts import (
     KOKORO_LANG,
     KOKORO_SAMPLE_RATE as KOKORO_SAMPLE_RATE,
-    KOKORO_VOICE,
+    KOKORO_VOICE as KOKORO_VOICE,
     KokoroTTS,
 )
 
@@ -43,9 +43,29 @@ from ...plugins.kokoro_tts import (
 _SPEAK_TIMEOUT_S = 180.0
 
 
+def _module_default_voice() -> str:
+    """The kokoro_tts module's OWN configured default voice — what
+    :func:`_resolve_voice` falls back to when neither the active
+    character nor ``Identity.voice_id`` set one.
+
+    Reads ``Config.kokoro_tts.voice`` (settings-catalog editable — see
+    ``jaeger_os/nodes/kokoro_tts/config.py``) so changing it in
+    config.yaml actually changes the spoken default; falls back to the
+    module's own dataclass default when there's no instance to read
+    yet (fresh boot, no layout bound)."""
+    from jaeger_os.nodes.kokoro_tts import KokoroTTSConfig
+    try:
+        layout = _require_layout()
+        from jaeger_os.core.instance.schemas import Config, load_yaml
+        return load_yaml(layout.config_path, Config).kokoro_tts.voice
+    except Exception:
+        return KokoroTTSConfig().voice
+
+
 def _resolve_voice() -> str:
     """Read the active instance's identity.yaml for a ``voice_id``
-    override, falling back to the plugin's KOKORO_VOICE default.
+    override, falling back to the kokoro_tts module's configured
+    default voice.
 
     Used by ``jaeger_os.nodes.runtime.ensure_tts_node()`` to build
     Kokoro with the right voice for the active instance (Jarvis vs.
@@ -54,7 +74,7 @@ def _resolve_voice() -> str:
     try:
         layout = _require_layout()
     except Exception:
-        return KOKORO_VOICE
+        return _module_default_voice()
     try:
         from jaeger_os.personality.character import active_character
         ch = active_character(layout.root)
@@ -66,9 +86,9 @@ def _resolve_voice() -> str:
     try:
         identity = load_yaml(layout.identity_path, Identity)
     except Exception:
-        return KOKORO_VOICE
+        return _module_default_voice()
     voice_id = (identity.voice_id or "").strip()
-    return voice_id or KOKORO_VOICE
+    return voice_id or _module_default_voice()
 
 
 def warm_kokoro() -> dict[str, Any]:
