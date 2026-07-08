@@ -48,6 +48,7 @@ class NodeSpec:
     tier: int = 3
     backend: str = "thread"
     factory: str = ""          # thread: "pkg.mod:fn" returning Node(s)
+    slot: str = ""             # thread: resolve factory via discover_modules()[slot]
     module: str = ""           # subprocess: spawn `python -m module`
     restart: str = "on_failure"
     config_key: str = ""
@@ -169,7 +170,7 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
 
     for n_raw in raw.get("node") or []:
         _check_keys(n_raw, {
-            "id", "tier", "backend", "factory", "module", "restart",
+            "id", "tier", "backend", "factory", "slot", "module", "restart",
             "config_key", "enabled", "args",
         }, "[[node]]")
         node = NodeSpec(
@@ -177,6 +178,7 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
             tier=int(n_raw.get("tier", 3)),
             backend=str(n_raw.get("backend", "thread")),
             factory=str(n_raw.get("factory", "")),
+            slot=str(n_raw.get("slot", "")),
             module=str(n_raw.get("module", "")),
             restart=str(n_raw.get("restart", "on_failure")),
             config_key=str(n_raw.get("config_key", "")),
@@ -189,8 +191,9 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
         _refuse(node.restart in _RESTARTS,
                 f"node {node.id!r}: restart {node.restart!r} not in {_RESTARTS}")
         if node.backend == "thread":
-            _refuse(bool(node.factory),
-                    f"node {node.id!r}: thread backend needs `factory`")
+            _refuse(bool(node.factory or node.slot),
+                    f"node {node.id!r}: thread backend needs "
+                    "`factory` or `slot`")
         if node.backend == "subprocess":
             _refuse(bool(node.module),
                     f"node {node.id!r}: subprocess backend needs `module`")
