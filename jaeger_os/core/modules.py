@@ -1,7 +1,11 @@
 """module.yaml → validated ``ModuleSpec`` (the engine-module discovery seam).
 
 A module directory (``jaeger_os/nodes/<name>/``) holds ``module.yaml``
-declaring its slot, topics, tools, and factory. The loader validates
+declaring its slot, topics, tools, factory, and the third-party
+libraries its engine needs (``requires_libraries``) — the module
+owns its own readiness requirements, the same way a plugin's
+``plugin.yaml`` owns its ``requires: libraries:`` block. The loader
+validates
 STRICTLY (unknown fields refuse, missing factory refuses, empty slot
 refuses) — loudly at load time with the offending file named, never a
 silent degrade. Mirrors ``jaeger_os/hardware/package.py``'s house style.
@@ -32,6 +36,7 @@ class ModuleSpec(msgspec.Struct, forbid_unknown_fields=True):
     produces: list[str] = []
     tools: list[str] = []
     config: str = ""
+    requires_libraries: list[str] = []
 
 
 def _check_factory(factory: str, *, path: pathlib.Path) -> None:
