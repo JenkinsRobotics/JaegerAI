@@ -146,6 +146,37 @@ def test_manifest_refuses_thread_without_factory(tmp_path):
         load_manifest(_write_app(tmp_path, bad))
 
 
+# ── M2a: slot-resolution (manifest binds a node by slot, not factory) ──
+
+
+def test_manifest_parses_node_slot(tmp_path):
+    """A ``[[node]]`` may declare ``slot=`` with no ``factory=`` — the
+    thread-backend rule now accepts factory OR slot."""
+    m = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
+        'slot = "widgets"')
+    spec = load_manifest(_write_app(tmp_path, m))
+    assert spec.nodes[0].slot == "widgets"
+    assert spec.nodes[0].factory == ""
+
+
+def test_manifest_refuses_thread_without_factory_or_slot(tmp_path):
+    bad = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"', 'factory = ""')
+    with pytest.raises(ValueError, match="needs `factory` or `slot`"):
+        load_manifest(_write_app(tmp_path, bad))
+
+
+def test_manifest_unknown_keys_still_refused_with_slot_present(tmp_path):
+    """``slot`` is now an allowed key — a genuinely unknown key next to
+    it still refuses (the allowlist add didn't loosen anything else)."""
+    m = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
+        'slot = "widgets"\nbogus_key = "x"')
+    with pytest.raises(ValueError, match="bogus_key"):
+        load_manifest(_write_app(tmp_path, m))
+
+
 def test_manifest_refuses_subprocess_on_inproc_bus(tmp_path):
     bad = _GOOD_MANIFEST.replace(
         'backend = "thread"\nfactory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
@@ -535,6 +566,134 @@ def test_supervisor_backed_ensure_animation_node_reflects_restart(tmp_path):
         node2 = node_runtime.ensure_animation_node()
         assert node2 is not node1
         assert node2 is app.supervisor.node("animation")
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+# ── M2a: slot-resolution end to end (app._make_handle → discover_modules) ──
+
+
+_SLOT_APP_MANIFEST = """
+[app]
+name = "conftest-slot-app"
+version = "0.0.1"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "widget"
+tier = 3
+backend = "thread"
+slot = "widgets"
+restart = "never"
+config_key = "widget"
+"""
+
+
+def _write_slot_app(tmp_path: pathlib.Path) -> pathlib.Path:
+    (tmp_path / "jaeger.toml").write_text(_SLOT_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("widget: {}\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_slot_bound_node_resolves_factory_and_boots(tmp_path, monkeypatch):
+    """A ``[[node]]`` declaring only ``slot=`` gets its ``factory``
+    populated from ``discover_modules()`` before ``resolve_ref`` runs,
+    and boots under the supervisor exactly like a factory-string node."""
+    from jaeger_os.core import modules as modules_mod
+
+    fake_spec = modules_mod.ModuleSpec(
+        module="widget_engine", slot="widgets",
+        factory=f"{__name__}:make_ticker",
+    )
+    monkeypatch.setattr(
+        modules_mod, "discover_modules", lambda root=None: {
+            "widgets": [fake_spec]})
+
+    app = JaegerApp(_write_slot_app(tmp_path)).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "widget")
+        assert node_spec.factory == f"{__name__}:make_ticker"   # populated
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+    finally:
+        app.shutdown()
+
+
+def test_slot_bound_node_picks_deterministically_when_multiple_modules(
+    tmp_path, monkeypatch,
+):
+    """More than one module for a slot: pick sorted-by-module-name first,
+    not whichever discover_modules happened to return first."""
+    from jaeger_os.core import modules as modules_mod
+
+    zeta = modules_mod.ModuleSpec(
+        module="zeta_engine", slot="widgets", factory=f"{__name__}:missing")
+    alpha = modules_mod.ModuleSpec(
+        module="alpha_engine", slot="widgets", factory=f"{__name__}:make_ticker")
+    monkeypatch.setattr(
+        modules_mod, "discover_modules", lambda root=None: {
+            "widgets": [zeta, alpha]})
+
+    app = JaegerApp(_write_slot_app(tmp_path)).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "widget")
+        assert node_spec.factory == f"{__name__}:make_ticker"   # alpha, not zeta
+    finally:
+        app.shutdown()
+
+
+def test_slot_bound_node_unknown_slot_raises_naming_the_slot(tmp_path, monkeypatch):
+    """Zero modules for the declared slot is fail-closed — a declared
+    node must resolve, never silently vanish."""
+    from jaeger_os.core import modules as modules_mod
+
+    monkeypatch.setattr(modules_mod, "discover_modules", lambda root=None: {})
+
+    with pytest.raises(ValueError, match="widgets"):
+        JaegerApp(_write_slot_app(tmp_path)).boot()
+
+
+def test_slot_bound_tts_node_resolves_to_kokoro_via_real_discovery(tmp_path):
+    """No monkeypatching: the REAL ``discover_modules()`` walking the
+    REAL ``jaeger_os/nodes/`` tree resolves ``slot = "tts"`` to
+    kokoro_tts's factory and boots it under the supervisor — the exact
+    path ``jaeger.windowed.toml``'s tts node now takes."""
+    manifest = """
+[app]
+name = "conftest-tts-slot-app"
+requires_framework = ">=0.1"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "tts"
+tier = 3
+backend = "thread"
+slot = "tts"
+restart = "never"
+config_key = "tts"
+"""
+    (tmp_path / "jaeger.toml").write_text(manifest, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("tts: {}\n", encoding="utf-8")
+
+    from jaeger_os.nodes import runtime as node_runtime
+    node_runtime.shutdown()
+    app = JaegerApp(tmp_path).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "tts")
+        assert node_spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
     finally:
         app.shutdown()
         node_runtime.shutdown()

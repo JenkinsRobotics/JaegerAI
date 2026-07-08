@@ -221,8 +221,16 @@ class JaegerApp:
 
     def _start_nodes(self) -> None:
         self.supervisor = Supervisor(health=self.health, bus=self.bus)
+        # M2a: resolve any slot-bound nodes' factories before building
+        # handles. One discover_modules() scan for the whole pass (it
+        # walks jaeger_os/nodes/ on disk) rather than one per node.
+        modules_by_slot = None
+        if any(n.slot and not n.factory for n in self.spec.nodes):
+            from jaeger_os.core.modules import discover_modules
+            modules_by_slot = discover_modules()
         for node_spec in self.spec.nodes:
-            self.supervisor.add(self._make_handle(node_spec))
+            self.supervisor.add(
+                self._make_handle(node_spec, modules_by_slot))
         self.supervisor.start_all()
         # 0.8 U3b: register AFTER start_all() so jaeger_os.nodes.runtime's
         # ensure_tts_node/ensure_audio_session_node/ensure_animation_node —
@@ -234,9 +242,11 @@ class JaegerApp:
         from jaeger_os.nodes import runtime as node_runtime
         node_runtime.set_supervisor(self.supervisor)
 
-    def _make_handle(self, node_spec: NodeSpec):
+    def _make_handle(self, node_spec: NodeSpec, modules_by_slot=None):
         cfg = slice_for(self.config, node_spec.config_key)
         if node_spec.backend == "thread":
+            if node_spec.slot and not node_spec.factory:
+                self._resolve_slot(node_spec, modules_by_slot)
             factory_fn = resolve_ref(node_spec.factory)
 
             def factory(fn=factory_fn, spec=node_spec, cfg=cfg):
@@ -256,6 +266,31 @@ class JaegerApp:
             f"node {node_spec.id!r}: backend {node_spec.backend!r} "
             "not implemented in format 0.1 (thread | subprocess)"
         )
+
+    def _resolve_slot(self, node_spec: NodeSpec, modules_by_slot=None) -> None:
+        """M2a: populate ``node_spec.factory`` from ``discover_modules()``
+        for a ``slot=``-bound node. Fail-closed — a declared node with no
+        module backing its slot is a manifest bug, not a silent skip.
+        Zero modules for the slot raises naming the slot; more than one
+        picks deterministically (sorted by module name) and logs the
+        choice — real multi-engine selection is a later config concern."""
+        if modules_by_slot is None:
+            from jaeger_os.core.modules import discover_modules
+            modules_by_slot = discover_modules()
+        candidates = modules_by_slot.get(node_spec.slot, [])
+        if not candidates:
+            raise ValueError(
+                f"node {node_spec.id!r}: no module provides "
+                f"slot {node_spec.slot!r}"
+            )
+        chosen = sorted(candidates, key=lambda m: m.module)[0]
+        if len(candidates) > 1:
+            log(self.spec.name,
+                f"node {node_spec.id!r}: slot {node_spec.slot!r} has "
+                f"{len(candidates)} modules "
+                f"({sorted(m.module for m in candidates)}); "
+                f"chose {chosen.module!r}", bus=self.bus)
+        node_spec.factory = chosen.factory
 
     def _install_signals(self) -> None:
         def handler(signum: int, frame: Any) -> None:  # noqa: ARG001
