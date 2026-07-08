@@ -7,7 +7,9 @@ factory: jaeger_os.plugins.discord.bridge:DiscordBridge
 # first multi-module slot (discord/telegram/imessage all declare
 # slot: messaging and coexist; send_message is available iff ANY of
 # them is ready, see jaeger_os/agent/availability.py's ANY-OF gate).
-# `factory` here is metadata only (no [[node]] entry binds this slot —
+# `factory` names the real bridge class but NO manifest binds this slot
+# — and none should: bridges are not factory(bus, config) chassis nodes;
+# a [[node]] slot="messaging" would misconstruct the bridge. (—
 # bridges are agent-side threads started via activate_plugin/autostart/
 # start_bridge, jaeger_os/plugins/__init__.py:109, NOT chassis nodes).
 #
