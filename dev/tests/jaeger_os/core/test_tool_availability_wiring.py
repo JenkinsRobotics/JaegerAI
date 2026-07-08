@@ -182,24 +182,68 @@ def test_text_to_speech_available_when_module_discovered():
 
 
 def test_text_to_speech_unavailable_when_module_missing(monkeypatch):
-    """If module discovery finds no module declaring
-    ``text_to_speech``, the tool must NOT silently stay available
-    via plugin fail-open — this is the regression 0.8 M1 closes."""
+    """If module discovery finds no ``kokoro_tts`` module at all,
+    ``text_to_speech`` must be unavailable WITHOUT any help from the
+    plugin mechanism — this is the regression 0.8 M1 closes. Unlike
+    an earlier version of this test, nothing here synthesizes a fake
+    ``kokoro_tts`` plugin row; ``list_plugins`` is untouched (and
+    genuinely has no ``kokoro_tts`` entry in this repo, since it's
+    not a plugin anymore) to prove the module-owned path never falls
+    through to the plugin's unknown-plugin fail-open default."""
     from jaeger_os.agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {"text_to_speech": _td("text_to_speech")}
     wire_availability_checks(_StubAgent(tools))
-    # No module claims it, and "kokoro_tts" is absent from
-    # list_plugins() (it's not a plugin anymore) — old code fell
-    # back to fail-open here; confirm this path degrades safely by
-    # forcing the plugin lookup to also report it not ready.
-    from jaeger_os.agent.tools import plugins as _plugins_mod
-    monkeypatch.setattr(
-        _plugins_mod, "list_plugins",
-        lambda: {"plugins": [{"name": "kokoro_tts", "status": "needs_install"}]},
-    )
     assert tools["text_to_speech"].is_available() is False
+
+
+def test_text_to_speech_available_when_module_present_and_libs_importable(
+    monkeypatch,
+):
+    """A discovered module claiming ``text_to_speech`` with every
+    declared ``requires_libraries`` entry importable is available."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="kokoro_tts", slot="tts", factory="pkg.mod:make",
+        tools=["text_to_speech"], requires_libraries=["kokoro"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+    monkeypatch.setattr(_avail_mod, "_library_importable", lambda name: True)
+    tools = {"text_to_speech": _td("text_to_speech")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["text_to_speech"].is_available() is True
+
+
+def test_text_to_speech_unavailable_when_required_library_missing(monkeypatch):
+    """The module is discovered and claims ``text_to_speech``, but a
+    library it declares in ``requires_libraries`` doesn't import
+    (``find_spec`` returns ``None``) — the old code only checked
+    module *presence*, so this case used to report available; the
+    fix probes each required library and fails closed if any is
+    missing."""
+    from jaeger_os.agent import availability as _avail_mod
+    from jaeger_os.core.modules import ModuleSpec
+
+    spec = ModuleSpec(
+        module="kokoro_tts", slot="tts", factory="pkg.mod:make",
+        tools=["text_to_speech"], requires_libraries=["kokoro", "sounddevice"],
+    )
+    monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [spec])
+
+    def _fake_find_spec(name):
+        return None if name == "sounddevice" else object()
+
+    monkeypatch.setattr(
+        _avail_mod.importlib.util, "find_spec", _fake_find_spec,
+    )
+    _avail_mod._library_importable.cache_clear()
+    tools = {"text_to_speech": _td("text_to_speech")}
+    wire_availability_checks(_StubAgent(tools))
+    assert tools["text_to_speech"].is_available() is False
+    _avail_mod._library_importable.cache_clear()
 
 
 def test_speak_and_warm_kokoro_gated_on_module_presence():
