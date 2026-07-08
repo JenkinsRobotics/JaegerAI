@@ -28,12 +28,25 @@ from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
 from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 # Re-export the module's constants so existing imports keep working.
-from ...nodes.kokoro_tts import (
-    KOKORO_LANG,
-    KOKORO_SAMPLE_RATE as KOKORO_SAMPLE_RATE,
-    KOKORO_VOICE as KOKORO_VOICE,
-    KokoroTTS,
-)
+try:
+    from ...nodes.kokoro_tts import (
+        KOKORO_LANG,
+        KOKORO_SAMPLE_RATE as KOKORO_SAMPLE_RATE,
+        KOKORO_VOICE as KOKORO_VOICE,
+        KokoroTTS,
+    )
+except ImportError:
+    # 0.8 M2a: kokoro_tts module removed from this deployment. These
+    # constants are only ever read while actually synthesizing speech
+    # (``_get_tts``'s fallback branch, ``_module_default_voice``'s
+    # except branch) — paths the ``_speak_via_bus`` early-return below
+    # keeps the agent from ever reaching when the module's gone.
+    # Fallbacks mirror kokoro_tts/engine.py's own defaults so nothing
+    # downstream sees a surprising type.
+    KOKORO_LANG = "a"
+    KOKORO_SAMPLE_RATE = 24000
+    KOKORO_VOICE = "af_heart"
+    KokoroTTS = None  # type: ignore[assignment,misc]
 
 
 # How long the brain's tool waits for the TTS node to publish
@@ -170,10 +183,39 @@ def speak(text: str = "", path: str = "") -> dict[str, Any]:
     return _speak_via_bus(text)
 
 
+def _tts_module_present() -> bool:
+    """True iff the ``tts`` slot has a discovered, ready module.
+
+    0.8 M2a: lets :func:`_speak_via_bus` return immediately instead of
+    spinning up the runtime and blocking on ``bus.request`` for
+    ``_SPEAK_TIMEOUT_S`` (180 s) when kokoro_tts has been removed from
+    the deployment. Prefers the availability gate's own module-
+    readiness check (the same one that hides ``text_to_speech`` from
+    the agent) since it's already authoritative for this tool; falls
+    back to a raw slot-discovery check if that import ever fails for
+    an unrelated reason, so a broken availability module doesn't turn
+    into a false "module missing"."""
+    try:
+        from jaeger_os.agent.availability import _module_ready
+        ready = _module_ready("text_to_speech")
+        if ready is not None:
+            return ready
+    except Exception:  # noqa: BLE001 — gate import must never block speak
+        pass
+    try:
+        from jaeger_os.core.modules import discover_modules
+        return bool(discover_modules().get("tts"))
+    except Exception:  # noqa: BLE001
+        return True  # fail-open: don't block speak because discovery broke
+
+
 def _speak_via_bus(text: str) -> dict[str, Any]:
     """Publish a :class:`SpeechCommand` and block on the matching
     :class:`SpokenAck`.  Returns a dict shaped like the pre-0.4
     in-process result for backward-compatible callers."""
+    if not _tts_module_present():
+        return {"spoken": False, "reason": "no tts module installed"}
+
     from jaeger_os.transport import topics
     from jaeger_os.nodes import runtime
 

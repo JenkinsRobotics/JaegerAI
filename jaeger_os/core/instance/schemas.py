@@ -744,7 +744,20 @@ class PersonaConfig(BaseModel):
 # nested here the same way should follow the same shape: its config.py
 # imports catalog metadata from ``setting_meta.py``, never from
 # ``schemas.py`` directly.
-from jaeger_os.nodes.kokoro_tts.config import KokoroTTSConfig
+try:
+    from jaeger_os.nodes.kokoro_tts.config import KokoroTTSConfig
+except ImportError:
+    # 0.8 M2a: the kokoro_tts directory (config.py included) can be
+    # deleted entirely. This stand-in is structurally identical to the
+    # real leaf (same fields/defaults) so an existing config.yaml's
+    # ``kokoro_tts:`` block — or the default_factory below — still
+    # parses cleanly under ``extra="forbid"``; the values are inert
+    # since nothing can synthesize speech without the module present.
+    class KokoroTTSConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        voice: str = "af_heart"
+        lang: str = "a"
+        sample_rate: int = 24000
 
 
 class Config(BaseModel):
