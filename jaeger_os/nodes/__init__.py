@@ -24,7 +24,7 @@ from .base import Node, NodeState
 from .audio_session import AudioSessionNode, STTAdapter, STTNode
 from .light import LightAdapter, LightNode, SerialLightAdapter
 from .motor import MotorAdapter, MotorNode, SerialMotorAdapter
-from .tts import Synthesizer, TTSNode
+from .kokoro_tts import Synthesizer, TTSNode
 from .vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
 
 __all__ = [

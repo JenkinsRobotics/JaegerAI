@@ -1,7 +1,7 @@
 """jaeger_os.nodes.vision — the vision node package.
 
 Per-subsystem layout matching ``jaeger_os/nodes/audio_session/`` +
-``jaeger_os/nodes/tts/``.
+``jaeger_os/nodes/kokoro_tts/``.
 
 JROS philosophy on vision (operator-locked 2026-06-06):
 
