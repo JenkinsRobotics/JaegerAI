@@ -587,7 +587,7 @@ def run_wizard(
         #   • macOS + ``--audio-backend avaudio`` (default): AVAudioEngine's
         #     built-in voice-processing AEC + NS + AGC kicks in
         #     automatically when no speexdsp is wired (see
-        #     ``whisper_stt/_base.py``), so speexdsp is OPTIONAL on Mac.
+        #     ``nodes/whisper_stt/engine/_base.py``), so speexdsp is OPTIONAL on Mac.
         #   • Anywhere else (Linux + portaudio, macOS + ``--audio-backend
         #     portaudio``): speexdsp is the only AEC available; without
         #     it, mic-pause-during-TTS is the only echo defence.
