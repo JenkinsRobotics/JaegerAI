@@ -79,7 +79,10 @@ def test_setup_plugin_works_with_a_bound_layout() -> None:
         prev = None
     agent_tools.bind(InstanceLayout(root=pathlib.Path(tempfile.mkdtemp())))
     try:
-        res = setup_plugin("telegram")  # telegram declares env_required creds
+        # homeassistant declares env_required creds (HASS_TOKEN). 0.8 M3b:
+        # telegram graduated to a module.yaml-only messaging module and no
+        # longer has a plugin.yaml for setup_plugin to read.
+        res = setup_plugin("homeassistant")
         assert "error" not in res, res          # no ImportError surfaced
         assert res.get("steps") is not None, res
     finally:

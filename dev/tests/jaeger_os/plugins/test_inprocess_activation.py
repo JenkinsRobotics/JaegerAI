@@ -83,25 +83,30 @@ def test_telegram_bridge_takes_passed_token_not_env(monkeypatch) -> None:
 
 
 def test_uppercase_saved_credential_reads_as_configured(tmp_path) -> None:
-    """Regression: a credential saved UPPERCASE (TELEGRAM_BOT_TOKEN — as
+    """Regression: a credential saved UPPERCASE (HASS_TOKEN — as
     set_credential and the manifest use it) read as 'needs_credentials' because
     the status check lowercased only the lookup side, not the stored name. So a
     saved-and-working token still showed 'not configured' after a restart.
-    Case-insensitive now."""
+    Case-insensitive now.
+
+    Uses ``homeassistant`` (0.8 M3b: telegram graduated to a
+    module.yaml-only messaging module — it no longer has a plugin.yaml
+    for ``setup_plugin`` to read; homeassistant is still a real plugin
+    with an env-gated credential, same shape this regression needs)."""
     from jaeger_os.agent import tools as agent_tools
     from jaeger_os.agent.tools.plugins import setup_plugin
     from jaeger_os.core import credentials as creds
 
     layout = InstanceLayout(root=tmp_path)
-    creds.set_credential(layout, "TELEGRAM_BOT_TOKEN", "tok:val")
+    creds.set_credential(layout, "HASS_TOKEN", "tok:val")
     try:
         prev = agent_tools.get_layout()
     except Exception:  # noqa: BLE001
         prev = None
     agent_tools.bind(layout)
     try:
-        steps = " ".join(setup_plugin("telegram").get("steps", []))
-        assert "Provide credential `TELEGRAM_BOT_TOKEN`" not in steps, steps
+        steps = " ".join(setup_plugin("homeassistant").get("steps", []))
+        assert "Provide credential `HASS_TOKEN`" not in steps, steps
     finally:
         if prev is not None:
             agent_tools.bind(prev)
