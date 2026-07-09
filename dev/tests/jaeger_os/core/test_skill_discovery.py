@@ -15,7 +15,6 @@ from pathlib import Path
 from jaeger_os.agent.skill_registry.playbook_skills import (
     PlaybookSkill,
     _current_platform,
-    _format_skill_index,
     _normalize_platforms,
     _platform_ok,
     _select_available,
@@ -80,23 +79,7 @@ def test_select_available_drops_wrong_platform_and_disabled():
     assert names == {"keep", "local"}
 
 
-# ── compact skill index ──────────────────────────────────────────────
 
-
-def test_format_skill_index_groups_by_category():
-    skills = [
-        _skill("drive-the-mac", category="mac"),
-        _skill("take-a-screenshot", category="mac"),
-        _skill("inspect-a-codebase", category="code"),
-    ]
-    index = _format_skill_index(skills)
-    assert "- code: inspect-a-codebase" in index
-    assert "- mac: drive-the-mac, take-a-screenshot" in index
-    assert "skill(" in index  # tells the model how to use one
-
-
-def test_format_skill_index_is_empty_for_no_skills():
-    assert _format_skill_index([]) == ""
 
 
 # ── integration with the real bundled skills ─────────────────────────

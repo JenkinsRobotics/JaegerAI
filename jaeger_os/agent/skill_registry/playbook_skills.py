@@ -281,36 +281,6 @@ def available_playbooks(
                              available_tools)
 
 
-_SKILL_INDEX_MAX_CHARS = 1400
-_SKILL_INDEX_TRUNCATE_SUFFIX = "\n…(more — use skill search)"
-
-
-def _format_skill_index(skills: list[PlaybookSkill]) -> str:
-    """Render a compact, prompt-ready index of ``skills`` — grouped by
-    category, names only. Empty string for an empty list.
-
-    The total output (body + truncation suffix) is hard-capped at
-    :data:`_SKILL_INDEX_MAX_CHARS`. Earlier the cap was applied to
-    the body alone, so the suffix pushed the actual prompt section
-    above the budget; we reserve the suffix's length up front."""
-    if not skills:
-        return ""
-    by_cat: dict[str, list[str]] = {}
-    for s in skills:
-        by_cat.setdefault(s.category, []).append(s.name)
-    lines = [
-        "Skill library — experienced playbooks for non-trivial tasks. Call "
-        'skill(action="view", name="…") to follow one, or '
-        'skill(action="search", query="…") to find one:',
-    ]
-    for cat in sorted(by_cat):
-        lines.append(f"- {cat}: {', '.join(sorted(by_cat[cat]))}")
-    text = "\n".join(lines)
-    if len(text) > _SKILL_INDEX_MAX_CHARS:
-        budget = _SKILL_INDEX_MAX_CHARS - len(_SKILL_INDEX_TRUNCATE_SUFFIX)
-        text = text[:budget].rstrip() + _SKILL_INDEX_TRUNCATE_SUFFIX
-    return text
-
 
 def _short_function(desc: str) -> str:
     """A 3-8 word 'what it does' for the always-on skill menu — first
