@@ -121,6 +121,24 @@ def _instance_root(boot: Any) -> Any:
     return getattr(getattr(boot, "layout", None), "root", None)
 
 
+def _suggested_name(instance: str | None) -> str | None:
+    """The operator-pinned instance name to hand onboarding as a
+    ``suggested_name``, or None when there's nothing real to suggest.
+
+    ``instance`` is whatever ``main()`` resolved to boot/attach against —
+    an explicit CLI pin (``./jaeger agent create lilith`` → argv[0]) OR
+    the generic ``default_instance_name()`` fallback, and the two are
+    indistinguishable once they reach here (``_launch_swift_app`` pins
+    ``JAEGER_INSTANCE_NAME`` unconditionally — see main.py:3610). The
+    literal ``"default"`` is that fallback's own conjured placeholder
+    (never a name an operator typed), so it's the one value filtered
+    out — everything else (an explicit CLI name, or a sticky default
+    from a prior ``jaeger instance use``) is a real name worth
+    prefilling."""
+    name = (instance or "").strip()
+    return name if name and name != "default" else None
+
+
 def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
     from jaeger_os.personality.character import layer_items
     stats: list[dict[str, Any]] = []
@@ -672,7 +690,9 @@ def main(argv: list[str] | None = None) -> int:
                "first-run setup required")
         ctx.boot_error = msg
         _emit(proto, protocol.agent_state_frame("failed", error=msg))
-        _emit(proto, protocol.fatal_frame(msg, kind="no_instance"))
+        _emit(proto, protocol.fatal_frame(
+            msg, kind="no_instance",
+            suggested_name=_suggested_name(instance)))
         ctx.booted.set()
     else:
         _emit(proto, protocol.agent_state_frame("booting"))

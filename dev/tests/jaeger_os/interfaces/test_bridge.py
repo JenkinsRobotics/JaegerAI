@@ -136,8 +136,16 @@ class _SlowStdin:
 
 
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
-         boot_delay=0.0, run_fn=None, stdin_delay=0.0):
-    """Drive ``bridge.main`` with faked deps; return parsed stdout frames."""
+         boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
+         default_name="test-inst"):
+    """Drive ``bridge.main`` with faked deps; return parsed stdout frames.
+
+    ``argv`` mirrors what the Swift shell passes on the ``jaeger bridge``
+    command line (``["lilith"]`` when ``JAEGER_INSTANCE_NAME`` is pinned
+    non-empty); ``default_name`` is what a bareword launch's
+    ``default_instance_name()`` resolves to when no explicit argv is
+    given — real installs return the literal ``"default"`` here on a
+    genuinely fresh box."""
     boot = _FakeBoot()
 
     def fake_boot(*, instance_name, **kwargs):
@@ -163,14 +171,14 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
                         raising=False)
     monkeypatch.setattr(
         "jaeger_os.core.instance.instance.default_instance_name",
-        lambda: "test-inst", raising=False,
+        lambda: default_name, raising=False,
     )
 
     proto = io.StringIO()
     monkeypatch.setattr("sys.stdout", proto)
     monkeypatch.setattr("sys.stdin", _SlowStdin(stdin_text, stdin_delay))
 
-    rc = bridge.main(argv=[])
+    rc = bridge.main(argv=argv if argv is not None else [])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
     return rc, frames, boot
 
@@ -298,6 +306,39 @@ def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path
     assert "first-run setup required" in frames[1]["error"]
     assert frames[2]["kind"] == "no_instance"
     assert rc == 1
+
+
+def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
+        monkeypatch, tmp_path):
+    """``./jaeger agent create lilith`` pins the operator-typed name onto
+    the ``jaeger bridge`` argv (mirroring ``JAEGER_INSTANCE_NAME`` — see
+    main.py's ``_launch_swift_app``). The no_instance fatal frame must
+    surface it as ``suggested_name`` so onboarding can default the
+    identity field to it instead of orphaning it behind whatever
+    character gets picked."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
+                         boot_exc=AssertionError("boot must not run"),
+                         argv=["lilith"])
+    fatal = next(f for f in frames if f["type"] == "fatal")
+    assert fatal["kind"] == "no_instance"
+    assert fatal["suggested_name"] == "lilith"
+
+
+def test_no_instance_fatal_omits_suggested_name_for_generic_default(
+        monkeypatch, tmp_path):
+    """No explicit CLI name → the resolver's generic ``"default"``
+    fallback (a fresh box, no sticky, no env pin) must NOT leak into
+    onboarding as a suggestion — that would wrongly override the
+    character-name default the identity step is supposed to fall back
+    to."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
+                         boot_exc=AssertionError("boot must not run"),
+                         default_name="default")
+    fatal = next(f for f in frames if f["type"] == "fatal")
+    assert fatal["kind"] == "no_instance"
+    assert "suggested_name" not in fatal
 
 
 def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
@@ -761,6 +802,14 @@ def test_fixture_frames_match_builders():
     assert frames["fatal_no_instance"] == protocol.fatal_frame(
         "no instance named 'default' exists yet — first-run setup required",
         kind="no_instance")
+    # v1 additive suggested_name — omitted by default (fixture above stays
+    # byte-identical), present only when the bridge has a real operator
+    # pin to hand onboarding.
+    assert "suggested_name" not in protocol.fatal_frame(
+        "x", kind="no_instance")
+    assert frames["fatal_no_instance_suggested"] == protocol.fatal_frame(
+        "no instance named 'lilith' exists yet — first-run setup required",
+        kind="no_instance", suggested_name="lilith")
     assert frames["bye"] == protocol.bye_frame()
     # v1 additive: the settings_set result carries restart_required in data.
     assert frames["result_settings_set"] == protocol.result_frame(
