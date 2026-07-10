@@ -88,7 +88,11 @@ enum ProtocolFrame {
                elapsedS: Double?, ctxUsed: Int?, ctxMax: Int?)
     case result(id: String, ok: Bool, error: String?, data: Data?)
     case request(BridgeRequest)
-    case fatal(error: String, kind: String)
+    /// ``suggestedName`` is a v1 ADDITIVE optional (nil when the core
+    /// omits it, or on an older core) — the operator's CLI-pinned agent
+    /// name, sent alongside ``kind="no_instance"`` so onboarding can
+    /// default the identity step to it.
+    case fatal(error: String, kind: String, suggestedName: String?)
     case bye
 
     static func decode(_ frame: Data) -> ProtocolFrame? {
@@ -151,7 +155,8 @@ enum ProtocolFrame {
                 options: obj["options"] as? [String] ?? []))
         case "fatal":
             return .fatal(error: obj["error"] as? String ?? "bridge failed",
-                          kind: obj["kind"] as? String ?? "boot")
+                          kind: obj["kind"] as? String ?? "boot",
+                          suggestedName: obj["suggested_name"] as? String)
         case "bye":
             return .bye
         default:

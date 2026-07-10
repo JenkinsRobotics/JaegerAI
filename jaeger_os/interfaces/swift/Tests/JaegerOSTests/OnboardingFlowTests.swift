@@ -84,6 +84,61 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertEqual(a.role, "impeccably polite AI butler")
     }
 
+    // MARK: name precedence — pin > character preset; user edit > both
+    // (the lilith/anakin bug: the CLI's pinned name must survive a
+    // character pick instead of being silently clobbered).
+
+    func testCliPinWinsOverCharacterPreset() {
+        var a = OnboardingAnswers()
+        a.pinnedName = "lilith"
+        a.displayName = "lilith"          // seeded from suggested_name
+        a.select(characterId: "anakin_skywalker", name: "Anakin Skywalker",
+                 role: "fallen jedi")
+        XCTAssertEqual(a.displayName, "lilith",
+                       "a CLI pin must survive a character pick")
+        XCTAssertEqual(a.characterId, "anakin_skywalker")   // persona still applies
+    }
+
+    func testUserEditWinsOverALaterCharacterPick() {
+        var a = OnboardingAnswers()
+        a.select(characterId: "jarvis", name: "Jarvis", role: "butler")
+        a.displayName = "Ted"
+        a.displayNameEdited = true        // the IdentityStep binding sets this
+        a.select(characterId: "hal9000", name: "HAL 9000", role: "sentient computer")
+        XCTAssertEqual(a.displayName, "Ted",
+                       "an operator's own edit must survive re-picking a character")
+    }
+
+    func testCharacterPresetStillFillsAnUntouchedUnpinnedField() {
+        var a = OnboardingAnswers()
+        a.select(characterId: "jarvis", name: "Jarvis", role: "butler")
+        XCTAssertEqual(a.displayName, "Jarvis")
+        // Browsing to a different card before typing anything follows the
+        // latest pick — this is the ordinary (no pin, no edit) path.
+        a.select(characterId: "hal9000", name: "HAL 9000", role: "sentient computer")
+        XCTAssertEqual(a.displayName, "HAL 9000")
+    }
+
+    func testCommandArgsSendsPinnedNameVerbatim() {
+        var a = OnboardingAnswers()
+        a.pinnedName = "lilith"
+        a.select(characterId: "anakin_skywalker", name: "Anakin Skywalker",
+                 role: "fallen jedi")
+        let args = a.commandArgs()
+        XCTAssertEqual(args["name"], "lilith")
+        XCTAssertEqual(args["character_id"], "anakin_skywalker")
+    }
+
+    func testCommandArgsOmitNameWhenNoPin() {
+        var a = OnboardingAnswers()
+        a.select(characterId: "anakin_skywalker", name: "Anakin Skywalker",
+                 role: "fallen jedi")
+        let args = a.commandArgs()
+        XCTAssertNil(args["name"],
+                    "no pin: the server slugs the dir from display_name")
+        XCTAssertEqual(args["display_name"], "Anakin Skywalker")
+    }
+
     // MARK: payload decoding
 
     func testSetupDefaultsDecodesBridgeShape() throws {
