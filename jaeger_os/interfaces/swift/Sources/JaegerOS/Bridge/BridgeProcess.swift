@@ -121,7 +121,10 @@ actor BridgeProcess {
     /// Fired for every ``fatal`` frame with its ``kind`` — the transport
     /// may STAY alive after one (kind ``no_instance``: first-run, the
     /// bridge keeps serving queries so onboarding can run over it).
-    var onFatal: (@Sendable (_ kind: String, _ error: String) -> Void)?
+    /// ``suggestedName`` (v1 additive) rides ``no_instance`` — the
+    /// operator's CLI-pinned agent name, or nil.
+    var onFatal: (@Sendable (_ kind: String, _ error: String,
+                             _ suggestedName: String?) -> Void)?
     /// Fired once when the child exits. ``clean`` = a ``bye`` frame was
     /// seen (orderly); false = crash/kill.
     var onTermination: (@Sendable (_ clean: Bool) -> Void)?
@@ -130,7 +133,7 @@ actor BridgeProcess {
     func setOnTool(_ cb: @escaping @Sendable (String, String, Double, String?) -> Void) { onTool = cb }
     func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
     func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
-    func setOnFatal(_ cb: @escaping @Sendable (String, String) -> Void) { onFatal = cb }
+    func setOnFatal(_ cb: @escaping @Sendable (String, String, String?) -> Void) { onFatal = cb }
     func setOnTermination(_ cb: @escaping @Sendable (Bool) -> Void) { onTermination = cb }
 
     // MARK: - Queries / commands
@@ -355,12 +358,12 @@ actor BridgeProcess {
                 replyCont = nil
             case .request(let r):
                 onRequest?(r)
-            case .fatal(let error, let kind):
+            case .fatal(let error, let kind, let suggestedName):
                 let err: BridgeError = kind == "locked"
                     ? .locked(error) : .bootFailed(error)
                 readyCont?.resume(throwing: err)
                 readyCont = nil
-                onFatal?(kind, error)
+                onFatal?(kind, error, suggestedName)
                 onAgentState?(.failed(error))
                 replyCont?.resume(returning: TurnResult(text: "", error: error))
                 replyCont = nil

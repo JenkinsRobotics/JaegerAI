@@ -143,8 +143,11 @@ final class AgentBridge: ObservableObject {
         await proc.setOnRequest { [weak self] request in
             Task { @MainActor in self?.handleRequest(request) }
         }
-        await proc.setOnFatal { [weak self] kind, error in
-            Task { @MainActor in self?.handleFatal(kind: kind, error: error) }
+        await proc.setOnFatal { [weak self] kind, error, suggestedName in
+            Task { @MainActor in
+                self?.handleFatal(kind: kind, error: error,
+                                  suggestedName: suggestedName)
+            }
         }
         await proc.setOnTermination { [weak self] clean in
             Task { @MainActor in self?.handleTermination(clean: clean) }
@@ -295,11 +298,17 @@ final class AgentBridge: ObservableObject {
     /// Route ``fatal`` frames by kind. ``no_instance`` is FIRST-RUN, not
     /// an error: the bridge transport stays alive for setup queries, so
     /// present the onboarding window instead of a failure surface.
-    private func handleFatal(kind: String, error: String) {
+    /// ``suggestedName`` (v1 additive) is the operator's CLI-pinned agent
+    /// name (``./jaeger agent create lilith``) — handed straight to
+    /// onboarding so the identity step defaults to it instead of
+    /// silently orphaning it behind whatever character gets picked.
+    private func handleFatal(kind: String, error: String,
+                             suggestedName: String?) {
         guard kind == "no_instance" else { return }
         needsOnboarding = true
         NSLog("[Bridge] no instance on disk — presenting onboarding")
-        OnboardingWindowController.shared.show(agent: self)
+        OnboardingWindowController.shared.show(agent: self,
+                                               suggestedName: suggestedName)
     }
 
     /// Onboarding finished (instance created + agent booted): clear the

@@ -152,22 +152,32 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(req.kind, "approval")
         XCTAssertEqual(req.options, ["allow", "deny"])
 
-        guard case .fatal(_, let kind) = try decode("fatal_locked") else {
+        guard case .fatal(_, let kind, _) = try decode("fatal_locked") else {
             return XCTFail("fatal_locked")
         }
         XCTAssertEqual(kind, "locked")
-        guard case .fatal(_, let bootKind) = try decode("fatal_boot") else {
+        guard case .fatal(_, let bootKind, _) = try decode("fatal_boot") else {
             return XCTFail("fatal_boot")
         }
         XCTAssertEqual(bootKind, "boot")
         // v1 additive: first-run — no instance on disk yet. The shell
         // routes this kind to onboarding instead of a generic error.
-        guard case .fatal(let noInstErr, let noInstKind) =
+        guard case .fatal(let noInstErr, let noInstKind, let noSuggested) =
                 try decode("fatal_no_instance") else {
             return XCTFail("fatal_no_instance")
         }
         XCTAssertEqual(noInstKind, "no_instance")
         XCTAssertTrue(noInstErr.contains("first-run"))
+        XCTAssertNil(noSuggested)   // additive key absent from this fixture
+
+        // v1 additive: the operator's CLI-pinned agent name rides the SAME
+        // fatal frame — onboarding defaults the identity step to it.
+        guard case .fatal(_, let pinnedKind, let suggested) =
+                try decode("fatal_no_instance_suggested") else {
+            return XCTFail("fatal_no_instance_suggested")
+        }
+        XCTAssertEqual(pinnedKind, "no_instance")
+        XCTAssertEqual(suggested, "lilith")
 
         guard case .bye = try decode("bye") else { return XCTFail("bye") }
     }
