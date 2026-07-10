@@ -9,7 +9,7 @@ faster on the transport hot path AND native MessagePack support
 for the binary topics (audio frames, vision frames).  Pydantic
 stays in JROS for config validation + tool schemas where its
 richer ecosystem earns the overhead; transport schemas live where
-microseconds matter.  See ``dev/docs/ROADMAP_0.4.md`` open question
+microseconds matter.  See ``dev/docs/history/ROADMAP_0.4.md`` open question
 #2 (resolved): JSON for text topics, MessagePack for binary topics.
 
 Namespace
@@ -319,7 +319,7 @@ SENSE_NODE_HEALTH = "/sense/node_health"
 
 class EStop(TopicMessage):
     """System e-stop — L2 of the hardware safety contract (see
-    dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md §2.8). Publishing with
+    dev/docs/hardware/JROS_HARDWARE_FRAMEWORK_PLAN.md §2.8). Publishing with
     ``engaged=True`` LATCHES the stop: every hardware node in the
     package's ``safety.estop_scope`` executes its node-local stop on
     receipt, and motion capabilities refuse while latched. Release
@@ -459,7 +459,7 @@ class TimelineCommand(TopicMessage):
     speech tracks, etc.) extract their relevant track and schedule
     its events.
 
-    See dev/docs/0.5.0_timeline_schema.md for the schema."""
+    See dev/docs/avatar/0.5.0_timeline_schema.md for the schema."""
     topic: Literal["/act/timeline"] = ACT_TIMELINE
     name: str = ""                # named timeline from instance dir; "" → inline
     timeline_json: str = ""       # serialised when inline
@@ -493,7 +493,7 @@ class XpAwarded(TopicMessage):
     Subscribers: the skill_tree registry (which persists state), and
     eventual visualisation surfaces.
 
-    See dev/docs/SKILL_TREE.md for the XP-progression contract."""
+    See dev/docs/skills/SKILL_TREE.md for the XP-progression contract."""
     topic: Literal["/sense/xp_awarded"] = SENSE_XP_AWARDED
     skill_id: str = ""
     amount: int = 0
