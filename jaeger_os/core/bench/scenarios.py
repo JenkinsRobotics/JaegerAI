@@ -1295,8 +1295,23 @@ def build_hermetic_instance(source_dir: Path,
     if src_dist.is_file():
         shutil.copy2(src_dist, layout.root / "distribution.yaml")
 
-    # Fresh manifest — unbound character so no live persona is dragged in.
-    dump_json(layout.manifest_path, Manifest(instance_name="scenario-tmp"))
+    # Fresh manifest, bound to lilith (persona.mode now defaults to
+    # persona_first — Mode C, 2026-07-10 gate): a bound character is the
+    # realistic default-instance shape, not the free-swap-dev-box unbound
+    # state this used to seed. config.yaml is copied verbatim from
+    # source_dir above, so persona.mode inherits whatever the SOURCE
+    # instance has configured (its own default or override) — nothing
+    # forced here. NOTE: drive_one_turn (this suite's turn driver, see
+    # _run_scenario/_drive_turn in dev/benchmark/scenarios.py) is
+    # persona-free by construction regardless of this binding — assemble.py
+    # deliberately omits any character/persona fragment from the worker
+    # system prompt, and the Mode-C lane only runs inside main.py's
+    # _run_turn_via_jaeger_agent, which this suite never calls. Binding a
+    # character here is necessary but NOT sufficient to exercise
+    # persona_lane.py's own prompt/tool surface — see
+    # dev/docs/roadmap/PERSONA_MODE_C_BUILD_PLAN.md Task 2 item 4.
+    dump_json(layout.manifest_path,
+              Manifest(instance_name="scenario-tmp", bound_character="lilith"))
 
     _git_init_quiet(layout.root)
     return HermeticInstance(root=root, instance_dir=inst, source_dir=source_dir)

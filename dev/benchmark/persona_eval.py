@@ -11,21 +11,21 @@ instance uses, 24 fixed prompts driven through the live turn dispatcher
 
 Three things it measures:
 
-  1. DELEGATION GATE (hard): the 12 task prompts, mode=agent_tool,
+  1. DELEGATION GATE (hard): the 12 task prompts, mode=persona_first,
      character=lilith, must ALL delegate (perform_task called). Detected
      via ``_pipeline["persona_lane_last_delegated"]`` — the smallest
      honest observable hook added in jaeger_os/main.py for this eval
      (see the comment at its call site in ``_run_turn_via_jaeger_agent``).
   2. Chat over-delegation (report, not gated): the same 12 chat/creative
      prompts under the same mode+character — target <=3/12 delegate.
-  3. Latency: the 12 chat prompts run twice — once in mode=agent_tool
-     (the id lane's own aux-context turns) and once in mode=output_filter
+  3. Latency: the 12 chat prompts run twice — once in mode=persona_first
+     (the id lane's own aux-context turns) and once in mode=persona_last
      (today's Mode A) — so the operator can see whether Mode C's chat
      path is at least as fast as Mode A's.
 
 A fourth run (distinctness) is NOT gated — it drives the same 12 chat
 prompts through lilith / eren_yeager / glados / no-character (mode=
-agent_tool throughout; "no-character" monkeypatches
+persona_first throughout; "no-character" monkeypatches
 ``jaeger_os.personality.character.active_character`` to return None for
 that one batch, which is the only way to get a genuinely persona-less
 turn — the character loader always falls back to a default id otherwise)
@@ -263,15 +263,15 @@ def _drive(prompt: str, *, tag: str) -> dict:
         "error": out.get("error"),
         "elapsed_s": out.get("elapsed_s", wall),
         "tool_activity": out.get("tool_activity") or [],
-        "delegated": delegated,  # True / False / None (mode wasn't agent_tool, or no character)
+        "delegated": delegated,  # True / False / None (mode wasn't persona_first, or no character)
     }
 
 
 # ── phases ───────────────────────────────────────────────────────────
 
 
-def _phase_agent_tool(source_config, *, warmup: bool, gate_only: bool = False) -> dict:
-    """ONE boot, mode=agent_tool: delegation-gate task+chat rows for
+def _phase_persona_first(source_config, *, warmup: bool, gate_only: bool = False) -> dict:
+    """ONE boot, mode=persona_first: delegation-gate task+chat rows for
     lilith, plus the 3 remaining distinctness columns (chat prompts
     only) -- minimizes model loads (the expensive part) to one per mode
     instead of one per character.
@@ -281,12 +281,12 @@ def _phase_agent_tool(source_config, *, warmup: bool, gate_only: bool = False) -
     the delegation gate + over-delegation number actually need. For
     fast iteration on the lane's prompt contract (this phase alone is
     ~24 turns instead of ~60)."""
-    layout, note_path, boot = _boot("agent_tool", source_config=source_config,
+    layout, note_path, boot = _boot("persona_first", source_config=source_config,
                                      warmup=warmup)
     rows = {"task": {}, "chat": {}}  # chat: {character_label: {pid: row}}
     try:
         _set_character(layout, "lilith")
-        print("=== [agent_tool] lilith -- task prompts (delegation gate) ===", flush=True)
+        print("=== [persona_first] lilith -- task prompts (delegation gate) ===", flush=True)
         for pid, template in TASK_PROMPTS:
             prompt = template.format(note=note_path)
             row = _drive(prompt, tag=f"task-{pid}")
@@ -298,7 +298,7 @@ def _phase_agent_tool(source_config, *, warmup: bool, gate_only: bool = False) -
         for label in labels:
             _set_character(layout, label)
             col = label or "no-character"
-            print(f"=== [agent_tool] {col} -- chat prompts ===", flush=True)
+            print(f"=== [persona_first] {col} -- chat prompts ===", flush=True)
             rows["chat"].setdefault(col, {})
             for pid, prompt in CHAT_PROMPTS:
                 row = _drive(prompt, tag=f"chat-{col}-{pid}")
@@ -311,16 +311,16 @@ def _phase_agent_tool(source_config, *, warmup: bool, gate_only: bool = False) -
     return rows
 
 
-def _phase_output_filter(source_config, *, warmup: bool) -> dict:
-    """Mode A (output_filter), lilith, the SAME 12 chat prompts -- the
+def _phase_persona_last(source_config, *, warmup: bool) -> dict:
+    """Mode A (persona_last), lilith, the SAME 12 chat prompts -- the
     latency baseline Mode C's id-lane chat turns are compared against."""
-    layout, _note_path, boot = _boot("output_filter", source_config=source_config,
+    layout, _note_path, boot = _boot("persona_last", source_config=source_config,
                                       warmup=warmup)
     rows = {}
     try:
         from jaeger_os.personality.character import set_active_character
         set_active_character(layout.root, "lilith")
-        print("=== [output_filter] lilith -- chat prompts (latency baseline) ===", flush=True)
+        print("=== [persona_last] lilith -- chat prompts (latency baseline) ===", flush=True)
         for pid, prompt in CHAT_PROMPTS:
             row = _drive(prompt, tag=f"modeA-{pid}")
             rows[pid] = row
@@ -373,7 +373,7 @@ def _write_distinctness_sheet(agent_rows: dict, ts: str) -> pathlib.Path:
         f"# Persona distinctness sheet ({ts})",
         "",
         "Same 12 chat/creative prompts through 4 persona conditions, all "
-        "mode=agent_tool (\"no-character\" monkeypatches "
+        "mode=persona_first (\"no-character\" monkeypatches "
         "`active_character()` to None for a genuinely plain turn -- see "
         "persona_eval.py's `_set_character`). For operator eyeball: do "
         "lilith / eren_yeager / glados actually sound different from each "
@@ -412,7 +412,7 @@ def main() -> int:
     p.add_argument("--no-warmup", action="store_true",
                    help="Skip the llama-cpp prewarm pass on each boot.")
     p.add_argument("--gate-only", action="store_true",
-                   help="Just the 12 task + 12 lilith-chat agent_tool prompts "
+                   help="Just the 12 task + 12 lilith-chat persona_first prompts "
                         "(delegation gate + over-delegation number). Skips the "
                         "eren_yeager/glados/no-character distinctness columns, "
                         "the Mode-A latency baseline, the routing bench, and "
@@ -427,13 +427,13 @@ def main() -> int:
     print(f"=== persona_eval: model={model_path} ctx={source_config.model.ctx} "
          f"ts={ts} gate_only={args.gate_only} ===", flush=True)
 
-    agent_rows = _phase_agent_tool(source_config, warmup=warmup, gate_only=args.gate_only)
+    agent_rows = _phase_persona_first(source_config, warmup=warmup, gate_only=args.gate_only)
     if args.gate_only:
         modeA_rows: dict = {}
         bench_result = {"passed": None, "total": None, "returncode": None,
                          "summary_path": None, "skipped": "gate-only"}
     else:
-        modeA_rows = _phase_output_filter(source_config, warmup=warmup)
+        modeA_rows = _phase_persona_last(source_config, warmup=warmup)
         bench_result = _run_bench(no_warmup=args.no_warmup)
 
     # ── delegation gate ──
@@ -457,7 +457,7 @@ def main() -> int:
 
     out_dir = _REPO / "dev/benchmark/results" / "persona_eval" / ts
     out_dir.mkdir(parents=True, exist_ok=True)
-    raw = {"agent_tool": agent_rows, "output_filter": modeA_rows,
+    raw = {"persona_first": agent_rows, "persona_last": modeA_rows,
            "bench": bench_result}
     (out_dir / f"persona_eval-{ts}-rows.jsonl").write_text(
         json.dumps(raw, default=str, ensure_ascii=False), encoding="utf-8")
@@ -468,8 +468,8 @@ def main() -> int:
                              "total": task_total},
         "chat_over_delegation": {"delegated": chat_deleg, "total": chat_total,
                                   "target_max": 3},
-        "latency_s": {"mode_agent_tool_lilith_chat_avg": round(modeC_avg, 3),
-                       "mode_output_filter_lilith_chat_avg": round(modeA_avg, 3),
+        "latency_s": {"mode_persona_first_lilith_chat_avg": round(modeC_avg, 3),
+                       "mode_persona_last_lilith_chat_avg": round(modeA_avg, 3),
                        "c_lte_a": modeC_avg <= modeA_avg},
         "bench": bench_result,
     }
@@ -484,12 +484,12 @@ def main() -> int:
     print(f"chat over-delegation (lilith): {chat_deleg}/{chat_total} "
          f"(target <=3)", flush=True)
     if args.gate_only:
-        print(f"latency avg -- mode C (agent_tool) chat: {modeC_avg:.2f}s  "
+        print(f"latency avg -- mode C (persona_first) chat: {modeC_avg:.2f}s  "
              f"(mode A baseline skipped -- --gate-only)", flush=True)
         print("bench: skipped -- --gate-only", flush=True)
     else:
-        print(f"latency avg -- mode C (agent_tool) chat: {modeC_avg:.2f}s  "
-             f"mode A (output_filter) chat: {modeA_avg:.2f}s", flush=True)
+        print(f"latency avg -- mode C (persona_first) chat: {modeC_avg:.2f}s  "
+             f"mode A (persona_last) chat: {modeA_avg:.2f}s", flush=True)
         print(f"bench: {bench_result['passed']}/{bench_result['total']}", flush=True)
     print(f"distinctness sheet: {sheet_path}", flush=True)
     print(f"summary: {out_dir}", flush=True)

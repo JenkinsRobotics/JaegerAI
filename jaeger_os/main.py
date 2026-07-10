@@ -1950,18 +1950,21 @@ def _apply_persona_filter(answer: str) -> str:
 
 def _persona_mode() -> str:
     """Mode C switch (design: dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md).
-    Config default is ``"output_filter"`` (today's Station-3 path, byte-
-    identical behaviour). ``JAEGER_PERSONA_MODE`` overrides the config in
-    EITHER direction — force ``agent_tool`` on for an A/B session without
-    touching config.yaml, or force ``output_filter`` off a misbehaving
-    default — read fresh every turn so a live toggle needs no restart.
-    An unrecognised override value is ignored (falls back to config)
-    rather than raising: a typo'd env var must never break a turn."""
+    Config default is ``"persona_first"`` (Mode C, the id/ego lane — DEFAULT
+    as of the 2026-07-10 gate). ``"persona_last"`` is the old Station-3
+    output-filter path (formerly named ``output_filter``; the old
+    ``agent_tool`` name is now ``persona_first`` — pre-1.0 rename, no shim).
+    ``JAEGER_PERSONA_MODE`` overrides the config in EITHER direction — force
+    ``persona_last`` off a misbehaving default, or force ``persona_first``
+    on for an A/B session without touching config.yaml — read fresh every
+    turn so a live toggle needs no restart. An unrecognised override value
+    is ignored (falls back to config) rather than raising: a typo'd env var
+    must never break a turn."""
     config = _pipeline.get("config")
     pconf = getattr(config, "persona", None) if config is not None else None
-    mode = getattr(pconf, "mode", "output_filter") or "output_filter"
+    mode = getattr(pconf, "mode", "persona_first") or "persona_first"
     override = os.environ.get("JAEGER_PERSONA_MODE", "").strip()
-    if override in ("output_filter", "agent_tool"):
+    if override in ("persona_first", "persona_last"):
         return override
     return mode
 
@@ -2478,20 +2481,20 @@ def _run_turn_via_jaeger_agent(
 
         # Persona Mode C (design: dev/docs/roadmap/PERSONA_PIPELINE_ABC_
         # DESIGN.md) — the id/ego lane, BEFORE drive_one_turn. Mode is
-        # config-default "output_filter" (this branch is a no-op then,
-        # byte-identical to pre-Mode-C behaviour). bench and
-        # delegate_task's sub-agent (main.py:1104-1130) call
-        # drive_one_turn directly and never reach this function at all,
-        # so the routing engine stays measured persona-off regardless of
-        # this instance's persona.mode.
+        # config-default "persona_first" (Mode C, DEFAULT as of the
+        # 2026-07-10 gate). bench and delegate_task's sub-agent
+        # (main.py:1104-1130) call drive_one_turn directly and never
+        # reach this function at all, so the routing engine stays
+        # measured persona-off regardless of this instance's persona.mode.
         result = None
         # The lane's own client.chat() calls run UN-LOCKED (design: they
         # must never contend for llm_lock with a live drive_one_turn).
         # That's only safe on a client whose aux lane is actually up —
         # otherwise its chat() silently falls back to the shared WORKER
         # context llm_lock exists to serialize. No aux lane this turn →
-        # skip Mode C entirely and fall through to the locked Mode-A path.
-        if _persona_mode() == "agent_tool" and _persona_lane_aux_available(client):
+        # skip Mode C entirely and fall through to the locked persona_last
+        # path.
+        if _persona_mode() == "persona_first" and _persona_lane_aux_available(client):
             from jaeger_os.personality.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
