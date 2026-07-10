@@ -1892,6 +1892,35 @@ def _preflight_log() -> None:
 _jaeger_agents_by_session: dict[str, Any] = {}
 
 
+def _persona_agent_name(layout: Any) -> str:
+    """The instance's OWN name (identity.yaml), independent of whichever
+    character is active. Best-effort: an unreadable identity file yields
+    ``""`` (the framing that follows just gets skipped, never a crash)."""
+    try:
+        from jaeger_os.core.instance.schemas import Identity, load_yaml
+        return (load_yaml(layout.identity_path, Identity).name or "").strip()
+    except Exception:  # noqa: BLE001 — framing is optional, the voice isn't
+        return ""
+
+
+def _persona_identity_block(agent_name: str, character: Any) -> str:
+    """Identity vs character framing (operator decision, 2026-07-05): the
+    character supplies the PERSONA, never the agent's name — the name is
+    identity.yaml's, set at instance creation ("a robot like Jarvis, but
+    I will name him Ted"). Shared by Station 3's output filter and the
+    Mode-C persona lane so every voice in the system introduces itself
+    the same way."""
+    block = character.character_block()
+    if agent_name and agent_name.lower() != character.name.lower():
+        block = (
+            f"Your name is {agent_name}. You embody the persona and "
+            f"mannerisms of {character.name} — but YOUR name stays "
+            f"{agent_name}; never present yourself as {character.name}.\n\n"
+            + block
+        )
+    return block
+
+
 def _apply_persona_filter(answer: str) -> str:
     """Station 3 (dev/docs/reality/agentic_runners.md): restyle the final answer in
     the active character's voice via ONE bounded clean-context call.
@@ -1910,31 +1939,138 @@ def _apply_persona_filter(answer: str) -> str:
         character = active_character(layout.root)
         if character is None:
             return answer
-        block = character.character_block()
-        # Identity vs character (operator decision, 2026-07-05): the
-        # character supplies the PERSONA, never the agent's name — the
-        # name is identity.yaml's, set at instance creation ("a robot
-        # like Jarvis, but I will name him Ted"). Frame the filter
-        # context so the rewrite embodies the character's voice without
-        # claiming the character's name as its own.
-        try:
-            from jaeger_os.core.instance.schemas import Identity, load_yaml
-            agent_name = (load_yaml(layout.identity_path, Identity).name or "").strip()
-        except Exception:  # noqa: BLE001 — framing is optional, the voice isn't
-            agent_name = ""
-        if agent_name and agent_name.lower() != character.name.lower():
-            block = (
-                f"Your name is {agent_name}. You embody the persona and "
-                f"mannerisms of {character.name} — but YOUR name stays "
-                f"{agent_name}; never present yourself as {character.name}.\n\n"
-                + block
-            )
+        block = _persona_identity_block(_persona_agent_name(layout), character)
         from jaeger_os.agent.prompts.persona_filter import apply_persona_voice
         return apply_persona_voice(
             client, answer, block, max_chars=pconf.max_chars,
         )
     except Exception:  # noqa: BLE001 — voice is optional, the answer is not
         return answer
+
+
+def _persona_mode() -> str:
+    """Mode C switch (design: dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md).
+    Config default is ``"output_filter"`` (today's Station-3 path, byte-
+    identical behaviour). ``JAEGER_PERSONA_MODE`` overrides the config in
+    EITHER direction — force ``agent_tool`` on for an A/B session without
+    touching config.yaml, or force ``output_filter`` off a misbehaving
+    default — read fresh every turn so a live toggle needs no restart.
+    An unrecognised override value is ignored (falls back to config)
+    rather than raising: a typo'd env var must never break a turn."""
+    config = _pipeline.get("config")
+    pconf = getattr(config, "persona", None) if config is not None else None
+    mode = getattr(pconf, "mode", "output_filter") or "output_filter"
+    override = os.environ.get("JAEGER_PERSONA_MODE", "").strip()
+    if override in ("output_filter", "agent_tool"):
+        return override
+    return mode
+
+
+def _persona_lane_turn_result(
+    persona_text: str,
+    inner_result: dict[str, Any] | None,
+    *,
+    started: float,
+) -> dict[str, Any]:
+    """Assemble the same dict shape :func:`drive_one_turn` returns, so the
+    logging/report code in :func:`_run_turn_via_jaeger_agent` (below)
+    doesn't need to know whether Mode C ran. ``persona_text`` — the id's
+    in-character reply — always wins for ``answer``. When ``inner_result``
+    is present (``perform_task`` delegated), its tool/iteration/token
+    bookkeeping carries through unchanged for the trace and latency log;
+    a tool-free turn (the id answered directly, the clean agent never
+    ran) synthesizes empty bookkeeping. ``elapsed_s`` is always
+    recomputed from ``started`` — the turn-level clock — since it must
+    cover the id's own aux calls too, not just an inner delegated turn."""
+    elapsed = time.perf_counter() - started
+    if inner_result is not None:
+        merged = dict(inner_result)
+        merged["answer"] = persona_text
+        merged["skipped"] = False
+        merged["elapsed_s"] = elapsed
+        return merged
+    return {
+        "answer": persona_text, "tool_activity": [], "first_decision": None,
+        "elapsed_s": elapsed, "skipped": False, "halt_reason": None,
+        "iterations": 0, "new_messages": [], "prompt_tokens": 0,
+        "completion_tokens": 0, "ttft_s": 0.0,
+    }
+
+
+def _run_persona_lane_turn(
+    client: Any,
+    jaeger_agent: Any,
+    user_text: str,
+    character: Any,
+    lock: Any,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Mode C glue. Builds the id's system prompt + bounded history, then
+    hands :func:`~jaeger_os.agent.prompts.persona_lane.run_persona_turn` a
+    ``perform_task`` closure — a closure over the SAME per-session
+    ``jaeger_agent`` and the SAME ``llm_lock`` discipline the plain path
+    (and :func:`delegate_task`, main.py:1104-1130) already use, so inner
+    tool chips stream through the existing ``AgentCallbacks`` event path
+    unchanged; nothing new to wire.
+
+    Fail-open: any failure before or during the lane call returns
+    ``(None, None)`` so the caller falls straight through to today's
+    ``drive_one_turn`` + Mode-A filter path — Mode C never produces a
+    dead turn.
+
+    Returns ``(persona_text, inner_result)``. ``inner_result`` is the raw
+    :func:`drive_one_turn` dict IF AND ONLY IF ``perform_task`` ran (the
+    turn delegated); ``None`` means the id answered directly and the
+    clean agent's loop never executed this turn — the exact invariant
+    ``run_persona_turn`` documents and the tests in
+    ``dev/tests/jaeger_os/agent/test_persona_lane.py`` assert: once
+    ``perform_task`` has been called, ``persona_text`` is never ``None``.
+    """
+    try:
+        from jaeger_os.agent.loop.runtime_bridge import drive_one_turn
+        from jaeger_os.agent.prompts.persona_lane import run_persona_turn
+
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return None, None
+        block = _persona_identity_block(_persona_agent_name(layout), character)
+
+        inner_box: list[dict[str, Any]] = []
+
+        def perform_task(request: str) -> str:
+            # Recursion is structurally impossible, not merely policed:
+            # this calls drive_one_turn directly, never back through
+            # _run_turn_via_jaeger_agent or the persona lane — there is
+            # no path for the ego to re-enter the id.
+            if lock is not None:
+                with lock:
+                    inner = drive_one_turn(jaeger_agent, request)
+            else:
+                inner = drive_one_turn(jaeger_agent, request)
+            inner_box.append(inner)
+            return str(inner.get("answer") or "").strip()
+
+        history = list(jaeger_agent.messages)
+        persona_text = run_persona_turn(
+            client, user_text,
+            character_block=block, agent_name=_persona_agent_name(layout),
+            history=history, perform_task=perform_task,
+        )
+        inner_result = inner_box[0] if inner_box else None
+        # A delegated turn already gets this exchange recorded — drive_
+        # one_turn appends the user + assistant messages to jaeger_agent.
+        # messages itself (JaegerAgent.run_turn's own bookkeeping). A
+        # tool-free turn never touches the clean agent's loop at all, so
+        # without this the session history would silently skip every
+        # id-answered-directly turn — breaking both the NEXT Mode-C
+        # turn's history (read from this same list, above) and a later
+        # switch back to Mode A mid-session. Record it the same shape
+        # drive_one_turn would have.
+        if inner_result is None and persona_text is not None:
+            jaeger_agent.messages.append({"role": "user", "content": user_text})
+            jaeger_agent.messages.append({"role": "assistant", "content": persona_text})
+        return persona_text, inner_result
+    except Exception:  # noqa: BLE001 — the lane is optional, the turn is not
+        return None, None
 
 
 def _ensure_session_agent(client: Any, session_key: str) -> Any:
@@ -2227,17 +2363,43 @@ def _run_turn_via_jaeger_agent(
     _pipeline["turn_tool_time"] = 0.0
     from jaeger_os.agent import trace as _trace
     _trace.trace_begin(key, user_text)
+    persona_handled = False
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
         _context.set_current_session(key)    # same, for tools that live in tools/
         _refresh_character_prompt(jaeger_agent)
         _tag_confirm_session(key)   # route a mid-turn approval to this channel
-        if lock is not None:
-            with lock:
+
+        # Persona Mode C (design: dev/docs/roadmap/PERSONA_PIPELINE_ABC_
+        # DESIGN.md) — the id/ego lane, BEFORE drive_one_turn. Mode is
+        # config-default "output_filter" (this branch is a no-op then,
+        # byte-identical to pre-Mode-C behaviour). bench and
+        # delegate_task's sub-agent (main.py:1104-1130) call
+        # drive_one_turn directly and never reach this function at all,
+        # so the routing engine stays measured persona-off regardless of
+        # this instance's persona.mode.
+        result = None
+        if _persona_mode() == "agent_tool":
+            from jaeger_os.personality.character import active_character
+            layout = _pipeline.get("layout")
+            character = active_character(layout.root) if layout is not None else None
+            if character is not None:
+                persona_text, inner_result = _run_persona_lane_turn(
+                    client, jaeger_agent, user_text, character, lock,
+                )
+                if persona_text is not None:
+                    result = _persona_lane_turn_result(
+                        persona_text, inner_result, started=started,
+                    )
+                    persona_handled = True
+
+        if result is None:
+            if lock is not None:
+                with lock:
+                    result = drive_one_turn(jaeger_agent, user_text)
+            else:
                 result = drive_one_turn(jaeger_agent, user_text)
-        else:
-            result = drive_one_turn(jaeger_agent, user_text)
     except Exception as exc:  # noqa: BLE001 — match legacy crash surface
         elapsed = time.perf_counter() - started
         report = LatencyReport(elapsed, 0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -2269,7 +2431,10 @@ def _run_turn_via_jaeger_agent(
     # delegate_task sub-agents drive the loop directly and never pass
     # through, so the engine is always measured persona-off. Skip-final
     # deterministic answers stay instant. Fail-open by construction.
-    if answer and not skipped:
+    # ``persona_handled`` is Mode C's own voice — the id already composed
+    # (or deliberately passed through raw) the answer above, so Station 3
+    # must not restyle it a second time.
+    if answer and not skipped and not persona_handled:
         answer = _apply_persona_filter(answer)
 
     # Tool time we can fill — summed from the ``tool_progress("done")``
@@ -2569,6 +2734,13 @@ class _ChatResult:
     text: str
     latency_s: float
     ttft_s: float = 0.0
+    # Raw ``choices[0].message.tool_calls`` (OpenAI shape: ``[{"id", "type":
+    # "function", "function": {"name", "arguments"}}]``) when the caller
+    # passed ``tools=`` and the model emitted a native call — ``[]``
+    # otherwise. Added for the Mode C persona lane (persona_lane.py), the
+    # first ``chat()`` caller that needs to see tool decisions rather than
+    # only the answer text.
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
 
 
@@ -2718,8 +2890,12 @@ class LlamaCppPythonClient:
         else:
             completion = llm.create_chat_completion(**kwargs)
         elapsed = time.perf_counter() - started
-        text = completion["choices"][0]["message"].get("content") or ""
-        return _ChatResult(text=text.strip(), latency_s=elapsed)
+        message = completion["choices"][0]["message"]
+        text = message.get("content") or ""
+        return _ChatResult(
+            text=text.strip(), latency_s=elapsed,
+            tool_calls=list(message.get("tool_calls") or []),
+        )
 
 
 def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:

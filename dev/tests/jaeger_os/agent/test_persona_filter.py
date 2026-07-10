@@ -78,6 +78,11 @@ def test_config_schema_has_persona_section():
     from jaeger_os.core.instance.schemas import Config, PersonaConfig
     pc = PersonaConfig()
     assert pc.output_filter is True and pc.max_chars == 1600
+    # Mode C (dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md) default —
+    # today's Station-3 path stays default-off-for-agent_tool, i.e. this
+    # module's behaviour above is byte-identical until an instance opts
+    # in via config or JAEGER_PERSONA_MODE.
+    assert pc.mode == "output_filter"
     assert Config.model_fields["persona"].default_factory is PersonaConfig
 
 

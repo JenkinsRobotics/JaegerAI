@@ -47,10 +47,11 @@ def test_group_output_is_page_ordered(layout):
     # model leads, interaction trails the NAMED eight-group page order —
     # spill-over groups an engine-module contributes (0.8 M1: "kokoro_tts"
     # nested at Config.kokoro_tts; 0.8 M2b: "whisper_stt" nested at
-    # Config.whisper_stt) sort alphabetically after it, per GROUP_ORDER's
-    # own "eight spec groups, then any spill-over" contract.
+    # Config.whisper_stt; persona Mode C: "persona" at Config.persona.mode)
+    # sort alphabetically after it, per GROUP_ORDER's own "eight spec
+    # groups, then any spill-over" contract.
     assert order.index("model") < order.index("display") < order.index("voice")
-    spillover = {"kokoro_tts", "whisper_stt"}
+    spillover = {"kokoro_tts", "whisper_stt", "persona"}
     named_order = [g for g in order if g not in spillover]
     assert named_order.index("interaction") == len(named_order) - 1
     assert "kokoro_tts" in order
@@ -58,7 +59,7 @@ def test_group_output_is_page_ordered(layout):
     assert order.index("kokoro_tts") > order.index("interaction")
     assert order.index("whisper_stt") > order.index("interaction")
     # alphabetical among the spill-over groups themselves
-    assert order.index("kokoro_tts") < order.index("whisper_stt")
+    assert order.index("kokoro_tts") < order.index("persona") < order.index("whisper_stt")
 
 
 def test_kokoro_tts_engine_module_group_is_live(layout):
