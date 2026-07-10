@@ -7,7 +7,7 @@ player (``engine.py`` / ``persistent_player.py``), its own settings-
 catalog config slice (``config.py``, nested at ``Config.kokoro_tts``),
 and its ``module.yaml`` manifest (module/slot/version/consumes/produces/
 tools/factory/config — the seam a future module-loader/discovery layer
-reads; see ``dev/docs/JROS_0.8_M1_KOKORO_TTS_PLAN.md`` Task 2).
+reads; see ``dev/docs/history/JROS_0.8_M1_KOKORO_TTS_PLAN.md`` Task 2).
 
 Folded in from ``jaeger_os/nodes/tts/`` (the generic node) and
 ``jaeger_os/plugins/kokoro_tts/`` (the Kokoro engine) — no back-compat
