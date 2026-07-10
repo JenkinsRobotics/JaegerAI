@@ -10,8 +10,10 @@ dev/tests/jaeger_os/agent/test_persona_lane.py. This file covers the
 main.py-side wiring: mode resolution (config default + env override in
 both directions), the shared identity framing, and the
 ``_run_persona_lane_turn`` / ``_persona_lane_turn_result`` glue —
-including the regression pin that mode="output_filter" (today's default)
-never reaches the Mode-C branch and the structural invariant that
+including the regression pin that mode="persona_last" (the explicit
+Station-3-only path) never reaches the Mode-C branch, the fail-safe pin
+that mode="persona_first" (today's default) with NO active character
+behaves identically to persona_last, and the structural invariant that
 ``perform_task`` (== drive_one_turn) never runs twice for one turn.
 """
 
@@ -49,15 +51,15 @@ def _reset_pipeline_config():
 # ── config default ────────────────────────────────────────────────────
 
 
-def test_persona_config_mode_defaults_to_output_filter():
+def test_persona_config_mode_defaults_to_persona_first():
     pc = PersonaConfig()
-    assert pc.mode == "output_filter"
+    assert pc.mode == "persona_first"
     assert Config.model_fields["persona"].default_factory is PersonaConfig
 
 
 def test_persona_config_rejects_frontend_mode():
     """Mode B (frontend) is design-only until built — no spec ahead of
-    code. Only output_filter / agent_tool are valid today."""
+    code. Only persona_last / persona_first are valid today."""
     with pytest.raises(Exception):
         PersonaConfig(mode="frontend")
 
@@ -67,37 +69,37 @@ def test_persona_config_rejects_frontend_mode():
 
 def test_persona_mode_reads_config_default():
     _pipeline["config"] = SimpleNamespace(persona=PersonaConfig())
-    assert _persona_mode() == "output_filter"
+    assert _persona_mode() == "persona_first"
 
 
-def test_persona_mode_reads_config_agent_tool():
-    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="agent_tool"))
-    assert _persona_mode() == "agent_tool"
+def test_persona_mode_reads_config_persona_first():
+    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="persona_first"))
+    assert _persona_mode() == "persona_first"
 
 
-def test_persona_mode_missing_config_falls_back_to_output_filter():
+def test_persona_mode_missing_config_falls_back_to_persona_first():
     _pipeline["config"] = None
-    assert _persona_mode() == "output_filter"
+    assert _persona_mode() == "persona_first"
     _pipeline["config"] = SimpleNamespace()  # no .persona attr at all
-    assert _persona_mode() == "output_filter"
+    assert _persona_mode() == "persona_first"
 
 
-def test_persona_mode_env_override_forces_agent_tool_on(monkeypatch):
-    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig())  # default output_filter
-    monkeypatch.setenv("JAEGER_PERSONA_MODE", "agent_tool")
-    assert _persona_mode() == "agent_tool"
+def test_persona_mode_env_override_forces_persona_first_on(monkeypatch):
+    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="persona_last"))
+    monkeypatch.setenv("JAEGER_PERSONA_MODE", "persona_first")
+    assert _persona_mode() == "persona_first"
 
 
-def test_persona_mode_env_override_forces_output_filter_off(monkeypatch):
-    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="agent_tool"))
-    monkeypatch.setenv("JAEGER_PERSONA_MODE", "output_filter")
-    assert _persona_mode() == "output_filter"
+def test_persona_mode_env_override_forces_persona_last_off(monkeypatch):
+    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="persona_first"))
+    monkeypatch.setenv("JAEGER_PERSONA_MODE", "persona_last")
+    assert _persona_mode() == "persona_last"
 
 
 def test_persona_mode_env_garbage_value_ignored(monkeypatch):
-    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="agent_tool"))
+    _pipeline["config"] = SimpleNamespace(persona=PersonaConfig(mode="persona_first"))
     monkeypatch.setenv("JAEGER_PERSONA_MODE", "not_a_real_mode")
-    assert _persona_mode() == "agent_tool"  # falls back to config, not a crash
+    assert _persona_mode() == "persona_first"  # falls back to config, not a crash
 
 
 # ── shared identity framing (Station 3 + Mode C reuse the same text) ──
@@ -550,7 +552,7 @@ def test_persona_lane_turn_result_delegated_carries_inner_bookkeeping():
     assert out["elapsed_s"] != 999.0  # recomputed from the turn-level clock, not the inner call's
 
 
-# ── _run_turn_via_jaeger_agent: mode=output_filter default-off pin ───
+# ── _run_turn_via_jaeger_agent: mode=persona_last default-off pin ───
 
 
 class _FakeExternalClient:
@@ -568,16 +570,16 @@ class _FakeExternalClient:
         self._api_key = "fake-key"
 
 
-def test_run_turn_via_jaeger_agent_output_filter_mode_runs_once_no_lane(
+def test_run_turn_via_jaeger_agent_persona_last_mode_runs_once_no_lane(
     monkeypatch, tmp_path,
 ):
-    """Behavioral default-off pin: with persona.mode="output_filter" (the
-    config default), a turn through the FULL _run_turn_via_jaeger_agent
-    must call drive_one_turn exactly once, apply the persona output
-    filter (Station 3) to the answer, and never touch the Mode-C lane
-    (_run_persona_lane_turn) at all — the Mode-C branch condition must
-    short-circuit on ``_persona_mode() != "agent_tool"`` before it
-    reaches ``_persona_lane_aux_available`` or the lane glue."""
+    """Behavioral pin: with persona.mode="persona_last" (explicit —
+    persona_first is now the config default), a turn through the FULL
+    _run_turn_via_jaeger_agent must call drive_one_turn exactly once, apply
+    the persona output filter (Station 3) to the answer, and never touch
+    the Mode-C lane (_run_persona_lane_turn) at all — the Mode-C branch
+    condition must short-circuit on ``_persona_mode() != "persona_first"``
+    before it reaches ``_persona_lane_aux_available`` or the lane glue."""
     import jaeger_os.main as main_mod
     from jaeger_os.agent import tools as agent_tools
 
@@ -588,7 +590,7 @@ def test_run_turn_via_jaeger_agent_output_filter_mode_runs_once_no_lane(
     config = Config(
         instance_name="t", model=ModelConfig(model_path="/dev/null"),
         skills=SkillsConfig(run_smoke_tests=False),
-        persona=PersonaConfig(),  # mode="output_filter" — today's default
+        persona=PersonaConfig(mode="persona_last"),  # explicit — no longer the default
     )
     monkeypatch.setitem(_pipeline, "layout", layout)
     monkeypatch.setitem(_pipeline, "config", config)
@@ -646,4 +648,94 @@ def test_run_turn_via_jaeger_agent_output_filter_mode_runs_once_no_lane(
     assert drive_calls[0][1] == "hello there"
     assert filter_calls == ["the plain agent answer"]  # Station 3 applied
     assert result["text"] == "FILTERED: the plain agent answer"
-    assert lane_calls == []  # Mode-C lane never invoked in output_filter mode
+    assert lane_calls == []  # Mode-C lane never invoked in persona_last mode
+
+
+def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe(
+    monkeypatch, tmp_path,
+):
+    """Fail-safe pin (persona_first is now the config DEFAULT): an instance
+    with NO active character must behave EXACTLY like persona_last — the
+    branch's own ``if character is not None`` guard (main.py, inside
+    ``_run_turn_via_jaeger_agent``) is what makes this safe, verified here
+    end to end rather than trusted by inspection. drive_one_turn runs
+    exactly once, the Mode-C lane is never invoked (no closure is even
+    built), and Station 3's output filter — a no-op without a character —
+    leaves the answer untouched."""
+    import jaeger_os.main as main_mod
+    import jaeger_os.personality.character as character_mod
+    from jaeger_os.agent import tools as agent_tools
+
+    layout = InstanceLayout(root=tmp_path / "inst")
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    agent_tools.bind(layout)  # jaeger_tools._audit needs a bound layout
+    config = Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null"),
+        skills=SkillsConfig(run_smoke_tests=False),
+        persona=PersonaConfig(),  # mode="persona_first" — today's default
+    )
+    monkeypatch.setitem(_pipeline, "layout", layout)
+    monkeypatch.setitem(_pipeline, "config", config)
+    monkeypatch.setitem(_pipeline, "client", None)
+    monkeypatch.setitem(_pipeline, "llm_lock", None)
+    monkeypatch.setitem(_pipeline, "thinking_runner", None)
+    # Genuinely no character (active_character_id() otherwise always
+    # resolves to a default id — see persona_eval.py's `_set_character`
+    # for the same pattern).
+    monkeypatch.setattr(character_mod, "active_character", lambda root: None)
+    _agent_cache.clear()
+    _jaeger_agents_by_session.clear()
+
+    client = _FakeExternalClient()
+    # aux lane reports available so the ONLY thing stopping the lane is
+    # the character check, not this precondition.
+    monkeypatch.setattr(main_mod, "_persona_lane_aux_available", lambda client: True)
+
+    drive_calls: list[tuple[object, str]] = []
+
+    def _fake_drive_one_turn(agent, text):
+        drive_calls.append((agent, text))
+        return {
+            "answer": "the plain agent answer", "tool_activity": [],
+            "first_decision": None, "elapsed_s": 0.01, "skipped": False,
+            "halt_reason": None, "iterations": 1, "new_messages": [],
+            "prompt_tokens": 0, "completion_tokens": 0, "ttft_s": 0.0,
+        }
+
+    monkeypatch.setattr(
+        "jaeger_os.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+    )
+
+    filter_calls: list[str] = []
+
+    def _fake_apply_persona_filter(answer: str) -> str:
+        filter_calls.append(answer)
+        return f"FILTERED: {answer}"
+
+    monkeypatch.setattr(main_mod, "_apply_persona_filter", _fake_apply_persona_filter)
+
+    lane_calls: list[str] = []
+
+    def _fake_run_persona_lane_turn(client, jaeger_agent, user_text, character, lock):
+        lane_calls.append(user_text)
+        return None, None
+
+    monkeypatch.setattr(
+        main_mod, "_run_persona_lane_turn", _fake_run_persona_lane_turn,
+    )
+
+    try:
+        result = _run_turn_via_jaeger_agent(
+            client, "hello there", session_key="test-persona-first-no-character",
+        )
+    finally:
+        _agent_cache.clear()
+        _jaeger_agents_by_session.pop("test-persona-first-no-character", None)
+
+    assert drive_calls != []
+    assert len(drive_calls) == 1  # drive_one_turn called exactly once
+    assert drive_calls[0][1] == "hello there"
+    assert filter_calls == ["the plain agent answer"]  # Station 3 still runs (no-ops without a character)
+    assert result["text"] == "FILTERED: the plain agent answer"
+    assert lane_calls == []  # lane closure never built — the character-None guard short-circuits first

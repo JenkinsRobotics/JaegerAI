@@ -4,6 +4,13 @@
 > canonical: id = persona lane · ego = clean agent (the id's ONE tool) ·
 > superego = permission/e-stop gates. The id never touches reality directly.
 
+> **STATUS UPDATE:** shipped and now DEFAULT. Config literals renamed
+> pre-1.0 (no shim): `output_filter` → `persona_last`, `agent_tool` →
+> `persona_first`. Mode B ("frontend") is DEAD — never built. Read
+> `agent_tool` below as `persona_first` and `output_filter` as
+> `persona_last`; the rest of this document is left as the historical
+> build record.
+
 **Verified seams (Mode-C recon):** ONE chokepoint — `_apply_persona_filter`'s
 sole call site is main.py:2273 inside `_run_turn_via_jaeger_agent`
 (main.py:2207); ALL surfaces (TUI, bridge/Swift via run_for_voice, voice_loop,

@@ -5,6 +5,15 @@
 > Config: `persona.mode: output_filter | frontend | agent_tool` (A default).
 > Reversible knob per instance; A stays default until B/C pass every gate.
 
+> **STATUS UPDATE (2026-07-10, post-gate):** Mode B was never built — DEAD,
+> superseded by C's approval before B's implementation started. Mode C
+> shipped and passed its gates (delegation 12/12, security-lane regression
+> check) and is now the DEFAULT pipeline. The config literals were renamed
+> pre-1.0 (no shim) for operator-legible settings-page naming:
+> `output_filter` → `persona_last`, `agent_tool` → `persona_first`. The rest
+> of this document is left as the historical design record — read "A" as
+> `persona_last` and "C"/`agent_tool` as `persona_first` throughout.
+
 ## The problem being solved
 
 The clean agent generates content persona-off; Station-3 restyles it. For
@@ -20,7 +29,7 @@ exit" to "the voice that answers," without touching the agentic engine.
 user → clean agent (tools, persona-off) → answer → Station-3 restyle
 (content-survival guard). Known ceiling: creative content is generic.
 
-## Mode B — persona frontend (answer-or-delegate)
+## Mode B — persona frontend — DEAD, superseded by C before build; kept for the record
 
 user → persona model (in character, with chat context), instructed: answer
 directly UNLESS the turn needs tools/facts/actions/multi-step work — then

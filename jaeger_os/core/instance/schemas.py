@@ -705,19 +705,23 @@ class PersonaConfig(BaseModel):
     # canonized 2026-07-10): "the id and the ego" — the persona model runs
     # as a minimal agent with ONE tool (``perform_task``) and decides per
     # turn whether to answer in character or delegate to the clean agent.
-    # Experimental + default-off; do NOT add "frontend" (Mode B) here
-    # until it's built (no spec ahead of code). ``JAEGER_PERSONA_MODE``
-    # overrides this in either direction (jaeger_os/main.py:_persona_mode).
-    mode: Literal["output_filter", "agent_tool"] = Field(
-        "output_filter",
+    # DEFAULT as of the 2026-07-10 gate (delegation 12/12, security lane
+    # regression-checked — see PERSONA_MODE_C_BUILD_PLAN.md). Mode B
+    # ("frontend") is DEAD — superseded by C before it was ever built; the
+    # design doc keeps it for the record but no code implements it.
+    # ``JAEGER_PERSONA_MODE`` overrides this in either direction
+    # (jaeger_os/main.py:_persona_mode). Renamed from output_filter/
+    # agent_tool to persona_last/persona_first (pre-1.0, no shim — see
+    # feedback-no-back-compat-pre-1.0) so the settings page can show
+    # operator-legible names instead of internal Mode A/C jargon.
+    mode: Literal["persona_first", "persona_last"] = Field(
+        "persona_first",
         json_schema_extra=_setting("persona"),
-        description="output_filter (default): today's Station-3 path — "
-                    "workers execute vanilla, the character restyles the "
-                    "FINAL answer only. agent_tool (Mode C, experimental): "
-                    "the persona model decides per turn, via one tool call, "
-                    "whether to answer as itself or delegate the turn to "
-                    "the clean agent. JAEGER_PERSONA_MODE env overrides "
-                    "this either direction.",
+        description='Pipeline: "persona_first" — your character answers '
+                    "directly and calls the task engine as its tool (fast, "
+                    "in-character conversation; recommended). "
+                    '"persona_last" — the task engine answers plainly and '
+                    "the character re-styles the result.",
     )
 
 
