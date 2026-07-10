@@ -34,7 +34,18 @@ guard applies to the compose).
   the failure mode. The delegate rule must be aggressively conservative
   ("any fact, any action, any doubt → delegate").
 
-## Mode C — the clean agent IS the persona's tool (operator's pick to try)
+## Mode C — the clean agent IS the persona's tool (operator's pick; APPROVED 2026-07-10)
+
+**The id and the ego (operator's framing — the best explanation of this mode):**
+the persona lane is the id — desire, voice, character; it wants to answer
+everything itself. The clean agent is the ego — the reality principle; tool
+calls are literally reality-testing. The permission tiers / e-stop / fail-
+closed gates are the superego, saying no regardless of what either wants.
+The safety property in one line: **the id never touches reality directly** —
+Lilith cannot assert the time, she must go through the ego, which checks.
+(Every hallucination is an id answering a reality question.) Same seam as
+Mind-Body-Soul one level down: the Soul doesn't drive motors; the expressive
+self doesn't fabricate facts.
 
 The persona model runs as a minimal agent with exactly ONE tool:
 
