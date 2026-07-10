@@ -701,6 +701,24 @@ class PersonaConfig(BaseModel):
                     "doubles latency where it hurts most. 0 disables "
                     "styling entirely.",
     )
+    # Mode C (dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md, operator-
+    # canonized 2026-07-10): "the id and the ego" — the persona model runs
+    # as a minimal agent with ONE tool (``perform_task``) and decides per
+    # turn whether to answer in character or delegate to the clean agent.
+    # Experimental + default-off; do NOT add "frontend" (Mode B) here
+    # until it's built (no spec ahead of code). ``JAEGER_PERSONA_MODE``
+    # overrides this in either direction (jaeger_os/main.py:_persona_mode).
+    mode: Literal["output_filter", "agent_tool"] = Field(
+        "output_filter",
+        json_schema_extra=_setting("persona"),
+        description="output_filter (default): today's Station-3 path — "
+                    "workers execute vanilla, the character restyles the "
+                    "FINAL answer only. agent_tool (Mode C, experimental): "
+                    "the persona model decides per turn, via one tool call, "
+                    "whether to answer as itself or delegate the turn to "
+                    "the clean agent. JAEGER_PERSONA_MODE env overrides "
+                    "this either direction.",
+    )
 
 
 # 0.8 M1: kokoro_tts is the first "engine-module" — its config model
