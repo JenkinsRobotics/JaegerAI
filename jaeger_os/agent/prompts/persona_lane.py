@@ -15,15 +15,27 @@ Lilith cannot assert the time — she must go through the ego, which checks.
 Every hallucination is an id answering a reality question it should have
 delegated instead.
 
-``run_persona_turn`` is the whole mechanism: native function-calling
+``run_persona_turn`` is the whole mechanism: a TEXT-dialect tool call
 decides — call ``perform_task`` (the full clean agentic loop: persona-off,
 every tool, the hardened prompt) or answer as the character. Delegation is
 a TOOL CALL, not a prose classifier — the same decision shape the routing
-bench measures, and the mechanism local models handle best. When it
-delegates, the id composes the final reply from the tool's raw result,
-guarded by the SAME content-survival check Station 3 (``persona_filter.
-py``) uses for its restyle pass — imported, not duplicated, so "restyled"
-never means "replaced."
+bench measures. The decision is driven the same way the main loop drives
+every other text-dialect family (:mod:`jaeger_os.agent.dialects.chatml`):
+the tool schema is spelled out in the system prompt and the FIRST aux call
+is plain chat with no structured ``tools=`` kwarg, because the aux lane's
+raw ``client.chat()`` (main.py's ``LlamaCppPythonClient.chat`` — a
+different, lighter client than the worker's ``LocalLlamaAdapter``) has no
+family-aware salvage of a malformed structured emission: the 20260710
+gate caught gemma answering ``list_files`` with the bare, unwrapped text
+``perform_task{request:<|"|>List contents...<|"|>}`` instead of a
+populated ``tool_calls`` field, and neither the native path nor
+``extract_tool_calls`` recognised that shape (see ``_perform_task_
+fallback`` below). Native ``tool_calls`` parsing stays wired as a bonus
+path in :func:`_decide` in case a future client populates it, but the
+text dialect is primary. When it delegates, the id composes the final
+reply from the tool's raw result, guarded by the SAME content-survival
+check Station 3 (``persona_filter.py``) uses for its restyle pass —
+imported, not duplicated, so "restyled" never means "replaced."
 
 Recursion is structurally impossible here, not merely policed: the
 ``perform_task`` closure (built by the caller, main.py's
@@ -44,11 +56,13 @@ silently discarding it — the turn must never run twice.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
-from jaeger_os.agent.dialects import extract_tool_calls
+from jaeger_os.agent.dialects import _shared, extract_tool_calls
+from jaeger_os.agent.dialects.chatml import render_tools as _render_chatml_tools
 from jaeger_os.agent.prompts.persona_filter import _preserves_content
 from jaeger_os.agent.schemas.tool_schema import ToolDef
 
@@ -84,15 +98,35 @@ PERFORM_TASK_SPEC = ToolDef(
 # character block. Deliberately blunt ("any doubt -> use it"): the whole
 # safety property of Mode C rests on the id under-trusting itself, and a
 # soft instruction here is exactly the failure mode the design doc calls
-# out ("what time is it" answered from vibes).
+# out ("what time is it" answered from vibes). The 20260710 gate (5/12)
+# showed the two ways "blunt" wasn't blunt enough: the character's own
+# "ask incisive questions" trait beat a soft delegation instruction on
+# search_memory/node_health/weather/schedules/speak, and calc got
+# answered from vibes despite "any computation" already being listed —
+# so this now names the failure modes explicitly and forbids clarifying
+# questions outright (perform_task's own agent resolves ambiguity).
 LANE_CONTRACT = (
-    "You have ONE tool: perform_task. Any fact, any action, any device, "
-    "any file, any schedule, any message, any computation, or any doubt "
-    "at all -> call perform_task with the user's request. You are not the "
-    "one who touches reality; that tool is. Otherwise — a genuine chat, "
-    "opinion, joke, or creative turn with nothing to check — answer as "
-    "yourself, briefly, in character."
+    "You have ONE tool: perform_task. If the request involves ANY "
+    "action, lookup, computation, data, device, file, schedule, "
+    "message, or system state: call perform_task FIRST, passing the "
+    "user's request verbatim. Never answer such a request from memory, "
+    "never do arithmetic or research yourself, and NEVER ask a "
+    "clarifying question before delegating — perform_task's agent "
+    "resolves ambiguity, not you. You are not the one who touches "
+    "reality; that tool is. Only pure conversation with nothing to "
+    "check — feelings, opinions, stories, jokes, comfort, banter — is "
+    "answered directly, briefly, in character."
 )
+
+# The tool catalogue itself, rendered in the SAME text dialect the main
+# loop uses for every text-driven family (chatml/Hermes — see
+# jaeger_os.agent.dialects.chatml and adapters/local_llama.py's
+# format_messages). Reused verbatim rather than reinvented: this is the
+# one tool-presentation renderer proven across the bench, and
+# extract_tool_calls already parses its ``<tool_call>{...}</tool_call>``
+# envelope through jaeger_os.agent.dialects.chatml.extract_envelope
+# regardless of which family emitted it.
+LANE_TOOLS_BLOCK = _render_chatml_tools([PERFORM_TASK_SPEC])
 
 # Compose-pass instruction: turn the tool's raw (persona-off) answer into
 # the id's own voice without touching its substance. Mirrors persona_
@@ -144,15 +178,70 @@ def _budget_history(
     return turns
 
 
+# Last-resort salvage for a BARE ``perform_task{...}`` / ``perform_task(...)``
+# emission with no dialect envelope at all — no ``<tool_call>...</tool_call>``,
+# no ``<|tool_call>call:...<tool_call|>``, nothing. This is the exact shape
+# the 20260710 gate caught (list_files): the model emitted
+# ``perform_task{request:<|"|>List contents...<|"|>}`` as plain content, and
+# no real dialect matches it because every one of them requires SOME
+# envelope around the call. A general-purpose parser can't safely guess an
+# argument NAME for an arbitrary tool, but this lane has exactly ONE tool
+# with exactly ONE string argument — so "the text after perform_task( / {
+# up to the matching closer, whatever key it's under (or no key at all),
+# IS the request" is a safe bet here. Kept as the ABSOLUTE last resort,
+# behind both native tool_calls and every real dialect in extract_tool_calls
+# — a well-formed emission never reaches this.
+_BARE_PERFORM_TASK = re.compile(r"\bperform_task\s*([\{\(])", re.IGNORECASE)
+
+
+def _perform_task_fallback(text: str) -> dict[str, Any] | None:
+    """Lenient, perform_task-ONLY salvage of a bare ``name{...}``/
+    ``name(...)`` call with no envelope. See the module-level comment
+    above :data:`_BARE_PERFORM_TASK` for why this narrow parser is safe
+    (one tool, one string arg) where a general dialect parser can't be."""
+    match = _BARE_PERFORM_TASK.search(text or "")
+    if not match:
+        return None
+    opener = match.group(1)
+    closer = "}" if opener == "{" else ")"
+    tail = text[match.end():]
+    end = tail.rfind(closer)
+    body = (tail[:end] if end != -1 else tail).strip()
+    if not body:
+        return None
+    # Brace args use ``key: value`` (parse_gemma_args); paren args use
+    # Python-style ``key=value`` (parse_paren_args) — the same split
+    # gemma.py's own NATIVE_PATTERNS use for its two brace/paren forms.
+    args = (
+        _shared.parse_paren_args(body) if opener == "("
+        else _shared.parse_gemma_args(body)
+    )
+    request = args.get("request")
+    if isinstance(request, str) and request.strip():
+        return {"request": request.strip()}
+    if not args:
+        # No recognisable ``key: value`` structure at all — the model
+        # wrote the request as a bare, unkeyed string. Strip Gemma's
+        # quote tokens / real quotes and use it whole.
+        cleaned = _shared.degemma_quotes(body).strip().strip("\"'").strip()
+        if cleaned:
+            return {"request": cleaned}
+    return None
+
+
 def _decide(result: Any) -> dict[str, Any] | None:
     """Extract ``perform_task``'s arguments from an aux ``chat()`` result.
 
-    Native ``tool_calls`` first — the structured path llama-cpp's handler
-    fills for tools-aware families (Gemma among them, per the recon: the
-    aux lane already sends ``tools=``/``tool_choice='auto'``). The text-
-    dialect drift parser (:func:`extract_tool_calls`) second, for models
-    that emit the call as text instead. Returns ``None`` when neither
-    surfaces a ``perform_task`` call — the id answered directly."""
+    Native ``tool_calls`` first — a bonus path kept for a client that
+    populates it even though the lane no longer sends ``tools=`` on the
+    first call (see the module docstring). The text-dialect drift parser
+    (:func:`extract_tool_calls`) is the PRIMARY path — the lane's system
+    prompt spells out the chatml ``<tool_call>{...}</tool_call>`` envelope
+    (:data:`LANE_TOOLS_BLOCK`) and this is what reads it back. Finally,
+    :func:`_perform_task_fallback` catches a bare, envelope-free emission
+    of ``perform_task`` specifically — the malformed shape the 20260710
+    gate caught. Returns ``None`` when nothing surfaces a ``perform_task``
+    call — the id answered directly."""
     for tc in (getattr(result, "tool_calls", None) or []):
         fn = (tc or {}).get("function") or {}
         if fn.get("name") != PERFORM_TASK_SPEC.name:
@@ -166,10 +255,11 @@ def _decide(result: Any) -> dict[str, Any] | None:
         if isinstance(raw_args, dict):
             return raw_args
         return {}
-    for call in extract_tool_calls(getattr(result, "text", "") or ""):
+    text = getattr(result, "text", "") or ""
+    for call in extract_tool_calls(text):
         if call.get("name") == PERFORM_TASK_SPEC.name:
             return call.get("arguments") or {}
-    return None
+    return _perform_task_fallback(text)
 
 
 def run_persona_turn(
@@ -196,7 +286,7 @@ def run_persona_turn(
     if not text or not block:
         return None
 
-    system = block + "\n\n" + LANE_CONTRACT
+    system = block + "\n\n" + LANE_CONTRACT + "\n\n" + LANE_TOOLS_BLOCK
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     messages.extend(
         {"role": t["role"], "content": t["content"]}
@@ -205,9 +295,15 @@ def run_persona_turn(
     messages.append({"role": "user", "content": text})
 
     try:
+        # Deliberately NO ``tools=`` here — see the module docstring.
+        # The tool is presented as TEXT (LANE_TOOLS_BLOCK, above) and
+        # decided by parsing the response text (_decide); the aux
+        # client's structured tools=/tool_choice="auto" path produced
+        # an unparseable malformed emission for this exact model
+        # (20260710 gate). Native tool_calls stays a bonus path in
+        # _decide in case a future client populates it anyway.
         first = client.chat(
             messages,
-            tools=[PERFORM_TASK_SPEC.to_openai_schema()],
             max_tokens=400,
             temperature=0.4,
             top_p=0.9,
@@ -250,6 +346,7 @@ def run_persona_turn(
 __all__ = [
     "PERFORM_TASK_SPEC",
     "LANE_CONTRACT",
+    "LANE_TOOLS_BLOCK",
     "COMPOSE_RULES",
     "MAX_HISTORY_PAIRS",
     "MAX_HISTORY_CHARS",

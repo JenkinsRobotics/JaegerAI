@@ -20,11 +20,13 @@ import pytest
 
 from jaeger_os.agent.prompts.persona_lane import (
     LANE_CONTRACT,
+    LANE_TOOLS_BLOCK,
     MAX_HISTORY_CHARS,
     MAX_HISTORY_PAIRS,
     PERFORM_TASK_SPEC,
     _budget_history,
     _decide,
+    _perform_task_fallback,
     run_persona_turn,
 )
 
@@ -84,12 +86,16 @@ def test_tool_free_turn_returns_in_character_text_zero_inner_turns():
     assert calls == []  # perform_task never called
     assert len(client.calls) == 1  # exactly one aux call — no compose pass
 
-    # The one call carries tools= (native function-calling, per the design:
-    # delegation is a tool call, not a prose classifier).
-    assert client.calls[0]["tools"][0]["function"]["name"] == "perform_task"
+    # No ``tools=`` on the first call — the tool is presented as TEXT
+    # (LANE_TOOLS_BLOCK, in the system prompt) and decided by parsing the
+    # response, not via llama.cpp's structured tools=/tool_choice="auto"
+    # path (that path produced an unparseable malformed emission for this
+    # exact model — 20260710 gate; see the module docstring).
+    assert "tools" not in client.calls[0] or not client.calls[0]["tools"]
     system_msg = client.calls[0]["messages"][0]
     assert system_msg["role"] == "system"
     assert LANE_CONTRACT in system_msg["content"]
+    assert LANE_TOOLS_BLOCK in system_msg["content"]
     assert BLOCK in system_msg["content"]
 
 
@@ -97,8 +103,13 @@ def test_tool_free_turn_returns_in_character_text_zero_inner_turns():
 
 
 def test_tool_call_turn_delegates_once_and_composes_reply():
+    """Primary path: the id decides via the chatml TEXT envelope
+    (LANE_TOOLS_BLOCK instructs the model to emit exactly this), not
+    native tool_calls — the aux lane no longer sends ``tools=`` at all
+    (20260710 gate fix)."""
     client = _Client([
-        _reply(tool_calls=[_native_perform_task_call("what time is it?")]),
+        _reply('<tool_call>\n{"name": "perform_task", '
+               '"arguments": {"request": "what time is it?"}}\n</tool_call>'),
         _reply("Ah, it's 12:00, my dear — right on the dot."),
     ])
     calls: list[str] = []
@@ -120,6 +131,28 @@ def test_tool_call_turn_delegates_once_and_composes_reply():
     assert compose_msgs[0] == {"role": "system", "content": BLOCK}
     assert "The time is 12:00." in compose_msgs[1]["content"]
     assert "tools" not in client.calls[1] or not client.calls[1].get("tools")
+
+
+def test_tool_call_via_native_tool_calls_bonus_path_still_delegates():
+    """Bonus path: if a future client populates ``tool_calls`` even
+    without ``tools=`` being sent, _decide still honors it first."""
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call("what time is it?")]),
+        _reply("Ah, it's 12:00, my dear — right on the dot."),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "The time is 12:00."
+
+    out = run_persona_turn(
+        client, "what time is it?",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert calls == ["what time is it?"]
+    assert out == "Ah, it's 12:00, my dear — right on the dot."
 
 
 def test_tool_call_via_text_dialect_fallback_still_delegates_once():
@@ -355,6 +388,69 @@ def test_decide_handles_malformed_native_arguments_gracefully():
            "function": {"name": "perform_task", "arguments": "{not json"}}
     result = _reply(tool_calls=[bad])
     assert _decide(result) == {}
+
+
+def test_decide_parses_chatml_text_envelope():
+    """The lane's actual primary path: LANE_TOOLS_BLOCK instructs a
+    ``<tool_call>{json}</tool_call>`` envelope; extract_tool_calls reads
+    it back regardless of which model family emitted it."""
+    result = _reply(
+        '<tool_call>\n{"name": "perform_task", '
+        '"arguments": {"request": "list the files"}}\n</tool_call>'
+    )
+    assert _decide(result) == {"request": "list the files"}
+
+
+def test_decide_salvages_the_20260710_gate_malformed_shape():
+    """Regression pin: the exact malformed text the persona_eval gate
+    caught 2026-07-10 (run 20260710-011623, case ``list_files``) — the
+    aux lane's structured tools= path produced this bare, envelope-free
+    text instead of populating tool_calls, and no real dialect (chatml,
+    gemma native, llama3, mistral) matches it. Only
+    _perform_task_fallback catches this specific shape."""
+    text = 'perform_task{request:<|"|>List contents of the workspace directory<|"|>}'
+    result = _reply(text)
+    assert _decide(result) == {
+        "request": "List contents of the workspace directory"
+    }
+
+
+def test_perform_task_fallback_handles_paren_form():
+    args = _perform_task_fallback('perform_task(request="do the thing")')
+    assert args == {"request": "do the thing"}
+
+
+def test_perform_task_fallback_handles_bare_unkeyed_string():
+    args = _perform_task_fallback('perform_task{"just do it"}')
+    assert args == {"request": "just do it"}
+
+
+def test_perform_task_fallback_returns_none_when_no_match():
+    assert _perform_task_fallback("just chatting, no tool here") is None
+    assert _perform_task_fallback("") is None
+
+
+def test_run_persona_turn_delegates_via_the_bare_malformed_shape():
+    """End-to-end: run_persona_turn still delegates exactly once even
+    when the aux client's first reply is the 20260710 gate's malformed,
+    envelope-free text."""
+    client = _Client([
+        _reply('perform_task{request:<|"|>list the workspace<|"|>}'),
+        _reply("Right, here's what's there: file1.txt, file2.txt."),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "file1.txt, file2.txt"
+
+    out = run_persona_turn(
+        client, "list the workspace",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert calls == ["list the workspace"]
+    assert out == "Right, here's what's there: file1.txt, file2.txt."
 
 
 # ── tool spec shape ────────────────────────────────────────────────
