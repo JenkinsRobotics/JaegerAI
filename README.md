@@ -145,8 +145,10 @@ anywhere; `./run.sh` still works as an alias.
 Or scaffold a named agent:
 
 ```bash
-./jaeger agent create lilith  # create "lilith" via the wizard
-./jaeger --agent lilith       # launch "lilith"
+./jaeger agent create --name ted  # "ted" is the agent's name — editable
+                                   # later, never blank; the wizard defaults
+                                   # to your character pick when omitted
+./jaeger --agent ted              # launch "ted"
 ```
 
 Manage multiple agents (a character is the persona; an agent is a deployed AI
