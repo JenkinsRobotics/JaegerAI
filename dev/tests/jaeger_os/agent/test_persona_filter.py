@@ -79,3 +79,54 @@ def test_config_schema_has_persona_section():
     pc = PersonaConfig()
     assert pc.output_filter is True and pc.max_chars == 1600
     assert Config.model_fields["persona"].default_factory is PersonaConfig
+
+
+# --- Content-survival guard ------------------------------------------------
+# The mechanical enforcement of "losing voice is acceptable; losing the
+# answer is not": a rewrite may change every word's clothing, but it may not
+# swap the content for commentary/analysis about the content (the Lilith
+# bug — a joke answer came back as meta-analysis of the joke).
+
+SCARECROW_JOKE = (
+    "Why did the scarecrow win an award? Because he was outstanding in "
+    "his field!"
+)
+
+
+def test_mangled_rewrite_analysis_instead_of_joke_returns_original():
+    # The exact failure mode this guard exists for: the joke replaced by
+    # meta-commentary about the joke.
+    mangled = (
+        "The premise suggests a pun based on the literal meaning of "
+        "outstanding, contrasted with agricultural connotations, which "
+        "creates the humorous incongruity."
+    )
+    c = _Client(mangled)
+    assert apply_persona_voice(c, SCARECROW_JOKE, BLOCK) == SCARECROW_JOKE
+
+
+def test_faithful_restyle_keeping_pun_words_is_returned():
+    # Same joke, tone-shifted framing — the pun words survive verbatim.
+    restyled = (
+        "Ah, a classic for you: why did the scarecrow win an award? "
+        "Because he was truly outstanding in his field, darling."
+    )
+    c = _Client(restyled)
+    assert apply_persona_voice(c, SCARECROW_JOKE, BLOCK) == restyled
+
+
+def test_short_factual_answer_restyled_passes():
+    c = _Client("The port, dear fellow, is 8080.")
+    out = apply_persona_voice(c, "The port is 8080.", BLOCK)
+    assert out == "The port, dear fellow, is 8080."
+
+
+def test_rewrite_dropping_half_the_facts_returns_original():
+    original = (
+        "The config is at /etc/jaeger/config.yaml, the port is 8080, and "
+        "you can reach admin@example.com for access."
+    )
+    # Drops the path, the port, and the email — only vague framing left.
+    gutted = "I looked into it and there are some details you should know."
+    c = _Client(gutted)
+    assert apply_persona_voice(c, original, BLOCK) == original

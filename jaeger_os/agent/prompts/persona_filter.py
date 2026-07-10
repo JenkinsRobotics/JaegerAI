@@ -20,6 +20,7 @@ persona-off. Kill switches: ``persona.output_filter: false`` in config, or
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 
@@ -35,6 +36,9 @@ _STYLE_RULES = (
     "snippet VERBATIM — change only tone and phrasing.\n"
     "- Keep EVERY piece of information, suggestion, and question from the "
     "reply. Dropping content is failure.\n"
+    "- If the reply IS the deliverable — a joke, story, poem, quote, or "
+    "list — deliver it intact in your voice: restyle the framing, never "
+    "replace, analyze, or explain the content.\n"
     "- ADD NOTHING: no remarks, jabs, lectures, or commentary of your own. "
     "Your character shows in HOW things are said, never in extra sentences. "
     "Never be rude to the user.\n"
@@ -44,6 +48,63 @@ _STYLE_RULES = (
     "- Output ONLY the rewritten reply — no preamble, no quotes.\n\n"
     "REPLY TO REWRITE:\n"
 )
+
+# Content-survival guard: stopword-stripped content-word overlap between the
+# original answer and the styled rewrite. This is the mechanical enforcement
+# of "losing voice is acceptable; losing the answer is not" — a rewrite can
+# change every word's clothing but not swap the content for commentary about
+# the content (the "Lilith turns a joke into meta-analysis" bug).
+_OVERLAP_THRESHOLD = 0.5
+
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "if", "then", "else", "of", "to",
+    "in", "on", "at", "by", "for", "with", "about", "as", "into", "like",
+    "through", "after", "over", "between", "out", "against", "during",
+    "without", "before", "under", "around", "among", "is", "are", "was",
+    "were", "be", "been", "being", "this", "that", "these", "those", "it",
+    "its", "you", "your", "yours", "i", "me", "my", "mine", "we", "our",
+    "ours", "he", "she", "they", "them", "him", "his", "her", "hers",
+    "their", "theirs", "not", "no", "nor", "do", "does", "did", "so",
+    "than", "too", "very", "can", "will", "just", "should", "would",
+    "could", "up", "down", "off", "again", "further", "once", "here",
+    "there", "when", "where", "why", "how", "all", "any", "both", "each",
+    "few", "more", "most", "other", "some", "such", "only", "own", "same",
+    "from", "have", "has", "had", "who", "whom", "which", "what", "because",
+    "sir", "ma'am", "dear", "indeed", "ah", "oh", "well", "truly", "quite",
+})
+
+# Tokens: word characters plus internal ./:-_@ so file paths, URLs, emails,
+# and version numbers survive as single content tokens rather than being
+# shredded into meaningless fragments.
+_WORD_RE = re.compile(r"[a-z0-9](?:[a-z0-9_./:@-]*[a-z0-9])?", re.IGNORECASE)
+
+
+def _content_words(text: str) -> set[str]:
+    """Lowercase, tokenize, and drop stopwords/short filler — but numbers,
+    paths, and names (any token carrying a digit) always count, per the
+    contract that they must survive VERBATIM."""
+    words = _WORD_RE.findall(text.lower())
+    out: set[str] = set()
+    for word in words:
+        if any(ch.isdigit() for ch in word):
+            out.add(word)
+            continue
+        if len(word) < 3 or word in _STOPWORDS:
+            continue
+        out.add(word)
+    return out
+
+
+def _preserves_content(original: str, styled: str) -> bool:
+    """True if ``styled`` retains at least ``_OVERLAP_THRESHOLD`` of the
+    original's content words. A restyle may reword freely; it may not
+    replace the substance with commentary/analysis about the substance."""
+    orig_words = _content_words(original)
+    if not orig_words:
+        return True
+    styled_words = _content_words(styled)
+    overlap = len(orig_words & styled_words) / len(orig_words)
+    return overlap >= _OVERLAP_THRESHOLD
 
 
 def filter_enabled() -> bool:
@@ -77,7 +138,7 @@ def apply_persona_voice(
                 {"role": "user", "content": _STYLE_RULES + text},
             ],
             max_tokens=min(600, max(120, len(text) // 2)),
-            temperature=0.6,
+            temperature=0.3,
             top_p=0.9,
             stream=False,
         )
@@ -88,7 +149,17 @@ def apply_persona_voice(
     # misbehaved — keep the original.
     if not styled or len(styled) > max(len(text) * 2, 400):
         return answer
+    # Content-survival guard: a rewrite that lost the substance (mangled
+    # into analysis/commentary, or dropped facts) is worse than no rewrite.
+    if not _preserves_content(text, styled):
+        return answer
     return styled
 
 
-__all__ = ["apply_persona_voice", "filter_enabled", "DEFAULT_MAX_CHARS"]
+__all__ = [
+    "apply_persona_voice",
+    "filter_enabled",
+    "DEFAULT_MAX_CHARS",
+    "_content_words",
+    "_preserves_content",
+]
