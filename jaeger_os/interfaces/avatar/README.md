@@ -8,7 +8,7 @@ this Swift app displays them.
 
 **Phase 1 scaffold (2026-06-08)** — window + WebSocket plumbing +
 placeholder rendering.  Mochi adapters integrate phase by phase.
-See `dev/docs/0.5.0_swift_renderer_plan.md` for the roadmap.
+See `dev/docs/avatar/0.5.0_swift_renderer_plan.md` for the roadmap.
 
 ## Build + run (Phase 1)
 
@@ -38,7 +38,7 @@ JROS Python brain
 
 Frame protocol: each WebSocket binary message is
 `[4-byte length][JSON header][raw RGBA bytes]`.  Details in
-`dev/docs/0.5.0_swift_renderer_plan.md`.
+`dev/docs/avatar/0.5.0_swift_renderer_plan.md`.
 
 ## Tests
 

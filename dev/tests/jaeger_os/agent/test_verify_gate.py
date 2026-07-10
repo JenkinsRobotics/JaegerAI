@@ -3,7 +3,7 @@
 Covers the two failure signatures the gate exists for (PLAN-halt,
 claim-vs-action), the false-positive guards that keep it SOFT, and the
 loop wiring (one nudge max, nudge never persists, kill switch).
-Design: dev/docs/agentic_runners.md.
+Design: dev/docs/reality/agentic_runners.md.
 """
 
 from __future__ import annotations

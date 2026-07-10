@@ -1,0 +1,24 @@
+# JROS 0.8 — M2c: animation + media modules (recipe applications)
+
+> subagent-driven. Recipe = kokoro_tts/whisper_stt. Remaining pure-JROS nodes.
+
+**Verified facts (M2c recon):** `nodes/animation/` = AnimationNode (SUB /act/animation, /act/animation_stop, /sense/tts_chunk; PUB /sense/animation_state) + adapter set (Image/Bitmap/Sprite/Gif/Math) + `bridge.py` FrameBridge (WS :8765) + `auto_state.py` AvatarAutoStateDriver; factory exists; runtime builds bridge+driver (`_construct_animation_components`:506, `_build_animation_node`:578). Tools in `agent/tools/avatar.py`: `set_avatar_state`/`play_timeline` (beta=True) + `warm_avatar` — currently UNGATED by module availability. Config = `AvatarConfig` at `Config.avatar` (enabled=False, bridge_host, bridge_port, default_emotion) — **mismatch: manifests pass `config_key="animation"` which matches no schema field, so bridge host/port from config never flow** (routed-config gap, same species M2b closed). `nodes/media/` = MediaNode (SUB /act/media; PUB /sense/media_frame, /sense/media_state) + own decoders (Gif/Image/Video); no config, no tools, no runtime/manifest wiring (only the test harness publishes ACT_MEDIA). `nodes/animation_dev/` = orphaned Mochi MScript renderer variant (stale importer claims; not in any manifest; carries mscript/ engine + llm_command_parser; one real delta = publishes AvatarFrame).
+
+**Decisions:**
+- **animation** → full recipe. Module `animation`, slot `animation`. Engine = adapter set + FrameBridge (they move INTO the module: bridge.py/auto_state.py already live there — runtime keeps orchestrating them as U3 built). Config: `AvatarConfig` moves to `nodes/animation/config.py` (field name + group + settings paths UNCHANGED — operator surface stays `avatar.*`; guarded leaf import in schemas.py, kokoro pattern). Fix the mismatch: manifests' `config_key = "avatar"`. Tools: `_TOOL_TO_MODULE` gains set_avatar_state/play_timeline/warm_avatar → `animation` (fail-closed; beta gate stays on top). module.yaml `requires:` = what bridge/adapters actually import (read them — likely websockets + PIL/numpy; verify, don't guess).
+- **media** → cheap recipe: module.yaml (slot `media`, consumes/produces as above, tools [], requires from decoders' real imports) + tests/ smoke + guarded discovery presence. NO config.py (it has no config — don't invent one), NO manifest entry (not part of the boot set; discovery makes it visible for the Studio Media tab later).
+- **animation_dev** → LEFT AS-IS deliberately (under-development Mochi renderer, no live consumers; module-izing before it's wired = spec ahead of code). One-line README note in its dir stating this + pointer to this plan. NOT deleted (migrated Mochi content the operator wants).
+
+---
+
+### Task A — both conversions
+
+1. `nodes/animation/`: add `module.yaml` (module: animation · slot: animation · consumes [/act/animation, /act/animation_stop, /sense/tts_chunk] · produces [/sense/animation_state] · tools [set_avatar_state, play_timeline, warm_avatar] · factory `jaeger_os.nodes.animation:make_animation_node` · config: avatar · requires from real imports); add `config.py` = AvatarConfig moved verbatim (same field names/defaults/groups, `_setting` from setting_meta); schemas.py nests `Config.avatar` via guarded leaf import + structurally-identical stand-in (kokoro pattern), removing the old inline class; add `tests/` module-contract smoke (yaml validates; factory builds on InProcBus with bridge disabled; command→state round-trip with a fake adapter).
+2. Manifests: both tomls animation `[[node]]` → `slot = "animation"` (drop factory) + `config_key = "avatar"` (fix the mismatch). Verify the config now actually reaches `make_animation_node` (bridge_host/port honored — check how app passes config_key dict to factories and assert in a test).
+3. availability.py: add the 3 avatar tools to `_TOOL_TO_MODULE` → `animation` (kokoro mechanism; beta gate unchanged on top). Tests: available when module present; fail-closed when discovery lacks the animation slot.
+4. Guarded import for `runtime.py:41` (`AnimationNode, AvatarAutoStateDriver`) — M2a pattern; module dir removal must degrade, not ImportError.
+5. `nodes/media/`: add `module.yaml` (slot media, tools [], requires from decoders' imports) + `tests/` smoke (yaml validates via load_module; MediaNode command→frame round-trip on InProcBus with a tiny in-memory image). No other changes.
+6. `nodes/animation_dev/README.md`: 3 lines — status (migrated Mochi MScript renderer, not yet wired), what its delta is (AvatarFrame publish), where the decision lives (this plan).
+
+### Gates
+Per-dir suites green; discovery shows 4 slots (tts, stt, animation, media); windowed headless boot — animation node RUNNING resolved via slot with config_key=avatar (bridge on configured port); **bench ≥ prior (78/81 current baseline; flag ANY new fail with the same isolation rigor as M2b)**; catalog still renders the avatar group unchanged; ledger. NO push.

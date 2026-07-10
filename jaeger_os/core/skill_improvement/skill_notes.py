@@ -5,7 +5,7 @@ issues / failed) via the ``skill_note`` tool. Notes ACCUMULATE per skill; when a
 skill's notes pile up (or it keeps misbehaving) the agent proposes a Deep Think
 task to review them and improve the recipe — measured against the prior version
 (smoke test + ``benchmark_skill``), keep-if-better. See
-``dev/docs/process/SKILL_EVOLUTION_PLAN.md``.
+``dev/docs/history/SKILL_EVOLUTION_PLAN.md``.
 
 This module is **phase 1**: capture the signal. It does NOT trigger reviews or
 rewrite anything (phases 2-4). One append-only JSONL at

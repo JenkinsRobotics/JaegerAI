@@ -14,8 +14,8 @@ boundary is the safety contract: the agent can write its own skills + state,
 never the framework code.
 
 For the current architecture and per-release history, see
-[`../dev/docs/OVERVIEW.md`](../dev/docs/OVERVIEW.md),
-[`../dev/docs/agentic_runners.md`](../dev/docs/agentic_runners.md), and
+[`../dev/docs/README.md`](../dev/docs/README.md),
+[`../dev/docs/reality/agentic_runners.md`](../dev/docs/reality/agentic_runners.md), and
 [`../dev/docs/revision_summaries/`](../dev/docs/revision_summaries/).
 
 ## Directory tour

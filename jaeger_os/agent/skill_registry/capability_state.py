@@ -1,6 +1,6 @@
 """Per-capability state + history for v3 skills.
 
-Layout (per the spec, ``dev/docs/skill_schema_v3.md``)::
+Layout (per the spec, ``dev/docs/history/skill_schema_v3-v1.md``)::
 
     <instance>/skills/<id>/
       manifest.yaml      # full v3 manifest

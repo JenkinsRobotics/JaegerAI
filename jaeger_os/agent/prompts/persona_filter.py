@@ -1,4 +1,4 @@
-"""Station 3 — the persona output filter (dev/docs/agentic_runners.md).
+"""Station 3 — the persona output filter (dev/docs/reality/agentic_runners.md).
 
 Workers run vanilla: a character in the execution context costs a 4B ~7
 bench points (measured — that's why assemble.py deliberately omits the

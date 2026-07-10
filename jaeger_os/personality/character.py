@@ -113,7 +113,7 @@ class Character:
         rebuilt when the character sheet changes (main.py _refresh_character_
         prompt), so this runs on edit, not per turn. Main agent only — a
         sub-agent gets no persona (its preamble is its whole identity).
-        See dev/docs/persona_compiler.md."""
+        See dev/docs/reality/persona_compiler.md."""
         from jaeger_os.personality.compose import (
             PERSONA_BOUNDARY, domain_lens, expression_clauses,
         )

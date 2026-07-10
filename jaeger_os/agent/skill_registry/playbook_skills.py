@@ -222,7 +222,7 @@ def discover_playbooks() -> list[PlaybookSkill]:
             # Presence-based unification: ANY folder with a SKILL.md is a recipe.
             # A folder that ALSO ships a module registers tools (skill_loader) —
             # so a skill can be both. No "code_skill vs playbook" split. See
-            # dev/docs/skill_unification.md.
+            # dev/docs/history/skill_unification.md.
             try:
                 text = md.read_text(encoding="utf-8")
             except OSError:
