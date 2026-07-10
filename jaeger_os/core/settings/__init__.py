@@ -8,7 +8,7 @@ that single catalog. There is deliberately NO hand-enumerated settings list
 in Swift and NO parallel field map in the bridge — a new setting is one
 annotated field here and it appears everywhere. It is a plain module over the
 ``Config`` schema, not a provider/plugin framework (that federation seam is a
-0.8 concern — see ``dev/docs/framework_vision.md``).
+0.8 concern — see ``dev/docs/vision/framework_vision.md``).
 
 Import the API from the submodule to keep the ``catalog`` function distinct
 from the ``catalog`` module::

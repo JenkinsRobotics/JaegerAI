@@ -1,6 +1,6 @@
 """Timeline — multi-track scheduling for agent performances.
 
-See ``dev/docs/0.5.0_timeline_schema.md`` for the schema design.
+See ``dev/docs/avatar/0.5.0_timeline_schema.md`` for the schema design.
 
 Public surface:
 

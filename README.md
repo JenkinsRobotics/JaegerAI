@@ -198,7 +198,7 @@ JAEGER_HOME=/opt/jaeger curl -fsSL \
 
 The two sibling dirs at the install root make the framework / operator
 split obvious. Operator state is fully `.gitignore`d; framework upgrades
-never touch it. See [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md)
+never touch it. See [`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md)
 for the design rationale.
 
 **Manual install (no curl)** — if you'd rather see every step:
@@ -409,7 +409,7 @@ The position no one else owns:
    code laptop or fleet — only the transport changes (`inproc://`
    → `tcp://` when nodes move across boards).
 
-See [`dev/docs/ROADMAP_0.4.md`](dev/docs/ROADMAP_0.4.md) for the
+See [`dev/docs/history/ROADMAP_0.4.md`](dev/docs/history/ROADMAP_0.4.md) for the
 full track breakdown.
 
 ### How JROS fits next to ROS and Hermes
@@ -506,13 +506,13 @@ permission layer regardless.
 
 | Doc | What |
 |---|---|
-| [`dev/docs/OVERVIEW.md`](dev/docs/OVERVIEW.md) | Where everything lives — the doc map |
-| [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
-| [`dev/docs/agentic_runners.md`](dev/docs/agentic_runners.md) | The two runners (realtime + Deep Think) + inference lanes |
-| [`dev/docs/memory_architecture.md`](dev/docs/memory_architecture.md) | Subject-attributed SQL memory (provenance + history) |
-| [`dev/docs/skill_standard.md`](dev/docs/skill_standard.md) | The self-authored skill standard |
-| [`dev/docs/scenario_bench.md`](dev/docs/scenario_bench.md) | The hermetic scenario benchmark |
-| [`dev/docs/framework_vision.md`](dev/docs/framework_vision.md) | The 0.8 modular-framework north star |
+| [`dev/docs/README.md`](dev/docs/README.md) | Where everything lives — the doc map |
+| [`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
+| [`dev/docs/reality/agentic_runners.md`](dev/docs/reality/agentic_runners.md) | The two runners (realtime + Deep Think) + inference lanes |
+| [`dev/docs/reality/memory_architecture.md`](dev/docs/reality/memory_architecture.md) | Subject-attributed SQL memory (provenance + history) |
+| [`dev/docs/reality/skill_standard.md`](dev/docs/reality/skill_standard.md) | The self-authored skill standard |
+| [`dev/docs/reality/scenario_bench.md`](dev/docs/reality/scenario_bench.md) | The hermetic scenario benchmark |
+| [`dev/docs/vision/framework_vision.md`](dev/docs/vision/framework_vision.md) | The 0.8 modular-framework north star |
 | [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/) | Per-release write-ups (0.1 → 0.7) |
 
 The full JROS spec — architecture, transport, the node standard, the agent
@@ -538,7 +538,7 @@ and skill systems — continues to land under `dev/docs/`.
 - **0.8 — Modular framework.** Modules (TTS/STT/vision/hardware nodes,
   plugins) that own their own config/settings/lifecycle and register into a
   unified surface — the ROS2-style federation seam
-  ([`dev/docs/framework_vision.md`](dev/docs/framework_vision.md)).
+  ([`dev/docs/vision/framework_vision.md`](dev/docs/vision/framework_vision.md)).
 - **JP01.** The first hardware Jaeger — the same brain, a body around it.
 
 ---

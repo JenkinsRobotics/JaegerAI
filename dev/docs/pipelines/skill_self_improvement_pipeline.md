@@ -53,6 +53,6 @@ skills/<skill>/
 ## Relation to the discovery pipeline
 This is the "reflect/improve" arm of the task loop. Its planned mirror — *gap →
 propose a NEW skill* and *staleness → retire* — is tracked as **P4/P7** in
-`dev/docs/agentic_skill_pipeline_backlog.md`. The broader idea (a locked
+`dev/docs/roadmap/agentic_skill_pipeline_backlog.md`. The broader idea (a locked
 **regression bench** re-run after each self-improvement so agreed routing/order
 can't silently drift) is the reliability practice noted there.

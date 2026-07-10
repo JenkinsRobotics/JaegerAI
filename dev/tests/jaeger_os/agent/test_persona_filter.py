@@ -2,7 +2,7 @@
 
 The contracts that matter: persona-off (or any failure) is BYTE-IDENTICAL
 pass-through, the prompt pins verbatim preservation, and the styled result
-is sanity-checked. Design: dev/docs/agentic_runners.md.
+is sanity-checked. Design: dev/docs/reality/agentic_runners.md.
 """
 
 from __future__ import annotations

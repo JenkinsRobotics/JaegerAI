@@ -1,6 +1,6 @@
 """The verify gate — station 2 of the standard runner.
 
-Design: dev/docs/agentic_runners.md ("soft loop, hard boundary"). The loop's
+Design: dev/docs/reality/agentic_runners.md ("soft loop, hard boundary"). The loop's
 single exit door is "a response with no tool calls is the final answer" —
 which lets two specific 4B failure modes slip out:
 

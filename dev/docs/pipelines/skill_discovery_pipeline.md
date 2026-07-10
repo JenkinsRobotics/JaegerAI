@@ -2,7 +2,7 @@
 
 **What it is:** how the agent finds and selects the right *tool* or *playbook
 skill* for a task. As of 2026-07-01 this is **pull-based** (was push-based).
-Improvement backlog: `dev/docs/agentic_skill_pipeline_backlog.md`.
+Improvement backlog: `dev/docs/roadmap/agentic_skill_pipeline_backlog.md`.
 
 ## Vocabulary
 - **Tool** — a callable function (`agent/tools/*.py`), in the registry

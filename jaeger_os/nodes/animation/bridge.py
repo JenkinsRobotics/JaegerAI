@@ -3,7 +3,7 @@ AnimationNode to the Swift renderer (jaeger_os/interfaces/avatar/) or any
 other WebSocket-speaking client.
 
 Wire format documented in
-``dev/docs/0.5.0_swift_renderer_plan.md``:
+``dev/docs/avatar/0.5.0_swift_renderer_plan.md``:
 
     [ 4-byte BE length L ]
     [ L bytes UTF-8 JSON header ]

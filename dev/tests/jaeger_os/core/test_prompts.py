@@ -49,7 +49,7 @@ def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
     can't be fixed downstream) and flows into the prompt as one line. The
     persona BLOCK (soul/traits/voice) still stays out — it's applied by the
     two-pass output filter, never the execution context. See
-    dev/docs/persona_compiler.md."""
+    dev/docs/reality/persona_compiler.md."""
     (tmp_path / "identity.yaml").write_text(
         "name: Jarvis\nrole: assistant\npersonality: plain\n",
         encoding="utf-8",

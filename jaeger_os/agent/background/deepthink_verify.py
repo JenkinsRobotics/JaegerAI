@@ -1,6 +1,6 @@
 """Deep Think runner, Phase 1 — verify-before-done.
 
-Design: dev/docs/agentic_runners.md (Runner 2). The daemon used to mark a
+Design: dev/docs/reality/agentic_runners.md (Runner 2). The daemon used to mark a
 task "completed" the moment ``run_command`` RETURNED — even if the model
 answered "I couldn't do this". The assembly line's value is enforcement, so
 completion is now decided by OBSERVABLE EVIDENCE, never by trust-by-return

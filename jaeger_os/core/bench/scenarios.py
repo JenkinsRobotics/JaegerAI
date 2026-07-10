@@ -11,7 +11,7 @@ This is the SECOND benchmark type, distinct from the routing corpus in
     a pre-release GATE, not an every-tweak bench.
 
 The scenarios are the operator-authored real-world prompts in
-``dev/docs/scenario_test_suite.md`` (kept VERBATIM as the acceptance
+``dev/docs/reality/scenario_test_suite.md`` (kept VERBATIM as the acceptance
 wording), encoded here with REAL checks.
 
 HERMETIC BY CONSTRUCTION

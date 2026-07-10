@@ -665,7 +665,7 @@ class InteractionConfig(BaseModel):
 
 
 class HardwareConfig(BaseModel):
-    """Hardware package selection (dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
+    """Hardware package selection (dev/docs/hardware/JROS_HARDWARE_FRAMEWORK_PLAN.md).
 
     ``package`` names a directory under ``jaeger_os/hardware/packages/``
     (e.g. ``"jp01"``); empty string = no robot attached (the default —
@@ -681,7 +681,7 @@ class HardwareConfig(BaseModel):
 
 
 class PersonaConfig(BaseModel):
-    """Station 3 of the standard runner (dev/docs/agentic_runners.md):
+    """Station 3 of the standard runner (dev/docs/reality/agentic_runners.md):
     workers execute vanilla (a character in the execution context costs a
     4B ~7 bench points, measured); the character's voice is applied to the
     FINAL answer by one bounded clean-context call at the user-facing

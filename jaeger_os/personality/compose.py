@@ -139,7 +139,7 @@ def _compose_speech(patterns: tuple[str, ...]) -> str:
 # an operator editing a character. The functions below are the VIEW the live
 # model sees: raw floats compiled into behavioral prose, deviations only.
 # A base 4B model can't map "sarcasm: 0.40" to behavior, but it reads "wield
-# sharp sarcasm" fine. See dev/docs/persona_compiler.md.
+# sharp sarcasm" fine. See dev/docs/reality/persona_compiler.md.
 
 _HIGH = 0.60
 _LOW = 0.30

@@ -84,7 +84,7 @@ def test_build_system_prompt_carries_identity_and_rules(instance):
     prompt = build_system_prompt(instance)
     # Workers run vanilla — the CHARACTER (e.g. "Jarvis") is NOT in the worker
     # prompt; it's applied by the two-pass output filter. System identity comes
-    # from the framework. See dev/docs/persona_compiler.md.
+    # from the framework. See dev/docs/reality/persona_compiler.md.
     assert "## My voice —" not in prompt          # no character/persona block
     assert "Jaeger OS" in prompt                  # system knowledge
     assert "current message" in prompt.lower()    # no stale-task execution

@@ -1893,7 +1893,7 @@ _jaeger_agents_by_session: dict[str, Any] = {}
 
 
 def _apply_persona_filter(answer: str) -> str:
-    """Station 3 (dev/docs/agentic_runners.md): restyle the final answer in
+    """Station 3 (dev/docs/reality/agentic_runners.md): restyle the final answer in
     the active character's voice via ONE bounded clean-context call.
     Everything is best-effort and fail-open — no character, filter disabled,
     or any error returns the plain answer unchanged."""
@@ -2264,7 +2264,7 @@ def _run_turn_via_jaeger_agent(
     elapsed = result["elapsed_s"]
     skipped = result["skipped"]
 
-    # Station 3 — the persona output filter (dev/docs/agentic_runners.md).
+    # Station 3 — the persona output filter (dev/docs/reality/agentic_runners.md).
     # Applied ONLY here, the user-facing boundary: the bench and
     # delegate_task sub-agents drive the loop directly and never pass
     # through, so the engine is always measured persona-off. Skip-final
