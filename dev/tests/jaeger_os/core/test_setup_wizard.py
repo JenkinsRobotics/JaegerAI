@@ -233,6 +233,121 @@ def test_wizard_writes_ctx_32k_for_new_instances(monkeypatch, tmp_path):
     assert "default_mode: gui" in cfg_text
 
 
+def test_wizard_step1_defaults_agent_name_to_the_cli_pin(monkeypatch, tmp_path):
+    """TUI parity with the bridge onboarding's precedence: an explicit
+    ``--name`` pin (``instance_name``) defaults Step 1's agent-name prompt
+    to that pin, not the picked character's name — a bare Enter accepts
+    it, so the folder AND identity.name both land on the pin."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JAEGER_SKIP_PREPARE", "1")
+
+    # Every prompt takes its default via a bare Enter (StopIteration → "").
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+
+    layout = W.run_wizard(instance_name="lilith")
+    assert layout.root.name == "lilith"
+    from jaeger_os.core.instance.schemas import Identity, load_yaml
+    ident = load_yaml(layout.identity_path, Identity)
+    assert ident.name == "lilith"
+
+
+# ── Agent-identity create-flow fix (2026-07-10) ─────────────────────
+# Walk-the-flow gate (a)/(b)/(c): the lilith/anakin bug was an explicit
+# CLI-passed name getting silently orphaned behind a picked character's
+# name. These exercise ``create_instance`` — THE non-interactive core
+# both the TUI wizard and the bridge's onboarding command drive — with
+# REAL shipped characters (no fixture needed).
+
+
+def test_create_instance_cli_name_wins_dir_and_identity_over_character(
+        tmp_path, monkeypatch):
+    """(a) CLI name "lilith" + character "anakin_skywalker": the dir AND
+    identity.name follow the explicit name verbatim — the character only
+    supplies the persona (bound_character), never the name. This is the
+    exact scenario the bug report hit."""
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+    layout = W.create_instance(
+        character_id="anakin_skywalker", name="lilith", display_name="lilith",
+    )
+    assert layout.root.name == "lilith"
+
+    from jaeger_os.core.instance.schemas import (
+        Identity, Manifest, load_json, load_yaml)
+    ident = load_yaml(layout.identity_path, Identity)
+    man = load_json(layout.manifest_path, Manifest)
+    assert ident.name == "lilith"           # verbatim, no auto-capitalization
+    assert man.bound_character == "anakin_skywalker"
+
+    # main.py:1925's name-protection framing keys off exactly this
+    # comparison (identity.yaml's name vs. the active character's name).
+    # Mirrored here rather than calling ``_apply_persona_filter`` directly
+    # (that reads the live ``_pipeline`` globals — a full model boot).
+    from jaeger_os.personality.character import active_character
+    character = active_character(layout.root)
+    assert character is not None
+    assert ident.name.lower() != character.name.lower(), (
+        "framing must FIRE: the agent's name and the character's name differ")
+
+
+def test_create_instance_no_name_dirs_and_names_from_character(
+        tmp_path, monkeypatch):
+    """(b) No name + character "anakin_skywalker": dir and identity.name
+    BOTH derive from the character (existing, correct behaviour for the
+    no-pin path) — and the name-protection framing stays silent because
+    the names match."""
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+    layout = W.create_instance(character_id="anakin_skywalker")
+    assert layout.root.name == "anakin-skywalker"
+
+    from jaeger_os.core.instance.schemas import Identity, load_yaml
+    ident = load_yaml(layout.identity_path, Identity)
+    assert ident.name == "Anakin Skywalker"
+
+    from jaeger_os.personality.character import active_character
+    character = active_character(layout.root)
+    assert character is not None
+    assert ident.name.lower() == character.name.lower(), (
+        "framing must stay SILENT: no pin means agent name == character name")
+
+
+def test_create_instance_blank_display_name_falls_back_never_empty(
+        tmp_path, monkeypatch):
+    """(c) Whitespace-only display_name must never reach identity.yaml —
+    the never-empty guarantee falls back to the character's name."""
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+    layout = W.create_instance(
+        character_id="anakin_skywalker", display_name="   ")
+    from jaeger_os.core.instance.schemas import Identity, load_yaml
+    ident = load_yaml(layout.identity_path, Identity)
+    assert ident.name == "Anakin Skywalker"
+    assert ident.name.strip() != ""
+
+
+def test_create_instance_blank_name_and_display_name_falls_back_to_jaeger(
+        tmp_path, monkeypatch):
+    """Belt-and-suspenders: even a character shim with no display_name
+    (simulated here) must never leave identity.yaml blank — the final
+    hard-coded "Jaeger" fallback."""
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        W, "_character_shim",
+        lambda char_id, rows=None: SimpleNamespace(
+            display_name="", role="general-purpose agentic assistant",
+            personality="p", voice_id="am_michael", voice_tone=""))
+    layout = W.create_instance(character_id="anakin_skywalker",
+                               display_name="   ")
+    from jaeger_os.core.instance.schemas import Identity, load_yaml
+    ident = load_yaml(layout.identity_path, Identity)
+    assert ident.name == "Jaeger"
+
+
 # ── WIZ-1 (legacy): the ``--setup`` flag was removed in 0.2.0 ───────
 # The wizard now runs via ``jaeger setup`` (a daemon-cli subcommand),
 # which doesn't chain into ``tui_main`` so there's no argparse

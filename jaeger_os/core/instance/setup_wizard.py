@@ -409,10 +409,24 @@ def run_wizard(
 
     # ── Step 1 · Identity ───────────────────────────────────────────
     _step(1, "Identity")
-    print("  Who is this Jaeger? Their name also names the instance folder.")
+    if name:
+        # An explicit instance name (--name / agent create <name>) already
+        # fixed the folder above — the operator contract keeps the AGENT
+        # name separate from that (freely editable, never renames the
+        # folder), so default to what they typed rather than re-deriving
+        # a folder-naming echo.
+        print("  Who is this Jaeger? (the instance folder is already set above)")
+    else:
+        print("  Who is this Jaeger? Their name also names the instance folder.")
+    # Default order: CLI-passed name (this instance's --name pin) wins,
+    # then the picked character's name, then the hard-coded "Jarvis" —
+    # always editable, matching the bridge's onboarding precedence
+    # (pin > character preset > … ; here "…" is just the built-in
+    # placeholder since there's no separate user-edit state in a
+    # single ``input()`` prompt).
     agent_name = _ask(
         "Agent display name",
-        p_id.display_name if p_id else "Jarvis",
+        name or (p_id.display_name if p_id else "Jarvis"),
     )
     # WIZ-2: surface the role length cap AND split a too-long role
     # gracefully — first sentence goes into identity.role, the full
@@ -863,7 +877,13 @@ def create_instance(
     ``FileExistsError`` when the target instance already exists (the
     caller decides about backups — this function never destroys)."""
     shim = _character_shim(character_id)
-    display_name = (display_name or "").strip() or shim.display_name
+    # Never-empty guarantee: an explicit display_name wins, else the
+    # character's, else the hard-coded "Jaeger" — a malformed character
+    # sheet (empty display_name) must never leave identity.yaml with a
+    # blank name.
+    display_name = ((display_name or "").strip()
+                    or (shim.display_name or "").strip()
+                    or "Jaeger")
     role_raw = (role or "").strip() or shim.role
     role_final, role_overflow = _truncate_role(role_raw)
     personality = ((personality or "").strip()
