@@ -1966,6 +1966,48 @@ def _persona_mode() -> str:
     return mode
 
 
+# Tool names whose activity means the model already SPOKE the answer
+# aloud this turn (``text_to_speech`` / ``speak``) — shared by the
+# voice-loop's double-play guard (below, in the turn result) and Mode
+# C's compose-skip guard (``_run_persona_lane_turn``): whatever text
+# gets DISPLAYED must equal what was HEARD, so neither path may re-
+# speak or restyle it.
+_SPOKEN_TOOLS = ("text_to_speech", "speak")
+
+
+def _spoke_via_tool(tool_activity: list[str]) -> bool:
+    """True when ``tool_activity`` shows a speech tool ran this turn.
+    Checks by tool name (the Phase-9 renderer emits ``  ▸ tool(args)``
+    with no emoji); falls back to the legacy ``🔊`` marker for any
+    caller still on an older activity-line formatter."""
+    return any(
+        "🔊" in line
+        or any(f"▸ {t}(" in line for t in _SPOKEN_TOOLS)
+        for line in tool_activity
+    )
+
+
+def _persona_lane_aux_available(client: Any) -> bool:
+    """True when Mode C may safely run its UN-LOCKED aux ``chat()``
+    calls on ``client``. Only :class:`LlamaCppPythonClient` has the
+    aux-context split (a second ``llama_context`` sharing the same
+    loaded model) that makes an unlocked side-channel call safe; when
+    its aux lane is disabled (``model.aux_ctx: 0``) or failed to spawn,
+    ``_aux_lane()`` returns falsy and ``chat()`` silently falls back to
+    the WORKER context — exactly the context ``llm_lock`` exists to
+    serialize ``drive_one_turn`` against. Running the lane's chats
+    there, unlocked, races the worker. Clients with no ``_aux_lane``
+    method at all (MLX, external HTTP backends) have no such shared-
+    context hazard, so they're always available."""
+    aux_lane = getattr(client, "_aux_lane", None)
+    if aux_lane is None:
+        return True
+    try:
+        return bool(aux_lane())
+    except Exception:  # noqa: BLE001 — never let the probe crash a turn
+        return False
+
+
 def _persona_lane_turn_result(
     persona_text: str,
     inner_result: dict[str, Any] | None,
@@ -2012,10 +2054,18 @@ def _run_persona_lane_turn(
     tool chips stream through the existing ``AgentCallbacks`` event path
     unchanged; nothing new to wire.
 
-    Fail-open: any failure before or during the lane call returns
-    ``(None, None)`` so the caller falls straight through to today's
-    ``drive_one_turn`` + Mode-A filter path — Mode C never produces a
-    dead turn.
+    Fail-open, but ONLY before delegation: any failure before
+    ``perform_task`` has been called returns ``(None, None)`` so the
+    caller falls straight through to today's ``drive_one_turn`` +
+    Mode-A filter path. Once ``perform_task`` HAS been called (tracked
+    by the ``attempted`` flag below), a failure re-raises instead of
+    falling open — falling open there would let the caller run
+    ``drive_one_turn`` a SECOND time for the same user turn (main.py's
+    Mode-C branch treats ``persona_text is None`` as "never ran, try
+    Mode A"). Re-raising sends the failure to the exact same outer
+    ``except Exception`` handler (below, ``_run_turn_via_jaeger_agent``)
+    a plain Mode-A turn failure hits — identical failure UX, zero
+    re-execution.
 
     Returns ``(persona_text, inner_result)``. ``inner_result`` is the raw
     :func:`drive_one_turn` dict IF AND ONLY IF ``perform_task`` ran (the
@@ -2025,6 +2075,12 @@ def _run_persona_lane_turn(
     ``dev/tests/jaeger_os/agent/test_persona_lane.py`` assert: once
     ``perform_task`` has been called, ``persona_text`` is never ``None``.
     """
+    # 1-slot flag closed over by both this function's except clause and
+    # the perform_task closure below — the single source of truth for
+    # "did the inner turn start running" that the except clause needs
+    # to decide fall-open (never ran) vs re-raise (ran, possibly mid-
+    # flight when it broke).
+    attempted: list[bool] = [False]
     try:
         from jaeger_os.agent.loop.runtime_bridge import drive_one_turn
         from jaeger_os.agent.prompts.persona_lane import run_persona_turn
@@ -2041,6 +2097,9 @@ def _run_persona_lane_turn(
             # this calls drive_one_turn directly, never back through
             # _run_turn_via_jaeger_agent or the persona lane — there is
             # no path for the ego to re-enter the id.
+            attempted[0] = True  # set IMMEDIATELY before drive_one_turn:
+            # if it raises, the except clause below must re-raise, not
+            # fall open into a second drive_one_turn call.
             if lock is not None:
                 with lock:
                     inner = drive_one_turn(jaeger_agent, request)
@@ -2056,20 +2115,66 @@ def _run_persona_lane_turn(
             history=history, perform_task=perform_task,
         )
         inner_result = inner_box[0] if inner_box else None
-        # A delegated turn already gets this exchange recorded — drive_
-        # one_turn appends the user + assistant messages to jaeger_agent.
-        # messages itself (JaegerAgent.run_turn's own bookkeeping). A
-        # tool-free turn never touches the clean agent's loop at all, so
-        # without this the session history would silently skip every
-        # id-answered-directly turn — breaking both the NEXT Mode-C
-        # turn's history (read from this same list, above) and a later
-        # switch back to Mode A mid-session. Record it the same shape
-        # drive_one_turn would have.
+        # Heard must equal displayed: if the delegated turn already
+        # spoke the answer aloud (text_to_speech ran), the compose
+        # restyle above would make the DISPLAYED text diverge from
+        # what the user just HEARD. Overriding back to the inner
+        # turn's raw answer here also keeps the history repair below
+        # consistent — it records the same text as both spoken and
+        # shown.
+        if (
+            inner_result is not None
+            and persona_text is not None
+            and _spoke_via_tool(inner_result.get("tool_activity") or [])
+        ):
+            persona_text = str(inner_result.get("answer") or "").strip()
+        # A delegated turn already gets an exchange recorded — drive_
+        # one_turn appends the user + assistant messages to jaeger_
+        # agent.messages itself (JaegerAgent.run_turn's own bookkeeping)
+        # — but that entry carries ``request`` (the id's paraphrase of
+        # what the user asked, extracted from the perform_task tool
+        # call) as the user turn, and the inner turn's raw/unstyled
+        # text as the assistant turn. Neither is what actually happened
+        # from the user's point of view: they said ``user_text`` and
+        # received ``persona_text`` (composed, or raw on a guard-
+        # rejected compose / spoke-via-tool override above). Repair
+        # both entries in place so the session history — and every
+        # later turn that reads it — remembers the real exchange.
+        # Defensive: only touch the last assistant entry and the
+        # nearest preceding user entry, and only if their shapes are
+        # what run_turn is documented to append; any surprise skips
+        # the repair rather than risk corrupting history run_turn's
+        # own exception contract already worked hard to keep well-
+        # formed.
+        if inner_result is not None and persona_text is not None:
+            try:
+                msgs = jaeger_agent.messages
+                if msgs and isinstance(msgs[-1], dict) and msgs[-1].get("role") == "assistant":
+                    assistant_idx = len(msgs) - 1
+                    user_idx = None
+                    for i in range(assistant_idx - 1, -1, -1):
+                        m = msgs[i]
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            user_idx = i
+                            break
+                    if user_idx is not None:
+                        msgs[user_idx]["content"] = user_text
+                        msgs[assistant_idx]["content"] = persona_text
+            except Exception:  # noqa: BLE001 — repair is best-effort, never fatal
+                pass
+        # A tool-free turn never touches the clean agent's loop at all,
+        # so without this the session history would silently skip
+        # every id-answered-directly turn — breaking both the NEXT
+        # Mode-C turn's history (read from this same list, above) and
+        # a later switch back to Mode A mid-session. Record it the
+        # same shape drive_one_turn would have.
         if inner_result is None and persona_text is not None:
             jaeger_agent.messages.append({"role": "user", "content": user_text})
             jaeger_agent.messages.append({"role": "assistant", "content": persona_text})
         return persona_text, inner_result
-    except Exception:  # noqa: BLE001 — the lane is optional, the turn is not
+    except Exception:  # noqa: BLE001 — optional ONLY before delegation
+        if attempted[0]:
+            raise
         return None, None
 
 
@@ -2380,7 +2485,13 @@ def _run_turn_via_jaeger_agent(
         # so the routing engine stays measured persona-off regardless of
         # this instance's persona.mode.
         result = None
-        if _persona_mode() == "agent_tool":
+        # The lane's own client.chat() calls run UN-LOCKED (design: they
+        # must never contend for llm_lock with a live drive_one_turn).
+        # That's only safe on a client whose aux lane is actually up —
+        # otherwise its chat() silently falls back to the shared WORKER
+        # context llm_lock exists to serialize. No aux lane this turn →
+        # skip Mode C entirely and fall through to the locked Mode-A path.
+        if _persona_mode() == "agent_tool" and _persona_lane_aux_available(client):
             from jaeger_os.personality.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
@@ -2388,6 +2499,14 @@ def _run_turn_via_jaeger_agent(
                 persona_text, inner_result = _run_persona_lane_turn(
                     client, jaeger_agent, user_text, character, lock,
                 )
+                # Smallest honest observable hook (persona Mode C build
+                # plan, Task 2): the eval harness needs SOME way to see
+                # whether this turn delegated (perform_task called) without
+                # scraping logs. inner_result is only non-None when the
+                # lane actually invoked perform_task — exactly the gate
+                # dev/benchmark/persona_eval.py measures. Read fresh every
+                # turn; not part of any public contract.
+                _pipeline["persona_lane_last_delegated"] = inner_result is not None
                 if persona_text is not None:
                     result = _persona_lane_turn_result(
                         persona_text, inner_result, started=started,
@@ -2512,13 +2631,10 @@ def _run_turn_via_jaeger_agent(
     # used ``text_to_speech`` played the audio TWICE (once from the
     # tool, once from the TUI's post-turn ``v.speak(text)`` fallback).
     # Now we check by tool name AND fall back to the legacy emoji
-    # marker for any caller still on the older formatter.
-    _SPOKEN_TOOLS = ("text_to_speech", "speak")
-    spoke_via_tool = any(
-        "🔊" in line
-        or any(f"▸ {t}(" in line for t in _SPOKEN_TOOLS)
-        for line in tool_activity
-    )
+    # marker for any caller still on the older formatter. Shared with
+    # Mode C's own compose-skip guard (``_run_persona_lane_turn``) —
+    # one definition of "did the model already speak this" for both.
+    spoke_via_tool = _spoke_via_tool(tool_activity)
     return {
         "text": answer, "error": None, "tool_activity": tool_activity,
         "first_decision": first_decision, "skipped_final": skipped,
