@@ -3,7 +3,7 @@
 > **Modification tier: C — Framework core.** Drop versioned
 > migration scripts here as needed for future releases.  Test on
 > a real instance before shipping.  Full policy:
-> [`/dev/docs/SELF_MODIFICATION_BOUNDARIES.md`](../../dev/docs/SELF_MODIFICATION_BOUNDARIES.md).
+> [`/dev/docs/core/SELF_MODIFICATION_BOUNDARIES.md`](../../dev/docs/core/SELF_MODIFICATION_BOUNDARIES.md).
 
 ## Status
 

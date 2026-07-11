@@ -24,8 +24,8 @@ import signal
 import sys
 from typing import Any
 
-from .bus.api import Bus, MessageRegistry
-from .bus.inproc import InProcBus
+from jaeger_os.transport import Bus, InProcBus
+
 from .config import load_config, slice_for
 from .core import Core
 from .health import HealthCache
@@ -60,8 +60,6 @@ class JaegerApp:
     def __init__(
         self,
         manifest_path: str | pathlib.Path,
-        *,
-        registry: MessageRegistry | None = None,
     ) -> None:
         # A file path is honored verbatim (an app may carry more than one
         # manifest — e.g. jaeger.sim.toml, jaeger.windowed.toml); a dir
@@ -71,7 +69,6 @@ class JaegerApp:
         self.root = (manifest_path.parent if manifest_path.is_file()
                      else manifest_path)
         self.spec: AppSpec = load_manifest(manifest_path)
-        self.registry = registry or MessageRegistry()
         self.config: dict[str, Any] = {}
         self.bus: Bus | None = None
         self.health: HealthCache | None = None
@@ -142,6 +139,14 @@ class JaegerApp:
             pass
         if self.supervisor is not None:
             self.supervisor.stop_all()
+        # 0.8 U3b: clear the delegation target + tear down the
+        # AnimationNode bridge/auto-driver sidecars the supervisor
+        # doesn't know about (see runtime.set_supervisor's docstring).
+        try:
+            from jaeger_os.nodes import runtime as node_runtime
+            node_runtime.set_supervisor(None)
+        except Exception:  # noqa: BLE001
+            pass
         if self.core is not None:
             try:
                 self.core.stop()
@@ -190,17 +195,16 @@ class JaegerApp:
             self._slot_held = False
 
     def _build_bus(self) -> None:
-        if self.spec.bus.backend == "zmq":
-            from .bus.zmq import (
-                DEFAULT_XPUB, DEFAULT_XSUB, Broker, ZmqBus,
-            )
-            xsub = self.spec.bus.xsub or DEFAULT_XSUB
-            xpub = self.spec.bus.xpub or DEFAULT_XPUB
-            self._broker = Broker(xsub=xsub, xpub=xpub)
-            self._broker.start()
-            self.bus = ZmqBus(self.registry, xsub=xsub, xpub=xpub)
-        else:
-            self.bus = InProcBus()
+        self.bus = InProcBus()
+        # 0.8 U3: inject this chassis's bus into the brain-side runtime
+        # singleton (jaeger_os.nodes.runtime) so ``ensure_tts_node`` /
+        # ``ensure_animation_node`` / ``ensure_audio_session_node`` — and
+        # the AgentCore's AgentBridge, which reads ``self.bus`` — all
+        # share the ONE bus instead of two disconnected InProcBus
+        # instances (the pre-U3 windowed-app duality). Lazy import: the
+        # chassis stays importable without pulling in TTS/animation deps.
+        from jaeger_os.nodes import runtime as node_runtime
+        node_runtime.set_bus(self.bus)
 
     def _init_core(self) -> None:
         """Boot the Tier-1 core (manifest ``[core]``) on the MAIN thread,
@@ -217,13 +221,32 @@ class JaegerApp:
 
     def _start_nodes(self) -> None:
         self.supervisor = Supervisor(health=self.health, bus=self.bus)
+        # M2a: resolve any slot-bound nodes' factories before building
+        # handles. One discover_modules() scan for the whole pass (it
+        # walks jaeger_os/nodes/ on disk) rather than one per node.
+        modules_by_slot = None
+        if any(n.slot and not n.factory for n in self.spec.nodes):
+            from jaeger_os.core.modules import discover_modules
+            modules_by_slot = discover_modules()
         for node_spec in self.spec.nodes:
-            self.supervisor.add(self._make_handle(node_spec))
+            self.supervisor.add(
+                self._make_handle(node_spec, modules_by_slot))
         self.supervisor.start_all()
+        # 0.8 U3b: register AFTER start_all() so jaeger_os.nodes.runtime's
+        # ensure_tts_node/ensure_audio_session_node/ensure_animation_node —
+        # called by the agent's speak/listen/avatar tools — delegate to
+        # THIS supervisor for any node the manifest declares + enables,
+        # instead of spawning a second thread per node (the pre-U3b
+        # windowed-app double-spawn this manifest's [[node]] entries used
+        # to guard against by staying disabled).
+        from jaeger_os.nodes import runtime as node_runtime
+        node_runtime.set_supervisor(self.supervisor)
 
-    def _make_handle(self, node_spec: NodeSpec):
+    def _make_handle(self, node_spec: NodeSpec, modules_by_slot=None):
         cfg = slice_for(self.config, node_spec.config_key)
         if node_spec.backend == "thread":
+            if node_spec.slot and not node_spec.factory:
+                self._resolve_slot(node_spec, modules_by_slot)
             factory_fn = resolve_ref(node_spec.factory)
 
             def factory(fn=factory_fn, spec=node_spec, cfg=cfg):
@@ -243,6 +266,31 @@ class JaegerApp:
             f"node {node_spec.id!r}: backend {node_spec.backend!r} "
             "not implemented in format 0.1 (thread | subprocess)"
         )
+
+    def _resolve_slot(self, node_spec: NodeSpec, modules_by_slot=None) -> None:
+        """M2a: populate ``node_spec.factory`` from ``discover_modules()``
+        for a ``slot=``-bound node. Fail-closed — a declared node with no
+        module backing its slot is a manifest bug, not a silent skip.
+        Zero modules for the slot raises naming the slot; more than one
+        picks deterministically (sorted by module name) and logs the
+        choice — real multi-engine selection is a later config concern."""
+        if modules_by_slot is None:
+            from jaeger_os.core.modules import discover_modules
+            modules_by_slot = discover_modules()
+        candidates = modules_by_slot.get(node_spec.slot, [])
+        if not candidates:
+            raise ValueError(
+                f"node {node_spec.id!r}: no module provides "
+                f"slot {node_spec.slot!r}"
+            )
+        chosen = sorted(candidates, key=lambda m: m.module)[0]
+        if len(candidates) > 1:
+            log(self.spec.name,
+                f"node {node_spec.id!r}: slot {node_spec.slot!r} has "
+                f"{len(candidates)} modules "
+                f"({sorted(m.module for m in candidates)}); "
+                f"chose {chosen.module!r}", bus=self.bus)
+        node_spec.factory = chosen.factory
 
     def _install_signals(self) -> None:
         def handler(signum: int, frame: Any) -> None:  # noqa: ARG001
