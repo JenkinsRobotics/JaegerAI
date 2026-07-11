@@ -1,7 +1,7 @@
 """Skill tree — XP-driven progression for every node + skill.
 
 Foundation module per the operator-locked architectural pattern
-(see ``dev/docs/SKILL_TREE.md``).  Every node + skill is a
+(see ``dev/docs/skills/SKILL_TREE.md``).  Every node + skill is a
 :class:`SkillNode` in a DAG; tool dispatches award XP via the
 bus; level-ups + mastery cascade through the graph as
 prerequisites get satisfied.

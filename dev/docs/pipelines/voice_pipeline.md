@@ -42,7 +42,7 @@ mic ─► AudioSessionNode (own STT thread) ─► /sense/transcript ─► voi
  │                                              bus.request(SpeechCommand) ─► /act/speech
  │                                                ack_topic=/sense/spoken, timeout 180s
  │                                                      ▼
- │                                              TTSNode  nodes/tts/node.py
+ │                                              TTSNode  nodes/kokoro_tts/node.py
  │                                                SUB /act/speech → queue → tick()
  │                                                synthesizer.speak()  (KokoroTTS)
  │                                                PUB /sense/tts_chunk @~30Hz (lip-sync)
@@ -89,7 +89,7 @@ mic ─► AudioSessionNode (own STT thread) ─► /sense/transcript ─► voi
 - `plugins/whisper_stt/_base.py :: DEFAULT_WAKE_PHRASES` — cartesian product of
   prefixes `("ok","okay","hey")` × names `("jaeger","yeager","yager","jager")`
   (`_base.py:33-35`); fuzzy-matched via `_find_wake_in_text` at threshold 0.78.
-- `nodes/tts/node.py :: TTSNode` — SUB `/act/speech` + `/act/speech_stop`;
+- `nodes/kokoro_tts/node.py :: TTSNode` — SUB `/act/speech` + `/act/speech_stop`;
   `tick()` drains one `SpeechCommand`, runs `synthesizer.speak()` (KokoroTTS)
   serially on the node thread, PUBs `SpokenAck` on `/sense/spoken` matched by
   `correlation_id`. Emits `TtsChunk` on `/sense/tts_chunk` at ~30 Hz (sin-wave
@@ -98,10 +98,10 @@ mic ─► AudioSessionNode (own STT thread) ─► /sense/transcript ─► voi
 - `nodes/runtime.py :: ensure_tts_node()` / `get_synth()` / `get_bus()` —
   materialises the singleton `TTSNode` on the brain's `InProcBus`
   (`runtime.py:165-196`); `agent/tools/speak.py` routes speech through it.
-- `plugins/kokoro_tts/` — `KokoroTTS` synthesizer + `PersistentKokoroPlayer`
+- `nodes/kokoro_tts/` — `KokoroTTS` synthesizer + `PersistentKokoroPlayer`
   (`persistent_player.py`). Publishes synthesized `AudioOutFrame` on
   `/act/audio_out` (24 kHz float32 PCM).
-- `plugins/avaudio_io/{input_stream,output_stream}.py` — default macOS audio
+- `core/audio/avaudio_io/{input_stream,output_stream}.py` — default macOS audio
   backend (`InputStream`/`OutputStream`, PyObjC `AVAudioEngine`, sounddevice-
   shaped API). Mic at 16 kHz; `voice_processing=True` enables Apple's built-in
   AEC+NS+AGC. `portaudio` (sounddevice) is the off-macOS default / fallback
@@ -171,7 +171,7 @@ mic ─► AudioSessionNode (own STT thread) ─► /sense/transcript ─► voi
   (`voice_loop.py:114-119`).
 - **Proxy / not-yet-real:** `/sense/tts_chunk` amplitude is a sin-wave
   placeholder, not real RMS from Kokoro's buffer — a 0.5.x follow-up
-  (`topics.py:254-268`, `nodes/tts/node.py:255-268`).
+  (`topics.py:254-268`, `nodes/kokoro_tts/node.py:255-268`).
 - **Engine control still direct:** `set_paused` / `open_followup` /
   `set_on_speech_detected` / `drain_pending` still call the `stt` engine
   directly (not via `/control/*` topics — not yet designed; `voice_loop.py:307-316`).

@@ -39,11 +39,13 @@ def run_status(args: Any) -> int:
     print(c.kv("Instance path",  c.dim(str(layout.root.resolve()))))
 
     # Identity — loaded independently so a broken config doesn't
-    # hide the persona name.
+    # hide the agent's name. ``ident.name`` is the AGENT's own name
+    # (identity.yaml), never the character it's playing — labeled
+    # "Agent name" so it's never mistaken for a persona preset.
     from jaeger_os.core.instance.schemas import Config, Identity, load_yaml
     try:
         ident = load_yaml(layout.identity_path, Identity)
-        print(c.kv("Persona",     c.bold(ident.name)))
+        print(c.kv("Agent name",  c.bold(ident.name)))
         if ident.role:
             print(c.kv("Role",    ident.role))
         if ident.voice_id:

@@ -14,10 +14,11 @@ import SwiftUI
 struct MenuCard: View {
     @ObservedObject var agent: AgentBridge
     @ObservedObject var tts: TTSManager
+    @ObservedObject private var settings = SettingsStore.shared
 
     /// Display name = the AGENT's name (identity.yaml), never the character —
     /// the character is only the persona it's playing. Falls back to the
-    /// character while the identity query is in flight, then instance/default.
+    /// instance while the identity query is in flight, then the default.
     private var displayName: String {
         agent.status?.displayName ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }
@@ -73,6 +74,18 @@ struct MenuCard: View {
                 .help(status.detail ?? status.text)
             }
             Spacer()
+            if settings.updateStatus?.available == true {
+                SettingsLink {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color(red: 1.0, green: 0.35, blue: 0.35))
+                            .frame(width: 6, height: 6)
+                        Text("Update").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(HUD.accent)
+                }
+                .buttonStyle(.plain)
+                .help("v\(settings.updateStatus?.latest ?? "?") is available — opens Settings → App Settings → Updates")
+            }
             SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.system(size: 15)).foregroundStyle(.secondary)

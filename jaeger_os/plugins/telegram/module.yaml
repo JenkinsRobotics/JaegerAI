@@ -1,0 +1,19 @@
+module: telegram
+slot: messaging
+version: 1.0.0
+tools: [send_message]
+factory: jaeger_os.plugins.telegram.bridge:TelegramBridge
+# 0.8 M3b: graduated from plugin.yaml (deleted) — see discord/module.yaml
+# for the full multi-module-slot rationale (shared by all three
+# messaging modules). `factory` names the real bridge class but NO manifest
+# should bind this slot: bridges are not factory(bus, config) nodes and
+# a [[node]] slot="messaging" would misconstruct them. No [[node]] entry
+# binds this slot (bridges are agent-side threads, not chassis nodes).
+#
+# python-telegram-bot's DISTRIBUTION name is `python-telegram-bot`; the
+# IMPORT name is `telegram` — requires_libraries probes import names.
+requires_libraries: [telegram]
+# TELEGRAM_BOT_TOKEN deliberately NOT modeled as a requirement — see
+# discord/module.yaml's comment: the credential store makes env
+# optional, so an unset env var must not hard-gate availability.
+# start_bridge() surfaces a missing credential at call time instead.

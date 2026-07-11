@@ -136,8 +136,16 @@ class _SlowStdin:
 
 
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
-         boot_delay=0.0, run_fn=None, stdin_delay=0.0):
-    """Drive ``bridge.main`` with faked deps; return parsed stdout frames."""
+         boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
+         default_name="test-inst", stdin_obj=None):
+    """Drive ``bridge.main`` with faked deps; return parsed stdout frames.
+
+    ``argv`` mirrors what the Swift shell passes on the ``jaeger bridge``
+    command line (``["lilith"]`` when ``JAEGER_INSTANCE_NAME`` is pinned
+    non-empty); ``default_name`` is what a bareword launch's
+    ``default_instance_name()`` resolves to when no explicit argv is
+    given — real installs return the literal ``"default"`` here on a
+    genuinely fresh box."""
     boot = _FakeBoot()
 
     def fake_boot(*, instance_name, **kwargs):
@@ -163,14 +171,16 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
                         raising=False)
     monkeypatch.setattr(
         "jaeger_os.core.instance.instance.default_instance_name",
-        lambda: "test-inst", raising=False,
+        lambda: default_name, raising=False,
     )
 
     proto = io.StringIO()
     monkeypatch.setattr("sys.stdout", proto)
-    monkeypatch.setattr("sys.stdin", _SlowStdin(stdin_text, stdin_delay))
+    monkeypatch.setattr("sys.stdin",
+                        stdin_obj if stdin_obj is not None
+                        else _SlowStdin(stdin_text, stdin_delay))
 
-    rc = bridge.main(argv=[])
+    rc = bridge.main(argv=argv if argv is not None else [])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
     return rc, frames, boot
 
@@ -298,6 +308,39 @@ def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path
     assert "first-run setup required" in frames[1]["error"]
     assert frames[2]["kind"] == "no_instance"
     assert rc == 1
+
+
+def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
+        monkeypatch, tmp_path):
+    """``./jaeger agent create lilith`` pins the operator-typed name onto
+    the ``jaeger bridge`` argv (mirroring ``JAEGER_INSTANCE_NAME`` — see
+    main.py's ``_launch_swift_app``). The no_instance fatal frame must
+    surface it as ``suggested_name`` so onboarding can default the
+    identity field to it instead of orphaning it behind whatever
+    character gets picked."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
+                         boot_exc=AssertionError("boot must not run"),
+                         argv=["lilith"])
+    fatal = next(f for f in frames if f["type"] == "fatal")
+    assert fatal["kind"] == "no_instance"
+    assert fatal["suggested_name"] == "lilith"
+
+
+def test_no_instance_fatal_omits_suggested_name_for_generic_default(
+        monkeypatch, tmp_path):
+    """No explicit CLI name → the resolver's generic ``"default"``
+    fallback (a fresh box, no sticky, no env pin) must NOT leak into
+    onboarding as a suggestion — that would wrongly override the
+    character-name default the identity step is supposed to fall back
+    to."""
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
+                         boot_exc=AssertionError("boot must not run"),
+                         default_name="default")
+    fatal = next(f for f in frames if f["type"] == "fatal")
+    assert fatal["kind"] == "no_instance"
+    assert "suggested_name" not in fatal
 
 
 def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
@@ -710,6 +753,87 @@ def test_slash_unknown_command_hints_help(monkeypatch):
     assert "Unknown slash command" in reply["text"]
 
 
+def test_list_sessions_query_returns_rows(monkeypatch, _instance_on_disk):
+    """Runway item 4: the native History surface's row list. Works with a
+    layout-only stub (pre-boot fast-ready) since the session store is
+    layout-keyed, not agent-keyed."""
+    from jaeger_os.core.sessions import SessionStore
+    (_instance_on_disk / "memory").mkdir(parents=True, exist_ok=True)
+    store = SessionStore(_instance_on_disk / "memory" / "sessions.db")
+    store.record("s1", "user", "first conversation")
+    store.record("s2", "user", "second conversation")
+    store.close()
+
+    stdin = '{"op":"query","what":"list_sessions","id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)   # answer pre-boot
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    ids = [row["id"] for row in result["data"]]
+    assert ids == ["s2", "s1"]                    # most-active first
+    assert result["data"][0]["preview"] == "second conversation"
+
+
+def test_load_session_query_returns_history_and_replays(monkeypatch):
+    """``load_session`` answers with the full turn list AND (once the
+    agent has booted) hands the client through to
+    ``main.resume_session_from_store`` for the live replay — pinned here
+    against the real function's contract in test_session_commands.py, so
+    this test just proves the bridge WIRES the id/client through."""
+    seen = {}
+
+    def fake_resume(client, session_id, layout=None):
+        seen["client"] = client
+        seen["session_id"] = session_id
+        return [{"role": "user", "text": "hi", "ts": 1.0},
+                {"role": "assistant", "text": "hello", "ts": 2.0}]
+
+    monkeypatch.setattr("jaeger_os.main.resume_session_from_store",
+                        fake_resume, raising=False)
+
+    stdin = ('{"op":"query","what":"load_session","args":{"id":"picked"},'
+             '"id":"r1"}\n{"op":"quit"}\n')
+    _, frames, boot = _run(monkeypatch, stdin, stdin_delay=0.25)  # after boot
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"] == [{"role": "user", "text": "hi", "ts": 1.0},
+                              {"role": "assistant", "text": "hello", "ts": 2.0}]
+    assert seen["session_id"] == "picked"
+    assert seen["client"] is boot.client          # the booted client, not None
+
+
+def test_load_session_query_without_id_returns_empty(monkeypatch):
+    stdin = '{"op":"query","what":"load_session","args":{},"id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"] == []
+
+
+def test_new_session_command_mints_id_and_evicts_old(monkeypatch):
+    """The native "New Chat" button. Returns a fresh short id as ``data``
+    (the generic _command -> ok/error shape can't carry that — see
+    settings_set/create_instance for the same reason) and evicts the old
+    session key when one is given."""
+    evicted = []
+    monkeypatch.setattr("jaeger_os.main.evict_session",
+                        lambda key: evicted.append(key), raising=False)
+
+    stdin = ('{"op":"command","cmd":"new_session",'
+             '"args":{"old_id":"stale-key"},"id":"r1"}\n'
+             '{"op":"command","cmd":"new_session","args":{},"id":"r2"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    results = {f["id"]: f for f in frames if f["type"] == "result"}
+    assert results["r1"]["ok"] is True
+    assert len(results["r1"]["data"]["id"]) == 8
+    assert evicted == ["stale-key"]
+    # No old_id given → no eviction, still mints a fresh id.
+    assert results["r2"]["ok"] is True
+    assert results["r2"]["data"]["id"] != results["r1"]["data"]["id"]
+    assert len(evicted) == 1
+    assert rc == 0
+
+
 def test_fixture_frames_match_builders():
     """The cross-language fixtures ARE what the builders produce — if a
     builder changes shape, this fails here and the Swift decoder test
@@ -761,14 +885,167 @@ def test_fixture_frames_match_builders():
     assert frames["fatal_no_instance"] == protocol.fatal_frame(
         "no instance named 'default' exists yet — first-run setup required",
         kind="no_instance")
+    # v1 additive suggested_name — omitted by default (fixture above stays
+    # byte-identical), present only when the bridge has a real operator
+    # pin to hand onboarding.
+    assert "suggested_name" not in protocol.fatal_frame(
+        "x", kind="no_instance")
+    assert frames["fatal_no_instance_suggested"] == protocol.fatal_frame(
+        "no instance named 'lilith' exists yet — first-run setup required",
+        kind="no_instance", suggested_name="lilith")
     assert frames["bye"] == protocol.bye_frame()
     # v1 additive: the settings_set result carries restart_required in data.
     assert frames["result_settings_set"] == protocol.result_frame(
         "r7", data={"restart_required": True, "path": "model.ctx",
                     "value": 16384}, ok=True)
+    # In-app updates (0.8): check_update / run_update result shapes.
+    assert frames["result_check_update"] == protocol.result_frame(
+        "r12", data={"current": "0.8.0", "latest": "0.9.0", "available": True,
+                    "notes_url": "https://github.com/JenkinsRobotics/JROS/releases/tag/0.9.0"},
+        ok=True)
+    assert frames["result_run_update"] == protocol.result_frame(
+        "r13", data={"restart_required": True, "returncode": 0,
+                    "output": "[jaeger update] now at 0.9.0. Restart `jaeger` to apply."},
+        ok=True)
     assert fx["ops"]["send"] == protocol.send_op("hello", "desktop-app")
     assert fx["ops"]["respond"] == protocol.respond_op("perm1", "allow")
     assert fx["ops"]["quit"] == protocol.quit_op()
+
+
+# ── in-app updates (0.8): check_update query, run_update command ──────────
+
+
+def test_check_update_query_roundtrip(monkeypatch, _instance_on_disk):
+    """``query what=check_update`` serves version_check.cached_update_status
+    keyed to the resolved instance's layout — works pre-boot."""
+    monkeypatch.setattr(
+        "jaeger_os.core.version_check.latest_version",
+        lambda *a, **k: "99.0.0", raising=False)
+    stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    import jaeger_os
+    assert result["data"]["current"] == jaeger_os.__version__
+    assert result["data"]["latest"] == "99.0.0"
+    assert result["data"]["available"] is True
+    assert result["data"]["notes_url"].endswith("/releases/tag/99.0.0")
+    assert rc == 0
+
+
+def test_check_update_query_fails_soft_offline(monkeypatch, _instance_on_disk):
+    """No network (latest_version -> None): available False, no crash."""
+    monkeypatch.setattr(
+        "jaeger_os.core.version_check.latest_version",
+        lambda *a, **k: None, raising=False)
+    stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"]["available"] is False
+    assert result["data"]["latest"] is None
+    assert rc == 0
+
+
+def test_run_update_command_invokes_the_existing_updater(monkeypatch):
+    """``command cmd=run_update`` calls update_verb.run_update_subprocess —
+    never reimplements the upgrade logic — and the result carries
+    restart_required so the client knows to prompt a quit+reopen."""
+    seen = {}
+
+    def fake_run_update(*, ref=None, **kwargs):
+        seen["ref"] = ref
+        return {"ok": True, "returncode": 0, "output": "done",
+                "restart_required": True, "error": None}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+    stdin = ('{"op":"command","cmd":"run_update","args":{"ref":"0.9.0"},'
+             '"id":"r1"}\n{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"]["restart_required"] is True
+    assert result["data"]["output"] == "done"
+    assert seen["ref"] == "0.9.0"
+    assert rc == 0
+
+
+def test_run_update_command_reports_failure_without_crashing(monkeypatch):
+    def fake_run_update(*, ref=None, **kwargs):
+        return {"ok": False, "returncode": 1, "output": "boom",
+                "restart_required": True, "error": "update exited 1"}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+    stdin = '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert result["error"] == "update exited 1"
+    assert rc == 0
+
+
+class _GatedStdin:
+    """Deterministic ordering for the busy-guard test: yields the chat
+    line immediately, then blocks the run_update line until the turn
+    worker has actually flipped ``ctx.busy`` (the ``started`` event) —
+    no sleep-based race — and unblocks the turn (``release``) right as
+    the ``quit`` line goes out so teardown doesn't hang on the worker
+    thread."""
+
+    def __init__(self, lines, started, release):
+        self._lines = iter(lines)
+        self._started = started
+        self._release = release
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = next(self._lines)
+        if "run_update" in line:
+            self._started.wait(5)
+        elif "quit" in line:
+            self._release.set()
+        return line
+
+
+def test_run_update_command_refuses_while_a_turn_is_in_flight(monkeypatch):
+    """The cheap guard: run_update while a chat/slash/cron turn is mid-flight
+    is refused with an error, never raced against the update subprocess."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    called = []
+
+    def slow_run(client, text, session_key=None):
+        started.set()
+        release.wait(5)
+        return {"text": "done", "error": None}
+
+    def fake_run_update(*, ref=None, **kwargs):
+        called.append(1)
+        return {"ok": True, "returncode": 0, "output": "",
+                "restart_required": True, "error": None}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+
+    lines = ['{"text":"slow"}\n',
+             '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n',
+             '{"op":"quit"}\n']
+    stdin_obj = _GatedStdin(lines, started, release)
+    rc, frames, _ = _run(monkeypatch, "", run_fn=slow_run, stdin_obj=stdin_obj)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert "turn is in flight" in result["error"]
+    assert called == []            # the updater was never invoked
+    assert rc == 0
 
 
 if __name__ == "__main__":

@@ -62,7 +62,7 @@ def test_visible_tool_groups_filters_to_CORE_when_scoping_on(monkeypatch):
 
 
 def test_wake_phrase_matches_at_head():
-    from jaeger_os.plugins.whisper_stt._base import _find_wake_in_text
+    from jaeger_os.nodes.whisper_stt.engine._base import _find_wake_in_text
     matched, remainder = _find_wake_in_text(
         "hey jaeger what is the weather",
         ("hey jaeger",),
@@ -76,7 +76,7 @@ def test_wake_phrase_inside_sentence_is_ignored():
     """Pre-VOICE-3, "yes I think hey jaeger is cool" wrongly
     triggered. After VOICE-3 the wake word MUST be the opening
     of the sentence."""
-    from jaeger_os.plugins.whisper_stt._base import _find_wake_in_text
+    from jaeger_os.nodes.whisper_stt.engine._base import _find_wake_in_text
     matched, remainder = _find_wake_in_text(
         "yes I think hey jaeger is cool",
         ("hey jaeger",),
@@ -90,7 +90,7 @@ def test_wake_phrase_fuzzy_head_match_still_works():
     """Whisper sometimes mishears 'jaeger' as 'yeager' / 'jager'.
     The fuzzy fallback should still accept the head window even
     when it's not an exact match."""
-    from jaeger_os.plugins.whisper_stt._base import _find_wake_in_text
+    from jaeger_os.nodes.whisper_stt.engine._base import _find_wake_in_text
     matched, remainder = _find_wake_in_text(
         "hey yeager pick up the trash",
         ("hey jaeger",),
@@ -104,7 +104,7 @@ def test_wake_phrase_fuzzy_head_match_still_works():
 def test_continuous_extract_command_head_only(monkeypatch):
     """The continuous-mode wake matcher (``_extract_command``)
     enforces the same head-only contract."""
-    from jaeger_os.plugins.whisper_stt.continuous import (
+    from jaeger_os.nodes.whisper_stt.engine.continuous import (
         WhisperSTTContinuous,
     )
     # Hand-build a stub instance with just the attrs _extract_command
@@ -123,7 +123,7 @@ def test_pre_wake_transcript_is_logged_as_not_sent(capsys, monkeypatch):
     """When wake-required mode is on AND no wake match, the
     transcript should print as ``[mic heard X — not sent]`` AND not
     land in the committed queue."""
-    from jaeger_os.plugins.whisper_stt.continuous import WhisperSTTContinuous
+    from jaeger_os.nodes.whisper_stt.engine.continuous import WhisperSTTContinuous
     stub = WhisperSTTContinuous.__new__(WhisperSTTContinuous)
     stub.require_wake_word = True
     stub.wake_phrases = ("hey jaeger",)
@@ -154,7 +154,7 @@ def test_pre_wake_transcript_is_logged_as_not_sent(capsys, monkeypatch):
 def test_wake_match_is_committed(capsys):
     """Positive control — when the wake phrase IS at the head, the
     committed queue gets the command tail."""
-    from jaeger_os.plugins.whisper_stt.continuous import WhisperSTTContinuous
+    from jaeger_os.nodes.whisper_stt.engine.continuous import WhisperSTTContinuous
     stub = WhisperSTTContinuous.__new__(WhisperSTTContinuous)
     stub.require_wake_word = True
     stub.wake_phrases = ("hey jaeger",)

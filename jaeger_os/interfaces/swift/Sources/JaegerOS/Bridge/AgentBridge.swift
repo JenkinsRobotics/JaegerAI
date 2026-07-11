@@ -143,8 +143,11 @@ final class AgentBridge: ObservableObject {
         await proc.setOnRequest { [weak self] request in
             Task { @MainActor in self?.handleRequest(request) }
         }
-        await proc.setOnFatal { [weak self] kind, error in
-            Task { @MainActor in self?.handleFatal(kind: kind, error: error) }
+        await proc.setOnFatal { [weak self] kind, error, suggestedName in
+            Task { @MainActor in
+                self?.handleFatal(kind: kind, error: error,
+                                  suggestedName: suggestedName)
+            }
         }
         await proc.setOnTermination { [weak self] clean in
             Task { @MainActor in self?.handleTermination(clean: clean) }
@@ -295,11 +298,17 @@ final class AgentBridge: ObservableObject {
     /// Route ``fatal`` frames by kind. ``no_instance`` is FIRST-RUN, not
     /// an error: the bridge transport stays alive for setup queries, so
     /// present the onboarding window instead of a failure surface.
-    private func handleFatal(kind: String, error: String) {
+    /// ``suggestedName`` (v1 additive) is the operator's CLI-pinned agent
+    /// name (``./jaeger agent create lilith``) — handed straight to
+    /// onboarding so the identity step defaults to it instead of
+    /// silently orphaning it behind whatever character gets picked.
+    private func handleFatal(kind: String, error: String,
+                             suggestedName: String?) {
         guard kind == "no_instance" else { return }
         needsOnboarding = true
         NSLog("[Bridge] no instance on disk — presenting onboarding")
-        OnboardingWindowController.shared.show(agent: self)
+        OnboardingWindowController.shared.show(agent: self,
+                                               suggestedName: suggestedName)
     }
 
     /// Onboarding finished (instance created + agent booted): clear the
@@ -403,9 +412,13 @@ struct AgentStatus {
     /// Active character's display name — the PERSONA being played,
     /// secondary flavor next to ``agentName`` ("Ted · playing HAL 9000").
     var character: String? { rawDict["character"] as? String }
-    /// What the header should lead with: the agent's name, falling back
-    /// to the character while the identity query is still in flight.
-    var displayName: String? { agentName ?? character }
+    /// What the header should lead with: the agent's name. NEVER falls
+    /// back to the character — the character is a persona preset, not the
+    /// agent's identity, and must not stand in for it on any surface that
+    /// represents the agent (window titles, tray, chat header). Falls back
+    /// to the instance (dir name / universal key) while the identity query
+    /// is still in flight.
+    var displayName: String? { agentName ?? instance }
     /// Absolute path to the agent's effective avatar (instance profile
     /// picture if set, else the active character's card).
     var iconPath: String? { rawDict["icon"] as? String }

@@ -47,11 +47,21 @@ def test_every_bundled_plugin_manifest_validates():
 
 def test_audit_returns_one_row_per_plugin():
     rows = audit_plugin_dir(_BUNDLED_PLUGINS_ROOT)
-    # We ship exactly 6 plugins today; pinned so an accidental
-    # commit that drops one or adds an unannounced one is noticed.
+    # Pinned so an accidental commit that drops one or adds an
+    # unannounced one is noticed. kokoro_tts (0.8 M1) and whisper_stt
+    # (0.8 M2b) both graduated from a plugin to a core engine-module
+    # (jaeger_os/nodes/kokoro_tts/, jaeger_os/nodes/whisper_stt/); 0.8
+    # M3b graduates discord/telegram/imessage the same way, but AS THE
+    # FIRST MULTI-MODULE SLOT (module.yaml under jaeger_os/plugins/,
+    # not jaeger_os/nodes/ — see dev/tests/jaeger_os/core/test_modules.py).
+    # All 5 are intentionally no longer in this plugin.yaml-only set.
     names = {r["name"] for r in rows}
-    assert {"discord", "telegram", "imessage", "mcp",
-            "kokoro_tts", "whisper_stt"} <= names
+    assert {"homeassistant", "ai_gen", "mcp"} <= names
+    assert "kokoro_tts" not in names
+    assert "whisper_stt" not in names
+    assert "discord" not in names
+    assert "telegram" not in names
+    assert "imessage" not in names
 
 
 # ── schema behaviour ──────────────────────────────────────────────

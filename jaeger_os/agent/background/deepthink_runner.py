@@ -1,6 +1,6 @@
 """Deep Think runner, Phase 2 — the staged assembly line.
 
-Design: dev/docs/agentic_runners.md (Runner 2). The background tier is the
+Design: dev/docs/reality/agentic_runners.md (Runner 2). The background tier is the
 one place the hard pipeline pays: latency-free, unattended, huge contexts,
 objective success criteria. Stages, all runner-owned:
 

@@ -67,16 +67,36 @@ struct OnboardingAnswers: Sendable, Equatable {
     var asleepModel: String = ""
     var permissionMode: String = "confirm"
 
-    /// Prefill identity from a picked character — the operator can still
-    /// type over both fields, exactly like the CLI wizard's defaults.
+    /// The CLI-pinned name (bridge's ``suggested_name``, e.g. ``./jaeger
+    /// agent create lilith``), or empty when none. Seeded once at
+    /// ``loadCatalog`` time; wins over every character preset until the
+    /// operator types over the Name field.
+    var pinnedName: String = ""
+    /// True once the operator has typed into the Name field — an edit
+    /// always wins over both the pin and any later character pick.
+    var displayNameEdited: Bool = false
+
+    /// Prefill identity from a picked character. Precedence (the operator
+    /// contract): a user edit or a CLI pin always wins over the preset —
+    /// selecting a character only fills the (still-blank, still-untouched)
+    /// Name field, it never clobbers a name the operator already has.
     mutating func select(characterId id: String, name: String, role: String) {
         self.characterId = id
-        displayName = name
         self.role = role
+        if pinnedName.isEmpty && !displayNameEdited {
+            displayName = name
+        }
     }
 
     /// The ``create_instance`` args. Blank optionals are OMITTED so the
     /// single source of truth for defaults stays in setup_wizard.py.
+    ///
+    /// ``name`` (the instance DIR) is sent ONLY when a CLI pin exists —
+    /// verbatim, so ``./jaeger agent create lilith`` always dirs as
+    /// ``lilith`` regardless of which character gets picked or how the
+    /// operator edits the display name afterward. With no pin, ``name``
+    /// is omitted and the server slugs the dir from ``display_name``
+    /// (unchanged, existing behaviour).
     func commandArgs() -> [String: String] {
         var args: [String: String] = [
             "character_id": characterId,
@@ -95,6 +115,8 @@ struct OnboardingAnswers: Sendable, Equatable {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { args[key] = trimmed }
         }
+        let pin = pinnedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pin.isEmpty { args["name"] = pin }
         return args
     }
 

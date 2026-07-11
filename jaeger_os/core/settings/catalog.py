@@ -12,7 +12,7 @@ hand-enumerated field list in the CLI, the bridge, or the Swift app.
 Deliberately a plain module over the ``Config`` model — NOT a plugin / provider
 framework. When a future module (a TTS node, a plugin, a hardware package) needs
 to contribute its own settings to this surface, that federation seam is a 0.8
-concern (``dev/docs/framework_vision.md``); today the whole catalog is the
+concern (``dev/docs/vision/framework_vision.md``); today the whole catalog is the
 config schema.
 """
 

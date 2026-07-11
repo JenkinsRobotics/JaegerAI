@@ -21,9 +21,8 @@ _MANIFEST = _REPO_ROOT / "jaeger.windowed.toml"
 
 def main() -> int:
     from jaeger_os.app import JaegerApp
-    from jaeger_os.core.messages import MESSAGES
 
-    return JaegerApp(_MANIFEST, registry=MESSAGES).run()
+    return JaegerApp(_MANIFEST).run()
 
 
 if __name__ == "__main__":

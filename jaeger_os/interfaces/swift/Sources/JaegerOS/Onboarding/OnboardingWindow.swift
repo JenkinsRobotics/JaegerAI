@@ -31,9 +31,9 @@ final class OnboardingWindowController {
 
     private init() {}
 
-    func show(agent: AgentBridge) {
+    func show(agent: AgentBridge, suggestedName: String? = nil) {
         if window != nil { return }
-        let model = OnboardingModel(agent: agent)
+        let model = OnboardingModel(agent: agent, suggestedName: suggestedName)
         model.onFinished = { [weak self] in self?.close() }
         self.model = model
 
@@ -86,8 +86,12 @@ final class OnboardingModel: ObservableObject {
     let agent: AgentBridge
     var onFinished: (() -> Void)?
 
-    init(agent: AgentBridge) {
+    init(agent: AgentBridge, suggestedName: String? = nil) {
         self.agent = agent
+        if let suggestedName, !suggestedName.isEmpty {
+            answers.pinnedName = suggestedName
+            answers.displayName = suggestedName
+        }
     }
 
     // MARK: catalog
@@ -108,6 +112,8 @@ final class OnboardingModel: ObservableObject {
             defaults = d
         }
         // Preselect the default character so Continue is never a dead end.
+        // ``select`` itself honours the pin/edit precedence, so this never
+        // clobbers a CLI-pinned name seeded in ``init``.
         if answers.characterId.isEmpty,
            let pick = characters.first(where: { $0.id == defaults?.defaultCharacter })
                     ?? characters.first {
@@ -355,8 +361,9 @@ private struct CharacterStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             StepTitle("Choose a character",
-                      subtitle: "Your Jaeger plays this character — name, "
-                               + "voice and persona come from the pick. "
+                      subtitle: "Your Jaeger plays this character — its "
+                               + "voice and persona come from the pick "
+                               + "(the agent's own name is set next). "
                                + "Editable later in Studio.")
             if model.loading && model.characters.isEmpty {
                 Spacer()
@@ -440,17 +447,30 @@ private struct IdentityStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             StepTitle("Identity",
-                      subtitle: "Prefilled from "
-                               + (model.selectedCharacter?.name ?? "the character")
-                               + " — type over anything. The name also names "
-                               + "the instance folder.")
-            OnboardingField(label: "NAME", text: $model.answers.displayName,
+                      subtitle: "The agent's own name — how it refers to "
+                               + "itself. The character you picked supplies "
+                               + "its persona and voice, never its name; "
+                               + "type over anything here.")
+            OnboardingField(label: "NAME", text: nameBinding,
                             prompt: "Jarvis")
             OnboardingField(label: "ROLE — WHAT DOES IT DO?",
                             text: $model.answers.role,
                             prompt: "general-purpose agentic assistant")
             Spacer()
         }
+    }
+
+    /// Any edit here marks the field "touched" so a later character pick
+    /// (Back → pick a different card → Continue) never clobbers it — an
+    /// operator's own typing always wins (the operator contract).
+    private var nameBinding: Binding<String> {
+        Binding(
+            get: { model.answers.displayName },
+            set: {
+                model.answers.displayName = $0
+                model.answers.displayNameEdited = true
+            }
+        )
     }
 }
 
@@ -622,9 +642,15 @@ private struct ReviewStep: View {
                       subtitle: "Everything can be changed later — "
                                + "in Settings or Jaeger Studio.")
             VStack(spacing: 0) {
-                row("Character", model.selectedCharacter?.name
+                // Agent name FIRST and prominent — the operator contract's
+                // "no mismatch hides here" row. Instance ID (the fixed
+                // folder slug) sits right under it, dim/small, so a
+                // name/preset mismatch (the lilith/anakin bug) is visible
+                // at a glance instead of buried under "Character".
+                row("Agent name", model.answers.displayName)
+                row("Instance ID", instanceIdPreview, dim: true)
+                row("Character preset", model.selectedCharacter?.name
                         ?? model.answers.characterId)
-                row("Name", model.answers.displayName)
                 row("Role", model.answers.role)
                 row("Awake model", model.useRecommended
                         ? recommended(\.awake) : model.answers.awakeModel)
@@ -642,6 +668,24 @@ private struct ReviewStep: View {
         }
     }
 
+    /// Client-side preview ONLY — the real slug is computed server-side
+    /// (``setup_wizard._slug``) at write time; this mirrors that logic
+    /// (lowercase, non ``[a-z0-9_-]`` runs → ``-``, trim ``-``/``_``) just
+    /// for the review screen so the folder name isn't a surprise.
+    private var instanceIdPreview: String {
+        let pin = model.answers.pinnedName.trimmingCharacters(in: .whitespaces)
+        let source = pin.isEmpty ? model.answers.displayName : pin
+        let lowered = source.lowercased()
+        let slug = lowered.map { c -> Character in
+            (c.isLetter && c.isASCII) || c.isNumber || c == "_" || c == "-"
+                ? c : "-"
+        }
+        var result = String(slug)
+        while result.hasPrefix("-") || result.hasPrefix("_") { result.removeFirst() }
+        while result.hasSuffix("-") || result.hasSuffix("_") { result.removeLast() }
+        return result.isEmpty ? "agent" : result
+    }
+
     private func recommended(
         _ path: KeyPath<SetupDefaults, SetupDefaults.ModelPick>) -> String {
         guard let d = model.defaults else { return "recommended" }
@@ -649,7 +693,7 @@ private struct ReviewStep: View {
     }
 
     private func row(_ label: String, _ value: String,
-                     last: Bool = false) -> some View {
+                     dim: Bool = false, last: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text(label.uppercased())
@@ -658,8 +702,8 @@ private struct ReviewStep: View {
                     .foregroundStyle(Term.inkDim)
                     .frame(width: 130, alignment: .leading)
                 Text(value)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Term.ink)
+                    .font(.system(size: dim ? 12 : 13, weight: .medium))
+                    .foregroundStyle(dim ? Term.inkDim : Term.ink)
                     .lineLimit(1)
                 Spacer()
             }

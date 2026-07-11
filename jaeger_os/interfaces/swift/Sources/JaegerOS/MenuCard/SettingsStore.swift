@@ -59,6 +59,24 @@ struct PermissionsInfo: Codable {
     var granted: [String]
 }
 
+/// ``version_check.cached_update_status`` shape (the ``check_update`` query) —
+/// current/latest version, whether a newer release exists, and a link to its
+/// notes. ``latest``/``notes_url`` are nil offline or when already current.
+struct UpdateStatus: Codable, Equatable {
+    var current: String
+    var latest: String?
+    var available: Bool
+    var notes_url: String?
+}
+
+/// Outcome of the ``run_update`` command — the bridge shells out to
+/// ``jaeger update`` (the SAME machinery the CLI runs) and reports back.
+struct UpdateRunResult: Codable, Equatable {
+    var restart_required: Bool
+    var returncode: Int?
+    var output: String
+}
+
 // MARK: - schema-derived settings catalog (the single source)
 
 /// A heterogeneous setting value (the catalog's ``default`` / ``current``).
@@ -188,6 +206,20 @@ final class SettingsStore: ObservableObject {
     /// Last settings error, surfaced inline on the App page.
     @Published var settingsError: String?
     @Published var busy = false
+
+    /// Last-known ``check_update`` result — the Updates row and the
+    /// menu-bar dot both read this, so a single background poll (app
+    /// launch + every ~6h, see ``pollUpdatesIfDue``) lights up every
+    /// surface at once.
+    @Published var updateStatus: UpdateStatus?
+    /// True while ``run_update`` (the actual upgrade subprocess) is running.
+    @Published var updateInProgress = false
+    /// Outcome of the last ``run_update`` — nil before one has run.
+    @Published var updateResult: UpdateRunResult?
+    /// Set when ``run_update`` couldn't even be dispatched (e.g. a turn
+    /// was in flight) — distinct from a completed-but-failed run, which
+    /// lands in ``updateResult`` instead.
+    @Published var updateError: String?
 
     /// Page order mirrors ``catalog.GROUP_ORDER`` on the Python side.
     private static let groupOrder = [
@@ -345,5 +377,42 @@ final class SettingsStore: ObservableObject {
         busy = true
         defer { busy = false }
         return await agent.command(cmd, args: args).ok
+    }
+
+    // MARK: - in-app updates (0.8)
+
+    /// Ask the bridge whether a newer release exists. Cheap to call often —
+    /// the Python side caches the GitHub lookup for ~6h — so this is safe
+    /// on app launch and on a periodic timer, not just the explicit button.
+    @discardableResult
+    func checkForUpdates() async -> UpdateStatus? {
+        let r = await agent.query("check_update")
+        guard r.ok, let json = r.json,
+              let st = try? JSONDecoder().decode(UpdateStatus.self, from: json)
+        else { return nil }
+        updateStatus = st
+        return st
+    }
+
+    /// Run the actual upgrade (shells out to ``jaeger update`` on the Python
+    /// side — never reimplemented here). On success, ``updateResult.
+    /// restart_required`` tells the caller to prompt a quit+reopen; this
+    /// method never auto-restarts the app.
+    func runUpdate() async {
+        guard !updateInProgress else { return }
+        updateInProgress = true
+        updateError = nil
+        defer { updateInProgress = false }
+        let ref = updateStatus?.latest
+        let args: [String: any Sendable] = ref.map { ["ref": $0] } ?? [:]
+        let r = await agent.command("run_update", args: args)
+        guard let json = r.json,
+              let res = try? JSONDecoder().decode(UpdateRunResult.self, from: json)
+        else {
+            updateError = r.error ?? "update failed"
+            return
+        }
+        updateResult = res
+        if !r.ok { updateError = r.error }
     }
 }

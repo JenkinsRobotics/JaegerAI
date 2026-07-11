@@ -41,7 +41,7 @@ def _build_synth():
     config dependency — it uses module-level defaults for voice + lang
     and resolves its audio backend lazily.  Returns the synth so the
     caller can tear it down."""
-    from jaeger_os.plugins.kokoro_tts.node import KokoroTTS
+    from jaeger_os.nodes.kokoro_tts.engine import KokoroTTS
     return KokoroTTS()
 
 

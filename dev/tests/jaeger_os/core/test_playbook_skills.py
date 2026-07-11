@@ -24,7 +24,7 @@ def test_playbooks_are_discovered() -> None:
 def test_a_skill_can_be_both_module_and_recipe() -> None:
     # Presence-based unification: a folder that ships a module (registers tools)
     # AND a SKILL.md is BOTH — its recipe is indexed too. No "code_skill vs
-    # playbook" mutual exclusion. See dev/docs/skill_unification.md.
+    # playbook" mutual exclusion. See dev/docs/history/skill_unification.md.
     names = {s.name for s in pb.discover_playbooks()}
     assert "computer_use" in names       # a module-providing skill's recipe...
     assert "macos_computer" in names     # ...is now surfaced via use_skill too

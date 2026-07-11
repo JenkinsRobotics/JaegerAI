@@ -391,3 +391,224 @@ def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monke
     monkeypatch.setattr(U, "_reinstall_deps", lambda h: deps.append(h) or 0)
     assert U._update_download(home, ref="9.9.9", force=True) == 0
     assert deps == [home]      # force resyncs deps even though requirements match
+
+
+# ── Swift app rebuild after product swap (0.7.3) ───────────────────
+
+
+def _swift_layout(home: Path) -> Path:
+    """A fake built app + build script under HOME; returns the script."""
+    swift = home / "jaeger_os" / "interfaces" / "swift"
+    (swift / ".build" / "JaegerOS.app").mkdir(parents=True)
+    script = swift / "Scripts" / "build-app.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/bin/bash\nexit 0\n")
+    return script
+
+
+def test_update_download_rebuilds_swift_app(tmp_path, monkeypatch):
+    home = tmp_path
+    (home / "jaeger_os").mkdir()
+    (home / "requirements.txt").write_text("same")
+    _swift_layout(home)
+
+    def fake_extract(tarball, staging):
+        (staging / "jaeger_os").mkdir(parents=True)
+        (staging / "requirements.txt").write_text("same")
+        return ["jaeger_os", "requirements.txt"]
+
+    monkeypatch.setattr(U, "_download_tarball",
+                        lambda repo, ref, dest: dest.write_bytes(b""))
+    monkeypatch.setattr(U, "_extract_product", fake_extract)
+    rebuilds: list = []
+    monkeypatch.setattr(U, "_rebuild_swift_app", lambda h: rebuilds.append(h))
+    assert U._update_download(home, ref="9.9.9") == 0
+    assert rebuilds == [home]   # rebuild runs on the swapped-in install
+
+
+def test_rebuild_swift_app_skips_when_never_built(tmp_path, monkeypatch, capsys):
+    calls: list = []
+    monkeypatch.setattr(U.subprocess, "run",
+                        lambda *a, **k: calls.append(a))
+    U._rebuild_swift_app(tmp_path)      # no .build/JaegerOS.app → no-op
+    assert calls == []
+    assert capsys.readouterr().err == ""
+
+
+def test_rebuild_swift_app_runs_build_script(tmp_path, monkeypatch, capsys):
+    script = _swift_layout(tmp_path)
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--release"]]
+    assert "ready" in capsys.readouterr().out
+
+
+def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys):
+    """A failed install-time build must not exempt a station forever:
+    script present + app absent -> BUILD (this was the 'never even
+    installed' half of the deployed-station bug)."""
+    import shutil as _sh
+    script = _swift_layout(tmp_path)
+    _sh.rmtree(tmp_path / "jaeger_os" / "interfaces" / "swift" / ".build")
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--release"]]
+    assert "building" in capsys.readouterr().out
+
+
+def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
+    """Flavor follows the install: dev/ present -> JaegerOS-dev.app via --dev
+    (mirrors install.sh); a git-clone station gets the dev shell."""
+    script = _swift_layout(tmp_path)
+    (tmp_path / "dev").mkdir()
+    ran: list = []
+
+    class _R:
+        returncode = 0
+
+    monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
+    monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
+    U._rebuild_swift_app(tmp_path)
+    assert ran == [["bash", str(script), "--dev"]]
+
+
+def test_rebuild_swift_app_only_if_stale_skips_fresh(tmp_path, monkeypatch):
+    _swift_layout(tmp_path)
+    from jaeger_os.cli import _common
+    monkeypatch.setattr(_common, "swift_app_is_stale", lambda repo, bundle: False)
+    ran: list = []
+    monkeypatch.setattr(U.subprocess, "run", lambda *a, **k: ran.append(a))
+    U._rebuild_swift_app(tmp_path, only_if_stale=True)
+    assert ran == []
+
+
+def test_rebuild_swift_app_warns_without_toolchain(tmp_path, monkeypatch, capsys):
+    _swift_layout(tmp_path)
+    monkeypatch.setattr(U.shutil, "which", lambda name: None)
+    U._rebuild_swift_app(tmp_path)
+    assert "NOT (re)built" in capsys.readouterr().err
+
+
+def test_swift_app_is_stale_basics(tmp_path):
+    """Missing executable -> stale; no .git (tarball install) -> never stale
+    (that path rebuilds explicitly after every product swap)."""
+    from jaeger_os.cli._common import swift_app_is_stale
+    bundle = tmp_path / "JaegerOS.app"
+    assert swift_app_is_stale(tmp_path, bundle) is True   # no exe
+    exe = bundle / "Contents" / "MacOS" / "JaegerOS"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert swift_app_is_stale(tmp_path, bundle) is False  # exe, but no .git
+
+
+# ── app-bridge run_update (0.8 in-app updates) ──────────────────────
+
+
+def test_jaeger_exe_prefers_venv_console_script(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    # No venv yet -> falls back to the wrapper script at the install root.
+    assert U.jaeger_exe() == repo / "jaeger"
+    venv_bin = repo / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "jaeger").write_text("#!/bin/sh\n")
+    assert U.jaeger_exe() == venv_bin / "jaeger"
+
+
+def test_run_update_subprocess_invokes_jaeger_update(tmp_path, monkeypatch):
+    """Calls the SAME ``jaeger update`` machinery — never reimplements the
+    upgrade logic — with stdin closed (non-interactive)."""
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+
+        class _R:
+            returncode = 0
+            stdout = "[jaeger update] now at 0.9.0.\n"
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res == {"ok": True, "returncode": 0,
+                    "output": "[jaeger update] now at 0.9.0.\n",
+                    "restart_required": True, "error": None}
+    argv, kwargs = calls[0]
+    assert argv == [str(repo / "jaeger"), "update"]
+    assert kwargs["stdin"] is U.subprocess.DEVNULL
+
+
+def test_run_update_subprocess_pins_ref(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+
+        class _R:
+            returncode = 0
+            stdout = ""
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    U.run_update_subprocess(ref="0.9.0")
+    assert calls[0] == [str(repo / "jaeger"), "update", "--ref", "0.9.0"]
+
+
+def test_run_update_subprocess_nonzero_exit_reports_error(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+
+    def fake_run(argv, **kwargs):
+        class _R:
+            returncode = 2
+            stdout = "boom\n"
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res["ok"] is False
+    # still restart-worthy — the process ran and may have changed files.
+    assert res["restart_required"] is True
+    assert "exited 2" in res["error"]
+
+
+def test_run_update_subprocess_missing_binary_never_raises(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+
+    def fake_run(argv, **kwargs):
+        raise FileNotFoundError("no such file")
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res == {"ok": False, "returncode": None, "output": "",
+                    "restart_required": False, "error": "no such file"}

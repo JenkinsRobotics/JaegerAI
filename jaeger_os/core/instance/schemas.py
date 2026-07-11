@@ -21,26 +21,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-def _setting(group: str, *, restart: bool = False,
-             advanced: bool = False) -> dict[str, Any]:
-    """Settings-catalog metadata for a Config leaf field.
-
-    The single-source settings surface (``core/settings/catalog.py``) walks
-    ``Config`` and emits a descriptor for every leaf field carrying this
-    metadata — CLI (``jaeger settings``) and the Swift app both render from
-    that one catalog, so a setting is defined ONCE, here, and nowhere else.
-
-      group     which settings page the field belongs to (model / display /
-                voice / tts / autonomy / permissions / retention / interaction).
-      restart   True if the change only takes effect after the agent reboots
-                (surfaces show a "restart required" badge).
-      advanced  True to tuck the field behind the "Advanced" disclosure.
-
-    A leaf WITHOUT this metadata is deliberately NOT exposed in the catalog
-    (identity keys, provenance, and the deferred hardware/avatar/plugin
-    blocks stay out until their own Phase-3 providers land)."""
-    return {"group": group, "restart": restart, "advanced": advanced}
+# ``_setting``'s canonical definition moved to ``setting_meta.py`` at 0.8
+# M1 so an engine-module's config slice (e.g. ``jaeger_os/nodes/
+# kokoro_tts/config.py``) can carry catalog metadata without importing
+# this file — breaking what would otherwise be a schemas <-> module
+# circular import (see this file's ``Config`` import site, below).
+# Re-exported here so every existing ``_setting(...)`` call in this file
+# is unchanged.
+from jaeger_os.core.instance.setting_meta import _setting
 
 
 # Bumped whenever the on-disk shape of identity.yaml / config.yaml
@@ -223,6 +211,16 @@ class DisplayConfig(BaseModel):
         "interrupt", json_schema_extra=_setting("display"),
         description="What pressing Enter does mid-turn: interrupt (cancel + "
                     "run now), queue (run after), steer (inject as guidance).")
+    # Runway item 4 (0.8): the durable session store (core/sessions.py)
+    # never pruned — a long-lived install would grow sessions.db forever.
+    # Pruned on every recorded turn (SessionStore.prune, cheap indexed
+    # DELETE); 0 = keep everything (an explicit operator opt-out, not a
+    # silently-ignored value).
+    session_history_keep: int = Field(
+        50, ge=0, json_schema_extra=_setting("display"),
+        description="How many past conversations the durable session store "
+                    "(History) keeps before pruning the oldest. 0 = never "
+                    "prune.")
 
 
 class RetentionConfig(BaseModel):
@@ -676,33 +674,8 @@ class InteractionConfig(BaseModel):
     )
 
 
-class AvatarConfig(BaseModel):
-    """0.5: AnimationNode + FrameBridge configuration.
-
-    Controls whether the avatar pipeline auto-starts at boot.
-
-    **Default OFF (2026-06-14):** the avatar / animation node (the
-    Lilith face) is a beta, dev-mode feature — its ``set_avatar_state``
-    /timeline tools are ``beta``-gated (visible only under
-    ``JAEGER_DEV_MODE=1``) and the MathScript renderer is still a
-    prototype. So the daily-driver agent does NOT warm the AnimationNode
-    by default. Set ``avatar.enabled = true`` in the instance config to
-    spin up the AnimationNode + WebSocket bridge when developing it;
-    promote to default-on once the renderer is stable.
-
-    ``./launch --no-avatar`` also forces it off regardless of config.
-    """
-    model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    bridge_host: str = "127.0.0.1"
-    bridge_port: int = Field(8765, ge=1024, le=65535)
-    # Default emotion the wizard suggests; AnimationNode will publish
-    # this on boot when set_avatar_state hasn't been called yet.
-    default_emotion: str = "neutral"
-
-
 class HardwareConfig(BaseModel):
-    """Hardware package selection (dev/docs/JROS_HARDWARE_FRAMEWORK_PLAN.md).
+    """Hardware package selection (dev/docs/hardware/JROS_HARDWARE_FRAMEWORK_PLAN.md).
 
     ``package`` names a directory under ``jaeger_os/hardware/packages/``
     (e.g. ``"jp01"``); empty string = no robot attached (the default —
@@ -718,7 +691,7 @@ class HardwareConfig(BaseModel):
 
 
 class PersonaConfig(BaseModel):
-    """Station 3 of the standard runner (dev/docs/agentic_runners.md):
+    """Station 3 of the standard runner (dev/docs/reality/agentic_runners.md):
     workers execute vanilla (a character in the execution context costs a
     4B ~7 bench points, measured); the character's voice is applied to the
     FINAL answer by one bounded clean-context call at the user-facing
@@ -738,6 +711,103 @@ class PersonaConfig(BaseModel):
                     "doubles latency where it hurts most. 0 disables "
                     "styling entirely.",
     )
+    # Mode C (dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md, operator-
+    # canonized 2026-07-10): "the id and the ego" — the persona model runs
+    # as a minimal agent with ONE tool (``perform_task``) and decides per
+    # turn whether to answer in character or delegate to the clean agent.
+    # DEFAULT as of the 2026-07-10 gate (delegation 12/12, security lane
+    # regression-checked — see PERSONA_MODE_C_BUILD_PLAN.md). Mode B
+    # ("frontend") is DEAD — superseded by C before it was ever built; the
+    # design doc keeps it for the record but no code implements it.
+    # ``JAEGER_PERSONA_MODE`` overrides this in either direction
+    # (jaeger_os/main.py:_persona_mode). Renamed from output_filter/
+    # agent_tool to persona_last/persona_first (pre-1.0, no shim — see
+    # feedback-no-back-compat-pre-1.0) so the settings page can show
+    # operator-legible names instead of internal Mode A/C jargon.
+    mode: Literal["persona_first", "persona_last"] = Field(
+        "persona_first",
+        json_schema_extra=_setting("persona"),
+        description='Pipeline: "persona_first" — your character answers '
+                    "directly and calls the task engine as its tool (fast, "
+                    "in-character conversation; recommended). "
+                    '"persona_last" — the task engine answers plainly and '
+                    "the character re-styles the result.",
+    )
+
+
+# 0.8 M1: kokoro_tts is the first "engine-module" — its config model
+# (``KokoroTTSConfig``) lives beside its node/engine code in
+# ``jaeger_os/nodes/kokoro_tts/config.py``, not here. Importing it here
+# to nest it into ``Config`` (below) pulls in ``jaeger_os.nodes`` (this
+# import forces that package's ``__init__.py`` to run, which imports
+# ``jaeger_os.nodes.kokoro_tts``). The FIRST cut of this had
+# ``config.py`` import ``_setting`` straight from this file — a
+# textbook two-file cycle (schemas -> module -> schemas) that broke
+# with an ``ImportError`` on whichever side happened to import first.
+# Fixed by moving ``_setting`` to ``setting_meta.py``, a zero-dependency
+# leaf both sides import from — ``jaeger_os/nodes/kokoro_tts/config.py``
+# has no import-time dependency on this file, so this import direction
+# is now a plain one-way edge, not a cycle. Any FUTURE engine-module
+# nested here the same way should follow the same shape: its config.py
+# imports catalog metadata from ``setting_meta.py``, never from
+# ``schemas.py`` directly.
+try:
+    from jaeger_os.nodes.kokoro_tts.config import KokoroTTSConfig
+except ImportError:
+    # 0.8 M2a: the kokoro_tts directory (config.py included) can be
+    # deleted entirely. This stand-in is structurally identical to the
+    # real leaf (same fields/defaults) so an existing config.yaml's
+    # ``kokoro_tts:`` block — or the default_factory below — still
+    # parses cleanly under ``extra="forbid"``; the values are inert
+    # since nothing can synthesize speech without the module present.
+    class KokoroTTSConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        voice: str = "af_heart"
+        lang: str = "a"
+        sample_rate: int = 24000
+
+
+# 0.8 M2b Task B: whisper_stt is the second engine-module nested this
+# way (see the kokoro_tts import block above for the full import-cycle
+# rationale — same shape, same ``setting_meta`` leaf, same guarded
+# ImportError fallback so a deleted ``nodes/whisper_stt/`` directory
+# degrades instead of breaking config load).
+try:
+    from jaeger_os.nodes.whisper_stt.config import WhisperSTTConfig
+except ImportError:
+    # Structurally identical to the real leaf (same fields/defaults) so
+    # an existing config.yaml's ``whisper_stt:`` block — or the
+    # default_factory below — still parses cleanly under
+    # ``extra="forbid"``; the values are inert since nothing can listen
+    # without the module present.
+    class WhisperSTTConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        stt_mode: str = "two_pass"
+        fast_model_name: str = "base.en"
+        accurate_model_name: str = "medium.en"
+
+
+# 0.8 M2c: animation is the third engine-module nested this way — same
+# shape/rationale as the kokoro_tts and whisper_stt import blocks above.
+# ``AvatarConfig`` moved to ``jaeger_os/nodes/animation/config.py``
+# verbatim (same fields/defaults; still carries NO ``_setting()``
+# catalog metadata — the avatar/animation pipeline stays an unexposed,
+# beta, dev-mode block, same as before this move).
+try:
+    from jaeger_os.nodes.animation.config import AvatarConfig
+except ImportError:
+    # 0.8 M2a-style guard: the animation directory (config.py included)
+    # can be deleted entirely. Structurally identical to the real leaf
+    # so an existing config.yaml's ``avatar:`` block — or the
+    # default_factory below — still parses cleanly under
+    # ``extra="forbid"``; the values are inert since nothing can drive
+    # the avatar without the module present.
+    class AvatarConfig(BaseModel):  # type: ignore[no-redef]
+        model_config = ConfigDict(extra="forbid")
+        enabled: bool = False
+        bridge_host: str = "127.0.0.1"
+        bridge_port: int = Field(8765, ge=1024, le=65535)
+        default_emotion: str = "neutral"
 
 
 class Config(BaseModel):
@@ -761,6 +831,8 @@ class Config(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
+    whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

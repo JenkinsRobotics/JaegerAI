@@ -76,9 +76,10 @@ class ChatWindow(QWidget):
     def __init__(self, ctx: Any) -> None:
         super().__init__()
         self.ctx = ctx
-        # Display name tracks the ACTIVE character (what the agent is playing),
-        # so the title / banner / reply prefix match the persona — not the
-        # boot-time core identity. Recomputed each time the window opens.
+        # Display name = the AGENT's own identity (never the character —
+        # see ``window.agent_name``'s fallback chain), so the title / banner
+        # / reply prefix always self-reference the agent. Recomputed each
+        # time the window opens (an identity edit takes effect on reopen).
         try:
             from jaeger_os.interfaces.avatar_player.window import agent_name
             self._agent_name = agent_name(ctx)

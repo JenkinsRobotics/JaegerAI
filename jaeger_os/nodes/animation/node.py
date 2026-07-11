@@ -2,7 +2,7 @@
 the bus; ships rendered frames to the renderer (Swift app at
 ``jaeger_os/interfaces/avatar/`` is the 0.5 default).
 
-Architecture mirrors :class:`jaeger_os.nodes.tts.node.TTSNode`:
+Architecture mirrors :class:`jaeger_os.nodes.kokoro_tts.node.TTSNode`:
 a subscriber on the bus + a worker thread that drains a queue of
 play commands.  Each accepted command:
 
