@@ -211,6 +211,16 @@ class DisplayConfig(BaseModel):
         "interrupt", json_schema_extra=_setting("display"),
         description="What pressing Enter does mid-turn: interrupt (cancel + "
                     "run now), queue (run after), steer (inject as guidance).")
+    # Runway item 4 (0.8): the durable session store (core/sessions.py)
+    # never pruned — a long-lived install would grow sessions.db forever.
+    # Pruned on every recorded turn (SessionStore.prune, cheap indexed
+    # DELETE); 0 = keep everything (an explicit operator opt-out, not a
+    # silently-ignored value).
+    session_history_keep: int = Field(
+        50, ge=0, json_schema_extra=_setting("display"),
+        description="How many past conversations the durable session store "
+                    "(History) keeps before pruning the oldest. 0 = never "
+                    "prune.")
 
 
 class RetentionConfig(BaseModel):

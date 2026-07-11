@@ -260,6 +260,30 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # native onboarding — the same data the CLI wizard prints.
         from jaeger_os.core.instance.setup_wizard import setup_defaults
         return setup_defaults()
+    if what == "list_sessions":
+        # Runway item 4 (0.8): the native History surface's row list —
+        # id/title/preview/created_at/last_active/messages, most-active
+        # first. Works pre-boot (the store is layout-keyed, not agent-
+        # keyed) so History can populate while the model is still warming.
+        from jaeger_os.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            return []
+        return store.list_sessions(limit=int(args.get("limit") or 50))
+    if what == "load_session":
+        # Runway item 4: the operator picked a conversation out of
+        # History. Returns its full turn list for the client to rebuild
+        # a transcript with, AND (when the agent has booted) replays it
+        # into that session's live JaegerAgent.messages so a follow-up
+        # turn on this id continues WITH context — see
+        # ``main.resume_session_from_store`` for why this is a full
+        # replay, not the usual clean-slate / lossy-digest resume.
+        from jaeger_os.main import resume_session_from_store
+        sid = str(args.get("id") or "").strip()
+        if not sid:
+            return []
+        return resume_session_from_store(
+            getattr(boot, "client", None), sid, layout=lay)
     return None
 
 
@@ -795,6 +819,29 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "new_session":
+                # Runway item 4: the native "New Chat" button. Handled
+                # here (not ``_command``) for the same reason as
+                # settings_set/create_instance above — it needs to
+                # return the minted id as ``data``, which the generic
+                # _command -> (ok, error) shape can't carry. Evicting
+                # the OLD session (when given) is best-effort cleanup —
+                # the client is about to stop sending turns on that key
+                # regardless, so a failure here would only leak state,
+                # never break the new session.
+                import uuid
+                from jaeger_os.main import evict_session
+                a = req.get("args") or {}
+                old_id = str(a.get("old_id") or "").strip()
+                if old_id:
+                    try:
+                        evict_session(old_id)
+                    except Exception:  # noqa: BLE001 — cleanup only
+                        pass
+                new_id = uuid.uuid4().hex[:8]
+                _emit(proto, protocol.result_frame(
+                    req.get("id"), data={"id": new_id}, ok=True))
                 continue
             if op == "command" and (req.get("cmd") or "") == "create_instance":
                 # Handled here (not in _command): it needs ctx + proto to

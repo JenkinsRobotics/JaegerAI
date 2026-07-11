@@ -751,6 +751,87 @@ def test_slash_unknown_command_hints_help(monkeypatch):
     assert "Unknown slash command" in reply["text"]
 
 
+def test_list_sessions_query_returns_rows(monkeypatch, _instance_on_disk):
+    """Runway item 4: the native History surface's row list. Works with a
+    layout-only stub (pre-boot fast-ready) since the session store is
+    layout-keyed, not agent-keyed."""
+    from jaeger_os.core.sessions import SessionStore
+    (_instance_on_disk / "memory").mkdir(parents=True, exist_ok=True)
+    store = SessionStore(_instance_on_disk / "memory" / "sessions.db")
+    store.record("s1", "user", "first conversation")
+    store.record("s2", "user", "second conversation")
+    store.close()
+
+    stdin = '{"op":"query","what":"list_sessions","id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)   # answer pre-boot
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    ids = [row["id"] for row in result["data"]]
+    assert ids == ["s2", "s1"]                    # most-active first
+    assert result["data"][0]["preview"] == "second conversation"
+
+
+def test_load_session_query_returns_history_and_replays(monkeypatch):
+    """``load_session`` answers with the full turn list AND (once the
+    agent has booted) hands the client through to
+    ``main.resume_session_from_store`` for the live replay — pinned here
+    against the real function's contract in test_session_commands.py, so
+    this test just proves the bridge WIRES the id/client through."""
+    seen = {}
+
+    def fake_resume(client, session_id, layout=None):
+        seen["client"] = client
+        seen["session_id"] = session_id
+        return [{"role": "user", "text": "hi", "ts": 1.0},
+                {"role": "assistant", "text": "hello", "ts": 2.0}]
+
+    monkeypatch.setattr("jaeger_os.main.resume_session_from_store",
+                        fake_resume, raising=False)
+
+    stdin = ('{"op":"query","what":"load_session","args":{"id":"picked"},'
+             '"id":"r1"}\n{"op":"quit"}\n')
+    _, frames, boot = _run(monkeypatch, stdin, stdin_delay=0.25)  # after boot
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"] == [{"role": "user", "text": "hi", "ts": 1.0},
+                              {"role": "assistant", "text": "hello", "ts": 2.0}]
+    assert seen["session_id"] == "picked"
+    assert seen["client"] is boot.client          # the booted client, not None
+
+
+def test_load_session_query_without_id_returns_empty(monkeypatch):
+    stdin = '{"op":"query","what":"load_session","args":{},"id":"r1"}\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"] == []
+
+
+def test_new_session_command_mints_id_and_evicts_old(monkeypatch):
+    """The native "New Chat" button. Returns a fresh short id as ``data``
+    (the generic _command -> ok/error shape can't carry that — see
+    settings_set/create_instance for the same reason) and evicts the old
+    session key when one is given."""
+    evicted = []
+    monkeypatch.setattr("jaeger_os.main.evict_session",
+                        lambda key: evicted.append(key), raising=False)
+
+    stdin = ('{"op":"command","cmd":"new_session",'
+             '"args":{"old_id":"stale-key"},"id":"r1"}\n'
+             '{"op":"command","cmd":"new_session","args":{},"id":"r2"}\n'
+             '{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    results = {f["id"]: f for f in frames if f["type"] == "result"}
+    assert results["r1"]["ok"] is True
+    assert len(results["r1"]["data"]["id"]) == 8
+    assert evicted == ["stale-key"]
+    # No old_id given → no eviction, still mints a fresh id.
+    assert results["r2"]["ok"] is True
+    assert results["r2"]["data"]["id"] != results["r1"]["data"]["id"]
+    assert len(evicted) == 1
+    assert rc == 0
+
+
 def test_fixture_frames_match_builders():
     """The cross-language fixtures ARE what the builders produce — if a
     builder changes shape, this fails here and the Swift decoder test

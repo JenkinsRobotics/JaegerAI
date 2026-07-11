@@ -2420,6 +2420,59 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     return _jaeger_agents_by_session[key]
 
 
+def resume_session_from_store(
+    client: Any, session_id: str, layout: Any = None,
+) -> list[dict[str, Any]]:
+    """EXPLICIT session resume (the native app's History → load_session):
+    replay ``session_id``'s durable turns into that session's LIVE
+    ``JaegerAgent.messages`` so a follow-up turn on this id sees context.
+
+    This is deliberately NOT what a fresh session (:func:`_get_session_history`)
+    or a same-key restart (:func:`_previous_session_digest`, a lossy
+    orientation digest) do. Both of those guard against stale-task bleed —
+    context from a DIFFERENT, already-finished conversation leaking into a
+    new one the operator never asked to continue. That concern doesn't
+    apply here: the operator just picked THIS exact conversation out of
+    History and means to continue it — full replay is the honest behavior,
+    not a bug the clean-slate rule needs to guard against.
+
+    Capped at the same ``_MAX_HISTORY_MESSAGES * 2`` window a live turn
+    trims to (keeping the most RECENT turns), so resuming a huge old
+    conversation doesn't blow the context budget on the very next turn.
+
+    Returns the FULL (uncapped) turn list — ``{role, text, ts}``, oldest
+    first — so the caller can rebuild a UI transcript with it. Replay into
+    the live agent only happens when ``client`` is given (the agent has
+    booted); browsing History while the model is still warming still
+    answers with the turns for display, just without live replay — the
+    next turn on that session falls back to a fresh agent instead of
+    silently doing nothing. The replay itself is best-effort: a failure
+    building the session's agent must not cost the operator the History
+    view they asked for — they still get their turns back, just without
+    live continuation (same "display always wins" contract as the
+    no-client case above)."""
+    from jaeger_os.core.sessions import get_store
+    store = get_store(layout)
+    if store is None:
+        return []
+    turns = store.history(session_id)
+    if not turns or client is None:
+        return turns
+    try:
+        capped = turns[-(_MAX_HISTORY_MESSAGES * 2):]
+        agent = _ensure_session_agent(client, session_id)
+        agent.messages = [
+            {"role": t["role"], "content": t["text"]}
+            for t in capped if t.get("role") in ("user", "assistant")
+        ]
+        _session_loaded.add(session_id)
+        _session_state.pop(session_id, None)
+    except Exception as exc:  # noqa: BLE001 — display must not fail with it
+        print(f"[jaeger] session resume replay failed for {session_id!r}: {exc}",
+              file=sys.stderr, flush=True)
+    return turns
+
+
 def prewarm_session(client: Any, session_key: str = "desktop-app") -> None:
     """Prime the KV cache with the EXACT prompt prefix ``session_key``'s
     first turn will send — so message #1 pays zero cold prefill.
@@ -2765,6 +2818,11 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     session = session_key or "voice"
     out = _run_turn(client, user_text, session_key=session)
     # Persist the turn so conversations survive app close + are listable.
+    # ``preview`` (first user line, set by SessionStore.record) already
+    # serves as the History list's title fallback — see
+    # interfaces/pyside6/rich_tui/window.py's ``_list_sessions`` — so
+    # there's no separate "first-turn set_title" call here; a distinct
+    # OPERATOR-editable title is a future rename affordance, not this one.
     try:
         from jaeger_os.core.sessions import get_store
         store = get_store()
@@ -2772,6 +2830,10 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
             store.record(session, "user", user_text)
             if out.get("text"):
                 store.record(session, "assistant", out["text"])
+            cfg = _pipeline.get("config")
+            keep = int(getattr(getattr(cfg, "display", None),
+                               "session_history_keep", 50) or 0)
+            store.prune(keep)
     except Exception:  # noqa: BLE001 — persistence never breaks a turn
         pass
     return {
