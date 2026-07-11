@@ -11,7 +11,10 @@ memory, logs, skills, and (M2) credentials. Resolution order:
 JAEGER_INSTANCE_NAME or via the wizard.
 
 Locking uses fcntl on `.lock` so two Jaeger processes can never share an
-instance dir; stale locks are detected via the PID written into the file.
+instance dir. Stale locks are detected via the PID written into the file
+AND (0.8.1) a process-shape check — a recorded pid that's dead, or alive
+but not actually a jaeger process (see :mod:`procshape`), is broken
+automatically with a loud log instead of wedging every future boot.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from jaeger_os.core.instance.procshape import is_real_jaeger_command, pid_cmdline
 from jaeger_os.core.instance.schemas import (
     SCHEMA_VERSION,
     Config,
@@ -352,11 +356,30 @@ class InstanceLock:
                     f"instance {self._path.parent.name!r} is locked by pid {holder} (still running). "
                     "Refusing to start a second copy."
                 ) from exc
-            # Stale: caller can remove + retry.
-            raise RuntimeError(
-                f"stale lock at {self._path} (pid {old or '?'} is gone). "
-                f"Remove the file manually if you're sure nothing else is running."
-            ) from exc
+            # 0.8.1 field bug #3: stale — either the recorded pid is
+            # gone, or it's alive but NOT jaeger-shaped (see
+            # _pid_alive's docstring; that case already logged loudly
+            # there). Break the lock automatically and retry ONCE
+            # instead of making the operator `rm` it by hand — a
+            # crashed/broken-bundle launch must not permanently wedge
+            # every future boot.
+            print(
+                f"[jaeger] breaking stale instance lock at {self._path} "
+                f"(recorded pid {old or '?'} is gone or not a jaeger process).",
+                file=sys.stderr, flush=True,
+            )
+            with contextlib.suppress(FileNotFoundError):
+                self._path.unlink()
+            fh = self._path.open("a+", encoding="utf-8")
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as retry_exc:
+                fh.close()
+                raise RuntimeError(
+                    f"stale lock at {self._path} was broken, but another "
+                    "process grabbed it immediately after (a launch race) "
+                    "— try again."
+                ) from retry_exc
 
         fh.seek(0)
         fh.truncate()
@@ -377,6 +400,33 @@ class InstanceLock:
 
 
 def _pid_alive(pid_str: str) -> int | None:
+    """Return the holder's PID if the lock looks genuinely held, else
+    ``None`` (stale — caller may break it).
+
+    Two checks, in order (0.8.1 field bug #3 — "stale-lock detection"):
+
+      1. Is the PID alive at all (``os.kill(pid, 0)``)? Dead → stale,
+         the classic case. Catchable exits (SIGTERM/SIGINT, any
+         exception during boot) already release the lock via
+         ``InstanceLock.release()`` — ``boot_for_tui`` and the
+         daemon/bridge/TUI entry points all call it from a ``finally``
+         — so a truly-dead PID here means an UNCATCHABLE exit
+         (SIGKILL, OOM-kill, power loss): exactly the field report
+         ("a crashed launch left a headless Python agent holding the
+         instance lock").
+      2. Is the alive PID actually **jaeger-shaped**? A live PID that
+         is NOT a jaeger process — because the OS recycled the dead
+         jaeger's PID for something unrelated before this check ran,
+         or because something else entirely is squatting the number —
+         must not block a fresh boot forever just for being alive.
+         Verified with the same ``ps``-based cmdline check
+         ``jaeger kill`` uses (:mod:`jaeger_os.core.instance.
+         procshape`) so lock-breaking and the kill sweep never
+         disagree about what "jaeger" means. A cmdline lookup that
+         can't be read (``ps`` unavailable/timeout) fails CLOSED —
+         treated as still held — so a transient ``ps`` hiccup never
+         breaks a lock that is genuinely in use.
+    """
     try:
         pid = int(pid_str)
     except (TypeError, ValueError):
@@ -385,12 +435,22 @@ def _pid_alive(pid_str: str) -> int | None:
         return None
     try:
         os.kill(pid, 0)
-        return pid
     except OSError as exc:
         if exc.errno == errno.ESRCH:
             return None
-        # EPERM means the process exists but is owned by another user.
-        return pid
+        # EPERM: process exists, owned by another user — fall through
+        # to the cmdline check below (``ps`` can usually still read it).
+
+    cmdline = pid_cmdline(pid)
+    if cmdline is not None and not is_real_jaeger_command(cmdline):
+        print(
+            f"[jaeger] instance lock claims pid {pid}, but that pid is "
+            f"NOT a jaeger process (cmdline: {cmdline!r}) — treating the "
+            "lock as stale and breaking it.",
+            file=sys.stderr, flush=True,
+        )
+        return None
+    return pid
 
 
 # ---------------------------------------------------------------------------
