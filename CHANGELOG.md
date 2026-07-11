@@ -3,6 +3,22 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.8.1` — the field-test patch
+
+Eleven fixes, every one traced to release-day field testing on a deployed
+station. Boot: never blocks on the network (HF cache trusted when complete;
+voice warm moved off the critical path — window interactive immediately);
+stale instance locks auto-break when the holder isn't a live jaeger process.
+Persona brain: the id now carries a live-derived SELF-MODEL (knows it's a
+JROS agent and what's installed), a BINDING-ASK rule (character shapes HOW,
+never WHETHER — jokes get told), and SELF-STATE delegation (capability/state
+questions check reality, never confabulate) — delegation gate 12/12, new
+joke + self-state gates pass. App: mid-turn messages queue instead of being
+silently dropped (the Swift composer was discarding them), plugin activation
+persists via plugins.autostart, discord/telegram/imessage visible in
+discovery again (lost in the 0.8 module graduation), a messaging-setup SOP
+skill, and dark-mode-correct settings controls.
+
 ## `0.8.0` — modular runtime + persona_first pipeline
 
 The line that unifies the runtime and ships the "second self" pipeline as
