@@ -124,7 +124,7 @@ def update_status(repo: str | None = None, *, timeout: float = 5.0) -> dict:
     }
 
 
-_CACHE_TTL_S = 6 * 3600.0   # 6h — matches the app-bridge tray poll cadence
+_CACHE_TTL_S = 24 * 3600.0  # once a day is plenty (operator call, 2026-07-11)
 _CACHE_NAME = "update_check.json"
 
 
@@ -141,7 +141,7 @@ def cached_update_status(layout: object | None = None, *, repo: str | None = Non
                          now: float | None = None) -> dict:
     """:func:`update_status` plus ``notes_url``, with the GitHub lookup
     cached under ``<instance>/run/update_check.json`` for ``ttl_s``
-    seconds — so a tray poll every ~6h (app launch + periodic) doesn't
+    seconds — so the daily tray poll (app launch + periodic) doesn't
     hit the API every time. Only ``latest`` is cached; ``current`` /
     ``available`` are recomputed live each call against ``jaeger_os.
     __version__`` (cheap, and self-corrects across a restart onto a new

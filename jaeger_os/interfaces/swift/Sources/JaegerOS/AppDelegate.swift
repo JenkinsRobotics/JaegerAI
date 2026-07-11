@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             while !Task.isCancelled {
                 _ = await SettingsStore.shared.checkForUpdates()
-                try? await Task.sleep(for: .seconds(6 * 3600))
+                try? await Task.sleep(for: .seconds(24 * 3600))
             }
         }
     }
