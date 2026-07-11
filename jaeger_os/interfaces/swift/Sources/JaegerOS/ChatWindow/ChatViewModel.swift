@@ -93,6 +93,18 @@ final class ChatViewModel: ObservableObject {
     /// double-fire while we wait for the agent to reply.
     @Published private(set) var isSending: Bool = false
 
+    /// 0.8.1 item 9: messages typed while a turn is already in flight.
+    /// The bridge's own turn queue (a FIFO ``queue.Queue``, see
+    /// ``interfaces/bridge.py``) never drops a mid-turn send either —
+    /// but ``BridgeProcess`` only tracks ONE in-flight reply
+    /// continuation, so this client can't fire two turns at once
+    /// without redesigning that. Queueing locally and draining in
+    /// ``send`` fixes the actual bug (a mid-turn Return silently
+    /// cleared the composer and dropped the text — see ``send``'s old
+    /// ``guard !isSending else { return }``) without touching the
+    /// bridge's concurrency model. ``count`` lets a view show "queued".
+    @Published private(set) var pendingSends: [String] = []
+
     /// Composer text — bound to the chat window's TextField.  Owned
     /// by the view-model so transcription results (from STT) can
     /// drop straight into it without needing a callback up to the
@@ -368,25 +380,50 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Send a user turn through the agent's ``chat.send`` verb.  The
-    /// user bubble appears immediately; the assistant bubble lands
-    /// once the agent replies.  Errors become inline system bubbles.
+    /// user bubble appears immediately (even while queued behind an
+    /// in-flight turn); the assistant bubble lands once the agent
+    /// replies.  Errors become inline system bubbles.
+    ///
+    /// 0.8.1 item 9: a message typed while a turn is already running
+    /// used to be silently DROPPED here (``guard !isSending else {
+    /// return }``, with the composer already cleared by the caller —
+    /// real data loss, not just a missing spinner). It now queues and
+    /// drains in order once the in-flight turn finishes.
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        guard !isSending else { return }
 
+        if isSending {
+            pendingSends.append(trimmed)
+            messages.append(ChatMessage(
+                author: .user, timestamp: Date(), text: trimmed))
+            return
+        }
+
+        await runTurn(trimmed, appendUserBubble: true)
+        while !pendingSends.isEmpty {
+            let next = pendingSends.removeFirst()
+            await runTurn(next, appendUserBubble: false)
+        }
+    }
+
+    /// Runs ONE turn over the bridge. ``appendUserBubble`` is false for a
+    /// queued send — ``send`` already appended its bubble the moment it
+    /// was typed, so the transcript shows it right away instead of only
+    /// once it's finally this message's turn to run.
+    private func runTurn(_ trimmed: String, appendUserBubble: Bool) async {
         // Late-bind the display prefs if the init-time fetch raced the
         // transport coming up.
         if !displayConfigLoaded { await loadDisplayConfig() }
 
-        // User bubble lands now so the operator sees their message
-        // immediately even if the agent is slow to reply.
         let turnStarted = Date()
-        messages.append(ChatMessage(
-            author: .user,
-            timestamp: turnStarted,
-            text: trimmed
-        ))
+        if appendUserBubble {
+            messages.append(ChatMessage(
+                author: .user,
+                timestamp: turnStarted,
+                text: trimmed
+            ))
+        }
 
         // Placeholder assistant bubble — we'll fill in once the
         // response lands.  Marked as streaming so the view can show a
