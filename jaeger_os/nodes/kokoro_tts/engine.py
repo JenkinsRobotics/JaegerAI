@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 import time
 from typing import Any
 
@@ -35,6 +36,85 @@ from typing import Any
 KOKORO_VOICE = "af_heart"
 KOKORO_LANG = "a"
 KOKORO_SAMPLE_RATE = 24000
+
+# ---------------------------------------------------------------------------
+# HF Hub offline-first boot (0.8.1 field bug #1: "boot never blocks on
+# network"). Kokoro's own loader (kokoro/model.py, kokoro/pipeline.py) calls
+# huggingface_hub.hf_hub_download() with no local_files_only= — EVERY call
+# does an unauthenticated HEAD request against the Hub to check for a newer
+# revision before trusting the local cache, even when every required file
+# is already on disk (verified: a 37GB-cached instance still stalled boot
+# minutes on rate-limited HEADs). Principle: install/update time is when
+# the network happens; runtime is offline. If the assets this pipeline
+# needs are already cached, force huggingface_hub into offline mode BEFORE
+# constructing KPipeline — automatic, no operator config. If something
+# required is genuinely missing, leave the Hub reachable (first-run
+# download) but log loudly so a slow boot has an obvious cause on the
+# console; item 2 (voice warm off the boot critical path) keeps that
+# download from wedging the app either way.
+_KOKORO_MODEL_FILENAMES = {
+    "hexgrad/Kokoro-82M": "kokoro-v1_0.pth",
+    "hexgrad/Kokoro-82M-v1.1-zh": "kokoro-v1_1-zh.pth",
+}
+_HF_TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _env_true(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _HF_TRUE_VALUES
+
+
+def ensure_hf_offline_if_cached(
+    repo_id: str = "hexgrad/Kokoro-82M", voice: str = KOKORO_VOICE,
+) -> bool:
+    """Force ``HF_HUB_OFFLINE`` on for this process when every file Kokoro
+    needs for ``repo_id``/``voice`` is already in the local HF cache.
+    Cache-index lookups only (``huggingface_hub.try_to_load_from_cache``)
+    — no network, cheap enough to call on every pipeline init. Returns
+    True when offline mode is (already, or newly) in effect.
+
+    An operator-set ``HF_HUB_OFFLINE`` env var always wins either
+    direction — this never overrides an explicit choice.
+    """
+    if "HF_HUB_OFFLINE" in os.environ:
+        return _env_true("HF_HUB_OFFLINE")
+
+    from huggingface_hub import _CACHED_NO_EXIST, try_to_load_from_cache
+
+    required = [
+        "config.json",
+        _KOKORO_MODEL_FILENAMES.get(repo_id, _KOKORO_MODEL_FILENAMES["hexgrad/Kokoro-82M"]),
+        f"voices/{voice}.pt",
+    ]
+    missing = [
+        f for f in required
+        if (hit := try_to_load_from_cache(repo_id=repo_id, filename=f)) is None
+        or hit is _CACHED_NO_EXIST
+    ]
+    if missing:
+        print(
+            f"[kokoro] NOT fully cached ({', '.join(missing)} missing for "
+            f"{repo_id!r}) — boot will fetch from Hugging Face Hub "
+            "(network required; one-time download).",
+            file=sys.stderr, flush=True,
+        )
+        return False
+
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    try:
+        # constants.HF_HUB_OFFLINE is a module-level global read live by
+        # is_offline_mode() — patch it directly too, in case some other
+        # import path already pulled in huggingface_hub.constants earlier
+        # in this process (env var alone only affects a FIRST import).
+        import huggingface_hub.constants as _hf_constants
+        _hf_constants.HF_HUB_OFFLINE = True
+    except Exception:  # noqa: BLE001 — env var alone still helps
+        pass
+    print(
+        f"[kokoro] {repo_id!r} fully cached — forcing HF_HUB_OFFLINE "
+        "(no Hub freshness checks at boot).",
+        file=sys.stderr, flush=True,
+    )
+    return True
 # Sample rate the AEC reference buffer is expected to run at. AEC math
 # requires near (mic) and far (TTS playback) at the same sample rate;
 # the mic captures at 16 kHz, so Kokoro's 24 kHz output gets resampled
@@ -111,7 +191,13 @@ class KokoroTTS:
     Single-instance in practice — `core/tools/speak.py` caches one in a
     module global. Thread-safety is intentionally minimal: Kokoro's pipeline
     is not designed for concurrent calls, and the agent's tool surface is
-    serialized through the LLM lock anyway.
+    serialized through the LLM lock anyway — EXCEPT for pipeline *loading*
+    itself (0.8.1: voice warm now runs off the boot critical path in a
+    background thread — see main.py's ``warm_plugins_async``), which can
+    race a real-time ``speak()`` call landing before warm finishes. That one
+    section (``_ensure_pipeline``) is guarded by ``_pipeline_lock`` so a
+    concurrent caller blocks and waits for the in-flight load instead of
+    starting a second one — "wait gracefully," never wedge or double-load.
     """
 
     def __init__(
@@ -124,6 +210,7 @@ class KokoroTTS:
         self.voice = voice
         self.lang = lang
         self._pipeline: Any = None
+        self._pipeline_lock = threading.Lock()
         # When set, every played frame is also pushed to this buffer so the
         # STT plugin's AEC can use it as the far-end reference. Without it,
         # AEC sees silence as far-end and barge-in won't work — but plain
@@ -210,21 +297,35 @@ class KokoroTTS:
 
     # ── pipeline lifecycle ────────────────────────────────────────────
     def _ensure_pipeline(self) -> Any:
-        if self._pipeline is None:
-            import warnings
+        if self._pipeline is not None:
+            return self._pipeline
+        # Double-checked locking: background warm (main.py's
+        # warm_plugins_async) and a real-time speak() call can both reach
+        # here before either has loaded anything. The lock makes the
+        # SECOND caller wait for the first's load instead of racing it —
+        # never a wedge (the first caller always makes progress), never a
+        # duplicate load.
+        with self._pipeline_lock:
+            if self._pipeline is None:
+                import warnings
 
-            # Kokoro's model build emits noisy torch UserWarnings
-            # (LSTM dropout) and FutureWarnings (weight_norm deprecation).
-            # They are harmless and not actionable by the user — silence
-            # them so a `speak` call doesn't spew a wall of stack-frame
-            # text into the TUI.
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=UserWarning)
-                warnings.simplefilter("ignore", category=FutureWarning)
-                from kokoro import KPipeline
-                self._pipeline = KPipeline(
-                    lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
-                )
+                # Boot-never-blocks-on-network: decide offline vs. online
+                # BEFORE touching kokoro/huggingface_hub at all. See
+                # ensure_hf_offline_if_cached()'s docstring.
+                ensure_hf_offline_if_cached("hexgrad/Kokoro-82M", self.voice)
+
+                # Kokoro's model build emits noisy torch UserWarnings
+                # (LSTM dropout) and FutureWarnings (weight_norm deprecation).
+                # They are harmless and not actionable by the user — silence
+                # them so a `speak` call doesn't spew a wall of stack-frame
+                # text into the TUI.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=UserWarning)
+                    warnings.simplefilter("ignore", category=FutureWarning)
+                    from kokoro import KPipeline
+                    self._pipeline = KPipeline(
+                        lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
+                    )
         return self._pipeline
 
     def warm(self) -> dict[str, Any]:
