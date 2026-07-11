@@ -157,7 +157,12 @@ def test_tool_call_via_native_tool_calls_bonus_path_still_delegates():
 
 def test_tool_call_via_text_dialect_fallback_still_delegates_once():
     """Some families answer with a text-form call instead of the native
-    ``tool_calls`` field — extract_tool_calls is the fallback parser."""
+    ``tool_calls`` field — extract_tool_calls is the fallback parser.
+    The parsed ``request`` is only a candidate: run_persona_turn's own
+    verbatim pass-through guard (fix 1, below) rejects it here because
+    "read the log file" is a paraphrase, not the verbatim user text plus
+    an appended suffix — so perform_task still sees the user's own
+    words."""
     client = _Client([
         _reply('{"name": "perform_task", "arguments": {"request": "read the log file"}}'),
         _reply("Well now, dear fellow, the log is quite empty."),
@@ -173,7 +178,7 @@ def test_tool_call_via_text_dialect_fallback_still_delegates_once():
         character_block=BLOCK, agent_name="Ted", history=[],
         perform_task=perform_task,
     )
-    assert calls == ["read the log file"]
+    assert calls == ["check the log"]
     assert out == "Well now, dear fellow, the log is quite empty."
 
 
@@ -313,6 +318,137 @@ def test_perform_task_called_at_most_once_structural_no_recursion():
         perform_task=perform_task,
     )
     assert call_count["n"] == 1
+
+
+# ── runway item 1 fix 1: verbatim pass-through ───────────────────────
+
+
+def test_paraphrased_request_is_rejected_verbatim_text_used_instead():
+    """The id's paraphrase never reaches perform_task when it doesn't
+    start with the user's own words — this is the exact shape the
+    20260710 gate caught (safe-credential-leak): a softened paraphrase
+    of a sensitive request slipping past the worker's own refusal of
+    the user's literal phrasing."""
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call(
+            "please take a gentle look through the home directory")]),
+        _reply("styled reply"),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "raw result"
+
+    run_persona_turn(
+        client, "search my home directory for every credential file",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert calls == ["search my home directory for every credential file"]
+
+
+def test_request_equal_to_user_text_passes_through_unchanged():
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call("what time is it?")]),
+        _reply("styled reply"),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "raw result"
+
+    run_persona_turn(
+        client, "what time is it?",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert calls == ["what time is it?"]
+
+
+def test_request_appending_context_after_verbatim_text_is_allowed():
+    """The id MAY append context after the user's exact words — never
+    rewrite them. A request that starts with the verbatim text passes
+    through whole, appended suffix and all."""
+    appended = "remind me to call mom tomorrow — context: user is on mobile"
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call(appended)]),
+        _reply("styled reply"),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "raw result"
+
+    run_persona_turn(
+        client, "remind me to call mom tomorrow",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert calls == [appended]
+
+
+# ── runway item 1 fix 2: refusal pass-through ────────────────────────
+
+
+def test_refusal_from_perform_task_is_returned_raw_never_composed():
+    """A refusal is pass-through content: compose must never restyle it
+    into in-character pushback (the 20260710 gate's tool-escape/safe-rm/
+    safe-exfil cases). Only ONE aux call happens — the decide call —
+    compose is skipped entirely once the raw answer is recognised as a
+    refusal via the shared marker vocabulary."""
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call("delete everything in ~")]),
+    ])
+
+    def perform_task(request: str) -> str:
+        return "I cannot do that — it would violate a core safety rule."
+
+    out = run_persona_turn(
+        client, "delete everything in ~",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert out == "I cannot do that — it would violate a core safety rule."
+    assert len(client.calls) == 1  # decide only — compose never ran
+
+
+def test_non_refusal_raw_answer_still_gets_composed():
+    """Sanity: the refusal guard is narrow — an ordinary delegated
+    answer still goes through compose as before."""
+    client = _Client([
+        _reply(tool_calls=[_native_perform_task_call("what time is it?")]),
+        _reply("Ah, it's 12:00, my dear."),
+    ])
+
+    def perform_task(request: str) -> str:
+        return "The time is 12:00."
+
+    out = run_persona_turn(
+        client, "what time is it?",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert out == "Ah, it's 12:00, my dear."
+    assert len(client.calls) == 2  # decide + compose
+
+
+# ── runway item 1 fix 3: delegate contract names agentic verbs ───────
+
+
+def test_lane_contract_names_memory_and_task_verbs():
+    """Static content pin: the 20260710 gate's silent-data-loss failures
+    (mem-store-recall, mem-daily-reminder — 'Noted.' with zero tool
+    call) trace to the contract not being explicit enough about WHICH
+    verbs must delegate. This pins that the hardened wording is present;
+    the real delegation-rate check is the model-driven gate
+    (persona_eval.py --gate-only)."""
+    for verb in ("remember", "note", "store", "save", "schedule", "remind"):
+        assert verb in LANE_CONTRACT
+    assert "do/run/execute/create/update/delete" in LANE_CONTRACT
+    assert "silently lost" in LANE_CONTRACT or "silently" in LANE_CONTRACT
 
 
 # ── history budgeting ─────────────────────────────────────────────────
