@@ -437,6 +437,13 @@ class _Ctx:
         self.pending: dict[str, tuple[threading.Event, list[str]]] = {}
         self.early: dict[str, str] = {}
         self.req_counter = 0
+        # 0.8.1 item 9: session → count of sends queued (received while
+        # ``busy`` was True) but not yet picked up by the turn worker.
+        # Purely a telemetry counter for the ``queued`` ack frame — the
+        # actual queueing/ordering guarantee comes from ``turns`` being a
+        # plain FIFO ``queue.Queue`` drained by one worker thread, which
+        # already ran every send as a normal turn before this existed.
+        self.session_pending: dict[str, int] = {}
 
 
 class _BridgeConfirm:
@@ -665,6 +672,13 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             return
         text = (req.get("text") or "").strip()
         session = req.get("session") or "desktop-app"
+        # This request is no longer "waiting" — it's about to run. Mirrors
+        # the increment in ``main``'s stdin loop (item 9's queued-ack
+        # counter); covers both the slash and chat branches below since
+        # either can have been queued mid-turn.
+        pending = ctx.session_pending.get(session)
+        if pending:
+            ctx.session_pending[session] = max(0, pending - 1)
         # Slash pre-dispatch — same contract as the TUI REPL: a leading
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
@@ -921,6 +935,21 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             # ``{"op":"send","text":...}`` (protocol) or legacy ``{"text":...}``.
             if (req.get("text") or "").strip():
+                # 0.8.1 item 9: a send arriving while a turn is already in
+                # flight was ALREADY never lost server-side — ``turns`` is a
+                # plain FIFO queue.Queue drained by one worker thread, so it
+                # just runs as the next normal turn (own state/reply frames)
+                # once the worker is free. The gap was VISIBILITY: a naive
+                # client had no signal that it queued instead of running
+                # immediately (the Swift composer, e.g., assumed "busy"
+                # meant "nowhere to put this" and dropped the text itself —
+                # see ChatViewModel.send's isSending guard). Emit a small
+                # v1-additive ack so a client can render a pending state.
+                session = req.get("session") or "desktop-app"
+                if ctx.busy:
+                    ctx.session_pending[session] = ctx.session_pending.get(session, 0) + 1
+                    _emit(proto, protocol.queued_frame(
+                        session, ctx.session_pending[session]))
                 turns.put(req)
     finally:
         # Orderly shutdown: let the boot settle (can't clean up a
