@@ -295,7 +295,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             getattr(boot, "client", None), sid, layout=lay)
     if what == "check_update":
         # In-app updates (0.8): {current, latest, available, notes_url}.
-        # Cached under <instance>/run/update_check.json for ~6h — see
+        # Cached under <instance>/run/update_check.json for ~24h — see
         # version_check.cached_update_status — so app-launch + periodic
         # tray polling doesn't hammer the GitHub API. Works pre-boot
         # (layout-keyed cache, no client needed).
