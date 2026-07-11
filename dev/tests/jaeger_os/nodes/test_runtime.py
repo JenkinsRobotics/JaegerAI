@@ -14,7 +14,7 @@ import queue
 from jaeger_os.transport import topics
 from jaeger_os.core.audio import AudioSessionConfig
 from jaeger_os.nodes import runtime
-from jaeger_os.nodes.tts import TTSNode
+from jaeger_os.nodes.kokoro_tts import TTSNode
 from jaeger_os.transport import InProcBus
 
 
@@ -139,6 +139,77 @@ def test_shutdown_then_get_bus_creates_fresh_bus():
         runtime.shutdown()
 
 
+# ── bus injection (0.8 U3) ──────────────────────────────────────────
+
+
+def test_set_bus_injects_and_get_bus_returns_it():
+    """A chassis (or boot_for_tui) injects its OWN bus; get_bus() must
+    hand that exact object back, not mint a second one."""
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        assert runtime.get_bus() is injected
+    finally:
+        runtime.shutdown()
+        injected.close()
+
+
+def test_set_bus_is_idempotent_with_the_same_bus():
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        runtime.set_bus(injected)   # no-op, doesn't raise or swap
+        assert runtime.get_bus() is injected
+    finally:
+        runtime.shutdown()
+        injected.close()
+
+
+def test_get_bus_then_set_bus_same_object_is_a_noop():
+    """The boot_for_tui pattern: get_bus() mints, then set_bus(get_bus())
+    re-injects the SAME object — formalising it as owned-by-runtime
+    without disturbing ownership."""
+    runtime.shutdown()
+    try:
+        minted = runtime.get_bus()
+        runtime.set_bus(minted)
+        assert runtime.get_bus() is minted
+        assert runtime._bus_owned is True   # still runtime's to close
+    finally:
+        runtime.shutdown()
+
+
+def test_shutdown_does_not_close_an_injected_bus():
+    """runtime.shutdown() must never close a chassis-owned bus — only
+    the chassis that minted it may close it."""
+    runtime.shutdown()
+    injected = InProcBus()
+    try:
+        runtime.set_bus(injected)
+        runtime.shutdown()
+        assert runtime._bus is None          # singleton cleared
+        assert injected._closed is False     # NOT closed by runtime
+    finally:
+        injected.close()
+
+
+def test_shutdown_closes_a_self_minted_bus():
+    """The bare TUI/daemon path: nothing ever injected a foreign bus, so
+    shutdown() DOES close the one runtime minted for itself."""
+    runtime.shutdown()
+    bus = runtime.get_bus()
+    runtime.shutdown()
+    assert runtime._bus is None
+    assert bus._closed is True
+    fresh = runtime.get_bus()
+    try:
+        assert fresh is not bus
+    finally:
+        runtime.shutdown()
+
+
 def test_ensure_tts_node_starts_node_and_installs_subscriber(monkeypatch):
     created = _install_mock_runtime(monkeypatch)
     try:
@@ -242,4 +313,314 @@ def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
         assert runtime._audio_session_thread is None
         assert runtime._tts_node is not None
     finally:
+        runtime.shutdown()
+
+
+# ── config routing (0.8 M2b Task B) ──────────────────────────────────
+#
+# ``_build_audio_session_node`` used to always pass a construction-
+# default ``AudioSessionConfig()`` — the "config isn't routed" gap
+# recorded in the plan. These tests pin that the real
+# ``Config.whisper_stt`` + ``Config.voice`` values now reach the
+# ``AudioSessionConfig`` the audio session factory receives, and that
+# an untouched config still produces today's byte-identical defaults
+# (regression pin).
+
+
+def _fake_layout(cfg_path):
+    return type("_FakeLayout", (), {"config_path": cfg_path})()
+
+
+def test_build_audio_session_node_routes_custom_config(monkeypatch, tmp_path):
+    from jaeger_os.core.instance.schemas import (
+        Config, ModelConfig, VoiceConfig, dump_yaml)
+    from jaeger_os.nodes.whisper_stt.config import WhisperSTTConfig
+    import jaeger_os.core.context as context
+
+    cfg_path = tmp_path / "config.yaml"
+    dump_yaml(cfg_path, Config(
+        instance_name="t",
+        model=ModelConfig(model_path="/dev/null"),
+        whisper_stt=WhisperSTTConfig(
+            stt_mode="continuous",
+            fast_model_name="tiny.en",
+            accurate_model_name="small.en",
+        ),
+        voice=VoiceConfig(
+            wake_word=False,
+            follow_up_seconds=5.0,
+            barge_in=True,
+            audio_backend="avaudio",
+            self_speech_filter=False,
+            self_speech_threshold=0.9,
+        ),
+    ))
+    monkeypatch.setattr(
+        context, "_require_layout", lambda: _fake_layout(cfg_path),
+    )
+
+    _install_mock_runtime(monkeypatch)
+    captured: dict[str, AudioSessionConfig] = {}
+
+    def fake_audio_factory(config):
+        captured["config"] = config
+        return _MockAudioSession()
+
+    monkeypatch.setattr(runtime, "_audio_session_factory", fake_audio_factory)
+    try:
+        bus = runtime.get_bus()
+        runtime._build_audio_session_node(bus, {})
+        got = captured["config"]
+        assert got.stt_mode == "continuous"
+        assert got.fast_model_name == "tiny.en"
+        assert got.accurate_model_name == "small.en"
+        assert got.require_wake_word is False
+        assert got.followup_window_s == 5.0
+        assert got.barge_in is True
+        assert got.audio_backend == "avaudio"
+        assert got.self_speech_filter is False
+        assert got.self_speech_threshold == 0.9
+        # wake_phrases preserved at the dataclass default — no VoiceConfig
+        # phrase-list field to route through.
+        assert got.wake_phrases == ()
+    finally:
+        runtime.shutdown()
+
+
+def test_build_audio_session_node_defaults_match_config_defaults(
+    monkeypatch, tmp_path,
+):
+    """Untouched config -> an ``AudioSessionConfig`` mirroring the real
+    ``Config.voice`` / ``Config.whisper_stt`` field defaults.
+
+    NOT a blanket ``== AudioSessionConfig()`` regression pin: that
+    dataclass's own standalone default is ``require_wake_word=False``,
+    while ``VoiceConfig.wake_word`` (the field this task routes it
+    from) defaults ``True``. That silent mismatch was exactly the
+    routing gap Task B closes — pre-fix, ``_build_audio_session_node``
+    always passed ``AudioSessionConfig()`` regardless of
+    ``Config.voice.wake_word``, so wake-word gating silently defaulted
+    OFF for any supervisor-owned audio_session node even though a
+    freshly-written config.yaml says ON. Every OTHER field happens to
+    line up between the two defaults today, so this still pins them
+    byte-for-byte; only ``require_wake_word`` intentionally flips.
+    """
+    from jaeger_os.core.instance.schemas import Config, ModelConfig, dump_yaml
+    import jaeger_os.core.context as context
+
+    cfg_path = tmp_path / "config.yaml"
+    dump_yaml(cfg_path, Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null"),
+    ))
+    monkeypatch.setattr(
+        context, "_require_layout", lambda: _fake_layout(cfg_path),
+    )
+
+    _install_mock_runtime(monkeypatch)
+    captured: dict[str, AudioSessionConfig] = {}
+
+    def fake_audio_factory(config):
+        captured["config"] = config
+        return _MockAudioSession()
+
+    monkeypatch.setattr(runtime, "_audio_session_factory", fake_audio_factory)
+    try:
+        bus = runtime.get_bus()
+        runtime._build_audio_session_node(bus, {})
+        expected = AudioSessionConfig(
+            stt_mode="two_pass",
+            fast_model_name="base.en",
+            accurate_model_name="medium.en",
+            require_wake_word=True,
+            followup_window_s=10.0,
+            barge_in=False,
+            audio_backend="sounddevice",
+            self_speech_filter=True,
+            self_speech_threshold=0.75,
+        )
+        assert captured["config"] == expected
+    finally:
+        runtime.shutdown()
+
+
+def test_load_audio_session_config_falls_back_on_load_failure(monkeypatch):
+    """No instance layout available (fresh/unconfigured) -> the loader
+    degrades to construction defaults instead of raising."""
+    import jaeger_os.core.context as context
+
+    def _raise():
+        raise RuntimeError("no active instance")
+
+    monkeypatch.setattr(context, "_require_layout", _raise)
+    assert runtime._load_audio_session_config() == AudioSessionConfig()
+
+
+# ── supervisor-backed ensure_* delegation (0.8 U3b) ──────────────────
+#
+# A duck-typed fake stands in for jaeger_os.app.supervisor.Supervisor
+# here — these tests exercise ONLY runtime.py's delegation logic
+# (has/enabled/is_running/node/start), not the real Supervisor/
+# ThreadHandle machinery (that's covered end-to-end in
+# dev/tests/jaeger_os/app/test_app_format.py's supervisor-backed
+# JaegerApp tests).
+
+
+class _FakeSupervisorNode:
+    """Duck-types jaeger_os.app.supervisor.Supervisor just enough for
+    runtime.py's ensure_*_node delegation branch: has/enabled/
+    is_running/node/start. ``factory`` is whatever runtime._build_*
+    function the real make_*_node would call — start() invokes it
+    fresh each time, mirroring ThreadHandle.start()/.restart()'s "never
+    reuse a torn-down node object" contract."""
+
+    def __init__(self, node_id: str, factory, *, enabled: bool = True):
+        self.node_id = node_id
+        self.factory = factory
+        self._enabled = enabled
+        self._running = False
+        self._node = None
+        self.start_calls = 0
+
+    def has(self, node_id: str) -> bool:
+        return node_id == self.node_id
+
+    def enabled(self, node_id: str) -> bool:
+        return node_id == self.node_id and self._enabled
+
+    def is_running(self, node_id: str) -> bool:
+        return node_id == self.node_id and self._running
+
+    def start(self, node_id: str) -> None:
+        assert node_id == self.node_id
+        self.start_calls += 1
+        self._node = self.factory()
+        self._running = True
+
+    def node(self, node_id: str):
+        return self._node if node_id == self.node_id else None
+
+    def crash_and_prepare_restart(self) -> None:
+        """Simulate the Supervisor's watch thread observing a dead
+        node: alive() goes False so the next ensure_* call re-starts
+        it (via a FRESH factory() call, per ThreadHandle.restart())."""
+        self._running = False
+
+
+def test_ensure_tts_node_delegates_to_registered_supervisor(monkeypatch):
+    created = _install_mock_runtime(monkeypatch)
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(bus, {}),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_tts_node()
+        assert fake.start_calls == 1
+        assert node is fake.node("tts")
+        assert node is runtime._tts_node
+        assert runtime._synth is created["synth"]
+
+        # Idempotent: a second call must NOT re-start the supervised
+        # node (no double-spawn) — it just reads the live object again.
+        node_again = runtime.ensure_tts_node()
+        assert fake.start_calls == 1
+        assert node_again is node
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_reflects_a_supervisor_restart(monkeypatch):
+    """The seam this delegation adds: after the supervisor restarts a
+    crashed node (fresh object from a fresh factory() call),
+    ensure_tts_node() must return the NEW live object, not a stale
+    cached one — get_synth()/get_audio_session() depend on this."""
+    _install_mock_runtime(monkeypatch)
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(bus, {}),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node1 = runtime.ensure_tts_node()
+        fake.crash_and_prepare_restart()
+        node2 = runtime.ensure_tts_node()
+        assert fake.start_calls == 2
+        assert node2 is not node1
+        assert node2 is fake.node("tts")
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_falls_back_when_no_supervisor_registered(monkeypatch):
+    """Default state (no chassis ever called set_supervisor — the
+    TUI/bridge/daemon boot roots) — byte-identical thread-spawn path."""
+    created = _install_mock_runtime(monkeypatch)
+    assert runtime._supervisor is None
+    try:
+        node = runtime.ensure_tts_node()
+        assert node is created["node"]
+        assert runtime._tts_node is node
+    finally:
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_ignores_an_undeclared_supervisor():
+    """A supervisor IS registered, but its manifest never declared a
+    "tts" node (e.g. a manifest without the tts entry) — falls back to
+    the legacy path rather than erroring."""
+    class _NothingDeclared:
+        def has(self, node_id):
+            return False
+    runtime.shutdown()
+    runtime.set_supervisor(_NothingDeclared())
+    try:
+        bus = runtime.get_bus()
+        assert isinstance(bus, InProcBus)
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_tts_node_ignores_a_disabled_supervised_node(monkeypatch):
+    """The node is declared but enabled = false (e.g. root jaeger.toml's
+    still-parked entries) — delegation must not force-start it; falls
+    back to the legacy spawn instead."""
+    created = _install_mock_runtime(monkeypatch)
+    fake = _FakeSupervisorNode(
+        "tts", lambda: runtime._build_tts_node(runtime.get_bus(), {}),
+        enabled=False,
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_tts_node()
+        assert fake.start_calls == 0          # never force-started
+        assert node is created["node"]        # legacy path built it
+    finally:
+        runtime.set_supervisor(None)
+        runtime.shutdown()
+
+
+def test_ensure_animation_node_delegates_to_registered_supervisor(monkeypatch):
+    """Same delegation shape for the animation node — also exercises
+    _build_animation_node's bridge/auto-driver rebuild-fresh-each-call
+    path (enable_bridge=False so no real socket is bound)."""
+    runtime.shutdown()
+    bus = runtime.get_bus()
+    fake = _FakeSupervisorNode(
+        "animation",
+        lambda: runtime._build_animation_node(bus, enable_bridge=False),
+    )
+    runtime.set_supervisor(fake)
+    try:
+        node = runtime.ensure_animation_node(enable_bridge=False)
+        assert fake.start_calls == 1
+        assert node is fake.node("animation")
+        assert node is runtime._animation_node
+        node_again = runtime.ensure_animation_node(enable_bridge=False)
+        assert fake.start_calls == 1
+        assert node_again is node
+    finally:
+        runtime.set_supervisor(None)
         runtime.shutdown()

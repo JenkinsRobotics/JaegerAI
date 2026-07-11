@@ -1,6 +1,6 @@
 """Skill self-improvement review — decides WHEN to improve a recipe-skill and
 crafts the Deep Think task that does it, measured (smoke + benchmark) before the
-rewrite is trusted. Phases 2-3 of dev/docs/process/SKILL_EVOLUTION_PLAN.md.
+rewrite is trusted. Phases 2-3 of dev/docs/history/SKILL_EVOLUTION_PLAN.md.
 
 The heavy rewrite runs in the EXISTING Deep Think loop (idle/asleep, strong
 model) — this module only proposes the task and records the revision.

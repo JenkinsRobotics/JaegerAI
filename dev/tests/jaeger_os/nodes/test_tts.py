@@ -1,4 +1,6 @@
-"""Tests for ``jaeger_os.nodes.tts`` — Track B.1.
+"""Tests for ``jaeger_os.nodes.kokoro_tts`` (``TTSNode`` — the node half
+of the 0.8 M1 engine-module; folded in from ``jaeger_os.nodes.tts``) —
+Track B.1.
 
 Mock synthesizer so we exercise the Bus + node + ack contract without
 touching audio hardware or model loading.  Real-Kokoro integration

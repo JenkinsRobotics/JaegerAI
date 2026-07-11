@@ -23,7 +23,7 @@ Not yet documented here (add as needed): the Swift↔`jaeger bridge` UI seam
 > producer, sqlite-vec KNN, the multiprocess bus) — verified gaps, not omissions.
 
 **Backlog (planned changes, not how-it-works):**
-`dev/docs/agentic_skill_pipeline_backlog.md`.
+`dev/docs/roadmap/agentic_skill_pipeline_backlog.md`.
 
 Convention: a pipeline doc is a *map* — accurate, cited, and updated when the code
 changes. If a claim can't be verified in the code, it doesn't go in.

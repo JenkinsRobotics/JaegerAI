@@ -355,7 +355,7 @@ class JaegerTUI:
         # `/quiet on` mutes those prints; `_voice_activity_log` keeps the
         # last N events buffered so `/quiet` status reporting can show
         # what was muted.  Full split-screen Live + Layout deferred —
-        # see dev/docs/0.4.0_voice_gate_unification_prompt.md G4 section.
+        # see dev/docs/audio/0.4.0_voice_gate_unification_prompt.md G4 section.
         # Default ON: most operators don't want to see "[skipped —
         # non-speech: '(wind blowing)']" / "[skipped — non-speech:
         # '[BLANK_AUDIO]']" cluttering the conversation pane during

@@ -12,7 +12,7 @@ bus and renders pixel buffers it ships to the Swift renderer (or
 any other consumer) via WebSocket.
 
 Each adapter implementation is a SKILL TREE NODE (see
-``dev/docs/SKILL_TREE.md``).  When a clip plays, the corresponding
+``dev/docs/skills/SKILL_TREE.md``).  When a clip plays, the corresponding
 skill earns XP — operators see their agent's animation capability
 grow with use.
 

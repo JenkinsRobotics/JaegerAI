@@ -26,7 +26,7 @@ from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from jaeger_os.agent.loop.bridge import AgentBridge  # noqa: E402
-from jaeger_os.app.bus.inproc import InProcBus  # noqa: E402
+from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.core.messages import AgentState, ChatReply  # noqa: E402
 from jaeger_os.interfaces.pyside6.pill.qt import Pill  # noqa: E402
 from jaeger_os.interfaces.pyside6.rich_tui.window import ChatWindow  # noqa: E402
@@ -129,7 +129,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
 
     import jaeger_os.main as m
     from jaeger_os.app import JaegerApp
-    from jaeger_os.core.messages import MESSAGES, ChatMessage, ChatReply
+    from jaeger_os.core.messages import ChatMessage, ChatReply
 
     cleaned = []
     monkeypatch.setattr(m, "boot_for_tui", lambda **kw: types.SimpleNamespace(
@@ -138,21 +138,54 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         m, "run_for_voice",
         lambda c, t, session_key="gui": {"text": f"echo: {t}", "error": None})
 
+    from jaeger_os.nodes import runtime as node_runtime
+
     repo = pathlib.Path(__file__).resolve().parents[4]
-    app = JaegerApp(repo / "jaeger.windowed.toml", registry=MESSAGES)
+    app = JaegerApp(repo / "jaeger.windowed.toml")
     assert app.spec.name == "jros-windowed"
     assert app.spec.event_loop == "qt"
     app.boot()   # init_core builds the AgentCore (main thread) + bridge
     try:
+        assert isinstance(app.bus, InProcBus)   # 0.8 U1: chassis on transport.InProcBus
         assert app.core is not None
         assert app.core.__class__.__name__ == "AgentCore"
         assert app.core.bridge is not None
+        # 0.8 U3: _build_bus injects app.bus into nodes.runtime — one bus
+        # per process, not two disconnected InProcBus instances.
+        assert node_runtime.get_bus() is app.bus
+        # 0.8 U3b: the windowed path graduates tts + animation to
+        # supervisor ownership (audio_session stays declared-but-
+        # disabled — real mic + Whisper load, no headless degrade path
+        # yet; see jaeger.windowed.toml's node-block comment).
+        # ThreadHandle.start() (called synchronously from boot()'s
+        # supervisor.start_all()) already blocks until RUNNING/FAILED,
+        # so no polling wait is needed here.
+        rows = {row["id"]: row for row in app.supervisor.ls()}
+        assert set(rows) == {"tts", "audio_session", "animation"}
+        assert rows["tts"]["state"] == "running"
+        assert rows["animation"]["state"] == "running"
+        assert rows["audio_session"]["state"] == "off"   # disabled, not started
+        # 0.8 M2a: the tts node binds by `slot = "tts"` now, not a
+        # hardcoded factory string — prove _make_handle resolved it via
+        # discover_modules() to kokoro_tts's real factory before the
+        # supervisor ever started it.
+        tts_spec = next(n for n in app.spec.nodes if n.id == "tts")
+        assert tts_spec.slot == "tts"
+        assert tts_spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
+        # ensure_*_node() (what the agent's speak/avatar tools call)
+        # must delegate to the SAME supervisor-managed objects — no
+        # double-spawn (the pre-U3b reason these nodes stayed disabled).
+        assert node_runtime.ensure_tts_node() is app.supervisor.node("tts")
+        assert (node_runtime.ensure_animation_node()
+                is app.supervisor.node("animation"))
+
         replies = []
         app.bus.subscribe(ChatReply.topic, lambda msg: replies.append(msg.text))
         app.bus.publish(ChatMessage(text="hi core", source="gui"))
         assert _pump(qapp, lambda: replies == ["echo: hi core"])
     finally:
         app.shutdown()
+        node_runtime.shutdown()   # reset the singleton for later tests
     assert cleaned == [True]   # the core drained + cleaned up the model
 
 

@@ -16,7 +16,7 @@ Usage:
     dev/scripts/generate_agent_contract.py            # write the doc
     dev/scripts/generate_agent_contract.py --check    # exit 1 if stale
 
-POLISH-5 in dev/docs/ROADMAP_0.2.0.md.
+POLISH-5 in dev/docs/history/ROADMAP_0.2.0.md.
 """
 
 from __future__ import annotations

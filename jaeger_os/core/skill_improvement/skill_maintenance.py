@@ -4,7 +4,7 @@ post-use notes, and retire (recoverably) agent-owned skills that never win.
 Instance zone only (`<instance>/skills/`); everything **moves to ``.archive/``,
 never deletes**. The loader scans direct children + matches ``<name>_v<N>``, so
 ``.archive/`` is invisible to skill discovery. The retirement guard never
-touches a user-written skill. See dev/docs/process/SKILL_EVOLUTION_PLAN.md §6-§7.
+touches a user-written skill. See dev/docs/history/SKILL_EVOLUTION_PLAN.md §6-§7.
 """
 
 from __future__ import annotations

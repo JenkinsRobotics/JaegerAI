@@ -10,15 +10,20 @@ Topic convention (chassis spec): ``/act/*`` = do, ``/sense/*`` = happened,
 ``jaeger_app_framework/demos/jros-demo/core/messages.py``, scoped to the
 chat surfaces for now — hardware/avatar messages arrive when those nodes
 migrate onto the chassis bus.
+
+``Transcript`` used to live here as a plain dataclass shadow of
+``transport.topics.Transcript`` (the msgspec type the real audio_session
+node publishes on ``/sense/transcript``) — two types on one topic, and
+the dataclass had no ``is_final`` field, so :class:`~jaeger_os.agent.loop
+.bridge.AgentBridge` treated every voice partial as a finished chat turn.
+0.8 U3 deleted the dataclass; ``AgentBridge`` subscribes to
+``transport.topics.SENSE_TRANSCRIPT`` directly and ignores non-final
+transcripts.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from jaeger_os.app.bus.api import MessageRegistry
-from jaeger_os.app.health import NodeHealth
-from jaeger_os.app.logging import LogLine
 
 
 @dataclass
@@ -44,14 +49,6 @@ class ChatReply:
     text: str = ""
     session: str = ""
     topic: str = "/sense/chat"
-
-
-@dataclass
-class Transcript:
-    """STT seam — what the voice path publishes. Reserved for the voice
-    phase; the AgentBridge already routes it to the same inbox as chat."""
-    text: str = ""
-    topic: str = "/sense/transcript"
 
 
 @dataclass
@@ -134,18 +131,7 @@ class ModeState:
     topic: str = "/sense/mode"
 
 
-# Registered for the ZMQ wire codec (the in-process bus passes objects
-# through untouched and never consults the registry). NodeHealth + LogLine
-# are chassis-standard ``/sys/*`` topics, registered so a surface can show
-# ``/sys/log`` / node health later.
-MESSAGES = MessageRegistry()
-MESSAGES.register_all([
-    ChatMessage, ChatReply, Transcript, AgentState, ToolEvent, AgentActivity,
-    ModeState, AgentRequest, AgentResponse,
-    NodeHealth, LogLine,
-])
-
 __all__ = [
-    "MESSAGES", "ChatMessage", "ChatReply", "Transcript", "AgentState",
+    "ChatMessage", "ChatReply", "AgentState",
     "ToolEvent", "AgentActivity", "ModeState", "AgentRequest", "AgentResponse",
 ]

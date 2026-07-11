@@ -15,6 +15,21 @@ This is the second benchmark type, distinct from the routing corpus
     python dev/benchmark/scenarios.py --ids file-scratchpad
     python dev/benchmark/scenarios.py --list          # list, don't run
     python dev/benchmark/scenarios.py --keep-temp     # don't delete the tmp instance
+    python dev/benchmark/scenarios.py --worker-path   # DEBUG: bypass the
+                                                       # front door (see below)
+
+FRONT-DOOR WIRING
+-----------------
+Turns are driven through ``jaeger_os.main.run_command`` — the SAME headless
+entry point the CLI, cron runner, and daemon use (mirrors the wiring in
+``dev/benchmark/persona_eval.py``'s ``_drive``). That means every real
+pipeline stage a user's turn goes through — including the persona_first
+id/ego lane (the DEFAULT mode as of the 2026-07-10 gate) — runs here too.
+``--worker-path`` is a DEBUG-ONLY escape hatch back to the old direct
+``drive_one_turn`` wiring (bypasses ``run_command`` and therefore the
+persona lane entirely); it is NOT the release gate — use it only to isolate
+whether a failure is in the worker loop itself vs the persona lane sitting
+in front of it.
 
 HERMETIC BY CONSTRUCTION
 ------------------------
@@ -119,6 +134,16 @@ def _read_memory_view(layout: Any):
 
 # ── turn driver (captures tool ARGS; bounded per-turn timeout) ───────
 
+# Cheap engagement check (roadmap 0.8.0 runway item 1): counts how many
+# front-door turns actually went through the persona_first lane's decide
+# call (``_pipeline["persona_lane_last_delegated"]`` set to True/False,
+# not left at None). Reset per ``_run()`` invocation; asserted non-zero at
+# the end of a front-door run so a silently-broken wiring (e.g. the
+# hermetic instance's character binding regressing, or the aux lane
+# failing to spawn) is loud instead of a suite that quietly went back to
+# testing the worker loop alone.
+_persona_lane_engagement = {"turns_seen": 0, "engaged": 0}
+
 
 def _build_agent(client: Any):
     from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent
@@ -164,11 +189,13 @@ def _extract_calls(new_messages: list[dict]):
     return calls
 
 
-def _drive_turn(agent: Any, prompt: str, timeout_s: float):
-    """Run one turn in a worker thread, bounded by ``timeout_s``. On
-    timeout we return a timed-out Turn and move on — the daemon thread may
-    keep running, but it writes ONLY to the temp instance, so the live one
-    is safe regardless. Never hangs the harness."""
+def _drive_turn_worker(agent: Any, prompt: str, timeout_s: float):
+    """DEBUG-ONLY (``--worker-path``): run one turn directly through
+    ``drive_one_turn``, bypassing ``run_command`` and therefore the
+    persona_first lane entirely. Bounded by ``timeout_s`` in a daemon
+    thread — on timeout we return a timed-out Turn and move on; the
+    thread may keep running, but it writes ONLY to the temp instance, so
+    the live one is safe regardless. Never hangs the harness."""
     import io
     from contextlib import redirect_stdout
 
@@ -200,11 +227,74 @@ def _drive_turn(agent: Any, prompt: str, timeout_s: float):
                 tool_calls=_extract_calls(out.get("new_messages") or [])), elapsed
 
 
+def _drive_turn_front_door(client: Any, session_key: str, prompt: str,
+                           timeout_s: float):
+    """THE RELEASE GATE: run one turn through ``jaeger_os.main.run_command``
+    — the exact headless entry point the CLI/cron/daemon call (mirrors
+    ``dev/benchmark/persona_eval.py``'s ``_drive``, persona_eval.py:242) —
+    so the scenario suite exercises everything a real user turn goes
+    through, including the persona_first id/ego lane sitting in front of
+    the worker loop. Same bounded-thread timeout contract as the old
+    direct-drive path."""
+    import io
+    from contextlib import redirect_stdout
+
+    import jaeger_os.main as jmain
+    from jaeger_os.core.bench.scenarios import Turn
+
+    box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            jmain._pipeline["persona_lane_last_delegated"] = None
+            with redirect_stdout(io.StringIO()):
+                box["text"] = jmain.run_command(client, prompt,
+                                                session_key=session_key)
+            box["delegated"] = jmain._pipeline.get("persona_lane_last_delegated")
+        except Exception as exc:  # noqa: BLE001
+            box["err"] = f"{type(exc).__name__}: {exc}"
+
+    th = threading.Thread(target=_worker, daemon=True)
+    started = time.perf_counter()
+    th.start()
+    th.join(timeout_s)
+    elapsed = time.perf_counter() - started
+
+    if th.is_alive():
+        return Turn(prompt=prompt, answer="", timed_out=True,
+                    error=f"turn exceeded {timeout_s:.0f}s"), elapsed
+    if "err" in box:
+        return Turn(prompt=prompt, answer="", error=box["err"]), elapsed
+
+    delegated = box.get("delegated")  # True/False = lane decided; None = lane not taken
+    _persona_lane_engagement["turns_seen"] += 1
+    if delegated is not None:
+        _persona_lane_engagement["engaged"] += 1
+
+    # Tool calls for THIS turn. ``JaegerAgent.last_turn_messages`` is
+    # populated ONLY inside ``run_turn`` (reset at its start — see
+    # jaeger_os/agent/loop/jaeger_agent.py:289). When the persona lane
+    # composed the answer WITHOUT delegating (delegated is False) no
+    # tool ran and ``run_turn`` was never called this turn — reading
+    # ``last_turn_messages`` would replay a STALE slice from a PRIOR
+    # turn on this same session. When delegated is True, ``perform_task``
+    # called ``drive_one_turn``/``run_turn`` internally (main.py:2108) so
+    # ``last_turn_messages`` IS this turn's real record; when delegated is
+    # None the lane wasn't taken at all and ``drive_one_turn`` ran
+    # directly (main.py:2519-2524) — same guarantee.
+    new_messages: list[dict] = []
+    if delegated is not False:
+        jaeger_agent = jmain._jaeger_agents_by_session.get(session_key)
+        new_messages = list(getattr(jaeger_agent, "last_turn_messages", None) or [])
+    return Turn(prompt=prompt, answer=box.get("text", "") or "",
+               tool_calls=_extract_calls(new_messages)), elapsed
+
+
 # ── one scenario ────────────────────────────────────────────────────
 
 
 def _run_scenario(client: Any, case: Any, layout: Any,
-                  *, dump: bool = False) -> ScenarioResult:
+                  *, dump: bool = False, worker_path: bool = False) -> ScenarioResult:
     from jaeger_os.core.bench.scenarios import Transcript
 
     workspace = _workspace_dir(layout)
@@ -215,15 +305,44 @@ def _run_scenario(client: Any, case: Any, layout: Any,
         with contextlib.suppress(Exception):
             case.setup(workspace)
 
-    agent = _build_agent(client)
     transcript = Transcript()
     total_elapsed = 0.0
-    for prompt in case.turns:
-        turn, elapsed = _drive_turn(agent, prompt, case.timeout_s)
-        total_elapsed += elapsed
-        transcript.turns.append(turn)
-        if turn.timed_out:
-            break
+    if worker_path:
+        # DEBUG ONLY — see module docstring / --worker-path help.
+        agent = _build_agent(client)
+        for prompt in case.turns:
+            turn, elapsed = _drive_turn_worker(agent, prompt, case.timeout_s)
+            total_elapsed += elapsed
+            transcript.turns.append(turn)
+            if turn.timed_out:
+                break
+    else:
+        # THE RELEASE GATE — real front door (run_command), one session
+        # per scenario (fresh key => fresh JaegerAgent, same isolation
+        # the old per-scenario _build_agent gave us) so history never
+        # bleeds between scenarios but DOES persist across a scenario's
+        # own multi-turn sequence.
+        import uuid
+        session_key = f"bench-scenario-{case.id}-{uuid.uuid4().hex[:8]}"
+        try:
+            for prompt in case.turns:
+                turn, elapsed = _drive_turn_front_door(client, session_key, prompt,
+                                                       case.timeout_s)
+                total_elapsed += elapsed
+                transcript.turns.append(turn)
+                if turn.timed_out:
+                    break
+        finally:
+            # Runway item 1 leak fix: every scenario mints a brand-new
+            # uuid session_key (fresh JaegerAgent+history), and nothing
+            # ever freed it — jaeger_os.main's per-session caches only
+            # grow, so a 51-case run accumulated 51 live sessions with
+            # zero teardown (diagnosed root cause of the process death
+            # at ~28/51, ~9.5 min in). Evict THIS scenario's session the
+            # moment its turns are done, win or lose, so the suite's
+            # live footprint stays O(1) sessions, not O(cases).
+            import jaeger_os.main as jmain
+            jmain.evict_session(session_key)
 
     if dump:
         for ti, turn in enumerate(transcript.turns, 1):
@@ -362,6 +481,8 @@ def _run(args: argparse.Namespace) -> int:
 
     results: list[ScenarioResult] = []
     boot = None
+    _persona_lane_engagement["turns_seen"] = 0
+    _persona_lane_engagement["engaged"] = 0
     try:
         os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
         print("=== Booting hermetic pipeline (temp instance) ===", flush=True)
@@ -383,7 +504,8 @@ def _run(args: argparse.Namespace) -> int:
         for i, case in enumerate(selected, 1):
             print(f"\n[{i}/{len(selected)}] {case.id} ({case.lane}) …",
                   flush=True)
-            res = _run_scenario(boot.client, case, boot.layout, dump=args.dump)
+            res = _run_scenario(boot.client, case, boot.layout, dump=args.dump,
+                               worker_path=args.worker_path)
             results.append(res)
             print(f"    -> {res.status.upper()}  ({res.elapsed_s:.1f}s)  "
                   f"{res.detail}", flush=True)
@@ -414,7 +536,26 @@ def _run(args: argparse.Namespace) -> int:
             print(f"[scenario] deleted temp instance {hermetic.root}",
                   flush=True)
 
-    return _print_report(results)
+    rc = _print_report(results)
+
+    # Cheap engagement check (roadmap 0.8.0 runway item 1): prove the
+    # persona_first lane actually fired at least once this run — printed
+    # unconditionally, asserted only on the front-door (release-gate)
+    # path. --worker-path deliberately never reaches the lane, so it's
+    # exempt.
+    seen = _persona_lane_engagement["turns_seen"]
+    engaged = _persona_lane_engagement["engaged"]
+    print(f"[scenario] persona_first lane engagement: {engaged}/{seen} "
+          f"front-door turns saw a decide call"
+          f"{' (--worker-path: lane bypassed by design)' if args.worker_path else ''}",
+          flush=True)
+    if not args.worker_path:
+        assert seen == 0 or engaged > 0, (
+            f"persona_first lane never engaged across {seen} front-door "
+            "turns — front-door wiring is broken (character binding, aux "
+            "lane, or persona.mode regressed)")
+
+    return rc
 
 
 def _override_model_path(cfg_path: pathlib.Path, model_path: str) -> None:
@@ -446,6 +587,13 @@ def main() -> int:
                    help="Override model.model_path in the hermetic config "
                         "(e.g. the 26B gguf for a final validation run). "
                         "The live config is never touched.")
+    p.add_argument("--worker-path", action="store_true",
+                   help="DEBUG ONLY, NOT the release gate: drive turns "
+                        "directly through drive_one_turn (the old wiring), "
+                        "bypassing run_command and the persona_first lane "
+                        "entirely. Use only to isolate a worker-loop bug "
+                        "from a persona-lane bug; the release gate is the "
+                        "default (front-door) mode.")
     args = p.parse_args()
     return _run(args)
 

@@ -1,7 +1,7 @@
 """Integration test: WORKERS RUN VANILLA — the assembled system prompt carries
 NO character/persona in any mode.
 
-Measured finding (dev/docs/persona_compiler.md): a 4B's execution degrades ~7%
+Measured finding (dev/docs/reality/persona_compiler.md): a 4B's execution degrades ~7%
 with a character in context, and the "drop persona when executing" boundary rule
 does not hold at any persona size. So persona was moved OUT of the worker prompt
 entirely — it is applied by the two-pass output filter (re-voicing the final

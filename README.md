@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.7.2-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.8.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -46,7 +46,20 @@ installs the whole stack.**
 - 🔗 **Third-party API** — embed a JROS agent in your own app: a single-file, zero-dependency Python client ([`clients/python/jros_client.py`](clients/python/jros_client.py)) over the `jaeger bridge` NDJSON protocol, the same fixture-pinned contract the native Mac app speaks. See [Third-party apps](#third-party-apps--integrate-jros).
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.7.2`.** The 0.7.x patch line polished the out-of-box flow:
+> **Status — `0.8.0` (the modular-runtime release).** The runtime is now ONE
+> unified stack (one bus, one Node class, supervisor-owned workers), and
+> capabilities are **engine-modules** in the ROS spirit — `kokoro_tts`,
+> `whisper_stt`, `animation`, `media` are self-contained folders (node +
+> engine + config + `module.yaml` + tests) bound by slot; swap an engine by
+> flipping a module. The persona pipeline is **persona-first** ("the id and
+> the ego"): your character answers conversation directly (~10x faster chat)
+> and calls the clean task agent as its one tool — security-gated 15/15,
+> delegation 12/12. Plus: agent name vs character preset finally separated
+> end-to-end, New Chat + History in the app, in-app updates (daily check +
+> one-click update), and the full-system scenario suite now tests the real
+> user path. Hardware/capability-layer integration is 0.9's headline.
+>
+> **`0.7.2`.** The 0.7.x patch line polished the out-of-box flow:
 > end-user installs build the product `JaegerOS.app` and first-run setup is
 > the app's setup window (0.7.1); a third-party client API shipped
 > (`clients/python/jros_client.py` + the documented bridge protocol, 0.7.1);
@@ -145,8 +158,10 @@ anywhere; `./run.sh` still works as an alias.
 Or scaffold a named agent:
 
 ```bash
-./jaeger agent create lilith  # create "lilith" via the wizard
-./jaeger --agent lilith       # launch "lilith"
+./jaeger agent create --name ted  # "ted" is the agent's name — editable
+                                   # later, never blank; the wizard defaults
+                                   # to your character pick when omitted
+./jaeger --agent ted              # launch "ted"
 ```
 
 Manage multiple agents (a character is the persona; an agent is a deployed AI
@@ -198,7 +213,7 @@ JAEGER_HOME=/opt/jaeger curl -fsSL \
 
 The two sibling dirs at the install root make the framework / operator
 split obvious. Operator state is fully `.gitignore`d; framework upgrades
-never touch it. See [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md)
+never touch it. See [`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md)
 for the design rationale.
 
 **Manual install (no curl)** — if you'd rather see every step:
@@ -409,7 +424,7 @@ The position no one else owns:
    code laptop or fleet — only the transport changes (`inproc://`
    → `tcp://` when nodes move across boards).
 
-See [`dev/docs/ROADMAP_0.4.md`](dev/docs/ROADMAP_0.4.md) for the
+See [`dev/docs/history/ROADMAP_0.4.md`](dev/docs/history/ROADMAP_0.4.md) for the
 full track breakdown.
 
 ### How JROS fits next to ROS and Hermes
@@ -506,13 +521,13 @@ permission layer regardless.
 
 | Doc | What |
 |---|---|
-| [`dev/docs/OVERVIEW.md`](dev/docs/OVERVIEW.md) | Where everything lives — the doc map |
-| [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
-| [`dev/docs/agentic_runners.md`](dev/docs/agentic_runners.md) | The two runners (realtime + Deep Think) + inference lanes |
-| [`dev/docs/memory_architecture.md`](dev/docs/memory_architecture.md) | Subject-attributed SQL memory (provenance + history) |
-| [`dev/docs/skill_standard.md`](dev/docs/skill_standard.md) | The self-authored skill standard |
-| [`dev/docs/scenario_bench.md`](dev/docs/scenario_bench.md) | The hermetic scenario benchmark |
-| [`dev/docs/framework_vision.md`](dev/docs/framework_vision.md) | The 0.8 modular-framework north star |
+| [`dev/docs/README.md`](dev/docs/README.md) | Where everything lives — the doc map |
+| [`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md) | Three-layer architecture — System / Runtime / User |
+| [`dev/docs/reality/agentic_runners.md`](dev/docs/reality/agentic_runners.md) | The two runners (realtime + Deep Think) + inference lanes |
+| [`dev/docs/reality/memory_architecture.md`](dev/docs/reality/memory_architecture.md) | Subject-attributed SQL memory (provenance + history) |
+| [`dev/docs/reality/skill_standard.md`](dev/docs/reality/skill_standard.md) | The self-authored skill standard |
+| [`dev/docs/reality/scenario_bench.md`](dev/docs/reality/scenario_bench.md) | The hermetic scenario benchmark |
+| [`dev/docs/vision/framework_vision.md`](dev/docs/vision/framework_vision.md) | The 0.8 modular-framework north star |
 | [`dev/docs/revision_summaries/`](dev/docs/revision_summaries/) | Per-release write-ups (0.1 → 0.7) |
 
 The full JROS spec — architecture, transport, the node standard, the agent
@@ -538,7 +553,7 @@ and skill systems — continues to land under `dev/docs/`.
 - **0.8 — Modular framework.** Modules (TTS/STT/vision/hardware nodes,
   plugins) that own their own config/settings/lifecycle and register into a
   unified surface — the ROS2-style federation seam
-  ([`dev/docs/framework_vision.md`](dev/docs/framework_vision.md)).
+  ([`dev/docs/vision/framework_vision.md`](dev/docs/vision/framework_vision.md)).
 - **JP01.** The first hardware Jaeger — the same brain, a body around it.
 
 ---

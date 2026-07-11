@@ -1,7 +1,7 @@
 """Instance-scoped persistent memory — the public facade over SQLite.
 
 The store is ``<instance>/memory/state.db`` (see ``sqlite_store.py`` and
-dev/docs/memory_architecture.md): ``facts`` is the current subject-attributed
+dev/docs/reality/memory_architecture.md): ``facts`` is the current subject-attributed
 view, ``fact_log`` the append-only assertion history, ``episodic`` +
 ``episodic_embeddings`` the per-turn log with semantic search. The old flat
 files (``facts.json`` / ``episodic.jsonl`` / ``schedules.jsonl``) are legacy —

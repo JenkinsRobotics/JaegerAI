@@ -152,22 +152,32 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(req.kind, "approval")
         XCTAssertEqual(req.options, ["allow", "deny"])
 
-        guard case .fatal(_, let kind) = try decode("fatal_locked") else {
+        guard case .fatal(_, let kind, _) = try decode("fatal_locked") else {
             return XCTFail("fatal_locked")
         }
         XCTAssertEqual(kind, "locked")
-        guard case .fatal(_, let bootKind) = try decode("fatal_boot") else {
+        guard case .fatal(_, let bootKind, _) = try decode("fatal_boot") else {
             return XCTFail("fatal_boot")
         }
         XCTAssertEqual(bootKind, "boot")
         // v1 additive: first-run — no instance on disk yet. The shell
         // routes this kind to onboarding instead of a generic error.
-        guard case .fatal(let noInstErr, let noInstKind) =
+        guard case .fatal(let noInstErr, let noInstKind, let noSuggested) =
                 try decode("fatal_no_instance") else {
             return XCTFail("fatal_no_instance")
         }
         XCTAssertEqual(noInstKind, "no_instance")
         XCTAssertTrue(noInstErr.contains("first-run"))
+        XCTAssertNil(noSuggested)   // additive key absent from this fixture
+
+        // v1 additive: the operator's CLI-pinned agent name rides the SAME
+        // fatal frame — onboarding defaults the identity step to it.
+        guard case .fatal(_, let pinnedKind, let suggested) =
+                try decode("fatal_no_instance_suggested") else {
+            return XCTFail("fatal_no_instance_suggested")
+        }
+        XCTAssertEqual(pinnedKind, "no_instance")
+        XCTAssertEqual(suggested, "lilith")
 
         guard case .bye = try decode("bye") else { return XCTFail("bye") }
     }
@@ -278,6 +288,62 @@ final class ProtocolFixtureTests: XCTestCase {
         }
         XCTAssertEqual(payload?["restart_required"] as? Bool, true)
         XCTAssertEqual(payload?["path"] as? String, "model.ctx")
+    }
+
+    func testUpdateOpFixturesMatchWhatTheShellSends() throws {
+        // In-app updates (0.8) ride two additive v1 values: query
+        // "check_update" (SettingsStore.checkForUpdates) and command
+        // "run_update" (SettingsStore.runUpdate). Pin the shapes the shell
+        // serializes + the result payloads it decodes, so a Python-side
+        // rename breaks here too.
+        let here = URL(fileURLWithPath: #filePath)
+        let url = here
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("protocol_v1_fixtures.json")
+        let root = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url)) as? [String: Any]
+        let ops = root?["ops"] as? [String: Any]
+
+        guard let check = ops?["query_check_update"] as? [String: Any] else {
+            return XCTFail("query_check_update op fixture missing")
+        }
+        XCTAssertEqual(check["op"] as? String, "query")
+        XCTAssertEqual(check["what"] as? String, "check_update")
+
+        guard let run = ops?["command_run_update"] as? [String: Any] else {
+            return XCTFail("command_run_update op fixture missing")
+        }
+        XCTAssertEqual(run["op"] as? String, "command")
+        XCTAssertEqual(run["cmd"] as? String, "run_update")
+
+        guard case .result(let checkId, let checkOk, _, let checkData) =
+                try decode("result_check_update") else {
+            return XCTFail("result_check_update")
+        }
+        XCTAssertEqual(checkId, "r12")
+        XCTAssertTrue(checkOk)
+        let checkPayload = checkData.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        XCTAssertEqual(checkPayload?["current"] as? String, "0.8.0")
+        XCTAssertEqual(checkPayload?["latest"] as? String, "0.9.0")
+        XCTAssertEqual(checkPayload?["available"] as? Bool, true)
+        XCTAssertNotNil(checkPayload?["notes_url"] as? String)
+
+        guard case .result(let runId, let runOk, _, let runData) =
+                try decode("result_run_update") else {
+            return XCTFail("result_run_update")
+        }
+        XCTAssertEqual(runId, "r13")
+        XCTAssertTrue(runOk)
+        let runPayload = runData.flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        XCTAssertEqual(runPayload?["restart_required"] as? Bool, true)
+        XCTAssertEqual(runPayload?["returncode"] as? Int, 0)
     }
 
     func testUnknownFrameTypeIsSkippedNotFatal() {

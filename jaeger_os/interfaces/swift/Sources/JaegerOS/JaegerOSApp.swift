@@ -37,6 +37,11 @@ struct JaegerOSApp: App {
     /// and a "Stop Speaking" item when audio is active.
     @StateObject private var tts = TTSManager.shared
 
+    /// Backs the menu-bar "update available" dot (0.8) — the same store
+    /// the Settings HUD's Updates row reads, so one background poll
+    /// (``AppDelegate``, launch + ~6h) lights up both surfaces at once.
+    @StateObject private var settingsStore = SettingsStore.shared
+
     /// Derived from ``agent.isConnected`` — the menu-bar icon swap
     /// flag.  We keep it explicit (not a computed property) so the
     /// SwiftUI view tree's binding is dead simple.
@@ -66,32 +71,44 @@ struct JaegerOSApp: App {
             // Resources loaded via Bundle.module.url(...) — Image(_:bundle:)
             // expects an asset catalog and silently renders nothing for
             // loose PNGs sitting under Resources/.
-            if let icon = Self.icon(for: agentState) {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    // 18pt — the AppKit standard menu-bar item height
-                    // (NSStatusItem default, what Ollama / Raycast /
-                    // Alfred all settle on).  The source PNG ships at
-                    // 44×44 (22pt @2x); ``loadIcon`` sets
-                    // ``image.size = 18`` so SwiftUI renders against the
-                    // PNG's native pixels without a chain of resamples.
-                    //
-                    // 0.3.0: was 14pt, which downsampled the J disc to
-                    // ~64% of menu-bar standard and read visually
-                    // smaller than its neighbours.  Lilith's PyQt6
-                    // ``QSystemTrayIcon(QIcon)`` handles menu-bar
-                    // sizing automatically; AppKit needs the explicit
-                    // hint.
-                    .frame(width: 18, height: 18)
-            } else {
-                // Fallback so we NEVER have an empty label.  If we hit
-                // this, the resource bundle didn't pick up the PNGs —
-                // the SwiftUI Shape stays visible at the same 18pt so
-                // the menu remains clickable and matches neighbour
-                // weight.
-                JaegerMechIcon(size: 18)
+            ZStack(alignment: .topTrailing) {
+                if let icon = Self.icon(for: agentState) {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        // 18pt — the AppKit standard menu-bar item height
+                        // (NSStatusItem default, what Ollama / Raycast /
+                        // Alfred all settle on).  The source PNG ships at
+                        // 44×44 (22pt @2x); ``loadIcon`` sets
+                        // ``image.size = 18`` so SwiftUI renders against the
+                        // PNG's native pixels without a chain of resamples.
+                        //
+                        // 0.3.0: was 14pt, which downsampled the J disc to
+                        // ~64% of menu-bar standard and read visually
+                        // smaller than its neighbours.  Lilith's PyQt6
+                        // ``QSystemTrayIcon(QIcon)`` handles menu-bar
+                        // sizing automatically; AppKit needs the explicit
+                        // hint.
+                        .frame(width: 18, height: 18)
+                } else {
+                    // Fallback so we NEVER have an empty label.  If we hit
+                    // this, the resource bundle didn't pick up the PNGs —
+                    // the SwiftUI Shape stays visible at the same 18pt so
+                    // the menu remains clickable and matches neighbour
+                    // weight.
+                    JaegerMechIcon(size: 18)
+                }
+                // Update-available dot (0.8) — subtle, no modal nagging.
+                // Backed by the SAME cached check_update poll the Updates
+                // row reads (SettingsStore.updateStatus), so the dot and
+                // the row never disagree.
+                if settingsStore.updateStatus?.available == true {
+                    Circle()
+                        .fill(Color(red: 1.0, green: 0.35, blue: 0.35))
+                        .frame(width: 6, height: 6)
+                        .offset(x: 2, y: -1)
+                }
             }
         }
         .menuBarExtraStyle(.window)   // render the SwiftUI card, not a text menu

@@ -77,18 +77,46 @@ class SessionStore:
         return [{"role": r, "text": t, "ts": ts} for r, t, ts in cur.fetchall()]
 
     def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Recent sessions (most-active first) with preview + turn count."""
+        """Recent sessions (most-active first) with preview + turn count.
+        Ties on ``last_active`` (two turns landing in the same wall-clock
+        tick) break by insertion order (``rowid``, newest first) so
+        ranking stays deterministic instead of depending on SQLite's
+        unspecified tie order."""
         cur = self._conn.execute(
-            "SELECT s.id, s.title, s.preview, s.last_active, "
+            "SELECT s.id, s.title, s.preview, s.created_at, s.last_active, "
             "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) "
-            "FROM sessions s ORDER BY s.last_active DESC LIMIT ?", (limit,))
-        return [{"id": i, "title": ti, "preview": p, "last_active": la,
-                 "messages": n} for i, ti, p, la, n in cur.fetchall()]
+            "FROM sessions s ORDER BY s.last_active DESC, s.rowid DESC "
+            "LIMIT ?", (limit,))
+        return [{"id": i, "title": ti, "preview": p, "created_at": ca,
+                 "last_active": la, "messages": n}
+                for i, ti, p, ca, la, n in cur.fetchall()]
 
     def set_title(self, session_id: str, title: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("UPDATE sessions SET title=? WHERE id=?",
                                (title, session_id))
+
+    def prune(self, keep: int) -> int:
+        """Drop sessions beyond the ``keep`` most-recently-active (and their
+        messages), so a long-lived install doesn't grow this file forever.
+        ``keep <= 0`` is a no-op — unlimited retention is an explicit
+        operator choice (``display.session_history_keep``), not a silently
+        ignored value. Returns the number of sessions dropped."""
+        if keep <= 0:
+            return 0
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "SELECT id FROM sessions ORDER BY last_active DESC, "
+                "rowid DESC LIMIT -1 OFFSET ?", (keep,))
+            stale = [row[0] for row in cur.fetchall()]
+            if not stale:
+                return 0
+            self._conn.executemany(
+                "DELETE FROM messages WHERE session_id=?",
+                [(s,) for s in stale])
+            self._conn.executemany(
+                "DELETE FROM sessions WHERE id=?", [(s,) for s in stale])
+        return len(stale)
 
     def close(self) -> None:
         with self._lock:

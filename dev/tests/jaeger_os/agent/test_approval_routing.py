@@ -13,7 +13,7 @@ import threading
 def test_tag_confirm_session_sets_provider_session() -> None:
     import jaeger_os.main as m
     from jaeger_os.agent.loop.bus_confirm import BusConfirmationProvider
-    from jaeger_os.app.bus.inproc import InProcBus
+    from jaeger_os.transport import InProcBus
     from jaeger_os.core.safety.permissions import current_policy
 
     bus = InProcBus()
@@ -34,7 +34,7 @@ def test_confirm_round_trips_via_a_channel_responder() -> None:
     publishes an AgentRequest tagged with the session; a responder for that
     session publishes an AgentResponse; confirm() unblocks with the answer."""
     from jaeger_os.agent.loop.bus_confirm import BusConfirmationProvider
-    from jaeger_os.app.bus.inproc import InProcBus
+    from jaeger_os.transport import InProcBus
     from jaeger_os.core.messages import AgentRequest, AgentResponse
 
     from jaeger_os.core.safety import session_trust

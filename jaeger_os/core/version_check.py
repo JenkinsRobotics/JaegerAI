@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 # Mirror scripts/install.sh: JAEGER_REPO_URL overrides, default is upstream.
 # We want "owner/repo", install.sh wants the full git URL — derive ours from
@@ -122,7 +124,70 @@ def update_status(repo: str | None = None, *, timeout: float = 5.0) -> dict:
     }
 
 
+_CACHE_TTL_S = 24 * 3600.0  # once a day is plenty (operator call, 2026-07-11)
+_CACHE_NAME = "update_check.json"
+
+
+def _cache_path(layout: object | None) -> Path | None:
+    """``<instance>/run/update_check.json``, or None when there's no
+    instance to key the cache to (pre-instance / uninstantiated layout —
+    the caller falls back to an uncached check, never a crash)."""
+    root = getattr(layout, "root", None)
+    return (Path(root) / "run" / _CACHE_NAME) if root else None
+
+
+def cached_update_status(layout: object | None = None, *, repo: str | None = None,
+                         timeout: float = 5.0, ttl_s: float = _CACHE_TTL_S,
+                         now: float | None = None) -> dict:
+    """:func:`update_status` plus ``notes_url``, with the GitHub lookup
+    cached under ``<instance>/run/update_check.json`` for ``ttl_s``
+    seconds — so the daily tray poll (app launch + periodic) doesn't
+    hit the API every time. Only ``latest`` is cached; ``current`` /
+    ``available`` are recomputed live each call against ``jaeger_os.
+    __version__`` (cheap, and self-corrects across a restart onto a new
+    version without waiting out a stale cache).
+
+    ``layout`` may be None or a layout with no ``root`` (pre-instance) —
+    caching is then skipped, not fatal, and every call hits the network
+    (rare: onboarding only). ``now`` is an injectable clock for tests.
+    Never raises — a bad/corrupt cache file or a write failure both
+    degrade to an uncached live check, same as :func:`latest_version`
+    degrading a network failure to ``None``."""
+    clock = time.time() if now is None else now
+    path = _cache_path(layout)
+    cached: dict | None = None
+    if path is not None:
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = None
+    fresh = (isinstance(cached, dict)
+             and isinstance(cached.get("checked_at"), (int, float))
+             and (clock - cached["checked_at"]) < ttl_s)
+    if fresh:
+        latest = cached.get("latest")
+    else:
+        latest = latest_version(repo, timeout=timeout)
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps({"checked_at": clock, "latest": latest}),
+                    encoding="utf-8")
+            except OSError:
+                pass   # caching is an optimization, not a requirement
+    import jaeger_os
+    current = jaeger_os.__version__
+    slug = repo or repo_slug()
+    return {
+        "current": current,
+        "latest": latest,
+        "available": bool(latest and is_newer(latest, current)),
+        "notes_url": f"https://github.com/{slug}/releases/tag/{latest}" if latest else None,
+    }
+
+
 __all__ = [
     "repo_slug", "parse_version", "is_newer", "pick_latest",
-    "fetch_tags", "latest_version", "update_status",
+    "fetch_tags", "latest_version", "update_status", "cached_update_status",
 ]

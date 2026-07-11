@@ -251,7 +251,8 @@ class TrayMenu(QWidget):
         self._dot.setStyleSheet(f"color: {colour}; font-size: 11px;")
 
     def update_brand(self, name: str, avatar_path: str | None) -> None:
-        """Refresh the header to the current character (name + profile icon)."""
+        """Refresh the header (agent name + profile icon; icon art may still
+        come from the current character's card)."""
         self._name_label.setText(name)
         path = avatar_path or asset_path(_AVATAR_ASSET) or icon_path_for(TrayState.RUNNING)
         if path:

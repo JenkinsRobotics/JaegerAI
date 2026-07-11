@@ -5,7 +5,7 @@ Deliberately simple for now: after a non-trivial multi-step task, the agent
 records a brief after-action note to a human-readable ``reflections.md`` in the
 instance. The point today is to BUILD THE PRACTICE of closing the loop.
 
-Future (backlog, dev/docs/future_backlog.md): the reflection feeds skill
+Future (backlog, dev/docs/roadmap/future_backlog.md): the reflection feeds skill
 creation + pruning — a novel repeatable task becomes a new skill, a fumbled one
 triggers a skill review. For now it just journals; nothing auto-creates skills.
 

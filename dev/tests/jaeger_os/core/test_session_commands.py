@@ -157,3 +157,116 @@ def test_last_ctx_snapshot_computes_pct(monkeypatch):
                             context_guard=guard)
     monkeypatch.setattr(main, "_jaeger_agents_by_session", {"s": agent})
     assert main.last_ctx_snapshot("s") == {"tokens": 500, "pct": 25}
+
+
+# ── resume_session_from_store (native History → load_session) ───────────
+
+
+def test_resume_session_from_store_replays_capped_history(monkeypatch, tmp_path):
+    """load_session's EXPLICIT resume: full turn list returned for the UI,
+    and (capped to the same window a live turn trims to) replayed into the
+    target session's JaegerAgent.messages so the next turn sees context."""
+    from jaeger_os.core.sessions import SessionStore
+
+    store = SessionStore(tmp_path / "s.db")
+    for i in range(3):
+        store.record("picked", "user", f"question {i}")
+        store.record("picked", "assistant", f"answer {i}")
+    monkeypatch.setattr("jaeger_os.core.sessions.get_store", lambda layout=None: store)
+
+    built = SimpleNamespace(messages=[{"role": "user", "content": "stale seed"}])
+    calls = []
+
+    def fake_ensure(client, session_key):
+        calls.append((client, session_key))
+        return built
+
+    monkeypatch.setattr(main, "_ensure_session_agent", fake_ensure)
+    monkeypatch.setattr(main, "_session_loaded", set())
+    monkeypatch.setattr(main, "_session_state", {"picked": {"stale": 1}})
+
+    client = object()
+    turns = main.resume_session_from_store(client, "picked")
+
+    assert len(turns) == 6                       # the FULL turn list
+    assert calls == [(client, "picked")]
+    assert built.messages == [
+        {"role": "user", "content": "question 0"},
+        {"role": "assistant", "content": "answer 0"},
+        {"role": "user", "content": "question 1"},
+        {"role": "assistant", "content": "answer 1"},
+        {"role": "user", "content": "question 2"},
+        {"role": "assistant", "content": "answer 2"},
+    ]
+    assert "picked" in main._session_loaded
+    assert "picked" not in main._session_state
+    store.close()
+
+
+def test_resume_session_from_store_caps_to_max_history_window(monkeypatch, tmp_path):
+    from jaeger_os.core.sessions import SessionStore
+
+    store = SessionStore(tmp_path / "s.db")
+    for i in range(30):                           # well over _MAX_HISTORY_MESSAGES*2
+        store.record("long", "user", f"q{i}")
+        store.record("long", "assistant", f"a{i}")
+    monkeypatch.setattr("jaeger_os.core.sessions.get_store", lambda layout=None: store)
+
+    built = SimpleNamespace(messages=[])
+    monkeypatch.setattr(main, "_ensure_session_agent",
+                        lambda client, key: built)
+
+    turns = main.resume_session_from_store(object(), "long")
+    assert len(turns) == 60                        # uncapped return
+    cap = main._MAX_HISTORY_MESSAGES * 2
+    assert len(built.messages) == cap
+    assert built.messages[-1] == {"role": "assistant", "content": "a29"}
+    store.close()
+
+
+def test_resume_session_from_store_without_client_skips_replay(monkeypatch, tmp_path):
+    """Browsing History before the agent has booted: still returns the
+    turns for the UI, but there's no live agent to seed."""
+    from jaeger_os.core.sessions import SessionStore
+
+    store = SessionStore(tmp_path / "s.db")
+    store.record("s1", "user", "hi")
+    monkeypatch.setattr("jaeger_os.core.sessions.get_store", lambda layout=None: store)
+
+    def explode(client, key):
+        raise AssertionError("must not build an agent with no client")
+
+    monkeypatch.setattr(main, "_ensure_session_agent", explode)
+    turns = main.resume_session_from_store(None, "s1")
+    assert len(turns) == 1
+    store.close()
+
+
+def test_resume_session_from_store_replay_failure_still_returns_turns(monkeypatch, tmp_path):
+    """The replay is best-effort: if building the session's live agent
+    blows up (e.g. a client shape the adapter layer doesn't recognize),
+    the operator must still get their History view back, just without
+    live continuation — display must not fail with the replay."""
+    from jaeger_os.core.sessions import SessionStore
+
+    store = SessionStore(tmp_path / "s.db")
+    store.record("s1", "user", "hi")
+    store.record("s1", "assistant", "hello")
+    monkeypatch.setattr("jaeger_os.core.sessions.get_store", lambda layout=None: store)
+
+    def explode(client, key):
+        raise RuntimeError("no adapter for this client shape")
+
+    monkeypatch.setattr(main, "_ensure_session_agent", explode)
+    turns = main.resume_session_from_store(object(), "s1")
+    assert [t["text"] for t in turns] == ["hi", "hello"]
+    store.close()
+
+
+def test_resume_session_from_store_unknown_session_returns_empty(monkeypatch, tmp_path):
+    from jaeger_os.core.sessions import SessionStore
+
+    store = SessionStore(tmp_path / "s.db")
+    monkeypatch.setattr("jaeger_os.core.sessions.get_store", lambda layout=None: store)
+    assert main.resume_session_from_store(object(), "nope") == []
+    store.close()

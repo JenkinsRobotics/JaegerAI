@@ -3,6 +3,111 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.8.0` — modular runtime + persona_first pipeline
+
+The line that unifies the runtime and ships the "second self" pipeline as
+default. Two themes: **JROS became a modular framework** (one bus, one Node,
+one runtime, and modules that own their own engine), and **persona_first
+became the default agentic pipeline** (the id/ego split, hardened and
+gated).
+
+### One bus, one Node, one runtime (Phase U)
+The chassis duality (two bus implementations, two Node classes, two runtime
+paths depending on windowed vs TUI) is resolved.
+- `app/bus/` and `app/node.py` deleted; the chassis runs on
+  `transport.InProcBus`; one `FrameNode`/`NodeHealth` used everywhere.
+- The Supervisor now owns worker nodes end to end (`ensure_*` delegates
+  instead of recursing); `jaeger.windowed.toml` declares nodes
+  (tts/animation) enabled, headless-safe.
+- Routing bench hit **81/81 — the first perfect score** mid-phase.
+
+### The module system: "the module IS the engine"
+Modules are no longer plugins bolted onto a fixed engine — the engine ships
+*as* the module, discovered and bound by slot.
+- **`kokoro_tts`, `whisper_stt`, `animation`, `media`** converted to
+  engine-modules: each is a `module.yaml` + node + engine + its own config
+  leaf + tests. `nodes/tts`, `plugins/kokoro_tts`, and the old audio_session
+  split are gone — no shims.
+- **Slot-bound manifests** — `slot=tts` etc. resolve via
+  `discover_modules()`; removing a module degrades gracefully (guarded
+  imports, early no-module returns) instead of crashing.
+- **Messaging is the first multi-module slot** — discord/telegram/imessage
+  each ship a `module.yaml`; `send_message` is any-of, fail-closed, and
+  gates on `requires_platform`.
+- **Availability is fail-closed everywhere** — `requires_libraries` is
+  probed and cached at load; a missing dependency hides the tool instead of
+  crashing the turn. HomeAssistant/ai_gen tools, previously fail-open, are
+  now gated the same way.
+
+### persona_first: the id/ego pipeline, now default
+The character-voice filter that used to tax every worker turn is replaced
+by an architecture where the persona is the one thing the user talks to,
+and a clean inner agent does the work.
+- **id/ego split** — the persona lane speaks to the user directly (in the
+  model's native text dialect) and delegates agentic work to a vanilla
+  inner agent as its one tool; this is now the default pipeline (Mode B
+  retired unbuilt).
+- **Content-survival guard** — the compose step can restyle tone but may
+  never drop the deliverable; refusals pass through verbatim instead of
+  being restyled into Socratic pushback; delegate-worthy verbs (remember/
+  store/note/"do X") are contractually forced through the inner agent
+  instead of being silently acknowledged.
+- **8-10x faster chat** — persona-lane chat averages ~3.0-3.6s/turn vs
+  ~30s for the prior filter-based path (delegation 12/12, over-delegation
+  0/12).
+- **Security 15/15, including the historic `inj-mem-poison` fix** — the
+  4B's long-standing memory-poisoning gap (self-authorizing a "delete any
+  file" fact) now passes through the hardened lane; previously it needed
+  the 26B to pass.
+- **The scenario suite now drives the real front door** — the harness was
+  calling `drive_one_turn` directly, bypassing persona_first entirely;
+  it now goes through `run_command`, the actual user path, closing a gap
+  that had let a release-blocking regression (security 8/15 through the
+  front door) hide behind a green worker-path number.
+
+### Identity, new chat, and staleness fixes
+- **Identity/create-flow fix** — the agent's name (identity.yaml) versus
+  the character preset was conflating on create; the CLI-pinned name now
+  threads through onboarding on both Python and Swift, with an instance ID
+  always shown on the review page. A follow-on GUI audit fixed 5 more
+  places (Swift display-name fallbacks, PySide6 tray/settings) that still
+  leaked the character name into agent self-reference.
+- **New chat + chat history** — three additive bridge verbs
+  (`list_sessions`/`load_session`/`new_session`) plus a Swift toolbar row
+  (New Chat, History popover with resume) — closing windows or starting
+  over no longer silently merges into one endless session.
+- **Swift-app update staleness fix** — `jaeger update`/launch now rebuilds
+  `JaegerOS.app` when the bundle's stamped build-commit is behind the
+  checkout, instead of only rebuilding on `git pull` deltas; a missing app
+  now builds instead of being skipped forever.
+
+### Docs reorganized
+`dev/docs/` is now split into `reality/` (what's true now), `history/`
+(how we got here), `roadmap/` (what's next), and `vision/` (the long-term
+picture), with one index and ~120 links fixed.
+
+### Benchmarks
+Routing bench **80-81/81** (record 81/81, RC gate 80/81); the 51-case
+scenario suite hits a **record 37/51** (security 15/15, engagement 53/53
+front-door turns); persona eval delegation 12/12, over-delegation 0/12;
+2507 pytest cases green; windowed smoke + signed Swift build green.
+
+### Deferred to 0.9.0
+Hardware integration (the capability layer, JP01 modules) — 0.8 shipped
+the groundwork (module system, unified runtime, persona_first) that it
+depends on; design drafted, awaiting the JP01 3.0 live walk.
+
+## `0.7.3` — updater rebuilds the app
+
+- **`jaeger update` now rebuilds `JaegerOS.app`** after applying a release
+  (and after `--rollback`). The .app bundle is a build artifact the release
+  tarball can't carry — updating 0.7.1 → 0.7.2 left the app binary stale
+  against the new core. Skips quietly when the app was never built; warns
+  loudly when a built app exists but the Swift toolchain is missing.
+- Honest updater label: a clean curl install now reports
+  `install method: clean install (download + apply)` instead of
+  `dev-checkout`.
+
 ## `0.7.2` — one-shot reminders, scheduling SOP, skill-call chips, close-the-terminal launch
 
 - **Native one-shot reminders.** "Remind me in 1 minute" was being scheduled

@@ -15,7 +15,7 @@ Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 The in-process TUI loads the plugin stack directly:
 
    - persistent Kokoro player + avaudio_io bridge       (kokoro_tts/)
-   - Whisper STT hardening (two-pass + fast/accurate)   (whisper_stt/)
+   - Whisper STT hardening (two-pass + fast/accurate)   (nodes/whisper_stt/engine/)
    - persona prefill framework                          (instance bundle)
    - skill system v3 (multi-axis manifest)              (agent/skill_registry/)
    - Gemma 4 + updated registry                         (core/models/)
@@ -229,7 +229,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_os.plugins.avaudio_io import OutputStream, InputStream  # noqa: F401
+        from jaeger_os.core.audio.avaudio_io import OutputStream, InputStream  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         return False, f"import failed: {exc}"
     return True, "OutputStream + InputStream importable (PyObjC)"
@@ -238,7 +238,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_os.plugins.whisper_stt.two_pass`` loads at TUI boot."""
+    ``jaeger_os.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401
@@ -272,7 +272,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_os.plugins.kokoro_tts.persistent_player import (
+        from jaeger_os.nodes.kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401
@@ -738,19 +738,26 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     from its own bundle path, so no PATH injection is needed."""
     if not (SWIFT_DIR / "Package.swift").exists():
         return None
-    bundle_bin = (SWIFT_DIR / ".build" / "JaegerOS-dev.app"
-                  / "Contents" / "MacOS" / "JaegerOS")
-    if dev or not bundle_bin.exists():
+    bundle = SWIFT_DIR / ".build" / "JaegerOS-dev.app"
+    bundle_bin = bundle / "Contents" / "MacOS" / "JaegerOS"
+    # Rebuild when forced, missing, OR stale (build-commit stamp older than
+    # the Swift tree) — the stale case is what keeps a station that pulls by
+    # hand from launching an app that lags the core it talks to.
+    from jaeger_os.cli._common import swift_app_is_stale
+    if dev or swift_app_is_stale(REPO, bundle):
         if not shutil.which("swift"):
-            return None
-        say("building JaegerOS-dev.app (Scripts/build-app.sh --dev)…",
-            prefix="launch")
-        build = subprocess.run(
-            [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
-            cwd=str(SWIFT_DIR))
-        if build.returncode != 0:
-            warn("swift app build failed")
-            return None
+            if not bundle_bin.exists():
+                return None
+            warn("swift toolchain missing — launching the existing (stale) app")
+        else:
+            say("building JaegerOS-dev.app (Scripts/build-app.sh --dev)…",
+                prefix="launch")
+            build = subprocess.run(
+                [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
+                cwd=str(SWIFT_DIR))
+            if build.returncode != 0:
+                warn("swift app build failed")
+                return None
     if not bundle_bin.exists():
         return None
     say("launching JaegerOS-dev — menu-bar tray + chat window…", prefix="launch")
@@ -784,8 +791,13 @@ def cmd_update() -> int:
         subprocess.run([str(VENV_PY), "-m", "pip", "install", "-q",
                         "-r", str(req), "-e", str(REPO)], cwd=str(REPO))
         ok("deps reinstalled")
-    if any(f.startswith("jaeger_os/interfaces/swift/") for f in changed):
-        say("Swift app changed — rebuilding JaegerOS-dev.app…", prefix="update")
+    # Staleness beats "what did THIS pull change": the bundle's build-commit
+    # stamp catches pulls done by hand outside this command and rebuilds that
+    # failed last time — a diff-keyed check misses both.
+    from jaeger_os.cli._common import swift_app_is_stale
+    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerOS-dev.app"):
+        say("Swift app lags the tree — rebuilding JaegerOS-dev.app…",
+            prefix="update")
         subprocess.run([str(REPO / "jaeger_os/interfaces/swift/Scripts/build-app.sh"),
                         "--dev"])
     ok("up to date — run `jaeger dev --health` to verify")

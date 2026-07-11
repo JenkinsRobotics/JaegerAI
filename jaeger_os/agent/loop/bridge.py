@@ -28,8 +28,8 @@ from jaeger_os.core.messages import (
     ChatMessage,
     ChatReply,
     ToolEvent,
-    Transcript,
 )
+from jaeger_os.transport import topics
 
 # (client, text, session_key=...) -> {"text": str, "error": str | None, ...}
 TurnFn = Callable[..., dict]
@@ -125,7 +125,7 @@ class AgentBridge:
             self._confirm_provider = None
 
         self.bus.subscribe(ChatMessage.topic, self._on_chat)
-        self.bus.subscribe(Transcript.topic, self._on_transcript)
+        self.bus.subscribe(topics.SENSE_TRANSCRIPT, self._on_transcript)
         self._thread = threading.Thread(
             target=self._loop, name="agent-bridge", daemon=True)
         self._thread.start()
@@ -157,7 +157,13 @@ class AgentBridge:
         session = getattr(msg, "session", "") or self.session_key
         self._enqueue(getattr(msg, "source", "gui"), msg.text, session)
 
-    def _on_transcript(self, msg: Transcript) -> None:
+    def _on_transcript(self, msg: topics.Transcript) -> None:
+        # Voice publishes incremental partials (is_final=False) while the
+        # utterance is still being spoken, then one final. Only the final
+        # is a chat turn — treating every partial as one would fire a
+        # turn per fragment of a single sentence.
+        if not getattr(msg, "is_final", True):
+            return
         self._enqueue("voice", msg.text, self.session_key)   # STT → same inbox
 
     def _enqueue(self, source: str, text: str, session: str) -> None:

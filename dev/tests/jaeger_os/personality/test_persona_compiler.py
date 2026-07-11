@@ -1,7 +1,7 @@
 """Persona Compiler — State (numeric sliders) → View (behavioral prose).
 
 The compiler surfaces only DEVIATING traits (mid-band emits nothing) and never
-leaks raw floats into the model's View. See dev/docs/persona_compiler.md.
+leaks raw floats into the model's View. See dev/docs/reality/persona_compiler.md.
 """
 
 from __future__ import annotations

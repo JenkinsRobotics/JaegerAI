@@ -1,7 +1,7 @@
 """Home Assistant plugin — read + control smart-home devices via the HA REST API.
 
 Registers four INDIVIDUAL agent tools (measured: individual named tools
-beat an ``action=`` umbrella for the 4B — dev/docs/agentic_runners.md):
+beat an ``action=`` umbrella for the 4B — dev/docs/reality/agentic_runners.md):
 
   • ha_list_entities(domain, area)  — enumerate devices, compact summary
   • ha_get_state(entity_id)         — one entity, full attributes

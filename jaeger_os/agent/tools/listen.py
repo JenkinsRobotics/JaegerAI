@@ -195,7 +195,7 @@ def _record_via_avaudio(seconds: int, np_module):
     sounddevice."""
     import threading as _threading
 
-    from jaeger_os.plugins.avaudio_io import InputStream as _AVInputStream
+    from jaeger_os.core.audio.avaudio_io import InputStream as _AVInputStream
 
     target = int(seconds * _SAMPLE_RATE)
     blocksize = 320  # 20 ms @ 16 kHz

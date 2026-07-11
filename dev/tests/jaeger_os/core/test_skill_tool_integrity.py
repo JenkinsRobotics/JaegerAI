@@ -1,6 +1,6 @@
 """Skill ↔ tool-registry integrity — the phantom-tool-name guard.
 
-The #1 skill bug (dev/docs/skill_standard.md rule 4) is a SKILL.md that
+The #1 skill bug (dev/docs/reality/skill_standard.md rule 4) is a SKILL.md that
 names a tool which isn't actually registered: the model then hallucinates
 the call. It has happened twice by the same mechanism — a tool rename or
 removal sweep that missed the skills tree (`delegate_task` stripped as

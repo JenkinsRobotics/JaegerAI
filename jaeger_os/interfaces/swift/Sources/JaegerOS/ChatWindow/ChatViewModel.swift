@@ -51,6 +51,36 @@ struct ChatMessage: Identifiable, Equatable {
 }
 
 
+/// One row in the History list — the bridge's ``list_sessions`` query
+/// (``core/sessions.py`` SessionStore, most-active first). Keys match the
+/// JSON verbatim (snake_case), same convention as ``SettingsStore``'s models.
+struct SessionSummary: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String?
+    let preview: String?
+    let created_at: Double?
+    let last_active: Double
+    let messages: Int
+
+    /// Title if the operator (or a future rename feature) set one, else
+    /// the first-user-line preview SessionStore records automatically,
+    /// else a placeholder — never a blank row.
+    var displayTitle: String {
+        let t = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        let p = (preview ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return p.isEmpty ? "(untitled)" : p
+    }
+}
+
+/// One durable turn off ``load_session`` — ``core/sessions.py``
+/// ``SessionStore.history``'s row shape.
+struct SessionTurn: Codable, Equatable {
+    let role: String
+    let text: String
+    let ts: Double
+}
+
 /// Owns the chat transcript + send pipeline.  One instance per chat
 /// window; SwiftUI views observe it via ``@StateObject``.
 @MainActor
@@ -89,10 +119,16 @@ final class ChatViewModel: ObservableObject {
     /// ``display.turn_separators`` — the thin accent rule between turns.
     @Published private(set) var turnSeparators: Bool = true
 
-    /// The session key the agent uses to scope rolling history.  We
-    /// keep this constant within one chat window's lifetime so the
-    /// agent can correlate follow-up turns.
-    let sessionKey: String
+    /// The session key the agent uses to scope rolling history (the
+    /// sessions.db row this window's turns land in). Mutable — "New Chat"
+    /// mints a fresh key, and picking a conversation from History adopts
+    /// THAT session's id — so both change it mid-window-lifetime instead
+    /// of forcing a new ``ChatViewModel``.
+    @Published private(set) var sessionKey: String
+
+    /// True while a History fetch / session switch is in flight — gates
+    /// the History button/list so the operator can't double-fire.
+    @Published private(set) var isSwitchingSession: Bool = false
 
     private let agent: AgentBridge
     private var eventToken: UUID?
@@ -104,7 +140,16 @@ final class ChatViewModel: ObservableObject {
     /// ``transcribe`` round-trip; Week 5 swaps in CoreML Whisper.
     let voice = VoiceRecorder()
 
-    init(agent: AgentBridge, sessionKey: String = "desktop-app") {
+    /// A fresh per-launch key ("desktop-app" used to be shared by every
+    /// window/relaunch, so every conversation merged into one sessions.db
+    /// row — see runway item 4). Short, matching the PySide6 window's own
+    /// ``uuid.uuid4().hex[:8]`` convention (rich_tui/window.py).
+    nonisolated static func mintSessionKey() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            .lowercased().prefix(8).description
+    }
+
+    init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey()) {
         self.agent = agent
         self.sessionKey = sessionKey
         // Subscribe to agent events so we can show thinking + tool
@@ -422,6 +467,69 @@ final class ChatViewModel: ObservableObject {
                     "⚠ agent error: \(error.localizedDescription)"
                 messages[i].isStreaming = false
             }
+        }
+    }
+
+    // MARK: - New Chat / History
+
+    /// "New Chat": mint a fresh session id, evict the old one on the
+    /// Python side (best-effort — a failed command just means the old
+    /// key's in-memory state lingers, harmless), and reset the local
+    /// transcript. Always leaves the view model on a NEW key, even if
+    /// the bridge call fails — the operator's "new chat" intent must not
+    /// silently no-op just because the pipe hiccuped.
+    func newChat() async {
+        isSwitchingSession = true
+        defer { isSwitchingSession = false }
+        let result = await agent.command("new_session", args: ["old_id": sessionKey])
+        var newKey = Self.mintSessionKey()
+        if result.ok, let data = result.json,
+           let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let id = obj["id"] as? String, !id.isEmpty {
+            newKey = id
+        }
+        sessionKey = newKey
+        messages.removeAll()
+        contextUsage = nil
+    }
+
+    /// The History list's rows — recent conversations, most-active first.
+    func fetchSessions() async -> [SessionSummary] {
+        let result = await agent.query("list_sessions", args: ["limit": 50])
+        guard result.ok, let json = result.json,
+              let rows = try? JSONDecoder().decode([SessionSummary].self, from: json)
+        else { return [] }
+        return rows
+    }
+
+    /// Operator picked a conversation out of History: rebuild the local
+    /// transcript from its durable turns and adopt its id, so follow-up
+    /// turns continue THIS conversation (the core replays the same turns
+    /// into the live agent server-side — see
+    /// ``main.resume_session_from_store``). Returns false (transcript
+    /// untouched) on a bridge failure.
+    @discardableResult
+    func loadSession(_ id: String) async -> Bool {
+        guard id != sessionKey else { return true }   // already viewing it
+        isSwitchingSession = true
+        defer { isSwitchingSession = false }
+        let result = await agent.query("load_session", args: ["id": id])
+        guard result.ok, let json = result.json,
+              let turns = try? JSONDecoder().decode([SessionTurn].self, from: json)
+        else { return false }
+        sessionKey = id
+        messages = Self.rebuildMessages(from: turns)
+        contextUsage = nil
+        return true
+    }
+
+    /// Pure turn-list -> transcript mapping, split out so it's testable
+    /// without a live ``AgentBridge`` (see ChatViewModelTests).
+    nonisolated static func rebuildMessages(from turns: [SessionTurn]) -> [ChatMessage] {
+        turns.map { turn in
+            ChatMessage(author: turn.role == "user" ? .user : .assistant,
+                       timestamp: Date(timeIntervalSince1970: turn.ts),
+                       text: turn.text)
         }
     }
 

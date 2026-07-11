@@ -7,7 +7,7 @@ images for plugin smoke tests, demo files referenced from examples.
 | Goes here | Does NOT go here |
 |---|---|
 | logos, banners, screenshots | LLM weights (`*.gguf`) — external cache |
-| demo audio clips for docs | Whisper weights — declared in `plugins/whisper_stt/plugin.yaml` |
+| demo audio clips for docs | Whisper weights — declared in `nodes/whisper_stt/module.yaml` |
 | fixture images for tests | Kokoro voice files — inside `plugins/kokoro_tts/voices/` |
 | sample CSV / JSON for demos | NN-trained skill weights — inside `<instance>/skills/<name>_vN/weights/` |
 | README screenshots | per-instance state (logs, memory, credentials) — `<instance>/` |

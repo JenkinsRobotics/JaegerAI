@@ -48,6 +48,15 @@ def _emit(out: TextIO, obj: dict[str, Any]) -> None:
         out.flush()
 
 
+def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
+    """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
+    turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
+    guard and the wire frame never drift apart."""
+    ctx.busy = busy
+    from jaeger_os.interfaces import protocol
+    _emit(out, protocol.state_frame(busy, session))
+
+
 def _model_name(boot: Any) -> str | None:
     """Best-effort model label for the status line; None if unknown.
 
@@ -119,6 +128,24 @@ def _agent_name(boot: Any) -> str | None:
 
 def _instance_root(boot: Any) -> Any:
     return getattr(getattr(boot, "layout", None), "root", None)
+
+
+def _suggested_name(instance: str | None) -> str | None:
+    """The operator-pinned instance name to hand onboarding as a
+    ``suggested_name``, or None when there's nothing real to suggest.
+
+    ``instance`` is whatever ``main()`` resolved to boot/attach against —
+    an explicit CLI pin (``./jaeger agent create lilith`` → argv[0]) OR
+    the generic ``default_instance_name()`` fallback, and the two are
+    indistinguishable once they reach here (``_launch_swift_app`` pins
+    ``JAEGER_INSTANCE_NAME`` unconditionally — see main.py:3610). The
+    literal ``"default"`` is that fallback's own conjured placeholder
+    (never a name an operator typed), so it's the one value filtered
+    out — everything else (an explicit CLI name, or a sticky default
+    from a prior ``jaeger instance use``) is a real name worth
+    prefilling."""
+    name = (instance or "").strip()
+    return name if name and name != "default" else None
 
 
 def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
@@ -242,6 +269,38 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # native onboarding — the same data the CLI wizard prints.
         from jaeger_os.core.instance.setup_wizard import setup_defaults
         return setup_defaults()
+    if what == "list_sessions":
+        # Runway item 4 (0.8): the native History surface's row list —
+        # id/title/preview/created_at/last_active/messages, most-active
+        # first. Works pre-boot (the store is layout-keyed, not agent-
+        # keyed) so History can populate while the model is still warming.
+        from jaeger_os.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            return []
+        return store.list_sessions(limit=int(args.get("limit") or 50))
+    if what == "load_session":
+        # Runway item 4: the operator picked a conversation out of
+        # History. Returns its full turn list for the client to rebuild
+        # a transcript with, AND (when the agent has booted) replays it
+        # into that session's live JaegerAgent.messages so a follow-up
+        # turn on this id continues WITH context — see
+        # ``main.resume_session_from_store`` for why this is a full
+        # replay, not the usual clean-slate / lossy-digest resume.
+        from jaeger_os.main import resume_session_from_store
+        sid = str(args.get("id") or "").strip()
+        if not sid:
+            return []
+        return resume_session_from_store(
+            getattr(boot, "client", None), sid, layout=lay)
+    if what == "check_update":
+        # In-app updates (0.8): {current, latest, available, notes_url}.
+        # Cached under <instance>/run/update_check.json for ~24h — see
+        # version_check.cached_update_status — so app-launch + periodic
+        # tray polling doesn't hammer the GitHub API. Works pre-boot
+        # (layout-keyed cache, no client needed).
+        from jaeger_os.core.version_check import cached_update_status
+        return cached_update_status(lay)
     return None
 
 
@@ -363,6 +422,13 @@ class _Ctx:
         self.boot: Any = None
         self.client: Any = None
         self.cron: Any = None                 # CronRunner — fires scheduled prompts
+        # True while ANY turn (chat, slash, or a fired cron prompt) is
+        # running — the cheap "is a turn in flight?" signal run_update's
+        # guard reads before shelling out (an update mid-turn would race
+        # the turn's file reads against the swap). Mirrors the state
+        # frames' busy flag; kept on ctx too since state frames are
+        # fire-and-forget, not queryable.
+        self.busy = False
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
         # Pending permission requests: id → (event, answer-slot). An answer
@@ -488,7 +554,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     def _cron_cb(prompt: str, session_key: str | None = None) -> None:
         session = session_key or "cron"
         try:
-            _emit(proto, protocol.state_frame(True, session))
+            _emit_state(proto, ctx, True, session)
             try:
                 from jaeger_os.main import run_for_voice
                 result = run_for_voice(ctx.client, prompt, session_key=session)
@@ -509,7 +575,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                         print(f"[bridge] cron speak failed: {exc}",
                               file=sys.stderr, flush=True)
             finally:
-                _emit(proto, protocol.state_frame(False, session))
+                _emit_state(proto, ctx, False, session)
         except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
             print(f"[bridge] cron turn failed: {exc}",
                   file=sys.stderr, flush=True)
@@ -603,21 +669,21 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
         if text.startswith("/"):
-            _emit(proto, protocol.state_frame(True, session))
+            _emit_state(proto, ctx, True, session)
             try:
                 reply = _run_slash(text, ctx)
                 _emit(proto, protocol.reply_frame(reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
                 _emit(proto, protocol.reply_frame("", str(exc), session))
             finally:
-                _emit(proto, protocol.state_frame(False, session))
+                _emit_state(proto, ctx, False, session)
             continue
         ctx.booted.wait()
         if ctx.client is None:
             _emit(proto, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
-        _emit(proto, protocol.state_frame(True, session))
+        _emit_state(proto, ctx, True, session)
         try:
             from jaeger_os.main import run_for_voice
             result = run_for_voice(ctx.client, text, session_key=session)
@@ -629,7 +695,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(proto, protocol.reply_frame("", str(exc), session))
         finally:
-            _emit(proto, protocol.state_frame(False, session))
+            _emit_state(proto, ctx, False, session)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -672,7 +738,9 @@ def main(argv: list[str] | None = None) -> int:
                "first-run setup required")
         ctx.boot_error = msg
         _emit(proto, protocol.agent_state_frame("failed", error=msg))
-        _emit(proto, protocol.fatal_frame(msg, kind="no_instance"))
+        _emit(proto, protocol.fatal_frame(
+            msg, kind="no_instance",
+            suggested_name=_suggested_name(instance)))
         ctx.booted.set()
     else:
         _emit(proto, protocol.agent_state_frame("booting"))
@@ -775,6 +843,57 @@ def main(argv: list[str] | None = None) -> int:
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "run_update":
+                # In-app updates (0.8): shells out to `jaeger update`
+                # (update_verb.run_update_subprocess) — never
+                # reimplements the upgrade logic. Handled here (not
+                # _command) so the result can carry restart_required +
+                # the captured output as ``data``, same reason as
+                # settings_set/new_session above. Refuses while a turn
+                # is in flight (ctx.busy) — an update mid-turn would race
+                # the turn's file/model reads against the product swap.
+                if ctx.busy:
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False,
+                        error="a turn is in flight — try again once it finishes"))
+                    continue
+                a = req.get("args") or {}
+                try:
+                    from jaeger_os.cli.verbs.update_verb import run_update_subprocess
+                    res = run_update_subprocess(ref=(a.get("ref") or None))
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"),
+                        data={"restart_required": res["restart_required"],
+                              "returncode": res["returncode"],
+                              "output": res["output"]},
+                        ok=res["ok"], error=res.get("error")))
+                except Exception as exc:  # noqa: BLE001 — reported, never crashes
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "new_session":
+                # Runway item 4: the native "New Chat" button. Handled
+                # here (not ``_command``) for the same reason as
+                # settings_set/create_instance above — it needs to
+                # return the minted id as ``data``, which the generic
+                # _command -> (ok, error) shape can't carry. Evicting
+                # the OLD session (when given) is best-effort cleanup —
+                # the client is about to stop sending turns on that key
+                # regardless, so a failure here would only leak state,
+                # never break the new session.
+                import uuid
+                from jaeger_os.main import evict_session
+                a = req.get("args") or {}
+                old_id = str(a.get("old_id") or "").strip()
+                if old_id:
+                    try:
+                        evict_session(old_id)
+                    except Exception:  # noqa: BLE001 — cleanup only
+                        pass
+                new_id = uuid.uuid4().hex[:8]
+                _emit(proto, protocol.result_frame(
+                    req.get("id"), data={"id": new_id}, ok=True))
                 continue
             if op == "command" and (req.get("cmd") or "") == "create_instance":
                 # Handled here (not in _command): it needs ctx + proto to

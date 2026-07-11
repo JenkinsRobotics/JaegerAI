@@ -222,11 +222,108 @@ def _update_download(home: Path, *, ref: str | None = None,
                 return rc
         else:
             print("[jaeger update] dependencies unchanged — skipped reinstall.")
+        _rebuild_swift_app(home)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     verb = "reinstalled" if force else "now at"
     print(f"[jaeger update] {verb} {ref}. Restart `jaeger` to apply.")
     return 0
+
+
+def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
+    """(Re)build the station's Swift app after an update. The .app bundle
+    is a BUILD ARTIFACT, not a product file — the release tarball can't
+    carry it, so without a rebuild the app silently lags the core it
+    talks to. A MISSING bundle is built too (a failed install-time build
+    must not exempt the station from ever getting the app); only a missing
+    Swift toolchain (Linux/headless) skips, loudly. ``only_if_stale``
+    consults the bundle's build-commit stamp (git installs) and skips the
+    rebuild when the Swift tree hasn't changed since the app was built.
+
+    Flavor follows the install: a dev checkout (``dev/`` present) uses the
+    dev shell (JaegerOS-dev.app, ``--dev``); a clean product install uses
+    JaegerOS.app (``--release``) — mirrors install.sh."""
+    swift_dir = home / "jaeger_os" / "interfaces" / "swift"
+    script = swift_dir / "Scripts" / "build-app.sh"
+    if not script.exists():
+        return
+    if (home / "dev").exists():
+        app_name, flag = "JaegerOS-dev.app", "--dev"
+    else:
+        app_name, flag = "JaegerOS.app", "--release"
+    built = swift_dir / ".build" / app_name
+    if only_if_stale:
+        from jaeger_os.cli._common import swift_app_is_stale
+        if not swift_app_is_stale(home, built):
+            return
+    if shutil.which("swift") is None:
+        print(f"[jaeger update] ⚠ swift toolchain missing — {app_name} NOT "
+              "(re)built and now lags the core; build when available:",
+              file=sys.stderr)
+        print(f"                 bash {script} {flag}", file=sys.stderr)
+        return
+    verb = "rebuilding" if built.exists() else "building"
+    print(f"[jaeger update] {verb} {app_name}…")
+    rc = subprocess.run(["bash", str(script), flag],
+                        stdout=subprocess.DEVNULL).returncode
+    if rc == 0:
+        print(f"[jaeger update] ✓ {app_name} ready")
+    else:
+        print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
+              f"bash {script} {flag}", file=sys.stderr)
+
+
+def jaeger_exe() -> Path:
+    """The install's ``jaeger`` launcher — the venv console script if
+    present, else the wrapper script at the install root. Shared by the
+    PySide6 update dialog (``interfaces/pyside6/widgets/update_banner.py``)
+    and the app-bridge ``run_update`` command below, so both spawn the SAME
+    executable a hand-typed ``jaeger update`` would run."""
+    from jaeger_os.core.instance.instance import PACKAGE_ROOT
+    home = PACKAGE_ROOT.parent
+    venv = home / ".venv" / "bin" / "jaeger"
+    return venv if venv.exists() else home / "jaeger"
+
+
+def run_update_subprocess(*, ref: str | None = None,
+                          timeout: float = 600.0) -> dict[str, Any]:
+    """Run ``jaeger update [--ref REF]`` as a subprocess and report the
+    outcome — the app-bridge's ``run_update`` command calls this so the
+    native app never reimplements the upgrade logic, just triggers the
+    SAME machinery ``jaeger update`` runs (dev-clone pull vs. tarball
+    swap, picked internally by install-method detection in
+    :func:`_cmd_update_argv`).
+
+    The child's stdin is closed (``DEVNULL``): ``_ask_yn`` (the
+    per-stale-instance migration prompt) already takes its default
+    (yes) when ``stdin`` isn't a tty, so this runs exactly as
+    non-interactively as ``jaeger update < /dev/null`` would.
+
+    Returns ``{ok, returncode, output, restart_required, error}``.
+    ``restart_required`` is True whenever the subprocess actually ran
+    (0 or nonzero exit — even a partial/failed apply may have changed
+    files that need a restart to either take effect or be inspected);
+    it's False only when the subprocess couldn't be launched at all.
+    """
+    argv = [str(jaeger_exe()), "update"]
+    if ref:
+        argv += ["--ref", ref]
+    try:
+        result = subprocess.run(
+            argv, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "returncode": None,
+                "output": exc.stdout or "", "restart_required": False,
+                "error": f"update timed out after {timeout:.0f}s"}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "returncode": None, "output": "",
+                "restart_required": False, "error": str(exc)}
+    ok = result.returncode == 0
+    return {"ok": ok, "returncode": result.returncode,
+            "output": result.stdout or "", "restart_required": True,
+            "error": None if ok else f"update exited {result.returncode}"}
 
 
 def _do_rollback(home: Path) -> int:
@@ -242,6 +339,7 @@ def _do_rollback(home: Path) -> int:
     restored = _restore(home, prev, items)
     print(f"[jaeger update] rolled back {len(restored)} item(s).")
     _reinstall_deps(home)
+    _rebuild_swift_app(home)   # the built app must match the restored core
     shutil.rmtree(prev, ignore_errors=True)
     print("[jaeger update] restart `jaeger` to apply the rolled-back version.")
     return 0
@@ -268,7 +366,12 @@ def _update_editable(*, ref: str | None = None) -> int:
         print("[jaeger update] git pull --ff-only failed (diverged?) — resolve manually.",
               file=sys.stderr)
         return pull.returncode
-    return _reinstall_deps(repo)
+    rc = _reinstall_deps(repo)
+    # The .app is a build artifact the pull can't deliver — rebuild whenever
+    # the Swift tree moved past the built bundle's stamp (also catches pulls
+    # done by hand and installs whose first build failed → missing app).
+    _rebuild_swift_app(repo, only_if_stale=True)
+    return rc
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:
@@ -413,7 +516,15 @@ def _cmd_update_argv(argv: list[str]) -> int:
         return _do_rollback(PACKAGE_ROOT.parent)
 
     method = _detect_method()
-    print(f"[jaeger update] install method: {method}")
+    # ``dev-checkout`` is the detector's name for ANY source-tree run,
+    # but a clean curl install has no .git and updates by tarball —
+    # label it honestly so operators don't think they're on a git clone.
+    label = method
+    if method == "dev-checkout":
+        from jaeger_os.core.instance.instance import PACKAGE_ROOT
+        if not (PACKAGE_ROOT.parent / ".git").exists():
+            label = "clean install (download + apply)"
+    print(f"[jaeger update] install method: {label}")
 
     stale = _list_stale_instances()
     if stale:
@@ -490,4 +601,5 @@ def _cmd_reinstall_argv(argv: list[str]) -> int:
     return _update_download(home, ref=args.ref, force=True)
 
 
-__all__ = ["_cmd_update_argv", "_cmd_reinstall_argv"]
+__all__ = ["_cmd_update_argv", "_cmd_reinstall_argv",
+           "jaeger_exe", "run_update_subprocess"]

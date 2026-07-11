@@ -222,7 +222,7 @@ def discover_playbooks() -> list[PlaybookSkill]:
             # Presence-based unification: ANY folder with a SKILL.md is a recipe.
             # A folder that ALSO ships a module registers tools (skill_loader) —
             # so a skill can be both. No "code_skill vs playbook" split. See
-            # dev/docs/skill_unification.md.
+            # dev/docs/history/skill_unification.md.
             try:
                 text = md.read_text(encoding="utf-8")
             except OSError:
@@ -280,36 +280,6 @@ def available_playbooks(
     return _select_available(discover_playbooks(), _disabled_playbook_names(),
                              available_tools)
 
-
-_SKILL_INDEX_MAX_CHARS = 1400
-_SKILL_INDEX_TRUNCATE_SUFFIX = "\n…(more — use skill search)"
-
-
-def _format_skill_index(skills: list[PlaybookSkill]) -> str:
-    """Render a compact, prompt-ready index of ``skills`` — grouped by
-    category, names only. Empty string for an empty list.
-
-    The total output (body + truncation suffix) is hard-capped at
-    :data:`_SKILL_INDEX_MAX_CHARS`. Earlier the cap was applied to
-    the body alone, so the suffix pushed the actual prompt section
-    above the budget; we reserve the suffix's length up front."""
-    if not skills:
-        return ""
-    by_cat: dict[str, list[str]] = {}
-    for s in skills:
-        by_cat.setdefault(s.category, []).append(s.name)
-    lines = [
-        "Skill library — experienced playbooks for non-trivial tasks. Call "
-        'skill(action="view", name="…") to follow one, or '
-        'skill(action="search", query="…") to find one:',
-    ]
-    for cat in sorted(by_cat):
-        lines.append(f"- {cat}: {', '.join(sorted(by_cat[cat]))}")
-    text = "\n".join(lines)
-    if len(text) > _SKILL_INDEX_MAX_CHARS:
-        budget = _SKILL_INDEX_MAX_CHARS - len(_SKILL_INDEX_TRUNCATE_SUFFIX)
-        text = text[:budget].rstrip() + _SKILL_INDEX_TRUNCATE_SUFFIX
-    return text
 
 
 def _short_function(desc: str) -> str:

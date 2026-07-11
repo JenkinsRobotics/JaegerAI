@@ -16,4 +16,4 @@ flowchart LR
 
 **The honest caveat (code-verified).** The amplitude is a **sin-wave proxy** (≈5 Hz syllable-like: `(sin(2π·5·t)+1)/2` + jitter, floor 0.15) — **not** real audio analysis. It reads as convincingly synced but doesn't track actual phonemes. Real RMS sampling waits on a Kokoro streaming-audio callback (0.5.x).
 
-**Key files:** `nodes/tts/node.py:_tts_amplitude_pulse` · `nodes/animation/node.py:_on_tts_chunk` · `nodes/animation/adapters/math_adapter.py` · the face `MathScript`. The data path is fully wired; only the amplitude **source** is a placeholder.
+**Key files:** `nodes/kokoro_tts/node.py:_tts_amplitude_pulse` · `nodes/animation/node.py:_on_tts_chunk` · `nodes/animation/adapters/math_adapter.py` · the face `MathScript`. The data path is fully wired; only the amplitude **source** is a placeholder.
