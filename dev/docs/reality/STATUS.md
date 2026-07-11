@@ -42,6 +42,19 @@ launch now rebuild; missing app builds instead of being skipped forever) —
 flow-walked on a scratch station; docs reorganized into reality/history/
 roadmap/vision sections.
 
+**Post-RC addition (in-app updates, operator-requested):** Swift app gained
+an Update action + a menu-bar "update available" notification.
+`query check_update` (`version_check.cached_update_status`, cached ~6h
+under `<instance>/run/`) and `command run_update` (shells out to the
+existing `jaeger update` machinery, non-interactive, restart_required in
+the result) added to the bridge protocol (v1 additive, no version bump).
+Settings HUD gained an Updates row; menu bar gained a dot when a newer
+release exists. No auto-restart — the operator quits + reopens. Python
+suite green (1528 in `interfaces`/`cli`/`core`); Swift `swift test` green
+(33, incl. the new fixture pins); `build-app.sh --dev` green. Scripted
+NDJSON walk + a real-network probe both verified (see
+`.superpowers/sdd/inapp-update-report.md`, untracked/local).
+
 **RC battery (`dev/docs/history/0.8.0_RC_BATTERY.md`), head `3dfa078`,
 E4B, front door throughout — ALL GATES PASS:** routing bench **80/81**
 (record band 79-81; a perfect 81/81 was hit mid-phase); scenario suite
