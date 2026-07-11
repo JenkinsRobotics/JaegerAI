@@ -511,3 +511,104 @@ def test_swift_app_is_stale_basics(tmp_path):
     exe.parent.mkdir(parents=True)
     exe.write_text("")
     assert swift_app_is_stale(tmp_path, bundle) is False  # exe, but no .git
+
+
+# ── app-bridge run_update (0.8 in-app updates) ──────────────────────
+
+
+def test_jaeger_exe_prefers_venv_console_script(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    # No venv yet -> falls back to the wrapper script at the install root.
+    assert U.jaeger_exe() == repo / "jaeger"
+    venv_bin = repo / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "jaeger").write_text("#!/bin/sh\n")
+    assert U.jaeger_exe() == venv_bin / "jaeger"
+
+
+def test_run_update_subprocess_invokes_jaeger_update(tmp_path, monkeypatch):
+    """Calls the SAME ``jaeger update`` machinery — never reimplements the
+    upgrade logic — with stdin closed (non-interactive)."""
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((list(argv), kwargs))
+
+        class _R:
+            returncode = 0
+            stdout = "[jaeger update] now at 0.9.0.\n"
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res == {"ok": True, "returncode": 0,
+                    "output": "[jaeger update] now at 0.9.0.\n",
+                    "restart_required": True, "error": None}
+    argv, kwargs = calls[0]
+    assert argv == [str(repo / "jaeger"), "update"]
+    assert kwargs["stdin"] is U.subprocess.DEVNULL
+
+
+def test_run_update_subprocess_pins_ref(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(list(argv))
+
+        class _R:
+            returncode = 0
+            stdout = ""
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    U.run_update_subprocess(ref="0.9.0")
+    assert calls[0] == [str(repo / "jaeger"), "update", "--ref", "0.9.0"]
+
+
+def test_run_update_subprocess_nonzero_exit_reports_error(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+
+    def fake_run(argv, **kwargs):
+        class _R:
+            returncode = 2
+            stdout = "boom\n"
+
+        return _R()
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res["ok"] is False
+    # still restart-worthy — the process ran and may have changed files.
+    assert res["restart_required"] is True
+    assert "exited 2" in res["error"]
+
+
+def test_run_update_subprocess_missing_binary_never_raises(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "jaeger_os").mkdir(parents=True)
+    monkeypatch.setattr(
+        "jaeger_os.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_os")
+
+    def fake_run(argv, **kwargs):
+        raise FileNotFoundError("no such file")
+
+    monkeypatch.setattr(U.subprocess, "run", fake_run)
+    res = U.run_update_subprocess()
+    assert res == {"ok": False, "returncode": None, "output": "",
+                    "restart_required": False, "error": "no such file"}
