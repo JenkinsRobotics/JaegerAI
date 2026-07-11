@@ -22,12 +22,20 @@ struct ChatView: View {
     @EnvironmentObject private var agent: AgentBridge
     @StateObject private var chat: ChatViewModel
 
+    /// History popover state — owned by the view (not the view model):
+    /// it's presentation, not conversation state.
+    @State private var showHistory = false
+    @State private var sessions: [SessionSummary] = []
+    @State private var sessionsLoaded = false
+
     init(agent: AgentBridge) {
         _chat = StateObject(wrappedValue: ChatViewModel(agent: agent))
     }
 
     var body: some View {
         VStack(spacing: 0) {
+            chatToolbar
+            Rectangle().fill(Term.rule).frame(height: 1)
             messageList
             Rectangle().fill(Term.rule).frame(height: 1)
             composer
@@ -79,6 +87,92 @@ struct ChatView: View {
     }
 
     // MARK: - Sections
+
+    /// Thin header row: New Chat + History — the native app's take on
+    /// the PySide6 rich_tui window's ``/new`` and ``/sessions`` slash
+    /// commands (interfaces/pyside6/rich_tui/window.py).
+    private var chatToolbar: some View {
+        HStack(spacing: 10) {
+            Button(action: startNewChat) {
+                Label("New Chat", systemImage: "square.and.pencil")
+                    .font(.system(size: 11, design: .monospaced))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(Term.inkDim)
+            .disabled(chat.isSwitchingSession)
+
+            Spacer()
+
+            Button(action: openHistory) {
+                Label("History", systemImage: "clock.arrow.circlepath")
+                    .font(.system(size: 11, design: .monospaced))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(Term.inkDim)
+            .disabled(chat.isSwitchingSession)
+            .popover(isPresented: $showHistory, arrowEdge: .bottom) {
+                historyList
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Term.panel)
+    }
+
+    private var historyList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Recent conversations")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(Term.inkDim)
+                .padding(12)
+            Divider()
+            if sessions.isEmpty {
+                Text(sessionsLoaded ? "No past conversations yet." : "Loading…")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Term.inkDim)
+                    .padding(16)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(sessions) { row in
+                            historyRow(row)
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: 320)
+            }
+        }
+        .frame(width: 320)
+        .background(Term.canvas)
+        .task { await refreshHistoryIfNeeded() }
+    }
+
+    private func historyRow(_ row: SessionSummary) -> some View {
+        Button {
+            Task {
+                showHistory = false
+                await chat.loadSession(row.id)
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(row.displayTitle)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(row.id == chat.sessionKey ? Term.accent : Term.ink)
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(row.messages)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Term.inkDim.opacity(0.7))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 
     private var messageList: some View {
         ScrollViewReader { proxy in
@@ -306,5 +400,23 @@ struct ChatView: View {
         let text = chat.composerText
         chat.composerText = ""
         Task { await chat.send(text) }
+    }
+
+    private func startNewChat() {
+        Task { await chat.newChat() }
+    }
+
+    private func openHistory() {
+        showHistory = true
+        Task { await refreshHistoryIfNeeded(force: true) }
+    }
+
+    /// Fetch once on first open; ``force`` re-fetches (used when the
+    /// operator re-opens History mid-session so a just-created chat
+    /// shows up without restarting the app).
+    private func refreshHistoryIfNeeded(force: Bool = false) async {
+        guard force || !sessionsLoaded else { return }
+        sessions = await chat.fetchSessions()
+        sessionsLoaded = true
     }
 }

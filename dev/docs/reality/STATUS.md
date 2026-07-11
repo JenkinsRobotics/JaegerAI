@@ -106,6 +106,55 @@ has actually been exercised and works.
 
 ---
 
+## 2026-07-11 — new-chat + chat-history (Swift default shell) (0.8.0) [ux]
+
+Runway item 4. The durable session store (`core/sessions.py`
+`SessionStore`, `<instance>/memory/sessions.db`) already recorded every
+turn; nothing SURFACED it — Swift always sent the fixed session key
+`"desktop-app"`, so every chat/window/relaunch merged into one row and
+there was no way to start fresh or revisit an old conversation. Three
+additive bridge verbs + a Swift toolbar close that gap.
+
+- **Bridge (additive, no version bump)** — `query:list_sessions` (recent
+  rows, most-active first), `query:load_session {id}` (a session's full
+  turn list, PLUS a live replay into that session's `JaegerAgent.messages`
+  when the agent has booted — see below), `command:new_session {old_id?}`
+  (mints an 8-char id, evicts `old_id` when given). `new_session` is
+  special-cased in `bridge.py`'s `main()` (not `_command`) because it
+  needs to return the minted id as `data` — same reason `settings_set`/
+  `create_instance` are.
+- **Resume is explicit, not the clean-slate default** —
+  `main.resume_session_from_store` does a FULL replay (capped at the
+  live-turn trim window, most-recent turns kept) into the picked
+  session's agent, deliberately different from a fresh session
+  (`_get_session_history`, clean by design) or a same-key restart
+  (`_previous_session_digest`, a lossy digest) — both of those guard
+  against stale-task bleed from a DIFFERENT conversation, which doesn't
+  apply when the operator explicitly picked THIS one from History. The
+  replay step is best-effort (wrapped so a broken client shape degrades
+  to display-only, never loses the History view) — caught live by the
+  scripted bridge walk during this work, not by inspection.
+- **Retention** — new `display.session_history_keep` setting (default
+  50, 0 = unlimited; a normal schema field, so it rides the existing
+  generic settings_catalog/settings_set verbs for free). `SessionStore
+  .prune` runs after every recorded turn.
+- **Swift** — `ChatViewModel.sessionKey` is now mutable, minted fresh per
+  window instance (was the shared `"desktop-app"` literal — existing
+  installs will see their old merged history as one History row, which
+  is expected and acceptable). New Chat + History (popover list, click
+  to resume) live in a small toolbar row above the transcript.
+- **Verification** — `dev/tests/jaeger_os/core` (1047) and
+  `dev/tests/jaeger_os/interfaces` (255) green (separately — see the
+  pytest cross-file `os._exit`-on-`llama_cpp` landmine note in
+  `.superpowers/sdd/runway-item-4-report.md`, pre-existing and
+  unrelated). `swift build`/`swift test` (32) green. A scripted
+  multi-pass walk over the REAL `bridge.main()` + a real sessions.db
+  (fake LLM call only) exercised the full new_session → turns →
+  new_session → list_sessions → load_session → follow-up sequence.
+  **Not yet operator-walked**: the actual Swift History popover against
+  a live booted model (button clicks, visual layout) — flagged in the
+  report, not claimed here.
+
 ## 2026-07-05 — aux inference lane: ONE model, TWO llama contexts (0.6.0) [perf]
 
 The operator-priority latency fix. Root cause (measured, previous entry):
