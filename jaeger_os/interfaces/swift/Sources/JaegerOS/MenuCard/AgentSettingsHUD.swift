@@ -58,8 +58,7 @@ struct AgentSettingsHUD: View {
     /// The AGENT's name (identity.yaml), never the character. ``store.detail``
     /// is the active CHARACTER's detail, so it must not lead here.
     private var name: String {
-        agent.status?.agentName ?? agent.status?.character
-            ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
+        agent.status?.agentName ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }
 
     var body: some View {

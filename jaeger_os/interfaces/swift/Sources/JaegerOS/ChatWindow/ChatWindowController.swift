@@ -36,7 +36,8 @@ final class ChatWindowController {
 
     /// Window title leads with the AGENT's name (identity.yaml — the robot
     /// the operator named), not the character it's playing: "Jaeger — Ted".
-    /// Falls back to the character until the identity query answers.
+    /// Falls back to the instance name until the identity query answers —
+    /// NEVER the character.
     private static func title(for status: AgentStatus?) -> String {
         if let name = status?.displayName { return "Jaeger — \(name)" }
         return "Jaeger"

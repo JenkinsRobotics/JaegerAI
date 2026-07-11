@@ -412,9 +412,13 @@ struct AgentStatus {
     /// Active character's display name — the PERSONA being played,
     /// secondary flavor next to ``agentName`` ("Ted · playing HAL 9000").
     var character: String? { rawDict["character"] as? String }
-    /// What the header should lead with: the agent's name, falling back
-    /// to the character while the identity query is still in flight.
-    var displayName: String? { agentName ?? character }
+    /// What the header should lead with: the agent's name. NEVER falls
+    /// back to the character — the character is a persona preset, not the
+    /// agent's identity, and must not stand in for it on any surface that
+    /// represents the agent (window titles, tray, chat header). Falls back
+    /// to the instance (dir name / universal key) while the identity query
+    /// is still in flight.
+    var displayName: String? { agentName ?? instance }
     /// Absolute path to the agent's effective avatar (instance profile
     /// picture if set, else the active character's card).
     var iconPath: String? { rawDict["icon"] as? String }

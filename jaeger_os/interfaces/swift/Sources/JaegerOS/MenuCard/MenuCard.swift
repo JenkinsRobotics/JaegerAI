@@ -17,7 +17,7 @@ struct MenuCard: View {
 
     /// Display name = the AGENT's name (identity.yaml), never the character —
     /// the character is only the persona it's playing. Falls back to the
-    /// character while the identity query is in flight, then instance/default.
+    /// instance while the identity query is in flight, then the default.
     private var displayName: String {
         agent.status?.displayName ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }

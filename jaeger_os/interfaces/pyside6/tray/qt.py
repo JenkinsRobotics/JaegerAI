@@ -128,19 +128,24 @@ class QtTray:
                 on_settings=self._open_settings,
             )
         else:
-            # Refresh to the current character (no rebuild → no show churn).
+            # Refresh the brand in place (no rebuild → no show churn).
             self._menu.update_brand(name, icon)
         self._menu.set_state(self._state)
         self._menu.popup_under(self._icon.geometry())
 
     def _character_brand(self) -> tuple[str, str | None]:
-        """Current character's name + profile-icon path for the tray header."""
+        """The tray header's name + profile-icon path. Name is the AGENT's
+        own identity (never the character — see ``window.agent_name``); the
+        icon may still default to the current character's card art (a
+        picture isn't a name representation)."""
         try:
-            from jaeger_os.interfaces.avatar_player.window import resolve_character
+            from jaeger_os.interfaces.avatar_player.window import (
+                agent_name, resolve_character,
+            )
+            name = agent_name(self.ctx)
             c = resolve_character(self.ctx)
-            if c is not None:
-                icon = c.icon_path()
-                return c.name, (str(icon) if icon else None)
+            icon = c.icon_path() if c is not None else None
+            return name, (str(icon) if icon else None)
         except Exception:  # noqa: BLE001
             pass
         return self._name, None
