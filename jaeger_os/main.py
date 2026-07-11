@@ -738,6 +738,40 @@ def reset_session(session_key: str = _DEFAULT_SESSION_KEY) -> int:
     return legacy_dropped + agent_dropped
 
 
+def evict_session(session_key: str) -> bool:
+    """Fully forget ``session_key`` — unlike :func:`reset_session` (which
+    keeps the session "loaded" and its ``JaegerAgent`` alive, just empty),
+    this drops every per-session entry so nothing outlives the caller.
+
+    For a long-lived interactive session ``reset_session`` (``/new``) is
+    right: the operator stays in the same session, just wants a clean
+    context. But a caller that mints a FRESH, disposable ``session_key``
+    per unit of work — the scenario suite's ``bench-scenario-<id>-<uuid>``
+    keys chief among them (``dev/benchmark/scenarios.py``) — has no reason
+    to keep that key around after its turns finish, and every one of
+    :data:`_jaeger_agents_by_session`, :data:`_session_histories`,
+    :data:`_session_state`, and :data:`_session_loaded` is a plain dict/set
+    that only ever grows: nothing before this function ever popped a key
+    out of them. A 51-case front-door run mints 51 such keys and none was
+    freed — diagnosed as the runway-item-1 leak (process death ~28/51,
+    ~9.5 min in). Explicit per-case teardown is the smallest honest fix:
+    call this once a scenario's turns are done and the suite's live
+    footprint stays O(1) sessions instead of O(cases).
+
+    Returns ``True`` if the session had any state to drop."""
+    had_state = False
+    if _jaeger_agents_by_session.pop(session_key, None) is not None:
+        had_state = True
+    if _session_histories.pop(session_key, None) is not None:
+        had_state = True
+    if _session_state.pop(session_key, None) is not None:
+        had_state = True
+    if session_key in _session_loaded:
+        _session_loaded.discard(session_key)
+        had_state = True
+    return had_state
+
+
 def last_ctx_snapshot(session_key: str = _DEFAULT_SESSION_KEY) -> dict[str, int]:
     """How full a session's context window is right now: ``{tokens, pct}``.
 
