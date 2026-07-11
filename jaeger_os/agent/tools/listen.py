@@ -131,6 +131,20 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
             "ok": False,
             "error": f"numpy missing ({exc})",
         }
+    # 0.8.1 field bug #2: boot's voice warm runs in the background now
+    # (main.py's warm_plugins_async); a listen() landing before it
+    # finishes still works (``_model_lock`` above makes this call wait
+    # for an in-flight warm load rather than racing it) — just say so.
+    try:
+        import sys as _sys
+        from jaeger_os.main import voice_warm_status
+        status = voice_warm_status()
+        if status == "voice: warming…":
+            print(f"[jaeger] {status} — listen() will wait for it to finish",
+                  file=_sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001 — status feedback is best-effort
+        pass
+
     try:
         whisper = _get_model(model)
     except Exception as exc:  # noqa: BLE001
