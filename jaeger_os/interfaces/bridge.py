@@ -48,6 +48,15 @@ def _emit(out: TextIO, obj: dict[str, Any]) -> None:
         out.flush()
 
 
+def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
+    """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
+    turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
+    guard and the wire frame never drift apart."""
+    ctx.busy = busy
+    from jaeger_os.interfaces import protocol
+    _emit(out, protocol.state_frame(busy, session))
+
+
 def _model_name(boot: Any) -> str | None:
     """Best-effort model label for the status line; None if unknown.
 
@@ -284,6 +293,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             return []
         return resume_session_from_store(
             getattr(boot, "client", None), sid, layout=lay)
+    if what == "check_update":
+        # In-app updates (0.8): {current, latest, available, notes_url}.
+        # Cached under <instance>/run/update_check.json for ~6h — see
+        # version_check.cached_update_status — so app-launch + periodic
+        # tray polling doesn't hammer the GitHub API. Works pre-boot
+        # (layout-keyed cache, no client needed).
+        from jaeger_os.core.version_check import cached_update_status
+        return cached_update_status(lay)
     return None
 
 
@@ -405,6 +422,13 @@ class _Ctx:
         self.boot: Any = None
         self.client: Any = None
         self.cron: Any = None                 # CronRunner — fires scheduled prompts
+        # True while ANY turn (chat, slash, or a fired cron prompt) is
+        # running — the cheap "is a turn in flight?" signal run_update's
+        # guard reads before shelling out (an update mid-turn would race
+        # the turn's file reads against the swap). Mirrors the state
+        # frames' busy flag; kept on ctx too since state frames are
+        # fire-and-forget, not queryable.
+        self.busy = False
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
         # Pending permission requests: id → (event, answer-slot). An answer
@@ -530,7 +554,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     def _cron_cb(prompt: str, session_key: str | None = None) -> None:
         session = session_key or "cron"
         try:
-            _emit(proto, protocol.state_frame(True, session))
+            _emit_state(proto, ctx, True, session)
             try:
                 from jaeger_os.main import run_for_voice
                 result = run_for_voice(ctx.client, prompt, session_key=session)
@@ -551,7 +575,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                         print(f"[bridge] cron speak failed: {exc}",
                               file=sys.stderr, flush=True)
             finally:
-                _emit(proto, protocol.state_frame(False, session))
+                _emit_state(proto, ctx, False, session)
         except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
             print(f"[bridge] cron turn failed: {exc}",
                   file=sys.stderr, flush=True)
@@ -645,21 +669,21 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
         if text.startswith("/"):
-            _emit(proto, protocol.state_frame(True, session))
+            _emit_state(proto, ctx, True, session)
             try:
                 reply = _run_slash(text, ctx)
                 _emit(proto, protocol.reply_frame(reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
                 _emit(proto, protocol.reply_frame("", str(exc), session))
             finally:
-                _emit(proto, protocol.state_frame(False, session))
+                _emit_state(proto, ctx, False, session)
             continue
         ctx.booted.wait()
         if ctx.client is None:
             _emit(proto, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
-        _emit(proto, protocol.state_frame(True, session))
+        _emit_state(proto, ctx, True, session)
         try:
             from jaeger_os.main import run_for_voice
             result = run_for_voice(ctx.client, text, session_key=session)
@@ -671,7 +695,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(proto, protocol.reply_frame("", str(exc), session))
         finally:
-            _emit(proto, protocol.state_frame(False, session))
+            _emit_state(proto, ctx, False, session)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -816,6 +840,34 @@ def main(argv: list[str] | None = None) -> int:
                         data={"restart_required": res["restart_required"],
                               "path": res["path"], "value": res["value"]},
                         ok=True))
+                except Exception as exc:  # noqa: BLE001 — reported, never crashes
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "run_update":
+                # In-app updates (0.8): shells out to `jaeger update`
+                # (update_verb.run_update_subprocess) — never
+                # reimplements the upgrade logic. Handled here (not
+                # _command) so the result can carry restart_required +
+                # the captured output as ``data``, same reason as
+                # settings_set/new_session above. Refuses while a turn
+                # is in flight (ctx.busy) — an update mid-turn would race
+                # the turn's file/model reads against the product swap.
+                if ctx.busy:
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False,
+                        error="a turn is in flight — try again once it finishes"))
+                    continue
+                a = req.get("args") or {}
+                try:
+                    from jaeger_os.cli.verbs.update_verb import run_update_subprocess
+                    res = run_update_subprocess(ref=(a.get("ref") or None))
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"),
+                        data={"restart_required": res["restart_required"],
+                              "returncode": res["returncode"],
+                              "output": res["output"]},
+                        ok=res["ok"], error=res.get("error")))
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))

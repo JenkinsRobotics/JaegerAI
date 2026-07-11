@@ -612,6 +612,8 @@ private struct AppPage: View {
                 .tint(HUD.accent).foregroundStyle(HUD.inkDim)
                 .font(.system(size: 12)).padding(.top, 8)
         }
+        Spacer().frame(height: 16)
+        UpdatesSection(store: store)
     }
 
     @ViewBuilder private func groupSection(_ group: SettingGroup) -> some View {
@@ -636,6 +638,78 @@ private struct AppPage: View {
             .foregroundStyle(Color.black)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(Capsule().fill(HUD.accent))
+    }
+}
+
+/// The Updates row — current version, an explicit "Check for updates"
+/// button, and (once one is found) "Update now" → run_update → a
+/// "Restart to apply" prompt. Not schema-driven like the rest of App
+/// Settings — this is an action, not a persisted setting — so it's a
+/// hand-built section, same pattern as the Permissions page below.
+private struct UpdatesSection: View {
+    @ObservedObject var store: SettingsStore
+    @State private var checking = false
+
+    var body: some View {
+        HUD.section("Updates")
+        HStack(spacing: 10) {
+            versionLine
+            Spacer()
+            checkButton
+        }
+        .task { if store.updateStatus == nil { _ = await store.checkForUpdates() } }
+        if let st = store.updateStatus, st.available {
+            HStack(spacing: 10) {
+                Text("Update available — v\(st.latest ?? "?")")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HUD.accent)
+                Spacer()
+                updateButton
+            }
+        }
+        if let err = store.updateError {
+            Text(err).font(.system(size: 12)).foregroundStyle(Color.red)
+        }
+        if let res = store.updateResult {
+            resultBanner(res)
+        }
+    }
+
+    private var versionLine: some View {
+        Text("You're on v\(store.updateStatus?.current ?? "…")")
+            .font(.system(size: 12)).foregroundStyle(HUD.inkDim)
+    }
+
+    private var checkButton: some View {
+        Button(checking ? "Checking…" : "Check for updates") {
+            checking = true
+            Task {
+                _ = await store.checkForUpdates()
+                checking = false
+            }
+        }
+        .buttonStyle(.plain).foregroundStyle(HUD.accent)
+        .disabled(checking)
+    }
+
+    private var updateButton: some View {
+        Button(store.updateInProgress ? "Updating…" : "Update now") {
+            Task { await store.runUpdate() }
+        }
+        .buttonStyle(.plain).foregroundStyle(HUD.accent)
+        .disabled(store.updateInProgress)
+    }
+
+    @ViewBuilder
+    private func resultBanner(_ res: UpdateRunResult) -> some View {
+        if res.restart_required {
+            Text("✓ Update applied — quit and reopen JaegerOS to finish.")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(HUD.accent)
+        } else {
+            Text("Update did not complete — see the log for details.")
+                .font(.system(size: 12)).foregroundStyle(Color.red)
+        }
     }
 }
 

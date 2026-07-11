@@ -98,6 +98,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                 ? "All systems online"
                                 : "Offline shell ready")
         }
+
+        // In-app updates (0.8): a silent check on launch, then every ~6h —
+        // matches the Python-side cache TTL (version_check.
+        // cached_update_status), so this loop is cheap even at that
+        // cadence: most calls just replay the cached "latest" without a
+        // network round-trip. Lights up the menu-bar dot (JaegerOSApp) and
+        // the MenuCard/Settings Updates row (SettingsStore.updateStatus is
+        // the shared @Published source both read) — never a modal.
+        Task { @MainActor in
+            while !Task.isCancelled {
+                _ = await SettingsStore.shared.checkForUpdates()
+                try? await Task.sleep(for: .seconds(6 * 3600))
+            }
+        }
     }
 
     /// Best-effort Carbon hotkey unregister on shutdown.  Honest

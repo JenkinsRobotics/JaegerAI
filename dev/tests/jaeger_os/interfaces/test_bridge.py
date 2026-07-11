@@ -137,7 +137,7 @@ class _SlowStdin:
 
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
          boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
-         default_name="test-inst"):
+         default_name="test-inst", stdin_obj=None):
     """Drive ``bridge.main`` with faked deps; return parsed stdout frames.
 
     ``argv`` mirrors what the Swift shell passes on the ``jaeger bridge``
@@ -176,7 +176,9 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
 
     proto = io.StringIO()
     monkeypatch.setattr("sys.stdout", proto)
-    monkeypatch.setattr("sys.stdin", _SlowStdin(stdin_text, stdin_delay))
+    monkeypatch.setattr("sys.stdin",
+                        stdin_obj if stdin_obj is not None
+                        else _SlowStdin(stdin_text, stdin_delay))
 
     rc = bridge.main(argv=argv if argv is not None else [])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
@@ -896,9 +898,154 @@ def test_fixture_frames_match_builders():
     assert frames["result_settings_set"] == protocol.result_frame(
         "r7", data={"restart_required": True, "path": "model.ctx",
                     "value": 16384}, ok=True)
+    # In-app updates (0.8): check_update / run_update result shapes.
+    assert frames["result_check_update"] == protocol.result_frame(
+        "r12", data={"current": "0.8.0", "latest": "0.9.0", "available": True,
+                    "notes_url": "https://github.com/JenkinsRobotics/JROS/releases/tag/0.9.0"},
+        ok=True)
+    assert frames["result_run_update"] == protocol.result_frame(
+        "r13", data={"restart_required": True, "returncode": 0,
+                    "output": "[jaeger update] now at 0.9.0. Restart `jaeger` to apply."},
+        ok=True)
     assert fx["ops"]["send"] == protocol.send_op("hello", "desktop-app")
     assert fx["ops"]["respond"] == protocol.respond_op("perm1", "allow")
     assert fx["ops"]["quit"] == protocol.quit_op()
+
+
+# ── in-app updates (0.8): check_update query, run_update command ──────────
+
+
+def test_check_update_query_roundtrip(monkeypatch, _instance_on_disk):
+    """``query what=check_update`` serves version_check.cached_update_status
+    keyed to the resolved instance's layout — works pre-boot."""
+    monkeypatch.setattr(
+        "jaeger_os.core.version_check.latest_version",
+        lambda *a, **k: "99.0.0", raising=False)
+    stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    import jaeger_os
+    assert result["data"]["current"] == jaeger_os.__version__
+    assert result["data"]["latest"] == "99.0.0"
+    assert result["data"]["available"] is True
+    assert result["data"]["notes_url"].endswith("/releases/tag/99.0.0")
+    assert rc == 0
+
+
+def test_check_update_query_fails_soft_offline(monkeypatch, _instance_on_disk):
+    """No network (latest_version -> None): available False, no crash."""
+    monkeypatch.setattr(
+        "jaeger_os.core.version_check.latest_version",
+        lambda *a, **k: None, raising=False)
+    stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"]["available"] is False
+    assert result["data"]["latest"] is None
+    assert rc == 0
+
+
+def test_run_update_command_invokes_the_existing_updater(monkeypatch):
+    """``command cmd=run_update`` calls update_verb.run_update_subprocess —
+    never reimplements the upgrade logic — and the result carries
+    restart_required so the client knows to prompt a quit+reopen."""
+    seen = {}
+
+    def fake_run_update(*, ref=None, **kwargs):
+        seen["ref"] = ref
+        return {"ok": True, "returncode": 0, "output": "done",
+                "restart_required": True, "error": None}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+    stdin = ('{"op":"command","cmd":"run_update","args":{"ref":"0.9.0"},'
+             '"id":"r1"}\n{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"]["restart_required"] is True
+    assert result["data"]["output"] == "done"
+    assert seen["ref"] == "0.9.0"
+    assert rc == 0
+
+
+def test_run_update_command_reports_failure_without_crashing(monkeypatch):
+    def fake_run_update(*, ref=None, **kwargs):
+        return {"ok": False, "returncode": 1, "output": "boom",
+                "restart_required": True, "error": "update exited 1"}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+    stdin = '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n{"op":"quit"}\n'
+    rc, frames, _ = _run(monkeypatch, stdin)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert result["error"] == "update exited 1"
+    assert rc == 0
+
+
+class _GatedStdin:
+    """Deterministic ordering for the busy-guard test: yields the chat
+    line immediately, then blocks the run_update line until the turn
+    worker has actually flipped ``ctx.busy`` (the ``started`` event) —
+    no sleep-based race — and unblocks the turn (``release``) right as
+    the ``quit`` line goes out so teardown doesn't hang on the worker
+    thread."""
+
+    def __init__(self, lines, started, release):
+        self._lines = iter(lines)
+        self._started = started
+        self._release = release
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = next(self._lines)
+        if "run_update" in line:
+            self._started.wait(5)
+        elif "quit" in line:
+            self._release.set()
+        return line
+
+
+def test_run_update_command_refuses_while_a_turn_is_in_flight(monkeypatch):
+    """The cheap guard: run_update while a chat/slash/cron turn is mid-flight
+    is refused with an error, never raced against the update subprocess."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    called = []
+
+    def slow_run(client, text, session_key=None):
+        started.set()
+        release.wait(5)
+        return {"text": "done", "error": None}
+
+    def fake_run_update(*, ref=None, **kwargs):
+        called.append(1)
+        return {"ok": True, "returncode": 0, "output": "",
+                "restart_required": True, "error": None}
+
+    monkeypatch.setattr(
+        "jaeger_os.cli.verbs.update_verb.run_update_subprocess",
+        fake_run_update, raising=False)
+
+    lines = ['{"text":"slow"}\n',
+             '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n',
+             '{"op":"quit"}\n']
+    stdin_obj = _GatedStdin(lines, started, release)
+    rc, frames, _ = _run(monkeypatch, "", run_fn=slow_run, stdin_obj=stdin_obj)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is False
+    assert "turn is in flight" in result["error"]
+    assert called == []            # the updater was never invoked
+    assert rc == 0
 
 
 if __name__ == "__main__":

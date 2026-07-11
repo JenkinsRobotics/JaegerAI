@@ -273,6 +273,59 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
               f"bash {script} {flag}", file=sys.stderr)
 
 
+def jaeger_exe() -> Path:
+    """The install's ``jaeger`` launcher — the venv console script if
+    present, else the wrapper script at the install root. Shared by the
+    PySide6 update dialog (``interfaces/pyside6/widgets/update_banner.py``)
+    and the app-bridge ``run_update`` command below, so both spawn the SAME
+    executable a hand-typed ``jaeger update`` would run."""
+    from jaeger_os.core.instance.instance import PACKAGE_ROOT
+    home = PACKAGE_ROOT.parent
+    venv = home / ".venv" / "bin" / "jaeger"
+    return venv if venv.exists() else home / "jaeger"
+
+
+def run_update_subprocess(*, ref: str | None = None,
+                          timeout: float = 600.0) -> dict[str, Any]:
+    """Run ``jaeger update [--ref REF]`` as a subprocess and report the
+    outcome — the app-bridge's ``run_update`` command calls this so the
+    native app never reimplements the upgrade logic, just triggers the
+    SAME machinery ``jaeger update`` runs (dev-clone pull vs. tarball
+    swap, picked internally by install-method detection in
+    :func:`_cmd_update_argv`).
+
+    The child's stdin is closed (``DEVNULL``): ``_ask_yn`` (the
+    per-stale-instance migration prompt) already takes its default
+    (yes) when ``stdin`` isn't a tty, so this runs exactly as
+    non-interactively as ``jaeger update < /dev/null`` would.
+
+    Returns ``{ok, returncode, output, restart_required, error}``.
+    ``restart_required`` is True whenever the subprocess actually ran
+    (0 or nonzero exit — even a partial/failed apply may have changed
+    files that need a restart to either take effect or be inspected);
+    it's False only when the subprocess couldn't be launched at all.
+    """
+    argv = [str(jaeger_exe()), "update"]
+    if ref:
+        argv += ["--ref", ref]
+    try:
+        result = subprocess.run(
+            argv, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        return {"ok": False, "returncode": None,
+                "output": exc.stdout or "", "restart_required": False,
+                "error": f"update timed out after {timeout:.0f}s"}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "returncode": None, "output": "",
+                "restart_required": False, "error": str(exc)}
+    ok = result.returncode == 0
+    return {"ok": ok, "returncode": result.returncode,
+            "output": result.stdout or "", "restart_required": True,
+            "error": None if ok else f"update exited {result.returncode}"}
+
+
 def _do_rollback(home: Path) -> int:
     """``jaeger update --rollback`` — restore the product the last
     download-update stashed, then resync deps. One level only (the prev dir is
@@ -548,4 +601,5 @@ def _cmd_reinstall_argv(argv: list[str]) -> int:
     return _update_download(home, ref=args.ref, force=True)
 
 
-__all__ = ["_cmd_update_argv", "_cmd_reinstall_argv"]
+__all__ = ["_cmd_update_argv", "_cmd_reinstall_argv",
+           "jaeger_exe", "run_update_subprocess"]
