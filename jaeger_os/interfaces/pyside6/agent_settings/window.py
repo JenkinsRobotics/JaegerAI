@@ -277,7 +277,11 @@ class AgentSettingsWindow(QWidget):
         self.ctx = ctx
         self._lay: Any = None
         self.character = resolve_character(ctx)
-        self._name = self.character.name if self.character else agent_name(ctx)
+        # The AGENT's own name (identity.yaml) — never the character. This
+        # window title / panel heading / dashboard heading represent the
+        # agent, not the persona it's playing (that's shown, labeled, only
+        # on the Character/Library tabs).
+        self._name = agent_name(ctx)
         self._studio: Any = None
         self._trait_sliders: dict[tuple[str, str], QSlider] = {}
 
@@ -335,10 +339,11 @@ class AgentSettingsWindow(QWidget):
         self._go(current)
 
     def _switch_character(self, ch: Any, goto: str = "Library") -> None:
-        """Retarget the whole app to a character — panel + all editable tabs."""
+        """Retarget the whole app to a character — panel + all editable tabs.
+        The agent's own name (``self._name``) never changes on a persona
+        switch, so the panel heading is left alone; only the avatar/pages
+        retarget to the new character."""
         self.character = ch
-        self._name = ch.name
-        self._panel_name.setText(ch.name.upper())
         show_card(self._avatar, ch)
         self._build_pages(goto)
 
