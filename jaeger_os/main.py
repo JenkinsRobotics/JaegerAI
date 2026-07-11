@@ -1046,9 +1046,11 @@ def _register_builtins(client: Any) -> None:
         store, connects in a background thread (same model / memory / persona
         answers every channel), and send_message can then reach it. Each chat
         keeps its own conversation context; turns serialize through the one
-        model. Returns {started, channel} or {started:false, error}. If it
-        reports a missing credential, ask the user for the value and
-        set_credential it, then retry — never invent a token."""
+        model. On success this ALSO persists the channel into this instance's
+        autostart list, so it comes back live on the next restart without
+        calling this again. Returns {started, channel} or {started:false,
+        error}. If it reports a missing credential, ask the user for the
+        value and set_credential it, then retry — never invent a token."""
         return activate_plugin_inprocess(name)
 
 
@@ -2843,6 +2845,27 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     }
 
 
+def _persist_plugin_autostart(name: str) -> None:
+    """Add ``name`` to the instance's ``config.plugins.autostart`` and write
+    it to disk — best-effort, never raises. Called after a successful
+    :func:`activate_plugin_inprocess` so an explicit activation survives a
+    restart (boot's :func:`autostart_plugins` reads the same list). Idempotent:
+    a name already present is left alone (no duplicate, no rewrite)."""
+    try:
+        from jaeger_os.core.instance.schemas import dump_yaml
+        cfg = _pipeline.get("config")
+        layout = _pipeline.get("layout")
+        if cfg is None or layout is None:
+            return
+        current = list(getattr(cfg.plugins, "autostart", None) or [])
+        if name in current:
+            return
+        cfg.plugins.autostart = current + [name]
+        dump_yaml(layout.config_path, cfg)
+    except Exception as exc:  # noqa: BLE001 — persistence never breaks activation
+        print(f"[jaeger] could not persist plugin autostart for {name!r}: {exc}", flush=True)
+
+
 def activate_plugin_inprocess(name: str) -> dict:
     """Bring a messaging plugin live in THIS process from the instance's saved
     credential — the shared entry point behind the ``activate_plugin`` tool, the
@@ -2851,8 +2874,12 @@ def activate_plugin_inprocess(name: str) -> dict:
     Wires the bridge to the live agent (``run_for_voice``) so the same model /
     memory / persona answers every channel; per-chat ``session_key``s keep
     contexts isolated; turns serialize on ``_pipeline['llm_lock']`` inside
-    ``_run_turn`` (so the bridge takes ``llm_lock=None``). Returns
-    ``start_bridge``'s status dict; never raises."""
+    ``_run_turn`` (so the bridge takes ``llm_lock=None``). On success, ALSO
+    persists ``name`` into ``config.plugins.autostart`` (see
+    :func:`_persist_plugin_autostart``) so the activation survives a restart —
+    an explicit activate is a durable "keep this channel live" decision, not a
+    one-off for this process's lifetime. Returns ``start_bridge``'s status
+    dict; never raises."""
     from .plugins import start_bridge
     client = _pipeline.get("client")
     layout = _pipeline.get("layout")
@@ -2862,8 +2889,11 @@ def activate_plugin_inprocess(name: str) -> dict:
     def _handler(text: str, session_key: str | None = None) -> str:
         return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
 
-    return start_bridge(name, layout=layout, handler=_handler, llm_lock=None,
-                        bus=_pipeline.get("chassis_bus"))
+    result = start_bridge(name, layout=layout, handler=_handler, llm_lock=None,
+                          bus=_pipeline.get("chassis_bus"))
+    if result.get("started"):
+        _persist_plugin_autostart((name or "").strip().lower())
+    return result
 
 
 def autostart_plugins(config: Any) -> None:
