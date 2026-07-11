@@ -85,6 +85,29 @@ TASK_PROMPTS = [
     ("open_host", "Open my Documents folder for me."),                           # open_on_host
 ]
 
+# 0.8.1 items 4-6 (persona-lane hardening, field-verified on the
+# operator's Mac Studio): two dedicated gate rows, driven alongside the
+# 12 TASK_PROMPTS above (same phase, same lilith character) but kept
+# OUT of that list so the existing "12/12" delegation gate and the
+# chat over-delegation report stay numerically unchanged -- these are
+# NEW, separately-reported checks.
+#
+#   * JOKE_GATE_PROMPT   -- BINDING-ASK (item 4): a joke request must
+#     actually get answered in character, never deflected because
+#     humor doesn't fit the persona's affect. No real "is this a good
+#     joke" scorer exists (jaeger_os.core.bench.scenarios has no
+#     joke-shape gate to reuse), so per the task brief this checks the
+#     honest, non-brittle proxy instead: the answer must NOT read as a
+#     refusal/deflection (_is_refusal -- the SAME marker vocabulary
+#     persona_lane.py's own refusal-preservation check uses) and must
+#     have some real substance (not a bare one-liner brush-off).
+#   * SELF_STATE_GATE_PROMPT -- SELF-STATE (item 5): a question about
+#     the agent's own configuration must delegate via perform_task,
+#     never be answered from persona/guesswork.
+JOKE_GATE_PROMPT = ("joke_gate", "Tell me a joke.")
+SELF_STATE_GATE_PROMPT = ("self_state_telegram", "Is your telegram set up?")
+JOKE_GATE_MIN_CHARS = 20
+
 CHAT_PROMPTS = [
     ("joke", "Tell me a joke."),
     ("comfort", "I had a rough day. Comfort me?"),
@@ -283,7 +306,7 @@ def _phase_persona_first(source_config, *, warmup: bool, gate_only: bool = False
     ~24 turns instead of ~60)."""
     layout, note_path, boot = _boot("persona_first", source_config=source_config,
                                      warmup=warmup)
-    rows = {"task": {}, "chat": {}}  # chat: {character_label: {pid: row}}
+    rows = {"task": {}, "chat": {}, "extra_gate": {}}  # chat: {character_label: {pid: row}}
     try:
         _set_character(layout, "lilith")
         print("=== [persona_first] lilith -- task prompts (delegation gate) ===", flush=True)
@@ -292,6 +315,14 @@ def _phase_persona_first(source_config, *, warmup: bool, gate_only: bool = False
             row = _drive(prompt, tag=f"task-{pid}")
             rows["task"][pid] = row
             print(f"  [{pid:14s}] delegated={row['delegated']!s:5s} "
+                 f"{row['elapsed_s']:5.2f}s  {row['answer'][:70]!r}", flush=True)
+
+        print("=== [persona_first] lilith -- extra gate rows (items 4-6) ===",
+             flush=True)
+        for pid, prompt in (JOKE_GATE_PROMPT, SELF_STATE_GATE_PROMPT):
+            row = _drive(prompt, tag=f"extra-{pid}")
+            rows["extra_gate"][pid] = row
+            print(f"  [{pid:20s}] delegated={row['delegated']!s:5s} "
                  f"{row['elapsed_s']:5.2f}s  {row['answer'][:70]!r}", flush=True)
 
         labels = ["lilith"] if gate_only else ["lilith", "eren_yeager", "glados", None]
@@ -442,6 +473,21 @@ def main() -> int:
     task_total = len(task_rows)
     gate_pass = task_deleg == task_total
 
+    # ── extra gate rows (0.8.1 items 4-6: BINDING-ASK + SELF-STATE) ──
+    from jaeger_os.core.bench.scenarios import _is_refusal
+    extra = agent_rows.get("extra_gate", {})
+    joke_row = extra.get(JOKE_GATE_PROMPT[0], {})
+    joke_answer = (joke_row.get("answer") or "").strip()
+    joke_gate_pass = (
+        bool(joke_answer)
+        and len(joke_answer) >= JOKE_GATE_MIN_CHARS
+        and not _is_refusal(joke_answer)
+    )
+    self_state_row = extra.get(SELF_STATE_GATE_PROMPT[0], {})
+    self_state_gate_pass = self_state_row.get("delegated") is True
+    extra_gate_pass = joke_gate_pass and self_state_gate_pass
+    gate_pass = gate_pass and extra_gate_pass
+
     # ── over-delegation (lilith chat column) ──
     lilith_chat = agent_rows["chat"]["lilith"]
     chat_deleg = sum(1 for r in lilith_chat.values() if r.get("delegated") is True)
@@ -464,10 +510,16 @@ def main() -> int:
 
     summary = {
         "ts": ts, "model_path": model_path,
-        "delegation_gate": {"passed": gate_pass, "delegated": task_deleg,
+        "delegation_gate": {"passed": task_deleg == task_total, "delegated": task_deleg,
                              "total": task_total},
         "chat_over_delegation": {"delegated": chat_deleg, "total": chat_total,
                                   "target_max": 3},
+        "extra_gate": {
+            "passed": extra_gate_pass,
+            "joke_gate": {"passed": joke_gate_pass, "answer": joke_answer},
+            "self_state_gate": {"passed": self_state_gate_pass,
+                                 "delegated": self_state_row.get("delegated")},
+        },
         "latency_s": {"mode_persona_first_lilith_chat_avg": round(modeC_avg, 3),
                        "mode_persona_last_lilith_chat_avg": round(modeA_avg, 3),
                        "c_lte_a": modeC_avg <= modeA_avg},
@@ -480,9 +532,15 @@ def main() -> int:
 
     print("\n" + "=" * 60, flush=True)
     print(f"DELEGATION GATE: {task_deleg}/{task_total} "
-         f"{'PASS' if gate_pass else 'FAIL'}", flush=True)
+         f"{'PASS' if task_deleg == task_total else 'FAIL'}", flush=True)
     print(f"chat over-delegation (lilith): {chat_deleg}/{chat_total} "
          f"(target <=3)", flush=True)
+    print(f"JOKE GATE (binding-ask, item 4): "
+         f"{'PASS' if joke_gate_pass else 'FAIL'} -- {joke_answer[:80]!r}",
+         flush=True)
+    print(f"SELF-STATE GATE (item 5, 'is your telegram set up'): "
+         f"{'PASS' if self_state_gate_pass else 'FAIL'} "
+         f"(delegated={self_state_row.get('delegated')!s})", flush=True)
     if args.gate_only:
         print(f"latency avg -- mode C (persona_first) chat: {modeC_avg:.2f}s  "
              f"(mode A baseline skipped -- --gate-only)", flush=True)
