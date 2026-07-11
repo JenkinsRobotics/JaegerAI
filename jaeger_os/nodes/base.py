@@ -16,6 +16,13 @@ A Node is a long-lived unit of work with a four-phase lifecycle:
             (Track D) treats as opaque + forwards to any operator-
             facing health surface.
 
+Liveness heartbeat (0.8 U3): every node publishes ``topics.NodeHealth``
+on ``/sense/node_health`` from inside :meth:`run`'s own loop, throttled
+to at most ~1/s regardless of ``tick_interval_s`` — best-effort, never
+raises, never blocks the tick cadence.  ``app.health.HealthCache``
+subscribes there so the chassis supervisor's ``diagnose()``/``ls()``
+get real liveness data instead of listening on a topic nobody publishes.
+
 Signals
 -------
 * SIGTERM  → graceful shutdown.  ``stop()`` flips the state to
@@ -46,7 +53,9 @@ import threading
 import time
 from typing import Any
 
-from jaeger_os.transport import Bus
+from jaeger_os.transport import Bus, topics
+
+_HEARTBEAT_PERIOD_S = 1.0
 
 
 class NodeState(str, enum.Enum):
@@ -169,6 +178,7 @@ class Node(abc.ABC):
         """Run the node lifecycle to completion.  Blocks until stop()
         is called or a signal triggers shutdown."""
         self._t_started_ns = time.time_ns()
+        last_heartbeat = 0.0   # 0.0 forces an immediate first heartbeat
         try:
             self._state = NodeState.SETTING_UP
             self._log(f"setup")
@@ -186,6 +196,10 @@ class Node(abc.ABC):
                     # set self._error and self._stop_event in their
                     # tick handler.
                     self._log(f"tick error: {type(exc).__name__}: {exc}")
+                now = time.monotonic()
+                if now - last_heartbeat >= _HEARTBEAT_PERIOD_S:
+                    last_heartbeat = now
+                    self._publish_heartbeat()
         except Exception as exc:  # noqa: BLE001
             # Setup-level errors are fatal — record + propagate to
             # teardown.
@@ -232,6 +246,32 @@ class Node(abc.ABC):
         self._log(f"received signal {signum}; restart requested")
         self.request_restart()
 
+    # ── liveness heartbeat ────────────────────────────────────────
+
+    def _publish_heartbeat(self) -> None:
+        """Publish a ``topics.NodeHealth`` liveness tick — throttled to
+        at most ~1/s by :meth:`run`'s own monotonic check, so a fast
+        ``tick_interval_s`` never floods the bus. Best-effort: a bus
+        hiccup or a bad subscriber must never break the tick cadence or
+        propagate out of the run loop.
+
+        Generic default — no hardware-link knowledge, so
+        ``link_connected``/``last_controller_rx_age_s`` stay at their
+        "not applicable" defaults. A hardware node that owns a physical
+        link (see ``hardware/packages/*/boot.py``) may override this to
+        report real link/telemetry detail instead.
+        """
+        try:
+            self.bus.publish(topics.NodeHealth(
+                node=self.name,
+                state=self._state.value,
+                link_connected=False,
+                last_controller_rx_age_s=0.0,
+                detail="",
+            ))
+        except Exception:  # noqa: BLE001 — heartbeat never breaks the node
+            pass
+
     # ── log routing ──────────────────────────────────────────────
 
     def _log(self, msg: str) -> None:
@@ -239,3 +279,54 @@ class Node(abc.ABC):
         readable.  Routes to stderr so it doesn't fight the TUI's
         stdout."""
         print(f"[node:{self.name}] {msg}", file=sys.stderr, flush=True)
+
+
+class FrameNode(Node):
+    """Render-loop specialization — the MochiNodeBase shape, formatted.
+
+    Fixed-rate scheduling (deadline-based, so render cost doesn't
+    drift the frame rate) with the update/render split Mochi's nodes
+    already use:
+
+        update_tick(ts)   advance state — scripts, state machines
+        render_tick(ts)   produce + publish one frame
+
+    A node that falls behind resyncs to "now" rather than spiraling.
+    """
+
+    def __init__(self, *, bus: Any, fps: float = 30.0,
+                 **kwargs: Any) -> None:
+        super().__init__(bus=bus,
+                         tick_interval_s=1.0 / max(float(fps), 0.5),
+                         **kwargs)
+        self.fps = float(fps)
+        self.frames_rendered = 0
+        self._next_deadline: float | None = None
+
+    # override these two, not tick():
+
+    def update_tick(self, ts: float) -> None:
+        """Advance state. Default: nothing."""
+
+    def render_tick(self, ts: float) -> None:
+        """Produce + publish one frame. Default: nothing."""
+
+    def tick(self) -> None:
+        now = time.monotonic()
+        if self._next_deadline is None:
+            self._next_deadline = now
+        self.update_tick(now)
+        self.render_tick(now)
+        self.frames_rendered += 1
+        self._next_deadline += self._tick_interval_s
+        sleep_s = self._next_deadline - time.monotonic()
+        if sleep_s > 0:
+            time.sleep(sleep_s)
+        else:
+            self._next_deadline = time.monotonic()   # fell behind; resync
+
+    def health(self) -> dict[str, Any]:
+        base = super().health()
+        base["fps_target"] = self.fps
+        base["frames_rendered"] = self.frames_rendered
+        return base

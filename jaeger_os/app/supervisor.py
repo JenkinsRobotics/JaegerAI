@@ -37,10 +37,12 @@ import threading
 import time
 from typing import Any, Callable
 
+import msgspec
+
 from .health import HealthCache
 from .logging import log
 from .manifest import NodeSpec
-from .node import Node, NodeState
+from jaeger_os.nodes.base import Node, NodeState
 
 _BACKOFF_BASE_S = 1.0
 _BACKOFF_CAP_S = 30.0
@@ -245,6 +247,42 @@ class Supervisor:
         self._get(node_id).restart()
         log("supervisor", f"node {node_id} restarted", bus=self._bus)
 
+    # ── 0.8 U3b: accessors for jaeger_os.nodes.runtime's ensure_*
+    #    delegation — let the brain-side singletons ask "does the
+    #    supervisor own this node, is it alive, and what's the live
+    #    object?" without reaching into ``_handles`` directly. ──────
+
+    def has(self, node_id: str) -> bool:
+        """True if the manifest declared this node (enabled or not)."""
+        with self._lock:
+            return node_id in self._handles
+
+    def enabled(self, node_id: str) -> bool:
+        """True if the declared node is enabled (would be started by
+        ``start_all()``). False for an undeclared node."""
+        with self._lock:
+            h = self._handles.get(node_id)
+        return bool(h and h.spec.enabled)
+
+    def is_running(self, node_id: str) -> bool:
+        with self._lock:
+            h = self._handles.get(node_id)
+        return bool(h and h.alive())
+
+    def node(self, node_id: str) -> Any | None:
+        """Return the live ``Node`` object a ``ThreadHandle`` wraps —
+        ``None`` for an undeclared id, a non-thread backend, or a
+        handle that hasn't started yet. This is how
+        ``jaeger_os.nodes.runtime``'s ``get_synth()``/
+        ``get_audio_session()`` read the SAME object the supervisor is
+        running instead of a stale module-global."""
+        with self._lock:
+            h = self._handles.get(node_id)
+        if h is None:
+            return None
+        getter = getattr(h, "node", None)
+        return getter() if getter else None
+
     def ls(self) -> list[dict[str, Any]]:
         rows = []
         for h in sorted(self._all(), key=lambda h: (h.spec.tier, h.spec.id)):
@@ -278,7 +316,11 @@ class Supervisor:
             "failures_in_window": len(recent),
             "crash_loop": len(recent) >= _BURST_LIMIT,
             "last_error": h.last_error,
-            "health": (latest.details if latest else {}),
+            # 0.8 U3: ``latest`` is now the canon ``topics.NodeHealth``
+            # msgspec Struct (was a dataclass with a ``.details`` dict) —
+            # ``msgspec.structs.asdict`` gives the same opaque-dict shape
+            # callers already expect.
+            "health": (msgspec.structs.asdict(latest) if latest else {}),
             "health_age_s": (
                 self._health.age_s(node_id) if self._health else None
             ),

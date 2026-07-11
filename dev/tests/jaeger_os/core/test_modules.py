@@ -1,0 +1,224 @@
+"""module.yaml loader + discovery (0.8 M1 Task 2 — the module seam).
+
+Mirrors ``dev/tests/jaeger_os/hardware/test_framework.py``'s package-
+loader coverage: happy path against the REAL kokoro_tts module.yaml,
+then one refusal per validation rule (unknown key, empty slot,
+missing factory, malformed factory string) — each naming the
+offending file, never silently degrading.
+"""
+
+from __future__ import annotations
+
+import pathlib
+
+import pytest
+
+from jaeger_os.core.modules import ModuleSpec, discover_modules, load_module
+
+
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+_KOKORO_DIR = _REPO_ROOT / "jaeger_os" / "nodes" / "kokoro_tts"
+_IMESSAGE_DIR = _REPO_ROOT / "jaeger_os" / "plugins" / "imessage"
+_NODES_ROOT = _REPO_ROOT / "jaeger_os" / "nodes"
+_PLUGINS_ROOT = _REPO_ROOT / "jaeger_os" / "plugins"
+
+
+_GOOD_YAML = """
+module: widget
+slot: widgets
+version: 2.0.0
+consumes: [/act/widget]
+produces: [/sense/widget]
+tools: [use_widget]
+factory: pkg.mod:make_widget
+config: widget
+"""
+
+
+def _write_module(tmp_path, name="widget", text=_GOOD_YAML):
+    d = tmp_path / name
+    d.mkdir(exist_ok=True)
+    (d / "module.yaml").write_text(text, encoding="utf-8")
+    return d
+
+
+# ── load_module against the REAL kokoro_tts module.yaml ────────────
+
+
+def test_load_module_real_kokoro_tts():
+    spec = load_module(_KOKORO_DIR)
+    assert spec.module == "kokoro_tts"
+    assert spec.slot == "tts"
+    assert spec.version == "1.0.0"
+    assert spec.consumes == ["/act/speech", "/act/speech_stop"]
+    assert spec.produces == ["/sense/spoken", "/sense/tts_chunk"]
+    assert spec.tools == ["text_to_speech"]
+    assert spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
+    assert spec.config == "kokoro_tts"
+    assert spec.requires_libraries == ["kokoro", "sounddevice", "numpy"]
+
+
+def test_load_module_happy_path(tmp_path):
+    spec = load_module(_write_module(tmp_path))
+    assert isinstance(spec, ModuleSpec)
+    assert spec.module == "widget"
+    assert spec.slot == "widgets"
+    assert spec.tools == ["use_widget"]
+    assert spec.requires_libraries == []
+
+
+def test_load_module_parses_requires_libraries(tmp_path):
+    text = _GOOD_YAML + "requires_libraries: [foo, bar]\n"
+    spec = load_module(_write_module(tmp_path, text=text))
+    assert spec.requires_libraries == ["foo", "bar"]
+
+
+def test_load_module_requires_platform_defaults_empty(tmp_path):
+    spec = load_module(_write_module(tmp_path))
+    assert spec.requires_platform == []
+
+
+def test_load_module_parses_requires_platform(tmp_path):
+    text = _GOOD_YAML + "requires_platform: [darwin]\n"
+    spec = load_module(_write_module(tmp_path, text=text))
+    assert spec.requires_platform == ["darwin"]
+
+
+def test_load_module_real_imessage_is_messaging_slot_platform_gated():
+    """0.8 M3b: imessage graduated from plugin.yaml to module.yaml —
+    slot ``messaging``, darwin-only."""
+    spec = load_module(_IMESSAGE_DIR)
+    assert spec.module == "imessage"
+    assert spec.slot == "messaging"
+    assert spec.tools == ["send_message"]
+    assert spec.requires_libraries == []
+    assert spec.requires_platform == ["darwin"]
+
+
+def test_load_module_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_module(tmp_path / "nope")
+
+
+def test_load_module_refuses_unknown_field(tmp_path):
+    bad = _GOOD_YAML.replace("version:", "vershun:")
+    with pytest.raises(ValueError, match="module.yaml"):
+        load_module(_write_module(tmp_path, text=bad))
+
+
+def test_load_module_refuses_empty_slot(tmp_path):
+    bad = _GOOD_YAML.replace("slot: widgets", "slot: ''")
+    with pytest.raises(ValueError, match="slot"):
+        load_module(_write_module(tmp_path, text=bad))
+
+
+def test_load_module_refuses_missing_factory(tmp_path):
+    bad = _GOOD_YAML.replace("factory: pkg.mod:make_widget", "")
+    with pytest.raises(ValueError):
+        load_module(_write_module(tmp_path, text=bad))
+
+
+def test_load_module_refuses_malformed_factory(tmp_path):
+    bad = _GOOD_YAML.replace(
+        "factory: pkg.mod:make_widget", "factory: pkg.mod.make_widget",
+    )
+    with pytest.raises(ValueError, match="pkg.mod:attr"):
+        load_module(_write_module(tmp_path, text=bad))
+
+
+# ── discover_modules ────────────────────────────────────────────────
+
+
+def test_discover_modules_default_root_finds_kokoro_tts():
+    found = discover_modules()
+    assert "tts" in found
+    names = {spec.module for spec in found["tts"]}
+    assert "kokoro_tts" in names
+
+
+def test_discover_modules_keys_by_slot(tmp_path):
+    _write_module(tmp_path, "widget_a", _GOOD_YAML)
+    other = _GOOD_YAML.replace("module: widget", "module: widget2").replace(
+        "slot: widgets", "slot: other_slot",
+    )
+    _write_module(tmp_path, "widget_b", other)
+    found = discover_modules(tmp_path)
+    assert set(found) == {"widgets", "other_slot"}
+    assert [spec.module for spec in found["widgets"]] == ["widget"]
+    assert [spec.module for spec in found["other_slot"]] == ["widget2"]
+
+
+def test_discover_modules_skips_dirs_without_module_yaml(tmp_path):
+    (tmp_path / "not_a_module").mkdir()
+    (tmp_path / "not_a_module" / "readme.txt").write_text("hi")
+    _write_module(tmp_path, "widget_a", _GOOD_YAML)
+    found = discover_modules(tmp_path)
+    assert set(found) == {"widgets"}
+
+
+def test_discover_modules_raises_loudly_on_broken_module(tmp_path):
+    _write_module(tmp_path, "good", _GOOD_YAML)
+    bad = _GOOD_YAML.replace("version:", "vershun:")
+    broken_dir = _write_module(tmp_path, "broken", bad)
+    with pytest.raises(ValueError, match=str(broken_dir / "module.yaml")):
+        discover_modules(tmp_path)
+
+
+def test_discover_modules_missing_root_returns_empty(tmp_path):
+    assert discover_modules(tmp_path / "does_not_exist") == {}
+
+
+def test_discover_modules_single_path_still_accepted():
+    """A lone ``pathlib.Path`` (not a tuple) still works — normalized
+    internally to a one-tuple. Existing callers passing a single root
+    keep working unchanged."""
+    found = discover_modules(_NODES_ROOT)
+    assert "tts" in found
+    names = {spec.module for spec in found["tts"]}
+    assert "kokoro_tts" in names
+
+
+# ── 0.8 M3b: messaging — the first multi-module slot, multi-root ───
+
+
+def test_discover_modules_nodes_root_alone_has_four_slots_no_messaging():
+    """The nodes/ root by itself still surfaces exactly the 4 engine
+    slots — messaging modules live under plugins/, not nodes/."""
+    found = discover_modules(_NODES_ROOT)
+    assert set(found) == {"tts", "stt", "animation", "media"}
+    assert "messaging" not in found
+
+
+def test_discover_modules_plugins_root_alone_is_messaging_only():
+    found = discover_modules(_PLUGINS_ROOT)
+    assert set(found) == {"messaging"}
+    names = {spec.module for spec in found["messaging"]}
+    assert names == {"discord", "telegram", "imessage"}
+
+
+def test_discover_modules_default_roots_cover_both_nodes_and_messaging():
+    """The default (no-args) call walks BOTH ``NODES_DIR`` and
+    ``PLUGINS_DIR`` — nodes-root modules stay discovered (4 slots
+    intact) AND the new multi-module ``messaging`` slot shows up with
+    all 3 real discord/telegram/imessage module.yaml files."""
+    found = discover_modules()
+    assert set(found) >= {"tts", "stt", "animation", "media", "messaging"}
+    messaging_names = {spec.module for spec in found["messaging"]}
+    assert messaging_names == {"discord", "telegram", "imessage"}
+    for spec in found["messaging"]:
+        assert spec.slot == "messaging"
+        assert spec.tools == ["send_message"]
+
+
+def test_discover_modules_accepts_explicit_roots_tuple(tmp_path):
+    """The plural ``roots=`` tuple form scans every root given, keying
+    everything by slot the same way the walker always has — a synthetic
+    tmp_path root alongside the real plugins root proves both are
+    consulted in one call."""
+    _write_module(tmp_path, "widget_a", _GOOD_YAML)
+    found = discover_modules((tmp_path, _PLUGINS_ROOT))
+    assert set(found) == {"widgets", "messaging"}
+    assert [spec.module for spec in found["widgets"]] == ["widget"]
+    assert {spec.module for spec in found["messaging"]} == {
+        "discord", "telegram", "imessage",
+    }

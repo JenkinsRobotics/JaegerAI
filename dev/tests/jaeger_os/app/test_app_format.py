@@ -22,22 +22,21 @@ import pytest
 from jaeger_os.app import FRAMEWORK_FORMAT, JaegerApp  # noqa: E402
 from jaeger_os.app.app import SecondInstanceError, resolve_ref  # noqa: E402
 from jaeger_os.app.core import Core, CoreMainThreadError  # noqa: E402
-from jaeger_os.app.bus.api import MessageRegistry, RawMessage  # noqa: E402
-from jaeger_os.app.bus.inproc import InProcBus  # noqa: E402
+from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_os.app.config import load_config, slice_for  # noqa: E402
-from jaeger_os.app.health import HealthCache, NodeHealth  # noqa: E402
+from jaeger_os.app.health import HealthCache  # noqa: E402
+from jaeger_os.transport import topics  # noqa: E402
 from jaeger_os.app.manifest import load_manifest  # noqa: E402
-from jaeger_os.app.node import FrameNode, Node, NodeState  # noqa: E402
+from jaeger_os.nodes.base import FrameNode, Node, NodeState  # noqa: E402
 from jaeger_os.app import supervisor as supervisor_mod  # noqa: E402
 from jaeger_os.app.supervisor import (  # noqa: E402
-    SubprocessHandle,
     Supervisor,
     ThreadHandle,
     reap_stale,
 )
 from jaeger_os.app.manifest import NodeSpec  # noqa: E402
-
-REPO = pathlib.Path(__file__).resolve().parents[4]  # dev/tests/jaeger_os/app/ → repo root
+import jaeger_os.app as app_pkg  # noqa: E402
+import jaeger_os.nodes.base as nodes_base_mod  # noqa: E402
 
 
 def _wait_for(cond, timeout_s=3.0):
@@ -147,6 +146,37 @@ def test_manifest_refuses_thread_without_factory(tmp_path):
         load_manifest(_write_app(tmp_path, bad))
 
 
+# ── M2a: slot-resolution (manifest binds a node by slot, not factory) ──
+
+
+def test_manifest_parses_node_slot(tmp_path):
+    """A ``[[node]]`` may declare ``slot=`` with no ``factory=`` — the
+    thread-backend rule now accepts factory OR slot."""
+    m = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
+        'slot = "widgets"')
+    spec = load_manifest(_write_app(tmp_path, m))
+    assert spec.nodes[0].slot == "widgets"
+    assert spec.nodes[0].factory == ""
+
+
+def test_manifest_refuses_thread_without_factory_or_slot(tmp_path):
+    bad = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"', 'factory = ""')
+    with pytest.raises(ValueError, match="needs `factory` or `slot`"):
+        load_manifest(_write_app(tmp_path, bad))
+
+
+def test_manifest_unknown_keys_still_refused_with_slot_present(tmp_path):
+    """``slot`` is now an allowed key — a genuinely unknown key next to
+    it still refuses (the allowlist add didn't loosen anything else)."""
+    m = _GOOD_MANIFEST.replace(
+        'factory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
+        'slot = "widgets"\nbogus_key = "x"')
+    with pytest.raises(ValueError, match="bogus_key"):
+        load_manifest(_write_app(tmp_path, m))
+
+
 def test_manifest_refuses_subprocess_on_inproc_bus(tmp_path):
     bad = _GOOD_MANIFEST.replace(
         'backend = "thread"\nfactory = "dev.tests.jaeger_os.app.test_app_format:make_ticker"',
@@ -198,29 +228,26 @@ def test_config_slices(tmp_path):
     assert slice_for(cfg, "") == {}
 
 
-# ── message registry ───────────────────────────────────────────────
+# ── bus (inproc) ─────────────────────────────────────────────────────
+#
+# MessageRegistry/RawMessage were the ZMQ wire-decode registry (0.8 U1
+# deleted app/bus/ + the chassis-ZMQ path); the in-process bus is a
+# pass-through — it never needs a registry, it just delivers whatever
+# dataclass you published. These two tests now prove exactly that: a
+# real publish -> subscribe delivery of a plain dataclass message.
 
 
-def test_registry_roundtrip_and_fallback():
-    reg = MessageRegistry()
-    reg.register(Ping)
-    wire = reg.encode(Ping(n=7))
-    back = reg.decode("/test/ping", wire)
-    assert isinstance(back, Ping) and back.n == 7
-    raw = reg.decode("/not/registered", b'{"x": 1, "topic": "/not/registered"}')
-    assert isinstance(raw, RawMessage) and raw.data == {"x": 1}
-
-
-def test_registry_refuses_topicless_dataclass():
-    @dataclasses.dataclass
-    class NoTopic:
-        x: int = 0
-
-    with pytest.raises(ValueError, match="topic"):
-        MessageRegistry().register(NoTopic)
-
-
-# ── bus (inproc) ───────────────────────────────────────────────────
+def test_inproc_bus_delivers_plain_dataclass_messages_untouched():
+    bus = InProcBus()
+    try:
+        got: list[Any] = []
+        bus.subscribe("/test/ping", got.append)
+        msg = Ping(n=7)
+        bus.publish(msg)
+        assert _wait_for(lambda: got)
+        assert got[0] is msg and got[0].n == 7   # object passed through, not re-decoded
+    finally:
+        bus.close()
 
 
 def test_inproc_bus_routes_and_isolates_bad_subscribers():
@@ -297,6 +324,40 @@ def test_frame_node_update_render_split_and_pacing():
         # be PACED, not a busy loop.
         assert 0.1 < elapsed < 2.0
         assert node.health()["fps_target"] == 50.0
+    finally:
+        bus.close()
+
+
+def test_app_node_is_the_real_nodes_base_node():
+    """0.8 U2: the chassis's Node/NodeState/FrameNode were a
+    strict-subset duplicate of the real ``jaeger_os.nodes.base``
+    classes (app/node.py). That duality is gone — there is exactly
+    one Node, one NodeState, one FrameNode, and ``jaeger_os.app`` just
+    re-exports them."""
+    assert app_pkg.Node is nodes_base_mod.Node
+    assert app_pkg.NodeState is nodes_base_mod.NodeState
+    assert app_pkg.FrameNode is nodes_base_mod.FrameNode
+    assert Node is nodes_base_mod.Node
+    assert NodeState is nodes_base_mod.NodeState
+    assert FrameNode is nodes_base_mod.FrameNode
+
+
+def test_frame_node_tick_increments_frames_rendered():
+    """FrameNode, moved into nodes/base.py, still runs a real
+    update/render tick loop against a real bus."""
+    class Blinker(nodes_base_mod.FrameNode):
+        def render_tick(self, ts: float) -> None:
+            pass
+
+    bus = InProcBus()
+    try:
+        node = Blinker(bus=bus, fps=50, name="blinker")
+        import threading
+        t = threading.Thread(target=node.run, daemon=True)
+        t.start()
+        assert _wait_for(lambda: node.frames_rendered >= 2)
+        node.stop()
+        t.join(timeout=2.0)
     finally:
         bus.close()
 
@@ -399,6 +460,299 @@ def test_app_boots_runs_verbs_and_shuts_down(tmp_path):
     assert not (tmp_path / ".run" / "conftest-app.pid").exists()
 
 
+def test_boot_injects_bus_into_node_runtime_singleton(tmp_path):
+    """0.8 U3: JaegerApp._build_bus injects ``self.bus`` into
+    ``jaeger_os.nodes.runtime`` so ``ensure_tts_node`` / the windowed
+    app's AgentBridge share ONE bus instead of two disconnected
+    InProcBus instances (the pre-U3 windowed-app duality)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()   # start from a clean singleton
+    app = JaegerApp(_write_app(tmp_path)).boot()
+    try:
+        assert node_runtime.get_bus() is app.bus
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()   # reset singleton for later tests
+
+
+# ── supervisor-backed ensure_* delegation (0.8 U3b) ─────────────────
+#
+# Uses the REAL "animation" node factory (jaeger_os.nodes.animation:
+# make_animation_node) — it's the lightweight one of the three
+# graduated nodes (no LLM/Whisper/mic hardware); enable_bridge=false
+# in config keeps it from binding a real WebSocket port in CI. The
+# unit-level fake-supervisor tests in dev/tests/jaeger_os/nodes/
+# test_runtime.py cover the "no supervisor" / "undeclared" /
+# "disabled" fallback branches; these two exercise the REAL
+# Supervisor + ThreadHandle end to end.
+
+_ANIMATION_APP_MANIFEST = """
+[app]
+name = "conftest-animation-app"
+version = "0.0.1"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "animation"
+tier = 3
+backend = "thread"
+slot = "animation"
+restart = "on_failure"
+config_key = "avatar"
+"""
+
+
+def _write_animation_app(tmp_path: pathlib.Path) -> pathlib.Path:
+    (tmp_path / "jaeger.toml").write_text(
+        _ANIMATION_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        "avatar:\n  enable_bridge: false\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_supervisor_backed_ensure_animation_node_returns_supervisor_object(
+    tmp_path,
+):
+    """The manifest-declared "animation" node is supervisor-owned —
+    ``ensure_animation_node()`` (still what the agent's avatar tools
+    call) must delegate to the SAME live node the supervisor manages,
+    not spawn a second thread (the pre-U3b reason these nodes stayed
+    disabled — see jaeger.toml's header)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()
+    app = JaegerApp(_write_animation_app(tmp_path)).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        supervised_node = app.supervisor.node("animation")
+        assert supervised_node is not None
+
+        ensured_node = node_runtime.ensure_animation_node()
+        assert ensured_node is supervised_node   # no double-spawn
+        assert node_runtime._animation_node is supervised_node
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+def test_supervisor_backed_ensure_animation_node_reflects_restart(tmp_path):
+    """The new seam this delegation adds: a supervisor-driven restart
+    produces a FRESH AnimationNode object (ThreadHandle.restart()'s
+    "never reuse a torn-down node object" contract) —
+    ``ensure_animation_node()`` must track the NEW object, not a
+    cached-stale one (``get_synth``/``get_audio_session`` depend on
+    the equivalent for tts/audio_session)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    node_runtime.shutdown()
+    app = JaegerApp(_write_animation_app(tmp_path)).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        node1 = node_runtime.ensure_animation_node()
+
+        app.supervisor.restart("animation")
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+
+        node2 = node_runtime.ensure_animation_node()
+        assert node2 is not node1
+        assert node2 is app.supervisor.node("animation")
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+def test_animation_config_key_avatar_routes_bridge_port_to_the_factory(
+    tmp_path, monkeypatch,
+):
+    """0.8 M2c: the manifests' animation node used to declare
+    ``config_key = "animation"`` — a key matching no field on
+    ``Config`` (``AvatarConfig`` lives at ``Config.avatar``), so a real
+    instance config.yaml's ``avatar:`` section (bridge_host/bridge_port)
+    could never reach ``make_animation_node`` through this chassis path.
+    Fixed to ``config_key = "avatar"``. This proves the full chain —
+    manifest -> ``_make_handle`` -> ``slice_for`` -> the factory ``fn``
+    ``ThreadHandle`` invokes -> ``_build_animation_node`` — actually
+    honors a custom ``bridge_port`` from the node's config slice, without
+    binding a real socket (``FrameBridge`` itself is faked so
+    ``enable_bridge: true`` is safe here)."""
+    from jaeger_os.nodes import runtime as node_runtime
+
+    captured: dict[str, Any] = {}
+
+    class _FakeBridge:
+        def __init__(self, *, host: str = "127.0.0.1", port: int = 8765,
+                     path: str = "/frames") -> None:
+            captured["host"] = host
+            captured["port"] = port
+
+        def start(self, *, ready_timeout_s: float = 5.0) -> None:
+            pass
+
+        def stop(self, *, timeout_s: float = 5.0) -> None:
+            pass
+
+        def publish_frame(self, frame: Any) -> None:
+            pass
+
+    monkeypatch.setattr(node_runtime.animation_bridge, "FrameBridge", _FakeBridge)
+
+    (tmp_path / "jaeger.toml").write_text(
+        _ANIMATION_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(
+        "avatar:\n  bridge_host: 0.0.0.0\n  bridge_port: 9911\n"
+        "  enable_bridge: true\n",
+        encoding="utf-8",
+    )
+
+    node_runtime.shutdown()
+    app = JaegerApp(tmp_path).boot()
+    try:
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+        assert captured == {"host": "0.0.0.0", "port": 9911}
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
+# ── M2a: slot-resolution end to end (app._make_handle → discover_modules) ──
+
+
+_SLOT_APP_MANIFEST = """
+[app]
+name = "conftest-slot-app"
+version = "0.0.1"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "widget"
+tier = 3
+backend = "thread"
+slot = "widgets"
+restart = "never"
+config_key = "widget"
+"""
+
+
+def _write_slot_app(tmp_path: pathlib.Path) -> pathlib.Path:
+    (tmp_path / "jaeger.toml").write_text(_SLOT_APP_MANIFEST, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("widget: {}\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_slot_bound_node_resolves_factory_and_boots(tmp_path, monkeypatch):
+    """A ``[[node]]`` declaring only ``slot=`` gets its ``factory``
+    populated from ``discover_modules()`` before ``resolve_ref`` runs,
+    and boots under the supervisor exactly like a factory-string node."""
+    from jaeger_os.core import modules as modules_mod
+
+    fake_spec = modules_mod.ModuleSpec(
+        module="widget_engine", slot="widgets",
+        factory=f"{__name__}:make_ticker",
+    )
+    monkeypatch.setattr(
+        modules_mod, "discover_modules", lambda root=None: {
+            "widgets": [fake_spec]})
+
+    app = JaegerApp(_write_slot_app(tmp_path)).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "widget")
+        assert node_spec.factory == f"{__name__}:make_ticker"   # populated
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+    finally:
+        app.shutdown()
+
+
+def test_slot_bound_node_picks_deterministically_when_multiple_modules(
+    tmp_path, monkeypatch,
+):
+    """More than one module for a slot: pick sorted-by-module-name first,
+    not whichever discover_modules happened to return first."""
+    from jaeger_os.core import modules as modules_mod
+
+    zeta = modules_mod.ModuleSpec(
+        module="zeta_engine", slot="widgets", factory=f"{__name__}:missing")
+    alpha = modules_mod.ModuleSpec(
+        module="alpha_engine", slot="widgets", factory=f"{__name__}:make_ticker")
+    monkeypatch.setattr(
+        modules_mod, "discover_modules", lambda root=None: {
+            "widgets": [zeta, alpha]})
+
+    app = JaegerApp(_write_slot_app(tmp_path)).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "widget")
+        assert node_spec.factory == f"{__name__}:make_ticker"   # alpha, not zeta
+    finally:
+        app.shutdown()
+
+
+def test_slot_bound_node_unknown_slot_raises_naming_the_slot(tmp_path, monkeypatch):
+    """Zero modules for the declared slot is fail-closed — a declared
+    node must resolve, never silently vanish."""
+    from jaeger_os.core import modules as modules_mod
+
+    monkeypatch.setattr(modules_mod, "discover_modules", lambda root=None: {})
+
+    with pytest.raises(ValueError, match="widgets"):
+        JaegerApp(_write_slot_app(tmp_path)).boot()
+
+
+def test_slot_bound_tts_node_resolves_to_kokoro_via_real_discovery(tmp_path):
+    """No monkeypatching: the REAL ``discover_modules()`` walking the
+    REAL ``jaeger_os/nodes/`` tree resolves ``slot = "tts"`` to
+    kokoro_tts's factory and boots it under the supervisor — the exact
+    path ``jaeger.windowed.toml``'s tts node now takes."""
+    manifest = """
+[app]
+name = "conftest-tts-slot-app"
+requires_framework = ">=0.1"
+event_loop = "none"
+single_instance = false
+
+[bus]
+backend = "inproc"
+
+[[node]]
+id = "tts"
+tier = 3
+backend = "thread"
+slot = "tts"
+restart = "never"
+config_key = "tts"
+"""
+    (tmp_path / "jaeger.toml").write_text(manifest, encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("tts: {}\n", encoding="utf-8")
+
+    from jaeger_os.nodes import runtime as node_runtime
+    node_runtime.shutdown()
+    app = JaegerApp(tmp_path).boot()
+    try:
+        node_spec = next(n for n in app.spec.nodes if n.id == "tts")
+        assert node_spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
+        assert _wait_for(
+            lambda: app.supervisor.ls()[0]["state"] == "running")
+    finally:
+        app.shutdown()
+        node_runtime.shutdown()
+
+
 def test_second_instance_refused(tmp_path):
     root = _write_app(tmp_path)
     app1 = JaegerApp(root).boot()
@@ -442,79 +796,58 @@ def test_reap_stale_kills_leftover_children(tmp_path):
             child.kill()
 
 
-# ── subprocess backend + zmq bus, end to end ───────────────────────
-
-
-@pytest.fixture
-def zmq_stack():
-    pytest.importorskip("zmq")
-    from jaeger_os.app.bus.zmq import Broker, ZmqBus
-    from dev.tests.jaeger_os.app._worker_node import MESSAGES
-
-    broker = Broker(xsub="tcp://127.0.0.1:7791", xpub="tcp://127.0.0.1:7792")
-    broker.start()
-    bus = ZmqBus(MESSAGES, xsub=broker.xsub_endpoint,
-                 xpub=broker.xpub_endpoint)
-    yield broker, bus
-    bus.close()
-    broker.stop()
-
-
-def test_subprocess_node_roundtrip_crash_and_supervised_restart(
-        zmq_stack, tmp_path, monkeypatch):
-    monkeypatch.setattr(supervisor_mod, "_BACKOFF_BASE_S", 0.1)
-    broker, bus = zmq_stack
-    from dev.tests.jaeger_os.app._worker_node import TestCmd
-
-    health = HealthCache(bus)
-    sup = Supervisor(health=health, bus=bus)
-    spec = NodeSpec(id="worker", backend="subprocess",
-                    module="dev.tests.jaeger_os.app._worker_node", restart="on_failure")
-    handle = SubprocessHandle(
-        spec, env_extra=broker.env(), cwd=REPO,
-        registry_file=tmp_path / "children.json",
-    )
-    sup.add(handle)
-    sup.start_all()
-    try:
-        # Liveness: heartbeats arrive over the wire.
-        assert _wait_for(lambda: health.latest("worker") is not None,
-                         timeout_s=8.0), "no heartbeat from child"
-        # Roundtrip: command in, echo out.
-        echoes: list[Any] = []
-        bus.subscribe("/test/echo", echoes.append)
-        deadline = time.monotonic() + 8.0
-        while not echoes and time.monotonic() < deadline:
-            bus.publish(TestCmd(cmd="ping"))
-            time.sleep(0.3)
-        assert echoes and echoes[0].cmd == "pong"
-        first_pid = echoes[0].pid
-
-        # Crash it — the supervisor's restart policy takes over.
-        bus.publish(TestCmd(cmd="die"))
-        assert _wait_for(lambda: handle.restarts >= 1, timeout_s=10.0), \
-            "supervisor never restarted the crashed child"
-        echoes.clear()
-        deadline = time.monotonic() + 8.0
-        while not echoes and time.monotonic() < deadline:
-            bus.publish(TestCmd(cmd="ping"))
-            time.sleep(0.3)
-        assert echoes, "restarted child never answered"
-        assert echoes[0].pid != first_pid   # genuinely a new process
-    finally:
-        sup.stop_all()
-        assert handle.state().startswith(("off", "exited"))
-        # Registry is clean — no orphans on disk.
-        leftovers = [p for p in
-                     (tmp_path / "children.json",) if p.exists()
-                     and p.read_text() not in ("{}", "")]
-        assert not leftovers
+# NOTE (0.8 U1): the subprocess-backend + chassis-ZMQ end-to-end test
+# that lived here (spawning a real subprocess node wired over
+# jaeger_os.app.bus.zmq.Broker/ZmqBus + app.child.child_main) was
+# removed along with app/bus/ and app/child.py. That path was never
+# exercised in production — both shipped manifests run
+# `[bus] backend = "inproc"`, and no manifest in this repo ever
+# configured a subprocess node — so the test now exercised only
+# dropped code. Its fixture module
+# (dev/tests/jaeger_os/app/_worker_node.py) is deleted too. Repointing
+# it onto transport's ZMQBus instead of deleting it would need
+# NodeHealth/LogLine (and the worker's TestCmd/TestEcho) converted to
+# msgspec Structs registered in transport.topics — out of scope here
+# (U1 keeps the message dataclasses plain; msgspec conversion is later,
+# alongside the Transcript/NodeHealth overlap noted for U3).
+# `test_manifest_refuses_subprocess_on_inproc_bus` above still covers
+# the manifest-validation half (subprocess needs backend="zmq") since
+# that logic lives in manifest.py, untouched by this change.
 
 
 def test_node_health_message_shape():
-    h = NodeHealth(node="x", state="running", details={"a": 1}, ts=1.0)
-    assert h.topic == "/sys/node_health"
-    assert dataclasses.asdict(h)["details"] == {"a": 1}
+    """Canon NodeHealth (0.8 U3): ``transport.topics`` msgspec Struct on
+    ``/sense/node_health``. The plain-dataclass twin that used to live
+    in ``app/health.py`` (on the different, unpublished ``/sys/node_health``
+    topic) is gone — every ``nodes.base.Node`` now heartbeats this type."""
+    h = topics.NodeHealth(node="x", state="running", detail="ok")
+    assert h.topic == "/sense/node_health"
+    assert h.node == "x" and h.state == "running" and h.detail == "ok"
+
+
+def test_health_cache_receives_a_real_base_node_heartbeat():
+    """0.8 U3: every ``nodes.base.Node`` heartbeats ``topics.NodeHealth``
+    on ``/sense/node_health`` from inside its OWN ``run()`` loop —
+    HealthCache (subscribed there) must observe it from a REAL node on a
+    REAL InProcBus, no mocking of either side."""
+    bus = InProcBus()
+    cache = HealthCache(bus)
+    node = TickerNode(bus=bus)
+    import threading
+    t = threading.Thread(target=node.run, daemon=True)
+    t.start()
+    try:
+        assert _wait_for(lambda: cache.latest(node.name) is not None,
+                          timeout_s=3.0)
+        latest = cache.latest(node.name)
+        assert latest.state == "running"
+        assert latest.topic == "/sense/node_health"
+        age = cache.age_s(node.name)
+        assert age is not None and age >= 0.0
+    finally:
+        node.stop()
+        t.join(timeout=2.0)
+        bus.close()
 
 
 # ── core (Tier-1 host role) ────────────────────────────────────────

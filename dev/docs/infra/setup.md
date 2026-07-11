@@ -150,7 +150,7 @@ The wizard walks through:
 1. **Agent identity** — name, instance dir.
 2. **Memory tier** — detects unified RAM, recommends an awake+asleep
    model pair (12 / 24 / 32 / 64+ GB ladder). See
-   [`deep_think_design.md`](deep_think_design.md).
+   [`deep_think_design.md`](../core/deep_think_design.md).
 3. **Model download** — fetches the chosen GGUF from Hugging Face into
    `src/jaeger_os/models/`. One-time, then offline forever after.
 4. **Voice** — wakeword, TTS voice, mic selection (optional).
@@ -311,9 +311,9 @@ Tiers: `12gb`, `24gb`, `32gb`, `64gb+`.
 
 ## See also
 
-- [`architecture/system_runtime_user.md`](architecture/system_runtime_user.md)
+- [`system_runtime_user.md`](../reality/system_runtime_user.md)
   — the three-layer model in depth.
-- [`deep_think_design.md`](deep_think_design.md) — sleep-cycle and
+- [`deep_think_design.md`](../core/deep_think_design.md) — sleep-cycle and
   memory-tier ladder rationale.
-- [`external_models.md`](external_models.md) — point JROS at LM Studio,
+- [`external_models.md`](../core/external_models.md) — point JROS at LM Studio,
   OpenAI, or Anthropic instead of (or alongside) the local LLM.

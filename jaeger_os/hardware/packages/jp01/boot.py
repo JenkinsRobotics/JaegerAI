@@ -233,7 +233,19 @@ def _start_nodes(runtime: Jp01Runtime, bus: Any) -> set[str]:
 
 def _start_health_heartbeat(runtime: Jp01Runtime, bus: Any) -> None:
     """1 s ``NodeHealth`` per controller — the supervisor-facing
-    liveness surface (plan §2.7)."""
+    liveness surface (plan §2.7).
+
+    0.8 U3 note: ``nodes.base.Node.run()`` now heartbeats generically
+    too (every node, ``jp01-motor``/``jp01-light`` here), so mc01/avc01
+    get two liveness signals — that generic one is NOT a replacement
+    for this one and this function is deliberately kept, not retired:
+    (1) it's the ONLY heartbeat for adapter-only controllers with no
+    dedicated node (vcc01 — a bare camera adapter, never wrapped in a
+    Node), and (2) even for mc01/avc01 it carries real per-controller
+    detail (``link_connected``, ``last_controller_rx_age_s`` from live
+    telemetry) the generic node heartbeat has no hardware knowledge to
+    report. Retiring it would silently drop vcc01's liveness entirely
+    and demote mc01/avc01 health to state-only."""
 
     def beat() -> None:
         while not runtime._health_stop.wait(_HEALTH_PERIOD_S):

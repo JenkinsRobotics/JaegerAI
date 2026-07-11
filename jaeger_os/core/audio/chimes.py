@@ -161,7 +161,7 @@ class ChimePlayer:
         Pumps the prebuilt audio buffer through a single OutputStream
         callback, waits for the finished_callback to fire."""
         import threading as _threading
-        from jaeger_os.plugins.avaudio_io import (
+        from jaeger_os.core.audio.avaudio_io import (
             OutputStream as _AVOutputStream,
             CallbackStop,
         )
