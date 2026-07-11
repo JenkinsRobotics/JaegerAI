@@ -46,7 +46,20 @@ installs the whole stack.**
 - 🔗 **Third-party API** — embed a JROS agent in your own app: a single-file, zero-dependency Python client ([`clients/python/jros_client.py`](clients/python/jros_client.py)) over the `jaeger bridge` NDJSON protocol, the same fixture-pinned contract the native Mac app speaks. See [Third-party apps](#third-party-apps--integrate-jros).
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
-> **Status — `0.7.2`.** The 0.7.x patch line polished the out-of-box flow:
+> **Status — `0.8.0` (the modular-runtime release).** The runtime is now ONE
+> unified stack (one bus, one Node class, supervisor-owned workers), and
+> capabilities are **engine-modules** in the ROS spirit — `kokoro_tts`,
+> `whisper_stt`, `animation`, `media` are self-contained folders (node +
+> engine + config + `module.yaml` + tests) bound by slot; swap an engine by
+> flipping a module. The persona pipeline is **persona-first** ("the id and
+> the ego"): your character answers conversation directly (~10x faster chat)
+> and calls the clean task agent as its one tool — security-gated 15/15,
+> delegation 12/12. Plus: agent name vs character preset finally separated
+> end-to-end, New Chat + History in the app, in-app updates (daily check +
+> one-click update), and the full-system scenario suite now tests the real
+> user path. Hardware/capability-layer integration is 0.9's headline.
+>
+> **`0.7.2`.** The 0.7.x patch line polished the out-of-box flow:
 > end-user installs build the product `JaegerOS.app` and first-run setup is
 > the app's setup window (0.7.1); a third-party client API shipped
 > (`clients/python/jros_client.py` + the documented bridge protocol, 0.7.1);
