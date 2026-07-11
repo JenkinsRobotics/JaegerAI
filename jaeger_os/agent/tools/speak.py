@@ -219,6 +219,21 @@ def _speak_via_bus(text: str) -> dict[str, Any]:
     from jaeger_os.transport import topics
     from jaeger_os.nodes import runtime
 
+    # 0.8.1 field bug #2: boot's voice warm now runs in the background
+    # (main.py's warm_plugins_async). A speak() landing before it
+    # finishes still works — KokoroTTS._pipeline_lock makes this call
+    # wait for the in-flight load instead of racing it — but say so
+    # loudly instead of silently pausing for several seconds.
+    try:
+        import sys as _sys
+        from jaeger_os.main import voice_warm_status
+        status = voice_warm_status()
+        if status == "voice: warming…":
+            print(f"[jaeger] {status} — speak() will wait for it to finish",
+                  file=_sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001 — status feedback is best-effort
+        pass
+
     # Ensure the node + bus are up.  Idempotent — pays the spinup
     # cost only on the very first call (which warm_kokoro should
     # have already covered at boot).

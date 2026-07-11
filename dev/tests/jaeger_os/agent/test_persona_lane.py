@@ -18,6 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from jaeger_os.agent.prompts import persona_lane
 from jaeger_os.agent.prompts.persona_lane import (
     LANE_CONTRACT,
     LANE_TOOLS_BLOCK,
@@ -27,7 +28,10 @@ from jaeger_os.agent.prompts.persona_lane import (
     _budget_history,
     _decide,
     _perform_task_fallback,
+    build_self_model_block,
+    reset_self_model_cache,
     run_persona_turn,
+    self_model_block,
 )
 
 BLOCK = "Your name is Ted. You embody the persona of Lilith.\n\n## My voice"
@@ -449,6 +453,119 @@ def test_lane_contract_names_memory_and_task_verbs():
         assert verb in LANE_CONTRACT
     assert "do/run/execute/create/update/delete" in LANE_CONTRACT
     assert "silently lost" in LANE_CONTRACT or "silently" in LANE_CONTRACT
+
+
+def test_lane_contract_has_binding_ask_rule():
+    """0.8.1 field bug #4 (BINDING-ASK): a character's affect must
+    shape HOW the id answers, never WHETHER — pins the wording that
+    stops a deflection like "that's not really my style" from
+    replacing an actual answer to a plain, answerable request. The
+    real behavioral check (a joke request gets an actual joke) is the
+    model-driven gate (persona_eval.py --gate-only, "tell me a joke")."""
+    assert "binding" in LANE_CONTRACT.lower()
+    assert "never WHETHER" in LANE_CONTRACT
+    assert "joke request gets an actual joke" in LANE_CONTRACT
+
+
+def test_lane_contract_names_self_state_delegation():
+    """0.8.1 field bug #5 (SELF-STATE): 'can you X' / 'is X set up' /
+    questions about the agent's own configuration must delegate via
+    perform_task, never be answered from persona (the id has no ground
+    truth about installed modules/config — see the SELF-MODEL block,
+    which only tells it the CATEGORY shape, never live status)."""
+    assert "capabilities" in LANE_CONTRACT
+    assert "installed features" in LANE_CONTRACT
+    assert "can you X" in LANE_CONTRACT
+    assert "is X set up" in LANE_CONTRACT
+
+
+def test_joke_request_tool_free_turn_is_returned_as_is():
+    """Canned joke-refusal shape: a tool-free answer (the correct path
+    for "pure conversation" per LANE_CONTRACT) survives completely
+    untouched — nothing in the lane re-writes, gates, or blocks a
+    direct in-character joke — and the system prompt the model saw
+    carries the BINDING-ASK rule that's supposed to prevent a
+    deflection in the first place."""
+    client = _Client([
+        _reply("Why did the robot cross the road? To reboot on the other side."),
+    ])
+    calls: list[str] = []
+
+    def perform_task(request: str) -> str:
+        calls.append(request)
+        return "unused"
+
+    out = run_persona_turn(
+        client, "tell me a joke",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=perform_task,
+    )
+    assert out == "Why did the robot cross the road? To reboot on the other side."
+    assert calls == []  # pure conversation — never delegated
+    system_msg = client.calls[0]["messages"][0]
+    assert "joke request gets an actual joke" in system_msg["content"]
+
+
+# ── SELF-MODEL block (0.8.1 field bug #6) ───────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _reset_self_model_cache_around_tests():
+    reset_self_model_cache()
+    yield
+    reset_self_model_cache()
+
+
+def test_self_model_block_is_injected_into_the_system_prompt():
+    client = _Client([_reply("hi there")])
+    run_persona_turn(
+        client, "hello",
+        character_block=BLOCK, agent_name="Ted", history=[],
+        perform_task=lambda r: "unused",
+    )
+    system_msg = client.calls[0]["messages"][0]
+    assert self_model_block() in system_msg["content"]
+    assert "You are a JROS agent running locally" in system_msg["content"]
+
+
+def test_self_model_block_is_cached_per_boot(monkeypatch):
+    first = self_model_block()
+    # Even if the underlying builder would return something different,
+    # the cached accessor keeps returning the boot-time snapshot until
+    # explicitly refreshed — recomputing every turn is pure overhead.
+    monkeypatch.setattr(persona_lane, "build_self_model_block", lambda: "DIFFERENT")
+    assert self_model_block() == first
+    assert self_model_block(refresh=True) == "DIFFERENT"
+
+
+def test_self_model_block_categories_are_derived_not_hardcoded(monkeypatch):
+    """The category set must come from the live tool registry / module
+    discovery, not a string literal baked into persona_lane.py — prove
+    it by controlling the "live" sources and checking the block
+    changes accordingly."""
+    monkeypatch.setattr(persona_lane, "_live_tool_names", lambda: set())
+    monkeypatch.setattr(persona_lane, "_installed_slots", lambda: set())
+    monkeypatch.setattr(persona_lane, "_installed_messaging_channels", lambda: [])
+    empty = build_self_model_block()
+    # Nothing registered -> just the header, no category lines at all.
+    assert empty.strip() == persona_lane._SELF_MODEL_HEADER
+
+    monkeypatch.setattr(persona_lane, "_live_tool_names", lambda: {"get_weather"})
+    monkeypatch.setattr(persona_lane, "_installed_slots", lambda: {"tts"})
+    monkeypatch.setattr(
+        persona_lane, "_installed_messaging_channels", lambda: ["telegram"],
+    )
+    populated = build_self_model_block()
+    assert "web & search" in populated
+    assert "speech" in populated
+    assert "messaging (telegram when configured)" in populated
+    assert "files/code" not in populated  # no files/code tool names registered
+
+
+def test_self_model_block_stays_within_token_budget():
+    # ~150 tokens at a rough 4 chars/token estimate — generous slack
+    # even for a fully-populated real registry.
+    assert len(build_self_model_block()) <= persona_lane._SELF_MODEL_MAX_CHARS
 
 
 # ── history budgeting ─────────────────────────────────────────────────
