@@ -75,6 +75,18 @@ struct AgentSettingsHUD: View {
             }
         }
         .background(HUD.bg)
+        // The HUD paints its own fixed-dark palette (HUD.bg/panel/field/ink
+        // etc. are hardcoded colors, not system-adaptive) regardless of the
+        // Mac's actual appearance setting. Without this, AppKit-backed
+        // chrome that SwiftUI can't restyle directly — a Picker's ``.menu``
+        // style pop-up button + its dropdown NSMenu, disclosure chevrons —
+        // follows the REAL system appearance. On a light-mode Mac that
+        // chrome renders with light-mode (black) text, which reads as
+        // black-on-black against this always-dark panel: the settings
+        // pickers (App Settings enum rows, Permissions mode) and any menu
+        // chrome. Forcing dark here keeps every native control's appearance
+        // consistent with the panel we paint, in both system appearances.
+        .preferredColorScheme(.dark)
         .task { await store.loadInitial() }
         .onChange(of: tab) { _, next in
             Task { await loadForTab(next) }

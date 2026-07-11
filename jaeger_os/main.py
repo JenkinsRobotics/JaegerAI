@@ -1046,9 +1046,11 @@ def _register_builtins(client: Any) -> None:
         store, connects in a background thread (same model / memory / persona
         answers every channel), and send_message can then reach it. Each chat
         keeps its own conversation context; turns serialize through the one
-        model. Returns {started, channel} or {started:false, error}. If it
-        reports a missing credential, ask the user for the value and
-        set_credential it, then retry — never invent a token."""
+        model. On success this ALSO persists the channel into this instance's
+        autostart list, so it comes back live on the next restart without
+        calling this again. Returns {started, channel} or {started:false,
+        error}. If it reports a missing credential, ask the user for the
+        value and set_credential it, then retry — never invent a token."""
         return activate_plugin_inprocess(name)
 
 
@@ -1887,6 +1889,98 @@ def warm_plugins(config: Any) -> None:
         "all_go": readiness.all_go(statuses),
         "ts": time.time(),
     }
+
+
+# 0.8.1 field bug #2: "voice warm off the boot critical path". Boot used to
+# serialize warm_plugins() (whisper load + kokoro warm, ~5-10s+ each, more
+# if a first-run download is in flight) before the window/bridge became
+# interactive at all. ``_pipeline["voice_warm_done"]`` is the handshake:
+# unset/not-done → still warming; callers that need voice RIGHT NOW (a
+# speak/listen tool call landing before warm finishes) wait on it with a
+# bounded timeout instead of hanging forever, and get a clear status
+# string either way. The watchdog thread below is a LOUD LOG only — it
+# can't and doesn't kill the warm thread (Python can't safely do that);
+# a genuinely slow first-run download keeps running, it just no longer
+# blocks the app from being usable for anything that doesn't need voice.
+VOICE_WARM_LOG_TIMEOUT_S = 90.0
+
+
+def voice_warm_status() -> str:
+    """Human-readable one-liner for a status line/frame: "voice warming…"
+    while :func:`warm_plugins_async` 's background thread is still running,
+    else the terminal state (ready / degraded / not started)."""
+    done = _pipeline.get("voice_warm_done")
+    report = _pipeline.get("readiness") or {}
+    if done is None:
+        return "voice: not started"
+    if not done.is_set():
+        return "voice: warming…"
+    if report.get("error"):
+        return f"voice: warm failed ({report['error']})"
+    if report.get("all_go"):
+        return "voice: ready"
+    return "voice: ready (degraded — see diagnostics)"
+
+
+def wait_for_voice_warm(timeout_s: float = 20.0) -> bool:
+    """Block the CALLER (never the background thread) until voice warm
+    finishes or ``timeout_s`` elapses. Use this from a voice-needing
+    action (speak/listen) that lands before background warm completes —
+    "waits gracefully... never wedges": it returns False rather than
+    hanging forever, so the caller can surface real feedback ("still
+    warming up, one moment") instead of an unexplained stall. Returns
+    True immediately if warm was never backgrounded (synchronous boot)
+    or has already finished."""
+    done = _pipeline.get("voice_warm_done")
+    if done is None:
+        return True
+    return done.wait(timeout=timeout_s)
+
+
+def warm_plugins_async(config: Any, *, log_timeout_s: float = VOICE_WARM_LOG_TIMEOUT_S) -> None:
+    """Non-blocking counterpart to :func:`warm_plugins`: returns
+    immediately, TTS/STT/vision/avatar/hardware warm on a background
+    daemon thread. The window/bridge is interactive the instant this
+    function returns — see :func:`boot_for_tui`. ``_pipeline["readiness"]``
+    starts as ``{"warming": True}`` and flips to the normal
+    :func:`warm_plugins` report (or an ``"error"`` entry) once the thread
+    finishes; :func:`voice_warm_status` and :func:`wait_for_voice_warm`
+    read the same handshake (``_pipeline["voice_warm_done"]``).
+    """
+    done = threading.Event()
+    _pipeline["voice_warm_done"] = done
+    _pipeline["readiness"] = {"warming": True, "all_go": False, "ts": time.time()}
+
+    def _run() -> None:
+        try:
+            warm_plugins(config)
+        except Exception as exc:  # noqa: BLE001 — a dead warm thread must
+            # still flip the handshake, or every future wait_for_voice_
+            # warm() call would block for its full timeout forever.
+            _pipeline["readiness"] = {
+                "warming": False, "all_go": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "ts": time.time(),
+            }
+            print(f"[jaeger] background voice warm FAILED: {exc}",
+                  file=sys.stderr, flush=True)
+        finally:
+            done.set()
+
+    threading.Thread(target=_run, daemon=True, name="jaeger-voice-warm").start()
+
+    def _watchdog() -> None:
+        if not done.wait(timeout=log_timeout_s):
+            print(
+                f"[jaeger] voice warm still running after {log_timeout_s:.0f}s "
+                "in the background — app stays usable; this is expected on "
+                "a slow first-run model download, otherwise check "
+                "`jaeger doctor` / diagnostics once it finishes.",
+                file=sys.stderr, flush=True,
+            )
+
+    threading.Thread(target=_watchdog, daemon=True,
+                      name="jaeger-voice-warm-watchdog").start()
 
 
 def _confirmation_provider(config: Any, layout: Any = None) -> Any:
@@ -2843,6 +2937,27 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     }
 
 
+def _persist_plugin_autostart(name: str) -> None:
+    """Add ``name`` to the instance's ``config.plugins.autostart`` and write
+    it to disk — best-effort, never raises. Called after a successful
+    :func:`activate_plugin_inprocess` so an explicit activation survives a
+    restart (boot's :func:`autostart_plugins` reads the same list). Idempotent:
+    a name already present is left alone (no duplicate, no rewrite)."""
+    try:
+        from jaeger_os.core.instance.schemas import dump_yaml
+        cfg = _pipeline.get("config")
+        layout = _pipeline.get("layout")
+        if cfg is None or layout is None:
+            return
+        current = list(getattr(cfg.plugins, "autostart", None) or [])
+        if name in current:
+            return
+        cfg.plugins.autostart = current + [name]
+        dump_yaml(layout.config_path, cfg)
+    except Exception as exc:  # noqa: BLE001 — persistence never breaks activation
+        print(f"[jaeger] could not persist plugin autostart for {name!r}: {exc}", flush=True)
+
+
 def activate_plugin_inprocess(name: str) -> dict:
     """Bring a messaging plugin live in THIS process from the instance's saved
     credential — the shared entry point behind the ``activate_plugin`` tool, the
@@ -2851,8 +2966,12 @@ def activate_plugin_inprocess(name: str) -> dict:
     Wires the bridge to the live agent (``run_for_voice``) so the same model /
     memory / persona answers every channel; per-chat ``session_key``s keep
     contexts isolated; turns serialize on ``_pipeline['llm_lock']`` inside
-    ``_run_turn`` (so the bridge takes ``llm_lock=None``). Returns
-    ``start_bridge``'s status dict; never raises."""
+    ``_run_turn`` (so the bridge takes ``llm_lock=None``). On success, ALSO
+    persists ``name`` into ``config.plugins.autostart`` (see
+    :func:`_persist_plugin_autostart``) so the activation survives a restart —
+    an explicit activate is a durable "keep this channel live" decision, not a
+    one-off for this process's lifetime. Returns ``start_bridge``'s status
+    dict; never raises."""
     from .plugins import start_bridge
     client = _pipeline.get("client")
     layout = _pipeline.get("layout")
@@ -2862,8 +2981,11 @@ def activate_plugin_inprocess(name: str) -> dict:
     def _handler(text: str, session_key: str | None = None) -> str:
         return (run_for_voice(client, text, session_key=session_key).get("text") or "").strip()
 
-    return start_bridge(name, layout=layout, handler=_handler, llm_lock=None,
-                        bus=_pipeline.get("chassis_bus"))
+    result = start_bridge(name, layout=layout, handler=_handler, llm_lock=None,
+                          bus=_pipeline.get("chassis_bus"))
+    if result.get("started"):
+        _persist_plugin_autostart((name or "").strip().lower())
+    return result
 
 
 def autostart_plugins(config: Any) -> None:
@@ -3744,7 +3866,15 @@ def boot_for_tui(
         if prewarm_model:
             prewarm(client)
         if warmup:
-            warm_plugins(config)
+            # 0.8.1 field bug #2: voice warm (whisper + kokoro, plus
+            # vision/avatar/hardware) runs in the background — the window/
+            # bridge is interactive the moment this call returns instead
+            # of after however long the slowest backend takes (a first-run
+            # download or a rate-limited HF freshness check with item 1
+            # NOT yet applying, e.g. a partial cache). See warm_plugins_
+            # async's docstring and voice_warm_status()/wait_for_voice_
+            # warm() for the "voice needed before warm finishes" path.
+            warm_plugins_async(config)
 
         llm_lock = threading.Lock()
         _pipeline["llm_lock"] = llm_lock

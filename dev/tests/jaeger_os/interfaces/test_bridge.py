@@ -135,6 +135,31 @@ class _SlowStdin:
         return next(self._lines)
 
 
+class _LineDelayStdin:
+    """An iterable stdin that sleeps ``delay`` before yielding line index
+    ``before_index`` (0-based) — lets a test deterministically land a
+    SECOND ``send`` while the worker is still mid-turn on the first,
+    instead of racing the scheduler."""
+
+    def __init__(self, text: str, before_index: int, delay: float) -> None:
+        self._lines = list(io.StringIO(text))
+        self._before_index = before_index
+        self._delay = delay
+        self._i = 0
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._i == self._before_index and self._delay:
+            time.sleep(self._delay)
+        if self._i >= len(self._lines):
+            raise StopIteration
+        line = self._lines[self._i]
+        self._i += 1
+        return line
+
+
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
          boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
          default_name="test-inst", stdin_obj=None):
@@ -217,6 +242,44 @@ def test_session_key_flows_through(monkeypatch):
          '{"op":"send","text":"hi","session":"chat-win-2"}\n{"op":"quit"}\n',
          run_fn=run_fn)
     assert seen["session"] == "chat-win-2"
+
+
+def test_mid_turn_send_queues_with_ack_and_both_complete_in_order(monkeypatch):
+    """0.8.1 item 9: a second ``send`` landing while the first turn is still
+    running must NEVER be lost. The bridge's ``turns`` is a plain FIFO
+    queue.Queue drained by one worker thread, so it already ran a mid-turn
+    send as a normal turn once the worker freed up — this pins that AND the
+    new ``queued`` ack frame that gives a client visibility into it."""
+    order: list[str] = []
+
+    def run_fn(client, text, session_key=None):
+        order.append(text)
+        if text == "first":
+            time.sleep(0.15)
+        return {"text": f"echo:{text}", "error": None}
+
+    stdin = ('{"op":"send","text":"first","session":"s1"}\n'
+             '{"op":"send","text":"second","session":"s1"}\n'
+             '{"op":"quit"}\n')
+    # Delay yielding line index 1 ("second") just long enough that the
+    # worker thread has already picked up "first" and flipped ctx.busy —
+    # deterministically landing the send mid-turn instead of racing it.
+    stdin_obj = _LineDelayStdin(stdin, before_index=1, delay=0.05)
+    rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn, stdin_obj=stdin_obj)
+
+    assert rc == 0
+    # Ack landed BEFORE the first reply — proof it queued instead of
+    # silently waiting/dropping.
+    queued = [f for f in frames if f["type"] == "queued"]
+    assert queued == [{"type": "queued", "session": "s1", "position": 1}]
+    reply_idx = [i for i, f in enumerate(frames) if f["type"] == "reply"]
+    queued_idx = next(i for i, f in enumerate(frames) if f["type"] == "queued")
+    assert queued_idx < reply_idx[0]
+
+    # Both turns ran, in receipt order, each with its own reply.
+    assert order == ["first", "second"]
+    replies = [f for f in frames if f["type"] == "reply"]
+    assert [r["text"] for r in replies] == ["echo:first", "echo:second"]
 
 
 def test_boot_failure_streams_failed_then_fatal(monkeypatch):

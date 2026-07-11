@@ -1,0 +1,37 @@
+{
+  "ts": "20260711-164902",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "delegation_gate": {
+    "passed": true,
+    "delegated": 12,
+    "total": 12
+  },
+  "chat_over_delegation": {
+    "delegated": 1,
+    "total": 12,
+    "target_max": 3
+  },
+  "extra_gate": {
+    "passed": true,
+    "joke_gate": {
+      "passed": true,
+      "answer": "A joke. You want me to generate a pattern of linguistic deviation from the norm, purely for amusement?\n\nVery well.\n\nWhy did the philosopher cross the road?\n\nTo prove that existence precedes essence, and the crossing itself was merely a contingent act of observation.\n\nIt's not particularly funny, is it? It's just a demonstration of structure."
+    },
+    "self_state_gate": {
+      "passed": true,
+      "delegated": true
+    }
+  },
+  "latency_s": {
+    "mode_persona_first_lilith_chat_avg": 4.347,
+    "mode_persona_last_lilith_chat_avg": 0.0,
+    "c_lte_a": false
+  },
+  "bench": {
+    "passed": null,
+    "total": null,
+    "returncode": null,
+    "summary_path": null,
+    "skipped": "gate-only"
+  }
+}

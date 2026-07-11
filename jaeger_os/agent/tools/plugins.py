@@ -128,80 +128,237 @@ def _platform_ok(platforms: list[str]) -> bool:
     return any(current.startswith(p) for p in platforms)
 
 
+def _find_messaging_module(target: str) -> Any | None:
+    """The discovered ``messaging``-slot :class:`ModuleSpec` named
+    ``target`` (discord/telegram/imessage), or ``None``. These graduated
+    from ``plugin.yaml`` to ``module.yaml`` at 0.8 M3b — no manifest
+    directory for :func:`_read_manifest` to find, so callers that fell
+    through the manifest path check here before giving up."""
+    try:
+        from jaeger_os.core.modules import discover_modules
+        by_slot = discover_modules()
+    except Exception:  # noqa: BLE001 — discovery must never crash a tool call
+        return None
+    for spec in (by_slot.get("messaging") or []):
+        if spec.module == target:
+            return spec
+    return None
+
+
+def _messaging_channel_row(spec: Any, layout: Any) -> dict[str, Any]:
+    """Build a ``list_plugins()``-shaped row for a module-provided
+    messaging channel (discord/telegram/imessage), using the SAME
+    status vocabulary as a manifest-backed plugin row so the agent
+    doesn't need two code paths to reason about readiness. Credential
+    names come from ``plugins/__init__.py``'s ``_BRIDGE_SPECS`` — these
+    channels have no ``plugin.yaml`` ``requires:`` block to read."""
+    from jaeger_os.core.modules import module_platform_ok
+    from jaeger_os.plugins import _BRIDGE_SPECS, plugin_credential
+
+    channel = spec.module
+    bridge_spec = _BRIDGE_SPECS.get(channel) or {}
+    token_name = bridge_spec.get("token")
+    optional_names = [n for n in (bridge_spec.get("allow"), bridge_spec.get("admin")) if n]
+
+    libs_ok = _library_status(list(spec.requires_libraries))
+    platform_ok = module_platform_ok(spec)
+    env_required = {}
+    if token_name:
+        env_required[token_name] = bool(plugin_credential(layout, token_name))
+
+    all_libs = all(libs_ok.values()) if libs_ok else True
+    all_env = all(env_required.values()) if env_required else True
+    if not platform_ok:
+        status = "unsupported_on_this_platform"
+    elif all_libs and all_env:
+        status = "ready"
+    elif not all_libs and not all_env:
+        status = "needs_install_and_credentials"
+    elif not all_libs:
+        status = "needs_install"
+    else:
+        status = "needs_credentials"
+
+    return {
+        "name": channel,
+        "kind": "channel",
+        "version": spec.version or None,
+        "description": f"Messaging channel ({channel}) — module-provided, slot=messaging.",
+        "status": status,
+        "libraries": libs_ok,
+        "env_required": env_required,
+        "env_optional": optional_names,
+        "platform_ok": platform_ok,
+        "platform_required": list(spec.requires_platform),
+    }
+
+
+def _messaging_channel_rows() -> list[dict[str, Any]]:
+    """Every discovered ``messaging``-slot module (discord/telegram/
+    imessage today), each as a :func:`_messaging_channel_row`. Never
+    raises — discovery/credential lookups degrade to an empty list
+    rather than breaking ``list_plugins()``."""
+    try:
+        from jaeger_os.core.modules import discover_modules
+        specs = discover_modules().get("messaging") or []
+    except Exception:  # noqa: BLE001
+        return []
+    try:
+        layout = _require_layout()
+    except Exception:
+        layout = None
+    return [_messaging_channel_row(spec, layout) for spec in specs]
+
+
 def list_plugins() -> dict[str, Any]:
-    """Return every bundled plugin under ``jaeger_os.plugins``, each
-    annotated with library/env/credential install status so the agent
-    knows what it can use, what needs setup, and what's blocked by the
-    host platform."""
-    if not _PLUGINS_ROOT.is_dir():
-        return {"plugins": [], "error": "plugins directory not found"}
+    """Return every bundled plugin under ``jaeger_os.plugins`` PLUS every
+    module-provided messaging channel (discord/telegram/imessage — 0.8
+    M3b graduated them to ``module.yaml`` and they'd been invisible here
+    ever since), each annotated with library/env/credential install
+    status so the agent knows what it can use, what needs setup, and
+    what's blocked by the host platform. ``kind`` distinguishes a
+    manifest-backed ``"plugin"`` row from a module-backed ``"channel"``
+    row — both share the same status vocabulary."""
     out_plugins: list[dict[str, Any]] = []
-    for child in sorted(_PLUGINS_ROOT.iterdir()):
-        if not child.is_dir() or child.name.startswith(("_", ".")):
-            continue
-        manifest = _read_manifest(child)
-        if manifest is None:
-            continue
-        requires = manifest.get("requires") or {}
-        libraries = list(requires.get("libraries") or [])
-        env_required = list(requires.get("env") or [])
-        env_optional = list(requires.get("env_optional") or [])
-        platforms = list(requires.get("platform") or [])
-        libs_ok = _library_status(libraries)
-        env_present = _env_status(env_required)
-        cred_present = _credential_status(env_required)
-        # A required env var counts as "satisfied" if it's set in env
-        # OR stored as a credential.
-        env_satisfied = {
-            name: env_present.get(name, False) or cred_present.get(name, False)
-            for name in env_required
-        }
-        all_libs = all(libs_ok.values()) if libs_ok else True
-        all_env = all(env_satisfied.values()) if env_satisfied else True
-        platform_ok = _platform_ok(platforms)
-        if not platform_ok:
-            status = "unsupported_on_this_platform"
-        elif all_libs and all_env:
-            status = "ready"
-        elif not all_libs and not all_env:
-            status = "needs_install_and_credentials"
-        elif not all_libs:
-            status = "needs_install"
-        else:
-            status = "needs_credentials"
-        out_plugins.append({
-            "name": manifest.get("name") or child.name,
-            "version": manifest.get("version"),
-            "description": (manifest.get("description") or "").strip(),
-            "status": status,
-            "libraries": libs_ok,
-            "env_required": env_satisfied,
-            "env_optional": env_optional,
-            "platform_ok": platform_ok,
-            "platform_required": platforms,
-        })
+    if _PLUGINS_ROOT.is_dir():
+        for child in sorted(_PLUGINS_ROOT.iterdir()):
+            if not child.is_dir() or child.name.startswith(("_", ".")):
+                continue
+            manifest = _read_manifest(child)
+            if manifest is None:
+                continue
+            requires = manifest.get("requires") or {}
+            libraries = list(requires.get("libraries") or [])
+            env_required = list(requires.get("env") or [])
+            env_optional = list(requires.get("env_optional") or [])
+            platforms = list(requires.get("platform") or [])
+            libs_ok = _library_status(libraries)
+            env_present = _env_status(env_required)
+            cred_present = _credential_status(env_required)
+            # A required env var counts as "satisfied" if it's set in env
+            # OR stored as a credential.
+            env_satisfied = {
+                name: env_present.get(name, False) or cred_present.get(name, False)
+                for name in env_required
+            }
+            all_libs = all(libs_ok.values()) if libs_ok else True
+            all_env = all(env_satisfied.values()) if env_satisfied else True
+            platform_ok = _platform_ok(platforms)
+            if not platform_ok:
+                status = "unsupported_on_this_platform"
+            elif all_libs and all_env:
+                status = "ready"
+            elif not all_libs and not all_env:
+                status = "needs_install_and_credentials"
+            elif not all_libs:
+                status = "needs_install"
+            else:
+                status = "needs_credentials"
+            out_plugins.append({
+                "name": manifest.get("name") or child.name,
+                "kind": "plugin",
+                "version": manifest.get("version"),
+                "description": (manifest.get("description") or "").strip(),
+                "status": status,
+                "libraries": libs_ok,
+                "env_required": env_satisfied,
+                "env_optional": env_optional,
+                "platform_ok": platform_ok,
+                "platform_required": platforms,
+            })
+    out_plugins.extend(_messaging_channel_rows())
     return {"plugins": out_plugins, "count": len(out_plugins)}
 
 
+def _setup_messaging_channel(target: str, spec: Any) -> dict[str, Any]:
+    """:func:`setup_plugin`'s guide for a module-provided messaging
+    channel (discord/telegram/imessage) — no ``plugin.yaml`` exists for
+    these (0.8 M3b), so the steps come from the module.yaml spec's
+    ``requires_libraries``/``requires_platform`` plus the credential
+    names ``plugins/__init__.py``'s ``_BRIDGE_SPECS`` declares for it."""
+    from jaeger_os.core.modules import module_platform_ok
+    from jaeger_os.plugins import _BRIDGE_SPECS, plugin_credential
+
+    description = f"Messaging channel ({target}) — module-provided, slot=messaging."
+    if not module_platform_ok(spec):
+        import sys
+        return {
+            "plugin": target, "kind": "channel",
+            "manifest_description": description,
+            "blocked": True,
+            "steps": [
+                f"This channel requires platform(s) {list(spec.requires_platform)}; "
+                f"current is {sys.platform!r}. Setup not possible on this host."
+            ],
+        }
+
+    steps: list[str] = []
+    libs_ok = _library_status(list(spec.requires_libraries))
+    missing_libs = [lib for lib, ok in libs_ok.items() if not ok]
+    if missing_libs:
+        steps.append(f"Install Python libraries: `pip install {' '.join(missing_libs)}`.")
+
+    bridge_spec = _BRIDGE_SPECS.get(target) or {}
+    token_name = bridge_spec.get("token")
+    try:
+        layout = _require_layout()
+    except Exception:
+        layout = None
+    env_status: dict[str, str] = {}
+    if token_name:
+        have = bool(plugin_credential(layout, token_name))
+        env_status[token_name] = "credential" if have else "missing"
+        if not have:
+            steps.append(
+                f"Provide credential `{token_name}`. Store it with "
+                f"`set_credential` (CLI: `python -m jaeger_os --set-credential "
+                f"{token_name.lower()}`)."
+            )
+    optional_names = [n for n in (bridge_spec.get("allow"), bridge_spec.get("admin")) if n]
+    if optional_names:
+        steps.append(
+            "Optional allowlist/admin env vars (unset = open to everyone / no "
+            "admin): " + ", ".join(f"`{n}`" for n in optional_names)
+        )
+    if not steps:
+        steps.append(
+            f'All requirements satisfied — call activate_plugin("{target}") to '
+            "bring it live (persists to this instance's autostart list)."
+        )
+    return {
+        "plugin": target, "kind": "channel", "version": spec.version or None,
+        "manifest_description": description,
+        "blocked": False, "steps": steps,
+        "library_status": libs_ok, "env_status": env_status,
+    }
+
+
 def setup_plugin(name: str) -> dict[str, Any]:
-    """Return a step-by-step setup guide for the named plugin. Does NOT
-    perform the setup — the agent surfaces these steps to the user, who
-    runs the install commands and stores the credentials themselves.
+    """Return a step-by-step setup guide for the named plugin OR
+    module-provided messaging channel (discord/telegram/imessage). Does
+    NOT perform the setup — the agent surfaces these steps to the user,
+    who runs the install commands and stores the credentials themselves.
 
     The guide includes: pip install commands for missing libraries, env
-    var names that need values, and pointers to the existing
-    ``set_credential`` flow for token storage."""
+    var / credential names that need values, and pointers to the
+    existing ``set_credential`` flow for token storage."""
     target = (name or "").strip().lower()
     if not target:
         return {"plugin": name, "error": "plugin name required"}
     plugin_dir = _PLUGINS_ROOT / target
-    if not plugin_dir.is_dir():
-        return {
-            "plugin": name,
-            "error": f"unknown plugin {target!r}; run list_plugins() for the catalog",
-        }
-    manifest = _read_manifest(plugin_dir)
+    manifest = _read_manifest(plugin_dir) if plugin_dir.is_dir() else None
     if manifest is None:
+        # 0.8.1 item 10: discord/telegram/imessage graduated to
+        # module.yaml (plugin.yaml deleted at 0.8 M3b) — fall back to
+        # the messaging-slot module spec before reporting unknown/broken.
+        channel_spec = _find_messaging_module(target)
+        if channel_spec is not None:
+            return _setup_messaging_channel(target, channel_spec)
+        if not plugin_dir.is_dir():
+            return {
+                "plugin": name,
+                "error": f"unknown plugin {target!r}; run list_plugins() for the catalog",
+            }
         return {"plugin": name, "error": "plugin manifest missing or invalid"}
     requires = manifest.get("requires") or {}
     libraries = list(requires.get("libraries") or [])
@@ -276,23 +433,32 @@ def setup_plugin(name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @register_tool_from_function(name="list_plugins", side_effect="read")
 def _t_list_plugins() -> dict:
-    """Enumerate the bundled jaeger_os plugins (homeassistant, ai_gen,
-    mcp) with install + credential status for each. Use this when the
-    user asks what integrations are available, or before suggesting a
-    feature you'd need a plugin for. (kokoro_tts and whisper_stt
-    graduated from plugins to core engine-modules at 0.8 M1 / M2b;
-    discord/telegram/imessage graduated the same way at 0.8 M3b as the
-    ``messaging`` module slot — none of them are listed here anymore,
-    they're always present / gated on module discovery instead.)"""
+    """Enumerate every bundled jaeger_os plugin (homeassistant, ai_gen,
+    mcp) AND every module-provided messaging channel (discord, telegram,
+    imessage) with install + credential status for each. Use this when
+    the user asks what integrations are available, or before suggesting
+    a feature you'd need a plugin/channel for. Each row's ``kind`` is
+    ``"plugin"`` (manifest-backed) or ``"channel"`` (module-backed —
+    discord/telegram/imessage graduated to the ``messaging`` module
+    slot at 0.8 M3b; 0.8.1 item 10 re-surfaced them here after they'd
+    gone invisible). ``status`` is one of ready / needs_install /
+    needs_credentials / needs_install_and_credentials /
+    unsupported_on_this_platform. (kokoro_tts/whisper_stt/animation
+    stay module-internal, not listed — they have no user-facing
+    credential or install step; only genuinely settable integrations
+    show up here.)"""
     return list_plugins()
 
 
 @register_tool_from_function(name="setup_plugin")
 def _t_setup_plugin(name: str) -> dict:
-    """Return step-by-step setup instructions for the named plugin
-    (e.g. ``discord``, ``telegram``, ``mcp``). Surfaces
-    missing libraries to ``pip install`` and required env vars or
-    credentials that need values. Does NOT modify the user's
-    environment — the user runs the install commands and stores
-    credentials themselves."""
+    """Return step-by-step setup instructions for the named plugin or
+    messaging channel (e.g. ``discord``, ``telegram``, ``imessage``,
+    ``mcp``, ``homeassistant``). Surfaces missing libraries to ``pip
+    install`` and required env vars or credentials that need values.
+    For a messaging channel, the flow after this is: set_credential the
+    named token, then ``activate_plugin(name)`` (which also persists it
+    to this instance's autostart so it survives a restart). Does NOT
+    modify the user's environment — the user runs the install commands
+    and stores credentials themselves."""
     return setup_plugin(name=name)

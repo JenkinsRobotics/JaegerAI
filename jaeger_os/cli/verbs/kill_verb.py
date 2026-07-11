@@ -41,6 +41,8 @@ import sys
 import time
 from pathlib import Path
 
+from jaeger_os.core.instance.procshape import is_real_jaeger_command as _is_real_jaeger_command
+
 
 _LOCK_FILENAMES: frozenset[str] = frozenset({
     "tui.pid",
@@ -191,40 +193,6 @@ def _find_jaeger_pids(
             continue
         found.append((pid, cmdline))
     return found
-
-
-def _is_real_jaeger_command(cmdline: str) -> bool:
-    """True when ``cmdline`` is an actual jaeger entry point.
-
-    A naive ``'python' in cmd and 'jaeger_os' in cmd`` matches shells
-    whose ``-c`` argument sources a snapshot that mentions either
-    string — false positives we never want to kill.
-
-    The canonical jaeger commands we DO want:
-
-      - ``... python -m jaeger_os ...``        (module form)
-      - ``... python -m jaeger_os.<sub> ...``  (daemon/cli subcommands)
-      - ``... python .../jaeger_os/__main__.py ...``
-      - ``... bin/jaeger ...``                 (the venv script)
-
-    Anything else (a shell, an editor, ps itself) does not match,
-    even if it mentions ``jaeger_os`` in argv text.
-    """
-    # Quick reject: a shell is never a jaeger process.
-    head = cmdline.split(None, 1)[0] if cmdline else ""
-    head_name = head.rsplit("/", 1)[-1]
-    if head_name in ("zsh", "bash", "sh", "fish", "dash"):
-        return False
-    # Canonical patterns.
-    if " -m jaeger_os" in cmdline:
-        return True
-    if "/jaeger_os/__main__.py" in cmdline:
-        return True
-    if head_name == "jaeger":
-        return True
-    if cmdline.endswith("/jaeger") or " /jaeger " in cmdline:
-        return True
-    return False
 
 
 def _find_lock_files(*, instance: str | None = None) -> list[Path]:

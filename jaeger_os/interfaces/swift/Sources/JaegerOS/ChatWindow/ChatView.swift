@@ -381,6 +381,14 @@ struct ChatView: View {
                 ProgressView()
                     .controlSize(.mini)
             }
+            // 0.8.1 item 9: messages typed while the current turn is
+            // still running are queued, not dropped — surface that so
+            // it doesn't look like they vanished.
+            if !chat.pendingSends.isEmpty {
+                Text("· \(chat.pendingSends.count) queued")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Term.inkDim)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -390,8 +398,11 @@ struct ChatView: View {
     // MARK: - Actions
 
     private var canSend: Bool {
+        // 0.8.1 item 9: sending while a turn is already in flight now
+        // QUEUES (ChatViewModel.send) instead of being dropped, so the
+        // button stays live through isSending — only a transcription in
+        // flight or an empty composer blocks it.
         agent.isConnected
-            && !chat.isSending
             && !chat.isTranscribing
             && !chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }

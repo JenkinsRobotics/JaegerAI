@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.8.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JROS/releases"><img src="https://img.shields.io/badge/version-0.8.1-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555555?style=for-the-badge" alt="Platform">
@@ -46,6 +46,13 @@ installs the whole stack.**
 - 🔗 **Third-party API** — embed a JROS agent in your own app: a single-file, zero-dependency Python client ([`clients/python/jros_client.py`](clients/python/jros_client.py)) over the `jaeger bridge` NDJSON protocol, the same fixture-pinned contract the native Mac app speaks. See [Third-party apps](#third-party-apps--integrate-jros).
 - 🤖 **Embodiment-ready** — the body contract and the capability-gated skill loader are already in place for hardware.
 
+> **Status — `0.8.1` (the field-test patch).** Eleven fixes from release-day
+> testing on a deployed station: offline-first boot (seconds, window
+> interactive immediately), a persona self-model (the agent knows what it is
+> and what's installed — and jokes get told), persistent plugin activation,
+> queued (never lost) mid-turn messages, messaging channels visible in
+> discovery again, and readable settings in light-mode macOS.
+>
 > **Status — `0.8.0` (the modular-runtime release).** The runtime is now ONE
 > unified stack (one bus, one Node class, supervisor-owned workers), and
 > capabilities are **engine-modules** in the ROS spirit — `kokoro_tts`,
