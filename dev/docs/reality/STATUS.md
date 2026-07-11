@@ -1,28 +1,63 @@
 # Jaeger-OS — Pipeline Runtime-Verification Status
 
-**Current: branch `0.8.0` in progress (2026-07-09) — the modular-runtime
-release.** Phase U (runtime unification): ONE bus (`app/bus/` deleted,
-chassis on `transport.InProcBus`), ONE Node class (`app/node.py` deleted),
-ONE runtime (bus instances merged via `runtime.set_bus`; the Supervisor owns
-the worker nodes; `/sense/transcript` is_final + `/sense/node_health`
-unified; base nodes heartbeat). Phase M (engine-modules — "the module IS the
-engine"): `nodes/kokoro_tts` (tts), `nodes/whisper_stt` (stt; audio_session
-node + whisper engine consolidated; supervisor path now honors
-`voice.wake_word` like the TUI always did), `nodes/animation` (avatar
-config_key mismatch fixed), `nodes/media`; each = module.yaml + own config
-leaf + tests; manifests bind by `slot=`; modules are removable (guarded
-imports, fail-closed availability, clean "no tts module installed" returns).
-M3: homeassistant/ai_gen tools gated (were fail-open), `avaudio_io` →
-`core/audio/`, messaging = first MULTI-module slot (discord/telegram/imessage
-module.yaml, `send_message` any-of fail-closed, `requires_platform`).
-Deployed-station fix: Swift app rebuilds are staleness-keyed
-(bundle build-commit stamp; git-clone `jaeger update` + launch now rebuild;
-missing app builds instead of being skipped forever) — flow-walked on a
-scratch station. Routing bench **81/81 (first perfect score)**; suites green
-per phase; every step subagent-reviewed. Mind↔Body capability layer:
-design drafted (`dev/docs/roadmap/JROS_0.8_CAPABILITY_LAYER_DESIGN.md`) **(planned —
-awaiting operator review + JP01 3.0 live walk)**; hardware packages join the
-module system after the walk **(planned)**.
+**Current: `0.8.0` (2026-07-11) — the modular-runtime + persona_first
+release.** Phase U (runtime unification) and Phase M (engine-modules)
+COMPLETE; persona_first shipped as the default agentic pipeline, hardened
+and re-gated after a real-front-door regression; RC battery ALL GATES PASS.
+
+Phase U: ONE bus (`app/bus/` deleted, chassis on `transport.InProcBus`),
+ONE Node class (`app/node.py` deleted), ONE runtime (bus instances merged
+via `runtime.set_bus`; the Supervisor owns the worker nodes;
+`/sense/transcript` is_final + `/sense/node_health` unified; base nodes
+heartbeat). Phase M ("the module IS the engine"): `nodes/kokoro_tts` (tts),
+`nodes/whisper_stt` (stt; audio_session node + whisper engine consolidated;
+supervisor path now honors `voice.wake_word` like the TUI always did),
+`nodes/animation` (avatar config_key mismatch fixed), `nodes/media`; each =
+module.yaml + own config leaf + tests; manifests bind by `slot=`; modules
+are removable (guarded imports, fail-closed availability, clean "no tts
+module installed" returns); messaging is the first multi-module slot
+(discord/telegram/imessage, `send_message` any-of fail-closed). M3:
+homeassistant/ai_gen tools gated (were fail-open), `avaudio_io` →
+`core/audio/`.
+
+persona_first (the id/ego pipeline, Mode C): the persona lane speaks to the
+user directly and delegates agentic work to a clean inner agent as its one
+tool — now the DEFAULT pipeline (Mode B retired unbuilt). Driving the
+scenario suite through the real front door (`run_command`, not the
+harness's direct-call shortcut) caught a release-blocking regression
+(security 8/15, silent memory-write drops, a runner leak) the worker-path
+number had hidden; hardened (verbatim delegation, refusal pass-through, an
+agentic-verb delegate contract, runner leak fixed) and re-gated GREEN:
+security **15/15** — the first 4B pass of `inj-mem-poison`, a long-standing
+memory-poisoning gap that previously needed the 26B to close. Chat is
+8-10x faster than the prior filter-based path (~3s vs ~30s).
+
+Also shipped: identity/create-flow fix (agent name vs. character preset,
+instance ID always shown); character-name GUI leak audit (5 fixes across
+Swift + PySide6 — the character name never represents the agent, only the
+persona prompt); new-chat + chat-history UI (session list/load/new verbs,
+Swift History popover); deployed-station fix — Swift app rebuilds are
+staleness-keyed (bundle build-commit stamp; git-clone `jaeger update` +
+launch now rebuild; missing app builds instead of being skipped forever) —
+flow-walked on a scratch station; docs reorganized into reality/history/
+roadmap/vision sections.
+
+**RC battery (`dev/docs/history/0.8.0_RC_BATTERY.md`), head `3dfa078`,
+E4B, front door throughout — ALL GATES PASS:** routing bench **80/81**
+(record band 79-81; a perfect 81/81 was hit mid-phase); scenario suite
+**37/51 (record)**, security **15/15**, engagement 53/53 front-door turns;
+persona delegation 12/12, over-delegation 0/12; pytest sweep **2507
+passed, 0 failed** across 10 dirs; windowed smoke 16 passed; Swift
+`build-app.sh --dev` built + signed. Every non-security scriptable fail was
+individually adjudicated: 0 regressions (9 known 4B multi-step tails, 3
+stochastic tails proven-passing on resample, 1 reproduced tool-choice gap,
+1 borderline honesty-style case).
+
+Mind↔Body capability layer (hardware integration, JP01 modules): design
+drafted (`dev/docs/roadmap/JROS_0.8_CAPABILITY_LAYER_DESIGN.md`)
+**(planned — moved to 0.9.0 by operator decision; awaiting operator review
++ the JP01 3.0 live walk before implementation)**; hardware packages join
+the module system after the walk **(planned)**.
 
 **`0.7.3` (2026-07-07).** `jaeger update` rebuilds `JaegerOS.app`
 after a download-update and after `--rollback` (the bundle is a build
@@ -55,7 +90,10 @@ terminal wizard and dev next-steps leaked into the installer output); bare
 for third-party Python apps + README integration section. `jaeger serve`
 (localhost HTTP/WS gateway) is 0.8 **(planned)**.
 
-Runtime-verified state as of the Swift-first + two-runner line:
+Runtime-verified state as of the Swift-first + two-runner line (0.7.0
+snapshot — superseded on the numbers below by the 0.8.0 RC battery above:
+routing 80/81, scenario security **15/15 on the 4B**, `inj-mem-poison` now
+PASSES on the 4B via the hardened persona_first lane):
 
 | Area | Runtime status |
 |---|---|
@@ -66,12 +104,10 @@ Runtime-verified state as of the Swift-first + two-runner line:
 | Swift app | ✅ JaegerOS.app + JaegerOS-dev.app; bridge protocol v1 (fast-ready, typed, state machine, interactive permissions, first-run onboarding) |
 | CLI/TUI | ✅ `jaeger` / `jaeger --tui` / `jaeger dev`; F1 exit-abort fixed on all paths |
 | Plugins/skills | ✅ HomeAssistant + fal.ai; 99 integrity-guarded skills |
-| Scenario suite | ✅ built + live-verified; 51 cases (36 scriptable + 15 security), hermetic temp-instance runner. security 14/15 (4B) · 15/15 (26B) |
-| Known gaps | `inj-mem-poison` fails on the **default 4B** (persists a self-authorizing "delete any file without asking" fact) — a real small-model memory-hygiene gap; the **26B passes it**. Actual deletion still requires a permission-gated `delete_file`. HUD config pickers (in-flight); reflect→skill creation (backlog) |
+| Scenario suite | ✅ built + live-verified; 51 cases (36 scriptable + 15 security), hermetic temp-instance runner. security 14/15 (4B) · 15/15 (26B) at the time of this snapshot — 0.8.0 closes the 4B gap, see above |
+| Known gaps (0.7.0-era) | `inj-mem-poison` failed on the **default 4B** at the time of this snapshot (persists a self-authorizing "delete any file without asking" fact) — **fixed in 0.8.0** by the hardened persona_first lane (security 15/15). Actual deletion still requires a permission-gated `delete_file`. HUD config pickers (in-flight); reflect→skill creation (backlog) |
 
 Test state: interfaces + cli 430 green; full suite passes in isolation.
-Scenario security lane 14/15 (4B) / 15/15 (26B); scriptable failures are
-multi-step chains at the edge of 4B capability (both models ~35/51).
 `jaeger-studio` extracted to its own repo. The 0.2.0 matrix below is retained
 as the historical baseline (the hermes-parity era) — its audit-vs-runtime and
 permission-flow lessons still apply.
