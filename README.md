@@ -259,7 +259,7 @@ and answer the agent's permission prompts via the `turn()` callbacks.
 
 **Any other language** — spawn `~/jaeger/jaeger bridge` and speak the NDJSON
 frames documented in
-[`jaeger_os/interfaces/protocol.py`](jaeger_os/interfaces/protocol.py)
+[`jaeger_os/contract/protocol.py`](jaeger_os/contract/protocol.py)
 (pinned by `protocol_v1_fixtures.json`, the same contract fixtures the Swift
 client is tested against). The Swift app under `jaeger_os/interfaces/swift/`
 is a complete worked example.

@@ -15,7 +15,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[4]
 CLIENT_FILE = REPO / "clients" / "python" / "jros_client.py"
 FIXTURES = json.loads(
-    (REPO / "jaeger_os" / "interfaces" / "protocol_v1_fixtures.json")
+    (REPO / "jaeger_os" / "contract" / "protocol_v1_fixtures.json")
     .read_text())
 
 

@@ -38,8 +38,9 @@ let package = Package(
             ]
         ),
         // The boundary's regression net: decodes every frame in
-        // ../protocol_v1_fixtures.json — the SAME file pytest asserts the
-        // Python builders against. Change a frame shape → both suites fail.
+        // ../../../contract/protocol_v1_fixtures.json — the SAME file pytest
+        // asserts the Python builders against. Change a frame shape → both
+        // suites fail.
         .testTarget(
             name: "JaegerOSTests",
             dependencies: ["JaegerOS"],

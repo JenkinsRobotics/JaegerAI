@@ -18,7 +18,8 @@ import time
 
 import pytest
 
-from jaeger_os.interfaces import bridge, protocol
+from jaeger_os.contract import protocol
+from jaeger_os.interfaces import bridge
 
 
 class _FakeBoot:
@@ -903,7 +904,7 @@ def test_fixture_frames_match_builders():
     fails there, symmetrically."""
     import pathlib
     fx = json.loads(
-        (pathlib.Path(bridge.__file__).parent / "protocol_v1_fixtures.json")
+        (pathlib.Path(protocol.__file__).parent / "protocol_v1_fixtures.json")
         .read_text())
     frames = fx["frames"]
     assert fx["proto"] == protocol.PROTOCOL_VERSION

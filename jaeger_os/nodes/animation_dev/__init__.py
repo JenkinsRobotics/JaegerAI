@@ -31,6 +31,8 @@ audit + per-adapter origin.
 
 from typing import Any
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+
 from .auto_state import AvatarAutoStateDriver
 from .base import AnimationAdapter, FrameBuffer
 from .node import AnimationNode
@@ -58,6 +60,6 @@ def make_animation_node(bus: Any, config: dict[str, Any]) -> AnimationNode:
     from jaeger_os.nodes.runtime import ensure_animation_node
     return ensure_animation_node(
         bridge_host=str(config.get("bridge_host", "127.0.0.1")),
-        bridge_port=int(config.get("bridge_port", 8765)),
+        bridge_port=int(config.get("bridge_port", ANIMATION_BRIDGE_DEFAULT_PORT)),
         enable_bridge=bool(config.get("enable_bridge", True)),
     )

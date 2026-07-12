@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+
 
 class AvatarConfig(BaseModel):
     """0.5: AnimationNode + FrameBridge configuration.
@@ -48,7 +50,7 @@ class AvatarConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
     bridge_host: str = "127.0.0.1"
-    bridge_port: int = Field(8765, ge=1024, le=65535)
+    bridge_port: int = Field(ANIMATION_BRIDGE_DEFAULT_PORT, ge=1024, le=65535)
     # Default emotion the wizard suggests; AnimationNode will publish
     # this on boot when set_avatar_state hasn't been called yet.
     default_emotion: str = "neutral"

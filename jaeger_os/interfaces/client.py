@@ -2,7 +2,7 @@
 
 Any non-Python (or separate-process) surface drives the agent through this
 one SDK instead of re-implementing the wire handling: it spawns ``jaeger
-bridge``, speaks :mod:`jaeger_os.interfaces.protocol`, and exposes a clean
+bridge``, speaks :mod:`jaeger_os.contract.protocol`, and exposes a clean
 ``start`` / ``turn`` / ``close`` API. The MCP server (#3), a web backend, a
 script, or a test all use it — that's the "transports, not endpoints"
 payoff. The Swift app is the same client in Swift.
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
-from jaeger_os.interfaces import protocol
+from jaeger_os.contract import protocol
 
 
 class JrosError(RuntimeError):

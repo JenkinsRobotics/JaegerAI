@@ -70,7 +70,7 @@ enum ProtocolV1 {
 }
 
 /// Every agent→client frame, decoded strictly by its ``type`` discriminator.
-/// THE typed mirror of ``jaeger_os/interfaces/protocol.py`` — shapes are
+/// THE typed mirror of ``jaeger_os/contract/protocol.py`` — shapes are
 /// pinned by ProtocolFixtureTests against ``protocol_v1_fixtures.json``,
 /// the same fixture file the Python side asserts its builders against.
 /// An unknown ``type`` decodes to nil (forward-compatible: new frames from

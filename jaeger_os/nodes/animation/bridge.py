@@ -44,6 +44,9 @@ from typing import Any
 import websockets
 from websockets.asyncio.server import ServerConnection, serve
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+from jaeger_os.contract.wire import LENGTH_PREFIX_FORMAT
+
 from .base import FrameBuffer
 
 
@@ -65,7 +68,7 @@ class FrameBridge:
         self,
         *,
         host: str = "127.0.0.1",
-        port: int = 8765,
+        port: int = ANIMATION_BRIDGE_DEFAULT_PORT,
         path: str = "/frames",
     ) -> None:
         self.host = host
@@ -219,7 +222,7 @@ def encode_frame(frame: FrameBuffer, *, asset: str = "") -> bytes:
             f"frame header exceeds {_MAX_HEADER_BYTES} bytes"
         )
     return (
-        struct.pack(">I", len(header_bytes))
+        struct.pack(LENGTH_PREFIX_FORMAT, len(header_bytes))
         + header_bytes
         + frame.data
     )
@@ -230,7 +233,7 @@ def decode_frame(message: bytes) -> tuple[dict, bytes]:
     Used by tests + future Python clients."""
     if len(message) < 4:
         raise ValueError("truncated frame: missing length prefix")
-    (header_len,) = struct.unpack(">I", message[:4])
+    (header_len,) = struct.unpack(LENGTH_PREFIX_FORMAT, message[:4])
     if len(message) < 4 + header_len:
         raise ValueError("truncated frame: header underrun")
     header = json.loads(message[4:4 + header_len].decode("utf-8"))

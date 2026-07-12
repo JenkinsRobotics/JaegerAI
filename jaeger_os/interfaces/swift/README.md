@@ -9,7 +9,7 @@ One Swift process owns the tray card, the chat window, the avatar orb,
 the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
 (the Python NDJSON stdio child, `jaeger_os/interfaces/bridge.py`) and
 speaks **protocol v1** — the single wire contract in
-`jaeger_os/interfaces/protocol.py`, pinned cross-language by
+`jaeger_os/contract/protocol.py`, pinned cross-language by
 `protocol_v1_fixtures.json` (Python asserts its builders against it;
 `ProtocolFixtureTests` decodes the same bytes here).
 
