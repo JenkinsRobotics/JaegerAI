@@ -6,11 +6,14 @@
 # module.yaml's requires_libraries for the exact probe set the
 # availability gate checks.
 
-# --- framework (path dep for local staging; pin a real published
-# version range once jaeger-os has releases). PEP 508 direct reference,
-# not `-e ../JaegerOS` — setuptools' dynamic-dependencies file parser
-# only accepts requirement specifiers. ABSOLUTE staging path. ---
-jaeger-os @ file:///private/tmp/claude-501/-Users-jonathanjenkins-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerOS
+# --- framework (git dependency — JaegerOS has no PyPI releases yet).
+# PEP 508 direct reference, not `-e ../JaegerOS` — setuptools' dynamic-
+# dependencies file parser only accepts requirement specifiers, not
+# pip's `-e`/`-r` directives. Pinned to @master for 0.9; switch to a
+# tag pin (e.g. @0.9.0) once JaegerOS cuts a release tag. A dev clone
+# with a sibling ~/GITHUB/JaegerOS checkout gets an editable install
+# instead — see JaegerAI's install.sh sibling-detection step. ---
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
 
 # --- the Kokoro engine itself ---
 kokoro>=0.9.4
