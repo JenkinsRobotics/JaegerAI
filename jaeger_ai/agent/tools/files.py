@@ -21,6 +21,7 @@ instance dir, giving the human a real authorship audit trail.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -261,6 +262,81 @@ def delete_file(path: str) -> dict[str, Any]:
     _audit("delete_file", {"path": rel})
     commit_sha = git_autocommit(layout, rel, f"agent: delete {rel}")
     result: dict[str, Any] = {"deleted": True, "path": rel}
+    if commit_sha:
+        result["commit"] = commit_sha
+    return result
+
+
+def move_file(src: str, dst: str) -> dict[str, Any]:
+    """Move (rename) a file within the instance's sandbox.
+
+    Both ``src`` and ``dst`` route through the same sandbox rules as
+    ``file_write`` (``workspace/...`` vs. everything else → skills/) —
+    a source or destination that escapes the sandbox is refused. The
+    destination's parent directories are created as needed. Every move
+    is audited + git-committed (recorded against the destination path)."""
+    layout = _require_layout()
+    try:
+        src_target = _resolve_write(src)
+    except SandboxError as exc:
+        _audit("move_file_denied", {"path": src, "reason": str(exc)})
+        return {"moved": False, "error": f"source: {exc}"}
+    try:
+        dst_target = _resolve_write(dst)
+    except SandboxError as exc:
+        _audit("move_file_denied", {"path": dst, "reason": str(exc)})
+        return {"moved": False, "error": f"destination: {exc}"}
+
+    if not src_target.exists():
+        return {"moved": False, "error": "source not found", "path": src}
+    if src_target.is_dir():
+        return {"moved": False, "error": "source is a directory", "path": src}
+
+    dst_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src_target), str(dst_target))
+    src_rel = _display_path(src_target, layout)
+    dst_rel = _display_path(dst_target, layout)
+    _audit("move_file", {"src": src_rel, "dst": dst_rel})
+
+    commit_sha = git_autocommit(layout, dst_rel, f"agent: move {src_rel} -> {dst_rel}")
+    result: dict[str, Any] = {"moved": True, "src": src_rel, "dst": dst_rel}
+    if commit_sha:
+        result["commit"] = commit_sha
+    return result
+
+
+def copy_file(src: str, dst: str) -> dict[str, Any]:
+    """Copy a file within the instance's sandbox.
+
+    Same sandbox routing as ``move_file`` for both ``src`` and ``dst``.
+    The destination's parent directories are created as needed. Every
+    copy is audited + git-committed (recorded against the destination
+    path)."""
+    layout = _require_layout()
+    try:
+        src_target = _resolve_write(src)
+    except SandboxError as exc:
+        _audit("copy_file_denied", {"path": src, "reason": str(exc)})
+        return {"copied": False, "error": f"source: {exc}"}
+    try:
+        dst_target = _resolve_write(dst)
+    except SandboxError as exc:
+        _audit("copy_file_denied", {"path": dst, "reason": str(exc)})
+        return {"copied": False, "error": f"destination: {exc}"}
+
+    if not src_target.exists():
+        return {"copied": False, "error": "source not found", "path": src}
+    if src_target.is_dir():
+        return {"copied": False, "error": "source is a directory", "path": src}
+
+    dst_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(src_target), str(dst_target))
+    src_rel = _display_path(src_target, layout)
+    dst_rel = _display_path(dst_target, layout)
+    _audit("copy_file", {"src": src_rel, "dst": dst_rel})
+
+    commit_sha = git_autocommit(layout, dst_rel, f"agent: copy {src_rel} -> {dst_rel}")
+    result: dict[str, Any] = {"copied": True, "src": src_rel, "dst": dst_rel}
     if commit_sha:
         result["commit"] = commit_sha
     return result
@@ -512,6 +588,28 @@ def _t_patch(path: str, old: str, new: str, replace_all: bool = False) -> dict:
 def _t_delete_file(path: str) -> dict:
     """Delete a file from the skills/ directory."""
     return delete_file(path=path)
+
+
+@register_tool_from_function(name="move_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="move_file",
+               summary="move a file in the skills workspace")
+def _t_move_file(src: str, dst: str) -> dict:
+    """Move (rename) a file inside the sandboxed skills/ workspace.
+    Both `src` and `dst` follow the same routing as `write_file`
+    (`workspace/...` vs. everything else → skills/). Refuses any
+    source or destination that escapes the sandbox."""
+    return move_file(src=src, dst=dst)
+
+
+@register_tool_from_function(name="copy_file")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
+               operation="copy_file",
+               summary="copy a file in the skills workspace")
+def _t_copy_file(src: str, dst: str) -> dict:
+    """Copy a file inside the sandboxed skills/ workspace. Same
+    sandbox routing as `move_file` for both `src` and `dst`."""
+    return copy_file(src=src, dst=dst)
 
 
 @register_tool_from_function(name="read_file", side_effect="read")

@@ -49,11 +49,14 @@ def test_write_and_effect_tools_are_tier_gated() -> None:
         "append_file": PermissionTier.WRITE_LOCAL,
         "patch": PermissionTier.WRITE_LOCAL,
         "delete_file": PermissionTier.WRITE_LOCAL,
+        "move_file": PermissionTier.WRITE_LOCAL,
+        "copy_file": PermissionTier.WRITE_LOCAL,
         "execute_code": PermissionTier.WRITE_LOCAL,
         "image_generate": PermissionTier.WRITE_LOCAL,
         "browser": PermissionTier.EXTERNAL_EFFECT,
         "open_on_host": PermissionTier.EXTERNAL_EFFECT,
         "send_message": PermissionTier.EXTERNAL_EFFECT,
+        "send_email": PermissionTier.EXTERNAL_EFFECT,
     }
     for name, tier in expected.items():
         assert name in tools, f"{name} is not registered"

@@ -73,6 +73,90 @@ def test_edit_file_rejects_sandbox_escape(bound_instance):
     assert result["edited"] is False
 
 
+# ── move_file / copy_file ───────────────────────────────────────────
+
+
+def test_move_file_relocates_within_the_sandbox(bound_instance):
+    tools.file_write("a.txt", "hello\n")
+    result = tools.move_file("a.txt", "b.txt")
+    assert result["moved"] is True
+    assert result["src"].endswith("a.txt")
+    assert result["dst"].endswith("b.txt")
+    assert tools.file_read("skills/b.txt")["content"] == "hello\n"
+    assert tools.file_read("skills/a.txt")["read"] is False
+
+
+def test_move_file_creates_destination_parent_dirs(bound_instance):
+    tools.file_write("a.txt", "hello\n")
+    result = tools.move_file("a.txt", "sub/dir/b.txt")
+    assert result["moved"] is True
+    assert tools.file_read("skills/sub/dir/b.txt")["content"] == "hello\n"
+
+
+def test_move_file_missing_source(bound_instance):
+    result = tools.move_file("nope.txt", "dest.txt")
+    assert result["moved"] is False
+    assert "not found" in result["error"]
+
+
+def test_move_file_rejects_source_sandbox_escape(bound_instance, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret\n")
+    result = tools.move_file(str(outside), "dest.txt")
+    assert result["moved"] is False
+    assert "source" in result["error"]
+    assert outside.exists()  # never touched
+
+
+def test_move_file_rejects_destination_sandbox_escape(bound_instance, tmp_path):
+    tools.file_write("a.txt", "hello\n")
+    escape = tmp_path / "escape.txt"
+    result = tools.move_file("a.txt", str(escape))
+    assert result["moved"] is False
+    assert "destination" in result["error"]
+    assert not escape.exists()
+    # source is untouched since the destination was refused first-class
+    assert tools.file_read("skills/a.txt")["read"] is True
+
+
+def test_copy_file_duplicates_within_the_sandbox(bound_instance):
+    tools.file_write("a.txt", "hello\n")
+    result = tools.copy_file("a.txt", "b.txt")
+    assert result["copied"] is True
+    assert tools.file_read("skills/a.txt")["content"] == "hello\n"
+    assert tools.file_read("skills/b.txt")["content"] == "hello\n"
+
+
+def test_copy_file_missing_source(bound_instance):
+    result = tools.copy_file("nope.txt", "dest.txt")
+    assert result["copied"] is False
+    assert "not found" in result["error"]
+
+
+def test_copy_file_rejects_source_sandbox_escape(bound_instance, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret\n")
+    result = tools.copy_file(str(outside), "dest.txt")
+    assert result["copied"] is False
+    assert "source" in result["error"]
+
+
+def test_copy_file_rejects_destination_sandbox_escape(bound_instance, tmp_path):
+    tools.file_write("a.txt", "hello\n")
+    escape = tmp_path / "escape.txt"
+    result = tools.copy_file("a.txt", str(escape))
+    assert result["copied"] is False
+    assert "destination" in result["error"]
+    assert not escape.exists()
+
+
+def test_move_file_refuses_a_directory_source(bound_instance):
+    tools.file_write("dir/inner.txt", "x\n")
+    result = tools.move_file("dir", "dir2")
+    assert result["moved"] is False
+    assert "directory" in result["error"]
+
+
 # ── search_files ─────────────────────────────────────────────────────
 
 

@@ -546,6 +546,7 @@ def test_self_model_block_categories_are_derived_not_hardcoded(monkeypatch):
     monkeypatch.setattr(persona_lane, "_live_tool_names", lambda: set())
     monkeypatch.setattr(persona_lane, "_installed_slots", lambda: set())
     monkeypatch.setattr(persona_lane, "_installed_messaging_channels", lambda: [])
+    monkeypatch.setattr(persona_lane, "_messaging_configured_state", lambda: None)
     empty = build_self_model_block()
     # Nothing registered -> just the header, no category lines at all.
     assert empty.strip() == persona_lane._SELF_MODEL_HEADER
@@ -555,10 +556,14 @@ def test_self_model_block_categories_are_derived_not_hardcoded(monkeypatch):
     monkeypatch.setattr(
         persona_lane, "_installed_messaging_channels", lambda: ["telegram"],
     )
+    monkeypatch.setattr(
+        persona_lane, "_messaging_configured_state",
+        lambda: "messaging: telegram ✓ available",
+    )
     populated = build_self_model_block()
     assert "web & search" in populated
     assert "speech" in populated
-    assert "messaging (telegram when configured)" in populated
+    assert "messaging: telegram ✓ available" in populated
     assert "files/code" not in populated  # no files/code tool names registered
 
 

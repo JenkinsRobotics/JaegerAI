@@ -38,11 +38,13 @@ from jaeger_ai.core.context import (
 # File ops (all sandboxed to <instance>/skills/)
 from .files import (
     append_file,
+    copy_file,
     delete_file,
     edit_file,
     file_read,
     file_write,
     list_skill_dir,
+    move_file,
     reset_read_tracker,
     search_files,
 )
@@ -159,7 +161,7 @@ __all__ = [
     "SandboxError", "_audit", "_require_layout", "_resolve_under", "git_autocommit",
     # files
     "file_write", "file_read", "list_skill_dir", "append_file", "delete_file",
-    "edit_file", "search_files", "reset_read_tracker",
+    "edit_file", "search_files", "reset_read_tracker", "move_file", "copy_file",
     # time_and_math
     "get_time", "calculate", "system_status",
     # memory

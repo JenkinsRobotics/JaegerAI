@@ -265,6 +265,12 @@ _SELF_MODEL_TOOLSET_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("memory & people", ("memory_granular", "people")),
     ("web & search", ("web",)),
     ("smart home", ("smart_home",)),
+    # 0.9.3 Task 3c: email is a registry-derived group like every other
+    # entry here — it appears the moment tools/email.py's send_email
+    # registers (main.py imports it right after messaging.py), never a
+    # hand-added line. No separate wiring needed beyond the TOOLSETS
+    # "email" bucket (toolset_scoping.py) this key points at.
+    ("email", ("email",)),
     ("diagnostics & system", ("diagnostics", "models")),
 )
 
@@ -275,6 +281,31 @@ _SELF_MODEL_SLOT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("vision/avatar/image", ("media", "animation")),
 )
 
+# 0.9.3 Task 3b (operator field brief: "open YouTube in Safari" died not
+# because the tool was missing but because the id had no idea it COULD
+# drive the desktop). Direct tool-name membership rather than a
+# toolset_scoping category, deliberately: the "background" TOOLSETS
+# bucket that ``open_on_host`` lives in also holds unrelated always-on
+# tools (start_background, list_background, ...), so keying off that
+# category would claim app-control even with the macOS skill absent.
+# These three names are the actual app-control surface — the
+# macos_computer_v1 skill's ``computer_use`` umbrella (AppleScript→CDP→
+# AX ladder + screenshot), ``browser`` (Playwright), and the always-
+# registered ``open_on_host`` (URL/file/app launch) — intersected with
+# the live registry so an unavailable skill (e.g. pyobjc missing) drops
+# the line instead of overclaiming.
+_SELF_MODEL_APP_CONTROL_TOOLS: frozenset[str] = frozenset({
+    "open_on_host", "computer_use", "browser",
+})
+_SELF_MODEL_APP_CONTROL_LABEL = (
+    "app control (open apps/URLs, drive macOS apps, take screenshots)"
+)
+
+# 0.9.3 Task 3 added three more possible lines (email, app control, and
+# the richer per-channel messaging status) — measured worst-case (every
+# group + a 3-channel "✓ active/✗ (needs token)/✓ available" messaging
+# line) is ~372 chars, comfortably inside the original 600-char budget,
+# so the cap itself didn't need to move; only wording stayed tight.
 _SELF_MODEL_MAX_CHARS = 600  # ~150 tokens at a rough 4 chars/token estimate
 
 _self_model_cache: dict[str, str] = {}
@@ -294,14 +325,58 @@ def _installed_slots() -> set[str]:
 def _installed_messaging_channels() -> list[str]:
     """Which messaging platform modules are actually installed (their
     module.yaml is present) — capability, not live-configured-with-
-    credentials status; SELF-STATE (the delegation rule above) is what
-    catches "is it actually SET UP", this just says what could be."""
+    credentials status; :func:`_messaging_configured_state` (below) is
+    what turns this into the real per-channel status line."""
     try:
         from jaeger_os.core.modules import discover_modules
         specs = discover_modules().get("messaging", [])
         return sorted({s.module for s in specs})
     except Exception:  # noqa: BLE001 — self-model is best-effort
         return []
+
+
+def _messaging_channel_status(channel: str, layout: Any) -> str:
+    """One channel's configured-state tag: ``✓ active`` (installed,
+    credentialed, and in this instance's boot autostart list), ``✓
+    available`` (credentialed but not autostarted), or ``✗ (needs
+    token)`` (no credential yet). Best-effort against a live-but-not-
+    yet-credentialed instance; never raises."""
+    try:
+        from jaeger_ai.plugins import _BRIDGE_SPECS, plugin_credential
+        token_name = (_BRIDGE_SPECS.get(channel) or {}).get("token")
+        has_credential = True if not token_name else bool(plugin_credential(layout, token_name))
+    except Exception:  # noqa: BLE001 — self-model is best-effort
+        has_credential = True  # don't falsely claim "needs token" on a lookup error
+    if not has_credential:
+        return "✗ (needs token)"
+    try:
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        cfg = load_yaml(layout.config_path, Config)
+        autostart = {n.strip().lower() for n in (cfg.plugins.autostart or [])}
+    except Exception:  # noqa: BLE001 — self-model is best-effort
+        autostart = set()
+    return "✓ active" if channel in autostart else "✓ available"
+
+
+def _messaging_configured_state() -> str | None:
+    """0.9.3 Task 3a — the operator's literal ask: "messaging: telegram
+    ✓ active · discord ✗ (needs token) · imessage ✓ available" instead
+    of the old bare "installed" listing, so post-boot setup amnesia
+    ("is telegram set up?") has real state to ground on. Falls back to
+    the bare channel name (no status suffix) when no instance is bound
+    yet — the block must never overclaim a status it can't check."""
+    channels = _installed_messaging_channels()
+    if not channels:
+        return None
+    try:
+        from jaeger_ai.core.context import get_layout
+        layout = get_layout()
+    except Exception:  # noqa: BLE001 — no bound instance yet
+        layout = None
+    if layout is None:
+        return "messaging: " + " · ".join(channels)
+    parts = [f"{ch} {_messaging_channel_status(ch, layout)}" for ch in channels]
+    return "messaging: " + " · ".join(parts)
 
 
 def _live_tool_names() -> set[str]:
@@ -334,9 +409,11 @@ def build_self_model_block() -> str:
     for label, keys in _SELF_MODEL_SLOT_GROUPS:
         if any(k in slots for k in keys):
             lines.append(f"- {label}")
-    channels = _installed_messaging_channels()
-    if channels:
-        lines.append(f"- messaging ({'/'.join(channels)} when configured)")
+    if _SELF_MODEL_APP_CONTROL_TOOLS & tool_names:
+        lines.append(f"- {_SELF_MODEL_APP_CONTROL_LABEL}")
+    messaging_line = _messaging_configured_state()
+    if messaging_line:
+        lines.append(f"- {messaging_line}")
     block = "\n".join(lines)
     if len(block) > _SELF_MODEL_MAX_CHARS:
         block = block[:_SELF_MODEL_MAX_CHARS].rstrip()
