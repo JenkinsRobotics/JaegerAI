@@ -6,6 +6,12 @@ The loader validates STRICTLY (unknown fields refuse, missing adapters
 refuse, framework-version mismatch refuses) — loudly at load time with
 the offending entry named, never a silent degrade. The schema ships
 with its validator in the same commit (standing rule).
+
+The schema TYPES (``PackageSpec`` and friends) live in
+``jaeger_os.contract.capability`` (0.9 contract package) — re-exported here
+unchanged so existing ``from .package import PackageSpec`` call sites keep
+working. This module owns the LOADER: parsing, validation, ref resolution,
+and transport/link construction.
 """
 
 from __future__ import annotations
@@ -16,61 +22,18 @@ from typing import Any
 
 import msgspec
 
+from jaeger_os.contract.capability import (
+    CapabilitySpec,
+    ControllerSpec,
+    LinkSpec,
+    PackageSpec,
+    RelaySpec,
+    SafetySpec,
+)
+
 from . import link as _link_mod
 from .protocol import make_protocol
 from .transport import MockTransport, SerialTransport, Transport, ZmqReqTransport
-
-
-class RelaySpec(msgspec.Struct, forbid_unknown_fields=True):
-    """Optional fallback path (the CC01 serial-over-ZMQ relay)."""
-    transport: str
-    endpoint: str = ""
-    target: str = ""
-
-
-class LinkSpec(msgspec.Struct, forbid_unknown_fields=True):
-    transport: str                      # serial | zmq_req | mock
-    protocol: str = "ascii_bracket"
-    port: str = ""
-    baud: int = 115200
-    endpoint: str = ""
-    target: str = ""
-    relay: RelaySpec | None = None
-
-
-class ControllerSpec(msgspec.Struct, forbid_unknown_fields=True):
-    node: str                           # generic node kind (motor/light/vision)
-    adapter: str                        # "pkg.adapters.mod:ClassName"
-    link: LinkSpec
-    enabled: bool = True
-    simulated: bool = False
-    heartbeat_expect_s: float = 0.0     # 0 = firmware doesn't heartbeat
-    streams: dict[str, Any] = {}        # high-rate endpoints (bus-native, not Link)
-
-
-class CapabilitySpec(msgspec.Struct, forbid_unknown_fields=True):
-    name: str                           # "motion.move_joints" (subsystem.action)
-    controller: str                     # key into controllers (or "*")
-    schema: str                         # "pkg.capabilities:ArgsModel"
-    handler: str = ""                   # "pkg.capabilities:fn" — empty = the
-    #                                     convention: schema module + action name
-    tier: str = "HARDWARE"              # permission tier label (fail-safe default)
-    description: str = ""
-    allow_when_latched: bool = False    # motion.stop sets this — it IS the stop
-
-
-class SafetySpec(msgspec.Struct, forbid_unknown_fields=True):
-    estop_scope: list[str] = []
-    firmware_watchdog_required: bool = False
-
-
-class PackageSpec(msgspec.Struct, forbid_unknown_fields=True):
-    package: str
-    requires_framework: str = ""
-    display_name: str = ""
-    controllers: dict[str, ControllerSpec] = {}
-    capabilities: list[CapabilitySpec] = []
-    safety: SafetySpec | None = None
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:

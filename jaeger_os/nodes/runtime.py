@@ -37,6 +37,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
 from jaeger_os.nodes.base import NodeState
 try:
@@ -594,7 +595,7 @@ def _build_animation_node(
     bus: Bus,
     *,
     bridge_host: str = "127.0.0.1",
-    bridge_port: int = 8765,
+    bridge_port: int = ANIMATION_BRIDGE_DEFAULT_PORT,
     enable_bridge: bool = True,
 ) -> AnimationNode:
     """Construct an :class:`AnimationNode` directly on ``bus`` — the
@@ -639,7 +640,7 @@ def _build_animation_node(
 def ensure_animation_node(
     *,
     bridge_host: str = "127.0.0.1",
-    bridge_port: int = 8765,
+    bridge_port: int = ANIMATION_BRIDGE_DEFAULT_PORT,
     enable_bridge: bool = True,
 ) -> AnimationNode:
     """Make sure an AnimationNode is running on the bus.  Idempotent.

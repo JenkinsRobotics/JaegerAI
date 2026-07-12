@@ -53,10 +53,11 @@ Projects            ← the assembled THINGS, each its own repo, pulling in
 one box — that's how the tiers were *discovered*, not a mistake):
 
 - **JaegerOS framework** — `jaeger_os/core/` (the bus, `Node`, `modules.py`
-  discovery/loader), `jaeger_os/interfaces/protocol.py` + `bridge.py` (the
-  wire contract), the Supervisor, `jaeger_os/hardware/` (package loader,
-  capability registration, `EStopLatch`), the not-yet-extracted
-  `jaeger_os/contract/` (0.9 work item).
+  discovery/loader), `jaeger_os/contract/` (0.9 work item, DONE: topics,
+  protocol, capability/module types, ports, wire formats — the one wire
+  truth, imports nothing from the rest of `jaeger_os`), `bridge.py` (the
+  protocol implementation), the Supervisor, `jaeger_os/hardware/` (package
+  loader, capability registration, `EStopLatch`).
 - **Jaeger AI (the product)** — `jaeger_os/agent/` (the loop, tool registry,
   availability gates, `persona_first` id/ego pipeline), `jaeger_os/personality/`
   (characters, the persona compiler), memory (`<instance>/memory/state.db`),
@@ -101,7 +102,7 @@ Three connection types, three mechanisms:
    first genuinely multi-module slot (discord/telegram/imessage coexist,
    ANY-OF readiness).
 3. **NDJSON protocol + `JrosClient` (outside apps ↔ the Mind).** One wire
-   contract (`jaeger_os/interfaces/protocol.py`), many transports —
+   contract (`jaeger_os/contract/protocol.py`), many transports —
    "transports, not endpoints." The Swift app speaks it over stdio
    (`jaeger bridge`); the MCP server, a future web backend, or any
    third-party client speaks the *same* frames through the same SDK
@@ -230,7 +231,7 @@ alongside newer surfaces per standing operator instruction), **voice**
 (whisper_stt/kokoro_tts modules), and the frozen PySide6 shipping set. All
 faces are clients of the one protocol described in §3.
 
-**The protocol + client SDK.** `jaeger_os/interfaces/protocol.py` (the wire
+**The protocol + client SDK.** `jaeger_os/contract/protocol.py` (the wire
 contract) + `jaeger_os/interfaces/client.py` (`JrosClient`, the SDK any
 surface — including third-party ones — uses to speak the same frames).
 
@@ -374,7 +375,7 @@ quit and reopen).
 `.superpowers/sdd/progress.md` (tail) · every `module.yaml` under
 `jaeger_os/nodes/*/` and `jaeger_os/plugins/*/` · the `plugin.yaml` files
 for `homeassistant`/`ai_gen`/`mcp` · `jaeger_os/hardware/packages/jp01/
-topology.yaml` · `jaeger_os/interfaces/protocol.py` (module docstring) ·
+topology.yaml` · `jaeger_os/contract/protocol.py` (module docstring) ·
 `jaeger_os/core/modules.py` (module docstring) ·
 `dev/docs/reality/persona_compiler.md` · `dev/docs/reality/
 memory_architecture.md` · `jaeger_os/personality/characters/` (directory

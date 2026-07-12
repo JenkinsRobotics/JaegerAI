@@ -27,6 +27,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from jaeger_os.contract.wire import LENGTH_PREFIX_FORMAT
+
 
 @dataclass
 class FrameEnvelope:
@@ -323,7 +325,7 @@ class TCPCameraAdapter:
         header = self._recv_exact(4)
         if header is None:
             return None
-        (length,) = struct.unpack("!I", header)
+        (length,) = struct.unpack(LENGTH_PREFIX_FORMAT, header)
         if length == 0 or length > 64 * 1024 * 1024:
             # 64 MB cap — anything larger is wire corruption,
             # not a real frame.

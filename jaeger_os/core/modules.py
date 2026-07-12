@@ -24,6 +24,11 @@ list (ANY-OF readiness is a caller concern, see
 NO manifest.py changes here: manifests keep explicit factory strings
 for now. module.yaml is authoritative *metadata*; slot-resolution
 binding (manifests picking a factory *by slot*) is a later step.
+
+``ModuleSpec`` itself lives in ``jaeger_os.contract.modules`` (0.9 contract
+package) — re-exported here unchanged so existing ``from
+jaeger_os.core.modules import ModuleSpec`` call sites keep working. This
+module owns the LOADER: discovery, parsing, and validation.
 """
 
 from __future__ import annotations
@@ -33,29 +38,13 @@ import sys
 
 import msgspec
 
+from jaeger_os.contract.modules import ModuleSpec
 
 # The two directories module.yaml files live under. Derived the same
 # way (relative to this file, not cwd) so discovery works regardless
 # of where the process was launched from.
 NODES_DIR = pathlib.Path(__file__).resolve().parents[1] / "nodes"
 PLUGINS_DIR = pathlib.Path(__file__).resolve().parents[1] / "plugins"
-
-
-class ModuleSpec(msgspec.Struct, forbid_unknown_fields=True):
-    module: str
-    slot: str
-    factory: str
-    version: str = ""
-    consumes: list[str] = []
-    produces: list[str] = []
-    tools: list[str] = []
-    config: str = ""
-    requires_libraries: list[str] = []
-    # Host-platform gate (module.yaml's analogue of a plugin manifest's
-    # ``requires: platform:``) — empty means "any platform". 0.8 M3b:
-    # imessage is darwin-only; strict like requires_libraries, no
-    # silent default beyond "unset = unrestricted".
-    requires_platform: list[str] = []
 
 
 def _check_factory(factory: str, *, path: pathlib.Path) -> None:
