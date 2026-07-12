@@ -11,4 +11,4 @@ dev/docs/roadmap/SPLIT_FILE_MAP.md in the JROS repo); history preserved
 via ``git filter-repo``.
 """
 
-__version__ = "0.9.0-dev"
+__version__ = "0.9.0"
