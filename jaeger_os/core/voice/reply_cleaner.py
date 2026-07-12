@@ -33,9 +33,13 @@ def clean_voice_reply(text: str | None) -> str:
 
     if "<|channel|>" in cleaned:
         try:
-            from jaeger_os.agent.dialects import parse_harmony
+            # 0.9 step 4 split: agent/ (incl. dialects.py) moved to the
+            # Mind's own package (jaeger_ai today) — resolved via
+            # resolve_mind_module instead of a hardcoded dotted import.
+            from jaeger_os.core.modules import resolve_mind_module
+            dialects_mod = resolve_mind_module("agent.dialects")
 
-            _calls, answer = parse_harmony(cleaned)
+            _calls, answer = dialects_mod.parse_harmony(cleaned)
             if answer:
                 cleaned = answer
         except Exception:  # noqa: BLE001

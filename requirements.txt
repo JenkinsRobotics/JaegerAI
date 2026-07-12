@@ -1,0 +1,32 @@
+# JaegerOS runtime dependencies.
+#
+# Framework-tier only — no LLM/inference, no messaging, no vision-model
+# deps (those are jaeger-ai / engine-repo concerns). Pinned to lower
+# bounds so a fresh clone gets the latest patch releases.
+
+# --- transport / contract / core substrate ---
+pydantic>=2.0
+msgspec>=0.18
+pyzmq>=26.0
+pyyaml>=6.0
+numpy>=1.26
+requests>=2.32
+certifi>=2024.0
+rich>=13.0
+
+# --- core/audio: mic/speaker session, echo cancellation, chimes ---
+sounddevice>=0.4.6
+scipy>=1.11
+webrtcvad-wheels>=2.0.14
+
+# --- hardware/nodes/{motor,light,vision} adapters ---
+pyserial>=3.5
+opencv-python>=4.9
+
+# macOS audio + accessibility frameworks (pyobjc) — macOS only.
+pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
+
+# --- dev tooling (uncomment if doing JaegerOS development) ---
+# pytest>=8.0
+# pytest-asyncio>=0.23
+# ruff>=0.4

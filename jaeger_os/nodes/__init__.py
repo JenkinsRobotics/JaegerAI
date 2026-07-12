@@ -23,29 +23,48 @@ The Track B audio_session / tts nodes will all subclass this.
 from .base import Node, NodeState
 from .light import LightAdapter, LightNode, SerialLightAdapter
 from .motor import MotorAdapter, MotorNode, SerialMotorAdapter
-try:
-    from .kokoro_tts import Synthesizer, TTSNode
-except ImportError:
-    # 0.8 M2a: kokoro_tts is an engine-module (jaeger_os/nodes/kokoro_tts/)
-    # that can be removed from a deployment entirely. The names stay
-    # importable (``from jaeger_os.nodes import TTSNode`` still resolves)
-    # so nothing crashes at import time; the availability gate
-    # (agent/availability.py's ``_module_ready``) already fails closed on
-    # ``text_to_speech`` when discovery finds no kokoro_tts module.
-    Synthesizer = None  # type: ignore[assignment,misc]
-    TTSNode = None  # type: ignore[assignment,misc]
-try:
-    from .whisper_stt import AudioSessionNode, STTAdapter, STTNode
-except ImportError:
-    # 0.8 M2b: same tolerance as the kokoro_tts guard above —
-    # whisper_stt is an engine-module (jaeger_os/nodes/whisper_stt/)
-    # that can be removed from a deployment entirely. The availability
-    # gate already fails closed on ``listen`` when discovery finds no
-    # whisper_stt module.
-    AudioSessionNode = None  # type: ignore[assignment,misc]
-    STTAdapter = None  # type: ignore[assignment,misc]
-    STTNode = None  # type: ignore[assignment,misc]
 from .vision import CameraAdapter, TCPCameraAdapter, USBCameraAdapter, VisionNode
+
+# 0.9 step 4 split: kokoro_tts/whisper_stt stopped being nested
+# submodules of jaeger_os.nodes (``.kokoro_tts`` / ``.whisper_stt``) and
+# became wholly separate installed packages (jaeger_kokoro_tts,
+# jaeger_whisper_stt) — a hardcoded ``from .kokoro_tts import ...``
+# relative import can no longer even ATTEMPT to resolve them. Resolved
+# via ``core.modules.resolve_slot_symbols`` (discover_modules() + the
+# winning module's factory-string module) instead — the same discovery
+# path app/app.py's slot-binding already uses (M2a pattern), so
+# whichever package actually ships the tts/stt module (in this tree or
+# any other installed one) is found the same way.
+#
+# LAZY via module ``__getattr__`` (PEP 562), NOT resolved eagerly at
+# import time — found the hard way (0.9 step 4 gate 1): the engine
+# packages' own node.py does ``from jaeger_os.nodes.base import Node``,
+# so whichever import chain reaches the engine package FIRST can
+# re-enter THIS package mid-initialization. If jaeger_os.nodes'
+# discovery eagerly imports the engine module at that exact moment, it
+# gets the engine's PARTIALLY-initialized module object back from
+# sys.modules (Python's own reentrant-import guard) — TTSNode/
+# Synthesizer aren't SET on it yet, so eager resolution permanently
+# caches None even though the engine is genuinely installed and works
+# fine a moment later. Resolving on first ACCESS instead (long after
+# all modules have finished importing) sidesteps the race entirely.
+# Absent (no module installed for the slot) resolves every name to
+# None, same fail-soft shape as the old ImportError guard — the
+# availability gate (agent/availability.py's ``_module_ready``) is what
+# fails the actual tool closed, this is just import-time tolerance.
+from jaeger_os.core.modules import resolve_slot_symbols as _resolve_slot_symbols
+
+_TTS_NAMES = ("Synthesizer", "TTSNode")
+_STT_NAMES = ("AudioSessionNode", "STTAdapter", "STTNode")
+
+
+def __getattr__(name: str):
+    if name in _TTS_NAMES:
+        return _resolve_slot_symbols("tts", _TTS_NAMES).get(name)
+    if name in _STT_NAMES:
+        return _resolve_slot_symbols("stt", _STT_NAMES).get(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Node", "NodeState",

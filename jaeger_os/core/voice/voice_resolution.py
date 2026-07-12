@@ -11,9 +11,19 @@ and runtime/hardware must never import ``agent/`` (the nervous-system
 rule). Living in ``core.voice`` lets both ``agent/tools/speak.py`` and
 ``nodes/runtime.py`` import it without either one reaching into the
 other's tier.
+
+0.9 step 4 split: every cross-tier lookup below (instance context,
+Config schema, active character, kokoro's own config) now resolves
+through ``core.modules``'s discovery helpers instead of a hardcoded
+dotted import — the owning packages (the Mind, the tts engine) are
+separate installed packages post-split, so their dotted paths aren't
+knowable at write-time. Absent-Mind / absent-engine both degrade to
+the empty-string default, same fail-soft shape as before.
 """
 
 from __future__ import annotations
+
+from jaeger_os.core.modules import resolve_mind_module, resolve_slot_symbols
 
 
 def _module_default_voice() -> str:
@@ -26,14 +36,16 @@ def _module_default_voice() -> str:
     config.yaml actually changes the spoken default; falls back to the
     module's own dataclass default when there's no instance to read
     yet (fresh boot, no layout bound)."""
-    from jaeger_os.core.context import _require_layout
-    from jaeger_os.nodes.kokoro_tts import KokoroTTSConfig
+    context_mod = resolve_mind_module("core.context")
+    KokoroTTSConfig = resolve_slot_symbols("tts", ("KokoroTTSConfig",)).get(
+        "KokoroTTSConfig")
     try:
-        layout = _require_layout()
-        from jaeger_os.core.instance.schemas import Config, load_yaml
-        return load_yaml(layout.config_path, Config).kokoro_tts.voice
+        layout = context_mod._require_layout()
+        schemas_mod = resolve_mind_module("core.instance.schemas")
+        return schemas_mod.load_yaml(layout.config_path,
+                                      schemas_mod.Config).kokoro_tts.voice
     except Exception:
-        return KokoroTTSConfig().voice
+        return KokoroTTSConfig().voice if KokoroTTSConfig is not None else ""
 
 
 def resolve_voice() -> str:
@@ -45,21 +57,21 @@ def resolve_voice() -> str:
     Kokoro with the right voice for the active instance (Jarvis vs.
     Lilith etc.) without each speak() call needing to know which
     instance is active."""
-    from jaeger_os.core.context import _require_layout
+    context_mod = resolve_mind_module("core.context")
     try:
-        layout = _require_layout()
+        layout = context_mod._require_layout()
     except Exception:
         return _module_default_voice()
     try:
-        from jaeger_os.personality.character import active_character
-        ch = active_character(layout.root)
+        personality_mod = resolve_mind_module("personality.character")
+        ch = personality_mod.active_character(layout.root)
         if ch is not None and ch.voice_id:
             return ch.voice_id.strip()
     except Exception:
         pass
-    from jaeger_os.core.instance.schemas import Identity, load_yaml
     try:
-        identity = load_yaml(layout.identity_path, Identity)
+        schemas_mod = resolve_mind_module("core.instance.schemas")
+        identity = schemas_mod.load_yaml(layout.identity_path, schemas_mod.Identity)
     except Exception:
         return _module_default_voice()
     voice_id = (identity.voice_id or "").strip()

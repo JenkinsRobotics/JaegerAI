@@ -180,7 +180,17 @@ class AudioSession:
         wake_phrases = config.wake_phrases or _default_wake_phrases()
         # The STT method registry is the single swap point — flip variants
         # by name via config.stt_mode (unknown name -> two_pass).
-        from jaeger_os.nodes.whisper_stt.engine.registry import get
+        # 0.9 step 4 split: whisper_stt is its own installed package
+        # (jaeger_whisper_stt) — resolved via discover_modules() instead
+        # of a hardcoded dotted import (same reasoning as
+        # nodes/runtime.py's engine-symbol guards).
+        from jaeger_os.core.modules import resolve_slot_module
+        registry = resolve_slot_module("stt", "engine.registry")
+        if registry is None:
+            raise RuntimeError(
+                "AudioSession._build_adapter: no stt-slot module installed"
+            )
+        get = registry.get
 
         return get(config.stt_mode).make(
             config, aec, reference_buffer, wake_phrases)
@@ -328,6 +338,10 @@ class AudioSession:
 
 
 def _default_wake_phrases() -> tuple[str, ...]:
-    from jaeger_os.nodes.whisper_stt.engine._base import DEFAULT_WAKE_PHRASES
-
-    return DEFAULT_WAKE_PHRASES
+    # 0.9 step 4 split: same discovery-driven resolution as
+    # _build_adapter above — whisper_stt is its own installed package.
+    from jaeger_os.core.modules import resolve_slot_module
+    base = resolve_slot_module("stt", "engine._base")
+    if base is None:
+        return ()
+    return base.DEFAULT_WAKE_PHRASES
