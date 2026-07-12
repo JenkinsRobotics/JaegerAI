@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from jaeger_os.nodes.whisper_stt.engine.bench import main  # noqa: E402
+from jaeger_whisper_stt.nodes.whisper_stt.engine.bench import main  # noqa: E402
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))

@@ -38,8 +38,11 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent   # dev/scripts/ → root
-RULES_PATH = REPO / "jaeger_os" / "core" / "prompts" / "rules.py"
-DOC_PATH = REPO / "jaeger_os" / "docs" / "agent_contract.md"
+# 0.9 step 4 split: jaeger_os/ -> jaeger_ai/ (this repo's own package
+# rename). Also fixes a pre-existing stale path: rules.py lives under
+# agent/prompts/, not core/prompts/ (never core/ — that's framework).
+RULES_PATH = REPO / "jaeger_ai" / "agent" / "prompts" / "rules.py"
+DOC_PATH = REPO / "jaeger_ai" / "docs" / "agent_contract.md"
 
 
 # Order matches how ``assemble_prompt`` weaves these into the final
@@ -92,7 +95,7 @@ def render() -> str:
     # Lazy import so a syntax error in rules.py surfaces here, not at
     # script-collection time.
     sys.path.insert(0, str(REPO / "src"))
-    from jaeger_os.agent.prompts import rules as _rules
+    from jaeger_ai.agent.prompts import rules as _rules
 
     for name, intro in _SECTIONS:
         text = getattr(_rules, name, None)

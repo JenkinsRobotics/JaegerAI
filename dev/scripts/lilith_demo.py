@@ -28,7 +28,7 @@ from PIL import Image
 REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO))
 
-from jaeger_os.nodes.animation.adapters import MathAdapter
+from jaeger_ai.nodes.animation.adapters import MathAdapter
 
 
 FACE_SCRIPT = (

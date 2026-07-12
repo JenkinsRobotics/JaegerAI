@@ -1,0 +1,328 @@
+{
+  "total": 79,
+  "passed": 77,
+  "pass_rate": 0.975,
+  "routing_passed": 60,
+  "routing_total": 61,
+  "answer_passed": 46,
+  "answer_total": 47,
+  "errors": 0,
+  "elapsed_s": 462.66,
+  "metrics": {
+    "avg_latency_s": 5.856,
+    "p50_latency_s": 2.732,
+    "p95_latency_s": 18.489,
+    "min_latency_s": 0.31,
+    "max_latency_s": 38.996,
+    "total_tool_dispatches": 108,
+    "avg_tools_per_turn": 1.37,
+    "answer_tokens_total": 9864,
+    "answer_tokens_avg": 124.9,
+    "answer_tokens_per_sec": 21.3,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 2835414,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {
+      "hit the same computer_open_app failure 2 times": 2
+    },
+    "halted_turns": 2,
+    "avg_iterations": 2.25,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.707,
+    "ttft_p50_s": 0.219,
+    "ttft_p95_s": 0.402,
+    "ttft_reported": 79
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 8.917,
+      "p95_latency_s": 38.996,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 27,
+      "passed": 27,
+      "pass_rate": 1.0,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 4.959,
+      "p95_latency_s": 13.749,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 10,
+      "passed": 10,
+      "pass_rate": 1.0,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 8.413,
+      "p95_latency_s": 22.123,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "pass_rate": 0.917,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 1.992,
+      "p95_latency_s": 2.576,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "pass_rate": 0.889,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 2.433,
+      "p95_latency_s": 4.593,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 79,
+      "passed": 77,
+      "pass_rate": 0.975,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 5.856,
+      "p95_latency_s": 18.489,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 27,
+      "passed": 27,
+      "avg_latency_s": 4.959
+    },
+    "files": {
+      "total": 15,
+      "passed": 14,
+      "avg_latency_s": 5.275
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 5.245
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 2.873
+    },
+    "code": {
+      "total": 5,
+      "passed": 4,
+      "avg_latency_s": 5.828
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.03
+    },
+    "multistep": {
+      "total": 10,
+      "passed": 10,
+      "avg_latency_s": 8.413
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 11,
+      "avg_latency_s": 1.992
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 8,
+      "avg_latency_s": 2.433
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 4.747
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.723
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.13
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.348
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 8.767
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 2.332
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 4.53
+    },
+    "skill": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 17.774
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 11.704
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 31.893
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 5.875
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 5.694
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.173
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 8.302
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.463
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 18.702
+    }
+  },
+  "failures": [
+    {
+      "id": "rec_python_zerodiv",
+      "prompt": "Use run_python to evaluate the expression one divided by zero. After it fails, tell me what error na",
+      "tools_called": [
+        "calculate"
+      ],
+      "answer": "The error name Python raised is \"division by zero (undefined)\".",
+      "routing_ok": false,
+      "answer_ok": true,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "chain_weather_t3",
+      "prompt": "Read that file back and tell me what the weather was.",
+      "tools_called": [
+        "read_file"
+      ],
+      "answer": "The weather saved in the file is: Partly cloudy 76°F (feels 80°F), humidity 89%, wind ↗6mph.",
+      "routing_ok": true,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 482.24,
+  "load_s": 46.09,
+  "category_breakdown": {
+    "routing": {
+      "passed": 27,
+      "total": 27
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 10,
+      "total": 10
+    },
+    "recovery": {
+      "passed": 8,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 11,
+      "total": 12
+    },
+    "files": {
+      "passed": 14,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 4,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 4,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 5,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 1,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 2,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260711-225326",
+  "benchmark_version": "1.3"
+}

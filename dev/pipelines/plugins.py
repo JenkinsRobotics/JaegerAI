@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from jaeger_os.agent.tools.plugins import list_plugins, setup_plugin  # noqa: E402
+from jaeger_ai.agent.tools.plugins import list_plugins, setup_plugin  # noqa: E402
 
 
 def main() -> int:

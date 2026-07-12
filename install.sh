@@ -118,7 +118,7 @@ if [[ -d "$REPO_ROOT/dev" ]]; then
   # sees works.
   if command -v swift >/dev/null 2>&1; then
     echo; echo "building JaegerOS-dev.app…"
-    "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
+    "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
       && echo "✓ JaegerOS-dev.app ready (symlinked at repo root)" \
       || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
   fi
@@ -134,7 +134,7 @@ else
   # the surface, quietly.
   if command -v swift >/dev/null 2>&1; then
     echo; echo "building JaegerOS.app (first build takes a minute)…"
-    "$REPO_ROOT/jaeger_os/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
+    "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
       && echo "✓ JaegerOS.app ready" \
       || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
   fi

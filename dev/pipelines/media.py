@@ -17,7 +17,7 @@ _REPO = pathlib.Path(__file__).resolve().parents[2]
 
 def main(argv: list[str]) -> int:
     from jaeger_os.nodes.testing import NodeHarness
-    from jaeger_os.nodes.media.node import MediaNode
+    from jaeger_ai.nodes.media.node import MediaNode
     from jaeger_os.transport import topics
 
     if argv:

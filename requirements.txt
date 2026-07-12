@@ -1,39 +1,26 @@
-# JROS runtime dependencies — installed by ./install.sh into .venv.
+# JaegerAI runtime dependencies — installed by ./install.sh into .venv.
 #
-# Pinned to lower bounds rather than exact versions so a fresh clone
-# gets the latest patch releases. If a breaking upstream lands and
-# wedges installs we'll pin upper bounds on the affected line.
-#
-# Some packages wrap native code; the local system must have:
-#   - PortAudio (for sounddevice; macOS: `brew install portaudio`)
-#   - a C/C++ toolchain (for llama-cpp-python, pywhispercpp)
-# See README "Prerequisites" for the full system-deps list.
+# Product-tier only: the Mind (local/external inference, tools, skills,
+# memory, persona), messaging bridges, vision-model tools, and the
+# windowed/TUI/tray faces. Framework-tier substrate (pydantic, msgspec,
+# pyzmq, numpy, sounddevice/scipy/webrtcvad-wheels for core/audio,
+# pyserial/opencv-python for hardware, the AVFoundation pyobjc piece)
+# comes transitively through the jaeger-os path dependency below — not
+# re-listed here. Pinned to lower bounds so a fresh clone gets the
+# latest patch releases.
+
+# --- framework (path dep for local staging; pin a real published
+# version range here once jaeger-os has releases, per the template's
+# own guidance for a not-yet-on-PyPI sibling package). PEP 508 direct
+# reference, not `-e ../JaegerOS` — setuptools' dynamic-dependencies
+# file parser only accepts requirement specifiers, not pip's `-e`/`-r`
+# directives. ABSOLUTE staging path, tied to this scratch layout;
+# swap for a version-range pin at real release. ---
+jaeger-os @ file:///private/tmp/claude-501/-Users-jonathanjenkins-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerOS
 
 # --- agent core ---
 pydantic>=2.0
-# 0.4 transport schemas (Track A): msgspec.Struct on the hot path —
-# 10× faster than Pydantic for serialization AND native MessagePack
-# support (binary topics: audio_in, audio_out, vision frames).
-# Pydantic stays for config + tool schemas where richer validation
-# earns the overhead.
-msgspec>=0.18
-# 0.4 multi-process transport (Track A.4): pyzmq pub/sub for nodes
-# split across Python processes (./launch --multiprocess) or across
-# boards (Mac↔Jetson↔Teensy when JP01 wires up).  ~50 KB library,
-# sub-ms local latency, inproc/ipc/tcp modes behind the same Bus
-# interface as InProcBus.
-pyzmq>=26.0
-# Animation/avatar frame bridge (nodes/software/animation/bridge.py) serves
-# frames over a WebSocket; the TTS path reaches it. Directly imported via
-# websockets.asyncio.server (the new asyncio API, websockets >= 13). It
-# arrives transitively through openai/mcp today, but a direct import must be
-# a direct dependency — a fresh install proved it can otherwise go missing
-# (TTS failed with "websockets is missing").
-websockets>=13.0
-pyyaml>=6.0
-numpy>=1.26
 requests>=2.32
-certifi>=2024.0
 rich>=13.0
 prompt-toolkit>=3.0
 llama-cpp-python>=0.3
@@ -43,28 +30,25 @@ mlx-lm>=0.21; sys_platform == "darwin" and platform_machine == "arm64"
 croniter>=2.0
 ddgs>=9.0
 
-# --- voice: Kokoro TTS + Whisper STT + audio I/O ---
-sounddevice>=0.4.6
-scipy>=1.11
-webrtcvad-wheels>=2.0.14
+# --- voice-adjacent, product-owned (not engine-specific) ---
+# openwakeword's call site wasn't disambiguated from the whisper_stt
+# engine module during this pass (0.9 step 4 staging) — kept here
+# rather than dropped; a false-positive product dependency is cheap, a
+# missing one breaks wake-word at runtime. Re-verify at the next real
+# engine swap.
 openwakeword>=0.6
-pywhispercpp>=1.4
-kokoro>=0.9.4
 
-# macOS audio + accessibility frameworks (pyobjc) — macOS only. The avaudio
-# TTS/STT backend (core/runtime/preflight) prefers AVFoundation; the core
-# macos_computer skill drives the UI through Quartz + ApplicationServices.
-# A fresh install pulled these only transitively, so a clean macOS install
-# hit "No module named 'AVFoundation'". Marked darwin so non-macOS installs
-# skip them cleanly.
-pyobjc-framework-AVFoundation>=10.0; sys_platform == "darwin"
+# --- animation/media faces (nodes/animation, nodes/media — product-shipped
+# modules, one consumer each per THREE_TIER_STRUCTURE.md's split triggers) ---
+websockets>=13.0
+pyyaml>=6.0
+
+# macOS accessibility frameworks (pyobjc) — macOS only. The core
+# macos_computer skill drives the UI through Quartz + ApplicationServices
+# (agent-owned skill, not framework substrate — AVFoundation itself
+# stays a jaeger-os dep, core/runtime/preflight's avaudio backend).
 pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
-# Acoustic echo cancellation (core/audio/aec.py) is OPTIONAL — its native
-# build needs the speex system lib and the code degrades to passthrough
-# without it. Moved to the `aec` extra so a clean install never breaks on it:
-#   pip install 'jaeger-os[aec]'   (after: brew install speexdsp / apt install libspeexdsp-dev)
-# See [project.optional-dependencies] in pyproject.toml.
 
 # --- vision: look_at + generate_image ---
 torch>=2.2
@@ -101,7 +85,7 @@ rumps>=0.4; sys_platform == 'darwin'
 # the rumps one as the windowed app supersedes the CLI/TUI default.
 pyside6>=6.5
 
-# --- dev tooling (uncomment if doing JROS development) ---
+# --- dev tooling (uncomment if doing JaegerAI development) ---
 # pytest>=8.0
 # pytest-asyncio>=0.23
 # pytest-xdist>=3.5

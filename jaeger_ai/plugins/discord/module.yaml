@@ -1,0 +1,26 @@
+module: discord
+slot: messaging
+version: 1.0.0
+tools: [send_message]
+factory: jaeger_ai.plugins.discord.bridge:DiscordBridge
+# 0.8 M3b: graduated from plugin.yaml (deleted) — messaging is the
+# first multi-module slot (discord/telegram/imessage all declare
+# slot: messaging and coexist; send_message is available iff ANY of
+# them is ready, see jaeger_os/agent/availability.py's ANY-OF gate).
+# `factory` names the real bridge class but NO manifest binds this slot
+# — and none should: bridges are not factory(bus, config) chassis nodes;
+# a [[node]] slot="messaging" would misconstruct the bridge. (—
+# bridges are agent-side threads started via activate_plugin/autostart/
+# start_bridge, jaeger_os/plugins/__init__.py:109, NOT chassis nodes).
+#
+# discord.py's DISTRIBUTION name is `discord.py`; the IMPORT name is
+# `discord` — requires_libraries probes import names (importlib.util.
+# find_spec), so it must be `discord`, not the pip name.
+requires_libraries: [discord]
+# DISCORD_BOT_TOKEN is deliberately NOT modeled as a requirement here.
+# Tokens live in the instance credential store first, env second
+# (plugins/__init__.py:57 plugin_credential) — an unset env var must
+# NOT hard-gate send_message's availability (a user who's stored the
+# token via set_credential is genuinely ready). The mid-turn
+# start_bridge() call is where a missing credential actually surfaces
+# (a precise, actionable error), not the availability gate.

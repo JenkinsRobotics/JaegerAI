@@ -1,0 +1,25 @@
+module: imessage
+slot: messaging
+version: 1.0.0
+tools: [send_message]
+factory: jaeger_ai.plugins.imessage.bridge:IMessageBridge
+# 0.8 M3b: graduated from plugin.yaml (deleted) — see discord/module.yaml
+# for the full multi-module-slot rationale. `factory` names the real bridge class but no manifest should bind
+# this slot (bridges are not factory(bus, config) nodes — a [[node]]
+# slot="messaging" would misconstruct them);
+# no [[node]] entry binds this slot (bridges are agent-side threads,
+# not chassis nodes).
+#
+# No third-party library requirement — iMessage drives the local
+# Messages app via AppleScript + reads chat.db directly (stdlib only).
+requires_libraries: []
+# macOS-only: polls chat.db and drives Messages.app via AppleScript,
+# neither of which exist off darwin. requires_platform gates
+# send_message's ANY-OF readiness the same way requires_libraries
+# does for discord/telegram.
+requires_platform: [darwin]
+# IMESSAGE_ALLOWED_HANDLES deliberately NOT modeled as a requirement —
+# see discord/module.yaml's comment: it's an allowlist read from the
+# credential store first, env second, and (unlike a bot token) iMessage
+# has no *auth* credential to gate on in the first place — only the
+# platform check applies here.

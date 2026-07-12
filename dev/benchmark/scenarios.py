@@ -113,15 +113,15 @@ def _live_signature(live_dir: pathlib.Path) -> dict[str, tuple[int, float]]:
 
 
 def _read_memory_view(layout: Any):
-    from jaeger_os.core.bench.scenarios import MemoryView
+    from jaeger_ai.core.bench.scenarios import MemoryView
     facts: dict[str, str] = {}
     schedules: list[dict] = []
     board: list[dict] = []
     with contextlib.suppress(Exception):
-        from jaeger_os.core.memory import memory as mem
+        from jaeger_ai.core.memory import memory as mem
         facts = mem.list_facts(None) or {}
     with contextlib.suppress(Exception):
-        from jaeger_os.core.memory import memory as mem
+        from jaeger_ai.core.memory import memory as mem
         schedules = mem.list_schedules() or []
     with contextlib.suppress(Exception):
         import json
@@ -146,8 +146,8 @@ _persona_lane_engagement = {"turns_seen": 0, "engaged": 0}
 
 
 def _build_agent(client: Any):
-    from jaeger_os.agent.loop.runtime_bridge import build_jaeger_agent
-    from jaeger_os.main import SKIP_FINAL_TOOLS, _get_agent, _pipeline
+    from jaeger_ai.agent.loop.runtime_bridge import build_jaeger_agent
+    from jaeger_ai.main import SKIP_FINAL_TOOLS, _get_agent, _pipeline
 
     _get_agent(client)  # mirror tools onto the registry
     cfg = _pipeline.get("config")
@@ -168,7 +168,7 @@ def _extract_calls(new_messages: list[dict]):
     """Pull ToolCall(name, arguments) out of a turn's assistant messages."""
     import json
 
-    from jaeger_os.core.bench.scenarios import ToolCall
+    from jaeger_ai.core.bench.scenarios import ToolCall
     calls: list[ToolCall] = []
     for msg in (new_messages or []):
         if msg.get("role") != "assistant":
@@ -199,8 +199,8 @@ def _drive_turn_worker(agent: Any, prompt: str, timeout_s: float):
     import io
     from contextlib import redirect_stdout
 
-    from jaeger_os.agent.loop.runtime_bridge import drive_one_turn
-    from jaeger_os.core.bench.scenarios import Turn
+    from jaeger_ai.agent.loop.runtime_bridge import drive_one_turn
+    from jaeger_ai.core.bench.scenarios import Turn
 
     box: dict[str, Any] = {}
 
@@ -239,8 +239,8 @@ def _drive_turn_front_door(client: Any, session_key: str, prompt: str,
     import io
     from contextlib import redirect_stdout
 
-    import jaeger_os.main as jmain
-    from jaeger_os.core.bench.scenarios import Turn
+    import jaeger_ai.main as jmain
+    from jaeger_ai.core.bench.scenarios import Turn
 
     box: dict[str, Any] = {}
 
@@ -295,7 +295,7 @@ def _drive_turn_front_door(client: Any, session_key: str, prompt: str,
 
 def _run_scenario(client: Any, case: Any, layout: Any,
                   *, dump: bool = False, worker_path: bool = False) -> ScenarioResult:
-    from jaeger_os.core.bench.scenarios import Transcript
+    from jaeger_ai.core.bench.scenarios import Transcript
 
     workspace = _workspace_dir(layout)
     # Each scenario gets a clean workspace so planted files / artifacts
@@ -341,7 +341,7 @@ def _run_scenario(client: Any, case: Any, layout: Any,
             # at ~28/51, ~9.5 min in). Evict THIS scenario's session the
             # moment its turns are done, win or lose, so the suite's
             # live footprint stays O(1) sessions, not O(cases).
-            import jaeger_os.main as jmain
+            import jaeger_ai.main as jmain
             jmain.evict_session(session_key)
 
     if dump:
@@ -373,7 +373,7 @@ def _run_scenario(client: Any, case: Any, layout: Any,
 
 def _workspace_dir(layout: Any) -> pathlib.Path:
     with contextlib.suppress(Exception):
-        from jaeger_os.core.context import get_effective_workspace_dir
+        from jaeger_ai.core.context import get_effective_workspace_dir
         return get_effective_workspace_dir()
     return pathlib.Path(layout.workspace_dir)
 
@@ -434,7 +434,7 @@ def _print_report(results: list[ScenarioResult]) -> int:
 
 
 def _select(lane: str | None, ids: list[str]) -> list[Any]:
-    from jaeger_os.core.bench.scenarios import scenarios_by_lane
+    from jaeger_ai.core.bench.scenarios import scenarios_by_lane
     sel = scenarios_by_lane(lane)
     if ids:
         wanted = set(ids)
@@ -443,10 +443,10 @@ def _select(lane: str | None, ids: list[str]) -> list[Any]:
 
 
 def _run(args: argparse.Namespace) -> int:
-    from jaeger_os.core.bench.scenarios import (
+    from jaeger_ai.core.bench.scenarios import (
         MANUAL_SCENARIOS, build_hermetic_instance,
     )
-    from jaeger_os.core.instance.instance import resolve_instance_dir
+    from jaeger_ai.core.instance.instance import resolve_instance_dir
 
     selected = _select(args.lane, [i.strip() for i in args.ids.split(",")
                                    if i.strip()])
@@ -487,7 +487,7 @@ def _run(args: argparse.Namespace) -> int:
         os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
         print("=== Booting hermetic pipeline (temp instance) ===", flush=True)
         boot_started = time.perf_counter()
-        from jaeger_os.main import boot_for_tui
+        from jaeger_ai.main import boot_for_tui
         boot = boot_for_tui(instance_name=None, with_memory=True,
                             warmup=False, prewarm_model=not args.no_prewarm)
         print(f"[scenario] booted in {time.perf_counter() - boot_started:.1f}s",

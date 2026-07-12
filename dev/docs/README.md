@@ -91,13 +91,12 @@ Also open: the hardware-modules step of [JROS_0.8_MODULE_REFACTOR_SPEC.md](histo
 ## Vision — where this goes
 
 Grounded long-term direction — the lens for major structural work, not a
-spec to build against today.
-
-| doc | summary |
-|---|---|
-| [framework_vision.md](vision/framework_vision.md) | JROS as a framework — the modular north star (0.8+) |
-
-See [vision/README.md](vision/) for the fuller picture.
+spec to build against today. Canonical home is **JaegerOS**, not this
+repo (0.9 step 4 split): [`JaegerOS/dev/docs/vision/`](https://github.com/Jenkins-Robotics/JaegerOS/tree/master/dev/docs/vision)
+— `THREE_TIER_STRUCTURE.md` (the Mind/Body/Soul model + split triggers),
+`framework_vision.md` (the modular north star), and
+`JAEGER_ECOSYSTEM.md` (the four-repo picture this split produced).
+Linked, not duplicated — read them there for the full reasoning.
 
 ---
 

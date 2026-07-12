@@ -139,7 +139,11 @@ enabled = false   # TUI path has no chassis boot root yet — see header
 id = "tts"
 tier = 3
 backend = "thread"
-factory = "jaeger_os.nodes.kokoro_tts:make_tts_node"
+slot = "tts"                  # 0.9 step 4: kokoro_tts is its own
+                              # installed package (jaeger_kokoro_tts)
+                              # post-split — a hardcoded factory string
+                              # can't name it. Resolved via
+                              # discover_modules() same as animation/stt.
 restart = "on_failure"
 config_key = "tts"
 enabled = false   # TUI path has no chassis boot root yet — see header
@@ -160,17 +164,17 @@ enabled = false   # TUI path has no chassis boot root yet — see header
 # Format 0.1's chassis dispatches event_loop = "qt" only for surface
 # rendering; the TUI is JROS's own Rich loop launched directly by
 # launch.py, and the tray runs as its own
-# `python -m jaeger_os.interfaces.pyside6.tray.macos` subprocess. The factory
+# `python -m jaeger_ai.interfaces.pyside6.tray.macos` subprocess. The factory
 # stubs (J5A) raise NotImplementedError if the chassis ever tries to
 # invoke them; enabled = false keeps that from happening.
 
 [[surface]]
 id = "tui"
 main = true
-factory = "jaeger_os.interfaces.tui:run_surface"
+factory = "jaeger_ai.interfaces.tui:run_surface"
 enabled = false   # JROS owns the TUI loop; chassis can't host it
 
 [[surface]]
 id = "tray"
-factory = "jaeger_os.interfaces.pyside6.tray.macos:run_surface"
+factory = "jaeger_ai.interfaces.pyside6.tray.macos:run_surface"
 enabled = false   # tray runs as its own subprocess

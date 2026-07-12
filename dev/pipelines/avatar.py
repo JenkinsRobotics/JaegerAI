@@ -22,7 +22,7 @@ def main(argv: list[str]) -> int:
     try:
         node = runtime.ensure_animation_node(enable_bridge=False)
         print("animation node:", node.state.value)
-        from jaeger_os.agent.tools.avatar import set_avatar_state
+        from jaeger_ai.agent.tools.avatar import set_avatar_state
         result = set_avatar_state(emotion)
         print(f"set_avatar_state({emotion!r}) -> {result}")
         return 0

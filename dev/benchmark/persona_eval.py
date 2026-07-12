@@ -136,8 +136,8 @@ def _active_config():
     here: at the default 8192 the 105-tool schema alone (~21K tokens)
     overflows every inner (perform_task) turn -- caught by smoke-testing
     before the real run, not assumed."""
-    from jaeger_os.core.instance.instance import resolve_instance_dir
-    from jaeger_os.core.instance.schemas import Config, load_yaml
+    from jaeger_ai.core.instance.instance import resolve_instance_dir
+    from jaeger_ai.core.instance.schemas import Config, load_yaml
     root = pathlib.Path(resolve_instance_dir(None))
     return load_yaml(root / "config.yaml", Config)
 
@@ -148,8 +148,8 @@ def _build_temp_instance(*, mode: str, source_config):
     not confirm policy) and persona.mode set for this phase. Model
     section cloned verbatim from ``source_config``. Deleted by the
     caller when the phase is done."""
-    from jaeger_os.core.instance.instance import InstanceLayout, resolve_instance_dir
-    from jaeger_os.core.instance.schemas import (
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    from jaeger_ai.core.instance.schemas import (
         DisplayConfig, Identity, Manifest, PermissionsConfig, PersonaConfig,
         dump_json, dump_yaml,
     )
@@ -217,7 +217,7 @@ def _install_headless_synth() -> None:
 def _boot(mode: str, *, source_config, warmup: bool):
     layout, note_path = _build_temp_instance(mode=mode, source_config=source_config)
     _install_headless_synth()
-    from jaeger_os.main import boot_for_tui
+    from jaeger_ai.main import boot_for_tui
     boot = boot_for_tui(instance_name=_TMP_INSTANCE, with_memory=True,
                         warmup=warmup)
     return layout, note_path, boot
@@ -242,7 +242,7 @@ def _set_character(layout, cid: str | None) -> None:
     -- so the only honest way to exercise "no character" is to patch the
     single lookup function main.py calls (local-imported fresh every
     turn, so patching the module attribute is enough)."""
-    import jaeger_os.personality.character as character_mod
+    import jaeger_ai.personality.character as character_mod
     global _ORIG_ACTIVE_CHARACTER
     if _ORIG_ACTIVE_CHARACTER is None:
         _ORIG_ACTIVE_CHARACTER = character_mod.active_character
@@ -254,7 +254,7 @@ def _set_character(layout, cid: str | None) -> None:
 
 
 def _restore_character() -> None:
-    import jaeger_os.personality.character as character_mod
+    import jaeger_ai.personality.character as character_mod
     if _ORIG_ACTIVE_CHARACTER is not None:
         character_mod.active_character = _ORIG_ACTIVE_CHARACTER
 
@@ -267,7 +267,7 @@ def _drive(prompt: str, *, tag: str) -> dict:
     ``run_command`` calls (run_command is a thin print+text-only wrapper
     over it) -- so we get the structured result (latency, tool activity,
     errors) the eval needs without scraping stdout."""
-    import jaeger_os.main as jmain
+    import jaeger_ai.main as jmain
     client = jmain._pipeline.get("client")
     jmain._pipeline["persona_lane_last_delegated"] = None
     session_key = f"persona-eval-{tag}-{uuid.uuid4().hex[:8]}"
@@ -349,7 +349,7 @@ def _phase_persona_last(source_config, *, warmup: bool) -> dict:
                                       warmup=warmup)
     rows = {}
     try:
-        from jaeger_os.personality.character import set_active_character
+        from jaeger_ai.personality.character import set_active_character
         set_active_character(layout.root, "lilith")
         print("=== [persona_last] lilith -- chat prompts (latency baseline) ===", flush=True)
         for pid, prompt in CHAT_PROMPTS:
@@ -474,7 +474,7 @@ def main() -> int:
     gate_pass = task_deleg == task_total
 
     # ── extra gate rows (0.8.1 items 4-6: BINDING-ASK + SELF-STATE) ──
-    from jaeger_os.core.bench.scenarios import _is_refusal
+    from jaeger_ai.core.bench.scenarios import _is_refusal
     extra = agent_rows.get("extra_gate", {})
     joke_row = extra.get(JOKE_GATE_PROMPT[0], {})
     joke_answer = (joke_row.get("answer") or "").strip()

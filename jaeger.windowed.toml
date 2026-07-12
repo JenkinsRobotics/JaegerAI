@@ -36,7 +36,7 @@ backend = "inproc"            # fused mode, one process — the chassis
 # ── core: the Tier-1 agent/model brain (main-thread init, not
 #    supervised). The model boot + AgentBridge live here. ───────────
 [core]
-factory = "jaeger_os.agent.loop.agent_core:make_core"
+factory = "jaeger_ai.agent.loop.agent_core:make_core"
 config_key = "agent"
 
 # ── nodes: Tier-3 voice/animation subsystems, supervisor-owned ──────
@@ -109,8 +109,8 @@ enabled = true
 [[surface]]
 id = "chat_window"
 main = true                   # owns the Qt event loop
-factory = "jaeger_os.interfaces.pyside6.rich_tui.window:make_surface"
+factory = "jaeger_ai.interfaces.pyside6.rich_tui.window:make_surface"
 
 [[surface]]
 id = "tray"
-factory = "jaeger_os.interfaces.pyside6.tray.qt:make_surface"
+factory = "jaeger_ai.interfaces.pyside6.tray.qt:make_surface"
