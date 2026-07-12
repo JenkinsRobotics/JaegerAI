@@ -1,11 +1,11 @@
 <h1 align="center">JaegerKokoroTTS</h1>
 
 <p align="center">
-  <em>The tts-slot engine module for the Jaeger ecosystem — streaming Kokoro speech synthesis, pins JaegerOS only, standalone CLI, field-proven on JP01.</em>
+  <em>The tts-slot engine module for the Jaeger ecosystem — streaming Kokoro speech synthesis, pins JaegerOS only, standalone module-contract tests, field-proven on JP01.</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS/releases"><img src="https://img.shields.io/badge/version-0.9.0--dev-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS/releases"><img src="https://img.shields.io/badge/version-0.9.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
@@ -114,12 +114,22 @@ rather than duplicated.
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | The listening sibling — same discipline, own repo. |
 | JP01 | Project (Body) | Consumes this module directly for its non-AI console. |
 
+Two more repos round out the ecosystem without being part of the tier map
+themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)
+(the conventions every new ecosystem repo — this one included — started
+from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
+(the robot's Mac + Jetson body-side code JP01's console pairs with).
+
 ## Development
 
 ```bash
 pytest jaeger_kokoro_tts/nodes/kokoro_tts/tests   # module-contract smoke (7 tests)
 pytest dev/tests                                   # HF-offline integration test
 ```
+
+The two engine modules together gate at 13/13 module-contract tests
+(7/7 here + 6/6 in [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
+— the split's per-repo, no-hardware-touched proof that each stands alone.
 
 No doc in this repo describes behavior the code doesn't implement yet
 (mark it `(planned)` instead) — see JaegerOS's `CONVENTIONS.md` for the
