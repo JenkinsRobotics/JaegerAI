@@ -66,4 +66,13 @@ def _t_set_credential(name: str, value: str) -> dict:
         creds.set_credential(_require_layout(), name, value)
     except Exception as exc:  # noqa: BLE001 — surface as a tool error, never raise
         return {"saved": False, "name": name, "error": str(exc)}
+    # 0.9.3 Task 3: a newly-saved credential can flip a messaging channel's
+    # SELF-MODEL status line (persona_lane.build_self_model_block) from
+    # "needs token" to "available" — invalidate its per-boot cache so the
+    # next turn reflects it instead of a stale snapshot.
+    try:
+        from jaeger_ai.agent.prompts.persona_lane import reset_self_model_cache
+        reset_self_model_cache()
+    except Exception:  # noqa: BLE001 — cache invalidation is best-effort
+        pass
     return {"saved": True, "name": name}

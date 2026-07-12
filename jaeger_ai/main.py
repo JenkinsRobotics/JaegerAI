@@ -1031,6 +1031,11 @@ def _register_builtins(client: Any) -> None:
     # not a client closure, so they belong in tools/ like every other tool).
     from jaeger_ai.agent.tools import messaging as _messaging  # noqa: F401
 
+    # send_email — same pattern: importing tools/email.py registers it.
+    # 0.9.3 Task 2: the operator's field brief ("make/send email") — Mail.app
+    # via AppleScript first, himalaya CLI as the alternate backend.
+    from jaeger_ai.agent.tools import email as _email  # noqa: F401
+
     # Home Assistant plugin tools (ha_list_entities / ha_get_state /
     # ha_list_services / ha_call_service) — same pattern: importing
     # registers them. They resolve HASS_URL/HASS_TOKEN at call time and
@@ -2967,6 +2972,12 @@ def _persist_plugin_autostart(name: str) -> None:
             return
         cfg.plugins.autostart = current + [name]
         dump_yaml(layout.config_path, cfg)
+        # 0.9.3 Task 3: the SELF-MODEL block's messaging configured-state
+        # line (persona_lane.build_self_model_block) reads this same
+        # autostart list — invalidate its per-boot cache so the next turn
+        # sees the new "✓ active" status instead of a stale snapshot.
+        from jaeger_ai.agent.prompts.persona_lane import reset_self_model_cache
+        reset_self_model_cache()
     except Exception as exc:  # noqa: BLE001 — persistence never breaks activation
         print(f"[jaeger] could not persist plugin autostart for {name!r}: {exc}", flush=True)
 

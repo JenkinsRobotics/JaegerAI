@@ -133,10 +133,10 @@ LEAN_CORE: frozenset[str] = frozenset({
 TOOLSETS: dict[str, frozenset[str]] = {
     "files": frozenset({
         # ``read_file`` and ``write_file`` are in CORE; the rest of
-        # the file surface (patch, append, delete, search, list_dir)
-        # loads on intent.
+        # the file surface (patch, append, delete, search, list_dir,
+        # move, copy) loads on intent.
         "append_file", "delete_file", "patch", "search_files",
-        "list_skill_dir",
+        "list_skill_dir", "move_file", "copy_file",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load
@@ -201,6 +201,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
+    "email": frozenset({"send_email"}),
     "smart_home": frozenset({
         # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
         # registered on import like send_message; loaded on intent.
@@ -232,6 +233,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
+    "email": "send an email (Mail.app AppleScript, or himalaya CLI when installed)",
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
