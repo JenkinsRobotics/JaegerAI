@@ -13,7 +13,7 @@
 # tag pin (e.g. @0.9.0) once JaegerOS cuts a release tag. A dev clone
 # with a sibling ~/GITHUB/JaegerOS checkout gets an editable install
 # instead — see JaegerAI's install.sh sibling-detection step. ---
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
 
 # --- the Whisper engine itself ---
 pywhispercpp>=1.4
