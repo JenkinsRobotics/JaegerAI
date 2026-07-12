@@ -123,15 +123,23 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
     "$PIP" install -e "$REPO_ROOT" --quiet
   fi
 
-  # 3b. Dev-clone sibling detection — if ~/GITHUB/{JaegerOS,
-  # JaegerKokoroTTS,JaegerWhisperSTT} checkouts exist next to this one
-  # (the canonical multi-repo dev layout), editable-install those OVER
-  # the git-resolved copies pip just pulled from GitHub: local changes
-  # to the framework/engines go live immediately, no push+reinstall
-  # round-trip. A curl one-liner install (no sibling checkouts) is
-  # unaffected — this is a no-op there.
-  SIBLING_ROOT="${JAEGER_SIBLING_ROOT:-$HOME/GITHUB}"
+  # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
+  # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
+  # JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
+  # copies so local framework/engine changes go live immediately.
+  # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
+  # migration) must run the OFFICIAL pinned releases inside its own
+  # venv — never code linked from someone's working trees, where a
+  # half-finished refactor would break the station live. Hence the
+  # explicit flag: nobody gets dev wiring by accident of directory
+  # layout. (Field-caught by the operator on migration day, 2026-07-12.)
+  if [[ "${JAEGER_DEV_SIBLINGS:-0}" != "1" ]]; then
+    SIBLING_ROOT=""
+  else
+    SIBLING_ROOT="${JAEGER_SIBLING_ROOT:-$HOME/GITHUB}"
+  fi
   SIBLINGS_FOUND=()
+  [[ -n "$SIBLING_ROOT" ]] &&
   for sib in JaegerOS JaegerKokoroTTS JaegerWhisperSTT; do
     if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
       SIBLINGS_FOUND+=("$sib")
