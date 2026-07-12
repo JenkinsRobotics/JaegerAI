@@ -1,4 +1,4 @@
-"""jaeger_os.nodes.kokoro_tts.config — the module's own settings-catalog
+"""jaeger_kokoro_tts.nodes.kokoro_tts.config — the module's own settings-catalog
 schema slice.
 
 0.8 M1: "the module IS the engine" — its config schema lives beside its

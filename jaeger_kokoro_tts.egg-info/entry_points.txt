@@ -1,0 +1,2 @@
+[jaeger_os.module_roots]
+jaeger_kokoro_tts = jaeger_kokoro_tts.module_roots:roots
