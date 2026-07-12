@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--version", action="version", version=f"jaeger-os {__version__}",
+        "--version", action="version", version=f"jaeger-ai {__version__}",
     )
     subparsers = parser.add_subparsers(
         dest="subcommand",
