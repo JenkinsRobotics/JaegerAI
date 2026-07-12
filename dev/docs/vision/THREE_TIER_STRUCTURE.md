@@ -87,3 +87,24 @@ the capability layer and drives it in character. The app's dependencies
 never enter the Mind's tree; the Mind's never enter the app's — they meet at
 the contract. The day this works with no framework edits, the structure is
 proven.
+
+## Refinements (operator session, 2026-07-11 — supersede conflicting text above)
+
+1. **Jaeger AI is the turnkey PRODUCT, not a headless library.** It ships the
+   complete universal agentic agent (Hermes lineage): loop, tools, skills,
+   memory, persona (id/ego), local inference, AND its own faces — chat app,
+   TUI, voice, the protocol it serves. Headless (robots) is a CONFIG, not a
+   fork. "Everything built to date" ≈ Jaeger AI; what 0.8 extracted beneath
+   it (bus/modules/supervisor/safety/contract/capability) = JaegerOS.
+2. **The connection rule:** bodies provide capabilities · the Mind consumes
+   them · the runtime is where they meet · the protocol is how outside apps
+   reach in (the same versioned NDJSON API the Swift app uses; embedding =
+   protocol connection, not pip-dissection). A simulator is a body made of
+   math — same capability names as a real body = teach in sim, deploy real.
+3. **The team trigger has FIRED (3 devs; monolith blocks cross-work).** The
+   repo split is a 0.9 deliverable, sequenced: contract pkg + CI dep rule +
+   mind-as-module IN-REPO first (1-2 wk), THEN split (git filter-repo,
+   history preserved): JaegerOS (framework) / Jaeger-AI (product incl.
+   faces) / JP01 (robot) / Studio. Inside repos: delete-freely lives on;
+   AT the seam: contract changes = version bump + coordinated update.
+   Contract package lives in JaegerOS; changes need affected-team sign-off.
