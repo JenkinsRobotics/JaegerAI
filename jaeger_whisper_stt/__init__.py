@@ -6,4 +6,4 @@ Pins ``jaeger-os`` only — never ``jaeger-ai`` — so a robot body (JP01
 and friends) can listen without the AI product installed at all.
 """
 
-__version__ = "1.0.0"
+__version__ = "0.9.0"

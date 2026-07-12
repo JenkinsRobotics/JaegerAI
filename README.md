@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT/releases"><img src="https://img.shields.io/badge/version-0.9.0--dev-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT/releases"><img src="https://img.shields.io/badge/version-0.9.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
@@ -121,11 +121,21 @@ rather than duplicated.
 | **JaegerWhisperSTT** | Engine module (`stt` slot) | This repo. |
 | JP01 | Project (Body) | Consumes this module directly for its non-AI console. |
 
+Two more repos round out the ecosystem without being part of the tier map
+themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)
+(the conventions every new ecosystem repo — this one included — started
+from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
+(the robot's Mac + Jetson body-side code JP01's console pairs with).
+
 ## Development
 
 ```bash
 pytest jaeger_whisper_stt/nodes/whisper_stt/tests   # module-contract + engine-mode smoke (6 tests)
 ```
+
+The two engine modules together gate at 13/13 module-contract tests
+(6/6 here + 7/7 in [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS))
+— the split's per-repo, no-hardware-touched proof that each stands alone.
 
 Note: a real, previously-untestable architectural coupling exists —
 `AudioSessionNode`'s factory calls `ensure_tts_node()` for AEC
