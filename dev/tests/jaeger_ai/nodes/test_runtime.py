@@ -258,7 +258,7 @@ def test_shutdown_stops_node_thread_and_synth(monkeypatch):
 
 
 def test_ensure_audio_session_node_publishes_transcript(monkeypatch):
-    created = _install_mock_runtime(monkeypatch)
+    _install_mock_runtime(monkeypatch)
     session = _MockAudioSession()
     monkeypatch.setattr(
         runtime,
@@ -287,13 +287,25 @@ def test_ensure_audio_session_node_publishes_transcript(monkeypatch):
         assert got
         assert got[0].text == "hello via audio node"
         assert got[0].node_id == "audio_session"
-        assert created["synth"] is runtime.get_synth()
+        # AEC decoupling (0.9): building/starting an audio session must
+        # never force-start TTS as a side effect. Nothing in this test
+        # ever called ensure_tts_node() (the audio_session_factory is
+        # swapped out entirely, and require_wake_word=False's default
+        # AudioSessionConfig has barge_in=False), so no TTS node exists.
+        assert runtime._tts_node is None
     finally:
         runtime.shutdown()
 
 
 def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
+    """TTS and the audio session have independent lifecycles in both
+    directions now (AEC decoupling, 0.9): starting/stopping one must
+    never start/stop the other. TTS is started here explicitly (e.g. a
+    prior speak() call, or barge-in resolved it) to prove
+    shutdown_audio_session_node() leaves an independently-running TTS
+    node alone — not that building the session started TTS itself."""
     _install_mock_runtime(monkeypatch)
+    runtime.ensure_tts_node()
     session = _MockAudioSession()
     monkeypatch.setattr(
         runtime,
@@ -312,6 +324,99 @@ def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
         assert runtime._audio_session_node is None
         assert runtime._audio_session_thread is None
         assert runtime._tts_node is not None
+    finally:
+        runtime.shutdown()
+
+
+# ── AEC decoupling (0.9) ──────────────────────────────────────────────
+#
+# WhisperSTT's construction used to hard-require a TTS handle (gate 2's
+# finding in 094-split-report.md): ``_build_audio_session_node`` always
+# called ``ensure_tts_node()`` before building the session, which raised
+# outright if no tts-slot module was installed at all. STT and TTS are
+# peers filling their own slots — an STT engine must never depend on a
+# TTS engine existing. These tests pin the new seam:
+# ``_resolve_far_end_provider()`` is the ONLY place TTS gets touched for
+# AEC purposes, and only when a tts-slot module is actually installed.
+
+
+def test_resolve_far_end_provider_returns_none_without_a_tts_slot_module(
+    monkeypatch,
+):
+    """No tts-slot module discoverable (e.g. a body with only
+    JaegerWhisperSTT installed) -> None, no crash, no attempt to start
+    TTS at all."""
+    import jaeger_os.core.modules as modules
+
+    monkeypatch.setattr(modules, "discover_modules", lambda *a, **k: {})
+    runtime.shutdown()
+    try:
+        assert runtime._resolve_far_end_provider() is None
+        assert runtime._tts_node is None
+    finally:
+        runtime.shutdown()
+
+
+def test_resolve_far_end_provider_wires_a_shared_reference_buffer(
+    monkeypatch,
+):
+    """A tts-slot module IS installed -> the provider is the running
+    synth's (shared, freshly-created-if-absent) reference_buffer, and it
+    satisfies the FarEndReference shape (pop_frame/clear)."""
+    import jaeger_os.core.modules as modules
+    from jaeger_os.core.audio import ReferenceBuffer
+
+    monkeypatch.setattr(
+        modules, "discover_modules", lambda *a, **k: {"tts": ["stub-spec"]},
+    )
+    _install_mock_runtime(monkeypatch)
+    try:
+        provider = runtime._resolve_far_end_provider()
+        assert isinstance(provider, ReferenceBuffer)
+        assert hasattr(provider, "pop_frame") and hasattr(provider, "clear")
+        assert runtime._tts_node is not None       # TTS got started
+        assert runtime.get_synth().reference_buffer is provider
+        # Idempotent: a second resolve reuses the SAME buffer rather than
+        # replacing it (the synth already carries one after the first call).
+        again = runtime._resolve_far_end_provider()
+        assert again is provider
+    finally:
+        runtime.shutdown()
+
+
+def test_default_audio_session_factory_only_touches_tts_when_barge_in_on(
+    monkeypatch,
+):
+    """The actual fix: building an audio session resolves (and
+    potentially starts) TTS ONLY when the real config asks for
+    barge-in. barge_in=False (today's default) must never call
+    _resolve_far_end_provider — not "call it and get None back", never
+    call it at all."""
+    calls: list[bool] = []
+
+    def fake_resolver():
+        calls.append(True)
+        return "SENTINEL-FAR-END"
+
+    class _FakeAudioSession:
+        @staticmethod
+        def build(config, *, far_end=None, llm_client=None, llm_lock=None):
+            return {"far_end": far_end}
+
+    monkeypatch.setattr(runtime, "_resolve_far_end_provider", fake_resolver)
+    monkeypatch.setattr(runtime, "AudioSession", _FakeAudioSession)
+    try:
+        off = runtime._default_audio_session_factory(
+            AudioSessionConfig(barge_in=False),
+        )
+        assert calls == []
+        assert off["far_end"] is None
+
+        on = runtime._default_audio_session_factory(
+            AudioSessionConfig(barge_in=True),
+        )
+        assert calls == [True]
+        assert on["far_end"] == "SENTINEL-FAR-END"
     finally:
         runtime.shutdown()
 
