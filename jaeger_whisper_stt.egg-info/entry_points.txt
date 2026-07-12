@@ -1,2 +1,0 @@
-[jaeger_os.module_roots]
-jaeger_whisper_stt = jaeger_whisper_stt.module_roots:roots

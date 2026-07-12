@@ -1,5 +1,0 @@
-jaeger-os @ file:///private/tmp/claude-501/-Users-developer-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerOS
-pywhispercpp>=1.4
-webrtcvad-wheels>=2.0.14
-sounddevice>=0.4.6
-numpy>=1.26
