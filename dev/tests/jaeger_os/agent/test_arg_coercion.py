@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_os.agent.parsing.arg_coercion import coerce_args
+from jaeger_os.core.tools.arg_coercion import coerce_args
 
 
 _OBJECT_SCHEMA = {

@@ -14,7 +14,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.agent.skill_registry import playbook_skills as _pb
 from jaeger_os.core.context import get_layout
 
@@ -368,7 +368,7 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 # playbook recipe to follow (delegates to the skill(view) reader).
 def _register_use_skill() -> None:
     import typing
-    from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+    from jaeger_os.core.tools.tool_registry import register_tool_from_function
     skills = _pb.available_playbooks()
     names = [s.name for s in skills]
     if not names:
@@ -387,7 +387,7 @@ def _register_use_skill() -> None:
         # that calls tools that don't exist.
         need = r.get("requires_tools") or []
         if need:
-            from jaeger_os.agent.schemas.tool_registry import get_tools
+            from jaeger_os.core.tools.tool_registry import get_tools
             have = {t.name for t in get_tools()}
             missing = [t for t in need if t not in have]
             if missing:

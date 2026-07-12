@@ -28,7 +28,7 @@ from typing import Any
 from jaeger_os.core.context import _require_layout
 from jaeger_os.agent.background.board import COLUMNS, board_for_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 def _card_brief(card: Any) -> dict[str, Any]:

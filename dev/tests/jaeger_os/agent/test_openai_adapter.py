@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from jaeger_os.agent import OpenAIAdapter
 from jaeger_os.agent.adapters.openai import KNOWN_PROVIDERS
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 # ── fake SDK client ────────────────────────────────────────────────

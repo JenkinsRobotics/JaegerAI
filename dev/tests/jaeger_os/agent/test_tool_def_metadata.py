@@ -20,7 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from jaeger_os.agent.dialects import normalize_tool_name
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 class _Args(BaseModel):

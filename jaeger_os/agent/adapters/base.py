@@ -22,7 +22,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from jaeger_os.agent.schemas.message_types import Message
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 # Features an adapter may declare. Listed here so capability checks

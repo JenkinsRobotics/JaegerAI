@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 
 from jaeger_os.agent.loop.jaeger_agent import JaegerAgent
-from jaeger_os.agent.schemas.tool_registry import (
+from jaeger_os.core.tools.tool_registry import (
     get_tool, get_tools, register_tool_from_function, unregister_tool,
 )
 from jaeger_os.agent.skill_registry import toolset_scoping as ts
@@ -36,7 +36,7 @@ def stub_tools():
     modules happened to import. Other tests in this suite call
     ``clear_registry`` which wipes ``describe_tool`` too; re-register
     it here so the meta-tool is reachable in any test ordering."""
-    from jaeger_os.agent.schemas.tool_registry import has_tool
+    from jaeger_os.core.tools.tool_registry import has_tool
     from jaeger_os.agent.tools.meta import describe_tool as _desc
 
     if not has_tool("describe_tool"):

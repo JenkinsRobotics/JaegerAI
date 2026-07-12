@@ -35,8 +35,8 @@ from jaeger_os.agent.loop.loop_backstop import (
     semantic_failure_signature,
 )
 from jaeger_os.agent.schemas.message_types import Message, ToolCall
-from jaeger_os.agent.schemas.tool_registry import get_tools
-from jaeger_os.agent.schemas.tool_schema import ToolDef, dev_mode_enabled
+from jaeger_os.core.tools.tool_registry import get_tools
+from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_os.agent.util.context_guard import ContextGuard, ContextOverflow
 
 

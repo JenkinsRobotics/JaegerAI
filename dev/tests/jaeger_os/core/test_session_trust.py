@@ -78,7 +78,7 @@ def test_confirm_prompts_an_admin_session() -> None:
 
 
 def test_certify_admin_tool_registered() -> None:
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     import jaeger_os.main as m
     m._register_builtins(object())
     assert "certify_admin" in {t.name for t in R.get_tools()}

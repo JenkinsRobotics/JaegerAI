@@ -15,7 +15,7 @@ import threading as _threading
 import time
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 # Reuse the same default the voice daemon uses for its "accurate" pass —

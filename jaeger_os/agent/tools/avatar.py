@@ -27,10 +27,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from pathlib import Path
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 
 
@@ -48,31 +47,15 @@ from jaeger_os.core.context import SandboxError, _require_layout, _resolve_under
 #
 # When the per-instance file exists it WINS — defaults are just the
 # safety net so the tool never fails on a fresh instance.
-_DEFAULT_EXPRESSIONS: dict[str, dict[str, Any]] = {
-    "neutral":   {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "neutral"}},
-    "happy":     {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "happy"}},
-    "sad":       {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "sad"}},
-    "focused":   {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "focused"}},
-    "thinking":  {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "thinking"}},
-    "speaking":  {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "speaking"}},
-    "listening": {"adapter": "math", "asset": "faces/lilith_face.py",
-                   "params": {"emotion": "listening"}},
-}
-
-
-# Framework default face scripts ship under this path.  The avatar
-# tool falls back here when the instance's ``avatar/`` directory
-# doesn't contain the asset — so a fresh instance has a working
-# face out of the box without the wizard having to copy files.
-_FRAMEWORK_AVATAR_DEFAULTS = (
-    Path(__file__).resolve().parent.parent  # agent/
-    / "personas" / "lilith" / "avatar"
+#
+# The table itself lives in ``nodes.animation.expression_defaults`` —
+# the animation node's ``AvatarAutoStateDriver`` needs the identical
+# mapping to publish AnimationCommands that match an explicit
+# set_avatar_state() call, and runtime tier must never import agent/
+# (nervous-system rule), so agent/ imports FROM nodes/ here instead.
+from jaeger_os.nodes.animation.expression_defaults import (
+    DEFAULT_EXPRESSIONS as _DEFAULT_EXPRESSIONS,
+    FRAMEWORK_AVATAR_DEFAULTS as _FRAMEWORK_AVATAR_DEFAULTS,
 )
 
 

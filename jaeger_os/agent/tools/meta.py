@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 @register_tool_from_function
@@ -64,7 +64,7 @@ def describe_tool(name: str) -> dict[str, Any]:
 
     ``{ok: False, error}`` for an unknown name.
     """
-    from jaeger_os.agent.schemas.tool_registry import get_tool, has_tool
+    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
     from jaeger_os.agent.skill_registry.toolset_scoping import (
         CORE, TOOLSETS, _SKILL_TOOLSETS,
     )
@@ -157,7 +157,7 @@ def list_tools(query: str = "") -> dict[str, Any]:
     tool names + their toolset, NOT a description of your capabilities — for
     "what can you do / help" use ``help_me``, not this. When every tool is
     already visible you rarely need it. Optional ``query`` filters by substring."""
-    from jaeger_os.agent.schemas.tool_registry import get_tools
+    from jaeger_os.core.tools.tool_registry import get_tools
     from jaeger_os.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
     where: dict[str, str] = {}
     for ts, tools in TOOLSETS.items():

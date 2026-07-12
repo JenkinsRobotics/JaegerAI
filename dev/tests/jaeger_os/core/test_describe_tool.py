@@ -14,10 +14,10 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from jaeger_os.agent.schemas.tool_registry import (
+from jaeger_os.core.tools.tool_registry import (
     has_tool, register_tool_instance,
 )
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 from jaeger_os.agent.tools.meta import describe_tool
 
 

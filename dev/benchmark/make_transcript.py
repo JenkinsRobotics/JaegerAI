@@ -71,7 +71,7 @@ def _tool_schema() -> str:
     This is the OTHER half of 'what we send' — the prompt is the first half."""
     try:
         import jaeger_os.agent.tools  # noqa: F401 — registers tools on import
-        from jaeger_os.agent.schemas.tool_registry import get_tools
+        from jaeger_os.core.tools.tool_registry import get_tools
         tools = sorted(get_tools(), key=lambda t: t.name)
     except Exception as e:  # pragma: no cover
         return f"(could not render tool schema: {e})"

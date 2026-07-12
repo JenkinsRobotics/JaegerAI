@@ -835,7 +835,7 @@ class JaegerTUI:
             # summing the JSON-serialised schema for every currently
             # visible tool. Cheap enough to recompute per refresh.
             try:
-                from jaeger_os.agent.schemas.tool_registry import get_tools
+                from jaeger_os.core.tools.tool_registry import get_tools
                 from jaeger_os.agent.skill_registry.toolset_scoping import tool_visible
                 import json as _json2
                 for t in get_tools():
