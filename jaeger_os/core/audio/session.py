@@ -65,12 +65,18 @@ class GateDecision:
 class AudioSession:
     """Own mic/AEC/STT state for one realtime voice session.
 
-    In monolithic mode this session deliberately shares the TTS
-    synthesizer's ``reference_buffer`` object in-process so AEC can stay
-    aligned without streaming raw speaker audio through the bus.  That is
-    a known monolithic-only coupling; the multiprocess path should replace
-    it with a dedicated TTS reference topic when raw audio needs to cross
-    a process boundary.
+    AEC is optional and slot-agnostic: the caller may hand this session
+    a :class:`~jaeger_os.core.audio.reference_buffer.FarEndReference`
+    (``far_end``) — anything that can supply the audio currently being
+    played out — and, if barge-in is on, this session's AEC will use it
+    to cancel the AI's own voice out of the mic signal. This session
+    never imports or names a TTS type; ``jaeger_os/nodes/runtime.py`` is
+    what resolves a real provider from whichever TTS-slot module (if
+    any) is installed, in-process, and hands it in here already built.
+    No provider → AEC degrades gracefully (a disconnected buffer that
+    only ever pops silence — the multiprocess path should eventually
+    replace that with a dedicated far-end topic when raw audio needs to
+    cross a process boundary).
     """
 
     def __init__(
@@ -117,11 +123,23 @@ class AudioSession:
         cls,
         config: AudioSessionConfig,
         *,
-        tts_synth: Any = None,
+        far_end: Any = None,
         llm_client: Any = None,
         llm_lock: Any = None,
     ) -> "AudioSession":
         """Build the production Whisper-backed audio session.
+
+        ``far_end`` is an optional
+        :class:`~jaeger_os.core.audio.reference_buffer.FarEndReference`
+        — something with ``pop_frame(n)``/``clear()`` — supplied by the
+        caller (``jaeger_os/nodes/runtime.py``'s discovery-driven
+        wiring in production; ``None`` in headless/no-TTS/test builds).
+        This session never reaches into a TTS object itself; it only
+        ever sees whatever provider, if any, was already handed to it.
+        When ``far_end`` is ``None`` and barge-in is on, AEC still runs
+        against a fresh, disconnected buffer (pops silence — a no-op
+        cancellation, same as no far-end reference at all) rather than
+        failing to build.
 
         ``llm_client`` + ``llm_lock`` enable the in-node LLM gate.
         The runtime singleton wires the brain's client through when
@@ -141,14 +159,10 @@ class AudioSession:
 
                 if aec_available():
                     aec = AECWrapper(sample_rate=16000, frame_ms=10, enabled=True)
-                    reference_buffer = getattr(tts_synth, "reference_buffer", None)
-                    if reference_buffer is None:
-                        reference_buffer = ReferenceBuffer(
-                            sample_rate=16000,
-                            capacity_seconds=2.0,
-                        )
-                        if tts_synth is not None:
-                            tts_synth.reference_buffer = reference_buffer
+                    reference_buffer = far_end if far_end is not None else ReferenceBuffer(
+                        sample_rate=16000,
+                        capacity_seconds=2.0,
+                    )
                     barge_in_live = True
             except Exception:  # noqa: BLE001
                 aec = None

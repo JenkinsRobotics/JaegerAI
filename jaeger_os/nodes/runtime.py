@@ -163,6 +163,51 @@ def _default_thread_factory(node: TTSNode) -> threading.Thread:
     )
 
 
+def _resolve_far_end_provider() -> Any:
+    """Return a :class:`~jaeger_os.core.audio.FarEndReference` for AEC,
+    IF a tts-slot module is actually installed — else ``None``.
+
+    This is the seam that replaces the old hard dependency ("building
+    an audio session always requires a TTS node"). AEC decoupling
+    (0.9): an STT engine's construction must never require a TTS
+    engine — STT and TTS are peers filling their own slots. Whether a
+    far-end reference is available is a runtime FACT (is a tts-slot
+    module installed right now?), never a hardcoded import — same
+    ``discover_modules()`` primitive the tts/stt engine-symbol guards
+    at the top of this file already use.
+
+    Only called when the caller actually wants AEC (``config.barge_in``
+    — see :func:`_default_audio_session_factory`), so a barge-in-off
+    session never touches TTS at all, and a body with no TTS-slot
+    module installed never even attempts ``ensure_tts_node()`` (which
+    would otherwise hard-fail — no module means no factory to build
+    one from).
+
+    Ensures the TTS node is actually running (so it starts producing
+    playback audio) and that its synth carries a shared
+    ``ReferenceBuffer``, creating + attaching one if this is the first
+    time AEC has been wired for this synth instance — the synth itself
+    (``KokoroTTS`` today) only ever writes to ``self.reference_buffer``
+    when something has set it; it never assumes one exists.
+    """
+    from jaeger_os.core.modules import discover_modules
+    if not discover_modules().get("tts"):
+        return None
+    ensure_tts_node()
+    synth = get_synth()
+    if synth is None:
+        return None
+    buf = getattr(synth, "reference_buffer", None)
+    if buf is None:
+        from jaeger_os.core.audio import ReferenceBuffer
+        buf = ReferenceBuffer(sample_rate=16000, capacity_seconds=2.0)
+        try:
+            synth.reference_buffer = buf
+        except Exception:  # noqa: BLE001 — synth doesn't accept the attr
+            return None
+    return buf
+
+
 def _default_audio_session_factory(
     config: AudioSessionConfig,
 ) -> AudioSession:
@@ -177,9 +222,13 @@ def _default_audio_session_factory(
     _pipeline = getattr(main_mod, "_pipeline", {})
     llm_client = _pipeline.get("client")
     llm_lock = _pipeline.get("llm_lock")
+    # AEC decoupling (0.9): only resolve (and possibly start) a TTS
+    # node when this session actually wants barge-in — never as an
+    # unconditional side effect of building an audio session.
+    far_end = _resolve_far_end_provider() if config.barge_in else None
     return AudioSession.build(
         config,
-        tts_synth=get_synth(),
+        far_end=far_end,
         llm_client=llm_client,
         llm_lock=llm_lock,
     )
@@ -478,9 +527,16 @@ def _build_audio_session_node(
     unused here (mirrors ``_build_tts_node``'s ``warm`` flag being the
     only manifest-config field it reads; audio_session's manifest node
     config carries no comparable per-boot flag today).
+
+    AEC decoupling (0.9): does NOT call :func:`ensure_tts_node`
+    unconditionally anymore — an STT-slot module's construction must
+    never require a TTS-slot module to be installed. See
+    :func:`_default_audio_session_factory` /
+    :func:`_resolve_far_end_provider`: TTS only gets ensured when the
+    real config asks for barge-in AND a tts-slot module is actually
+    installed.
     """
     global _audio_session, _audio_session_node
-    ensure_tts_node()  # dependency: shares the TTS synth's reference_buffer
     session = _audio_session_factory(_load_audio_session_config())
     node = _audio_session_node_factory(bus=bus, session=session)
     with _lock:
@@ -495,12 +551,16 @@ def ensure_audio_session_node(
 ) -> AudioSessionNode:
     """Make sure exactly one audio session node owns the mic.
 
-    The session factory receives the already-running TTS synth so
-    monolithic AEC can share its ``reference_buffer`` directly.  This is
-    intentional 0.4.0 coupling pending multiprocess reference transport.
+    AEC decoupling (0.9): does NOT call :func:`ensure_tts_node`
+    unconditionally — building/starting the mic session must never
+    require a TTS-slot module to be installed. If ``config.barge_in``
+    is set AND a tts-slot module is actually installed,
+    :func:`_default_audio_session_factory` resolves (and, as a side
+    effect, starts) TTS to share its ``reference_buffer`` as the AEC
+    far-end reference; otherwise this session simply runs without one
+    (falls back to mic-pause during playback, same as always).
     """
     global _audio_session_node, _audio_session_thread, _audio_session
-    ensure_tts_node()
     sup = _supervisor
     if sup is not None and sup.has("audio_session") and sup.enabled("audio_session"):
         if not sup.is_running("audio_session"):
