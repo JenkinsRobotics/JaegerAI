@@ -291,7 +291,7 @@
     <div class="dot e"></div>
   </div>
   <div class="wrap">
-    <div class="badge"><span class="dot"></span> 0.9.0-dev · the Mind · Apache-2.0</div>
+    <div class="badge"><span class="dot"></span> 0.9.0 · the Mind · Apache-2.0</div>
 
     <div class="hero-logo" aria-hidden="true">
       <img class="hero-mark" src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png"
@@ -432,10 +432,11 @@
       <div class="step">
         <span class="n">1</span>
         <h3>Clone + install</h3>
-        <p><code class="inline">install.sh</code> sets up a venv and installs jaeger-os + jaeger-ai editable (PEP 660) — the code stays writable in place because the agent self-modifies its own skills.</p>
+        <p><code class="inline">install.sh</code> sets up a venv and installs jaeger-os + jaeger-ai editable (PEP 660) — the code stays writable in place because the agent self-modifies its own skills. <code class="inline">pip</code> is the machinery underneath, resolving the dependency chain across all four ecosystem packages (path-pinned during staging, moving to git/version-range pins once each repo publishes releases).</p>
         <pre><span class="pmt">$</span> git clone https://github.com/JenkinsRobotics/JaegerAI.git
 <span class="pmt">$</span> cd JaegerAI
-<span class="pmt">$</span> ./install.sh</pre>
+<span class="pmt">$</span> ./install.sh
+<span class="pmt">$</span> ./jaeger update   <span class="cm"># later: pull + reinstall, non-interactive</span></pre>
       </div>
 
       <div class="step">
@@ -454,6 +455,14 @@
 <span class="pmt">$</span> ./jaeger</pre>
       </div>
     </div>
+
+    <p class="sub" style="margin-top: 28px; max-width: 100%;">
+      The from-scratch flow (a clean machine, no prior checkout) is
+      <strong>being finalized for the 0.9 release</strong> — the checkout
+      path above (steps 1–3) is the verified one.
+      <code class="inline">pip install jaeger-ai</code> from PyPI is
+      <strong>(planned, 1.0)</strong> — not available yet.
+    </p>
   </div>
 </section>
 
@@ -471,7 +480,7 @@
       </div>
 
       <div class="milestone next">
-        <h4>0.9.0-dev — Next</h4>
+        <h4>0.9.0 — Next</h4>
         <h3>Standing on its own as a repo</h3>
         <p>Split out of the JROS monorepo with history preserved: the CI dependency rule enforced, the <code class="inline">jaeger_os</code> → <code class="inline">jaeger_ai</code> package rename, discovery-driven engine resolution, cross-install proven against JaegerOS + both engine repos in one venv.</p>
       </div>
@@ -513,11 +522,13 @@
         <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>
         <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS" target="_blank" rel="noopener">JaegerKokoroTTS</a>
         <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT" target="_blank" rel="noopener">JaegerWhisperSTT</a>
+        <a href="https://github.com/JenkinsRobotics/JP01_Firmware" target="_blank" rel="noopener">JP01_Firmware</a>
       </div>
       <div class="foot-col">
         <div class="foot-h">Jenkins Robotics</div>
         <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">jenkinsrobotics.com</a>
         <a href="https://jenkinsrobotics.github.io" target="_blank" rel="noopener">Project index</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerTemplate" target="_blank" rel="noopener">JaegerTemplate</a>
         <a href="https://discord.gg/sAnE5pRVyT" target="_blank" rel="noopener">Discord</a>
       </div>
     </div>
