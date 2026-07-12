@@ -36,7 +36,7 @@ from typing import Any, Callable
 from jaeger_os.agent.dialects import extract_tool_calls
 from jaeger_os.agent.loop.interrupt import interruptible_call
 from jaeger_os.agent.schemas.message_types import Message
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 from .base import ProviderAdapter
 
 

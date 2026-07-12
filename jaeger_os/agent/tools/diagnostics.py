@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 def self_check(deep: bool = False) -> dict[str, Any]:

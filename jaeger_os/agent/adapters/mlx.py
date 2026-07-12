@@ -56,7 +56,7 @@ from jaeger_os.agent.loop.interrupt import (
     interruptible_call,
 )
 from jaeger_os.agent.schemas.message_types import Message, ToolCall
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 from .base import ProviderAdapter
 from .hermes_xml import HERMES_TOOL_INSTRUCTIONS, _render_tools_block
 

@@ -28,7 +28,7 @@ import os
 import re
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import (
+from jaeger_os.core.tools.tool_registry import (
     get_tool,
     register_tool_from_function,
 )

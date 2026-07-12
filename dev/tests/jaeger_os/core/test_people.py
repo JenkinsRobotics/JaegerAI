@@ -54,7 +54,7 @@ def test_find_by_handle_and_admins_for_channel() -> None:
 
 
 def test_people_tools_registered() -> None:
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     import jaeger_os.main as m
     m._register_builtins(object())
     names = {t.name for t in R.get_tools()}

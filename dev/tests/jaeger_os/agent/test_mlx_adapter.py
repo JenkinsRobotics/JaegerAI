@@ -103,7 +103,7 @@ def test_tools_always_reach_the_model_even_for_unknown_family():
     class _Args(BaseModel):
         x: int = 1
 
-    from jaeger_os.agent.schemas.tool_schema import ToolDef
+    from jaeger_os.core.tools.tool_schema import ToolDef
     tool = ToolDef(name="bump", description="Bump.",
                    args_model=_Args, fn=lambda x=1: {"ok": True})
 

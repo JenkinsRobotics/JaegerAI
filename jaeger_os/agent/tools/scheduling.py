@@ -13,7 +13,7 @@ from typing import Any
 
 from jaeger_os.core.memory import memory as mem
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 @requires_tier(

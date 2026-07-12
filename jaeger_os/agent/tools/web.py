@@ -38,7 +38,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.runtime.tool_interrupt import is_interrupted
 
 

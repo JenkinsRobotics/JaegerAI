@@ -17,7 +17,7 @@ from typing import Any
 
 from jaeger_os.core.context import _require_layout
 from jaeger_os.agent.background.deep_think import queue_for_layout
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
 def propose_deep_think_task(description: str) -> dict[str, Any]:

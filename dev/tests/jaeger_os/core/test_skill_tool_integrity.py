@@ -55,7 +55,7 @@ def _decorated_tool_names(src: str) -> set[str]:
 @pytest.fixture(scope="module")
 def registry_names() -> set[str]:
     import jaeger_os.agent.tools  # noqa: F401 — triggers module-level registration
-    from jaeger_os.agent.schemas.tool_registry import get_tools
+    from jaeger_os.core.tools.tool_registry import get_tools
     names = {t.name for t in get_tools()}
     for path in _SOURCE_ROOT.rglob("*.py"):
         if "__pycache__" in path.parts:

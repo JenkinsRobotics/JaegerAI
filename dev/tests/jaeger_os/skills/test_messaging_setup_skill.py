@@ -25,7 +25,7 @@ def test_messaging_setup_is_discovered() -> None:
 def test_messaging_setup_requires_tools_are_all_registered() -> None:
     from jaeger_os.agent.skill_registry.playbook_skills import discover_playbooks
     import jaeger_os.main as m
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
 
     m._register_builtins(object())
     registered = {t.name for t in R.get_tools()}

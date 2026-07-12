@@ -64,7 +64,7 @@ from pydantic import BaseModel, Field
 from jaeger_os.agent.dialects import _shared, extract_tool_calls
 from jaeger_os.agent.dialects.chatml import render_tools as _render_chatml_tools
 from jaeger_os.agent.prompts.persona_filter import _preserves_content
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 from jaeger_os.core.bench.scenarios import _is_refusal
 
 
@@ -245,7 +245,7 @@ MAX_HISTORY_CHARS = 3200
 #     capability that isn't actually there.
 #   * jaeger_os.agent.skill_registry.toolset_scoping.TOOLSETS — the
 #     routing surface's own category->tool-name map, intersected with
-#     jaeger_os.agent.schemas.tool_registry.get_tools() (the live,
+#     jaeger_os.core.tools.tool_registry.get_tools() (the live,
 #     process-wide registry) — for the core, always-compiled-in
 #     categories (files, scheduling, memory, web, diagnostics) that
 #     aren't module-gated at all.
@@ -307,7 +307,7 @@ def _installed_messaging_channels() -> list[str]:
 def _live_tool_names() -> set[str]:
     """Every tool name on the live, process-wide registry right now."""
     try:
-        from jaeger_os.agent.schemas.tool_registry import get_tools
+        from jaeger_os.core.tools.tool_registry import get_tools
         return {t.name for t in get_tools()}
     except Exception:  # noqa: BLE001 — self-model is best-effort
         return set()

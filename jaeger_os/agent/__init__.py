@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from jaeger_os.agent.parsing import schema_sanitizer
 from .adapters.anthropic import AnthropicAdapter
-from jaeger_os.agent.parsing.arg_coercion import coerce_args
+from jaeger_os.core.tools.arg_coercion import coerce_args
 from .adapters.base import KNOWN_FEATURES, ProviderAdapter
 from .adapters.hermes_xml import HermesXMLAdapter
 from .adapters.local_llama import LocalLlamaAdapter
@@ -32,7 +32,7 @@ from jaeger_os.agent.util.retry_utils import jittered_backoff, retry_with_backof
 from jaeger_os.agent.loop.jaeger_agent import JaegerAgent, SkipFinalFinalizer
 from jaeger_os.agent.schemas.message_types import Message, Role, ToolCall
 from jaeger_os.agent.prompts.prompts import build_system_prompt
-from jaeger_os.agent.schemas.tool_registry import (
+from jaeger_os.core.tools.tool_registry import (
     clear_registry,
     get_tool,
     get_tools,
@@ -42,7 +42,7 @@ from jaeger_os.agent.schemas.tool_registry import (
     register_tool_instance,
     unregister_tool,
 )
-from jaeger_os.agent.schemas.tool_schema import ToolDef, dev_mode_enabled
+from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_os.agent.schemas.tool_bundles import (
     JAEGER_TOOLSETS,
     list_toolsets,

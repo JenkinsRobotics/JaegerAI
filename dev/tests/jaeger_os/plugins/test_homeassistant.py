@@ -137,7 +137,7 @@ def test_list_entities_filters_domain_and_area(monkeypatch) -> None:
 
 
 def test_tools_registered_and_register_ctx_exposes_them() -> None:
-    from jaeger_os.agent.schemas.tool_registry import get_tool, has_tool
+    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
     from jaeger_os.plugins.registry import PluginContext
 
     for name in ha.TOOL_NAMES:

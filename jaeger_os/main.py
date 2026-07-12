@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from .core import credentials as creds
 from jaeger_os.core.runtime import log_rotation
 from jaeger_os.core.memory import memory as mem
@@ -869,7 +869,7 @@ def _session_context_block(session_key: str, user_text: str) -> str:
 # ---------------------------------------------------------------------------
 def _register_builtins(client: Any) -> None:
     """Wire all the built-in Jaeger tools into the framework-free
-    :mod:`jaeger_os.agent.schemas.tool_registry`.
+    :mod:`jaeger_os.core.tools.tool_registry`.
 
     Phase-6.2 cutover: the decorator is now ``@register_tool_from_function``
     (was ``@agent.tool_plain``); tool bodies and the ``@requires_tier``
@@ -1682,7 +1682,7 @@ def _get_agent(client: Any) -> object:
     fingerprint and returns the sentinel.
 
     Phase-9 cleanup: no pydantic-ai ``Agent`` is constructed any more.
-    Tools live in :mod:`jaeger_os.agent.schemas.tool_registry`; the sentinel
+    Tools live in :mod:`jaeger_os.core.tools.tool_registry`; the sentinel
     exists only so the skill loader's ``_ToolCapturingAgent`` wrapper
     has something to wrap.
     """
@@ -1853,7 +1853,7 @@ def _openai_tools_for_prewarm(agent: Any) -> list[dict[str, Any]] | None:
     # Registry path — pull from the shared registry the agent reads
     # from at turn 0.  This matches what the live agent will see.
     try:
-        from jaeger_os.agent.schemas.tool_registry import get_tools
+        from jaeger_os.core.tools.tool_registry import get_tools
     except Exception:  # noqa: BLE001
         return None
     try:

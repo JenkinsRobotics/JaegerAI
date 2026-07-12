@@ -25,7 +25,7 @@ import tempfile
 import time
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.context import _require_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.runtime.tool_interrupt import ToolInterrupted, run_interruptible

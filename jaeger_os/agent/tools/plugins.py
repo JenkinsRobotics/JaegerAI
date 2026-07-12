@@ -16,7 +16,7 @@ import os
 import pathlib
 from typing import Any
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_from_function
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.context import _require_layout
 
 try:

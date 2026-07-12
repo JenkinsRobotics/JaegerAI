@@ -63,7 +63,7 @@ def test_mode_state_message_shape() -> None:
 
 
 def test_set_mode_tool_registered() -> None:
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     import jaeger_os.main as m
     m._register_builtins(object())
     assert "set_mode" in {t.name for t in R.get_tools()}
@@ -82,7 +82,7 @@ def test_mode_info_reports_current_from_fact() -> None:
 
 
 def test_get_mode_tool_registered() -> None:
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     import jaeger_os.main as m
     m._register_builtins(object())
     assert "get_mode" in {t.name for t in R.get_tools()}

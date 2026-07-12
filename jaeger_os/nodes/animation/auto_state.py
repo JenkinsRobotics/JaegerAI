@@ -87,9 +87,9 @@ class AvatarAutoStateDriver:
         ``set_avatar_state`` agent tool so explicit calls + auto-
         driver produce identical commands."""
         try:
-            from jaeger_os.agent.tools.avatar import (
-                _DEFAULT_EXPRESSIONS,
-                _FRAMEWORK_AVATAR_DEFAULTS,
+            from jaeger_os.nodes.animation.expression_defaults import (
+                DEFAULT_EXPRESSIONS as _DEFAULT_EXPRESSIONS,
+                FRAMEWORK_AVATAR_DEFAULTS as _FRAMEWORK_AVATAR_DEFAULTS,
             )
         except Exception:  # noqa: BLE001
             return

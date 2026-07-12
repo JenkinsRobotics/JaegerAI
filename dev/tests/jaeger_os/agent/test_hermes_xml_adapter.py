@@ -23,7 +23,7 @@ from jaeger_os.agent import (
     register_tool,
 )
 from jaeger_os.agent.adapters.hermes_xml import HERMES_TOOL_INSTRUCTIONS
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 class _Args(BaseModel):

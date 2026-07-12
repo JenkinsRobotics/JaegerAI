@@ -131,7 +131,7 @@ def test_format_messages_injects_native_dialect_per_family():
     the model). A Hermes/chatml model gets <tool_call>; a Mistral model
     gets [TOOL_CALLS] — never the wrong one forced on it."""
     from pydantic import BaseModel
-    from jaeger_os.agent.schemas.tool_schema import ToolDef
+    from jaeger_os.core.tools.tool_schema import ToolDef
 
     class _A(BaseModel):
         x: int
@@ -159,7 +159,7 @@ def test_format_messages_gemma_injects_no_prose():
     """Gemma works through structured tools= — the adapter must NOT
     add prose for it (avoid perturbing a model that already routes)."""
     from pydantic import BaseModel
-    from jaeger_os.agent.schemas.tool_schema import ToolDef
+    from jaeger_os.core.tools.tool_schema import ToolDef
 
     class _A(BaseModel):
         x: int
@@ -183,7 +183,7 @@ def test_format_messages_prose_family_drops_structured_tools():
     args; Hermes builds strip the tool section). The catalogue is in the
     system prose instead."""
     from pydantic import BaseModel
-    from jaeger_os.agent.schemas.tool_schema import ToolDef
+    from jaeger_os.core.tools.tool_schema import ToolDef
 
     class _A(BaseModel):
         x: int

@@ -15,7 +15,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from jaeger_os.agent import AnthropicAdapter
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 # ── fake SDK client ────────────────────────────────────────────────

@@ -94,7 +94,7 @@ def test_agent_can_execute_plugin_tools() -> None:
     """All four plugin tools must be registered, or the agent can't drive
     plugins at all (the Jarvis failure was reaching for a tool that didn't
     exist)."""
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     import jaeger_os.main as m
     m._register_builtins(object())
     names = {t.name for t in R.get_tools()}
