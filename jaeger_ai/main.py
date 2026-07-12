@@ -1993,7 +1993,20 @@ def _confirmation_provider(config: Any, layout: Any = None) -> Any:
     prompt for 'confirm' mode (see ``_install_confirmations``).
 
     ``layout`` supplies the instance dir so the console provider can
-    load + persist per-skill grants (``<instance>/permissions.json``)."""
+    load + persist per-skill grants (``<instance>/permissions.json``).
+
+    This is called at BOOT, before it's known whether the process ends
+    up serving a tty (TUI/CLI), a Swift bridge child, or neither (an MCP
+    server, a cron-only headless daemon) — so it can only pick between
+    the two boot-time-knowable postures: Console (tty prompt, fails
+    closed on non-tty — see ``ConsoleConfirmationProvider.confirm``) or
+    AllowAll ('allow' mode). ``interfaces.bridge._boot_agent`` swaps
+    Console for ``BridgeConfirmationProvider`` right after boot ONCE it
+    knows it's a bridge session — never touching AllowAll, so 'allow'
+    mode/--yes behaves identically on every surface. A process that is
+    neither a tty nor a bridge (the MCP server, a headless daemon) never
+    reaches that swap and keeps Console's fail-closed non-tty default —
+    the "true headless daemon" case stays denied, same as before 0.9.3."""
     mode = getattr(getattr(config, "permissions", None), "mode", "confirm")
     if mode == "allow":
         from jaeger_os.core.safety.permissions import AllowAllProvider

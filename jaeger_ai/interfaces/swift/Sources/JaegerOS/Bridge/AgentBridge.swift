@@ -332,20 +332,18 @@ final class AgentBridge: ObservableObject {
 
     // MARK: - Permission requests
 
-    /// Default presenter: a native alert. ``pendingRequest`` is also
-    /// published so the settings HUD can render richer approval UI later
-    /// without touching the transport.
+    /// A tier-2+ approval landed (0.9.3 Task 1 — the headless confirmation
+    /// surface). ``pendingRequest`` is published; ``ChatView`` renders the
+    /// actual sheet (title = what the agent wants to do, three buttons:
+    /// once / always / deny) and calls ``respond(to:answer:)`` — this
+    /// method only guarantees the chat window is the one on screen to
+    /// show it, since the request can arrive while any window (or none)
+    /// is frontmost. ``clarify``/``secret`` kinds are published too, for a
+    /// future richer surface, but render no UI yet (unchanged from before).
     private func handleRequest(_ request: BridgeRequest) {
         pendingRequest = request
         guard request.kind == "approval" else { return }
-        let alert = NSAlert()
-        alert.messageText = "Jaeger asks permission"
-        alert.informativeText = request.prompt
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
-        let allowed = alert.runModal() == .alertFirstButtonReturn
-        respond(to: request, answer: allowed ? "allow" : "deny")
+        ChatWindowController.show(agent: self)
     }
 
     /// Answer a pending request (used by the alert above and available to
