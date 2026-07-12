@@ -9,14 +9,19 @@
 # re-listed here. Pinned to lower bounds so a fresh clone gets the
 # latest patch releases.
 
-# --- framework (path dep for local staging; pin a real published
-# version range here once jaeger-os has releases, per the template's
-# own guidance for a not-yet-on-PyPI sibling package). PEP 508 direct
-# reference, not `-e ../JaegerOS` — setuptools' dynamic-dependencies
-# file parser only accepts requirement specifiers, not pip's `-e`/`-r`
-# directives. ABSOLUTE staging path, tied to this scratch layout;
-# swap for a version-range pin at real release. ---
-jaeger-os @ file:///private/tmp/claude-501/-Users-jonathanjenkins-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerOS
+# --- framework + engine modules (git dependencies — none of the three
+# have PyPI releases yet). PEP 508 direct references, not `-e ../X` —
+# setuptools' dynamic-dependencies file parser only accepts requirement
+# specifiers, not pip's `-e`/`-r` directives. Pinned to @master for 0.9;
+# switch to tag pins (e.g. @0.9.0 / @1.0.0 / @1.0.0) once each repo cuts
+# a release tag. A dev clone with sibling ~/GITHUB/{JaegerOS,
+# JaegerKokoroTTS,JaegerWhisperSTT} checkouts gets editable installs of
+# those instead — see install.sh's sibling-detection step. kokoro_tts +
+# whisper_stt are DEFAULT deps (not optional extras) as of 0.9: a robot
+# needs a voice out of the curl one-liner, not a follow-up install. ---
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
+jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
+jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master
 
 # --- agent core ---
 pydantic>=2.0

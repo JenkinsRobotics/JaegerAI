@@ -1,5 +1,0 @@
-# JaegerAI's `kokoro_tts` optional extra — pulls in the JaegerKokoroTTS
-# engine repo. PEP 508 direct reference (not `-e`, see requirements.txt's
-# header) — ABSOLUTE staging path; pin a real published version range
-# once jaeger-kokoro-tts has releases.
-jaeger-kokoro-tts @ file:///private/tmp/claude-501/-Users-jonathanjenkins-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerKokoroTTS
