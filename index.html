@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="JaegerAI — the universal turnkey agentic agent: local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind.">
+<meta property="og:title" content="JaegerAI — the Mind of the Jaeger ecosystem">
+<meta property="og:description" content="The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. Runs on JaegerOS; headless is a config, not a fork.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0d1117">
+<title>JaegerAI — the Mind of the Jaeger ecosystem</title>
+<link rel="icon" type="image/png" href="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png">
+<style>
+  :root {
+    --bg:        #0a0e14;
+    --bg2:       #0d1117;
+    --panel:     #11161d;
+    --panel2:    #161b22;
+    --fg:        #c9d1d9;
+    --heading:   #f0f6fc;
+    --muted:     #8b949e;
+    --border:    #21262d;
+    --border2:   #30363d;
+    --accent:    #58a6ff;
+    --accent2:   #79c0ff;
+    --accent3:   #1f6feb;
+    --glow:      rgba(88, 166, 255, 0.18);
+    --green:     #3fb950;
+    --warn:      #d29922;
+    --red:       #f85149;
+    --radius:    10px;
+    --mono:      'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans:      -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 64px; }
+
+  body {
+    margin: 0;
+    color: var(--fg);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(1200px 600px at 80% -15%, rgba(88,166,255,0.16), transparent 60%),
+      radial-gradient(900px 600px at -5% 5%, rgba(31,111,235,0.18), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { color: var(--accent2); }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  code.inline {
+    background: var(--panel); padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--border); font-family: var(--mono);
+    font-size: 13px; color: var(--accent2);
+  }
+
+  .hero, section {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 80px 0;
+    position: relative;
+  }
+  section:nth-of-type(odd) {
+    background-color: var(--bg2);
+    background-image: radial-gradient(circle, rgba(88,166,255,0.05) 1px, transparent 1.4px);
+    background-size: 28px 28px;
+  }
+  section:nth-of-type(even) {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, rgba(88,166,255,0.04) 1px, transparent 1.4px);
+    background-size: 28px 28px;
+  }
+
+  .hero, section { opacity: 0; transform: translateY(24px); transition: opacity .65s cubic-bezier(.2,.7,.2,1), transform .65s cubic-bezier(.2,.7,.2,1); }
+  .hero.in, section.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .hero, section { opacity: 1 !important; transform: none !important; transition: none; }
+    .feature { opacity: 1 !important; transform: none !important; }
+  }
+
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    background: rgba(10, 14, 20, 0.86);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; color: var(--heading); letter-spacing: -0.01em; }
+  .brand-logo { flex-shrink: 0; border-radius: 6px; filter: drop-shadow(0 0 8px var(--glow)); }
+  .nav-links { display: flex; align-items: center; gap: 24px; }
+  .nav-links a { color: var(--muted); font-size: 14px; font-weight: 500; transition: color 0.15s ease; }
+  .nav-links a:hover { color: var(--fg); }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 16px; border-radius: var(--radius); font-weight: 600; font-size: 14px;
+    border: 1px solid var(--border2); color: var(--fg); background: var(--panel);
+    transition: transform .12s ease, border-color .15s ease, background .15s ease;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); color: var(--accent2); }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent3), var(--accent));
+    color: #fff; border: 1px solid var(--accent3);
+    box-shadow: 0 4px 18px rgba(88, 166, 255, 0.25);
+  }
+  .btn.primary:hover { filter: brightness(1.08); color: #fff; }
+
+  .hero { padding-top: 100px; text-align: center; overflow: hidden; position: relative; }
+  .hero .wrap { position: relative; z-index: 2; }
+  .hero-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+  .hero-bg::before {
+    content: ""; position: absolute; inset: -40px;
+    background-image:
+      linear-gradient(rgba(88,166,255,0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(88,166,255,0.07) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse at center, #000 30%, transparent 78%);
+    animation: grid-drift 32s linear infinite;
+  }
+  @keyframes grid-drift { from { transform: translate(0, 0); } to { transform: translate(48px, 48px); } }
+  .hero-bg .orb { position: absolute; width: 540px; height: 540px; border-radius: 50%; filter: blur(80px); opacity: 0.55; will-change: transform; }
+  .hero-bg .orb.one { background: radial-gradient(circle, rgba(88,166,255,0.55), transparent 70%); top: -180px; left: -120px; animation: orb-float-1 22s ease-in-out infinite; }
+  .hero-bg .orb.two { background: radial-gradient(circle, rgba(31,111,235,0.5), transparent 70%); bottom: -200px; right: -120px; animation: orb-float-2 28s ease-in-out infinite; }
+  .hero-bg .orb.three { width: 320px; height: 320px; background: radial-gradient(circle, rgba(121,192,255,0.35), transparent 70%); top: 30%; left: 50%; transform: translate(-50%, -50%); animation: orb-pulse 9s ease-in-out infinite; }
+  @keyframes orb-float-1 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(140px, 80px) scale(1.12); } }
+  @keyframes orb-float-2 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-100px, -60px) scale(1.08); } }
+  @keyframes orb-pulse { 0%, 100% { opacity: 0.32; transform: translate(-50%, -50%) scale(1); } 50% { opacity: 0.55; transform: translate(-50%, -50%) scale(1.18); } }
+  .hero-bg .scan {
+    position: absolute; left: 0; right: 0; height: 180px;
+    background: linear-gradient(180deg, transparent 0%, rgba(88,166,255,0.10) 50%, transparent 100%);
+    animation: scan-sweep 14s linear infinite; will-change: transform;
+  }
+  @keyframes scan-sweep { 0% { transform: translateY(-100%); opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateY(110vh); opacity: 0; } }
+  .hero-bg .dot { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: var(--accent2); box-shadow: 0 0 8px var(--accent2); opacity: 0.7; }
+  .hero-bg .dot.a { top: 22%; left: 14%; animation: dot-drift 13s ease-in-out infinite; }
+  .hero-bg .dot.b { top: 70%; left: 22%; animation: dot-drift 17s ease-in-out infinite reverse; }
+  .hero-bg .dot.c { top: 30%; right: 18%; animation: dot-drift 19s ease-in-out infinite; }
+  .hero-bg .dot.d { top: 78%; right: 12%; animation: dot-drift 15s ease-in-out infinite reverse; }
+  .hero-bg .dot.e { top: 12%; left: 52%; animation: dot-drift 21s ease-in-out infinite; }
+  @keyframes dot-drift { 0%, 100% { transform: translate(0, 0); opacity: 0.5; } 50% { transform: translate(20px, -16px); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-bg::before, .hero-bg .orb, .hero-bg .scan, .hero-bg .dot, .hero-mark { animation: none !important; }
+  }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-family: var(--mono);
+    color: var(--muted); border: 1px solid var(--border2); background: var(--panel);
+    padding: 6px 14px; border-radius: 999px; margin-bottom: 28px;
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  .hero-logo { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 6px; }
+  .hero-mark { border-radius: 14px; filter: drop-shadow(0 6px 26px var(--glow)) drop-shadow(0 0 10px rgba(88,166,255,0.25)); animation: mark-bob 6s ease-in-out infinite; }
+  @keyframes mark-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  .wordmark { font-family: var(--mono); font-size: clamp(36px, 7vw, 56px); font-weight: 700; color: var(--heading); letter-spacing: -0.02em; line-height: 1; }
+
+  .hero h1 { font-size: clamp(28px, 4.4vw, 44px); line-height: 1.15; margin: 24px 0 8px; letter-spacing: -0.015em; font-weight: 700; color: var(--heading); }
+  .hero h1 .grad { background: linear-gradient(135deg, var(--accent2), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .hero .slogan { color: var(--accent); font-family: var(--mono); font-size: 13px; margin: 0 0 28px; letter-spacing: 0.5px; opacity: 0.85; }
+  .hero .lede { font-size: clamp(16px, 2.1vw, 19px); color: var(--muted); max-width: 660px; margin: 0 auto 36px; }
+  .hero-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 40px; }
+
+  .term { max-width: 680px; margin: 32px auto 0; text-align: left; background: var(--panel2); border: 1px solid var(--border2); border-radius: var(--radius); overflow: hidden; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); }
+  .term-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .term-bar .ttl { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  .term-bar .lights { display: flex; gap: 6px; }
+  .term-bar .lights span { width: 11px; height: 11px; border-radius: 50%; background: var(--border2); }
+  .term-bar .lights span:first-child { background: #ff5f57; }
+  .term-bar .lights span:nth-child(2) { background: #febc2e; }
+  .term-bar .lights span:nth-child(3) { background: #28c840; }
+  .term pre { margin: 0; padding: 18px 18px; font-family: var(--mono); font-size: 13.5px; color: var(--fg); line-height: 1.75; white-space: pre-wrap; word-break: break-all; }
+  .term .pmt { color: var(--accent); }
+  .term .cm { color: var(--muted); font-style: italic; }
+  .term .ok { color: var(--green); }
+  .term .blink { display: inline-block; color: var(--accent2); animation: term-blink 1.05s steps(1) infinite; }
+  @keyframes term-blink { 50% { opacity: 0; } }
+
+  .eyebrow { color: var(--accent); font-weight: 700; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+  h2.h { font-size: clamp(22px, 3.2vw, 32px); margin: 10px 0 16px; letter-spacing: -0.015em; color: var(--heading); font-weight: 700; line-height: 1.2; }
+  .sub { color: var(--muted); max-width: 680px; font-size: 16px; }
+  .center { text-align: center; }
+  .center .sub { margin-left: auto; margin-right: auto; }
+
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; margin-top: 44px; }
+  .feature { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; transition: border-color .18s ease, transform .18s ease, background .18s ease; opacity: 0; transform: translateY(16px); }
+  #features.in .feature { animation: domino-in .5s cubic-bezier(.2,.7,.2,1) forwards; }
+  #features.in .feature:nth-child(1) { animation-delay: .04s; }
+  #features.in .feature:nth-child(2) { animation-delay: .09s; }
+  #features.in .feature:nth-child(3) { animation-delay: .14s; }
+  #features.in .feature:nth-child(4) { animation-delay: .19s; }
+  #features.in .feature:nth-child(5) { animation-delay: .24s; }
+  #features.in .feature:nth-child(6) { animation-delay: .29s; }
+  @keyframes domino-in { to { opacity: 1; transform: none; } }
+  .feature:hover { border-color: var(--accent); transform: translateY(-2px); background: var(--panel2); }
+  .feature h3 { font-size: 16px; margin: 0 0 8px; color: var(--heading); font-weight: 600; letter-spacing: -0.01em; }
+  .feature p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+  .feature .pill { display: inline-block; margin-top: 12px; padding: 2px 9px; font-family: var(--mono); font-size: 11px; color: var(--accent2); background: rgba(88, 166, 255, 0.08); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: 999px; }
+  .feature .pill.dev { color: var(--warn); background: rgba(210, 153, 34, 0.08); border-color: rgba(210, 153, 34, 0.30); }
+  .feature.dev { border-style: dashed; background: rgba(13, 17, 23, 0.5); }
+
+  .ondeck-divider { display: flex; align-items: center; gap: 14px; margin: 56px 0 24px; color: var(--accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .ondeck-divider::before, .ondeck-divider::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--border2), transparent); }
+
+  .arch { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 720px) { .arch { grid-template-columns: 1fr; } }
+  .arch-box { background: var(--panel); border: 1px solid var(--border2); border-radius: var(--radius); padding: 22px; }
+  .arch-box h4 { margin: 0 0 8px; color: var(--accent); font-family: var(--mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .arch-box h3 { margin: 0 0 12px; font-size: 18px; color: var(--heading); }
+  .arch-box p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+  .roadmap { margin-top: 44px; position: relative; }
+  .roadmap::before { content: ""; position: absolute; left: 18px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(180deg, var(--accent), var(--accent3), transparent); }
+  .milestone { position: relative; padding: 0 0 28px 56px; }
+  .milestone::before { content: ""; position: absolute; left: 11px; top: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); box-shadow: 0 0 0 4px var(--bg2), 0 0 12px var(--glow); }
+  .milestone.done::before { background: var(--accent); }
+  .milestone.next::before { background: var(--bg); border-color: var(--accent2); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 4px var(--bg2), 0 0 12px var(--glow); } 50% { box-shadow: 0 0 0 4px var(--bg2), 0 0 22px var(--accent2); } }
+  .milestone h4 { margin: 0 0 6px; font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.04em; }
+  .milestone h3 { margin: 0 0 8px; color: var(--heading); font-size: 17px; letter-spacing: -0.01em; }
+  .milestone p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+  .install-grid { margin-top: 44px; display: grid; grid-template-columns: 1fr; gap: 20px; max-width: 760px; }
+  .step { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; position: relative; }
+  .step .n { position: absolute; top: -14px; left: 18px; background: var(--accent); color: #fff; font-family: var(--mono); font-weight: 700; font-size: 14px; padding: 3px 10px; border-radius: 999px; box-shadow: 0 4px 12px var(--glow); }
+  .step h3 { margin: 8px 0 8px; color: var(--heading); font-size: 16px; }
+  .step p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .step pre { margin: 0; padding: 14px; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--fg); overflow-x: auto; line-height: 1.55; }
+  .step pre .pmt { color: var(--accent); }
+  .step pre .cm { color: var(--muted); }
+
+  footer { border-top: 1px solid var(--border); padding: 56px 0 32px; background: var(--bg2); }
+  footer .wrap { display: grid; grid-template-columns: 1.3fr 2fr; gap: 40px; align-items: start; }
+  @media (max-width: 720px) { footer .wrap { grid-template-columns: 1fr; gap: 28px; } }
+  .foot-brand { display: flex; align-items: flex-start; gap: 14px; }
+  .foot-brand img { border-radius: 6px; border: 1px solid var(--border2); background: #fff; padding: 3px; flex-shrink: 0; }
+  .foot-line { font-family: var(--mono); color: var(--heading); font-size: 14px; margin-bottom: 4px; font-weight: 600; }
+  .foot-sub { color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .foot-sub a { color: var(--accent); }
+  .foot-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  @media (max-width: 540px) { .foot-cols { grid-template-columns: repeat(2, 1fr); gap: 20px; } }
+  .foot-col { display: flex; flex-direction: column; gap: 6px; }
+  .foot-h { color: var(--accent); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px; }
+  .foot-col a { color: var(--muted); font-size: 13.5px; }
+  .foot-col a:hover { color: var(--fg); }
+  .foot-motto { margin-top: 10px; color: var(--accent2); font-family: var(--mono); font-size: 12px; font-style: italic; letter-spacing: 0.02em; opacity: 0.85; }
+
+  @media (max-width: 640px) { .nav-links a:not(.btn) { display: none; } .nav-links { gap: 12px; } }
+</style>
+</head>
+<body>
+
+<!-- ─────────────────────── NAV ─────────────────────── -->
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <img class="brand-logo" src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png"
+           alt="Jenkins Robotics" width="26" height="26">
+      JaegerAI
+    </div>
+    <div class="nav-links">
+      <a href="#what">What it is</a>
+      <a href="#features">Capabilities</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#install">Install</a>
+      <a href="#roadmap">Roadmap</a>
+      <a class="btn" href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ─────────────────────── HERO ─────────────────────── -->
+<header class="hero" id="top">
+  <div class="hero-bg" aria-hidden="true">
+    <div class="orb one"></div>
+    <div class="orb two"></div>
+    <div class="orb three"></div>
+    <div class="scan"></div>
+    <div class="dot a"></div>
+    <div class="dot b"></div>
+    <div class="dot c"></div>
+    <div class="dot d"></div>
+    <div class="dot e"></div>
+  </div>
+  <div class="wrap">
+    <div class="badge"><span class="dot"></span> 0.9.0-dev · the Mind · Apache-2.0</div>
+
+    <div class="hero-logo" aria-hidden="true">
+      <img class="hero-mark" src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png"
+           alt="Jenkins Robotics" width="88" height="88">
+      <div class="wordmark">JaegerAI</div>
+    </div>
+
+    <p class="slogan">// the universal turnkey agentic agent</p>
+
+    <h1>Local inference, tools, memory, and a persona pipeline —<span class="grad"> the Mind, ready to run.</span></h1>
+
+    <p class="lede">Local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol — one product. Runs on JaegerOS; headless is a config, not a fork.</p>
+
+    <div class="hero-cta">
+      <a class="btn primary" href="#install">Get started →</a>
+      <a class="btn" href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.6-2.8 5.5-5.5 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/>
+        </svg>
+        Star on GitHub
+      </a>
+    </div>
+
+    <div class="term" aria-label="install one-liner">
+      <div class="term-bar">
+        <div class="lights"><span></span><span></span><span></span></div>
+        <span class="ttl">install — bash</span>
+        <span style="width:48px"></span>
+      </div>
+<pre><span class="cm"># Clone, install, create your first agent.</span>
+<span class="pmt">$</span> git clone https://github.com/JenkinsRobotics/JaegerAI.git
+<span class="pmt">$</span> cd JaegerAI &amp;&amp; ./install.sh
+<span class="pmt">$</span> ./jaeger agent create<span class="blink">▎</span></pre>
+    </div>
+  </div>
+</header>
+
+<!-- ─────────────────────── WHAT IS IT ─────────────────────── -->
+<section id="what">
+  <div class="wrap">
+    <div class="eyebrow">// what it is</div>
+    <h2 class="h">The turnkey product, not a headless library.</h2>
+    <p class="sub">JaegerAI ships the complete universal agentic agent (Hermes lineage): loop, tools, skills, memory, persona, local inference, AND its own faces — chat app, TUI, voice, the protocol it serves. Headless (robots) is a config of JaegerAI, not a fork.</p>
+
+    <p class="sub" style="margin-top: 18px;">
+      Built on <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>
+      — the framework tier (bus, node, modules/slots, supervisor, safety,
+      contract, capability layer). This repo pins a JaegerOS release; it
+      never forks or edits it.
+    </p>
+
+    <p class="sub" style="margin-top: 18px;">
+      The <code class="inline">jaeger</code> CLI lives here — JaegerOS
+      ships no console script of its own. Engine modules
+      (<code class="inline">kokoro_tts</code>, <code class="inline">whisper_stt</code>)
+      are optional extras, each its own repo, pinning JaegerOS only.
+    </p>
+  </div>
+</section>
+
+<!-- ─────────────────────── CAPABILITIES ─────────────────────── -->
+<section id="features">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">// capabilities</div>
+      <h2 class="h">What ships in the Mind</h2>
+      <p class="sub">Real, shipped capabilities — not aspirational ones. See <code class="inline">CHANGELOG.md</code> for the full release history.</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>persona_first — the id/ego pipeline</h3>
+        <p>Default since 0.8.0: a persona lane speaks to the user directly, in character, and has exactly one tool — <code class="inline">perform_task(request)</code> — which runs the full clean inner agentic loop. The id never touches reality directly.</p>
+        <span class="pill">agent</span>
+      </div>
+
+      <div class="feature">
+        <h3>Characters as State → View</h3>
+        <p>14 shipped characters own identity + soul + traits + lore as numeric State (HEXACO/SPECIAL/Expression), compiled on change — never per turn — into the natural-language View the model actually sees.</p>
+        <span class="pill">personality</span>
+      </div>
+
+      <div class="feature">
+        <h3>Its own faces + protocol</h3>
+        <p>The Swift app (default windowed UI), the TUI, voice, and the frozen PySide6 set — all clients of one versioned NDJSON protocol (<code class="inline">JrosClient</code>), the same wire contract third-party apps can embed.</p>
+        <span class="pill">interfaces</span>
+      </div>
+    </div>
+
+    <!-- On-deck — capabilities in active development, not yet shipped -->
+    <div class="ondeck-divider"><span>// on deck — in active development</span></div>
+
+    <div class="feature-grid">
+      <div class="feature dev">
+        <h3>Module-shipped hardware SOPs</h3>
+        <p>Extending the module-shipped skill pattern (a module carrying its own <code class="inline">skills/</code>) to hardware-package setup SOPs, mirroring 0.8.1's messaging-setup skill.</p>
+        <span class="pill dev">planned</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────── ARCHITECTURE ─────────────────────── -->
+<section id="architecture">
+  <div class="wrap">
+    <div class="eyebrow">// architecture</div>
+    <h2 class="h">The Mind — pinned to JaegerOS, never forked from it.</h2>
+    <p class="sub">
+      JaegerAI is the second tier in the Jaeger ecosystem's four-tier map.
+      See <a href="https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md" target="_blank" rel="noopener">JAEGER_ECOSYSTEM.md</a>
+      for the full whole-ecosystem rundown and
+      <a href="https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md" target="_blank" rel="noopener">THREE_TIER_STRUCTURE.md</a>
+      for the tier-map reasoning.
+    </p>
+
+    <div class="arch">
+      <div class="arch-box">
+        <h4>// this repo</h4>
+        <h3>JaegerAI — the Mind</h3>
+        <p>Loop, tools, skills, memory, persona (id/ego), local inference, and its own faces. Registers its module roots (agent, nodes, plugins) through the <code class="inline">jaeger_os.module_roots</code> entry-point group — JaegerOS discovers it without ever naming it.</p>
+      </div>
+      <div class="arch-box">
+        <h4>// pinned framework</h4>
+        <h3>JaegerOS</h3>
+        <p>Bus · Node · modules/slots · supervisor · safety · contract · capability layer. This repo builds on a pinned release; JaegerOS itself is never edited to make this repo work.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────── INSTALL ─────────────────────── -->
+<section id="install">
+  <div class="wrap">
+    <div class="eyebrow">// install</div>
+    <h2 class="h">One script, then create your agent.</h2>
+
+    <div class="install-grid">
+      <div class="step">
+        <span class="n">1</span>
+        <h3>Clone + install</h3>
+        <p><code class="inline">install.sh</code> sets up a venv and installs jaeger-os + jaeger-ai editable (PEP 660) — the code stays writable in place because the agent self-modifies its own skills.</p>
+        <pre><span class="pmt">$</span> git clone https://github.com/JenkinsRobotics/JaegerAI.git
+<span class="pmt">$</span> cd JaegerAI
+<span class="pmt">$</span> ./install.sh</pre>
+      </div>
+
+      <div class="step">
+        <span class="n">2</span>
+        <h3>Voice extras (optional)</h3>
+        <p>A robot body can run JaegerAI text-only; pull in an engine module when you want speech.</p>
+        <pre><span class="pmt">$</span> pip install -e '.[kokoro_tts]'   <span class="cm"># speak</span>
+<span class="pmt">$</span> pip install -e '.[whisper_stt]'  <span class="cm"># listen</span></pre>
+      </div>
+
+      <div class="step">
+        <span class="n">3</span>
+        <h3>Create + launch an agent</h3>
+        <p>The setup wizard picks a character, model, and permissions.</p>
+        <pre><span class="pmt">$</span> ./jaeger agent create
+<span class="pmt">$</span> ./jaeger</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────── ROADMAP ─────────────────────── -->
+<section id="roadmap">
+  <div class="wrap">
+    <div class="eyebrow">// roadmap</div>
+    <h2 class="h">From the monorepo to its own repo, faces intact.</h2>
+
+    <div class="roadmap">
+      <div class="milestone done">
+        <h4>0.8.1 — Shipped</h4>
+        <h3>The field-test patch</h3>
+        <p>Eleven fixes from release-day testing on a deployed station: offline-first boot, a persona self-model, persistent plugin activation, queued mid-turn messages, messaging channels visible in discovery again, readable light-mode settings.</p>
+      </div>
+
+      <div class="milestone next">
+        <h4>0.9.0-dev — Next</h4>
+        <h3>Standing on its own as a repo</h3>
+        <p>Split out of the JROS monorepo with history preserved: the CI dependency rule enforced, the <code class="inline">jaeger_os</code> → <code class="inline">jaeger_ai</code> package rename, discovery-driven engine resolution, cross-install proven against JaegerOS + both engine repos in one venv.</p>
+      </div>
+
+      <div class="milestone">
+        <h4>Later</h4>
+        <h3>1.0 — the ecosystem opens</h3>
+        <p>Contract freeze at the JaegerOS seam; engine modules and hardware packages move to independently-versioned repos once the slot contracts survive a real body and a real engine swap.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────────── FOOTER ─────────────────────── -->
+<footer>
+  <div class="wrap">
+    <div class="foot-brand">
+      <img src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png"
+           alt="Jenkins Robotics" width="42" height="42" loading="lazy">
+      <div>
+        <div class="foot-line">JaegerAI · Apache-2.0</div>
+        <div class="foot-sub">
+          A <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">Jenkins Robotics</a>
+          project — the Mind of the Jaeger ecosystem, built on
+          <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>.
+        </div>
+        <div class="foot-motto">&ldquo;Engineering the future, one robot at a time.&rdquo;</div>
+      </div>
+    </div>
+    <div class="foot-cols">
+      <div class="foot-col">
+        <div class="foot-h">Project</div>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">GitHub repo</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/README.md" target="_blank" rel="noopener">README</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI/issues" target="_blank" rel="noopener">Issues</a>
+      </div>
+      <div class="foot-col">
+        <div class="foot-h">Ecosystem</div>
+        <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS" target="_blank" rel="noopener">JaegerKokoroTTS</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT" target="_blank" rel="noopener">JaegerWhisperSTT</a>
+      </div>
+      <div class="foot-col">
+        <div class="foot-h">Jenkins Robotics</div>
+        <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">jenkinsrobotics.com</a>
+        <a href="https://jenkinsrobotics.github.io" target="_blank" rel="noopener">Project index</a>
+        <a href="https://discord.gg/sAnE5pRVyT" target="_blank" rel="noopener">Discord</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Intersection-observer reveal — fades each section in once.
+  const reveal = (entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        e.target.classList.add('in');
+      }
+    }
+  };
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(reveal, { threshold: 0.12, rootMargin: '0px 0px -10% 0px' });
+    document.querySelectorAll('.hero, section').forEach(el => io.observe(el));
+  } else {
+    document.querySelectorAll('.hero, section').forEach(el => el.classList.add('in'));
+  }
+</script>
+
+</body>
+</html>
