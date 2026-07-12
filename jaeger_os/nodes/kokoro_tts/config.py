@@ -10,7 +10,7 @@ edits, matching ``module.yaml``'s ``config: kokoro_tts`` pointer.
 
 Voice resolution order is unchanged from pre-0.8: the active character's
 / instance's ``Identity.voice_id`` wins when set; ``voice`` below is only
-the fallback default (see ``agent/tools/speak.py::_resolve_voice``).
+the fallback default (see ``core/voice/voice_resolution.py::resolve_voice``).
 
 Import-cycle note: ``schemas.py`` imports THIS module's ``KokoroTTSConfig``
 to nest it into ``Config`` (``Config.kokoro_tts``). A naive two-file cycle
