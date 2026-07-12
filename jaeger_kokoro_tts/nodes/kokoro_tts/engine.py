@@ -32,6 +32,8 @@ import threading
 import time
 from typing import Any
 
+from jaeger_os.core.audio import FarEndReference
+
 
 KOKORO_VOICE = "af_heart"
 KOKORO_LANG = "a"
@@ -290,16 +292,21 @@ class KokoroTTS:
         *,
         voice: str = KOKORO_VOICE,
         lang: str = KOKORO_LANG,
-        reference_buffer: Any = None,
+        reference_buffer: FarEndReference | None = None,
     ) -> None:
         self.voice = voice
         self.lang = lang
         self._pipeline: Any = None
         self._pipeline_lock = threading.Lock()
-        # When set, every played frame is also pushed to this buffer so the
-        # STT plugin's AEC can use it as the far-end reference. Without it,
-        # AEC sees silence as far-end and barge-in won't work — but plain
-        # set_paused()-based playback still works.
+        # AEC decoupling (0.9): this engine IMPLEMENTS the
+        # jaeger_os.core.audio.FarEndReference seam by writing every
+        # played frame into whatever buffer is set here — it never
+        # knows or cares whether an STT engine is even installed, let
+        # alone which one. ``jaeger_os/nodes/runtime.py`` is what
+        # creates the buffer and assigns it here (discovery-driven,
+        # only when barge-in + AEC are actually wanted); left ``None``
+        # this engine simply doesn't publish a far-end reference and
+        # plain set_paused()-based playback still works.
         self.reference_buffer = reference_buffer
         # 0.3.0-refactor step 1+2: ONE long-lived output stream for the
         # whole TTS lifetime.  Backend chosen at runtime from
