@@ -115,6 +115,91 @@ def ensure_hf_offline_if_cached(
         file=sys.stderr, flush=True,
     )
     return True
+# ---------------------------------------------------------------------------
+# espeak-ng data-path length workaround (0.9 from-scratch-install fix).
+#
+# ROOT CAUSE (diagnosed empirically, not guessed): the ``espeakng-loader``
+# wheel's bundled ``libespeak-ng.dylib`` has a FIXED-SIZE internal C path
+# buffer. When ``espeakng_loader.get_data_path()`` (a path inside whatever
+# venv's site-packages the wheel happens to be installed into) is longer
+# than ~150 characters, ``espeak_Initialize()`` silently fails to use it,
+# falls back to the wheel's CI-build-time-baked absolute path (e.g.
+# ``/Users/runner/work/espeakng-loader/.../espeak-ng-data``), can't find
+# ``phontab`` there, and hard-exits(1) from inside the C library — no
+# Python exception, no traceback, just process death. Verified via a
+# binary search sweep: identical dylib + data, byte-for-byte, works at a
+# 150-char data path and fails at 152. This is why it only ever showed up
+# in freshly-built venvs: NOT because the venv is "fresh," but because
+# fresh venvs in this project's flow tend to live under longer paths
+# (sandboxed CI checkouts, session-scoped scratch dirs) than a long-lived
+# hand-built dev venv — a mature venv at a short path never hit it, and a
+# fresh venv at a short path never will either (confirmed both ways).
+#
+# FIX: mirror the loader's dylib + data dir into a short, fixed location
+# under /tmp (always short, always present, OS-guaranteed) the first time
+# the resolved path is too long, and point phonemizer's EspeakWrapper at
+# the mirror instead. Idempotent (checked by mtime), cheap (~20MB copy,
+# once), and applied BEFORE kokoro/misaki ever construct a real espeak
+# backend (misaki's own module-level ``EspeakWrapper.set_library()`` call
+# is harmless — it only sets an override string; the C library isn't
+# touched until a backend is actually constructed, which kokoro defers to
+# ``KPipeline()`` construction, not import time).
+_ESPEAK_SAFE_PATH_LEN = 130  # conservative; empirical break point is ~151
+_ESPEAK_SHORT_MIRROR_ROOT = "/tmp/jaeger-espeak-ng"
+
+
+def ensure_short_espeak_paths() -> None:
+    """If espeakng_loader's data path is long enough to hit espeak-ng's
+    fixed-size C path buffer, mirror it to a short /tmp path and point
+    phonemizer's EspeakWrapper there. No-op (and cheap) otherwise."""
+    try:
+        import espeakng_loader
+    except ImportError:
+        return  # not installed — kokoro's own import will fail loudly
+
+    lib_path = espeakng_loader.get_library_path()
+    data_path = espeakng_loader.get_data_path()
+    if len(data_path) < _ESPEAK_SAFE_PATH_LEN:
+        target_lib, target_data = lib_path, data_path
+    else:
+        import shutil
+
+        mirror = os.path.join(
+            _ESPEAK_SHORT_MIRROR_ROOT, f"v{os.path.basename(data_path.rstrip('/'))}"
+        )
+        target_lib = os.path.join(mirror, os.path.basename(lib_path))
+        target_data = os.path.join(mirror, "espeak-ng-data")
+        marker = os.path.join(mirror, ".source")
+        needs_copy = not (
+            os.path.isfile(target_lib)
+            and os.path.isdir(target_data)
+            and os.path.isfile(marker)
+            and open(marker).read().strip() == lib_path
+        )
+        if needs_copy:
+            os.makedirs(mirror, exist_ok=True)
+            shutil.copy2(lib_path, target_lib)
+            data_target_tmp = target_data + ".tmp"
+            if os.path.isdir(data_target_tmp):
+                shutil.rmtree(data_target_tmp)
+            shutil.copytree(data_path, data_target_tmp)
+            if os.path.isdir(target_data):
+                shutil.rmtree(target_data)
+            os.replace(data_target_tmp, target_data)
+            with open(marker, "w") as f:
+                f.write(lib_path)
+            print(
+                f"[kokoro] espeak-ng data path too long for the bundled "
+                f"library's internal buffer ({len(data_path)} chars) — "
+                f"mirrored to {mirror!r}.",
+                file=sys.stderr, flush=True,
+            )
+
+    from phonemizer.backend.espeak.wrapper import EspeakWrapper
+    EspeakWrapper.set_library(target_lib)
+    EspeakWrapper.set_data_path(target_data)
+
+
 # Sample rate the AEC reference buffer is expected to run at. AEC math
 # requires near (mic) and far (TTS playback) at the same sample rate;
 # the mic captures at 16 kHz, so Kokoro's 24 kHz output gets resampled
@@ -322,7 +407,19 @@ class KokoroTTS:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", category=UserWarning)
                     warnings.simplefilter("ignore", category=FutureWarning)
+                    # Fresh-venv-only native crash fix: espeak-ng's
+                    # fixed-size C path buffer breaks on long install
+                    # paths. `import kokoro` is what FIRST imports
+                    # misaki.espeak (not our own top-level import), and
+                    # misaki.espeak's own module-level code re-applies
+                    # EspeakWrapper.set_library/set_data_path with the
+                    # raw (possibly-too-long) site-packages path — so our
+                    # override must run AFTER this import, not before, or
+                    # misaki's own call clobbers it. See
+                    # ensure_short_espeak_paths()'s docstring for the
+                    # full root-cause writeup.
                     from kokoro import KPipeline
+                    ensure_short_espeak_paths()
                     self._pipeline = KPipeline(
                         lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
                     )
