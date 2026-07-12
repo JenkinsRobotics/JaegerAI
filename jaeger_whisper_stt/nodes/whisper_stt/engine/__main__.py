@@ -1,4 +1,4 @@
-"""``python -m jaeger_os.nodes.whisper_stt.engine`` -> the STT method bench."""
+"""``python -m jaeger_whisper_stt.nodes.whisper_stt.engine`` -> the STT method bench."""
 
 import sys
 

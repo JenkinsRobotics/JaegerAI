@@ -1,4 +1,4 @@
-"""Module-contract smoke for ``jaeger_os.nodes.whisper_stt`` — 0.8 M2b.
+"""Module-contract smoke for ``jaeger_whisper_stt.nodes.whisper_stt`` — 0.8 M2b.
 
 Not part of ``dev/tests`` (``pyproject.toml``'s ``testpaths`` doesn't
 include this package — same pattern as
@@ -6,7 +6,7 @@ include this package — same pattern as
 directly:
 
     pytest jaeger_os/nodes/whisper_stt/tests
-    python -m jaeger_os.nodes.whisper_stt.tests.test_module_contract
+    python -m jaeger_whisper_stt.nodes.whisper_stt.tests.test_module_contract
 
 Three things a module must get right, proven here without touching
 microphone hardware or loading the Whisper model weights:
@@ -34,7 +34,7 @@ import time
 
 import yaml
 
-from jaeger_os.nodes.whisper_stt import AudioSessionNode
+from jaeger_whisper_stt.nodes.whisper_stt import AudioSessionNode
 from jaeger_os.nodes.base import NodeState
 from jaeger_os.transport import InProcBus, topics
 
@@ -87,7 +87,7 @@ def test_module_yaml_validates() -> None:
     assert doc["consumes"] == []
     assert doc["produces"] == ["/sense/transcript", "/sense/user_speech_start"]
     assert doc["tools"] == ["listen"]
-    assert doc["factory"] == "jaeger_os.nodes.whisper_stt:make_audio_session_node"
+    assert doc["factory"] == "jaeger_whisper_stt.nodes.whisper_stt:make_audio_session_node"
     assert doc["config"] == "whisper_stt"
     assert doc["requires_libraries"] == [
         "pywhispercpp", "webrtcvad", "sounddevice", "numpy",

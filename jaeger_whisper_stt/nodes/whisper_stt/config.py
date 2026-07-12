@@ -1,4 +1,4 @@
-"""jaeger_os.nodes.whisper_stt.config — the module's own settings-catalog
+"""jaeger_whisper_stt.nodes.whisper_stt.config — the module's own settings-catalog
 schema slice.
 
 0.8 M2b Task B: "the module IS the engine" (kokoro_tts precedent, M1) —
@@ -10,7 +10,7 @@ settings-catalog walk (``core/settings/catalog.py``) then renders the
 ``module.yaml``'s ``config: whisper_stt`` pointer.
 
 Only fields that actually reach the engine are exposed here (no
-spec-ahead-of-code). ``jaeger_os.nodes.whisper_stt.engine.registry``'s
+spec-ahead-of-code). ``jaeger_whisper_stt.nodes.whisper_stt.engine.registry``'s
 ``_make_two_pass``/``_make_continuous`` factories forward exactly three
 ``AudioSessionConfig`` fields into ``WhisperSTTTwoPass``/
 ``WhisperSTTContinuous``: ``stt_mode`` (the registry key itself),
@@ -53,7 +53,7 @@ class WhisperSTTConfig(BaseModel):
         json_schema_extra=_setting("whisper_stt"),
         description=(
             "STT engine mode — the registry name flipped via "
-            "jaeger_os.nodes.whisper_stt.engine.registry.get() ('two_pass' "
+            "jaeger_whisper_stt.nodes.whisper_stt.engine.registry.get() ('two_pass' "
             "= fast model gates, accurate model commits; 'continuous' = "
             "single rolling model; 'local_agreement' is an unavailable "
             "stub)."

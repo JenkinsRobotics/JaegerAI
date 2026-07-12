@@ -1,4 +1,4 @@
-"""jaeger_os.nodes.whisper_stt — the whisper_stt engine-module.
+"""jaeger_whisper_stt.nodes.whisper_stt — the whisper_stt engine-module.
 
 0.8 M2b: the second "engine-module" (kokoro_tts, M1, is the first) —
 the module IS the engine. This package owns everything Whisper STT:

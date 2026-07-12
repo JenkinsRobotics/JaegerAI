@@ -4,7 +4,7 @@ version: 1.0.0
 consumes: []
 produces: [/sense/transcript, /sense/user_speech_start]
 tools: [listen]
-factory: jaeger_os.nodes.whisper_stt:make_audio_session_node
+factory: jaeger_whisper_stt.nodes.whisper_stt:make_audio_session_node
 config: whisper_stt        # its group/key in the settings catalog
 # Carried over from the old plugin.yaml's `requires.libraries` block
 # (pre-0.8 M2b, jaeger_os/plugins/whisper_stt/plugin.yaml) — the

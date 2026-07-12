@@ -1,9 +1,9 @@
 """STT method bench — run a clip through each method and print latency,
 so you can flip a pipeline variant and immediately see the cost.
 
-    python -m jaeger_os.nodes.whisper_stt.engine --audio clip.wav
-    python -m jaeger_os.nodes.whisper_stt.engine --method two_pass --audio clip.wav --ref "hello there"
-    python -m jaeger_os.nodes.whisper_stt.engine --record 5 --method all
+    python -m jaeger_whisper_stt.nodes.whisper_stt.engine --audio clip.wav
+    python -m jaeger_whisper_stt.nodes.whisper_stt.engine --method two_pass --audio clip.wav --ref "hello there"
+    python -m jaeger_whisper_stt.nodes.whisper_stt.engine --record 5 --method all
 
 Reports per method: model-load · transcribe · real-time-factor · WER (if
 --ref) · the transcript.  two_pass also splits fast vs accurate.

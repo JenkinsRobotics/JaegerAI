@@ -1,6 +1,6 @@
 """Whisper STT engine — mic capture + VAD/energy-segmented transcription.
 
-The engine half of the ``jaeger_os.nodes.whisper_stt`` module (0.8
+The engine half of the ``jaeger_whisper_stt.nodes.whisper_stt`` module (0.8
 M2b; folded in from ``jaeger_os/plugins/whisper_stt/``). ``registry.py``
 is the swap point ``core/audio/session.py``'s ``_build_adapter`` calls
 into by ``config.stt_mode`` name.

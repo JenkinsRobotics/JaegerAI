@@ -1,0 +1,44 @@
+# JaegerWhisperSTT — packaging + dev-tooling config.
+#
+# Split out of the JROS monorepo (0.9 four-way split): the stt-slot
+# engine module. The module IS the engine (see
+# jaeger_whisper_stt/nodes/whisper_stt/__init__.py). Two real consumers
+# (JaegerAI product + JP01 non-AI console) triggered the graduation to
+# its own repo (THREE_TIER_STRUCTURE.md's split triggers). Pins
+# jaeger-os ONLY — never jaeger-ai — a robot must be able to listen
+# without the AI product installed.
+#
+# Installs editable (PEP 660), same model as jaeger-os/jaeger-ai.
+# Version single-sourced from jaeger_whisper_stt/__init__.py; runtime
+# deps single-sourced from requirements.txt.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-whisper-stt"
+description = "JaegerWhisperSTT — the stt-slot engine module for the Jaeger ecosystem (pywhispercpp-backed Whisper engine + AudioSessionNode contract)."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dynamic = ["version", "dependencies"]
+
+[project.entry-points."jaeger_os.module_roots"]
+# The out-of-tree discover_modules() seam (0.9 step 4 split) — see
+# jaeger_whisper_stt/module_roots.py. JaegerOS finds this WITHOUT ever
+# naming jaeger_whisper_stt; it only knows the group.
+jaeger_whisper_stt = "jaeger_whisper_stt.module_roots:roots"
+
+[tool.setuptools.dynamic]
+version = {attr = "jaeger_whisper_stt.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["jaeger_whisper_stt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["jaeger_whisper_stt/nodes/whisper_stt/tests"]
+markers = [
+    "slow: tests that fork real processes or do real network I/O.",
+    "model: tests that load the real Whisper model weights.",
+]
