@@ -62,10 +62,11 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-`jaeger-os` on PyPI is the eventual path; until it has published
-releases, downstream repos (JaegerAI, the engine modules) pin this repo
-via a `file://` path dependency during staging — see their own
-`requirements.txt` headers for the real pin story.
+`pip install jaeger-os` from PyPI is **(planned, 1.0)** — not available
+yet. Until it has published releases, downstream repos (JaegerAI, the
+engine modules) pin this repo via a `file://` path dependency during
+staging — see their own `requirements.txt` headers for the real pin
+story.
 
 ## Quick start — build a module + manifest
 
@@ -139,6 +140,13 @@ the roadmap ladder).
 | [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS) | Engine module (`tts` slot) | Streaming Kokoro speech synthesis. Pins this repo only — never JaegerAI. |
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Pins this repo only — never JaegerAI. |
 | JP01 | Project (Body) | The reference hardware Jaeger — the first repo to consume out-of-tree modules and hardware packages the way this framework is built for. |
+
+Two more repos round out the ecosystem without being part of the tier map
+themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)
+(the conventions every new ecosystem repo — this one included — started
+from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
+(the robot's Mac + Jetson body-side code — the first repo this framework's
+out-of-tree capability layer is built to reach into).
 
 ## Development
 

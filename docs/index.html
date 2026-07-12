@@ -220,6 +220,18 @@
   .arch-box h3 { margin: 0 0 12px; font-size: 18px; color: var(--heading); }
   .arch-box p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
+  .tier-grid { margin-top: 44px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 900px) { .tier-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 540px) { .tier-grid { grid-template-columns: 1fr; } }
+  .tier-box { background: var(--panel); border: 1px solid var(--border2); border-radius: var(--radius); padding: 18px; position: relative; }
+  .tier-box.here { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .tier-box .n { font-family: var(--mono); font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+  .tier-box h4 { margin: 0 0 8px; font-size: 15px; color: var(--heading); }
+  .tier-box p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .tier-arrow { display: flex; align-items: center; justify-content: center; color: var(--border2); font-family: var(--mono); }
+  .repo-card { display: flex; flex-direction: column; height: 100%; }
+  .repo-card .link { margin-top: 14px; font-family: var(--mono); font-size: 12.5px; }
+
   .roadmap { margin-top: 44px; position: relative; }
   .roadmap::before { content: ""; position: absolute; left: 18px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(180deg, var(--accent), var(--accent3), transparent); }
   .milestone { position: relative; padding: 0 0 28px 56px; }
@@ -273,6 +285,7 @@
       <a href="#what">What it is</a>
       <a href="#features">Capabilities</a>
       <a href="#architecture">Architecture</a>
+      <a href="#ecosystem">Ecosystem</a>
       <a href="#install">Install</a>
       <a href="#roadmap">Roadmap</a>
       <a class="btn" href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">GitHub →</a>
@@ -424,6 +437,79 @@
   </div>
 </section>
 
+<!-- ─────────────────────── ECOSYSTEM ─────────────────────── -->
+<section id="ecosystem">
+  <div class="wrap">
+    <div class="center">
+      <div class="eyebrow">// the ecosystem</div>
+      <h2 class="h">One mind, many bodies — four repos, one wire truth.</h2>
+      <p class="sub">The 0.9 split turned one monorepo into a real ecosystem: a framework tier everything pins to, a turnkey Mind product, and engine modules that stand on their own. Full rundown in <a href="https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md" target="_blank" rel="noopener">JAEGER_ECOSYSTEM.md</a>.</p>
+    </div>
+
+    <div class="tier-grid" role="list" aria-label="the four-tier map">
+      <div class="tier-box here">
+        <div class="n">Tier 1 · Framework</div>
+        <h4>JaegerOS</h4>
+        <p>Bus, node, modules/slots, supervisor, safety, contract, capability layer. Pinned to, not edited, by everything below.</p>
+      </div>
+      <div class="tier-box">
+        <div class="n">Tier 2 · The Mind</div>
+        <h4>JaegerAI</h4>
+        <p>The turnkey agentic product — loop, tools, skills, memory, persona, local inference, and its own faces.</p>
+      </div>
+      <div class="tier-box">
+        <div class="n">Tier 3 · Modules</div>
+        <h4>Engines &amp; hardware</h4>
+        <p>JaegerKokoroTTS (tts), JaegerWhisperSTT (stt), hardware packages, characters — each pins JaegerOS only.</p>
+      </div>
+      <div class="tier-box">
+        <div class="n">Tier 4 · Projects</div>
+        <h4>The assembled things</h4>
+        <p>JP01 (the robot), Jaeger Animate (future), a desktop companion — each its own repo, owning its own bringup.</p>
+      </div>
+    </div>
+
+    <div class="feature-grid" style="margin-top: 28px;">
+      <div class="feature repo-card">
+        <span class="pill">framework · you are here</span>
+        <h3 style="margin-top:10px;">JaegerOS</h3>
+        <p>The Jaeger robot operating framework — bus, nodes, modules &amp; slots, supervisor, safety, wire contract, capability layer. Useful without any AI.</p>
+        <div class="link"><a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">github.com/JenkinsRobotics/JaegerOS →</a></div>
+      </div>
+
+      <div class="feature repo-card">
+        <span class="pill">the Mind (product)</span>
+        <h3 style="margin-top:10px;">JaegerAI</h3>
+        <p>The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol.</p>
+        <div class="link"><a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">github.com/JenkinsRobotics/JaegerAI →</a></div>
+      </div>
+
+      <div class="feature repo-card">
+        <span class="pill">engine module · tts slot</span>
+        <h3 style="margin-top:10px;">JaegerKokoroTTS</h3>
+        <p>Streaming Kokoro speech synthesis. Pins JaegerOS only — never JaegerAI — so a robot body can speak without the AI product installed at all.</p>
+        <div class="link"><a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS" target="_blank" rel="noopener">github.com/JenkinsRobotics/JaegerKokoroTTS →</a></div>
+      </div>
+
+      <div class="feature repo-card">
+        <span class="pill">engine module · stt slot</span>
+        <h3 style="margin-top:10px;">JaegerWhisperSTT</h3>
+        <p>Two-pass Whisper transcription with VAD and wake word, same discipline as JaegerKokoroTTS — pins JaegerOS only.</p>
+        <div class="link"><a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT" target="_blank" rel="noopener">github.com/JenkinsRobotics/JaegerWhisperSTT →</a></div>
+      </div>
+    </div>
+
+    <p class="sub" style="margin-top: 28px; max-width: 100%;">
+      Two more repos round out the ecosystem without being part of the tier map themselves:
+      <a href="https://github.com/JenkinsRobotics/JaegerTemplate" target="_blank" rel="noopener">JaegerTemplate</a>
+      (the conventions every new ecosystem repo — this one included — starts from) and
+      <a href="https://github.com/JenkinsRobotics/JP01_Firmware" target="_blank" rel="noopener">JP01_Firmware</a>
+      (the robot's Mac + Jetson body-side code — the first repo this framework's out-of-tree
+      capability layer is built to reach into).
+    </p>
+  </div>
+</section>
+
 <!-- ─────────────────────── INSTALL ─────────────────────── -->
 <section id="install">
   <div class="wrap">
@@ -460,9 +546,9 @@
 
     <div class="roadmap">
       <div class="milestone done">
-        <h4>0.9.0 — Shipped</h4>
+        <h4>0.9.0-dev — In progress</h4>
         <h3>The four-way split</h3>
-        <p><code class="inline">contract/</code> landed as the one wire truth, the CI dependency rule enforced (runtime/hardware never import <code class="inline">agent/</code>), the Mind promoted to a module in-repo, then JaegerOS / JaegerAI / JaegerKokoroTTS / JaegerWhisperSTT filter-repo'd into their own history-preserving repos — six gates run, cross-install proven.</p>
+        <p><code class="inline">contract/</code> landed as the one wire truth, the CI dependency rule enforced (runtime/hardware never import <code class="inline">agent/</code>), the Mind promoted to a module in-repo, then JaegerOS / JaegerAI / JaegerKokoroTTS / JaegerWhisperSTT filter-repo'd into their own history-preserving repos — six gates run, cross-install proven. 0.9.0 itself has not shipped yet.</p>
       </div>
 
       <div class="milestone next">
@@ -507,11 +593,13 @@
         <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>
         <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS" target="_blank" rel="noopener">JaegerKokoroTTS</a>
         <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT" target="_blank" rel="noopener">JaegerWhisperSTT</a>
+        <a href="https://github.com/JenkinsRobotics/JP01_Firmware" target="_blank" rel="noopener">JP01_Firmware</a>
       </div>
       <div class="foot-col">
         <div class="foot-h">Jenkins Robotics</div>
         <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">jenkinsrobotics.com</a>
         <a href="https://jenkinsrobotics.github.io" target="_blank" rel="noopener">Project index</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerTemplate" target="_blank" rel="noopener">JaegerTemplate</a>
         <a href="https://discord.gg/sAnE5pRVyT" target="_blank" rel="noopener">Discord</a>
       </div>
     </div>
