@@ -36,6 +36,18 @@ dependencies = {file = ["requirements.txt"]}
 [tool.setuptools.packages.find]
 include = ["jaeger_whisper_stt*"]
 
+[tool.setuptools.package-data]
+# Non-.py assets under the package (module.yaml at minimum) — setuptools
+# only auto-includes .py files for a found package; everything else
+# needs an explicit glob or it silently vanishes from a REAL (non
+# -editable) install. Caught via a real git-dependency install (`pip
+# install jaeger-whisper-stt @ git+...`): editable installs mask this
+# because they point back at the source tree, module.yaml "works" by
+# accident. "**/*" is deliberately broad (redundant with .py, harmless)
+# rather than an extension allowlist that silently misses the next
+# asset type this module grows.
+jaeger_whisper_stt = ["**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["jaeger_whisper_stt/nodes/whisper_stt/tests"]
 markers = [
