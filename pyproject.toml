@@ -65,6 +65,20 @@ dependencies = {file = ["requirements.txt"]}
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
 
+[tool.setuptools.package-data]
+# Non-.py assets under the package (module.yaml/plugin.yaml, character
+# personas + card art, skill markdown + paper-writing templates, ...) —
+# setuptools only auto-includes .py files for a found package; a REAL
+# (non-editable) install of jaeger_ai silently drops everything else
+# without this. The default install path is editable (masks the gap —
+# editable installs read straight from the source tree) but a
+# non-editable install (a future PyPI release, or jaeger-ai pulled in
+# as someone else's dependency) needs it too — found via the sibling
+# engine repos hitting this for real under a git-dependency install.
+# "**/*" is deliberately broad rather than an extension allowlist that
+# silently misses the next asset type a character/skill adds.
+jaeger_ai = ["**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["dev/tests"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration
