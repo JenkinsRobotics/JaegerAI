@@ -1,0 +1,17 @@
+module: animation
+slot: animation
+version: 1.0.0
+consumes: [/act/animation, /act/animation_stop, /sense/tts_chunk]
+produces: [/sense/animation_state]
+tools: [set_avatar_state, play_timeline, warm_avatar]
+factory: jaeger_ai.nodes.animation:make_animation_node
+config: avatar        # its group/key in the settings catalog
+# Read from the real top-level imports below (0.8 M2c recon), same
+# discipline as kokoro_tts/whisper_stt's requires_libraries — the
+# availability gate (jaeger_os/agent/availability.py) probes these
+# with importlib.util.find_spec before reporting set_avatar_state/
+# play_timeline/warm_avatar available:
+#   bridge.py               -> websockets  (top-level `import websockets`)
+#   adapters/image_adapter, gif_adapter, sprite_adapter -> PIL
+#   adapters/bitmap_adapter, math_adapter, sprite_adapter -> numpy
+requires_libraries: [websockets, PIL, numpy]

@@ -71,7 +71,7 @@ _QUICK_LIMIT = 8
 def _resolve_active_config_path() -> pathlib.Path:
     """The config.yaml the bench subprocess will actually load — the
     ACTIVE instance (JAEGER_INSTANCE_DIR wins for one-off overrides)."""
-    from jaeger_os.core.instance.instance import resolve_instance_dir
+    from jaeger_ai.core.instance.instance import resolve_instance_dir
     env_dir = os.environ.get("JAEGER_INSTANCE_DIR")
     root = pathlib.Path(env_dir) if env_dir else pathlib.Path(resolve_instance_dir(None))
     return root / "config.yaml"
@@ -141,7 +141,7 @@ def _prepared_config(*, model_path: str | None,
 def _canonical_model_name(model_path: object) -> str:
     stem = pathlib.Path(str(model_path)).stem
     try:
-        from jaeger_os.core.models.model_resolver import MODEL_REGISTRY
+        from jaeger_ai.core.models.model_resolver import MODEL_REGISTRY
         filename = pathlib.Path(str(model_path)).name.lower()
         for key, info in MODEL_REGISTRY.items():
             if str(info.get("hf_file", "")).lower() == filename:
@@ -190,17 +190,17 @@ def _run_single(args: argparse.Namespace) -> int:
     os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
     boot_started = time.perf_counter()
     with _prepared_config(model_path=None, force_allow=not args.no_force_allow):
-        from jaeger_os.main import boot_for_tui
+        from jaeger_ai.main import boot_for_tui
         boot = boot_for_tui(instance_name=None, with_memory=True,
                             warmup=not args.no_warmup)
         load_s = time.perf_counter() - boot_started
         print(f"[boot] loaded in {load_s:.2f}s", flush=True)
 
-        from jaeger_os.core.bench import run_bench, summarise
+        from jaeger_ai.core.bench import run_bench, summarise
 
         corpus = None
         if args.corpus == "B":
-            from jaeger_os.core.bench.cases_b import CASES_B
+            from jaeger_ai.core.bench.cases_b import CASES_B
             corpus = CASES_B
             print(f"=== Corpus B ({len(corpus)} cases) ===", flush=True)
 
@@ -226,7 +226,7 @@ def _run_single(args: argparse.Namespace) -> int:
 
     model_name = "unknown"
     try:
-        from jaeger_os.main import _pipeline as _pl
+        from jaeger_ai.main import _pipeline as _pl
         _mp = getattr(getattr(_pl.get("config"), "model", None), "model_path", None)
         if _mp:
             summary["model_path"] = str(_mp)
@@ -237,7 +237,7 @@ def _run_single(args: argparse.Namespace) -> int:
     ts = time.strftime("%Y%m%d-%H%M%S")
     summary["run_id"] = ts
     try:
-        from jaeger_os.core.bench.cases import BENCHMARK_VERSION
+        from jaeger_ai.core.bench.cases import BENCHMARK_VERSION
         summary["benchmark_version"] = BENCHMARK_VERSION
     except Exception:  # noqa: BLE001
         pass
@@ -301,7 +301,7 @@ def _run_single(args: argparse.Namespace) -> int:
 
     if not os.environ.get("JAEGER_SUPPRESS_HISTORY"):
         with contextlib.suppress(Exception):
-            from jaeger_os.cli.verbs.bench_history_verb import write_history_md
+            from jaeger_ai.cli.verbs.bench_history_verb import write_history_md
             written = write_history_md()
             if written:
                 print(f"Updated {written}", flush=True)
@@ -347,7 +347,7 @@ def _run_sweep(args: argparse.Namespace) -> int:
     finally:
         config_path.write_text(original, encoding="utf-8")
     with contextlib.suppress(Exception):
-        from jaeger_os.cli.verbs.bench_history_verb import write_history_md
+        from jaeger_ai.cli.verbs.bench_history_verb import write_history_md
         written = write_history_md()
         if written:
             print(f"\nUpdated {written}", flush=True)

@@ -5,7 +5,7 @@
 #   jaeger                      run the ACTIVE agent (no --instance needed)
 #   jaeger --instance NAME      run a specific agent
 #   jaeger --voice ...          run the agent in voice mode
-#   jaeger dev [flag]           developer toolbox (jaeger_os.cli.devtools):
+#   jaeger dev [flag]           developer toolbox (jaeger_ai.cli.devtools):
 #                               dev app/TUI boot, or pass
 #                               --stop/--status/--health/--dev-gui/…
 #   jaeger instances ...        manage agents: list / create / edit /
@@ -14,8 +14,8 @@
 #   jaeger setup [name]         alias of `jaeger instances create`
 #   jaeger doctor               environment + readiness check
 #
-# Management subcommands go to the console (jaeger_os.cli); everything
-# else runs the agent (jaeger_os.cli.run). Picks the repo's .venv interpreter
+# Management subcommands go to the console (jaeger_ai.cli); everything
+# else runs the agent (jaeger_ai.cli.run). Picks the repo's .venv interpreter
 # directly to sidestep pyenv shims.
 set -euo pipefail
 
@@ -27,8 +27,8 @@ if [ ! -x "$VENV_PY" ]; then
   exit 1
 fi
 
-# Dispatch now lives in jaeger_os.cli.entry — ONE routing table behind both
+# Dispatch now lives in jaeger_ai.cli.entry — ONE routing table behind both
 # this wrapper and the installed `jaeger` console script. It re-execs the same
 # `python -m <module>` (or launch.py) targets this case statement used to, so
-# behaviour is unchanged; see jaeger_os/cli/entry.py:_route for the table.
-exec "$VENV_PY" -m jaeger_os.cli.entry "$@"
+# behaviour is unchanged; see jaeger_ai/cli/entry.py:_route for the table.
+exec "$VENV_PY" -m jaeger_ai.cli.entry "$@"

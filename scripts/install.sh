@@ -14,7 +14,7 @@
 #   1. Verify prereqs (git, python 3.11/3.12).
 #   2. Fetch the JROS repo into a cache ($JAEGER_SRC, default
 #      ~/.cache/jaeger-src) — the full dev tree stays there.
-#   3. Copy ONLY the product (jaeger_os/ + entry scripts + manifests) into
+#   3. Copy ONLY the product (jaeger_ai/ + entry scripts + manifests) into
 #      $JAEGER_HOME — so the install dir is clean: no dev/tests/, no
 #      benchmarks, no dev launcher, no .git.
 #   4. Run the in-repo ./install.sh in $JAEGER_HOME — .venv, deps, and
@@ -35,10 +35,10 @@ RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com
 
 # The product allowlist — exactly what an end-user install contains.
 # Everything else in the repo (dev/ jaeger-studio/ launch_studio
-# scripts/ JaegerOS-dev.app) is dev-only and never copied. jaeger_os/ is
+# scripts/ JaegerOS-dev.app) is dev-only and never copied. jaeger_ai/ is
 # self-contained — it imports none of the dev tree at runtime.
 PRODUCT=(
-  jaeger_os
+  jaeger_ai
   install.sh run.sh jaeger
   requirements.txt pyproject.toml
   jaeger.toml jaeger.windowed.toml
@@ -49,7 +49,7 @@ cat <<EOF
 ╔══════════════════════════════════════════════╗
 ║  JROS — Jaeger-OS one-line installer         ║
 ╚══════════════════════════════════════════════╝
-  install location: $JAEGER_HOME   (clean: jaeger_os/ + .jaeger_os/)
+  install location: $JAEGER_HOME   (clean: jaeger_ai/ + .jaeger_os/)
   source cache:     $JAEGER_SRC
   ref:              $JAEGER_REF
 
@@ -137,7 +137,7 @@ for item in "${PRODUCT[@]}"; do
   fi
 done
 # Drop any stray bytecode the copy carried along.
-find "$JAEGER_HOME/jaeger_os" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+find "$JAEGER_HOME/jaeger_ai" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
 # 4. Run the in-repo installer in the clean dir (.venv + deps + scaffold).
 echo "→ running local installer..."
@@ -149,7 +149,7 @@ cat <<EOF
 ║  ✓ JROS installed at $JAEGER_HOME            ║
 ╚══════════════════════════════════════════════╝
 
-Your install is clean — jaeger_os/ plus the entry scripts; instance state
+Your install is clean — jaeger_ai/ plus the entry scripts; instance state
 lives under .jaeger_os/. (The full dev tree stays in the cache,
 $JAEGER_SRC — delete it any time.)
 

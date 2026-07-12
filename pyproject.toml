@@ -1,53 +1,74 @@
-# JROS — Jaeger-OS packaging + dev-tooling config.
+# JaegerAI — packaging + dev-tooling config.
 #
-# JROS installs as an EDITABLE package (PEP 660): the curl installer — and
-# ./install.sh — run `uv pip install -e .` INTO the clone. The code stays
-# writable in place (the agent self-modifies its skills; you can hack the
-# framework) while you still get real packaging: machine-readable version
-# metadata (`jaeger --version`) and `jaeger update` = git pull + editable
-# reinstall. This is the Hermes model (editable-into-clone), NOT a PyPI /
-# site-packages install — a self-modifying, stateful agent can't live in
-# read-only site-packages.
+# Split out of the JROS monorepo (0.9 four-way split); the turnkey
+# product (the Mind) — loop, tools, skills, memory, persona, local
+# inference, AND its own faces (chat app, TUI, voice, protocol). Ships
+# `main.py` + the `jaeger` command. Depends on jaeger-os (the framework
+# tier, nothing above it) via a path dependency in requirements.txt
+# while staging — see that file's header; a real version-range pin
+# replaces it once jaeger-os has published releases. Engine modules
+# (kokoro_tts / whisper_stt) are OPTIONAL extras, each its own repo,
+# pinning jaeger-os only (never jaeger-ai) — a robot body can run those
+# without the AI product installed at all.
+#
+# JaegerAI installs as an EDITABLE package (PEP 660), same model as
+# jaeger-os: the curl installer — and ./install.sh — run
+# `uv pip install -e .` INTO the clone. The code stays writable in
+# place (the agent self-modifies its skills) while you still get real
+# packaging: machine-readable version metadata (`jaeger --version`) and
+# `jaeger update` = git pull + editable reinstall.
 #
 # The `jaeger` command is a first-class console-script entry point
-# (jaeger_os.cli.entry:main) — one dispatcher behind both the installed
-# `jaeger` (on PATH after install) and the ./jaeger wrapper, which delegates
-# to it. So `jaeger` works from anywhere, not just inside the repo.
+# (jaeger_ai.cli.entry:main) — one dispatcher behind both the installed
+# `jaeger` (on PATH after install) and the ./jaeger wrapper, which
+# delegates to it. jaeger-os ships NO console script of its own (0.9
+# step 4 staging finding: every real cli/ verb imports
+# core.instance.schemas at module level — there is no layering-clean
+# framework-only CLI subset, so cli/ moved to JaegerAI entirely).
 #
-# History: 0.2.3 cut JROS from `pip install jaeger-os` to clone + PYTHONPATH,
-# which lost the entry point and the update path; 0.6 restored proper
-# packaging WITHOUT moving code — jaeger_os/ stays at the repo root, operator
-# state in .jaeger_os/ beside it. Version is single-sourced from
-# jaeger_os/__init__.py; runtime deps are single-sourced from requirements.txt.
+# Version is single-sourced from jaeger_ai/__init__.py; runtime deps
+# are single-sourced from requirements.txt.
 
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jaeger-os"
-description = "Jaeger-OS — a fused agentic-AI + robotics framework (the agent is the top layer of the robot stack)."
+name = "jaeger-ai"
+description = "JaegerAI — the turnkey agentic-AI product (the Mind): loop, tools, skills, memory, persona, local inference, and its own faces (chat app, TUI, voice, protocol)."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
 [project.optional-dependencies]
-# Acoustic echo cancellation for duplex voice. OPTIONAL: the native (SWIG)
-# build needs the speex system lib (macOS: brew install speexdsp; Debian:
-# apt install libspeexdsp-dev), and core/audio/aec.py degrades to passthrough
-# without it. Kept out of the base deps so one optional C extension can't
-# break the whole install. Enable with: pip install 'jaeger-os[aec]'.
+# Acoustic echo cancellation for duplex voice — passed through from
+# jaeger-os (core/audio/aec.py); re-declared here so `pip install
+# 'jaeger-ai[aec]'` works without the operator needing to know it's
+# actually a jaeger-os extra.
 aec = ["speexdsp>=0.1.1"]
 
+[tool.setuptools.dynamic.optional-dependencies]
+# Engine modules: own repos, own packages, path deps while staging
+# (see requirements-kokoro.txt / requirements-whisper.txt headers).
+# `pip install -e '.[kokoro_tts]'` / `-e '.[whisper_stt]'` / both.
+kokoro_tts = { file = ["requirements-kokoro.txt"] }
+whisper_stt = { file = ["requirements-whisper.txt"] }
+
 [project.scripts]
-jaeger = "jaeger_os.cli.entry:main"
+jaeger = "jaeger_ai.cli.entry:main"
+
+[project.entry-points."jaeger_os.module_roots"]
+# The out-of-tree discover_modules() seam (0.9 step 4 split) — see
+# jaeger_ai/module_roots.py. JaegerOS finds this WITHOUT ever naming
+# jaeger_ai; it only knows the group.
+jaeger_ai = "jaeger_ai.module_roots:roots"
 
 [tool.setuptools.dynamic]
-version = {attr = "jaeger_os.__version__"}
+version = {attr = "jaeger_ai.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
-include = ["jaeger_os*"]
+include = ["jaeger_ai*"]
 
 [tool.pytest.ini_options]
 testpaths = ["dev/tests"]
