@@ -4,12 +4,14 @@
 # product (the Mind) — loop, tools, skills, memory, persona, local
 # inference, AND its own faces (chat app, TUI, voice, protocol). Ships
 # `main.py` + the `jaeger` command. Depends on jaeger-os (the framework
-# tier, nothing above it) via a path dependency in requirements.txt
-# while staging — see that file's header; a real version-range pin
-# replaces it once jaeger-os has published releases. Engine modules
-# (kokoro_tts / whisper_stt) are OPTIONAL extras, each its own repo,
-# pinning jaeger-os only (never jaeger-ai) — a robot body can run those
-# without the AI product installed at all.
+# tier, nothing above it) plus the kokoro_tts/whisper_stt engine
+# modules, all three as git dependencies in requirements.txt (@master
+# for 0.9; a real version/tag pin replaces it once each repo has
+# releases — see that file's header). Engine modules are each their own
+# repo, pinning jaeger-os only (never jaeger-ai) — a robot body can run
+# those standalone, without the AI product installed at all — but
+# JaegerAI installs them by DEFAULT (not as opt-in extras): the curl
+# one-liner should produce a voice-capable agent, not a mute one.
 #
 # JaegerAI installs as an EDITABLE package (PEP 660), same model as
 # jaeger-os: the curl installer — and ./install.sh — run
@@ -46,13 +48,6 @@ dynamic = ["version", "dependencies"]
 # 'jaeger-ai[aec]'` works without the operator needing to know it's
 # actually a jaeger-os extra.
 aec = ["speexdsp>=0.1.1"]
-
-[tool.setuptools.dynamic.optional-dependencies]
-# Engine modules: own repos, own packages, path deps while staging
-# (see requirements-kokoro.txt / requirements-whisper.txt headers).
-# `pip install -e '.[kokoro_tts]'` / `-e '.[whisper_stt]'` / both.
-kokoro_tts = { file = ["requirements-kokoro.txt"] }
-whisper_stt = { file = ["requirements-whisper.txt"] }
 
 [project.scripts]
 jaeger = "jaeger_ai.cli.entry:main"
