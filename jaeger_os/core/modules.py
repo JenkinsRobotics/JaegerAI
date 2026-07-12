@@ -29,6 +29,16 @@ binding (manifests picking a factory *by slot*) is a later step.
 package) — re-exported here unchanged so existing ``from
 jaeger_os.core.modules import ModuleSpec`` call sites keep working. This
 module owns the LOADER: discovery, parsing, and validation.
+
+0.9 step 3 (mind-as-module): ``jaeger_os/agent/`` gained its own
+``module.yaml`` (``slot: mind``) — but unlike ``nodes/`` and
+``plugins/``, which hold MANY module subdirectories, the Mind is a
+singleton and its ``module.yaml`` sits directly at ``agent/``'s own
+root, not one level down. ``AGENT_DIR`` is added as a third default
+discovery root, and the walk below checks whether a root *itself* is
+a module (has ``module.yaml`` directly) before falling back to
+scanning its children — so ``discover_modules()`` finds the mind slot
+with zero special-casing at any call site.
 """
 
 from __future__ import annotations
@@ -40,11 +50,12 @@ import msgspec
 
 from jaeger_os.contract.modules import ModuleSpec
 
-# The two directories module.yaml files live under. Derived the same
-# way (relative to this file, not cwd) so discovery works regardless
-# of where the process was launched from.
+# The directories module.yaml files live under (or, for AGENT_DIR, IS
+# one). Derived the same way (relative to this file, not cwd) so
+# discovery works regardless of where the process was launched from.
 NODES_DIR = pathlib.Path(__file__).resolve().parents[1] / "nodes"
 PLUGINS_DIR = pathlib.Path(__file__).resolve().parents[1] / "plugins"
+AGENT_DIR = pathlib.Path(__file__).resolve().parents[1] / "agent"
 
 
 def _check_factory(factory: str, *, path: pathlib.Path) -> None:
@@ -90,10 +101,16 @@ def module_platform_ok(spec: ModuleSpec) -> bool:
 def discover_modules(
     roots: pathlib.Path | tuple[pathlib.Path, ...] | None = None,
 ) -> dict[str, list[ModuleSpec]]:
-    """Scan one or more roots' immediate subdirectories for
-    ``module.yaml`` and return every module found across ALL roots,
-    keyed by slot. Default roots: ``(NODES_DIR, PLUGINS_DIR)`` — the
-    two directories that hold module.yaml files in this repo.
+    """Scan one or more roots for ``module.yaml`` and return every
+    module found across ALL roots, keyed by slot. Default roots:
+    ``(NODES_DIR, PLUGINS_DIR, AGENT_DIR)``.
+
+    A root is checked two ways: is the root ITSELF a module (has
+    ``module.yaml`` directly — ``AGENT_DIR``'s shape, a singleton
+    module with no sibling), or does it hold module SUBdirectories
+    (``NODES_DIR``/``PLUGINS_DIR``'s shape, many engine/plugin
+    modules). A root that's a module itself is not also scanned for
+    child modules — the Mind has no nested modules to find.
 
     A single ``pathlib.Path`` is also accepted (normalized to a
     one-tuple) for callers/tests that only care about one directory.
@@ -106,13 +123,17 @@ def discover_modules(
     telegram, imessage all live under ``plugins/`` and share the
     slot); callers doing ANY-OF readiness must consult every entry."""
     if roots is None:
-        roots = (NODES_DIR, PLUGINS_DIR)
+        roots = (NODES_DIR, PLUGINS_DIR, AGENT_DIR)
     elif isinstance(roots, (str, pathlib.Path)):
         roots = (pathlib.Path(roots),)
     by_slot: dict[str, list[ModuleSpec]] = {}
     for root in roots:
         root = pathlib.Path(root)
         if not root.is_dir():
+            continue
+        if (root / "module.yaml").is_file():
+            spec = load_module(root)
+            by_slot.setdefault(spec.slot, []).append(spec)
             continue
         for child in sorted(root.iterdir()):
             if not child.is_dir():
@@ -126,5 +147,5 @@ def discover_modules(
 
 __all__ = [
     "ModuleSpec", "load_module", "discover_modules", "module_platform_ok",
-    "NODES_DIR", "PLUGINS_DIR",
+    "NODES_DIR", "PLUGINS_DIR", "AGENT_DIR",
 ]

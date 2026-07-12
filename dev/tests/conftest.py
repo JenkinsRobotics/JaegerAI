@@ -112,7 +112,7 @@ def _full_tool_registry_snapshot():
     re-run after a clear_registry() because the modules are import-cached)
     PLUS the remaining main.py builtins."""
     import jaeger_os.agent.tools  # noqa: F401 — module-level tool registrations
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     try:
         from jaeger_os.main import _register_builtins
         _register_builtins(None)   # register-only; client is unused at def time
@@ -127,7 +127,7 @@ def _restore_tool_registry(_full_tool_registry_snapshot):
     tool-standardization, most tools register on module import; a test that
     calls clear_registry() would otherwise strand those module tools for the
     whole rest of the session (imports are cached, so they can't re-fire)."""
-    from jaeger_os.agent.schemas import tool_registry as R
+    from jaeger_os.core.tools import tool_registry as R
     yield
     R._registry.clear()
     R._registry.update(_full_tool_registry_snapshot)

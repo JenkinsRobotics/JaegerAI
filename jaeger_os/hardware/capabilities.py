@@ -31,8 +31,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from jaeger_os.agent.schemas.tool_registry import register_tool_instance
-from jaeger_os.agent.schemas.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_registry import register_tool_instance
+from jaeger_os.core.tools.tool_schema import ToolDef
 from jaeger_os.core.safety.permissions import (
     PermissionError as TierError,
     PermissionRequest,
