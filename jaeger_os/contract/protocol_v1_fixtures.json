@@ -1,0 +1,306 @@
+{
+  "_comment": "JROS client protocol v1 — canonical frame examples. THE cross-language contract fixtures: pytest asserts the Python builders produce these shapes; XCTest asserts the Swift decoder parses every one. Change a frame -> change this file -> both suites tell you what broke.",
+  "proto": "1",
+  "frames": {
+    "ready": {
+      "type": "ready",
+      "proto": "1",
+      "capabilities": [
+        "query",
+        "command",
+        "chat",
+        "sessions",
+        "permissions",
+        "agent_state"
+      ],
+      "instance": "jros-dev",
+      "model": null,
+      "character": null,
+      "icon": null,
+      "agent": "booting",
+      "agent_name": null
+    },
+    "ready_warm": {
+      "type": "ready",
+      "proto": "1",
+      "capabilities": [
+        "query",
+        "command",
+        "chat",
+        "sessions",
+        "permissions",
+        "agent_state"
+      ],
+      "instance": "jros-dev",
+      "model": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "character": "HAL 9000",
+      "icon": "/tmp/hal.png",
+      "agent": "ready",
+      "agent_name": "Jarvis"
+    },
+    "agent_state_booting": {
+      "type": "agent_state",
+      "state": "booting",
+      "model": null,
+      "character": null,
+      "icon": null,
+      "error": null,
+      "agent_name": null
+    },
+    "agent_state_ready": {
+      "type": "agent_state",
+      "state": "ready",
+      "model": "gemma-4-E4B-it-Q4_K_M.gguf",
+      "character": "HAL 9000",
+      "icon": "/tmp/hal.png",
+      "error": null,
+      "agent_name": "Jarvis"
+    },
+    "agent_state_failed": {
+      "type": "agent_state",
+      "state": "failed",
+      "model": null,
+      "character": null,
+      "icon": null,
+      "error": "model file missing",
+      "agent_name": null
+    },
+    "state_busy": {
+      "type": "state",
+      "busy": true,
+      "session": "desktop-app"
+    },
+    "state_idle": {
+      "type": "state",
+      "busy": false,
+      "session": "desktop-app"
+    },
+    "tool": {
+      "type": "tool",
+      "name": "web_search",
+      "phase": "done",
+      "elapsed_s": 1.25,
+      "session": "desktop-app"
+    },
+    "reply": {
+      "type": "reply",
+      "text": "It's 3:48 PM PDT.",
+      "error": null,
+      "session": "desktop-app"
+    },
+    "reply_error": {
+      "type": "reply",
+      "text": "",
+      "error": "model exploded",
+      "session": "desktop-app"
+    },
+    "reply_telemetry": {
+      "type": "reply",
+      "text": "It's 3:48 PM PDT.",
+      "error": null,
+      "session": "desktop-app",
+      "elapsed_s": 3.21,
+      "ctx_used": 18300,
+      "ctx_max": 32768
+    },
+    "result": {
+      "type": "result",
+      "id": "r1",
+      "ok": true,
+      "data": {
+        "name": "Jaeger",
+        "voice_enabled": true
+      },
+      "error": null
+    },
+    "result_settings_set": {
+      "type": "result",
+      "id": "r7",
+      "ok": true,
+      "data": {
+        "restart_required": true,
+        "path": "model.ctx",
+        "value": 16384
+      },
+      "error": null
+    },
+    "result_check_update": {
+      "type": "result",
+      "id": "r12",
+      "ok": true,
+      "data": {
+        "current": "0.8.0",
+        "latest": "0.9.0",
+        "available": true,
+        "notes_url": "https://github.com/JenkinsRobotics/JROS/releases/tag/0.9.0"
+      },
+      "error": null
+    },
+    "result_run_update": {
+      "type": "result",
+      "id": "r13",
+      "ok": true,
+      "data": {
+        "restart_required": true,
+        "returncode": 0,
+        "output": "[jaeger update] now at 0.9.0. Restart `jaeger` to apply."
+      },
+      "error": null
+    },
+    "request_approval": {
+      "type": "request",
+      "id": "perm1",
+      "kind": "approval",
+      "prompt": "Allow files.write_file?",
+      "options": [
+        "allow",
+        "deny"
+      ],
+      "session": ""
+    },
+    "fatal_boot": {
+      "type": "fatal",
+      "error": "model file missing",
+      "kind": "boot"
+    },
+    "fatal_locked": {
+      "type": "fatal",
+      "error": "instance 'jros-dev' is locked by pid 4242 (still running).",
+      "kind": "locked"
+    },
+    "fatal_no_instance": {
+      "type": "fatal",
+      "error": "no instance named 'default' exists yet — first-run setup required",
+      "kind": "no_instance"
+    },
+    "fatal_no_instance_suggested": {
+      "type": "fatal",
+      "error": "no instance named 'lilith' exists yet — first-run setup required",
+      "kind": "no_instance",
+      "suggested_name": "lilith"
+    },
+    "bye": {
+      "type": "bye",
+      "reason": "quit"
+    },
+    "tool_skill_detail": {
+      "type": "tool",
+      "name": "skill",
+      "phase": "start",
+      "elapsed_s": 0.0,
+      "session": "desktop-app",
+      "detail": "view scheduling"
+    }
+  },
+  "ops": {
+    "send": {
+      "op": "send",
+      "text": "hello",
+      "session": "desktop-app"
+    },
+    "respond": {
+      "op": "respond",
+      "id": "perm1",
+      "answer": "allow"
+    },
+    "quit": {
+      "op": "quit"
+    },
+    "query": {
+      "op": "query",
+      "id": "r1",
+      "what": "config",
+      "args": {}
+    },
+    "command": {
+      "op": "command",
+      "id": "r2",
+      "cmd": "select_character",
+      "args": {
+        "id": "jarvis"
+      }
+    },
+    "command_speak": {
+      "op": "command",
+      "id": "r3",
+      "cmd": "speak",
+      "args": {
+        "text": "Good day."
+      }
+    },
+    "query_instance_exists": {
+      "op": "query",
+      "id": "r4",
+      "what": "instance_exists",
+      "args": {}
+    },
+    "query_setup_defaults": {
+      "op": "query",
+      "id": "r5",
+      "what": "setup_defaults",
+      "args": {}
+    },
+    "query_settings_catalog": {
+      "op": "query",
+      "id": "r7",
+      "what": "settings_catalog",
+      "args": {}
+    },
+    "command_settings_set": {
+      "op": "command",
+      "id": "r8",
+      "cmd": "settings_set",
+      "args": {
+        "path": "voice.speak_replies",
+        "value": false
+      }
+    },
+    "command_create_instance": {
+      "op": "command",
+      "id": "r6",
+      "cmd": "create_instance",
+      "args": {
+        "character_id": "jarvis",
+        "display_name": "Jarvis",
+        "permission_mode": "confirm",
+        "interaction_mode": "gui"
+      }
+    },
+    "query_list_sessions": {
+      "op": "query",
+      "id": "r9",
+      "what": "list_sessions",
+      "args": {
+        "limit": 50
+      }
+    },
+    "query_load_session": {
+      "op": "query",
+      "id": "r10",
+      "what": "load_session",
+      "args": {
+        "id": "a1b2c3d4"
+      }
+    },
+    "command_new_session": {
+      "op": "command",
+      "id": "r11",
+      "cmd": "new_session",
+      "args": {
+        "old_id": "a1b2c3d4"
+      }
+    },
+    "query_check_update": {
+      "op": "query",
+      "id": "r12",
+      "what": "check_update",
+      "args": {}
+    },
+    "command_run_update": {
+      "op": "command",
+      "id": "r13",
+      "cmd": "run_update",
+      "args": {}
+    }
+  }
+}
