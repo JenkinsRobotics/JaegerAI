@@ -39,47 +39,35 @@ from typing import Any, Callable, Optional
 
 from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
+from jaeger_os.core.modules import resolve_slot_symbols as _resolve_slot_symbols
+from jaeger_os.core.modules import resolve_mind_module as _resolve_mind_module
 from jaeger_os.nodes.base import NodeState
-try:
-    from jaeger_os.nodes.animation import AnimationNode, AvatarAutoStateDriver
-    from jaeger_os.nodes.animation import bridge as animation_bridge
-except ImportError:
-    # 0.8 M2c: same tolerance as the kokoro_tts/whisper_stt guards below
-    # — every use of AnimationNode/AvatarAutoStateDriver/animation_bridge
-    # is either a type annotation (stringified by the ``from __future__
-    # import annotations`` above, so never evaluated) or reached only
-    # through ``_construct_animation_components``/``_build_animation_node``,
-    # which the availability gate (set_avatar_state/play_timeline/
-    # warm_avatar -> animation module discovery) already keeps
-    # unreachable when the module (or a library it requires, e.g.
-    # websockets) is gone. None/inert here is the same failure mode as
-    # before, just later.
-    AnimationNode = None  # type: ignore[assignment,misc]
-    AvatarAutoStateDriver = None  # type: ignore[assignment,misc]
-    animation_bridge = None  # type: ignore[assignment]
-try:
-    from jaeger_os.nodes.kokoro_tts import Synthesizer, TTSNode
-except ImportError:
-    # 0.8 M2a: tolerate the kokoro_tts engine-module being removed —
-    # every use below is either a type annotation (stringified by the
-    # ``from __future__ import annotations`` above, so never evaluated)
-    # or reached only through ``_default_synth_factory``'s OWN lazy
-    # import (line ~72, unchanged), which is gated by the availability
-    # check before the agent ever calls into TTS. So None here is
-    # inert unless something actually tries to synthesize with no
-    # module installed — the same failure mode as before, just later.
-    Synthesizer = None  # type: ignore[assignment,misc]
-    TTSNode = None  # type: ignore[assignment,misc]
-try:
-    from jaeger_os.nodes.whisper_stt import AudioSessionNode
-except ImportError:
-    # 0.8 M2b: same tolerance as the kokoro_tts guard above — every
-    # use of AudioSessionNode below is either a type annotation
-    # (stringified, never evaluated) or reached only through
-    # ``_default_audio_session_node_factory``'s own construction call,
-    # which the availability gate (``listen`` -> whisper_stt module
-    # discovery) already keeps unreachable when the module is gone.
-    AudioSessionNode = None  # type: ignore[assignment,misc]
+
+# 0.9 step 4 split: animation/kokoro_tts/whisper_stt are no longer
+# nested submodules of jaeger_os.nodes (they moved to jaeger_ai.nodes.*
+# and the wholly-separate jaeger_kokoro_tts/jaeger_whisper_stt
+# packages respectively) — a hardcoded ``from jaeger_os.nodes.<x>
+# import ...`` can no longer even ATTEMPT to resolve them. Resolved via
+# discover_modules() + the winning module's factory-string module
+# instead (same mechanism nodes/__init__.py uses for tts/stt) — every
+# use below is either a type annotation (stringified by the
+# ``from __future__ import annotations`` above, never evaluated) or
+# reached only through a ``_build_*``/``_default_*_factory`` call that
+# the availability gate already keeps unreachable when the owning
+# module isn't installed. None/inert here is the same failure mode as
+# the old ImportError guards, just resolved a different way.
+_animation_syms = _resolve_slot_symbols(
+    "animation", ("AnimationNode", "AvatarAutoStateDriver", "bridge"))
+AnimationNode = _animation_syms.get("AnimationNode")  # type: ignore[assignment,misc]
+AvatarAutoStateDriver = _animation_syms.get("AvatarAutoStateDriver")  # type: ignore[assignment,misc]
+animation_bridge = _animation_syms.get("bridge")  # type: ignore[assignment]
+
+_tts_syms = _resolve_slot_symbols("tts", ("Synthesizer", "TTSNode"))
+Synthesizer = _tts_syms.get("Synthesizer")  # type: ignore[assignment,misc]
+TTSNode = _tts_syms.get("TTSNode")  # type: ignore[assignment,misc]
+
+_stt_syms = _resolve_slot_symbols("stt", ("AudioSessionNode",))
+AudioSessionNode = _stt_syms.get("AudioSessionNode")  # type: ignore[assignment,misc]
 from jaeger_os.transport import Bus, InProcBus
 
 
@@ -105,10 +93,30 @@ def _default_bus_factory() -> Bus:
 
 def _default_synth_factory() -> Synthesizer:
     # Late import — speak.py imports from this module, so a module-level
-    # import would be circular.
-    from jaeger_os.nodes.kokoro_tts import KokoroTTS, KokoroTTSConfig
+    # import would be circular. 0.9 step 4 split: KokoroTTS/
+    # KokoroTTSConfig no longer live at a hardcoded jaeger_os.nodes.
+    # kokoro_tts dotted path (that package doesn't exist post-split —
+    # jaeger_kokoro_tts is its own installed package) — resolved via
+    # the same discover_modules()-backed helper as the module-level
+    # guards above. This stays hardcoded to WHICHEVER module the "tts"
+    # slot resolves to (Kokoro today, by construction the only one) —
+    # deliberately not a multi-engine dispatch; that's still the
+    # deferred YAGNI item noted since 0.8 M2a ("a 2nd real TTS engine
+    # forces that decoupling").
+    engine_syms = _resolve_slot_symbols("tts", ("KokoroTTS", "KokoroTTSConfig"))
+    KokoroTTS = engine_syms.get("KokoroTTS")
+    KokoroTTSConfig = engine_syms.get("KokoroTTSConfig")
+    if KokoroTTS is None or KokoroTTSConfig is None:
+        raise RuntimeError(
+            "_default_synth_factory: no tts-slot module installed "
+            "(or it doesn't export KokoroTTS/KokoroTTSConfig)"
+        )
     from jaeger_os.core.voice.voice_resolution import resolve_voice as _resolve_voice
-    from jaeger_os.core.context import _require_layout
+    # 0.9 step 4 split: core.context/core.instance.schemas moved to the
+    # Mind's own package (jaeger_ai today) — resolved via
+    # resolve_mind_module instead of a hardcoded dotted import, same
+    # discovery mechanism as the tts/stt engine guards above.
+    context_mod = _resolve_mind_module("core.context")
 
     # 0.8 M1: lang comes from Config.kokoro_tts instead of a hardcoded
     # constant — the settings-catalog "kokoro_tts" group is only real
@@ -117,10 +125,10 @@ def _default_synth_factory() -> Synthesizer:
     # fallback default) lives in ``core.voice.voice_resolution`` itself.
     lang = KokoroTTSConfig().lang
     try:
-        layout = _require_layout()
-        from jaeger_os.core.instance.schemas import Config, load_yaml
-        lang = load_yaml(layout.config_path, Config).kokoro_tts.lang
-    except Exception:  # noqa: BLE001 — fresh/unconfigured instance
+        layout = context_mod._require_layout()
+        schemas_mod = _resolve_mind_module("core.instance.schemas")
+        lang = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config).kokoro_tts.lang
+    except Exception:  # noqa: BLE001 — fresh/unconfigured instance, or no Mind installed
         pass
     return KokoroTTS(voice=_resolve_voice(), lang=lang)
 
@@ -130,7 +138,16 @@ def _default_tts_node_factory(
     bus: Bus,
     synthesizer: Synthesizer,
 ) -> TTSNode:
-    return TTSNode(
+    # Resolved FRESH here rather than trusting the module-level
+    # TTSNode name — found the hard way (0.9 step 4 gate 1): an eager
+    # module-level resolution can permanently cache None if some other
+    # import chain re-enters this package mid-initialization (a
+    # transient circular-import race with the engine's own node.py,
+    # which imports jaeger_os.nodes.base). Resolving at CALL time is
+    # always after every module has finished importing, so it never
+    # observes the partial state.
+    _TTSNode = _resolve_slot_symbols("tts", ("TTSNode",)).get("TTSNode")
+    return _TTSNode(
         bus=bus,
         synthesizer=synthesizer,
         name="tts",
@@ -154,7 +171,10 @@ def _default_audio_session_factory(
     # inside the session.  When the brain hasn't loaded yet (rare —
     # only voice-only configurations during early boot), the gate
     # degrades to deterministic filters and accepts unknown phrases.
-    from jaeger_os.main import _pipeline
+    # 0.9 step 4 split: main.py moved to the Mind's own package
+    # (jaeger_ai today) — resolved via resolve_mind_module.
+    main_mod = _resolve_mind_module("main")
+    _pipeline = getattr(main_mod, "_pipeline", {})
     llm_client = _pipeline.get("client")
     llm_lock = _pipeline.get("llm_lock")
     return AudioSession.build(
@@ -170,7 +190,11 @@ def _default_audio_session_node_factory(
     bus: Bus,
     session: AudioSession,
 ) -> AudioSessionNode:
-    return AudioSessionNode(
+    # Resolved FRESH — see _default_tts_node_factory's comment for why
+    # (transient circular-import race, not a real absence).
+    _AudioSessionNode = _resolve_slot_symbols(
+        "stt", ("AudioSessionNode",)).get("AudioSessionNode")
+    return _AudioSessionNode(
         bus=bus,
         session=session,
         name="audio_session",
@@ -411,16 +435,19 @@ def _load_audio_session_config() -> AudioSessionConfig:
     no phrase-list field to route here.
 
     Falls back to ``AudioSessionConfig()`` defaults on any load failure
-    (fresh/unconfigured instance) — same fallback shape as kokoro's
-    synth factory; boot must not hard-fail because settings haven't
-    been written yet.
+    (fresh/unconfigured instance, OR no Mind installed — headless body)
+    — same fallback shape as kokoro's synth factory; boot must not
+    hard-fail because settings haven't been written yet.
+
+    0.9 step 4 split: core.context/core.instance.schemas moved to the
+    Mind's own package (jaeger_ai today) — resolved via
+    resolve_mind_module instead of a hardcoded dotted import.
     """
     try:
-        from jaeger_os.core.context import _require_layout
-        from jaeger_os.core.instance.schemas import Config, load_yaml
-
-        layout = _require_layout()
-        cfg = load_yaml(layout.config_path, Config)
+        context_mod = _resolve_mind_module("core.context")
+        schemas_mod = _resolve_mind_module("core.instance.schemas")
+        layout = context_mod._require_layout()
+        cfg = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config)
     except Exception:  # noqa: BLE001 — fresh/unconfigured instance
         return AudioSessionConfig()
     return AudioSessionConfig(
@@ -519,6 +546,13 @@ def _wait_for_node_running(node: TTSNode, *, timeout_s: float) -> None:
     raise TimeoutError("TTS node did not reach RUNNING state")
 
 
+def _resolve_avatar_auto_state_driver():
+    # Resolved FRESH — see _default_tts_node_factory's comment for why
+    # (transient circular-import race, not a real absence).
+    return _resolve_slot_symbols(
+        "animation", ("AvatarAutoStateDriver",)).get("AvatarAutoStateDriver")
+
+
 def _construct_animation_components(
     bus: Bus,
     *,
@@ -531,13 +565,21 @@ def _construct_animation_components(
     — shared by the legacy :func:`ensure_animation_node` singleton path
     and the supervisor-facing :func:`_build_animation_node` factory so
     both build the exact same node shape."""
+    # Resolved FRESH here rather than the module-level names — see
+    # _default_tts_node_factory's comment for why (transient
+    # circular-import race, not a real absence).
+    _animation_syms = _resolve_slot_symbols(
+        "animation", ("AnimationNode", "bridge"))
+    _AnimationNode = _animation_syms.get("AnimationNode")
+    _animation_bridge = _animation_syms.get("bridge")
+
     # Start the bridge first so the node's frame_callback can plug
     # into it.  Bridge runs on a daemon thread; failures are non-fatal
     # (animation still works, just no renderer receives frames).
-    bridge_instance: animation_bridge.FrameBridge | None = None
-    if enable_bridge:
+    bridge_instance: Any | None = None
+    if enable_bridge and _animation_bridge is not None:
         try:
-            bridge_instance = animation_bridge.FrameBridge(
+            bridge_instance = _animation_bridge.FrameBridge(
                 host=bridge_host, port=bridge_port,
             )
             bridge_instance.start()
@@ -545,21 +587,19 @@ def _construct_animation_components(
             bridge_instance = None
 
     # Build the registry once so XP grants land on the same
-    # tree the CLI + Swift app read.
+    # tree the CLI + Swift app read. 0.9 step 4 split: skill_tree/ and
+    # core.instance.instance moved to the Mind's own package (jaeger_ai
+    # today) — resolved via resolve_mind_module.
     skill_registry: Any | None = None
     try:
-        from jaeger_os.skill_tree import (
-            SkillTreeRegistry, seed_default_tree,
+        skill_tree_mod = _resolve_mind_module("skill_tree")
+        instance_mod = _resolve_mind_module("core.instance.instance")
+        layout = instance_mod.InstanceLayout(
+            root=instance_mod.resolve_instance_dir(
+                instance_mod.default_instance_name()),
         )
-        from jaeger_os.core.instance.instance import (
-            InstanceLayout, default_instance_name,
-            resolve_instance_dir,
-        )
-        layout = InstanceLayout(
-            root=resolve_instance_dir(default_instance_name()),
-        )
-        skill_registry = SkillTreeRegistry.for_instance(layout)
-        seed_default_tree(skill_registry)
+        skill_registry = skill_tree_mod.SkillTreeRegistry.for_instance(layout)
+        skill_tree_mod.seed_default_tree(skill_registry)
     except Exception:  # noqa: BLE001
         skill_registry = None
 
@@ -567,24 +607,28 @@ def _construct_animation_components(
         bridge_instance.publish_frame if bridge_instance else None
     )
 
-    node = AnimationNode(
+    node = _AnimationNode(
         bus=bus,
         skill_registry=skill_registry,
         frame_callback=frame_callback,
     )
 
     # Register the L1-L4 adapter set so the brain can route
-    # to any of them by name.
+    # to any of them by name. 0.9 step 4 split: animation moved to
+    # jaeger_ai.nodes.animation — resolved via discover_modules()
+    # instead of a hardcoded dotted import (same reasoning as the
+    # tts/stt engine-symbol guards above). ``adapters`` is a submodule
+    # of the animation package, not a re-exported name, so this uses
+    # resolve_slot_module's ``suffix`` form rather than
+    # resolve_slot_symbols (which only chases one hop).
     try:
-        from jaeger_os.nodes.animation.adapters import (
-            BitmapAdapter, GifAdapter, ImageAdapter,
-            MathAdapter, SpriteAdapter,
-        )
-        node.register_adapter("image", ImageAdapter())
-        node.register_adapter("bitmap", BitmapAdapter())
-        node.register_adapter("sprite", SpriteAdapter())
-        node.register_adapter("gif", GifAdapter())
-        node.register_adapter("math", MathAdapter())
+        from jaeger_os.core.modules import resolve_slot_module
+        adapters = resolve_slot_module("animation", "adapters")
+        node.register_adapter("image", adapters.ImageAdapter())
+        node.register_adapter("bitmap", adapters.BitmapAdapter())
+        node.register_adapter("sprite", adapters.SpriteAdapter())
+        node.register_adapter("gif", adapters.GifAdapter())
+        node.register_adapter("math", adapters.MathAdapter())
     except Exception:  # noqa: BLE001
         pass
 
@@ -629,7 +673,7 @@ def _build_animation_node(
         bus, bridge_host=bridge_host, bridge_port=bridge_port,
         enable_bridge=enable_bridge,
     )
-    auto_driver = AvatarAutoStateDriver(bus=bus)
+    auto_driver = _resolve_avatar_auto_state_driver()(bus=bus)
     auto_driver.start()
     with _lock:
         _animation_bridge = bridge_instance
@@ -697,7 +741,7 @@ def ensure_animation_node(
         # done.  Without this the avatar wouldn't react to TTS
         # unless the brain explicitly fired set_avatar_state
         # each turn.
-        auto_driver = AvatarAutoStateDriver(bus=bus)
+        auto_driver = _resolve_avatar_auto_state_driver()(bus=bus)
         auto_driver.start()
         _avatar_auto_driver = auto_driver
 

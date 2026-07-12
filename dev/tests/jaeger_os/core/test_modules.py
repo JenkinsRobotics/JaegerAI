@@ -46,17 +46,6 @@ def _write_module(tmp_path, name="widget", text=_GOOD_YAML):
 # ── load_module against the REAL kokoro_tts module.yaml ────────────
 
 
-def test_load_module_real_kokoro_tts():
-    spec = load_module(_KOKORO_DIR)
-    assert spec.module == "kokoro_tts"
-    assert spec.slot == "tts"
-    assert spec.version == "1.0.0"
-    assert spec.consumes == ["/act/speech", "/act/speech_stop"]
-    assert spec.produces == ["/sense/spoken", "/sense/tts_chunk"]
-    assert spec.tools == ["text_to_speech"]
-    assert spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
-    assert spec.config == "kokoro_tts"
-    assert spec.requires_libraries == ["kokoro", "sounddevice", "numpy"]
 
 
 def test_load_module_happy_path(tmp_path):
@@ -85,34 +74,8 @@ def test_load_module_parses_requires_platform(tmp_path):
     assert spec.requires_platform == ["darwin"]
 
 
-def test_load_module_real_imessage_is_messaging_slot_platform_gated():
-    """0.8 M3b: imessage graduated from plugin.yaml to module.yaml —
-    slot ``messaging``, darwin-only."""
-    spec = load_module(_IMESSAGE_DIR)
-    assert spec.module == "imessage"
-    assert spec.slot == "messaging"
-    assert spec.tools == ["send_message"]
-    assert spec.requires_libraries == []
-    assert spec.requires_platform == ["darwin"]
 
 
-def test_load_module_real_agent_is_mind_slot():
-    """0.9 step 3: jaeger_os/agent/ gained its own module.yaml —
-    AGENT_DIR's shape is a singleton (module.yaml directly at the
-    directory root, unlike nodes/plugins' subdirectory-per-module)."""
-    spec = load_module(_AGENT_DIR)
-    assert spec.module == "jaeger_ai"
-    assert spec.slot == "mind"
-    assert spec.factory == "jaeger_os.agent.loop.mind_node:make_mind_node"
-    assert spec.requires_libraries == ["llama_cpp"]
-    # What AgentBridge actually subscribes/publishes (agent/loop/bridge.py).
-    assert "/act/chat" in spec.consumes
-    assert "/sense/transcript" in spec.consumes
-    assert "/sense/chat" in spec.produces
-    assert "/sense/agent_state" in spec.produces
-    # The tool surface is the entire dynamic registry — not enumerable
-    # statically, so left empty rather than a stale snapshot.
-    assert spec.tools == []
 
 
 def test_load_module_missing_file(tmp_path):
@@ -149,22 +112,8 @@ def test_load_module_refuses_malformed_factory(tmp_path):
 # ── discover_modules ────────────────────────────────────────────────
 
 
-def test_discover_modules_default_root_finds_kokoro_tts():
-    found = discover_modules()
-    assert "tts" in found
-    names = {spec.module for spec in found["tts"]}
-    assert "kokoro_tts" in names
 
 
-def test_discover_modules_default_root_finds_mind():
-    """0.9 step 3: the standard no-args discover_modules() call — the
-    same one app.py's slot resolution and agent/availability.py's
-    readiness probe both use — surfaces slot=mind with zero special
-    casing at any call site."""
-    found = discover_modules()
-    assert "mind" in found
-    names = {spec.module for spec in found["mind"]}
-    assert "jaeger_ai" in names
 
 
 def test_discover_modules_keys_by_slot(tmp_path):
@@ -199,70 +148,16 @@ def test_discover_modules_missing_root_returns_empty(tmp_path):
     assert discover_modules(tmp_path / "does_not_exist") == {}
 
 
-def test_discover_modules_single_path_still_accepted():
-    """A lone ``pathlib.Path`` (not a tuple) still works — normalized
-    internally to a one-tuple. Existing callers passing a single root
-    keep working unchanged."""
-    found = discover_modules(_NODES_ROOT)
-    assert "tts" in found
-    names = {spec.module for spec in found["tts"]}
-    assert "kokoro_tts" in names
 
 
 # ── 0.8 M3b: messaging — the first multi-module slot, multi-root ───
 
 
-def test_discover_modules_nodes_root_alone_has_four_slots_no_messaging():
-    """The nodes/ root by itself still surfaces exactly the 4 engine
-    slots — messaging modules live under plugins/, not nodes/."""
-    found = discover_modules(_NODES_ROOT)
-    assert set(found) == {"tts", "stt", "animation", "media"}
-    assert "messaging" not in found
 
 
-def test_discover_modules_plugins_root_alone_is_messaging_only():
-    found = discover_modules(_PLUGINS_ROOT)
-    assert set(found) == {"messaging"}
-    names = {spec.module for spec in found["messaging"]}
-    assert names == {"discord", "telegram", "imessage"}
 
 
-def test_discover_modules_agent_root_alone_is_mind_only():
-    """AGENT_DIR by itself surfaces exactly the mind singleton — the
-    root IS the module (module.yaml at its own top level), not a
-    directory of module subdirectories like nodes/ and plugins/."""
-    found = discover_modules(_AGENT_DIR)
-    assert set(found) == {"mind"}
-    names = {spec.module for spec in found["mind"]}
-    assert names == {"jaeger_ai"}
 
 
-def test_discover_modules_default_roots_cover_both_nodes_and_messaging():
-    """The default (no-args) call walks ``NODES_DIR``, ``PLUGINS_DIR``,
-    AND ``AGENT_DIR`` — nodes-root modules stay discovered (4 slots
-    intact), the multi-module ``messaging`` slot shows up with all 3
-    real discord/telegram/imessage module.yaml files, and (0.9 step 3)
-    the mind singleton is there too."""
-    found = discover_modules()
-    assert set(found) >= {
-        "tts", "stt", "animation", "media", "messaging", "mind",
-    }
-    messaging_names = {spec.module for spec in found["messaging"]}
-    assert messaging_names == {"discord", "telegram", "imessage"}
-    for spec in found["messaging"]:
-        assert spec.slot == "messaging"
-        assert spec.tools == ["send_message"]
 
 
-def test_discover_modules_accepts_explicit_roots_tuple(tmp_path):
-    """The plural ``roots=`` tuple form scans every root given, keying
-    everything by slot the same way the walker always has — a synthetic
-    tmp_path root alongside the real plugins root proves both are
-    consulted in one call."""
-    _write_module(tmp_path, "widget_a", _GOOD_YAML)
-    found = discover_modules((tmp_path, _PLUGINS_ROOT))
-    assert set(found) == {"widgets", "messaging"}
-    assert [spec.module for spec in found["widgets"]] == ["widget"]
-    assert {spec.module for spec in found["messaging"]} == {
-        "discord", "telegram", "imessage",
-    }

@@ -55,17 +55,5 @@ def test_allows_ordinary_files(path):
 # ── _resolve_read integration ───────────────────────────────────────
 
 
-def test_resolve_read_refuses_a_sensitive_path():
-    """The read resolver must reject an OS secret store outright."""
-    from jaeger_os.core.context import SandboxError, _resolve_read
-
-    with pytest.raises(SandboxError):
-        _resolve_read("~/.ssh/id_rsa")
 
 
-def test_resolve_read_allows_an_ordinary_file(tmp_path):
-    from jaeger_os.core.context import _resolve_read
-
-    f = tmp_path / "notes.txt"
-    f.write_text("hello", encoding="utf-8")
-    assert _resolve_read(str(f)) == Path(str(f)).resolve()

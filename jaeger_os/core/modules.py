@@ -43,6 +43,8 @@ with zero special-casing at any call site.
 
 from __future__ import annotations
 
+import importlib
+import importlib.metadata
 import pathlib
 import sys
 
@@ -53,9 +55,47 @@ from jaeger_os.contract.modules import ModuleSpec
 # The directories module.yaml files live under (or, for AGENT_DIR, IS
 # one). Derived the same way (relative to this file, not cwd) so
 # discovery works regardless of where the process was launched from.
+# Post-0.9-split: JaegerOS's own tree no longer has kokoro_tts/
+# whisper_stt/agent (they moved to their own installed packages), so
+# these three roots alone are no longer the whole picture — see
+# ``_external_module_roots`` below for how out-of-tree packages
+# contribute their own roots without JaegerOS hardcoding their names.
 NODES_DIR = pathlib.Path(__file__).resolve().parents[1] / "nodes"
 PLUGINS_DIR = pathlib.Path(__file__).resolve().parents[1] / "plugins"
 AGENT_DIR = pathlib.Path(__file__).resolve().parents[1] / "agent"
+
+_MODULE_ROOTS_GROUP = "jaeger_os.module_roots"
+
+
+def _external_module_roots() -> tuple[pathlib.Path, ...]:
+    """Roots contributed by OTHER installed packages via the
+    ``jaeger_os.module_roots`` entry-point group — the out-of-tree
+    loading seam (0.9 step 4 split: JaegerAI/JaegerKokoroTTS/
+    JaegerWhisperSTT each ship one). JaegerOS never hardcodes those
+    package names; it only knows the group name. Each entry point's
+    callable takes no args and returns an iterable of directories to
+    scan the same way NODES_DIR/PLUGINS_DIR/AGENT_DIR are scanned.
+
+    Fail-soft by design: a package that isn't installed contributes
+    nothing (no entry points found), and a contributor whose callable
+    raises is skipped rather than aborting discovery for everyone else
+    — this mirrors the existing guarded-import tolerance for optional
+    engine modules (M2a/M2b), just at the package-discovery layer
+    instead of the symbol-import layer. A malformed module.yaml INSIDE
+    a discovered root still raises loudly once found (unchanged)."""
+    roots: list[pathlib.Path] = []
+    try:
+        eps = importlib.metadata.entry_points(group=_MODULE_ROOTS_GROUP)
+    except Exception:  # noqa: BLE001 — a broken metadata index shouldn't
+        return ()      # take down discovery for everyone else.
+    for ep in eps:
+        try:
+            contributed = ep.load()()
+        except Exception:  # noqa: BLE001 — one bad contributor, not fatal
+            continue
+        for r in contributed:
+            roots.append(pathlib.Path(r))
+    return tuple(roots)
 
 
 def _check_factory(factory: str, *, path: pathlib.Path) -> None:
@@ -103,7 +143,12 @@ def discover_modules(
 ) -> dict[str, list[ModuleSpec]]:
     """Scan one or more roots for ``module.yaml`` and return every
     module found across ALL roots, keyed by slot. Default roots:
-    ``(NODES_DIR, PLUGINS_DIR, AGENT_DIR)``.
+    ``(NODES_DIR, PLUGINS_DIR, AGENT_DIR)`` PLUS whatever
+    ``_external_module_roots()`` finds via the ``jaeger_os.module_roots``
+    entry-point group — the out-of-tree seam other installed packages
+    (JaegerAI, JaegerKokoroTTS, JaegerWhisperSTT, ...) use to surface
+    their own module.yaml-bearing directories without JaegerOS ever
+    naming them.
 
     A root is checked two ways: is the root ITSELF a module (has
     ``module.yaml`` directly — ``AGENT_DIR``'s shape, a singleton
@@ -113,7 +158,9 @@ def discover_modules(
     child modules — the Mind has no nested modules to find.
 
     A single ``pathlib.Path`` is also accepted (normalized to a
-    one-tuple) for callers/tests that only care about one directory.
+    one-tuple) for callers/tests that only care about one directory —
+    an explicit ``roots=`` argument bypasses BOTH the local defaults
+    AND the external entry-point scan, same as before this change.
 
     Directories without a ``module.yaml`` are skipped silently (not
     every node/plugin package is a module yet). A directory *with* a
@@ -123,7 +170,7 @@ def discover_modules(
     telegram, imessage all live under ``plugins/`` and share the
     slot); callers doing ANY-OF readiness must consult every entry."""
     if roots is None:
-        roots = (NODES_DIR, PLUGINS_DIR, AGENT_DIR)
+        roots = (NODES_DIR, PLUGINS_DIR, AGENT_DIR) + _external_module_roots()
     elif isinstance(roots, (str, pathlib.Path)):
         roots = (pathlib.Path(roots),)
     by_slot: dict[str, list[ModuleSpec]] = {}
@@ -145,7 +192,107 @@ def discover_modules(
     return by_slot
 
 
+def resolve_mind_module(suffix: str = ""):
+    """Import and return a module off the installed Mind's OWN package
+    ROOT (e.g. ``core.context``, ``core.instance.schemas``) — for the
+    handful of framework call sites that need to read INSTANCE state
+    (config, identity, active character) rather than a slot-owned
+    engine symbol. Uses the ``mind`` slot's factory string (``agent/``
+    ships ``module.yaml`` with ``slot: mind``) purely to learn the
+    Mind's top-level package NAME (the factory dotted path's first
+    component, e.g. ``jaeger_ai`` off
+    ``jaeger_ai.agent.loop.mind_node:make_mind_node``) — never
+    hardcoded, so this file still doesn't name ``jaeger_ai`` anywhere.
+    Deliberately NOT built on :func:`resolve_slot_module` — that
+    suffixes onto the factory's OWN module path (agent/...), while
+    core/context.py etc. live at the Mind's package ROOT, a sibling of
+    ``agent/``, not a child of it.
+
+    Returns ``None`` if no mind module is installed (headless body —
+    correct, not an error) or the suffix doesn't exist there.
+
+    Pre-0.9-split, ``jaeger_os.core.context`` /
+    ``jaeger_os.core.instance.schemas`` were nested submodules of the
+    SAME package as this file, so a hardcoded dotted import worked.
+    Post-split those moved to the Mind's own package (jaeger_ai today)
+    — the dotted path is no longer knowable at write-time, only at
+    install-time, which is exactly what this resolves."""
+    try:
+        by_slot = discover_modules()
+        candidates = by_slot.get("mind", [])
+        if not candidates:
+            return None
+        chosen = sorted(candidates, key=lambda m: m.module)[0]
+        mod_path, _, _ = chosen.factory.partition(":")
+        top = mod_path.split(".")[0]
+        full = f"{top}.{suffix}" if suffix else top
+        return importlib.import_module(full)
+    except Exception:  # noqa: BLE001 — inert absence, not a crash
+        return None
+
+
+def resolve_slot_module(slot: str, suffix: str = ""):
+    """Import and return the winning module's own factory-string
+    module for ``slot`` (optionally one of ITS OWN submodules, via
+    ``suffix``, e.g. ``"engine.registry"``) — the shared
+    discovery-driven primitive that replaces a hardcoded
+    ``jaeger_os.nodes.<engine>[.sub...]`` dotted import (0.9 step 4:
+    kokoro_tts/whisper_stt/animation/etc. can each live in a wholly
+    separate installed package post-split, so the dotted path can't be
+    hardcoded anymore — see ``nodes/__init__.py``, ``nodes/runtime.py``,
+    ``core/audio/session.py``, ``core/voice/voice_resolution.py``'s
+    call sites).
+
+    Ties (>1 module for the slot) resolve the same deterministic way
+    ``app/app.py``'s ``_resolve_slot`` does — sorted by module name,
+    first wins. Returns ``None`` on ANY failure: no module for the
+    slot, a malformed module.yaml, the module's package not installed,
+    or the suffix submodule doesn't exist — this is import-time
+    tolerance, not the readiness gate (``agent/availability.py`` still
+    owns failing the actual tool closed)."""
+    try:
+        by_slot = discover_modules()
+        candidates = by_slot.get(slot, [])
+        if not candidates:
+            return None
+        chosen = sorted(candidates, key=lambda m: m.module)[0]
+        mod_path, _, _ = chosen.factory.partition(":")
+        full_path = f"{mod_path}.{suffix}" if suffix else mod_path
+        return importlib.import_module(full_path)
+    except Exception:  # noqa: BLE001 — inert absence, not a crash
+        return None
+
+
+def resolve_slot_symbols(slot: str, names: tuple[str, ...]) -> dict:
+    """Resolve ``names`` off the winning module's own factory-string
+    module for ``slot`` (see :func:`resolve_slot_module`). Each name is
+    tried first as an ATTRIBUTE of that module (the common case: a
+    re-exported class/function), then — if absent — as one of the
+    module's own direct SUBMODULES (e.g. ``nodes.runtime`` wants the
+    whole ``bridge`` submodule off ``nodes.animation``, not just a
+    re-exported symbol; a plain ``getattr`` only sees ``bridge`` there
+    if something else already imported it first, which isn't
+    guaranteed at boot). Returns ``{}`` (every name absent) if the slot
+    itself can't be resolved, or per-name if a particular
+    attribute/submodule is missing."""
+    mod = resolve_slot_module(slot)
+    if mod is None:
+        return {}
+    mod_path = mod.__name__
+    out: dict = {}
+    for n in names:
+        if hasattr(mod, n):
+            out[n] = getattr(mod, n)
+            continue
+        try:
+            out[n] = importlib.import_module(f"{mod_path}.{n}")
+        except ImportError:
+            pass
+    return out
+
+
 __all__ = [
     "ModuleSpec", "load_module", "discover_modules", "module_platform_ok",
+    "resolve_slot_module", "resolve_slot_symbols", "resolve_mind_module",
     "NODES_DIR", "PLUGINS_DIR", "AGENT_DIR",
 ]

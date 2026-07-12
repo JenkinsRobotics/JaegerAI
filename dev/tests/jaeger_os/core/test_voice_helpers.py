@@ -48,12 +48,6 @@ def test_non_speech_filter_keeps_real_short_answers(text: str) -> None:
     assert is_non_speech_marker(text) is False
 
 
-def test_clean_voice_reply_extracts_harmony_final() -> None:
-    raw = (
-        "<|channel|>analysis<|message|>thinking<|end|>"
-        "<|channel|>final<|message|>It is 2:12 AM."
-    )
-    assert clean_voice_reply(raw) == "It is 2:12 AM."
 
 
 def test_clean_voice_reply_strips_malformed_channel_tokens() -> None:

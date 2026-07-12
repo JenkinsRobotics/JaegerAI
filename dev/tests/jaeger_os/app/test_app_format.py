@@ -517,112 +517,10 @@ def _write_animation_app(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path
 
 
-def test_supervisor_backed_ensure_animation_node_returns_supervisor_object(
-    tmp_path,
-):
-    """The manifest-declared "animation" node is supervisor-owned —
-    ``ensure_animation_node()`` (still what the agent's avatar tools
-    call) must delegate to the SAME live node the supervisor manages,
-    not spawn a second thread (the pre-U3b reason these nodes stayed
-    disabled — see jaeger.toml's header)."""
-    from jaeger_os.nodes import runtime as node_runtime
-
-    node_runtime.shutdown()
-    app = JaegerApp(_write_animation_app(tmp_path)).boot()
-    try:
-        assert _wait_for(
-            lambda: app.supervisor.ls()[0]["state"] == "running")
-        supervised_node = app.supervisor.node("animation")
-        assert supervised_node is not None
-
-        ensured_node = node_runtime.ensure_animation_node()
-        assert ensured_node is supervised_node   # no double-spawn
-        assert node_runtime._animation_node is supervised_node
-    finally:
-        app.shutdown()
-        node_runtime.shutdown()
 
 
-def test_supervisor_backed_ensure_animation_node_reflects_restart(tmp_path):
-    """The new seam this delegation adds: a supervisor-driven restart
-    produces a FRESH AnimationNode object (ThreadHandle.restart()'s
-    "never reuse a torn-down node object" contract) —
-    ``ensure_animation_node()`` must track the NEW object, not a
-    cached-stale one (``get_synth``/``get_audio_session`` depend on
-    the equivalent for tts/audio_session)."""
-    from jaeger_os.nodes import runtime as node_runtime
-
-    node_runtime.shutdown()
-    app = JaegerApp(_write_animation_app(tmp_path)).boot()
-    try:
-        assert _wait_for(
-            lambda: app.supervisor.ls()[0]["state"] == "running")
-        node1 = node_runtime.ensure_animation_node()
-
-        app.supervisor.restart("animation")
-        assert _wait_for(
-            lambda: app.supervisor.ls()[0]["state"] == "running")
-
-        node2 = node_runtime.ensure_animation_node()
-        assert node2 is not node1
-        assert node2 is app.supervisor.node("animation")
-    finally:
-        app.shutdown()
-        node_runtime.shutdown()
 
 
-def test_animation_config_key_avatar_routes_bridge_port_to_the_factory(
-    tmp_path, monkeypatch,
-):
-    """0.8 M2c: the manifests' animation node used to declare
-    ``config_key = "animation"`` — a key matching no field on
-    ``Config`` (``AvatarConfig`` lives at ``Config.avatar``), so a real
-    instance config.yaml's ``avatar:`` section (bridge_host/bridge_port)
-    could never reach ``make_animation_node`` through this chassis path.
-    Fixed to ``config_key = "avatar"``. This proves the full chain —
-    manifest -> ``_make_handle`` -> ``slice_for`` -> the factory ``fn``
-    ``ThreadHandle`` invokes -> ``_build_animation_node`` — actually
-    honors a custom ``bridge_port`` from the node's config slice, without
-    binding a real socket (``FrameBridge`` itself is faked so
-    ``enable_bridge: true`` is safe here)."""
-    from jaeger_os.nodes import runtime as node_runtime
-
-    captured: dict[str, Any] = {}
-
-    class _FakeBridge:
-        def __init__(self, *, host: str = "127.0.0.1", port: int = 8765,
-                     path: str = "/frames") -> None:
-            captured["host"] = host
-            captured["port"] = port
-
-        def start(self, *, ready_timeout_s: float = 5.0) -> None:
-            pass
-
-        def stop(self, *, timeout_s: float = 5.0) -> None:
-            pass
-
-        def publish_frame(self, frame: Any) -> None:
-            pass
-
-    monkeypatch.setattr(node_runtime.animation_bridge, "FrameBridge", _FakeBridge)
-
-    (tmp_path / "jaeger.toml").write_text(
-        _ANIMATION_APP_MANIFEST, encoding="utf-8")
-    (tmp_path / "config.yaml").write_text(
-        "avatar:\n  bridge_host: 0.0.0.0\n  bridge_port: 9911\n"
-        "  enable_bridge: true\n",
-        encoding="utf-8",
-    )
-
-    node_runtime.shutdown()
-    app = JaegerApp(tmp_path).boot()
-    try:
-        assert _wait_for(
-            lambda: app.supervisor.ls()[0]["state"] == "running")
-        assert captured == {"host": "0.0.0.0", "port": 9911}
-    finally:
-        app.shutdown()
-        node_runtime.shutdown()
 
 
 # ── M2a: slot-resolution end to end (app._make_handle → discover_modules) ──
@@ -714,43 +612,6 @@ def test_slot_bound_node_unknown_slot_raises_naming_the_slot(tmp_path, monkeypat
         JaegerApp(_write_slot_app(tmp_path)).boot()
 
 
-def test_slot_bound_tts_node_resolves_to_kokoro_via_real_discovery(tmp_path):
-    """No monkeypatching: the REAL ``discover_modules()`` walking the
-    REAL ``jaeger_os/nodes/`` tree resolves ``slot = "tts"`` to
-    kokoro_tts's factory and boots it under the supervisor — the exact
-    path ``jaeger.windowed.toml``'s tts node now takes."""
-    manifest = """
-[app]
-name = "conftest-tts-slot-app"
-requires_framework = ">=0.1"
-event_loop = "none"
-single_instance = false
-
-[bus]
-backend = "inproc"
-
-[[node]]
-id = "tts"
-tier = 3
-backend = "thread"
-slot = "tts"
-restart = "never"
-config_key = "tts"
-"""
-    (tmp_path / "jaeger.toml").write_text(manifest, encoding="utf-8")
-    (tmp_path / "config.yaml").write_text("tts: {}\n", encoding="utf-8")
-
-    from jaeger_os.nodes import runtime as node_runtime
-    node_runtime.shutdown()
-    app = JaegerApp(tmp_path).boot()
-    try:
-        node_spec = next(n for n in app.spec.nodes if n.id == "tts")
-        assert node_spec.factory == "jaeger_os.nodes.kokoro_tts:make_tts_node"
-        assert _wait_for(
-            lambda: app.supervisor.ls()[0]["state"] == "running")
-    finally:
-        app.shutdown()
-        node_runtime.shutdown()
 
 
 def test_second_instance_refused(tmp_path):
