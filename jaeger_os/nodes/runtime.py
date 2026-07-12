@@ -107,14 +107,14 @@ def _default_synth_factory() -> Synthesizer:
     # Late import — speak.py imports from this module, so a module-level
     # import would be circular.
     from jaeger_os.nodes.kokoro_tts import KokoroTTS, KokoroTTSConfig
-    from jaeger_os.agent.tools.speak import _resolve_voice
+    from jaeger_os.core.voice.voice_resolution import resolve_voice as _resolve_voice
     from jaeger_os.core.context import _require_layout
 
     # 0.8 M1: lang comes from Config.kokoro_tts instead of a hardcoded
     # constant — the settings-catalog "kokoro_tts" group is only real
     # if changing it actually changes what gets built here. Voice
     # resolution (Identity.voice_id wins, module config is the
-    # fallback default) lives in ``_resolve_voice`` itself.
+    # fallback default) lives in ``core.voice.voice_resolution`` itself.
     lang = KokoroTTSConfig().lang
     try:
         layout = _require_layout()

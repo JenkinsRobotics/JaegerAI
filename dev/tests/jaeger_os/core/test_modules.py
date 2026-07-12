@@ -19,6 +19,7 @@ from jaeger_os.core.modules import ModuleSpec, discover_modules, load_module
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _KOKORO_DIR = _REPO_ROOT / "jaeger_os" / "nodes" / "kokoro_tts"
 _IMESSAGE_DIR = _REPO_ROOT / "jaeger_os" / "plugins" / "imessage"
+_AGENT_DIR = _REPO_ROOT / "jaeger_os" / "agent"
 _NODES_ROOT = _REPO_ROOT / "jaeger_os" / "nodes"
 _PLUGINS_ROOT = _REPO_ROOT / "jaeger_os" / "plugins"
 
@@ -95,6 +96,25 @@ def test_load_module_real_imessage_is_messaging_slot_platform_gated():
     assert spec.requires_platform == ["darwin"]
 
 
+def test_load_module_real_agent_is_mind_slot():
+    """0.9 step 3: jaeger_os/agent/ gained its own module.yaml —
+    AGENT_DIR's shape is a singleton (module.yaml directly at the
+    directory root, unlike nodes/plugins' subdirectory-per-module)."""
+    spec = load_module(_AGENT_DIR)
+    assert spec.module == "jaeger_ai"
+    assert spec.slot == "mind"
+    assert spec.factory == "jaeger_os.agent.loop.mind_node:make_mind_node"
+    assert spec.requires_libraries == ["llama_cpp"]
+    # What AgentBridge actually subscribes/publishes (agent/loop/bridge.py).
+    assert "/act/chat" in spec.consumes
+    assert "/sense/transcript" in spec.consumes
+    assert "/sense/chat" in spec.produces
+    assert "/sense/agent_state" in spec.produces
+    # The tool surface is the entire dynamic registry — not enumerable
+    # statically, so left empty rather than a stale snapshot.
+    assert spec.tools == []
+
+
 def test_load_module_missing_file(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_module(tmp_path / "nope")
@@ -134,6 +154,17 @@ def test_discover_modules_default_root_finds_kokoro_tts():
     assert "tts" in found
     names = {spec.module for spec in found["tts"]}
     assert "kokoro_tts" in names
+
+
+def test_discover_modules_default_root_finds_mind():
+    """0.9 step 3: the standard no-args discover_modules() call — the
+    same one app.py's slot resolution and agent/availability.py's
+    readiness probe both use — surfaces slot=mind with zero special
+    casing at any call site."""
+    found = discover_modules()
+    assert "mind" in found
+    names = {spec.module for spec in found["mind"]}
+    assert "jaeger_ai" in names
 
 
 def test_discover_modules_keys_by_slot(tmp_path):
@@ -196,13 +227,26 @@ def test_discover_modules_plugins_root_alone_is_messaging_only():
     assert names == {"discord", "telegram", "imessage"}
 
 
+def test_discover_modules_agent_root_alone_is_mind_only():
+    """AGENT_DIR by itself surfaces exactly the mind singleton — the
+    root IS the module (module.yaml at its own top level), not a
+    directory of module subdirectories like nodes/ and plugins/."""
+    found = discover_modules(_AGENT_DIR)
+    assert set(found) == {"mind"}
+    names = {spec.module for spec in found["mind"]}
+    assert names == {"jaeger_ai"}
+
+
 def test_discover_modules_default_roots_cover_both_nodes_and_messaging():
-    """The default (no-args) call walks BOTH ``NODES_DIR`` and
-    ``PLUGINS_DIR`` — nodes-root modules stay discovered (4 slots
-    intact) AND the new multi-module ``messaging`` slot shows up with
-    all 3 real discord/telegram/imessage module.yaml files."""
+    """The default (no-args) call walks ``NODES_DIR``, ``PLUGINS_DIR``,
+    AND ``AGENT_DIR`` — nodes-root modules stay discovered (4 slots
+    intact), the multi-module ``messaging`` slot shows up with all 3
+    real discord/telegram/imessage module.yaml files, and (0.9 step 3)
+    the mind singleton is there too."""
     found = discover_modules()
-    assert set(found) >= {"tts", "stt", "animation", "media", "messaging"}
+    assert set(found) >= {
+        "tts", "stt", "animation", "media", "messaging", "mind",
+    }
     messaging_names = {spec.module for spec in found["messaging"]}
     assert messaging_names == {"discord", "telegram", "imessage"}
     for spec in found["messaging"]:

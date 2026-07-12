@@ -13,7 +13,7 @@ import time
 import pytest
 
 from jaeger_os.transport import topics
-from jaeger_os.agent.schemas.tool_registry import get_tool, has_tool
+from jaeger_os.core.tools.tool_registry import get_tool, has_tool
 from jaeger_os.core.safety.permissions import (
     AllowAllProvider,
     DenyAllProvider,
