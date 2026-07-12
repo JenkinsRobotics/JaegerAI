@@ -5,12 +5,18 @@ finalized transcripts on ``/sense/transcript`` and low-latency speech
 start on ``/sense/user_speech_start``.
 
 The node deliberately keeps mic frames, AEC, VAD, and STT buffering
-inside one in-process realtime subsystem.  In monolithic mode it may
-share the TTS synthesizer's ``reference_buffer`` object directly through
-``runtime.get_synth().reference_buffer`` during session construction.
-That is a known monolithic-only coupling; multiprocess mode should move
-the far-end reference to a dedicated binary topic when it needs to cross
-process boundaries.
+inside one in-process realtime subsystem.
+
+AEC decoupling (0.9): this module has no dependency on any TTS engine,
+at construction time or otherwise — ``AudioSession`` (owned by
+``jaeger_os.core.audio``) optionally carries a
+``jaeger_os.core.audio.FarEndReference`` (an opaque "pop the currently-
+playing audio frames" provider) that ``jaeger_os/nodes/runtime.py``
+resolves, discovery-driven, from whatever TTS-slot module happens to be
+installed — or leaves ``None`` if none is. This node/session never
+imports or names a TTS package; it just uses the provider if one was
+handed in. Multiprocess mode should move the far-end reference to a
+dedicated binary topic when it needs to cross process boundaries.
 """
 
 from __future__ import annotations
