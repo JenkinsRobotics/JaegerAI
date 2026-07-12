@@ -1,4 +1,4 @@
-"""Is there a newer JROS release? — version parsing + GitHub tag lookup.
+"""Is there a newer JaegerAI release? — version parsing + GitHub tag lookup.
 
 Two layers, split so the logic is testable without a network:
 
@@ -25,7 +25,7 @@ from pathlib import Path
 # Mirror scripts/install.sh: JAEGER_REPO_URL overrides, default is upstream.
 # We want "owner/repo", install.sh wants the full git URL — derive ours from
 # the env var if it's set, else the known default.
-_DEFAULT_REPO = "JenkinsRobotics/JROS"
+_DEFAULT_REPO = "JenkinsRobotics/JaegerAI"
 _TAGS_API = "https://api.github.com/repos/{repo}/tags"
 
 
