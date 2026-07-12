@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 
 import pytest
@@ -529,7 +530,7 @@ def test_turn_error_is_reported_not_raised(monkeypatch):
 
 def test_permission_request_respond_roundtrip(monkeypatch):
     """A tool asking for approval mid-turn emits ``request``; the client's
-    ``respond`` op resolves it — allow reaches the tool as True. Proves the
+    ``respond`` op resolves it — 'once' reaches the tool as True. Proves the
     stdin thread stays free while a turn blocks on the answer."""
     from jaeger_os.core.safety.permissions import current_policy
     original = current_policy().confirmation
@@ -544,7 +545,7 @@ def test_permission_request_respond_roundtrip(monkeypatch):
 
     # respond arrives AFTER the turn starts.
     stdin = ('{"text":"write it"}\n'
-             '{"op":"respond","id":"perm1","answer":"allow"}\n'
+             '{"op":"respond","id":"perm1","answer":"once"}\n'
              '{"op":"quit"}\n')
     try:
         rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
@@ -552,9 +553,194 @@ def test_permission_request_respond_roundtrip(monkeypatch):
         current_policy().confirmation = original
     req = next(f for f in frames if f["type"] == "request")
     assert req["kind"] == "approval" and req["id"] == "perm1"
-    assert req["options"] == ["allow", "deny"]
+    assert req["options"] == ["once", "always", "deny"]
+    assert req["prompt"] == "Allow files.write_file?"
     assert answers["granted"] is True
     assert rc == 0
+
+
+def test_permission_request_deny(monkeypatch):
+    """A 'deny' answer reaches the gated tool as False."""
+    from jaeger_os.core.safety.permissions import current_policy
+    original = current_policy().confirmation
+    answers = {}
+
+    def run_fn(client, text, session_key=None):
+        answers["granted"] = current_policy().confirmation.confirm(
+            type("Req", (), {"skill": "host", "operation": "open_on_host"})())
+        return {"text": "done", "error": None}
+
+    stdin = ('{"text":"open it"}\n'
+             '{"op":"respond","id":"perm1","answer":"deny"}\n'
+             '{"op":"quit"}\n')
+    try:
+        rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
+    finally:
+        current_policy().confirmation = original
+    assert answers["granted"] is False
+    assert rc == 0
+
+
+def test_permission_request_once_does_not_persist(monkeypatch):
+    """'once' approves only the call in flight — nothing is recorded, so a
+    SECOND tier-2 call on the same skill (same turn) prompts again."""
+    from jaeger_os.core.safety.permissions import current_policy
+    original = current_policy().confirmation
+    grants = []
+
+    def run_fn(client, text, session_key=None):
+        req = type("Req", (), {"skill": "host", "operation": "open_on_host"})()
+        first = current_policy().confirmation.confirm(req)
+        second = current_policy().confirmation.confirm(req)
+        grants.extend([first, second])
+        return {"text": "done", "error": None}
+
+    stdin = ('{"text":"open it twice"}\n'
+             '{"op":"respond","id":"perm1","answer":"once"}\n'
+             '{"op":"respond","id":"perm2","answer":"once"}\n'
+             '{"op":"quit"}\n')
+    try:
+        rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
+    finally:
+        current_policy().confirmation = original
+    requests = [f for f in frames if f["type"] == "request"]
+    assert len(requests) == 2                      # asked BOTH times
+    assert grants == [True, True]
+    assert rc == 0
+
+
+def test_permission_request_timeout_denies(monkeypatch):
+    """No ``respond`` within the timeout ⇒ deny, fail-safe. The turn never
+    hangs — a short fuse proves the wait actually bounds, not just that a
+    late answer happens to resolve it."""
+    from jaeger_os.core.safety.permissions import current_policy
+    from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider
+    monkeypatch.setattr(BridgeConfirmationProvider, "TIMEOUT_S", 0.1)
+    original = current_policy().confirmation
+    answers = {}
+
+    def run_fn(client, text, session_key=None):
+        answers["granted"] = current_policy().confirmation.confirm(
+            type("Req", (), {"skill": "host", "operation": "open_on_host"})())
+        return {"text": "done", "error": None}
+
+    # No respond frame at all — the client vanished / never answered.
+    stdin = '{"text":"open it"}\n{"op":"quit"}\n'
+    try:
+        rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
+    finally:
+        current_policy().confirmation = original
+    assert answers["granted"] is False
+    assert rc == 0
+
+
+def test_permission_request_always_persists_and_second_call_has_no_frame(
+        monkeypatch, _instance_on_disk):
+    """The field case's core assertion: 'always' writes the SAME
+    ``<instance>/permissions.json`` grant store the console provider uses,
+    and a subsequent tier-2 call on that skill executes WITHOUT ever
+    emitting a ``request`` frame — no round trip, no UI, on this boot or
+    (via the persisted file) any future one."""
+    from jaeger_os.core.safety.permissions import PermissionGrants, current_policy
+    original = current_policy().confirmation
+    calls = []
+
+    def run_fn(client, text, session_key=None):
+        req = type("Req", (), {"skill": "host", "operation": "open_on_host"})()
+        calls.append(current_policy().confirmation.confirm(req))
+        return {"text": "done", "error": None}
+
+    stdin = ('{"text":"open youtube in safari"}\n'
+             '{"op":"respond","id":"perm1","answer":"always"}\n'
+             '{"op":"quit"}\n')
+    try:
+        rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
+    finally:
+        current_policy().confirmation = original
+    assert calls == [True]
+    requests = [f for f in frames if f["type"] == "request"]
+    assert len(requests) == 1                       # asked exactly once
+    assert PermissionGrants.load(_instance_on_disk).is_granted("host")
+
+    # A brand-new provider instance (as a fresh boot would construct) loads
+    # the persisted grant and never emits a frame for the same skill.
+    import types as _types
+
+    from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
+    ctx2 = _Ctx()
+    ctx2.layout = _types.SimpleNamespace(root=_instance_on_disk)
+    out = io.StringIO()
+    provider2 = BridgeConfirmationProvider(out, ctx2)
+    req = type("Req", (), {"skill": "host", "operation": "open_on_host"})()
+    assert provider2.confirm(req) is True
+    assert out.getvalue() == ""                      # NO frame emitted
+
+
+def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk):
+    """Integration: the operator's literal field failure. ``open_on_host``
+    (tier-2/EXTERNAL_EFFECT) run on a fake bridge session emits an approval
+    frame; 'always' both lets THIS call through and persists the grant;
+    a SECOND call — even a fresh provider instance, as a restart would
+    construct — executes with NO frame at all."""
+    import types as _types
+
+    from jaeger_os.core.safety.permissions import (
+        PermissionGrants, PermissionPolicy, use_policy,
+    )
+    from jaeger_ai.agent.tools.host import _t_open_on_host
+    from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
+
+    opened = []
+    monkeypatch.setattr(
+        "jaeger_ai.agent.tools.host._run_open",
+        lambda args, label: opened.append(args) or {"opened": True, **label})
+
+    ctx = _Ctx()
+    ctx.layout = _types.SimpleNamespace(root=_instance_on_disk)
+    proto = io.StringIO()
+    provider = BridgeConfirmationProvider(proto, ctx)
+
+    def _respond_always():
+        # Simulate the Swift client's reply arriving on the pipe: find the
+        # emitted request's id and resolve it "always".
+        line = proto.getvalue().splitlines()[-1]
+        rid = json.loads(line)["id"]
+        evt, slot = ctx.pending[rid]
+        slot.append("always")
+        evt.set()
+
+    with use_policy(PermissionPolicy(confirmation=provider)):
+        # Fire the responder once the request frame is on the wire — do the
+        # confirm() call synchronously and let the thread resolve it.
+        import time as _time
+
+        def _delayed_respond():
+            for _ in range(200):
+                if proto.getvalue():
+                    break
+                _time.sleep(0.01)
+            _respond_always()
+        t = threading.Thread(target=_delayed_respond)
+        t.start()
+        result1 = _t_open_on_host(target="https://youtube.com")
+        t.join(timeout=5)
+
+    assert result1 == {"opened": True, "url": "https://youtube.com"}
+    assert opened == [["https://youtube.com"]]
+    assert PermissionGrants.load(_instance_on_disk).is_granted("host")
+    frames_after_first = proto.getvalue().count("\n")
+    assert frames_after_first == 1                   # exactly one request frame
+
+    # SECOND call — a fresh provider (as a real restart constructs), same
+    # instance dir — executes with NO approval frame at all.
+    proto2 = io.StringIO()
+    ctx2 = _Ctx()
+    ctx2.layout = _types.SimpleNamespace(root=_instance_on_disk)
+    provider2 = BridgeConfirmationProvider(proto2, ctx2)
+    with use_policy(PermissionPolicy(confirmation=provider2)):
+        result2 = _t_open_on_host(target="https://youtube.com")
+    assert result2 == {"opened": True, "url": "https://youtube.com"}
+    assert proto2.getvalue() == ""                    # NO frame — already granted
 
 
 def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):

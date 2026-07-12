@@ -17,9 +17,14 @@ Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md, approved 2026-07-04):
     older clients (JrosClient) keep their semantics.
   * WORKER-THREAD TURNS — the stdin loop never blocks on a turn, so
     ``respond`` (permission answers) and ``quit`` stay processable mid-turn.
-  * INTERACTIVE PERMISSIONS — approval requests surface as ``request``
-    frames; ``{"op":"respond","id":…,"answer":…}`` resolves them (timeout
-    ⇒ deny, fail-safe).
+  * INTERACTIVE PERMISSIONS — tier-2+ approval requests surface as
+    ``request`` frames (kind=approval, options once/always/deny);
+    ``{"op":"respond","id":…,"answer":…}`` resolves them (timeout ⇒ deny,
+    fail-safe). ``always`` persists a per-skill grant to the SAME
+    ``<instance>/permissions.json`` the console provider reads/writes —
+    see :class:`BridgeConfirmationProvider`. 0.9.3 Task 1: the surface
+    that unblocks tier-2 tools (``open_on_host``, …) for GUI/headless
+    stations that have no console to prompt at.
   * CLEAN-EXIT MARKER — ``bye`` is emitted before exit, and the process
     leaves through ``os._exit`` past the ggml Metal teardown abort (F1),
     so the client can trust "bye seen = orderly, no bye = crash".
@@ -448,19 +453,54 @@ class _Ctx:
         self.session_pending: dict[str, int] = {}
 
 
-class _BridgeConfirm:
-    """Interactive approval over the wire: emit a ``request`` frame, block
-    (on the TURN thread — stdin stays free) until ``respond`` arrives.
-    Timeout or a dead client ⇒ deny, fail-safe."""
+class BridgeConfirmationProvider:
+    """Interactive tier-2+ approval over the NDJSON wire — the headless
+    confirmation surface for a bridge/GUI session (0.9.3 Task 1).
+
+    Emits a ``request`` frame (``kind="approval"``, ``options=("once",
+    "always", "deny")``) and BLOCKS the TURN thread — stdin stays free, so
+    ``respond``/``quit`` keep working — until a matching
+    ``{"op":"respond","id":…,"answer":…}`` arrives. Timeout (120s) or a
+    dead client denies, fail-safe, same as the console provider's
+    non-tty path.
+
+    Grants are the SAME store :class:`~jaeger_os.core.safety.permissions.
+    ConsoleConfirmationProvider` reads/writes — ``<instance>/
+    permissions.json`` — so an "always" answered here (or at the console,
+    or on a prior boot) is visible everywhere and SKIPS THE FRAME
+    ENTIRELY on the next tier-2 call for that skill; no round trip, no
+    UI. ``once`` approves only the call in flight and records nothing —
+    the very next call on that skill prompts again (unlike the console's
+    session-scoped "yes"; the bridge dialog only distinguishes
+    call-scoped vs. permanent).
+
+    Provider selection lives in two places by design, not one:
+    ``main._confirmation_provider`` picks Console (tty prompt, unchanged)
+    or ``AllowAllProvider`` (operator's "allow" mode / --yes) at BOOT,
+    before anyone knows whether this process is a bridge child; then
+    ``_boot_agent`` (below) swaps Console for THIS class once it's clear
+    we're serving a Swift/bridge session — UNLESS the boot-time choice
+    was ``AllowAllProvider``, which is left alone so --yes/"allow" mode
+    behaves identically everywhere. A tty-less, bridge-less process (an
+    MCP server, a cron-only headless daemon) never reaches this swap, so
+    it keeps Console's fail-closed non-tty behavior — the same
+    fail-closed default as always.
+    """
 
     TIMEOUT_S = 120.0
 
     def __init__(self, proto: TextIO, ctx: _Ctx) -> None:
         self._proto = proto
         self._ctx = ctx
+        from jaeger_os.core.safety.permissions import PermissionGrants
+        root = getattr(getattr(ctx, "layout", None), "root", None)
+        self._grants = PermissionGrants.load(root)
 
     def confirm(self, request: object) -> bool:
         from jaeger_os.contract import protocol
+        skill = getattr(request, "skill", "") or ""
+        if self._grants.is_granted(skill):
+            return True  # already approved (console "always", or ours) — no frame
         self._ctx.req_counter += 1
         rid = f"perm{self._ctx.req_counter}"
         evt: threading.Event = threading.Event()
@@ -470,18 +510,20 @@ class _BridgeConfirm:
         if early is not None:
             slot.append(early)
             evt.set()
+        op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
         _emit(self._proto, protocol.request_frame(
-            rid, "approval",
-            (f"Allow {getattr(request, 'skill', '')}."
-             f"{getattr(request, 'operation', 'this action')}?"),
-            options=("allow", "deny")))
+            rid, "approval", f"Allow {op}?",
+            options=("once", "always", "deny")))
         try:
             if not evt.wait(self.TIMEOUT_S):
                 return False
             answer = (slot[0] if slot else "").strip().lower()
-            return answer in ("allow", "yes", "y", "true", "1", "approve")
         finally:
             self._ctx.pending.pop(rid, None)
+        if answer == "always":
+            self._grants.grant_persistent(skill)
+            return True
+        return answer in ("once", "allow", "yes", "y", "true", "1", "approve")
 
 
 def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
@@ -532,7 +574,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
             AllowAllProvider, current_policy)
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
-            policy.confirmation = _BridgeConfirm(proto, ctx)
+            policy.confirmation = BridgeConfirmationProvider(proto, ctx)
     except Exception:  # noqa: BLE001
         pass
 

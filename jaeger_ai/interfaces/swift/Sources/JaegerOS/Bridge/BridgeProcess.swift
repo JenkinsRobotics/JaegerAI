@@ -43,11 +43,19 @@ enum AgentLifecycle: Sendable, Equatable {
 }
 
 /// A permission/clarify request the agent raised mid-turn. Answer with
-/// ``BridgeProcess.respond(id:answer:)``.
-struct BridgeRequest: Sendable {
+/// ``BridgeProcess.respond(id:answer:)``. ``Identifiable`` (by the wire
+/// ``id``) so a SwiftUI view can drive ``.sheet(item:)`` straight off
+/// ``AgentBridge.pendingRequest`` — see the chat window's approval sheet.
+struct BridgeRequest: Sendable, Identifiable {
     let id: String
     let kind: String        // approval | clarify | secret
     let prompt: String
+    /// The wire vocabulary for an ``approval`` kind is ``once`` / ``always``
+    /// / ``deny`` (0.9.3 Task 1) — ``once`` approves just this call,
+    /// ``always`` persists a per-skill grant (``<instance>/
+    /// permissions.json``, the SAME store the console prompt writes) so
+    /// the next tier-2 call on that skill never asks again, on this boot
+    /// or any future one.
     let options: [String]
 }
 

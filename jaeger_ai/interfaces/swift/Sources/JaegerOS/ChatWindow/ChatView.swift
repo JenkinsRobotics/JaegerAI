@@ -69,6 +69,34 @@ struct ChatView: View {
         .onChange(of: chat.isSending) { _, newValue in
             PillBridge.shared.isAgentBusy = newValue
         }
+        // 0.9.3 Task 1 — the headless confirmation surface: a tier-2+
+        // permission request (``open_on_host``, …) renders as a sheet
+        // right here instead of failing closed. ``approvalRequest``
+        // filters ``agent.pendingRequest`` down to kind=="approval";
+        // clarify/secret stay UI-less for now, same as before this sheet
+        // existed.
+        .sheet(item: approvalRequest) { request in
+            ApprovalSheetView(request: request) { answer in
+                agent.respond(to: request, answer: answer)
+            }
+        }
+    }
+
+    /// Dismissing the sheet WITHOUT tapping a button (Esc, click-away)
+    /// answers "deny" — fail-safe, never leaves the agent's turn hanging
+    /// past the provider's own 120s timeout.
+    private var approvalRequest: Binding<BridgeRequest?> {
+        Binding(
+            get: {
+                guard let req = agent.pendingRequest, req.kind == "approval" else { return nil }
+                return req
+            },
+            set: { newValue in
+                if newValue == nil, let req = agent.pendingRequest, req.kind == "approval" {
+                    agent.respond(to: req, answer: "deny")
+                }
+            }
+        )
     }
 
     /// Pull any pending prompt off the pill bridge, clear it, and
@@ -429,5 +457,43 @@ struct ChatView: View {
         guard force || !sessionsLoaded else { return }
         sessions = await chat.fetchSessions()
         sessionsLoaded = true
+    }
+}
+
+// MARK: - Approval sheet
+
+/// The in-chat confirmation surface for a tier-2+ permission request
+/// (0.9.3 Task 1 — unblocks ``open_on_host`` and every other gated tool on
+/// a bridge/GUI station, which previously had no console to prompt at and
+/// failed closed). Thin by design: renders the frame's prompt, sends back
+/// whichever button was tapped — no local policy, no caching, the Python
+/// side owns every decision (grant persistence included).
+private struct ApprovalSheetView: View {
+    let request: BridgeRequest
+    let respond: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Jaeger wants to…")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(Term.inkDim)
+            Text(request.prompt)
+                .font(.system(size: 15, design: .monospaced))
+                .foregroundColor(Term.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Spacer()
+                Button("Deny") { respond("deny") }
+                    .keyboardShortcut(.cancelAction)
+                Button("Always Allow") { respond("always") }
+                Button("Approve Once") { respond("once") }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Term.accent)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .background(Term.canvas)
     }
 }
