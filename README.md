@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.9.0--dev-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.9.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
@@ -62,16 +62,33 @@ robot body can run without the AI product installed at all.
 
 ## Install
 
+The standard method is the same as pre-split JROS: clone, run
+`./install.sh`, keep current with `jaeger update`.
+
 ```bash
 git clone https://github.com/JenkinsRobotics/JaegerAI.git
 cd JaegerAI
 ./install.sh                       # venv + editable install of jaeger-os + jaeger-ai
+./jaeger update                    # later: git pull + reinstall deps, non-interactive
 ```
 
-`JaegerAI` depends on `jaeger-os` (a path/pin dependency — see
-`requirements.txt`'s header for the exact staging-vs-release pin story)
-and installs **editable** (PEP 660), same model as JaegerOS: the code
-stays writable in place because the agent self-modifies its own skills.
+`pip` is the machinery underneath: it resolves the dependency chain
+across all four ecosystem packages (`jaeger-os`, `jaeger-ai`,
+`jaeger-kokoro-tts`, `jaeger-whisper-stt`) — today via `file://` path
+pins while each repo stages pre-release (see `requirements.txt`'s
+header), moving to real git/version-range pins once they publish
+releases. JaegerAI installs **editable** (PEP 660), same model as
+JaegerOS: the code stays writable in place because the agent
+self-modifies its own skills.
+
+**The from-scratch flow (a clean machine with no prior checkout) is
+being finalized for the 0.9 release** — `install.sh` still carries some
+pre-split assumptions (e.g. its curl-side fallback clones the old
+monorepo URL) that haven't been re-walked end-to-end since the split;
+the in-checkout `./install.sh` path above is the verified one.
+`pip install jaeger-ai` from PyPI is **(planned, 1.0)** — not available
+yet.
+
 Voice is optional — pull in the engine extras when you want speech:
 
 ```bash
@@ -136,6 +153,13 @@ for the full tier-map reasoning this repo is built against.
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Optional extra of this repo. |
 | JP01 | Project (Body) | The reference hardware Jaeger — installs this repo headless. |
 
+Two more repos round out the ecosystem without being part of the tier map
+themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)
+(the conventions every new ecosystem repo — this one included — started
+from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
+(the robot's Mac + Jetson body-side code JP01's headless install of this
+repo ultimately talks to).
+
 ## Development
 
 ```bash
@@ -145,6 +169,11 @@ pytest dev/tests                   # full suite (204 test files)
 ./dev/benchmark/scenarios.py       # 51-case hermetic full-system scenario suite
 ./dev/benchmark/scenarios.py --lane security   # the 15 security gates only
 ```
+
+The 0.9 split validated this repo standalone before the filter-repo cut:
+2490/2500 tests passing (0 real fails; the remainder were environment-only,
+not code) plus an instance-boot-identical check — a real model + real
+tools booting the same way post-split as pre-split.
 
 Test markers (`slow`, `integration`, `model`, `ui`, `subprocess`,
 `smoke`, `regression`) let CI and local iteration pick the right subset

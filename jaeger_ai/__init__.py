@@ -1,8 +1,10 @@
-"""Jaeger-OS — a local-first agentic agent framework for embodied AI.
+"""JaegerAI — the turnkey agentic-AI product (the Mind) of the Jaeger ecosystem.
 
-The brain layer of the JROS platform: agent loop, tools, memory,
-skills, and safety scaffolding. Runs on-device by default. Concrete
-agents (Lilith, ARES, …) are *instances* of this framework, not forks.
+Agent loop, tools, skills, memory, the id/ego persona pipeline, local
+inference, and its own faces (chat app, TUI, voice, protocol). Runs on
+device by default, on top of a pinned JaegerOS (the framework tier).
+Concrete agents (Lilith, ARES, …) are *instances* of this product, not
+forks of it.
 """
 
 # macOS fork-safety: Apple's Objective-C runtime aborts a forked
@@ -19,4 +21,4 @@ import os as _os
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
