@@ -1,16 +1,23 @@
 """ReferenceBuffer — thread-safe ring buffer for AEC far-end audio.
 
-When barge-in is enabled, the TTS plugin pushes its playback samples
-into a ReferenceBuffer; the STT mic-capture pops samples from the same
-buffer to use as the AEC far-end reference. This way the AEC can cancel
-the AI's own voice out of the mic input.
+AEC decoupling (0.9, seam ratified post-split): whatever module is
+producing playback audio (kokoro_tts today, any future TTS-slot module
+tomorrow) pushes its samples into a ReferenceBuffer; the STT mic-capture
+pops samples from the same buffer to use as the AEC far-end reference.
+This way the AEC can cancel the AI's own voice out of the mic input.
+Neither side needs to know what's on the other end — see
+:class:`FarEndReference` below, the protocol that makes this a seam
+instead of a hardcoded pairing. ``AudioSession`` (session.py) accepts
+any object satisfying it; ``nodes/runtime.py`` is what actually wires a
+real TTS module's buffer in, discovery-driven, only when one is
+installed.
 
 Two usage patterns inside this module:
 
-  TTS side  (producer):
+  playback side  (producer, e.g. kokoro_tts's KokoroTTS.speak()):
       buf.write(np.float32_audio)      # called each chunk played
 
-  STT side  (consumer, inside mic callback):
+  mic side  (consumer, inside mic callback — the FarEndReference use):
       far = buf.pop_frame(n_samples)   # call once per captured frame
       cleaned = aec.process(near, far)
 
@@ -22,8 +29,33 @@ worse than zeros for echo cancellation.
 from __future__ import annotations
 
 import threading
+from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+
+@runtime_checkable
+class FarEndReference(Protocol):
+    """Something that can supply the audio frames currently being
+    played out — the far-end reference AEC subtracts from the mic
+    signal.
+
+    This is the whole seam: an STT engine (or ``AudioSession``) never
+    needs to know what produced the audio, only that it can be pulled
+    in fixed-size frames and reset between utterances. ``ReferenceBuffer``
+    is the one production implementation today; anything duck-typed to
+    this shape (including a test double) works as a far-end provider.
+    """
+
+    def pop_frame(self, n_samples: int) -> np.ndarray:
+        """Return the next ``n_samples`` of reference audio (float32,
+        zero-padded if fewer are available)."""
+        ...
+
+    def clear(self) -> None:
+        """Drop any unread samples — called when playback stops so a
+        new turn doesn't AEC against stale audio."""
+        ...
 
 
 class ReferenceBuffer:
