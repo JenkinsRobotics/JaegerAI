@@ -4,7 +4,7 @@ version: 1.0.0
 consumes: [/act/speech, /act/speech_stop]
 produces: [/sense/spoken, /sense/tts_chunk]
 tools: [text_to_speech]
-factory: jaeger_os.nodes.kokoro_tts:make_tts_node
+factory: jaeger_kokoro_tts.nodes.kokoro_tts:make_tts_node
 config: kokoro_tts        # its group/key in the settings catalog
 # Carried over from the old plugin.yaml's `requires.libraries` block
 # (pre-0.8 M1, jaeger_os/plugins/kokoro_tts/plugin.yaml) — the

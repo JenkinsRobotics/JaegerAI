@@ -17,7 +17,7 @@ import huggingface_hub
 import huggingface_hub.constants as hf_constants
 import pytest
 
-from jaeger_os.nodes.kokoro_tts import engine as kokoro_engine
+from jaeger_kokoro_tts.nodes.kokoro_tts import engine as kokoro_engine
 
 
 @pytest.fixture(autouse=True)

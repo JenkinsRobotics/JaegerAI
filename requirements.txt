@@ -1,0 +1,23 @@
+# JaegerKokoroTTS runtime dependencies.
+#
+# Engine-tier only — pins jaeger-os (framework substrate: transport,
+# nodes.base, core.audio, core.instance.setting_meta) and the Kokoro
+# engine's own third-party libraries. NEVER jaeger-ai — see
+# module.yaml's requires_libraries for the exact probe set the
+# availability gate checks.
+
+# --- framework (path dep for local staging; pin a real published
+# version range once jaeger-os has releases). PEP 508 direct reference,
+# not `-e ../JaegerOS` — setuptools' dynamic-dependencies file parser
+# only accepts requirement specifiers. ABSOLUTE staging path. ---
+jaeger-os @ file:///private/tmp/claude-501/-Users-jonathanjenkins-GITHUB-JROS/17170042-b653-42cf-9a0b-82cc7d82616c/scratchpad/split/JaegerOS
+
+# --- the Kokoro engine itself ---
+kokoro>=0.9.4
+sounddevice>=0.4.6
+numpy>=1.26
+huggingface_hub>=0.24
+
+# --- dev tooling (uncomment if doing JaegerKokoroTTS development) ---
+# pytest>=8.0
+# ruff>=0.4

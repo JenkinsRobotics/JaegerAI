@@ -1,11 +1,11 @@
-"""Module-contract smoke for ``jaeger_os.nodes.kokoro_tts`` — 0.8 M1.
+"""Module-contract smoke for ``jaeger_kokoro_tts.nodes.kokoro_tts`` — 0.8 M1.
 
 Not part of ``dev/tests`` (``pyproject.toml``'s ``testpaths`` doesn't
 include this package — same pattern as the old ``jaeger_os/plugins/
 kokoro_tts/tests/smoke_test.py`` it replaces). Run directly:
 
     pytest jaeger_os/nodes/kokoro_tts/tests
-    python -m jaeger_os.nodes.kokoro_tts.tests.test_module_contract
+    python -m jaeger_kokoro_tts.nodes.kokoro_tts.tests.test_module_contract
 
 Three things a module must get right, proven here without touching
 audio hardware or the Kokoro model weights:
@@ -26,7 +26,7 @@ import time
 
 import yaml
 
-from jaeger_os.nodes.kokoro_tts import TTSNode, make_tts_node
+from jaeger_kokoro_tts.nodes.kokoro_tts import TTSNode, make_tts_node
 from jaeger_os.nodes.base import NodeState
 from jaeger_os.transport import InProcBus, topics
 
@@ -41,7 +41,7 @@ def test_module_yaml_validates() -> None:
     assert doc["consumes"] == ["/act/speech", "/act/speech_stop"]
     assert doc["produces"] == ["/sense/spoken", "/sense/tts_chunk"]
     assert doc["tools"] == ["text_to_speech"]
-    assert doc["factory"] == "jaeger_os.nodes.kokoro_tts:make_tts_node"
+    assert doc["factory"] == "jaeger_kokoro_tts.nodes.kokoro_tts:make_tts_node"
     assert doc["config"] == "kokoro_tts"
 
 

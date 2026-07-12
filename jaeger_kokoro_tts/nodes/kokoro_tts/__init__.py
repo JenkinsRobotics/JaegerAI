@@ -1,4 +1,4 @@
-"""jaeger_os.nodes.kokoro_tts — the kokoro_tts engine-module.
+"""jaeger_kokoro_tts.nodes.kokoro_tts — the kokoro_tts engine-module.
 
 0.8 M1: the first "engine-module" — the module IS the engine. This
 package owns everything Kokoro: the generic ``TTSNode`` + ``Synthesizer``
