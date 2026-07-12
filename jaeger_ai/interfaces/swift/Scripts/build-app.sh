@@ -15,7 +15,7 @@
 # What this script does, in order:
 #   1. swift build (debug by default, -c release with --release)
 #   2. Generate AppIcon.icns from the jaeger_app_icon_* PNGs in
-#      jaeger_os/assets/ (cached if AppIcon.icns is newer than its
+#      jaeger_ai/assets/ (cached if AppIcon.icns is newer than its
 #      input PNGs)
 #   3. Build the .app skeleton:
 #        JaegerOS.app/
@@ -53,13 +53,13 @@ if [[ "$DEV" == "1" ]]; then
     APP_NAME="JaegerOS-dev"
 fi
 
-# Resolve paths — APP_ROOT is jaeger_os/interfaces/swift, REPO_ROOT is the
-# JROS root (three levels up: swift → interfaces → jaeger_os → JROS).
+# Resolve paths — APP_ROOT is jaeger_ai/interfaces/swift, REPO_ROOT is the
+# JaegerAI repo root (three levels up: swift → interfaces → jaeger_ai → repo root).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$APP_ROOT/../../.." && pwd)"
 BUILD_DIR="$APP_ROOT/.build"
-ASSETS_DIR="$REPO_ROOT/jaeger_os/assets"
+ASSETS_DIR="$REPO_ROOT/jaeger_ai/assets"
 
 # Step 1 — Swift build.
 echo "[build-app] swift build -c $CONFIG"
@@ -77,7 +77,7 @@ fi
 
 # Step 2 — Generate AppIcon.icns from PNG set.
 # iconutil wants a .iconset directory with specific filenames.
-# Source PNGs live in jaeger_os/assets/ — see the README there.
+# Source PNGs live in jaeger_ai/assets/ — see the README there.
 ICONSET_TMP="$BUILD_DIR/AppIcon.iconset"
 ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
@@ -124,11 +124,11 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # Info.plist — copy from Resources/ (the canonical source), then stamp
-# the REAL version: CFBundleShortVersionString from jaeger_os.__version__
+# the REAL version: CFBundleShortVersionString from jaeger_ai.__version__
 # (the single source of truth), CFBundleVersion suffixed with the git SHA
 # so two builds of the same release line are distinguishable.
 cp "$APP_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_os/__init__.py")"
+JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_ai/__init__.py")"
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 if [[ -n "$JROS_VERSION" ]]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JROS_VERSION" \
