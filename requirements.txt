@@ -19,9 +19,9 @@
 # those instead — see install.sh's sibling-detection step. kokoro_tts +
 # whisper_stt are DEFAULT deps (not optional extras) as of 0.9: a robot
 # needs a voice out of the curl one-liner, not a follow-up install. ---
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
-jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
-jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
+jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@0.9.0
+jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@0.9.0
 
 # --- agent core ---
 pydantic>=2.0
