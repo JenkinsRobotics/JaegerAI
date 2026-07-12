@@ -2,8 +2,10 @@
 
 The Swift shell spawns ``jaeger bridge`` and exchanges newline-delimited
 JSON over stdin/stdout — the same agent turn the TUI runs, one hop out of
-process.  Protocol v1 lives in ``protocol.py`` (the single wire contract)
-with ``protocol_v1_fixtures.json`` as the cross-language test fixtures.
+process.  Protocol v1 lives in ``jaeger_os/contract/protocol.py`` (the
+single wire contract, 0.9 contract package) with
+``jaeger_os/contract/protocol_v1_fixtures.json`` as the cross-language
+test fixtures.
 
 Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md, approved 2026-07-04):
 
@@ -53,7 +55,7 @@ def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None
     turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
     guard and the wire frame never drift apart."""
     ctx.busy = busy
-    from jaeger_os.interfaces import protocol
+    from jaeger_os.contract import protocol
     _emit(out, protocol.state_frame(busy, session))
 
 
@@ -458,7 +460,7 @@ class _BridgeConfirm:
         self._ctx = ctx
 
     def confirm(self, request: object) -> bool:
-        from jaeger_os.interfaces import protocol
+        from jaeger_os.contract import protocol
         self._ctx.req_counter += 1
         rid = f"perm{self._ctx.req_counter}"
         evt: threading.Event = threading.Event()
@@ -485,7 +487,7 @@ class _BridgeConfirm:
 def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     """Background boot: load the model, wire tool/permission forwarding,
     then stream the ``agent_state`` transition. Never raises."""
-    from jaeger_os.interfaces import protocol
+    from jaeger_os.contract import protocol
     try:
         from jaeger_os.main import boot_for_tui
         # prewarm_model=False: the generic two-pass prewarm primes a
@@ -665,7 +667,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
     """Runs chat turns off the stdin thread. Blocks each turn on boot
     completion — old clients that chat right after ``ready`` just wait,
     exactly as they did when ``ready`` meant model-loaded."""
-    from jaeger_os.interfaces import protocol
+    from jaeger_os.contract import protocol
     while True:
         req = turns.get()
         if req is None:
@@ -723,7 +725,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from jaeger_os.core.instance.instance import (
         InstanceLayout, default_instance_name, resolve_instance_dir)
-    from jaeger_os.interfaces import protocol
+    from jaeger_os.contract import protocol
 
     instance = (argv[0] if argv else None) or default_instance_name()
 

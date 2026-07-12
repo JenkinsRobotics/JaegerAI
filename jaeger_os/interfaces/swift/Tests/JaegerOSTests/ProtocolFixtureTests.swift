@@ -3,7 +3,7 @@
 //  JaegerOSTests
 //
 //  The cross-language protocol contract: every frame in
-//  ``jaeger_os/interfaces/protocol_v1_fixtures.json`` must decode into the
+//  ``jaeger_os/contract/protocol_v1_fixtures.json`` must decode into the
 //  Swift ``ProtocolFrame`` it claims to be. pytest asserts the Python
 //  BUILDERS produce these exact shapes (test_bridge.py::
 //  test_fixture_frames_match_builders); this suite asserts the Swift
@@ -15,17 +15,22 @@ import XCTest
 
 final class ProtocolFixtureTests: XCTestCase {
 
-    // Fixtures live beside protocol.py (two directories up from the swift
-    // package: Tests file → repo navigation via #filePath keeps the single
-    // source of truth without copying).
+    // Fixtures live beside protocol.py in jaeger_os/contract/ (the 0.9
+    // contract package — see dev/docs/vision/THREE_TIER_STRUCTURE.md),
+    // five directories up from the swift package: Tests file → repo
+    // navigation via #filePath keeps the single source of truth without
+    // copying.
     private func fixtures() throws -> [String: Data] {
         let here = URL(fileURLWithPath: #filePath)
-        let interfaces = here                       // …/interfaces/swift/Tests/JaegerOSTests/x.swift
-            .deletingLastPathComponent()            // JaegerOSTests
-            .deletingLastPathComponent()            // Tests
-            .deletingLastPathComponent()            // swift
-            .deletingLastPathComponent()            // interfaces
-        let url = interfaces.appendingPathComponent("protocol_v1_fixtures.json")
+        let jaegerOs = here                          // …/interfaces/swift/Tests/JaegerOSTests/x.swift
+            .deletingLastPathComponent()             // JaegerOSTests
+            .deletingLastPathComponent()             // Tests
+            .deletingLastPathComponent()             // swift
+            .deletingLastPathComponent()             // interfaces
+            .deletingLastPathComponent()             // jaeger_os
+        let url = jaegerOs
+            .appendingPathComponent("contract")
+            .appendingPathComponent("protocol_v1_fixtures.json")
         let root = try JSONSerialization.jsonObject(
             with: Data(contentsOf: url)) as? [String: Any]
         let proto = root?["proto"] as? String
@@ -193,6 +198,8 @@ final class ProtocolFixtureTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("contract")
             .appendingPathComponent("protocol_v1_fixtures.json")
         let root = try JSONSerialization.jsonObject(
             with: Data(contentsOf: url)) as? [String: Any]
@@ -217,6 +224,8 @@ final class ProtocolFixtureTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("contract")
             .appendingPathComponent("protocol_v1_fixtures.json")
         let root = try JSONSerialization.jsonObject(
             with: Data(contentsOf: url)) as? [String: Any]
@@ -255,6 +264,8 @@ final class ProtocolFixtureTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("contract")
             .appendingPathComponent("protocol_v1_fixtures.json")
         let root = try JSONSerialization.jsonObject(
             with: Data(contentsOf: url)) as? [String: Any]
@@ -302,6 +313,8 @@ final class ProtocolFixtureTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("contract")
             .appendingPathComponent("protocol_v1_fixtures.json")
         let root = try JSONSerialization.jsonObject(
             with: Data(contentsOf: url)) as? [String: Any]

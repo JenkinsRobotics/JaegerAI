@@ -32,6 +32,8 @@ here verbatim from ``core/instance/schemas.py``) is nested at
 
 from typing import Any
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+
 from .auto_state import AvatarAutoStateDriver
 from .base import AnimationAdapter, FrameBuffer
 from .config import AvatarConfig
@@ -61,6 +63,6 @@ def make_animation_node(bus: Any, config: dict[str, Any]) -> AnimationNode:
     return _build_animation_node(
         bus,
         bridge_host=str(config.get("bridge_host", "127.0.0.1")),
-        bridge_port=int(config.get("bridge_port", 8765)),
+        bridge_port=int(config.get("bridge_port", ANIMATION_BRIDGE_DEFAULT_PORT)),
         enable_bridge=bool(config.get("enable_bridge", True)),
     )

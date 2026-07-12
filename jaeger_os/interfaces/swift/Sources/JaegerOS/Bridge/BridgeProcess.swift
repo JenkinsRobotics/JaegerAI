@@ -5,7 +5,7 @@
 //  Out-of-process transport to the agent: spawns ``jaeger bridge`` (the
 //  Python NDJSON stdio bridge) as a child and exchanges newline-JSON over
 //  its stdin/stdout.  Protocol v1 — the single wire contract lives in
-//  ``jaeger_os/interfaces/protocol.py`` with cross-language fixtures in
+//  ``jaeger_os/contract/protocol.py`` with cross-language fixtures in
 //  ``protocol_v1_fixtures.json`` (decoded by ProtocolFixtureTests here).
 //
 //  Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md):

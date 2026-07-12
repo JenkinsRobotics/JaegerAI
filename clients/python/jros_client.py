@@ -15,7 +15,7 @@ Pick an agent:      JrosClient(instance="lilith")
 Non-default install: JrosClient(jaeger_home="/opt/jaeger")
 Full control:       JrosClient(command=["/path/to/jaeger", "bridge"])
 
-The wire contract is jaeger_os/interfaces/protocol.py (v1); this file is
+The wire contract is jaeger_os/contract/protocol.py (v1); this file is
 tested against the same protocol_v1_fixtures.json that pins the Swift
 client, so it cannot silently drift.
 """
@@ -49,7 +49,7 @@ def _default_command(jaeger_home: str | None) -> list[str]:
     return [str(launcher), "bridge"]
 
 
-# ── wire helpers (client side of jaeger_os/interfaces/protocol.py) ──
+# ── wire helpers (client side of jaeger_os/contract/protocol.py) ──
 
 def _parse(line: str) -> dict[str, Any] | None:
     line = line.strip()

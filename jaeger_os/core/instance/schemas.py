@@ -21,6 +21,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+
 # ``_setting``'s canonical definition moved to ``setting_meta.py`` at 0.8
 # M1 so an engine-module's config slice (e.g. ``jaeger_os/nodes/
 # kokoro_tts/config.py``) can carry catalog metadata without importing
@@ -806,7 +808,7 @@ except ImportError:
         model_config = ConfigDict(extra="forbid")
         enabled: bool = False
         bridge_host: str = "127.0.0.1"
-        bridge_port: int = Field(8765, ge=1024, le=65535)
+        bridge_port: int = Field(ANIMATION_BRIDGE_DEFAULT_PORT, ge=1024, le=65535)
         default_emotion: str = "neutral"
 
 

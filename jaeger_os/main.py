@@ -4216,11 +4216,15 @@ def _main_dispatch() -> int:
     # renderer connects to, and otherwise behaves like --voice.
     if "--stream" in sys.argv[1:]:
         sys.argv.remove("--stream")
+        from jaeger_os.contract.ports import (
+            ANIMATION_BRIDGE_DEFAULT_PORT,
+            ANIMATION_BRIDGE_HOST,
+        )
         print(
             "[jaeger] streaming mode — open the Swift renderer at:\n"
             "          jaeger_os/interfaces/avatar (swift run JROSAvatar)\n"
             "        connect URL:\n"
-            "          ws://127.0.0.1:8765/frames",
+            f"          ws://{ANIMATION_BRIDGE_HOST}:{ANIMATION_BRIDGE_DEFAULT_PORT}/frames",
             flush=True,
         )
         # Fall through into the --voice path below.
