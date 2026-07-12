@@ -285,7 +285,7 @@ def main() -> int:
     # AVAudioEngine (PyObjC), otherwise it comes up via sounddevice
     # exactly as in 0.2.x.
     if args.stt_mode == "continuous":
-        from .whisper_stt import WhisperSTTContinuous
+        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTContinuous
         stt = WhisperSTTContinuous(
             model_name=args.fast_model,
             require_wake_word=require_wake_word,
@@ -294,7 +294,7 @@ def main() -> int:
             audio_backend=args.audio_backend,
         )
     else:
-        from .whisper_stt import WhisperSTTTwoPass
+        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTTwoPass
         stt = WhisperSTTTwoPass(
             fast_model_name=args.fast_model,
             accurate_model_name=args.accurate_model,
