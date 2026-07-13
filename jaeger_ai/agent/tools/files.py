@@ -595,10 +595,13 @@ def _t_delete_file(path: str) -> dict:
                operation="move_file",
                summary="move a file in the skills workspace")
 def _t_move_file(src: str, dst: str) -> dict:
-    """Move (rename) a file inside the sandboxed skills/ workspace.
-    Both `src` and `dst` follow the same routing as `write_file`
-    (`workspace/...` vs. everything else → skills/). Refuses any
-    source or destination that escapes the sandbox."""
+    """Move (rename) a file inside the sandboxed skills/ workspace —
+    THE tool for "move/organize my files" (screenshots, exports,
+    notes): use this per file, never a shell `mv`. Destination
+    parent dirs are auto-created, so moving into a new folder is one
+    call. Both `src` and `dst` follow the same routing as
+    `write_file` (`workspace/...` vs. everything else → skills/).
+    Refuses any source or destination that escapes the sandbox."""
     return move_file(src=src, dst=dst)
 
 

@@ -382,6 +382,109 @@ class SkillLoadReport:
 
 _REGISTERED_KEYS: set[tuple[str, int, str]] = set()
 
+# 0.9.3 Task 5 (dependency visibility): the most recent load_and_register
+# report, process-wide. `jaeger doctor` runs in a fresh process and calls
+# load_and_register itself to populate this; the self-model
+# (persona_lane.build_self_model_block) reads it in the SAME process the
+# agent booted in, to explain a missing capability instead of silently
+# omitting it.
+_LAST_REPORT: "SkillLoadReport | None" = None
+
+
+def last_skip_reason(*names: str) -> str | None:
+    """The skip reason for the first of ``names`` found in the most recent
+    :func:`load_and_register` call's skip list this process, or ``None``
+    when none of them were skipped (either registered fine, or
+    load_and_register hasn't run yet). Callers pass every plausible
+    skill id for a capability (folder name AND manifest id can differ)."""
+    if _LAST_REPORT is None:
+        return None
+    by_name = {s.name: reason for s, reason in _LAST_REPORT.skipped}
+    for n in names:
+        if n in by_name:
+            return by_name[n]
+    return None
+
+
+# Skip-reason classification — every string this module writes into a
+# skip reason falls into one of these buckets. Used by `jaeger doctor`
+# (an actionable fix per bucket) and the boot log (a compact tag per
+# skipped skill) so a silent skip becomes a legible one.
+_SKIP_CLASS_DISABLED = "disabled"
+_SKIP_CLASS_UNSUPPORTED = "unsupported"
+_SKIP_CLASS_MISSING_SMOKE = "missing_smoke"
+_SKIP_CLASS_SMOKE_FAIL = "smoke_fail"
+_SKIP_CLASS_SAFETY = "safety"
+_SKIP_CLASS_PERMISSION = "permission"
+_SKIP_CLASS_IMPORT_ERROR = "import_error"
+_SKIP_CLASS_OTHER = "other"
+
+_PERMISSION_MARKERS = (
+    "PermissionError", "Operation not permitted", "not authorized",
+    "AXError", "not permitted to", "accessibility permission",
+    "screen recording",
+)
+
+
+def classify_skip(reason: str) -> str:
+    """Bucket a skip reason string into a short class tag — see the
+    ``_SKIP_CLASS_*`` constants above. Pure string classification (no
+    re-running anything); safe to call on any reason this module or a
+    caller synthesized."""
+    r = reason or ""
+    low = r.lower()
+    if any(marker.lower() in low for marker in _PERMISSION_MARKERS):
+        return _SKIP_CLASS_PERMISSION
+    if r == "disabled by config":
+        return _SKIP_CLASS_DISABLED
+    if "not implemented yet" in r and "package=" in r:
+        return _SKIP_CLASS_UNSUPPORTED
+    if "no tests/smoke_test.py" in r:
+        return _SKIP_CLASS_MISSING_SMOKE
+    if r.startswith("smoke test"):
+        return _SKIP_CLASS_SMOKE_FAIL
+    if r.startswith("safety scan:"):
+        return _SKIP_CLASS_SAFETY
+    if r.startswith("import/register failed:"):
+        return _SKIP_CLASS_IMPORT_ERROR
+    return _SKIP_CLASS_OTHER
+
+
+_MODULE_NOT_FOUND_RE = re.compile(r"No module named ['\"]([\w\.\-]+)['\"]")
+
+
+def skip_fix_hint(skill: "DiscoveredSkill", reason: str, cls: str) -> tuple[str, list[str]]:
+    """``(human fix text, runnable fix_cmd argv)`` for a skipped skill —
+    fed into ``preflight.Check.fix`` / ``fix_cmd`` by ``jaeger doctor`` so
+    the same "these can be installed for you" flow that handles missing
+    Python deps also offers to fix a skipped skill where it can."""
+    if cls == _SKIP_CLASS_IMPORT_ERROR or cls == _SKIP_CLASS_SMOKE_FAIL:
+        m = _MODULE_NOT_FOUND_RE.search(reason)
+        if m:
+            pkg = m.group(1).split(".")[0]
+            return (f"pip install {pkg}", ["pip", "install", pkg])
+    if cls == _SKIP_CLASS_PERMISSION:
+        return (
+            "grant this process the needed permission — System Settings "
+            "-> Privacy & Security -> Accessibility (or Screen Recording / "
+            "Full Disk Access, depending on the message above)",
+            [],
+        )
+    if cls == _SKIP_CLASS_MISSING_SMOKE:
+        return (f"add tests/smoke_test.py to {skill.folder}", [])
+    if cls == _SKIP_CLASS_SAFETY:
+        return (
+            "review the content the safety scanner flagged "
+            "(jaeger_ai/core/safety/skills_guard.py) before re-enabling",
+            [],
+        )
+    if cls == _SKIP_CLASS_SMOKE_FAIL:
+        return ("inspect the smoke test output above; fix the skill or "
+                "its dependency, then re-run `jaeger doctor`", [])
+    if cls in (_SKIP_CLASS_DISABLED, _SKIP_CLASS_UNSUPPORTED):
+        return ("", [])
+    return ("", [])
+
 
 def reset_registered() -> None:
     """Drop the loader's idempotency cache. Used by tests that bind/unbind
@@ -622,11 +725,17 @@ def load_and_register(
                     pass
         except Exception as exc:
             tb = traceback.format_exc(limit=4)
-            skipped.append((skill, f"import/register failed: {exc}\n{tb}"))
+            # 0.9.3 Task 5: lead with the exception CLASS, not just its
+            # message — "ModuleNotFoundError: No module named 'pyobjc'"
+            # is actionable at a glance; "No module named 'pyobjc'" alone
+            # reads the same whether it's an import error, a permission
+            # error, or something else entirely.
+            exc_repr = f"{type(exc).__name__}: {exc}"
+            skipped.append((skill, f"import/register failed: {exc_repr}\n{tb}"))
             if audit:
                 audit("skill_register_fail", {"skill": skill.name, "version": skill.version,
-                                              "zone": skill.zone, "error": str(exc)})
-            print(f"[jaeger-skills] {skill.name}_v{skill.version} ({skill.zone}) skipped: {exc}",
+                                              "zone": skill.zone, "error": exc_repr})
+            print(f"[jaeger-skills] {skill.name}_v{skill.version} ({skill.zone}) skipped: {exc_repr}",
                   flush=True)
             continue
 
@@ -649,6 +758,17 @@ def load_and_register(
                 "convenience (dev/docs/history/skill_schema_v3-v1.md).",
                 flush=True,
             )
+    # 0.9.3 Task 5: silent skill-skips end here — one compact line, every
+    # skip name + WHY (a short class tag: import_error / smoke_fail /
+    # permission / missing_smoke / safety / disabled / unsupported /
+    # other). Full reasons stay in the audit log + `jaeger doctor`; this
+    # is just the "something's missing, go look" boot-log signal.
+    if skipped:
+        compact = ", ".join(
+            f"{s.name}[{classify_skip(reason)}]" for s, reason in skipped
+        )
+        print(f"[jaeger-skills] {len(skipped)} skill(s) skipped: {compact} "
+              "— see `jaeger doctor` for fixes.", flush=True)
     # One skill model, two things a skill can carry: a module that provides
     # tools (registered above) and/or a SKILL.md recipe the agent loads via
     # use_skill. Recipe-only skills are indexed separately, not registered as
@@ -670,4 +790,6 @@ def load_and_register(
               flush=True)
     except Exception:  # noqa: BLE001
         pass
-    return SkillLoadReport(registered=registered, skipped=skipped)
+    global _LAST_REPORT
+    _LAST_REPORT = SkillLoadReport(registered=registered, skipped=skipped)
+    return _LAST_REPORT

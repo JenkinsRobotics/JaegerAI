@@ -210,5 +210,8 @@ def _t_terminal(command: str, timeout_s: float = 60.0) -> dict:
     ffmpeg. For Python code use execute_code; for files use
     write_file / read_file / list_skill_dir. PRIVILEGED-tier: each
     call prompts the user, so reach for it only when the task
-    genuinely needs a shell program."""
+    genuinely needs a shell program. Also the tool for system/
+    process inspection recipes (ps aux, top, lsof): "what's eating
+    my memory/CPU" means RAM/processes — a ps one-liner here, not
+    your own stored memory."""
     return run_shell(command=command, timeout_s=timeout_s)

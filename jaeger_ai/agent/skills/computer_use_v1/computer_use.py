@@ -322,7 +322,10 @@ def register(agent: Any) -> None:
     @agent.tool_plain
     @_gated(PermissionTier.READ_ONLY, "open_app", "launch a macOS app")
     def computer_open_app(name: str) -> dict:
-        """Launch or focus a macOS application by name (e.g. 'Safari')."""
+        """Launch or focus a macOS application by name (e.g. 'Safari').
+        NOT for opening a website — "open <site> in <browser>" is one
+        open_on_host call with the URL, no GUI driving needed. For a
+        multi-step GUI task, load the macos-computer-use skill first."""
         return open_app(name=name)
 
     @agent.tool_plain
