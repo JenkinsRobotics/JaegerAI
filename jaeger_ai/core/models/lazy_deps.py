@@ -60,6 +60,11 @@ LAZY_DEPS: dict[str, FeatureSpec] = {
         ("pyobjc-framework-ApplicationServices", "pyobjc-framework-Quartz",
          "pyobjc-framework-Cocoa"),
         "macOS background automation (PyObjC Accessibility bridge)"),
+    "vision.ocr": FeatureSpec(
+        "vision.ocr", "Vision",
+        ("pyobjc-framework-Vision", "pyobjc-framework-Quartz",
+         "pyobjc-framework-Cocoa"),
+        "macOS Vision framework OCR (PyObjC bridge)"),
 }
 
 

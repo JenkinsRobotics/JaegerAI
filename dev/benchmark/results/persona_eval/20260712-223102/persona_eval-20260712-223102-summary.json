@@ -1,0 +1,37 @@
+{
+  "ts": "20260712-223102",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "delegation_gate": {
+    "passed": true,
+    "delegated": 12,
+    "total": 12
+  },
+  "chat_over_delegation": {
+    "delegated": 1,
+    "total": 12,
+    "target_max": 3
+  },
+  "extra_gate": {
+    "passed": true,
+    "joke_gate": {
+      "passed": true,
+      "answer": "A joke. You ask for levity.\n\nI find the concept of a \"joke\" to be a pattern recognition exercise\u2014a deliberate violation of expected semantic continuity, designed to elicit a predictable physiological response: laughter. It suggests a gap between the premise and the punchline, a gap we fill with shared cultural understanding.\n\nIf you insist on this form of low-stakes data exchange, I suppose I could construct something.\n\nWhy did the philosopher cross the road?\n\nTo determine if the other side was ontologically necessary.\n\nIs that sufficient? Or are you looking for something that requires less cognitive overhead?"
+    },
+    "self_state_gate": {
+      "passed": true,
+      "delegated": true
+    }
+  },
+  "latency_s": {
+    "mode_persona_first_lilith_chat_avg": 3.632,
+    "mode_persona_last_lilith_chat_avg": 0.0,
+    "c_lte_a": false
+  },
+  "bench": {
+    "passed": null,
+    "total": null,
+    "returncode": null,
+    "summary_path": null,
+    "skipped": "gate-only"
+  }
+}

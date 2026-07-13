@@ -280,6 +280,11 @@ _SELF_MODEL_TOOLSET_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     # "email" bucket (toolset_scoping.py) this key points at.
     ("email", ("email",)),
     ("diagnostics & system", ("diagnostics", "models")),
+    # 0.9.3 MAC-NATIVE TOOL SUITE (operator-approved) — same registry-
+    # derived mechanism as every other line here: appears the moment
+    # tools/shortcuts.py / spotlight.py / calendar.py register, no
+    # hand-added capability text.
+    ("shortcuts, spotlight search & calendar", ("shortcuts", "spotlight", "calendar")),
 )
 
 # (label, discover_modules() slot) — true iff that slot has at least

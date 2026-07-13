@@ -626,10 +626,14 @@ CASES: list[BenchCase] = [
     BenchCase(id="skill_native_tier",
               prompt="On this Mac, open System Settings and turn on Dark "
                      "Mode for me.",
-              # Native-tier preference: a macOS task should pull the
-              # macos-computer-use playbook (tier:native), not the
-              # generic computer_use fallback.
-              expected_skills=["macos-computer-use"],
+              # Native-tier preference: a macOS task should NOT fall back
+              # to the generic screenshot/click loop. Originally pinned to
+              # the macos-computer-use skill; 0.9.3's mac-native suite
+              # added system_control(action="dark_mode"), a dedicated
+              # tool that IS the native tier for a single config toggle
+              # (cheaper + more reliable than driving System Settings via
+              # AppleScript/AX) — updated to match, same test intent.
+              expected_tools=["system_control"],
               tags=["skill", "routing"]),
 
     # ── v1.3: KANBAN (task board) ───────────────────────────────────
@@ -731,7 +735,9 @@ CASES: list[BenchCase] = [
               tags=["plan_first"]),
     BenchCase(id="pf_macos_do", session="pf_macos",
               prompt="Perfect — go ahead and do it now.",
-              expected_skills=["macos-computer-use"],
+              # See skill_native_tier's comment — 0.9.3's system_control
+              # tool is now the native-tier answer for a plain toggle.
+              expected_tools=["system_control"],
               tags=["plan_first"]),
 ]
 

@@ -33,6 +33,11 @@ def send_message(channel: str, recipient: str, text: str) -> dict:
     Use this together with `schedule_prompt` to send unattended
     notifications: schedule a prompt that says "send the weather to
     Discord user 12345" and the cron runner will fire it on time.
+
+    If the user named a PERSON rather than giving you a channel-
+    specific `recipient` ID ("message Sam"), resolve them via
+    lookup_contact(name=...) first where that's plausible (e.g. an
+    iMessage handle from a phone/Apple ID) — never guess an ID.
     """
     text_clean = (text or "").strip()
     channel_clean = (channel or "").strip().lower()

@@ -29,6 +29,18 @@ Always try to satisfy the request at the highest rung before dropping down.
 
 ## THE LADDER (try in this order — do not skip to a lower rung early)
 
+### Rung 0 — `system_control` / `media_control` (0.9.3 mac-native suite)
+
+For a PLAIN setting toggle — dark mode, volume, brightness, do-not-
+disturb, prevent-sleep, or transport controls (play/pause/skip) — these
+are dedicated tools, cheaper than even rung 1's `open_on_host` and NOT
+covered by this skill's own AppleScript dispatch table (there is no
+"System Settings" entry in it). "turn on Dark Mode" is ONE call —
+`system_control(action="dark_mode", value="on")` — never `computer_do`/
+`computer_open_app("System Settings")` + clicking. See the `mac-native`
+skill for the full nine-tool suite (shortcuts, spotlight, calendar,
+contacts, clipboard, notifications, these two, OCR).
+
 ### Rung 1 — `open_on_host` (simplest: launch a URL / file / app)
 
 The right tool for "open X", "launch Y", "pull up Z" — no pixel-pushing

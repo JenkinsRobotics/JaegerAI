@@ -215,6 +215,18 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # ``self_check`` = the agent's doctor (same engine as `jaeger
     # doctor`); ``system_status`` = host cpu/disk/uptime.
     "diagnostics": frozenset({"system_status", "self_check", "diagnostics"}),
+    # 0.9.3 MAC-NATIVE TOOL SUITE — one toolset per category, each also
+    # feeding a persona_lane.py SELF_MODEL group (shortcuts/spotlight/
+    # calendar) so the id knows it can reach for them.
+    "shortcuts": frozenset({"list_shortcuts", "run_shortcut"}),
+    "spotlight": frozenset({"spotlight_search"}),
+    "calendar": frozenset({"get_events", "create_event"}),
+    "contacts": frozenset({"lookup_contact"}),
+    "clipboard": frozenset({"clipboard_read", "clipboard_write"}),
+    "notifications": frozenset({"notify"}),
+    "system_control": frozenset({"system_control"}),
+    "media_control": frozenset({"media_control", "now_playing"}),
+    "ocr": frozenset({"ocr_file"}),
 }
 
 # One-line description per built-in class — for the load_tools catalog.
@@ -240,6 +252,15 @@ TOOLSET_SUMMARY: dict[str, str] = {
               "set_autonomy (ask/scoped/auto)",
     "bench": "run the agent self-benchmark against the live pipeline",
     "diagnostics": "system health + cpu/disk status",
+    "shortcuts": "list + run Shortcuts.app automations",
+    "spotlight": "find files anywhere on the Mac by Spotlight metadata",
+    "calendar": "read/create Calendar.app events",
+    "contacts": "look up a person's email/phone in Contacts.app",
+    "clipboard": "read/write the system clipboard",
+    "notifications": "show a macOS notification banner",
+    "system_control": "volume, brightness, dark mode, do-not-disturb, prevent-sleep",
+    "media_control": "control + read Music.app/Spotify playback",
+    "ocr": "extract text from an image or PDF (Vision framework)",
 }
 
 # Skill toolsets — populated at runtime by the skill loader. A skill is

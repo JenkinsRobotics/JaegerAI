@@ -324,8 +324,12 @@ def register(agent: Any) -> None:
     def computer_open_app(name: str) -> dict:
         """Launch or focus a macOS application by name (e.g. 'Safari').
         NOT for opening a website — "open <site> in <browser>" is one
-        open_on_host call with the URL, no GUI driving needed. For a
-        multi-step GUI task, load the macos-computer-use skill first."""
+        open_on_host call with the URL, no GUI driving needed. NOT for
+        a plain setting toggle either — "turn on dark mode / do not
+        disturb", "set the volume/brightness" is one
+        system_control(action=...) call, never System Settings +
+        clicking. For a multi-step GUI task, load the
+        macos-computer-use skill first."""
         return open_app(name=name)
 
     @agent.tool_plain

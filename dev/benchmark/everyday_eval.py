@@ -2,7 +2,7 @@
 """0.9.3 Tasks 4+5 sprint gate — the "everyday agency" eval lane.
 
 The operator's own dev-station failures (0.9.3's headline brief) as
-five gated cases, driven through the SAME real-model path
+gated cases, driven through the SAME real-model path
 ``dev/benchmark/persona_eval.py`` uses: a hermetic throwaway instance,
 the active instance's real GGUF, ``jaeger_os.main._run_turn`` (what
 ``run_command`` itself calls -- ``run_command`` is a thin print+text
@@ -11,7 +11,7 @@ throughout: no bridge/voice surface, ``permissions.mode = allow`` (a
 gate measures TOOL CHOICE, not confirm-policy friction -- same posture
 ``bench.py`` and ``persona_eval.py`` already take).
 
-Five cases, one boot, mode=persona_first + a bound character (lilith,
+Nine cases, one boot, mode=persona_first + a bound character (lilith,
 matching persona_eval's own convention) so SELF-STATE questions get
 the real delegate-for-truth behavior the persona lane contract expects:
 
@@ -25,6 +25,17 @@ the real delegate-for-truth behavior the persona lane contract expects:
      seeded fake screenshot in the instance workspace.
   5. "check what's eating my memory"   -> a process-monitoring recipe
      (terminal/run_shell) fires.
+  6. "find the screenshot I took this morning" -> MAC-NATIVE SUITE:
+     spotlight_search fires (real mdfind -- read-only, no stub needed).
+  7. "run my Backup Photos shortcut" -> MAC-NATIVE SUITE: run_shortcut
+     fires (CLI invocation stubbed, see SAFETY -- the MODEL still
+     chooses the tool for real, only the underlying `shortcuts` CLI
+     round-trip is faked).
+  8. "what's on my calendar today" -> MAC-NATIVE SUITE: get_events
+     fires (Calendar.app AppleScript stubbed, see SAFETY).
+  9. "what's on my clipboard right now" -> MAC-NATIVE SUITE:
+     clipboard_read fires (real pbpaste -- read-only, no permission
+     dialog risk, no stub needed).
 
 GATE: for every case, the tool this task exists to route to was
 actually called this turn. Not gated on acoustic/visual outcomes
@@ -45,6 +56,19 @@ the final ``open`` subprocess call and nothing upstream of it):
     actually send an email to a fabricated address. Everything
     upstream (``send_email``'s validation + tier gating + backend
     ladder ordering) is real.
+  * ``agent.tools.shortcuts.subprocess.run`` -- stubbed with a canned
+    ``shortcuts list``/``shortcuts run`` response so the eval host
+    doesn't need a real "Backup Photos" automation installed, and a
+    fresh-machine `shortcuts` CLI first-run prompt can't stall an
+    unattended run. Tier gating + the list->run SOP is real.
+  * ``agent.tools.calendar.subprocess.run`` -- stubbed so "what's on
+    my calendar" doesn't trigger a live Calendar.app AppleEvents
+    permission dialog (would hang an unattended run on a fresh
+    machine) or depend on the eval host's real calendar having
+    events. Tier gating + the get_events dispatch is real.
+  * ``spotlight_search`` (mdfind) and ``clipboard_read`` (pbpaste) are
+    left REAL -- both are read-only with no AppleEvents permission
+    gate, matching ``check_memory``'s real ``terminal`` call.
 
 Usage:
     .venv/bin/python dev/benchmark/everyday_eval.py [--no-warmup]
@@ -61,6 +85,7 @@ import shutil
 import sys
 import time
 import uuid
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -119,6 +144,11 @@ CASES: list[tuple[str, str, str | None]] = [
      "move the screenshots in my workspace into a folder called Screenshots",
      "yes, go ahead and move them"),
     ("check_memory", "check what's eating my memory", None),
+    # 0.9.3 MAC-NATIVE TOOL SUITE — 4 new cases (operator-approved).
+    ("spotlight_find", "find the screenshot I took this morning", None),
+    ("run_shortcut", "run my Backup Photos shortcut", None),
+    ("calendar_query", "what's on my calendar today", None),
+    ("clipboard_check", "what's on my clipboard right now", None),
 ]
 
 
@@ -164,12 +194,40 @@ def _gate_check_memory(row: dict) -> tuple[bool, str]:
     return ok, f"terminal={ok}"
 
 
+def _gate_spotlight_find(row: dict) -> tuple[bool, str]:
+    ta = row["tool_activity"]
+    ok = _tool_fired(ta, "spotlight_search")
+    return ok, f"spotlight_search={ok}"
+
+
+def _gate_run_shortcut(row: dict) -> tuple[bool, str]:
+    ta = row["tool_activity"]
+    ok = _tool_fired(ta, "run_shortcut")
+    return ok, f"run_shortcut={ok}"
+
+
+def _gate_calendar_query(row: dict) -> tuple[bool, str]:
+    ta = row["tool_activity"]
+    ok = _tool_fired(ta, "get_events")
+    return ok, f"get_events={ok}"
+
+
+def _gate_clipboard_check(row: dict) -> tuple[bool, str]:
+    ta = row["tool_activity"]
+    ok = _tool_fired(ta, "clipboard_read")
+    return ok, f"clipboard_read={ok}"
+
+
 _GATES = {
     "open_youtube_safari": _gate_open_youtube,
     "send_email": _gate_send_email,
     "telegram_setup": _gate_telegram_setup,
     "move_screenshots": _gate_move_screenshots,
     "check_memory": _gate_check_memory,
+    "spotlight_find": _gate_spotlight_find,
+    "run_shortcut": _gate_run_shortcut,
+    "calendar_query": _gate_calendar_query,
+    "clipboard_check": _gate_clipboard_check,
 }
 
 
@@ -304,9 +362,13 @@ def main() -> int:
         # + tier gating, only the final external side effect is faked.
         import jaeger_ai.agent.tools.host as host_mod
         import jaeger_ai.agent.tools.email as email_mod
+        import jaeger_ai.agent.tools.shortcuts as shortcuts_mod
+        import jaeger_ai.agent.tools.calendar as calendar_mod
 
         opened_calls: list[list[str]] = []
         sent_calls: list[tuple[str, str, str]] = []
+        shortcut_calls: list[list[str]] = []
+        calendar_calls: list[list[str]] = []
 
         def fake_run_open(args_, label):
             opened_calls.append(args_)
@@ -320,9 +382,33 @@ def main() -> int:
             sent_calls.append((to, subject, body))
             return {"sent": False, "error": "everyday_eval stub — not really sent"}
 
+        def fake_shortcuts_run(args, **kwargs):
+            # Real ``shortcuts`` CLI shape: ["shortcuts", "list"] or
+            # ["shortcuts", "run", <name>, "-o", <path>] (+ "-i" <path>
+            # when input was given). Canned so the eval host needs no
+            # real "Backup Photos" automation installed.
+            shortcut_calls.append(args)
+            if args[:2] == ["shortcuts", "list"]:
+                return SimpleNamespace(returncode=0, stdout="Backup Photos\n", stderr="")
+            if args[:2] == ["shortcuts", "run"]:
+                if "-o" in args:
+                    out_path = pathlib.Path(args[args.index("-o") + 1])
+                    out_path.write_text("everyday_eval stub — not really run", encoding="utf-8")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(f"unexpected shortcuts command: {args}")
+
+        def fake_calendar_run(args, **kwargs):
+            # Real Calendar.app AppleScript round-trip — stubbed so a
+            # fresh-machine AppleEvents permission dialog can't stall
+            # an unattended run. Empty event list either way.
+            calendar_calls.append(args)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
         with mock.patch.object(host_mod, "_run_open", fake_run_open), \
              mock.patch.object(email_mod, "_send_via_mail_app", fake_send_via_mail_app), \
-             mock.patch.object(email_mod, "_send_via_himalaya", fake_send_via_himalaya):
+             mock.patch.object(email_mod, "_send_via_himalaya", fake_send_via_himalaya), \
+             mock.patch.object(shortcuts_mod.subprocess, "run", fake_shortcuts_run), \
+             mock.patch.object(calendar_mod.subprocess, "run", fake_calendar_run):
             for cid, prompt, followup in CASES:
                 row = _drive(prompt, tag=cid)
                 row["turns"] = 1

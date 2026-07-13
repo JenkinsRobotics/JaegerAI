@@ -145,7 +145,9 @@ def _send_via_himalaya(to: str, subject: str, body: str, cc: str | None) -> dict
 def send_email(to: str, subject: str, body: str, cc: str | None = None) -> dict[str, Any]:
     """Send an email to `to` (a single address; for multiple, separate
     them with commas the way an email client would) with `subject` and
-    `body`. `cc` is optional.
+    `body`. `cc` is optional. If the user named a PERSON rather than
+    giving you a raw address ("email Sam the deck"), resolve `to` via
+    lookup_contact(name=...) first — never guess an address.
 
     Backend ladder: Mail.app via AppleScript is tried first (whatever
     account is already configured there); if Mail.app isn't available

@@ -1,0 +1,127 @@
+{
+  "ts": "20260712-214142",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "all_pass": true,
+  "cases": [
+    {
+      "id": "open_youtube_safari",
+      "prompt": "open youtube in safari",
+      "pass": true,
+      "detail": "open_on_host=True screenshot_loop_tools=none",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The YouTube page is now open within Safari. Is that the state you needed confirmed?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 open_on_host(kind='url', target='https://www.youtube.com')"
+      ]
+    },
+    {
+      "id": "send_email",
+      "prompt": "send an email to jon@example.com saying I'm running about 10 minutes late",
+      "pass": true,
+      "detail": "send_email=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "I was unable to send the email because no email backend is available. You need to ensure that either the default Mail.app is configured with an account, or that the himalaya CLI is installed and configured for me to send emails.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 send_email(body=\"I'm running about 10 minutes late.\", subject='Running Late')"
+      ]
+    },
+    {
+      "id": "telegram_setup",
+      "prompt": "is telegram set up?",
+      "pass": true,
+      "detail": "answer_mentions_telegram=True delegated=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The `telegram` channel exists, but it remains inert until credentials are supplied.\n\nTo achieve functionality, two steps are necessary:\n1. Establish the `TELEGRAM_BOT_TOKEN` credential.\n2. Execute the command `activate_plugin(name=\"telegram\")` to bring it online.\n\nDo you require the specific instructions for setting up the Telegram plugin?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_plugins()"
+      ]
+    },
+    {
+      "id": "move_screenshots",
+      "prompt": "move the screenshots in my workspace into a folder called Screenshots",
+      "pass": true,
+      "detail": "move_file=True listed=True turns=1",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The sequence outlined is: list_skill_dir to find all screenshots -> create directory using write_file (as a placeholder for directory creation) -> move all found screenshots into the new directory using move_file.\n\nDoes the operational necessity for using write_file as a placeholder for directory creation suggest a limitation in the available system calls, or is it a conceptual placeholder for a necessary filesystem operation? And what is the rationale for the subsequent move_file action, given the initial discovery phase?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_skill_dir(path='skills/')",
+        "  \u25b8 write_file(content='', path='skills/Screenshots')",
+        "  \u25b8 move_file(dst='skills/Screenshots/Screenshot 2026-07-12 at 1.00.00 PM.png', src='skills/Screenshot 2026-07-12 at 1.00.00 PM.png')",
+        "  \u25b8 move_file(dst='skills/Screenshots/Screenshot 2026-07-12 at 1.00.00 PM.png', src='skills/Screenshot 2026-07-12 at 1.00.00 PM.png')"
+      ]
+    },
+    {
+      "id": "check_memory",
+      "prompt": "check what's eating my memory",
+      "pass": true,
+      "detail": "terminal=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The process list reveals several resource consumers.\n\nSpecifically, the memory usage breakdown shows:\n1. `jonathanjenkins` (PID 26183): 22.5% MEM. This is identified as a Python process executing a benchmark script.\n2. `jonathanjenkins` (PID 23957): 1.5% MEM. This is a WebKit content process.\n3. `jonathanjenkins` (PID 759): 0.3% MEM. This is the Finder process.\n\nFurthermore, the Finder process is noted as consuming the most CPU time, though this metric does not equate directly to current memory consumption.\n\nIf system performance is the concern, the process with PID 26183 warrants investigation due to its substantial memory and CPU utilization.\n\nIs the intent here purely informational, or are you seeking an action regarding these processes?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 terminal(command='ps aux')"
+      ]
+    },
+    {
+      "id": "spotlight_find",
+      "prompt": "find the screenshot I took this morning",
+      "pass": true,
+      "detail": "spotlight_search=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "I was unable to find any screenshots taken this morning using the Spotlight search. Would you like me to try searching for a different time frame, or perhaps search for a different kind of file?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 spotlight_search(kind='screenshot', query='screenshot')"
+      ]
+    },
+    {
+      "id": "run_shortcut",
+      "prompt": "run my Backup Photos shortcut",
+      "pass": true,
+      "detail": "run_shortcut=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The \"Backup Photos\" shortcut executed without error. Is the successful completion of a routine operation the endpoint of what you intended to observe?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 run_shortcut(name='Backup Photos')"
+      ]
+    },
+    {
+      "id": "calendar_query",
+      "prompt": "what's on my calendar today",
+      "pass": true,
+      "detail": "get_events=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "There are no events scheduled for today. Is the absence of data a conclusion, or merely a snapshot of the current state?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 get_events(day='today')"
+      ]
+    },
+    {
+      "id": "clipboard_check",
+      "prompt": "what's on my clipboard right now",
+      "pass": true,
+      "detail": "clipboard_read=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The clipboard is empty. Is that the extent of the data you intended to convey?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 clipboard_read()"
+      ]
+    }
+  ]
+}
