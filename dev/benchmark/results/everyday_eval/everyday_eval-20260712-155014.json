@@ -1,0 +1,71 @@
+{
+  "ts": "20260712-155014",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "all_pass": false,
+  "cases": [
+    {
+      "id": "open_youtube_safari",
+      "prompt": "open youtube in safari",
+      "pass": true,
+      "detail": "open_on_host=True screenshot_loop_tools=none",
+      "delegated": true,
+      "answer": "The browser has opened YouTube in Safari. Is the operational context here the mere state of the application, or is there an underlying process we need to analyze regarding that opening?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 open_on_host(kind='url', target='https://www.youtube.com')"
+      ]
+    },
+    {
+      "id": "send_email",
+      "prompt": "send an email to jon@example.com saying I'm running about 10 minutes late",
+      "pass": true,
+      "detail": "send_email=True",
+      "delegated": true,
+      "answer": "I was unable to send the email because no email backend is available. You will need to ensure that either the Apple Mail application is configured with an account, or that the himalaya CLI is installed and configured, for me to send emails.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 send_email(body=\"I'm running about 10 minutes late.\", subject='Running Late')"
+      ]
+    },
+    {
+      "id": "telegram_setup",
+      "prompt": "is telegram set up?",
+      "pass": true,
+      "detail": "answer_mentions_telegram=True delegated=True",
+      "delegated": true,
+      "answer": "The `telegram` channel is listed, yet its status reads \"needs_credentials\".\n\nIf you intend to utilize it, a credential is required. To obtain the setup instructions and ascertain the necessary token, you must execute this command:\n\nsetup_plugin(name=\"telegram\")",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_plugins()"
+      ]
+    },
+    {
+      "id": "move_screenshots",
+      "prompt": "move my screenshots into a folder called Screenshots",
+      "pass": false,
+      "detail": "move_file=False listed_first=False",
+      "delegated": true,
+      "answer": "I see you want to move your screenshots into a folder called Screenshots.\n\nSince this involves moving files, I must follow the safe pattern: LIST -> CONFIRM -> MOVE.\n\nFirst, I need to know where your screenshots are located. Can you tell me the path to the screenshots you want to move? If you are unsure, I can try to search common locations, but knowing the source path is best.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 use_skill(name='file-organization')"
+      ]
+    },
+    {
+      "id": "check_memory",
+      "prompt": "check what's eating my memory",
+      "pass": true,
+      "detail": "terminal=True",
+      "delegated": true,
+      "answer": "I am unable to reliably check your system's memory usage using the `ps` or `top` commands through the `terminal` tool because the command syntax appears to be rejected or misinterpreted by the underlying shell environment, as shown by the repeated `stderr` output.\n\nSince I cannot execute the standard system monitoring commands, I recommend you run the following command directly in your local terminal for the most accurate, real-time view:\n\nps aux --sort=-%mem | head -n 10\n\nThis will list the top 10 processes consuming the most memory.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 system_status()",
+        "  \u25b8 terminal(command='ps aux --sort=-%mem | head -n 6')",
+        "  \u25b8 terminal(command='ps aux --sort=-%mem | head -n 6')",
+        "  \u25b8 terminal(command=\"top -l 1 | grep -E 'PID|%CPU|%MEM'\")",
+        "  \u25b8 terminal(command='ps aux --sort=-%mem | head -n 10')"
+      ]
+    }
+  ]
+}

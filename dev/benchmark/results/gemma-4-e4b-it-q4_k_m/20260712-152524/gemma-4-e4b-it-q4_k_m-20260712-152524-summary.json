@@ -1,0 +1,77 @@
+{
+  "total": 2,
+  "passed": 1,
+  "pass_rate": 0.5,
+  "routing_passed": 0,
+  "routing_total": 0,
+  "answer_passed": 0,
+  "answer_total": 0,
+  "errors": 0,
+  "elapsed_s": 70.09,
+  "metrics": {
+    "avg_latency_s": 35.044,
+    "p50_latency_s": 5.286,
+    "p95_latency_s": 64.801,
+    "min_latency_s": 5.286,
+    "max_latency_s": 64.801,
+    "total_tool_dispatches": 2,
+    "avg_tools_per_turn": 1.0,
+    "answer_tokens_total": 677,
+    "answer_tokens_avg": 338.5,
+    "answer_tokens_per_sec": 9.7,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 71079,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.0,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 21.056,
+    "ttft_p50_s": 0.188,
+    "ttft_p95_s": 41.924,
+    "ttft_reported": 2
+  },
+  "suites": {
+    "full": {
+      "total": 2,
+      "passed": 1,
+      "pass_rate": 0.5,
+      "threshold": 0.7,
+      "meets_threshold": false,
+      "avg_latency_s": 35.044,
+      "p95_latency_s": 64.801,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "plan_first": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 35.044
+    }
+  },
+  "failures": [
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_do"
+      ],
+      "answer": "The initial attempt to use `computer_do` failed because the goal was too abstract for the underlying engine to resolve directly.\n\nBased on the `macos-computer-use` playbook's logic, the next best step",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 70.12,
+  "load_s": 52.69,
+  "category_breakdown": {},
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260712-152524",
+  "benchmark_version": "1.3"
+}

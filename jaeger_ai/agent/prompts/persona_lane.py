@@ -252,9 +252,17 @@ MAX_HISTORY_CHARS = 3200
 #
 # Either way, a category with nothing behind it this boot simply
 # produces no line — never a hardcoded list baked into this module.
+# Wording matters here (0.9.3 field-caught): an earlier header ("Via
+# your task tool you can:") plus tool-shaped labels made the lane emit a
+# literal <tool_call> named "app control" for "open youtube in safari"
+# instead of delegating — deterministic on E4B, 2/2 runs. These lines
+# are CAPABILITY AREAS the ego owns; the header must say so and name
+# perform_task as the one real callable, or the id treats a label as a
+# tool name and the call dies unparsed.
 _SELF_MODEL_HEADER = (
-    "You are a JROS agent running locally on this machine. Via your "
-    "task tool you can:"
+    "You are a JROS agent running locally on this machine. Capability "
+    "areas below are NOT tool names — you reach ALL of them through "
+    "your one tool, perform_task:"
 )
 
 # (label, toolset_scoping.py category keys) — true iff ANY member tool
@@ -388,6 +396,36 @@ def _live_tool_names() -> set[str]:
         return set()
 
 
+# 0.9.3 Task 5: every plausible id for the two skills that provide
+# app-control tools — folder name AND manifest ``id`` (they differ:
+# macos_computer_v1/ -> id "macos_computer", computer_use_v1/ -> id
+# "computer_use") — so the skip-reason lookup finds whichever one the
+# loader actually recorded.
+_APP_CONTROL_SKILL_IDS: tuple[str, ...] = (
+    "macos_computer", "macos_computer_v1", "computer_use", "computer_use_v1",
+)
+
+
+def _app_control_unavailable_reason() -> str:
+    """Why the app-control tools aren't on the live registry — the most
+    recent skill-load skip reason for either app-control skill, else a
+    platform-shaped fallback. Best-effort; never raises (feeds straight
+    into a prompt string)."""
+    try:
+        from jaeger_ai.agent.skill_registry.skill_loader import last_skip_reason
+        reason = last_skip_reason(*_APP_CONTROL_SKILL_IDS)
+    except Exception:  # noqa: BLE001 — self-model is best-effort
+        reason = None
+    if reason:
+        # First line only — the self-model budget is tight (600 chars
+        # total); a full traceback belongs in `jaeger doctor`, not here.
+        return reason.splitlines()[0][:120]
+    import sys
+    if sys.platform != "darwin":
+        return "no app-control skill for this platform yet (macOS-only today)"
+    return "no app-control skill registered this boot"
+
+
 def build_self_model_block() -> str:
     """Assemble the SELF-MODEL digest from live registry/module state.
     See the module comment above :data:`_SELF_MODEL_HEADER` for what
@@ -411,6 +449,15 @@ def build_self_model_block() -> str:
             lines.append(f"- {label}")
     if _SELF_MODEL_APP_CONTROL_TOOLS & tool_names:
         lines.append(f"- {_SELF_MODEL_APP_CONTROL_LABEL}")
+    else:
+        # 0.9.3 Task 5: don't just omit the line — explain why, so the
+        # agent can tell the user "app control isn't available here
+        # because X" instead of failing mutely on the first attempt.
+        # ``open_on_host`` is core (virtually always registered), so this
+        # branch is rare in practice — it fires when even that failed to
+        # register, or on a non-macOS host with neither app-control skill.
+        reason = _app_control_unavailable_reason()
+        lines.append(f"- app control: unavailable — {reason}")
     messaging_line = _messaging_configured_state()
     if messaging_line:
         lines.append(f"- {messaging_line}")

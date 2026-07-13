@@ -90,6 +90,64 @@ def _fda_check() -> Any | None:
     return Check(name="full_disk_access", category="system", ok=True, detail=detail)
 
 
+class _DoctorRegistrationSentinel:
+    """Stand-in passed to the skill loader so ``jaeger doctor`` can trigger
+    a real discovery+registration pass and read back WHICH skills were
+    skipped and why — the loader's ``_ToolCapturingAgent`` only needs
+    ``tool_plain``/``tool`` to be callable; this is the same shape as
+    ``main._RegistrationSentinel``, duplicated here to avoid doctor.py
+    importing the CLI entry module."""
+
+    def __getattr__(self, name: str) -> Any:  # noqa: D401
+        return lambda *a, **k: None
+
+
+def _skill_skip_checks(layout: Any) -> list[Any]:
+    """0.9.3 Task 5 — one ``Check`` per skipped skill, category
+    ``"skills"``, with an actionable ``fix``/``fix_cmd`` where the skip
+    reason makes one derivable (pip install for an import error, a
+    System Settings pane for a permission gap, ...). Skills skipped by
+    deliberate config (``disabled by config``) or a forward-looking
+    unimplemented manifest are left out — those aren't dependency
+    problems, they're operator choices."""
+    from jaeger_ai.core.runtime.preflight import Check
+    from jaeger_ai.agent.skill_registry.skill_loader import (
+        classify_skip, load_and_register, skip_fix_hint,
+        _SKIP_CLASS_DISABLED, _SKIP_CLASS_UNSUPPORTED,
+    )
+
+    enabled_allowlist: list[str] | None = None
+    try:
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        cfg = load_yaml(layout.config_path, Config)
+        enabled_allowlist = list(cfg.skills.enabled_base_skills) or None
+    except Exception:  # noqa: BLE001 — no/partial config is fine, scan anyway
+        pass
+
+    try:
+        report = load_and_register(
+            _DoctorRegistrationSentinel(), layout,
+            run_smoke_tests=True, enabled_allowlist=enabled_allowlist,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return [Check(name="skill_scan", category="skills", ok=False,
+                       detail=f"couldn't scan skills: {type(exc).__name__}: {exc}")]
+
+    checks: list[Any] = []
+    for skill, reason in report.skipped:
+        cls = classify_skip(reason)
+        if cls in (_SKIP_CLASS_DISABLED, _SKIP_CLASS_UNSUPPORTED):
+            continue
+        fix, fix_cmd = skip_fix_hint(skill, reason, cls)
+        headline = reason.splitlines()[0][:160] if reason else "skipped"
+        checks.append(Check(
+            name=f"skill:{skill.name}", category="skills", ok=False,
+            detail=f"[{cls}] {headline}",
+            fix=fix, fix_cmd=fix_cmd,
+        ))
+    return checks
+
+
 def run_doctor(layout: Any = None, *, deep: bool = False,
                check_updates: bool = False) -> list[Any]:
     """Run the one doctor and return a flat ``list[Check]``.
@@ -112,6 +170,19 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
         checks: list[Any] = check_instance(layout)
     else:
         checks = check_environment()
+
+    # 0.9.3 Task 5 — skipped-skill visibility: one Check per skill the
+    # loader couldn't register, with a class tag + actionable fix where
+    # derivable. Instance-only (needs a layout to discover instance
+    # skills against); best-effort, never blocks the rest of the report.
+    if layout is not None:
+        try:
+            checks.extend(_skill_skip_checks(layout))
+        except Exception as exc:  # noqa: BLE001
+            checks.append(Check(
+                name="skill_scan", category="skills", ok=False,
+                detail=f"skill skip scan error: {type(exc).__name__}: {exc}",
+            ))
 
     # Runtime substrate probe — folded in as ``runtime``-category Checks
     # so the renderer shows them in their own section. A probe failure is

@@ -100,12 +100,16 @@ def _t_system_status() -> dict:
                operation="open_on_host",
                summary="open a URL / file / app on the host")
 def _t_open_on_host(target: str, kind: str = "auto") -> dict:
-    """Open something on the host (macOS). One verb for three cases:
-    a URL in the default browser, a workspace file in its default
-    app, or a macOS application by name. `kind` is "auto" (default),
-    "url", "file", or "app" — "auto" classifies the target (http →
-    URL, an existing skills/ file → file, else → app name). File
-    targets are sandbox-resolved under <instance>/skills/."""
+    """Open something on the host (macOS) — the FIRST tool for any
+    "open / launch / pull up X" ask. One verb for three cases: a URL
+    in the browser, a workspace file in its default app, or a macOS
+    application by name. "open youtube in safari" = ONE call with
+    the URL (target="https://www.youtube.com") — never drive the GUI
+    (computer_open_app / computer_use) just to open a website.
+    `kind` is "auto" (default), "url", "file", or "app" — "auto"
+    classifies the target (http → URL, an existing skills/ file →
+    file, else → app name). File targets are sandbox-resolved under
+    <instance>/skills/."""
     return open_on_host(target=target, kind=kind)
 
 

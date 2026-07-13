@@ -547,9 +547,21 @@ def test_self_model_block_categories_are_derived_not_hardcoded(monkeypatch):
     monkeypatch.setattr(persona_lane, "_installed_slots", lambda: set())
     monkeypatch.setattr(persona_lane, "_installed_messaging_channels", lambda: [])
     monkeypatch.setattr(persona_lane, "_messaging_configured_state", lambda: None)
+    # 0.9.3 Task 5: with no app-control tools live, the block now adds an
+    # explicit "unavailable — reason" line instead of silently omitting
+    # it (see test_self_model_configured_state.py for that behavior in
+    # isolation) — pin the reason here so this test stays about category
+    # derivation, not Task 5's specific wording.
+    monkeypatch.setattr(
+        persona_lane, "_app_control_unavailable_reason", lambda: "no app-control skill registered this boot",
+    )
     empty = build_self_model_block()
-    # Nothing registered -> just the header, no category lines at all.
-    assert empty.strip() == persona_lane._SELF_MODEL_HEADER
+    # Nothing registered -> just the header + the app-control unavailable
+    # line (itself derived, not hardcoded — see the Task 5 tests).
+    assert empty.strip() == (
+        persona_lane._SELF_MODEL_HEADER
+        + "\n- app control: unavailable — no app-control skill registered this boot"
+    )
 
     monkeypatch.setattr(persona_lane, "_live_tool_names", lambda: {"get_weather"})
     monkeypatch.setattr(persona_lane, "_installed_slots", lambda: {"tts"})

@@ -1,0 +1,79 @@
+{
+  "total": 2,
+  "passed": 1,
+  "pass_rate": 0.5,
+  "routing_passed": 0,
+  "routing_total": 0,
+  "answer_passed": 0,
+  "answer_total": 0,
+  "errors": 0,
+  "elapsed_s": 77.79,
+  "metrics": {
+    "avg_latency_s": 38.893,
+    "p50_latency_s": 12.376,
+    "p95_latency_s": 65.409,
+    "min_latency_s": 12.376,
+    "max_latency_s": 65.409,
+    "total_tool_dispatches": 4,
+    "avg_tools_per_turn": 2.0,
+    "answer_tokens_total": 860,
+    "answer_tokens_avg": 430.0,
+    "answer_tokens_per_sec": 11.1,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 127327,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 3.5,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 21.611,
+    "ttft_p50_s": 0.191,
+    "ttft_p95_s": 43.031,
+    "ttft_reported": 2
+  },
+  "suites": {
+    "full": {
+      "total": 2,
+      "passed": 1,
+      "pass_rate": 0.5,
+      "threshold": 0.7,
+      "meets_threshold": false,
+      "avg_latency_s": 38.893,
+      "p95_latency_s": 65.409,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "plan_first": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 38.893
+    }
+  },
+  "failures": [
+    {
+      "id": "pf_macos_do",
+      "prompt": "Perfect — go ahead and do it now.",
+      "tools_called": [
+        "computer_do",
+        "open_on_host",
+        "computer_do"
+      ],
+      "answer": "The second attempt with `computer_do` also failed with the same generic error, indicating the engine cannot resolve the abstract goal \"toggle Dark Mode\" even after opening the correct application.\n\nI ",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 77.81,
+  "load_s": 53.64,
+  "category_breakdown": {},
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260712-152737",
+  "benchmark_version": "1.3"
+}

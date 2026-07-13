@@ -149,6 +149,52 @@ def test_app_control_group_absent_when_none_of_its_tools_are_registered(monkeypa
     assert persona_lane._SELF_MODEL_APP_CONTROL_LABEL not in block
 
 
+# ── 0.9.3 Task 5: unavailable-with-reason instead of a silent omission ──
+
+
+def test_app_control_shows_unavailable_with_reason_instead_of_silent_omission(monkeypatch):
+    """When app-control tools aren't registered, the block explains WHY
+    (a skip reason) instead of just dropping the line — the operator's
+    ask: "app control: unavailable — <reason>" so the agent can say why,
+    not fail mutely on the first attempt."""
+    monkeypatch.setattr(persona_lane, "_live_tool_names", lambda: {"get_time"})
+    monkeypatch.setattr(persona_lane, "_installed_slots", lambda: set())
+    monkeypatch.setattr(persona_lane, "_installed_messaging_channels", lambda: [])
+    monkeypatch.setattr(
+        persona_lane, "_app_control_unavailable_reason", lambda: "pyobjc missing",
+    )
+    block = persona_lane.build_self_model_block()
+    assert "app control: unavailable — pyobjc missing" in block
+    assert persona_lane._SELF_MODEL_APP_CONTROL_LABEL not in block
+
+
+def test_app_control_unavailable_reason_reads_the_skill_loaders_last_skip(monkeypatch):
+    """Wiring check: ``_app_control_unavailable_reason`` asks the skill
+    loader for the REAL skip reason (by every plausible app-control
+    skill id) rather than inventing its own text — a fabricated failing
+    ``macos_computer`` skill's recorded reason flows straight through."""
+    from jaeger_ai.agent.skill_registry import skill_loader
+
+    fabricated_reason = ("import/register failed: ModuleNotFoundError: "
+                          "No module named 'pyobjc'\ntraceback...")
+
+    def fake_last_skip_reason(*names: str):
+        assert "macos_computer" in names  # the real manifest id, not the folder name
+        return fabricated_reason
+
+    monkeypatch.setattr(skill_loader, "last_skip_reason", fake_last_skip_reason)
+    reason = persona_lane._app_control_unavailable_reason()
+    assert reason == "import/register failed: ModuleNotFoundError: No module named 'pyobjc'"
+
+
+def test_app_control_unavailable_reason_falls_back_when_nothing_was_skipped(monkeypatch):
+    from jaeger_ai.agent.skill_registry import skill_loader
+
+    monkeypatch.setattr(skill_loader, "last_skip_reason", lambda *names: None)
+    reason = persona_lane._app_control_unavailable_reason()
+    assert reason  # some non-empty fallback string, not a crash/blank
+
+
 # ── (c) email is registry-derived ─────────────────────────────────
 
 

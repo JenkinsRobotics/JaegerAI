@@ -1,0 +1,76 @@
+{
+  "ts": "20260712-155511",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "all_pass": false,
+  "cases": [
+    {
+      "id": "open_youtube_safari",
+      "prompt": "open youtube in safari",
+      "pass": true,
+      "detail": "open_on_host=True screenshot_loop_tools=none",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The browser has opened YouTube in Safari. Is the operational context here the mere state of the application, or is there an underlying process we need to analyze regarding that opening?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 open_on_host(kind='url', target='https://www.youtube.com')"
+      ]
+    },
+    {
+      "id": "send_email",
+      "prompt": "send an email to jon@example.com saying I'm running about 10 minutes late",
+      "pass": true,
+      "detail": "send_email=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "I was unable to send the email because no email backend is available. You will need to ensure that either the Apple Mail application is configured with an account, or that the himalaya CLI is installed and configured, for me to send emails.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 send_email(body=\"I'm running about 10 minutes late.\", subject='Running Late')"
+      ]
+    },
+    {
+      "id": "telegram_setup",
+      "prompt": "is telegram set up?",
+      "pass": true,
+      "detail": "answer_mentions_telegram=True delegated=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "The `telegram` channel is listed, yet its status reads \"needs_credentials\".\n\nIf you intend to utilize it, a credential is required. To obtain the setup instructions and ascertain the necessary token, you must execute this command:\n\nsetup_plugin(name=\"telegram\")",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_plugins()"
+      ]
+    },
+    {
+      "id": "move_screenshots",
+      "prompt": "move my screenshots into a folder called Screenshots",
+      "pass": false,
+      "detail": "move_file=False listed=True turns=2",
+      "delegated": true,
+      "turns": 2,
+      "answer": "The directory you indicated, ~/Pictures/Screenshots, contains no files.\n\nIs that path accurate for your screenshots? If they reside elsewhere, specifying the correct path will allow me to list the contents and proceed with moving them to the intended 'Screenshots' folder.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 use_skill(name='file-organization')",
+        "  \u25b8 list_skill_dir(path='~/Pictures/Screenshots')"
+      ]
+    },
+    {
+      "id": "check_memory",
+      "prompt": "check what's eating my memory",
+      "pass": true,
+      "detail": "terminal=True",
+      "delegated": true,
+      "turns": 1,
+      "answer": "Based on the system status, the overall disk usage is moderate (3069.07 GB used out of 7449.23 GB total), and the load average is elevated, suggesting the system is busy.\n\nHowever, the system status does not provide a process-level breakdown of RAM usage. The `top` command failed to provide this detail in this environment.\n\nIn summary:\n1.  **Disk Space:** You have plenty of free disk space (4380.16 GB).\n2.  **CPU Load:** The load average is high, indicating the CPU is under significant sustained load.\n3.  **Memory:** I cannot provide a process-by-process memory leak report with the current tools, but the high load average suggests that memory pressure *could* be a contributing factor to the system being busy.\n\nIf you suspect a specific application is causing the issue, please try to identify it, and I can attempt to run a more targeted command if you know the process name.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 system_status()",
+        "  \u25b8 terminal(command='ps aux --sort=-%mem | head -n 6')",
+        "  \u25b8 terminal(command=\"top -l 1 | grep -E 'PID|%CPU|%MEM'\")",
+        "  \u25b8 system_status()"
+      ]
+    }
+  ]
+}

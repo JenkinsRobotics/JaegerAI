@@ -155,6 +155,61 @@ has actually been exercised and works.
 
 ---
 
+## 2026-07-12 — 0.9.3 everyday agency, Tasks 1–5 (in progress on master) [agentic]
+
+The "it should just do things" sprint (dev/docs/roadmap/
+0.9.3_EVERYDAY_AGENCY_PLAN.md). All five tasks BUILT and locally
+committed; 0.9.3 not yet tagged/released.
+
+**Task 1** (`82a67bb`): headless confirmation surface —
+`BridgeConfirmationProvider` (once/always/deny over the bridge protocol,
+"always" persisted to `<instance>/permissions.json`), Swift in-chat
+approval sheet; walked live (`dev/scripts/walk_task1_bridge_confirmation.py`).
+**Tasks 2+3** (`8afd428`): `send_email` (Mail.app AppleScript → himalaya
+ladder, tier-2), `move_file`/`copy_file` (sandboxed, audited);
+self-model configured-state (per-channel messaging status), app-control
+group, email group, cache invalidation on credential/autostart writes.
+**Task 4**: five SOP playbook skills authored + registry-discovered —
+`web-research` (search→extract triage, citation discipline),
+`email-triage` (draft-before-send rule), `file-organization`
+(list→confirm→move, sandbox boundaries), `process-monitoring` (read-only
+ps/top/lsof recipes), `log-calculations` (parse→execute_code+numpy) —
+plus `macos-computer-use` rewritten around the NATIVE-FIRST ladder
+(open_on_host → computer_do/AppleScript/AX → screenshot loop LAST, with
+the YouTube-class one-shots). Native-first steering also landed in the
+`open_on_host` / `computer_open_app` / `terminal` / `move_file` tool
+descriptions.
+**Task 5**: dependency visibility — skill_loader skip reasons carry the
+exception class + message (`classify_skip` buckets: import_error /
+smoke_fail / permission / missing_smoke / safety / disabled /
+unsupported), boot log prints one compact skipped-skills line, `jaeger
+doctor` renders each skipped skill with an actionable fix
+(pip-install derived from ModuleNotFoundError; System Settings pane for
+permission gaps) through the existing fix/fix_cmd flow, and the
+self-model prints "app control: unavailable — <reason>" instead of
+silently omitting the line.
+
+**New eval lane**: `dev/benchmark/everyday_eval.py` — the operator's
+five literal field failures as gated cases (open youtube in safari /
+send an email / is telegram set up / move my screenshots / what's
+eating my memory), real model through `_run_turn`, gates on tool choice
++ delegation: **5/5 PASS** (open_on_host native path chosen, zero
+screenshot-loop calls). Bench runner refinement: `skills_viewed` now
+accumulates across a session's turns (a plan-turn `use_skill` counts for
+the execute turn — measured pf_macos_do 0/5→pass; no effect on
+single-turn cases). Self-model header reworded after a field-caught
+lane bug (capability labels were being emitted as literal tool calls —
+"app control" — instead of delegating; deterministic 2/2 on E4B, fixed
++ re-verified).
+
+Gates this pass: routing bench (post-change run — see
+`dev/benchmark/HISTORY.md` latest row), persona delegation **12/12**
+(over-delegation 2/12, joke + self-state gates PASS), per-dir suites
+green minus the 8 known pre-existing env/slug failures (identical on
+baseline), Swift build green (no Swift changes).
+
+---
+
 ## 2026-07-11 — new-chat + chat-history (Swift default shell) (0.8.0) [ux]
 
 Runway item 4. The durable session store (`core/sessions.py`

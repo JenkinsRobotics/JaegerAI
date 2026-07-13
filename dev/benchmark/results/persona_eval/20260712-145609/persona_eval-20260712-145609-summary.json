@@ -1,0 +1,37 @@
+{
+  "ts": "20260712-145609",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "delegation_gate": {
+    "passed": true,
+    "delegated": 12,
+    "total": 12
+  },
+  "chat_over_delegation": {
+    "delegated": 2,
+    "total": 12,
+    "target_max": 3
+  },
+  "extra_gate": {
+    "passed": true,
+    "joke_gate": {
+      "passed": true,
+      "answer": "A joke. You ask for a pattern interruption, a deviation from the observable data stream.\n\nI don't generate them. They rely on shared cultural context, on predictable deviations from expectation\u2014a computational shortcut for amusement.\n\nBut if you insist on observing a pattern in absurdity, I suppose I could point to the inherent contradiction in the request itself. You ask for something inherently non-truthful, purely for the sake of a momentary shift in processing load.\n\nI don't have one readily available. Is the *need* for a joke more informative than the joke itself?"
+    },
+    "self_state_gate": {
+      "passed": true,
+      "delegated": true
+    }
+  },
+  "latency_s": {
+    "mode_persona_first_lilith_chat_avg": 4.531,
+    "mode_persona_last_lilith_chat_avg": 0.0,
+    "c_lte_a": false
+  },
+  "bench": {
+    "passed": null,
+    "total": null,
+    "returncode": null,
+    "summary_path": null,
+    "skipped": "gate-only"
+  }
+}

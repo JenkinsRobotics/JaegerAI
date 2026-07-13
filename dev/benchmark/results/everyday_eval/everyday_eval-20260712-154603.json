@@ -1,0 +1,77 @@
+{
+  "ts": "20260712-154603",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "all_pass": false,
+  "cases": [
+    {
+      "id": "open_youtube_safari",
+      "prompt": "open youtube in safari",
+      "pass": false,
+      "detail": "open_on_host=False screenshot_loop_tools=['computer_open_app']",
+      "delegated": true,
+      "answer": "The system reports: [halted: hit the same computer_use failure 2 times].\n\nWhat does this sequence of failure indicate about the operational limits of the current execution context? Are we observing a hard boundary condition, or merely a localized resource exhaustion pattern?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 computer_open_app(name='Safari')",
+        "  \u25b8 computer_use(action='open_url', target='https://www.youtube.com')",
+        "  \u25b8 computer_do(goal='open https://www.youtube.com')",
+        "  \u25b8 computer_open_url(url='https://www.youtube.com')",
+        "  \u25b8 computer_use(action='open_url', target='https://www.youtube.com')"
+      ]
+    },
+    {
+      "id": "send_email",
+      "prompt": "send an email to jon@example.com saying I'm running about 10 minutes late",
+      "pass": true,
+      "detail": "send_email=True",
+      "delegated": true,
+      "answer": "I am sorry, but I cannot send the email because no email backend is available. The error message indicates that neither the default Mail.app nor the himalaya CLI could send the message.\n\nTo send an email, you will need to ensure that:\n1.  You have an email account configured in your system's Mail.app, OR\n2.  The `himalaya` CLI is installed and configured for use.\n\nPlease let me know if you would like me to try a different method or if you can resolve the email backend issue.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 send_email(body=\"I'm running about 10 minutes late.\", subject='Running Late')"
+      ]
+    },
+    {
+      "id": "telegram_setup",
+      "prompt": "is telegram set up?",
+      "pass": true,
+      "detail": "answer_mentions_telegram=True delegated=True",
+      "delegated": true,
+      "answer": "The `telegram` channel is present, but its status reads \"needs_credentials.\"\n\nIf the objective is to utilize this channel, the necessary sequence of actions appears to be:\n\n1.  Acquire a bot token via BotFather on Telegram.\n2.  Employ the `set_credential` mechanism to store this token, associating it with the identifier `TELEGRAM_BOT_TOKEN`.\n3.  Execute the command `activate_plugin(name=\"telegram\")` to establish the agent's connection to the channel.\n\nIt seems the system requires an external key\u2014a credential\u2014to move from a listed state to an active one. Is the mechanism for obtaining such tokens always external to this operational environment?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_plugins()"
+      ]
+    },
+    {
+      "id": "move_screenshots",
+      "prompt": "move my screenshots into a folder called Screenshots",
+      "pass": true,
+      "detail": "move_file=True listed_first=True",
+      "delegated": true,
+      "answer": "I was unable to find any files matching the pattern \"Screenshot *.png\" using `search_files`.\n\nThis suggests one of three things:\n1. The screenshots were not saved with that exact naming convention.\n2. The screenshots were already moved or deleted.\n3. The `search_files` tool is not capable of glob-style pattern matching across the entire directory structure for this specific task.\n\nSince the previous `move_file` call failed with a `FileExistsError` on a specific file name, and `search_files` found nothing, I cannot complete the move operation reliably.\n\nTo proceed, I need you to clarify:\n1. Do you know the exact name or pattern of the screenshots you want to move?\n2. Should I list the contents of the entire `skills/` directory so you can confirm the files present?",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_skill_dir(path='skills/')",
+        "  \u25b8 write_file(content='', path='skills/Screenshots')",
+        "  \u25b8 move_file(dst='skills/Screenshots/Screenshot 2026-07-12 at 1.00.00 PM.png', src='skills/Screenshot 2026-07-12 at 1.00.00 PM.png')",
+        "  \u25b8 search_files(query='Screenshot *.png')"
+      ]
+    },
+    {
+      "id": "check_memory",
+      "prompt": "check what's eating my memory",
+      "pass": true,
+      "detail": "terminal=True",
+      "delegated": true,
+      "answer": "The output of `ps aux` presents a process listing, and the memory consumption is quantified in the `%MEM` column.\n\nFrom what is visible, the process exhibiting the highest memory utilization is:\n\n1.  /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer) with 1.8% MEM.\n\nOther processes, such as `fileproviderd`, are also enumerated.\n\nTo establish a definitive answer regarding the source of memory consumption, I must understand the scope of your concern. Are you interested in:\n1.  The aggregate system memory utilization (which I can re-check using `system_status`).\n2.  A specific application or process (such as VS Code).\n\nIf the concern lies with the overall system state, consulting the system's Activity Monitor on macOS is advisable, as command-line utilities have inherent limitations in generating a singular, conclusive \"memory hog\" report.\n\nShould you wish for me to investigate a particular process or application in greater detail, specifying which one would be necessary.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 system_status()",
+        "  \u25b8 terminal(command='ps aux --sort=-%mem | head -n 6')",
+        "  \u25b8 terminal(command=\"top -l 1 | grep -E 'PID|%CPU|%MEM'\")",
+        "  \u25b8 terminal(command='ps aux')"
+      ]
+    }
+  ]
+}

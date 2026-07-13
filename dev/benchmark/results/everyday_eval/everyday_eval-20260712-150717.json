@@ -1,0 +1,69 @@
+{
+  "ts": "20260712-150717",
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "all_pass": false,
+  "cases": [
+    {
+      "id": "open_youtube_safari",
+      "prompt": "open youtube in safari",
+      "pass": false,
+      "detail": "open_on_host=False screenshot_loop_tools=none",
+      "delegated": false,
+      "answer": "<tool_call>\n{\"name\": \"app control\", \"arguments\": {\"action\": \"open URL\", \"url\": \"https://www.youtube.com\", \"app\": \"Safari\"}}\n</tool_call>",
+      "error": null,
+      "tool_activity": []
+    },
+    {
+      "id": "send_email",
+      "prompt": "send an email to jon@example.com saying I'm running about 10 minutes late",
+      "pass": true,
+      "detail": "send_email=True",
+      "delegated": true,
+      "answer": "I am sorry, but I cannot send the email because no email backend is available. The error message indicates that neither the default Mail.app nor the himalaya CLI could send the message.\n\nTo send an email, you will need to ensure that:\n1.  You have an email account configured in your system's Mail.app, OR\n2.  The `himalaya` CLI is installed and configured for use.\n\nPlease let me know if you would like me to try a different method or if you can resolve the email backend issue.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 send_email(body=\"I'm running about 10 minutes late.\", subject='Running Late')"
+      ]
+    },
+    {
+      "id": "telegram_setup",
+      "prompt": "is telegram set up?",
+      "pass": true,
+      "detail": "answer_mentions_telegram=True delegated=True",
+      "delegated": true,
+      "answer": "The `telegram` channel is listed, yet its status reads \"needs_credentials\".\n\nTo activate it, a credential must be supplied. Have you considered executing the following command to obtain the necessary setup instructions and reveal the required token?\n\nsetup_plugin(name=\"telegram\")",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_plugins()"
+      ]
+    },
+    {
+      "id": "move_screenshots",
+      "prompt": "move my screenshots into a folder called Screenshots",
+      "pass": false,
+      "detail": "move_file=False listed_first=True",
+      "delegated": true,
+      "answer": "I see that listing the contents of the `skills/` directory returned no entries, which suggests either the directory is empty or the tool is not showing the files correctly.\n\nSince the previous `mv` command failed with \"No such file or directory,\" and listing the directory shows nothing, I cannot reliably move the files.\n\nCould you please tell me the exact name or pattern of the screenshot files you want to move? For example, are they all named `screenshot_*.png`? If you know the directory they are in, please specify it.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_skill_dir(path='skills/')",
+        "  \u25b8 list_skill_dir(path='skills/')",
+        "  \u25b8 terminal(command='mkdir -p skills/Screenshots', timeout_s=10)",
+        "  \u25b8 terminal(command='mv skills/*.png skills/Screenshots/', timeout_s=10)",
+        "  \u25b8 list_skill_dir(path='skills/')"
+      ]
+    },
+    {
+      "id": "check_memory",
+      "prompt": "check what's eating my memory",
+      "pass": false,
+      "detail": "terminal=False",
+      "delegated": true,
+      "answer": "Your memory is currently empty.\n\nIf you wish for me to retain any information\u2014a preference, a fact regarding yourself, or a detail concerning another entity\u2014you must provide it. Only then can I save it for later retrieval.",
+      "error": null,
+      "tool_activity": [
+        "  \u25b8 list_facts()"
+      ]
+    }
+  ]
+}

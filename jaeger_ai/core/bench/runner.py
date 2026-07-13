@@ -667,6 +667,20 @@ def run_bench(
                 with contextlib.suppress(Exception):
                     pipeline["system_prompt"] = prev_prompt
 
+    # Skills viewed accumulate ACROSS a session's turns (0.9.3): a
+    # playbook loaded during an earlier turn of the same conversation is
+    # still the recipe in use on a later turn — the agent shouldn't have
+    # to redundantly re-call use_skill each turn to get credit for it.
+    # Concretely: a plan_first session that loads the skill during the
+    # PLAN turn ("which skill would you use?" -> use_skill to read it)
+    # and then executes from the already-loaded recipe on the DO turn is
+    # doing exactly what the case intends, and was failing only because
+    # ``skills_viewed`` was turn-scoped (measured: pf_macos_do 0/5 with
+    # a wider use_skill enum vs 3/3 before, with the plan turn's
+    # use_skill(macos-computer-use) visible in every failing row).
+    # No effect on single-turn cases — each gets a unique session key.
+    session_skills_viewed: dict[str, list[str]] = {}
+
     with snapshot_ctx, _memory_source_guard(_mem, _prev_source), \
             _neutral_identity_guard():
         for idx, case in enumerate(selected):
@@ -675,8 +689,10 @@ def run_bench(
                 client, case.prompt,
                 agent_cache=agent_cache, session_key=session_key,
             )
+            acc = session_skills_viewed.setdefault(session_key, [])
+            acc.extend(meta.get("skills_viewed") or [])
             row = _score(case, tools, answer, error, elapsed,
-                         skills_viewed=meta.get("skills_viewed") or [])
+                         skills_viewed=list(acc))
             row.prompt_tokens = ptok
             row.completion_tokens = ctok
             ttft = meta.get("ttft_s")
