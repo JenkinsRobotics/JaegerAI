@@ -3,6 +3,25 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.9.3` — everyday agency
+
+The release that closes the gap between "the tools exist" and "it just does
+it." Tier-2 actions finally have a face: approval dialogs in the chat window
+(Once/Always/Deny, persisted per skill) replace the silent non-tty denial
+that made app control look broken. New tools: send_email (Mail.app-native,
+himalaya fallback), move_file/copy_file, and the Mac-native suite — Shortcuts
+runner, Spotlight search, Calendar + Contacts, clipboard, notifications,
+system + media control, local Vision OCR (13 tools; surface 108→121). The
+self-model now carries configured-state ("telegram ✓ active · discord ✗
+needs token") and app-control awareness — post-boot setup amnesia ends.
+Six SOP skills (web-research, email-triage, file-organization, process-
+monitoring, log-calculations, mac-native) with a native-first policy:
+AppleScript/AX ladder before screenshots, asserted by evals. Silent skill-
+skips end: every unregistered capability reports its reason and fix in the
+boot log, jaeger doctor, and the agent's own self-model. New everyday-tasks
+eval lane (9 cases from field testing) — 9/9; bench 79-80/81; delegation
+12/12. Also: station installs are hermetic (dev sibling linking now opt-in).
+
 ## `0.8.1` — the field-test patch
 
 Eleven fixes, every one traced to release-day field testing on a deployed
