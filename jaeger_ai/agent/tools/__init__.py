@@ -154,6 +154,19 @@ from .bench import run_benchmark
 # counterpart to ``--doctor``).
 from .diagnostics import self_check
 
+# 0.9.3 MAC-NATIVE TOOL SUITE — Shortcuts, Spotlight, Calendar/Contacts,
+# clipboard, notifications, system control, media control, OCR. Each
+# module registers on import, same pattern as host.py/vision.py above.
+from .shortcuts import list_shortcuts, run_shortcut
+from .spotlight import spotlight_search
+from .calendar import create_event, get_events
+from .contacts import lookup_contact
+from .clipboard import clipboard_read, clipboard_write
+from .notify import notify
+from .system_control import system_control
+from .media_control import media_control, now_playing
+from .ocr import ocr_file
+
 
 __all__ = [
     # framework wiring
@@ -216,4 +229,14 @@ __all__ = [
     "run_benchmark",
     # runtime diagnostics
     "self_check",
+    # mac-native tool suite (0.9.3)
+    "list_shortcuts", "run_shortcut",
+    "spotlight_search",
+    "get_events", "create_event",
+    "lookup_contact",
+    "clipboard_read", "clipboard_write",
+    "notify",
+    "system_control",
+    "media_control", "now_playing",
+    "ocr_file",
 ]

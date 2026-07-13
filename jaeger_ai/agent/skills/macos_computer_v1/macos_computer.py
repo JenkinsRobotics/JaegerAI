@@ -178,7 +178,14 @@ def register(host: Any) -> None:
     def computer_do(goal: Any) -> dict:
         """Run a plan (string or list of action dicts) through the
         AppleScript → browser → AX → vision capability ladder.
-        Picks the fastest available engine per step. Tier-2."""
+        Picks the fastest available engine per step. Tier-2.
+
+        NOT for a plain system-setting toggle this ladder has no
+        AppleScript entry for (dark mode, volume, brightness, do-not-
+        disturb, keep-awake) — use `system_control(action=...)`
+        instead; it's a dedicated, faster, more reliable call for
+        exactly those and this ladder would otherwise fall through to
+        the slow AX/vision rungs trying to click a Settings toggle."""
         return _impl.computer_do(goal)
 
     @register_tool_from_function
