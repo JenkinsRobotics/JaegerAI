@@ -552,6 +552,16 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     ctx.boot = boot
     ctx.client = boot.client
 
+    # First boot on this machine: trigger every TCC prompt now (macOS
+    # can't grant in install.sh — grants attach to THIS app identity),
+    # so tools don't hit permission walls mid-task. Marker-guarded,
+    # never re-prompts, never blocks boot.
+    try:
+        from jaeger_ai.core.diagnostics.tcc_permissions import first_boot_preflight
+        first_boot_preflight()
+    except Exception:  # noqa: BLE001
+        pass
+
     # Forward the agent loop's live tool activity as ``tool`` frames.
     class _ToolEmitter:
         def publish(self, event: str, **payload: object) -> None:

@@ -90,6 +90,37 @@ def _fda_check() -> Any | None:
     return Check(name="full_disk_access", category="system", ok=True, detail=detail)
 
 
+def _tcc_checks() -> list[Any]:
+    """macOS only: Accessibility + Screen Recording grant state for THIS
+    process identity. Informational (ok=True) — computer-control skills
+    already degrade with their own skip reasons; this row tells the
+    operator exactly what to flip and where."""
+    import sys
+    if sys.platform != "darwin":
+        return []
+    from jaeger_ai.core.diagnostics.tcc_permissions import status
+    from jaeger_ai.core.runtime.preflight import Check
+    panes = {
+        "accessibility": "Accessibility",
+        "screen_recording": "Screen Recording",
+    }
+    grants = status()
+    checks: list[Any] = []
+    for name, pane in panes.items():
+        granted = grants.get(name)
+        if granted is True:
+            detail = "granted"
+        elif granted is False:
+            detail = (f"not granted for this app — System Settings → "
+                      f"Privacy & Security → {pane}, then restart Jaeger. "
+                      "Grants are per launching app (JaegerOS.app vs "
+                      "Terminal are separate).")
+        else:
+            detail = "could not determine (PyObjC not installed)"
+        checks.append(Check(name=name, category="system", ok=True, detail=detail))
+    return checks
+
+
 class _DoctorRegistrationSentinel:
     """Stand-in passed to the skill loader so ``jaeger doctor`` can trigger
     a real discovery+registration pass and read back WHICH skills were
@@ -170,6 +201,13 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
         checks: list[Any] = check_instance(layout)
     else:
         checks = check_environment()
+
+    # TCC grant state (macOS) — Accessibility / Screen Recording for
+    # this process identity, next to the existing FDA row.
+    try:
+        checks.extend(_tcc_checks())
+    except Exception:  # noqa: BLE001 — informational, never blocks
+        pass
 
     # 0.9.3 Task 5 — skipped-skill visibility: one Check per skill the
     # loader couldn't register, with a class tag + actionable fix where
