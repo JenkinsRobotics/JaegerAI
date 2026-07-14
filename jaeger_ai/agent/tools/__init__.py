@@ -161,6 +161,7 @@ from .shortcuts import list_shortcuts, run_shortcut
 from .spotlight import spotlight_search
 from .calendar import create_event, get_events
 from .contacts import lookup_contact
+from .email import send_email
 from .clipboard import clipboard_read, clipboard_write
 from .notify import notify
 from .system_control import system_control
@@ -234,6 +235,7 @@ __all__ = [
     "spotlight_search",
     "get_events", "create_event",
     "lookup_contact",
+    "send_email",
     "clipboard_read", "clipboard_write",
     "notify",
     "system_control",
