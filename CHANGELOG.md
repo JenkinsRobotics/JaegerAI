@@ -3,6 +3,28 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.9.4` — the user's own apps
+
+Field-caught on day one of 0.9.3: "open YouTube in Safari" opened neither.
+This release makes the agent drive the USER'S apps natively instead of its
+own stand-ins. open_on_host gains an `app` param — "open <site> in
+<browser>" is one `open -a Safari <url>` call in the user's real browser;
+the playwright `browser` tool now declares itself the agent's OWN automation
+chromium (scrape/fill/click), never the answer to "open a website". The
+AppleScript engine grows real day-to-day reach: window management for ANY
+app (list/bounds/move/resize/minimize/fullscreen/zoom/close — block-form
+System Events, the chained one-liner misparses), and document creation in
+TextEdit / Pages / Keynote / Numbers / Word / PowerPoint / Excel
+(new_doc/new_presentation/new_workbook with initial text + save_doc; Office
+templates retry through cold starts; sandboxed Office may one-time-prompt
+for folders outside its grant — prefer ~/Documents). Calculator templates
+rewritten from AX button clicks (dead since macOS stopped naming the
+buttons) to typed keystrokes with a version-tolerant result read; AX reads
+strip invisible bidi marks so "25" is "25". Install is finally
+self-contained: install.sh runs `playwright install chromium` every install
+(idempotent), ending the stale-browser strand that broke the browser tool
+after any playwright upgrade.
+
 ## `0.9.3` — everyday agency
 
 The release that closes the gap between "the tools exist" and "it just does
