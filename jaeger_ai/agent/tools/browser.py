@@ -271,10 +271,14 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
 def _t_browser(action: str, url: str = "", element: int = 0,
                text: str = "", direction: str = "down",
                key: str = "Enter") -> dict:
-    """Drive a real web browser — one tool, action-dispatched.
-    Actions: open / snapshot / click / type / scroll / back /
-    press / close. Open a page → read its returned elements →
-    click/type by index. See ``describe_tool("browser")`` for
-    the full action map + per-action args."""
+    """Drive the agent's OWN automation browser (a separate chromium,
+    NOT the user's Safari/Chrome) — only for when YOU must read or
+    interact with page content (scrape, fill a form, click through a
+    flow). "Open <site>" / "open <site> in <browser>" for the USER is
+    NEVER this tool — that's one open_on_host call (app="Safari" etc.),
+    which uses their real browser. Actions: open / snapshot / click /
+    type / scroll / back / press / close. Open a page → read its
+    returned elements → click/type by index. See
+    ``describe_tool("browser")`` for the full action map + args."""
     return browser(action=action, url=url, element=element,
                     text=text, direction=direction, key=key)

@@ -156,6 +156,14 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
       echo "  ✓ $sib (editable, from $SIBLING_ROOT/$sib)"
     done
   fi
+
+  # 3c. Playwright chromium — the `browser` tool needs a chromium build
+  # matching the installed playwright package. Idempotent: skips the
+  # download when the matching revision is already cached, so re-running
+  # install.sh after a playwright upgrade refreshes a stale browser.
+  echo "→ Installing Playwright chromium (browser tool)..."
+  "$VENV/bin/playwright" install chromium ||
+    echo "  ⚠ playwright install chromium failed — browser tool won't work until you run it manually"
 else
   echo "→ --skip-deps: leaving .venv untouched"
 fi

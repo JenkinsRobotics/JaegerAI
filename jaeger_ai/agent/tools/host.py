@@ -36,7 +36,7 @@ def _run_open(args: list[str], label: dict[str, Any]) -> dict[str, Any]:
     return {"opened": True, **label}
 
 
-def open_on_host(target: str, kind: str = "auto") -> dict[str, Any]:
+def open_on_host(target: str, kind: str = "auto", app: str = "") -> dict[str, Any]:
     """Open a URL, a workspace file, or a macOS app on the host.
 
     ``kind`` is one of ``"auto"`` (default), ``"url"``, ``"file"``,
@@ -45,6 +45,9 @@ def open_on_host(target: str, kind: str = "auto") -> dict[str, Any]:
       • starts with http:// or https://  → opened as a URL
       • resolves to an existing file under skills/ → opened as a file
       • otherwise → treated as an app name (``open -a``)
+
+    ``app`` (URL targets only) names the app to open the URL in
+    (``open -a <app> <url>``), e.g. "Safari"; empty = default browser.
     """
     clean = (target or "").strip()
     if not clean:
@@ -67,6 +70,9 @@ def open_on_host(target: str, kind: str = "auto") -> dict[str, Any]:
     if kind == "url":
         if not is_url:
             return {"error": "URL must start with http:// or https://", "url": clean}
+        app = (app or "").strip()
+        if app:
+            return _run_open(["-a", app, clean], {"url": clean, "app": app})
         return _run_open([clean], {"url": clean})
 
     if kind == "file":
@@ -99,18 +105,19 @@ def _t_system_status() -> dict:
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="host",
                operation="open_on_host",
                summary="open a URL / file / app on the host")
-def _t_open_on_host(target: str, kind: str = "auto") -> dict:
+def _t_open_on_host(target: str, kind: str = "auto", app: str = "") -> dict:
     """Open something on the host (macOS) — the FIRST tool for any
     "open / launch / pull up X" ask. One verb for three cases: a URL
     in the browser, a workspace file in its default app, or a macOS
-    application by name. "open youtube in safari" = ONE call with
-    the URL (target="https://www.youtube.com") — never drive the GUI
-    (computer_open_app / computer_use) just to open a website.
+    application by name. "open youtube in safari" = ONE call:
+    target="https://www.youtube.com", app="Safari" — never drive the
+    GUI (computer_open_app / computer_use) just to open a website.
+    `app` (URLs only) picks the browser; empty = system default.
     `kind` is "auto" (default), "url", "file", or "app" — "auto"
     classifies the target (http → URL, an existing skills/ file →
     file, else → app name). File targets are sandbox-resolved under
     <instance>/skills/."""
-    return open_on_host(target=target, kind=kind)
+    return open_on_host(target=target, kind=kind, app=app)
 
 
 @register_tool_from_function(name="set_mode")
