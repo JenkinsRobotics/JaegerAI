@@ -62,8 +62,8 @@ diffusers>=0.27
 pillow>=10.0
 
 # --- browser automation: the `browser` tool ---
-# After install, fetch the browser binary once:
-#   .venv/bin/playwright install chromium
+# install.sh runs `playwright install chromium` after deps — the browser
+# binary must match this package's version, so it re-runs every install.
 playwright>=1.40
 
 # --- semantic episodic memory (search_memory) ---

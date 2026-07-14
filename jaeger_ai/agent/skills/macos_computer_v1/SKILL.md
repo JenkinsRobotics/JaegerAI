@@ -33,10 +33,17 @@ applescript_engine  →  browser_engine  →  ax_engine  →  vision_engine
 ```
 
 - **applescript_engine** — per-app dispatch (Calculator, Notes,
-  Safari, Mail, Finder, Music, Reminders, Messages). When the
-  target app has an AppleScript dictionary, this engine runs the
-  action with one OSAscript round-trip — no pointer movement, no
-  focus steal.
+  Safari, Mail, Finder, Music, Reminders, Messages; document
+  creation in TextEdit / Pages / Keynote / Numbers / Word /
+  PowerPoint / Excel via `new_doc` / `new_presentation` /
+  `new_workbook` + `save_doc`; and window management for ANY app:
+  `window_list` / `window_bounds` / `move_window` / `resize_window`
+  / `minimize` / `fullscreen` / `zoom_window` / `close_window`).
+  When the target app has an AppleScript dictionary, this engine
+  runs the action with one OSAscript round-trip — no pointer
+  movement, no focus steal. Sandboxed apps (App Store Office) may
+  pop a one-time "Grant File Access" dialog on save outside their
+  granted folders — prefer ~/Documents.
 - **browser_engine** — Chrome DevTools Protocol via the existing
   Playwright surface. For web pages, talk to the DOM directly.
 - **ax_engine** — Accessibility API via PyObjC. `AXPress` /
