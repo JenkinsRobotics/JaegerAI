@@ -55,7 +55,7 @@ def _route(argv: list[str], py: str) -> list[str]:
             return [py, "-m", "jaeger_ai.cli.devtools", "--update"]
         return [py, "-m", "jaeger_ai.cli.run", "update", *rest]
     if cmd in ("--dev", "dev"):
-        # Developer toolbox (dev TUI, JaegerOS-dev.app build/run, health,
+        # Developer toolbox (dev TUI, dev-state app build/run, health,
         # stop/status) — lives IN the package since launch.py was removed.
         return [py, "-m", "jaeger_ai.cli.devtools", *rest]
     if cmd in ("--version", "version"):

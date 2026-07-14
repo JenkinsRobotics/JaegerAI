@@ -4121,12 +4121,11 @@ def run_daemon(*, instance_name: str | None = None,
 
 
 def _swift_app_binary() -> "Path | None":
-    """The built PRODUCT app's inner binary, or None. ``jaeger`` is the
-    end-user command, so it only ever launches JaegerOS.app (installed,
-    then a checkout's product build) — never the dev bundle; JaegerOS-dev
-    .app is exclusively ``jaeger dev``'s surface (cli/devtools). Running
-    the inner binary (not ``open``) keeps stdout attached for terminal
-    users."""
+    """The built app's inner binary, or None. One bundle since
+    2026-07-14 — ``jaeger`` launches JaegerOS.app on the default
+    instance; ``jaeger dev`` (cli/devtools) launches the SAME bundle
+    pinned to jros-dev via its environment. Running the inner binary
+    (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
     swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
     candidates = [

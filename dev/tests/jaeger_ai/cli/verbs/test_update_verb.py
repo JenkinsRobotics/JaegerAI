@@ -469,8 +469,8 @@ def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys
 
 
 def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
-    """Flavor follows the install: dev/ present -> JaegerOS-dev.app via --dev
-    (mirrors install.sh); a git-clone station gets the dev shell."""
+    """Flavor follows the install: dev/ present -> debug build via --dev
+    (mirrors install.sh); same JaegerOS.app bundle either way."""
     script = _swift_layout(tmp_path)
     (tmp_path / "dev").mkdir()
     ran: list = []
