@@ -3,6 +3,23 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.9.5` — permissions up front
+
+macOS can't let an installer grant privacy permissions (TCC grants come
+only from the user, and they attach to the LAUNCHING app — JaegerOS.app,
+Terminal, and an IDE are three separate grants, which is why app control
+"worked sometimes"). The ceiling is asking for everything up front, so
+0.9.5 does: first app boot triggers the Accessibility, Screen Recording,
+and Automation prompts in one pass under the app's own identity
+(marker-guarded, never re-prompts) instead of individual tools hitting
+permission walls mid-task. One grant covers all downstream tools — child
+processes inherit the responsible app. `jaeger doctor` now shows
+accessibility + screen_recording grant state next to full_disk_access,
+with the exact Settings pane to flip and a per-app-identity note. Also:
+send_email hotfix (the tool was never imported by the boot path — shipped
+0.9.3 registered no email tool; a real boot-path registration test now
+guards it).
+
 ## `0.9.4` — the user's own apps
 
 Field-caught on day one of 0.9.3: "open YouTube in Safari" opened neither.
