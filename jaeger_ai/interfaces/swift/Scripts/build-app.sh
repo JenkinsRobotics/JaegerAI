@@ -46,8 +46,12 @@ done
 
 # Two apps, one pipeline (operator call 2026-07-05): JaegerOS.app is the
 # PRODUCT (default instance); JaegerOS-dev.app is the dev shell pinned to
-# the repo's jros-dev instance via LSEnvironment. Separate bundle ids so
-# both can run side by side, each single-instanced.
+# the repo's jros-dev instance via LSEnvironment. SAME bundle id for both
+# (operator call 2026-07-14): macOS TCC keys permission grants on the
+# bundle id, and separate ids meant granting Accessibility/Screen
+# Recording once per app. Cost: LSMultipleInstancesProhibited now treats
+# them as one app, so the product and dev SHELLS can't run side by side —
+# quit one first (a terminal `jaeger dev` still runs alongside fine).
 APP_NAME="JaegerOS"
 if [[ "$DEV" == "1" ]]; then
     APP_NAME="JaegerOS-dev"
@@ -136,8 +140,10 @@ if [[ -n "$JROS_VERSION" ]]; then
         "$APP_BUNDLE/Contents/Info.plist"
 fi
 if [[ "$DEV" == "1" ]]; then
+    # No CFBundleIdentifier override — dev shares the product's id so
+    # one TCC grant (Accessibility/Screen Recording/Automation) covers
+    # both apps. See the "operator call 2026-07-14" note above.
     /usr/libexec/PlistBuddy \
-        -c "Set :CFBundleIdentifier com.jenkinsrobotics.JaegerOS.dev" \
         -c "Set :CFBundleName JaegerOS-dev" \
         -c "Set :CFBundleDisplayName JaegerOS Dev" \
         -c "Add :LSEnvironment dict" \
