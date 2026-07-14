@@ -35,27 +35,22 @@ set -euo pipefail
 
 CONFIG="debug"
 INSTALL=0
-DEV=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
-        --dev)     DEV=1 ;;   # JaegerOS-dev.app: jros-dev instance, debug-fast
+        --dev)     ;;   # accepted for compat — debug config (the default)
     esac
 done
 
-# Two apps, one pipeline (operator call 2026-07-05): JaegerOS.app is the
-# PRODUCT (default instance); JaegerOS-dev.app is the dev shell pinned to
-# the repo's jros-dev instance via LSEnvironment. SAME bundle id for both
-# (operator call 2026-07-14): macOS TCC keys permission grants on the
-# bundle id, and separate ids meant granting Accessibility/Screen
-# Recording once per app. Cost: LSMultipleInstancesProhibited now treats
-# them as one app, so the product and dev SHELLS can't run side by side —
-# quit one first (a terminal `jaeger dev` still runs alongside fine).
+# ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
+# split): dev is a launch STATE, not a separate bundle. `jaeger dev`
+# runs this same JaegerOS.app against the repo's jros-dev instance via
+# the environment it launches with; a separate JaegerOS-dev.app meant a
+# second bundle id, and macOS TCC keys permission grants on bundle id —
+# every permission had to be granted twice. `--dev` is still accepted
+# (dev-checkout builds pass it) but only means "debug config" now.
 APP_NAME="JaegerOS"
-if [[ "$DEV" == "1" ]]; then
-    APP_NAME="JaegerOS-dev"
-fi
 
 # Resolve paths — APP_ROOT is jaeger_ai/interfaces/swift, REPO_ROOT is the
 # JaegerAI repo root (three levels up: swift → interfaces → jaeger_ai → repo root).
@@ -139,17 +134,9 @@ if [[ -n "$JROS_VERSION" ]]; then
         -c "Set :CFBundleVersion $JROS_VERSION+$GIT_SHA" \
         "$APP_BUNDLE/Contents/Info.plist"
 fi
-if [[ "$DEV" == "1" ]]; then
-    # No CFBundleIdentifier override — dev shares the product's id so
-    # one TCC grant (Accessibility/Screen Recording/Automation) covers
-    # both apps. See the "operator call 2026-07-14" note above.
-    /usr/libexec/PlistBuddy \
-        -c "Set :CFBundleName JaegerOS-dev" \
-        -c "Set :CFBundleDisplayName JaegerOS Dev" \
-        -c "Add :LSEnvironment dict" \
-        -c "Add :LSEnvironment:JAEGER_INSTANCE_NAME string jros-dev" \
-        "$APP_BUNDLE/Contents/Info.plist"
-fi
+# One-app collapse (2026-07-14): clear out a pre-collapse dev bundle so
+# a stale JaegerOS-dev.app can't linger next to the real one.
+rm -rf "$BUILD_DIR/JaegerOS-dev.app"
 
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerOS"
@@ -213,11 +200,11 @@ codesign --force --sign "$SIGN_IDENTITY" \
 codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
 
-# Keep the dev app VISIBLE at the repo root (gitignored symlink) — the
+# Keep the app VISIBLE at the repo root (gitignored symlink) — the
 # bundle itself lives in swift/.build, which nobody should have to find.
-if [[ "$DEV" == "1" ]]; then
-    ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS-dev.app"
-fi
+# (One-app collapse 2026-07-14: also drop the old dev-shell symlink.)
+rm -f "$REPO_ROOT/JaegerOS-dev.app"
+ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS.app"
 
 if [[ "$INSTALL" == "1" ]]; then
     echo "[build-app] installing -> /Applications/$APP_NAME.app"

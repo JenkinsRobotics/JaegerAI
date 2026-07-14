@@ -179,14 +179,14 @@ if [[ "$PRODUCT_MODE" -eq 0 ]]; then
   # (git clone + ./install.sh, or a repeat run inside one). Build the
   # dev shell so the first thing a developer sees works.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerOS-dev.app…"
+    echo; echo "building JaegerOS.app (debug)…"
     "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
-      && echo "✓ JaegerOS-dev.app ready (symlinked at repo root)" \
+      && echo "✓ JaegerOS.app ready (symlinked at repo root)" \
       || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
   fi
   echo
   echo "Next steps:"
-  echo "  open JaegerOS-dev.app     the windowed dev shell (menu-bar tray)"
+  echo "  ./jaeger dev              the windowed dev shell (jros-dev instance)"
   echo "  ./jaeger dev --tui        the terminal agent"
   echo "  ./jaeger update           pull + reinstall deps + rebuild as needed"
   echo "  ./jaeger dev --health     verify the install"

@@ -240,34 +240,32 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
     consults the bundle's build-commit stamp (git installs) and skips the
     rebuild when the Swift tree hasn't changed since the app was built.
 
-    Flavor follows the install: a dev checkout (``dev/`` present) uses the
-    dev shell (JaegerOS-dev.app, ``--dev``); a clean product install uses
-    JaegerOS.app (``--release``) — mirrors install.sh."""
+    Flavor follows the install: a dev checkout (``dev/`` present) builds
+    debug (``--dev``); a clean product install builds ``--release``. Same
+    JaegerOS.app either way (one bundle since 2026-07-14 — dev is a launch
+    state, not a separate app) — mirrors install.sh."""
     swift_dir = home / "jaeger_ai" / "interfaces" / "swift"
     script = swift_dir / "Scripts" / "build-app.sh"
     if not script.exists():
         return
-    if (home / "dev").exists():
-        app_name, flag = "JaegerOS-dev.app", "--dev"
-    else:
-        app_name, flag = "JaegerOS.app", "--release"
-    built = swift_dir / ".build" / app_name
+    flag = "--dev" if (home / "dev").exists() else "--release"
+    built = swift_dir / ".build" / "JaegerOS.app"
     if only_if_stale:
         from jaeger_ai.cli._common import swift_app_is_stale
         if not swift_app_is_stale(home, built):
             return
     if shutil.which("swift") is None:
-        print(f"[jaeger update] ⚠ swift toolchain missing — {app_name} NOT "
+        print(f"[jaeger update] ⚠ swift toolchain missing — JaegerOS.app NOT "
               "(re)built and now lags the core; build when available:",
               file=sys.stderr)
         print(f"                 bash {script} {flag}", file=sys.stderr)
         return
     verb = "rebuilding" if built.exists() else "building"
-    print(f"[jaeger update] {verb} {app_name}…")
+    print(f"[jaeger update] {verb} JaegerOS.app…")
     rc = subprocess.run(["bash", str(script), flag],
                         stdout=subprocess.DEVNULL).returncode
     if rc == 0:
-        print(f"[jaeger update] ✓ {app_name} ready")
+        print(f"[jaeger update] ✓ JaegerOS.app ready")
     else:
         print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
               f"bash {script} {flag}", file=sys.stderr)

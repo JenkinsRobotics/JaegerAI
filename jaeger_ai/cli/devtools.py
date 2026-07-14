@@ -2,8 +2,10 @@
 """jaeger_os.cli.devtools — the developer toolbox behind `jaeger --dev`.
 
 Replaces the old repo-root launch.py (removed 2026-07-05): the windowed
-dev shell is JaegerOS-dev.app (double-click it, or `jaeger --dev` builds +
-runs it); this module keeps the dev TUI + utility verbs.
+dev shell is the repo's JaegerOS.app run in the dev STATE (`jaeger --dev`
+builds + runs it pinned to the jros-dev instance — one bundle, one TCC
+permission grant, since 2026-07-14); this module keeps the dev TUI +
+utility verbs.
 
 Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 
@@ -727,18 +729,19 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     """Run the native Swift app. Returns an exit code once it finishes, or
     None to signal 'unavailable → fall back to PySide6'.
 
-    Packaged-app-first (Phase 2): a bare ``./launch`` RUNS the existing
-    JaegerOS-dev.app (the dev shell — pinned to the jros-dev instance via
-    its Info.plist LSEnvironment) and only builds when nothing is built
-    yet; ``./launch --dev`` forces a rebuild. The PRODUCT app
-    (JaegerOS.app, default instance) builds via
-    ``Scripts/build-app.sh --release`` and never routes through here.
+    Packaged-app-first (Phase 2): a bare ``./launch`` RUNS the repo's
+    built JaegerOS.app and only builds when nothing is built yet;
+    ``./launch --dev`` forces a rebuild. ONE app since 2026-07-14 —
+    dev is a launch state, not a separate bundle: this launcher pins
+    the jros-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
+    same bundle (same TCC identity, one permission grant) serves both
+    dev and product.
 
-    The dev app self-locates the repo's ``jaeger`` launcher by walking up
+    The app self-locates the repo's ``jaeger`` launcher by walking up
     from its own bundle path, so no PATH injection is needed."""
     if not (SWIFT_DIR / "Package.swift").exists():
         return None
-    bundle = SWIFT_DIR / ".build" / "JaegerOS-dev.app"
+    bundle = SWIFT_DIR / ".build" / "JaegerOS.app"
     bundle_bin = bundle / "Contents" / "MacOS" / "JaegerOS"
     # Rebuild when forced, missing, OR stale (build-commit stamp older than
     # the Swift tree) — the stale case is what keeps a station that pulls by
@@ -750,7 +753,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
             warn("swift toolchain missing — launching the existing (stale) app")
         else:
-            say("building JaegerOS-dev.app (Scripts/build-app.sh --dev)…",
+            say("building JaegerOS.app (Scripts/build-app.sh --dev)…",
                 prefix="launch")
             build = subprocess.run(
                 [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
@@ -760,7 +763,8 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
     if not bundle_bin.exists():
         return None
-    say("launching JaegerOS-dev — menu-bar tray + chat window…", prefix="launch")
+    say("launching JaegerOS (jros-dev instance) — menu-bar tray + chat window…",
+        prefix="launch")
     sys.stdout.flush()
     return subprocess.run([str(bundle_bin)], env=env).returncode
 
@@ -795,8 +799,8 @@ def cmd_update() -> int:
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
     from jaeger_ai.cli._common import swift_app_is_stale
-    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerOS-dev.app"):
-        say("Swift app lags the tree — rebuilding JaegerOS-dev.app…",
+    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerOS.app"):
+        say("Swift app lags the tree — rebuilding JaegerOS.app…",
             prefix="update")
         subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),
                         "--dev"])
