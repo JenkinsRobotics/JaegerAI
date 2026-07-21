@@ -3706,7 +3706,7 @@ def parse_args() -> argparse.Namespace:
                    help="Delete a stored credential by name and exit.")
     # ``--migrate``, ``--list-instances``, ``--create-instance``,
     # ``--delete-instance``, ``--clear-instance`` removed in 0.2.0
-    # — use ``jaeger migrate`` and ``jaeger instance {list,delete,clear}``
+    # — use ``jaeger migrate`` and ``jaeger agent {list,delete,clear}``
     # (INST-2). The wizard creates new instances directly via
     # ``jaeger setup --name NAME``; the explicit ``--create-instance``
     # noninteractive shortcut is no longer the recommended path.
@@ -4326,7 +4326,7 @@ def _main_dispatch() -> int:
     layout = InstanceLayout(root=root)
 
     # Instance-management commands now live under ``jaeger setup`` /
-    # ``jaeger instance {list,use,inspect,delete,clear}`` / ``jaeger
+    # ``jaeger agent {list,use,inspect,delete,clear}`` / ``jaeger
     # migrate`` — see ``daemon/instance_verbs.py`` (INST-2). The old
     # ``--list-instances`` / ``--create-instance`` / ``--delete-
     # instance`` / ``--clear-instance`` / ``--migrate`` flags were

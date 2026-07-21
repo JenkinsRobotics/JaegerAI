@@ -567,7 +567,7 @@ class DistributionConfig(BaseModel):
     ``jaeger restore`` (``install_method='imported'`` +
     ``restored_from``).
 
-    Purely informational. Used by ``jaeger instance inspect``,
+    Purely informational. Used by ``jaeger agent inspect``,
     bug-report dumps, and (in 0.3.0+) by the migration runner so
     it can refuse downgrades against an instance created by a newer
     framework.
