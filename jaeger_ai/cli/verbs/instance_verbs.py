@@ -215,8 +215,9 @@ def _cmd_agent_argv(argv: list[str]) -> int:
         # window when the product app is built and the target instance
         # doesn't exist yet — the app pins JAEGER_INSTANCE_NAME, the
         # bridge reports ``no_instance``, and onboarding takes over.
-        # ``--tui`` / ``--force`` / headless / ``jaeger setup`` keep the
-        # terminal wizard.
+        # ``jaeger setup`` routes here too (0.9.6 — GUI-first everywhere);
+        # ``--tui`` (`jaeger setup tui`) / ``--force`` / headless keep
+        # the terminal wizard.
         if "--tui" in rest:
             rest.remove("--tui")
             return _cmd_setup_argv(rest)

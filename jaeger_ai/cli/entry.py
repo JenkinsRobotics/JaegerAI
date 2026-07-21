@@ -37,7 +37,16 @@ def _route(argv: list[str], py: str) -> list[str]:
     if cmd in _CONSOLE:
         return [py, "-m", "jaeger_ai.cli", *argv]
     if cmd == "setup":
-        return [py, "-m", "jaeger_ai.cli", "instances", "create", *rest]
+        # GUI-first (operator call 2026-07-17): plain `jaeger setup` opens
+        # the app's onboarding window via the agent-create path, which
+        # falls back to the terminal wizard on its own when there's no
+        # built app / headless / JAEGER_NO_GUI. `jaeger setup tui` (or
+        # --tui) forces the terminal wizard explicitly.
+        if rest[:1] == ["tui"]:
+            # --tui goes LAST: agent-create's positional-name shim only
+            # looks at rest[0], so a name must stay in front.
+            rest = [*rest[1:], "--tui"]
+        return [py, "-m", "jaeger_ai.cli.run", "agent", "create", *rest]
     if cmd == "bridge":
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":
