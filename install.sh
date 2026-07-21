@@ -171,6 +171,21 @@ fi
 # 4. Scaffold .jaeger_os/ (idempotent) — operator state root
 mkdir -p "$REPO_ROOT/.jaeger_os/instances"
 
+# 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
+#    Prefer a /usr/local/bin symlink (already on every macOS PATH); when
+#    that's not writable (no sudo), fall back to the user's shell rc.
+if ln -sfn "$REPO_ROOT/jaeger" /usr/local/bin/jaeger 2>/dev/null; then
+  echo "✓ jaeger on PATH (/usr/local/bin/jaeger)"
+else
+  RC="$HOME/.zshrc"
+  [[ "${SHELL:-}" == */bash ]] && RC="$HOME/.bashrc"
+  PATH_LINE="export PATH=\"$REPO_ROOT:\$PATH\"  # jaeger"
+  if ! grep -qsF "$PATH_LINE" "$RC"; then
+    printf '\n%s\n' "$PATH_LINE" >> "$RC"
+  fi
+  echo "✓ jaeger added to PATH via $RC — open a new terminal (or: source $RC)"
+fi
+
 echo
 echo "✓ Local install complete"
 
