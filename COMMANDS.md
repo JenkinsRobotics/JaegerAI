@@ -24,7 +24,7 @@ instance, one word now.)
 | `jaeger agent create [--name N] [--tui] [--force]` | What `setup` routes to; `--force` rebuilds an existing agent |
 | `jaeger agent list` | Every agent, active one starred |
 | `jaeger agent use <name>` | Set the sticky default agent |
-| `jaeger agent inspect <name>` | Identity + config + manifest, no model boot |
+| `jaeger agent inspect [name]` | Identity + config + manifest, no model boot (default: active) |
 | `jaeger agent delete <name> [-f]` | Remove an agent |
 | `jaeger agent clear <name> [-f]` | Wipe memory + logs, keep identity/config |
 | `jaeger migrate [--agent N]` | Apply pending per-agent migrations |
@@ -33,7 +33,6 @@ instance, one word now.)
 
 | Command | What it does |
 |---|---|
-| `jaeger instances …` | Console extras: `show`, `edit`, `set-default`/`switch` (overlaps `agent` — being folded in) |
 | `jaeger skills …` | List / manage the agent's skills |
 | `jaeger personality …` | Persona / character settings |
 | `jaeger status` | Instance + runtime status |

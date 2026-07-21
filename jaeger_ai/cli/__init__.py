@@ -42,7 +42,6 @@ def main(argv: list[str] | None = None) -> int:
     from . import (
         avatar_cmd,
         config_cmd,
-        instances_cmd,
         personality_cmd,
         prompt_cmd,
         roadmap_cmd,
@@ -69,7 +68,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     avatar_cmd.register(subparsers)
     skills_cmd.register(subparsers)
-    instances_cmd.register(subparsers)
     personality_cmd.register(subparsers)
     status_cmd.register(subparsers)
     roadmap_cmd.register(subparsers)
