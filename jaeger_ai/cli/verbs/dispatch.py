@@ -31,7 +31,7 @@ from typing import Sequence
 # ``main.py``'s legacy path and boots the in-process TUI.
 SUBCOMMANDS: frozenset[str] = frozenset({
     "bench",
-    "agent", "setup", "instance", "migrate",
+    "agent", "setup", "migrate",
     "backup", "restore", "update", "reinstall", "uninstall",
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
@@ -62,9 +62,6 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "setup":
         from jaeger_ai.cli.verbs.instance_verbs import _cmd_setup_argv
         return _cmd_setup_argv(list(argv[1:]))
-    if argv[0] == "instance":
-        from jaeger_ai.cli.verbs.instance_verbs import _cmd_instance_argv
-        return _cmd_instance_argv(list(argv[1:]))
     if argv[0] == "migrate":
         from jaeger_ai.cli.verbs.instance_verbs import _cmd_migrate_argv
         return _cmd_migrate_argv(list(argv[1:]))

@@ -12,23 +12,26 @@ Verbs added in 0.2.0:
       old ``--setup`` / ``--create-instance`` flags were removed in
       0.2.0 — this verb is the only entry point.
 
-  jaeger instance list
-      Print every instance under ``~/.jaeger/instances/`` with its
+  jaeger agent list
+      Print every agent under ``~/.jaeger/instances/`` with its
       identity summary; the active one is starred.
 
-  jaeger instance use <name>
+  jaeger agent use <name>
       Write ``~/.jaeger/active_instance`` — the sticky default the
       resolver consults when no env var or CLI flag is set.
 
-  jaeger instance inspect <name>
+  jaeger agent inspect <name>
       Dump identity + config + manifest WITHOUT booting the model.
 
-  jaeger instance delete <name> [--force]
-      Remove the whole instance dir (asks for confirmation).
+  jaeger agent delete <name> [--force]
+      Remove the whole agent dir (asks for confirmation).
 
-  jaeger instance clear <name> [--force]
+  jaeger agent clear <name> [--force]
       Wipe memory + logs but keep identity / config / skills /
       credentials.
+
+  (The bare ``jaeger instance`` spelling was removed in 0.9.6 —
+  ``agent`` is the one word; internally these are still instances.)
 
   jaeger migrate
       Run pending per-instance migrations on the active instance.
@@ -66,7 +69,7 @@ def _print_setup_usage() -> None:
 
 def _print_instance_usage() -> None:
     print(
-        "usage: jaeger instance <verb> [args...]\n"
+        "usage: jaeger agent <verb> [args...]\n"
         "\n"
         "verbs:\n"
         "  list                    show every instance under ~/.jaeger/instances/\n"
@@ -101,7 +104,9 @@ def _print_agent_usage() -> None:
         "  delete <name> [-f]       remove an agent\n"
         "  clear <name>  [-f]       wipe an agent's memory + logs (keep identity)\n"
         "\n"
-        "  (`jaeger instance` / `jaeger setup` remain as aliases.)\n",
+        "  (`jaeger setup` is the GUI-first alias of `create`; the old\n"
+        "  `jaeger instance` verb was removed in 0.9.6 — agents ARE\n"
+        "  instances, one word now.)\n",
         file=sys.stderr,
     )
 

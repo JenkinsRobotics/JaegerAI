@@ -140,7 +140,7 @@ def read_active_instance() -> str | None:
 def write_active_instance(name: str | None) -> None:
     """Set the sticky-default instance. ``None`` removes the file.
 
-    Called by ``jaeger instance use <name>``. The wizard does NOT
+    Called by ``jaeger agent use <name>``. The wizard does NOT
     write this — it's the user's deliberate "from now on, this one
     is the default" gesture.
     """
@@ -160,7 +160,7 @@ def default_instance_name() -> str:
 
       1. ``JAEGER_INSTANCE_NAME`` env var (explicit per-shell pin)
       2. ``~/.jaeger/active_instance`` file (sticky default written
-         by ``jaeger instance use``)
+         by ``jaeger agent use``)
       3. Literal ``"default"``.
     """
     env = os.environ.get("JAEGER_INSTANCE_NAME", "").strip()
