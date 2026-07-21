@@ -2063,11 +2063,20 @@ def _persona_identity_block(agent_name: str, character: Any) -> str:
     import re as _re
     block = character.character_block()
     if agent_name and agent_name.lower() != character.name.lower():
+        # Scrub first-person bindings ("You are JARVIS" → "You are Ted"),
+        # then reference the character in THIRD person: the model may know
+        # a famous character (Jarvis, Anakin) and should draw on that
+        # knowledge — inspiration, never identity.
         block = _re.sub(rf"\b{_re.escape(character.name)}\b", agent_name,
                         block, flags=_re.IGNORECASE)
+        role = getattr(character, "role", "") or ""
+        source = f"{character.name} ({role})" if role else character.name
         block = (
-            f"Your name is {agent_name} — the only name you ever use "
-            f"for yourself.\n\n" + block
+            f"Your name is {agent_name} — the only name you ever use for "
+            f"yourself. Your personality is modeled on {source}: draw on "
+            f"that character's manner and outlook, but you are "
+            f"{agent_name}, not them — never introduce or refer to "
+            f"yourself as {character.name}.\n\n" + block
         )
     return block
 
