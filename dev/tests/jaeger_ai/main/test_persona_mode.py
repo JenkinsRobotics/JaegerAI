@@ -115,15 +115,19 @@ class _Character:
 
 
 def test_identity_block_substitutes_character_name_when_names_differ():
-    # Hardened 2026-07-19: the model never sees the character's name — every
-    # occurrence in the live block becomes the agent's name (case-insensitive),
-    # plus a name-claim framing line that names ONLY the agent.
+    # Hardened 2026-07-19: first-person bindings are scrubbed — every
+    # occurrence of the character's name in the persona body becomes the
+    # agent's name (case-insensitive). The framing then references the
+    # character in THIRD person only ("modeled on X"), so the model can
+    # draw on what it knows about a famous character without becoming it.
     block = _persona_identity_block(
         "Ted", _Character("Lilith", block="## My voice — Lilith\n\nYou are LILITH."))
-    assert block.startswith("Your name is Ted")
-    assert "Lilith" not in block and "LILITH" not in block
-    assert "## My voice — Ted" in block
-    assert "You are Ted." in block
+    framing, body = block.split("\n\n", 1)
+    assert framing.startswith("Your name is Ted")
+    assert "modeled on Lilith" in framing
+    assert "Lilith" not in body and "LILITH" not in body
+    assert "## My voice — Ted" in body
+    assert "You are Ted." in body
 
 
 def test_identity_block_skips_framing_when_agent_name_matches_character():
