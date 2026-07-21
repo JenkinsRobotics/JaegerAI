@@ -2050,19 +2050,24 @@ def _persona_agent_name(layout: Any) -> str:
 
 
 def _persona_identity_block(agent_name: str, character: Any) -> str:
-    """Identity vs character framing (operator decision, 2026-07-05): the
-    character supplies the PERSONA, never the agent's name — the name is
-    identity.yaml's, set at instance creation ("a robot like Jarvis, but
-    I will name him Ted"). Shared by Station 3's output filter and the
-    Mode-C persona lane so every voice in the system introduces itself
-    the same way."""
+    """Identity vs character framing (operator decision, 2026-07-05; hardened
+    2026-07-19): the character supplies the PERSONA, never the agent's name —
+    the name is identity.yaml's, set at instance creation ("a robot like
+    Jarvis, but I will name him Ted"). The old approach kept the character's
+    name in the block and ADDED a "but your name is Ted" framing line; small
+    models followed the persona's own "You are JARVIS" anyway. Now the model
+    never sees the character's name at all: every occurrence in the live
+    block is substituted with the agent's name before the prompt is built.
+    Shared by Station 3's output filter and the Mode-C persona lane so every
+    voice in the system introduces itself the same way."""
+    import re as _re
     block = character.character_block()
     if agent_name and agent_name.lower() != character.name.lower():
+        block = _re.sub(rf"\b{_re.escape(character.name)}\b", agent_name,
+                        block, flags=_re.IGNORECASE)
         block = (
-            f"Your name is {agent_name}. You embody the persona and "
-            f"mannerisms of {character.name} — but YOUR name stays "
-            f"{agent_name}; never present yourself as {character.name}.\n\n"
-            + block
+            f"Your name is {agent_name} — the only name you ever use "
+            f"for yourself.\n\n" + block
         )
     return block
 

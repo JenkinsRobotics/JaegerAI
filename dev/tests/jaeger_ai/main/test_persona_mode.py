@@ -114,12 +114,16 @@ class _Character:
         return self._block
 
 
-def test_identity_block_prepends_framing_when_names_differ():
-    block = _persona_identity_block("Ted", _Character("Lilith"))
-    assert block.startswith("Your name is Ted.")
-    assert "Lilith" in block
-    assert "never present yourself as Lilith" in block
-    assert block.endswith("## My voice")
+def test_identity_block_substitutes_character_name_when_names_differ():
+    # Hardened 2026-07-19: the model never sees the character's name — every
+    # occurrence in the live block becomes the agent's name (case-insensitive),
+    # plus a name-claim framing line that names ONLY the agent.
+    block = _persona_identity_block(
+        "Ted", _Character("Lilith", block="## My voice — Lilith\n\nYou are LILITH."))
+    assert block.startswith("Your name is Ted")
+    assert "Lilith" not in block and "LILITH" not in block
+    assert "## My voice — Ted" in block
+    assert "You are Ted." in block
 
 
 def test_identity_block_skips_framing_when_agent_name_matches_character():

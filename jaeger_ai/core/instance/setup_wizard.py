@@ -107,7 +107,7 @@ def _pick_character():
     print("  Pick the character this Jaeger plays — its persona, name and")
     print("  voice all come from the character (edit later in Studio).")
     options = [(r[0], f"{r[1]} — {r[2]}"[:78]) for r in rows]
-    default = next((i for i, r in enumerate(rows) if r[0] == "jarvis"), 0)
+    default = next((i for i, r in enumerate(rows) if r[0] == "assistant"), 0)
     chosen = _ask_choice("Character", options, default=max(0, default))
     shim = _character_shim(chosen, rows=rows)
     print(f"  ✓ this Jaeger plays: {shim.display_name}")
@@ -841,7 +841,7 @@ def setup_defaults() -> dict:
         "awake": _pick(rec.awake),
         "asleep": _pick(rec.asleep),
         "voices": [{"id": vid, "label": label} for vid, label in _VOICES],
-        "default_character": ("jarvis" if any(r[0] == "jarvis" for r in rows)
+        "default_character": ("assistant" if any(r[0] == "assistant" for r in rows)
                               else (rows[0][0] if rows else None)),
         "permission_modes": [
             {"id": "confirm", "label": "Ask me before each action"},
