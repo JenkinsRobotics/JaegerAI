@@ -3,6 +3,25 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.9.6` — one word, one app, your name
+
+The de-confusion release. `jaeger` is system-wide: product installs
+symlink it onto PATH (with a shell-rc fallback), the wrapper resolves
+its own symlink, and a dev checkout never claims the global name — the
+released install and the repo coexist. `jaeger setup` is GUI-first: it
+opens the app's onboarding window and only runs the terminal wizard on
+`jaeger setup tui` (or headless). One management surface: `jaeger
+instances` and the old `jaeger instance` verb are gone — `jaeger agent`
+(create/list/use/inspect/delete/clear) covers everything, `inspect`
+defaulting to the active agent. COMMANDS.md documents the whole surface
+on one page. Identity: new `assistant` character — a plain, professional,
+name-free default (full card assets) replacing Jarvis as the wizard and
+onboarding default — and the character's name no longer bleeds into the
+agent: first-person bindings in the persona block are rewritten to the
+agent's own name, with the character referenced once in third person
+("modeled on Jarvis…") so the model can draw on what it knows without
+becoming it. The agent's name is its name.
+
 ## `0.9.5` — permissions up front
 
 macOS can't let an installer grant privacy permissions (TCC grants come
