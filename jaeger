@@ -8,10 +8,10 @@
 #   jaeger dev [flag]           developer toolbox (jaeger_ai.cli.devtools):
 #                               dev app/TUI boot, or pass
 #                               --stop/--status/--health/--dev-gui/…
-#   jaeger instances ...        manage agents: list / create / edit /
-#                               delete / set-default / show
+#   jaeger agent ...            manage agents: create / list / use /
+#                               inspect / delete / clear
 #   jaeger skills|personality|status|roadmap|avatar    operator console
-#   jaeger setup [name]         alias of `jaeger instances create`
+#   jaeger setup [name]         create an agent (GUI-first; `setup tui` = wizard)
 #   jaeger doctor               environment + readiness check
 #
 # Management subcommands go to the console (jaeger_ai.cli); everything

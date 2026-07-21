@@ -55,7 +55,7 @@ def _fmt(value: Any) -> str:
 def run_config(args: Any) -> int:
     layout = _resolve_layout(args)
     if layout is None:
-        print(c.red("  no active instance — run `jaeger instances create` first"))
+        print(c.red("  no active instance — run `jaeger setup` first"))
         return 1
 
     from jaeger_ai.core.instance.schemas import Config, load_yaml

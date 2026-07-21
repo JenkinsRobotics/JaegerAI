@@ -23,8 +23,10 @@ import sys
 from pathlib import Path
 
 # Operator-console subcommands handled by jaeger_os.cli (argparse subparsers).
+# (0.9.6: "instances" removed — `jaeger agent` is the one management
+# surface; it rides the run path's verb dispatch, not this console.)
 _CONSOLE = (
-    "instances", "skills", "personality", "status",
+    "skills", "personality", "status",
     "roadmap", "avatar", "prompt", "config",
 )
 

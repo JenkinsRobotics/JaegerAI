@@ -60,7 +60,7 @@ def test_no_args_prints_help() -> None:
     assert code == 0
     assert "jaeger" in out
     assert "skills" in out
-    assert "instances" in out
+    assert "instances" not in out  # removed 0.9.6 — `jaeger agent` instead
 
 
 # ── skills ────────────────────────────────────────────────────────
@@ -97,21 +97,13 @@ def test_skills_tree_renders(sandbox) -> None:
     assert "animation.image" in out
 
 
-# ── instances ─────────────────────────────────────────────────────
+# ── instances (removed 0.9.6 — `jaeger agent` is the one surface) ──
 
-def test_instances_list_shows_active(sandbox) -> None:
-    code, out = _run("instances")
-    # Returns 1 when no instance is found in standard locations,
-    # but the env-var-pointed sandbox should still be reachable
-    # via 'show'.
-    assert code in (0, 1)
-
-
-def test_instances_show_renders(sandbox) -> None:
-    code, out = _run("instances", "show")
-    assert code == 0
-    assert "Active instance" in out
-    assert "TestAgent" in out
+def test_instances_console_command_is_gone(sandbox) -> None:
+    # argparse rejects the removed subcommand with SystemExit(2)
+    with pytest.raises(SystemExit) as exc:
+        _run("instances")
+    assert exc.value.code == 2
 
 
 # ── personality ───────────────────────────────────────────────────

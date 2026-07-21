@@ -749,7 +749,7 @@ def run_wizard(
             print("  Launch:    ./jaeger")
         else:
             print(f"  Launch:    ./jaeger --instance {name}")
-        print(f"  Re-config: ./jaeger instances edit {name}")
+        print(f"  Re-config: jaeger agent create --force --name {name}")
     print()
     return layout
 
