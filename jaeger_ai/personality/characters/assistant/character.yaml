@@ -53,7 +53,9 @@ traits:
     technology: 0.7
     nature: 0.4
     psychology: 0.5
-assets: {}
+assets:
+  card: card.png
+  avatar: avatar
 lore:
   quotes: []
   mannerisms: []
