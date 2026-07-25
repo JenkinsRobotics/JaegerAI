@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 
@@ -18,6 +19,19 @@ def run(subtask: str, depth: int) -> dict[str, Any]:
     """Run a task over one-shot stdio, never a Hermes WebUI or gateway port."""
     command = os.environ.get("JAEGER_HERMES_COMMAND", "hermes").strip() or "hermes"
     executable = shutil.which(command)
+    if executable is None and command == "hermes":
+        executable = next(
+            (
+                str(candidate)
+                for candidate in (
+                    Path.home() / ".local" / "bin" / "hermes",
+                    Path("/usr/local/bin/hermes"),
+                    Path("/opt/homebrew/bin/hermes"),
+                )
+                if candidate.is_file()
+            ),
+            None,
+        )
     if executable is None:
         return {
             "delegated": False,
