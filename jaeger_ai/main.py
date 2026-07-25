@@ -1116,6 +1116,24 @@ _DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
 _delegate_depth = threading.local()
 
 
+def _hermes_delegate_enabled() -> bool:
+    """Whether Jaeger should use Hermes for delegated subtasks only."""
+    from jaeger_ai.hermes_worker import enabled
+
+    return enabled()
+
+
+def _delegate_to_hermes(subtask: str, depth: int) -> dict[str, Any]:
+    """Run one isolated Hermes CLI worker under Jaeger's control.
+
+    This deliberately uses one-shot stdio. It never connects to a Hermes
+    WebUI/backend port and ARES never imports the worker's session database.
+    """
+    from jaeger_ai.hermes_worker import run
+
+    return run(subtask, depth)
+
+
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     """Run a subtask through the same agent loop with a fresh history.
 
@@ -1134,6 +1152,9 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     clean = (subtask or "").strip()
     if not clean:
         return {"delegated": False, "error": "empty subtask"}
+
+    if _hermes_delegate_enabled():
+        return _delegate_to_hermes(clean, depth)
 
     _delegate_depth.value = depth + 1
     started = time.perf_counter()
