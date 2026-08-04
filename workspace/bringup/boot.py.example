@@ -1,0 +1,251 @@
+"""bringup/boot.py — this workspace's package-load skeleton: topology →
+links → adapters → e-stop → capabilities → runtime.
+
+Copy to bringup/boot.py (drop the .example suffix), rename
+{{PackageName}}Runtime / load / shutdown / adapter_for as needed (they
+usually don't need renaming — "load"/"shutdown" is the convention every
+hardware package's boot module follows), and fill in the TODOs.
+
+Modelled field-for-field on JaegerOS's own reference hardware package
+boot module, jaeger_os/hardware/packages/jp01/boot.py — read that file
+side by side with this one; the structure below is deliberately close to
+it so anything unclear here has a working reference implementation
+upstream.
+
+``load(bus=…)`` is the one entry point manifest.toml.example's
+`[[node]] hardware` factory calls (`factory = "{{package_name}}.bringup.boot:load"`).
+It is idempotent per process and returns a runtime object:
+
+  * every enabled controller (topology.yaml's `controllers:`) gets its
+    adapter + Link — simulated controllers get the adapter module's
+    ``simulator()`` behind a MockTransport;
+  * every controller in topology.yaml's `safety.estop_scope` registers
+    its stop on the EStopLatch;
+  * with a bus: the stock generic nodes (MotorNode/LightNode/…) run on
+    daemon threads, and a heartbeat thread publishes NodeHealth;
+  * the capability umbrella tools declared in topology.yaml register
+    (beta-gated until this unit's unit.yaml has ``verified: true`` —
+    see ../unit.yaml.example and ../SAFETY_CHECKLIST.md).
+
+``shutdown()`` tears down in reverse and should be atexit-registered —
+motors neutralized and outputs blanked even on an unclean exit path.
+
+TODO before dropping the .example suffix:
+  - replace `_PACKAGE_DIR`'s target if topology.yaml doesn't live at this
+    file's grandparent (../topology.yaml relative to bringup/boot.py)
+  - wire the real unit.yaml handshake once it lands upstream (see the
+    "unit.yaml handshake" TODO below) — until then this file boots on
+    topology.yaml alone, same posture as JP01's boot.py today
+  - fill in this workspace's own controller/node names to match
+    topology.yaml exactly
+"""
+
+from __future__ import annotations
+
+import pathlib
+import sys
+import threading
+from dataclasses import dataclass, field
+from typing import Any
+
+from jaeger_os.core.tools.tool_registry import unregister_tool
+from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_os.hardware.capabilities import register_package_capabilities
+from jaeger_os.hardware.link import Link
+from jaeger_os.hardware.package import (
+    ControllerSpec,
+    PackageSpec,
+    build_link,
+    load_package,
+    resolve_ref,
+)
+from jaeger_os.hardware.safety import EStopLatch
+
+# topology.yaml lives one directory up from this file (workspace root);
+# adjust if you move bringup/ elsewhere.
+_PACKAGE_DIR = pathlib.Path(__file__).parent.parent
+_HEALTH_PERIOD_S = 1.0
+
+_lock = threading.Lock()
+_runtime: "WorkspaceRuntime | None" = None
+_atexit_installed = False
+
+
+@dataclass
+class WorkspaceRuntime:
+    """Rename to {{PackageName}}Runtime if you'd rather match this
+    workspace's own package name than the generic template name."""
+
+    spec: PackageSpec
+    links: dict[str, Link]
+    adapters: dict[str, Any]
+    estop: EStopLatch
+    tools: list[ToolDef]
+    nodes: list[tuple[Any, threading.Thread]] = field(default_factory=list)
+    bus: Any = None
+    _health_stop: threading.Event = field(default_factory=threading.Event)
+    _health_thread: threading.Thread | None = None
+
+    def health(self) -> dict[str, Any]:
+        return {
+            name: adapter.telemetry()
+            for name, adapter in self.adapters.items()
+        } | {"estop": self.estop.status()}
+
+
+def get_runtime() -> "WorkspaceRuntime | None":
+    return _runtime
+
+
+def adapter_for(controller: str) -> Any:
+    """Capability handlers' registry lookup. Raises while unbooted — the
+    umbrella dispatcher turns that into a typed error."""
+    rt = _runtime
+    if rt is None:
+        raise ConnectionError(f"{_PACKAGE_DIR.name} package not booted")
+    try:
+        return rt.adapters[controller]
+    except KeyError:
+        raise ConnectionError(f"no adapter for controller {controller!r}") from None
+
+
+def _build_adapter(ctrl: ControllerSpec, *, package: str) -> Any:
+    """Instantiate topology.yaml's `adapter:` ref — the declared class IS
+    the wired class, no parallel hardcoded map."""
+    cls = resolve_ref(ctrl.adapter, package=package)
+    return cls()
+
+
+def _sim_responder(ctrl: ControllerSpec, *, package: str) -> Any:
+    """The adapter module's ``simulator()`` responder, when it ships one.
+    A simulated controller without a simulator still boots — MockTransport
+    just swallows writes silently."""
+    mod_path = ctrl.adapter.partition(":")[0]
+    try:
+        factory = resolve_ref(f"{mod_path}:simulator", package=package)
+    except ImportError:
+        return None
+    return factory()
+
+
+def _check_unit_identity(spec: PackageSpec) -> None:
+    """TODO — unit.yaml handshake (design: dev/docs/roadmap/
+    JROS_0.8_CAPABILITY_LAYER_DESIGN.md, Gap 3, upstream in JaegerOS).
+    Once that lands: read unit.yaml, check `model` matches `spec.package`,
+    query the live unit and cross-check controller presence — refuse to
+    register capabilities (loud) on a mismatch, matching fail-closed
+    everywhere else in this stack. Until then this is a no-op and every
+    HARDWARE-tier capability stays beta-gated regardless of unit.yaml's
+    `verified` flag — see ../SAFETY_CHECKLIST.md before treating any unit
+    as live-verified."""
+    return None
+
+
+def load(*, bus: Any = None) -> WorkspaceRuntime:
+    """Boot (or return the already-booted) workspace hardware runtime."""
+    global _runtime, _atexit_installed
+    with _lock:
+        if _runtime is not None:
+            return _runtime
+
+        spec = load_package(_PACKAGE_DIR)
+        _check_unit_identity(spec)
+
+        if spec.safety and spec.safety.firmware_watchdog_required:
+            simulated = all(c.simulated for c in spec.controllers.values())
+            if not simulated:
+                print(
+                    f"[{spec.package}] WARNING: no L0 firmware watchdog on "
+                    "one or more e-stop-scoped controllers — live "
+                    "capabilities must stay beta until it ships",
+                    file=sys.stderr, flush=True,
+                )
+
+        links: dict[str, Link] = {}
+        adapters: dict[str, Any] = {}
+        for name, ctrl in spec.controllers.items():
+            if not ctrl.enabled:
+                continue
+            adapter = _build_adapter(ctrl, package=spec.package)
+            link = build_link(
+                name, ctrl,
+                on_event=adapter.on_wire_event,
+                mock_responder=(
+                    _sim_responder(ctrl, package=spec.package)
+                    if ctrl.simulated else None
+                ),
+            )
+            adapter.attach_link(link)
+            links[name] = link
+            adapters[name] = adapter
+
+        # Every controller in topology.yaml's safety.estop_scope registers
+        # its stop here — this is the ONE place that list gets consumed;
+        # don't duplicate the scope elsewhere.
+        estop = EStopLatch(bus)
+        for name in (spec.safety.estop_scope if spec.safety else []):
+            if name in adapters:
+                estop.register_stop(name, adapters[name].estop)
+
+        runtime = WorkspaceRuntime(
+            spec=spec, links=links, adapters=adapters,
+            estop=estop, tools=[], bus=bus,
+        )
+
+        # TODO: if this workspace has stock generic nodes (MotorNode,
+        # LightNode, …) to run over these adapters — mirroring jp01's
+        # boot.py `_start_nodes` — wire them here. Left out of this
+        # template because which nodes apply depends entirely on which
+        # controllers topology.yaml declares.
+        for name, adapter in adapters.items():
+            try:
+                adapter.start()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[{spec.package}] {name} link failed: {exc} — degraded",
+                      file=sys.stderr, flush=True)
+
+        runtime.tools = register_package_capabilities(
+            spec, links=links, estop=estop,
+        )
+
+        _runtime = runtime
+        if not _atexit_installed:
+            import atexit
+            atexit.register(shutdown)
+            _atexit_installed = True
+        print(
+            f"[{spec.package}] booted "
+            f"({'sim' if all(c.simulated for c in spec.controllers.values()) else 'LIVE'}): "
+            f"controllers={sorted(adapters)} "
+            f"tools={sorted(t.name for t in runtime.tools)} (beta-gated until unit verified)",
+            flush=True,
+        )
+        return runtime
+
+
+def shutdown() -> None:
+    """Reverse teardown. Idempotent; never raises."""
+    global _runtime
+    with _lock:
+        runtime, _runtime = _runtime, None
+    if runtime is None:
+        return
+    runtime._health_stop.set()
+    if runtime._health_thread is not None:
+        runtime._health_thread.join(timeout=2.0)
+    for tool in runtime.tools:
+        unregister_tool(tool.name)
+    for node, thread in runtime.nodes:
+        try:
+            node.stop()
+            thread.join(timeout=3.0)
+        except Exception:  # noqa: BLE001
+            pass
+    for adapter in runtime.adapters.values():
+        try:
+            adapter.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+__all__ = ["WorkspaceRuntime", "load", "shutdown", "get_runtime", "adapter_for"]

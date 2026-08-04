@@ -1,0 +1,157 @@
+# topology.yaml — this workspace's Body capability declaration, validated
+# by jaeger_os.hardware.package.load_package. Copy to topology.yaml (drop
+# the .example suffix) once every field below describes YOUR real body.
+#
+# Modelled field-for-field on JaegerOS's own reference hardware package,
+# jaeger_os/hardware/packages/jp01/topology.yaml (JP01 — a desk-scale
+# robot with three controllers: a motor board, an LED board, a vision
+# board). Read that file alongside this one if anything below is unclear.
+#
+# One copy of every truth (CONVENTIONS.md, law 1): the agent's tool
+# names, arg schemas, permission tiers, and e-stop scope all come from
+# THIS file. Nothing else in this repo should restate a capability name,
+# a controller port, or a tier — bringup/boot.py.example only ever reads
+# this file, never hardcodes a second copy of what's declared here.
+
+# The workspace's own identity, matching this repo's package/import name
+# (the same one requirements.txt.example and manifest.toml.example use).
+package: "{{package_name}}"
+
+# The JaegerOS version range this topology's schema was written against.
+# Bump this if a future JaegerOS release changes the topology.yaml shape
+# (CONVENTIONS.md "Versioning & pinning" — a contract change, not a patch).
+requires_framework: ">=0.9"
+
+# A one-line human label — shows up in operator-facing tooling
+# (`jaeger hardware verify`, health dashboards, logs).
+display_name: "{{REPO_NAME}} (describe the body: controller count, form factor)"
+
+# ── controllers ─────────────────────────────────────────────────────
+# Every physical (or simulated) sub-board this body talks to. Each one
+# needs: which generic Node class drives it (`node:`), the adapter class
+# that translates the wire protocol (`adapter:` — a dotted "module:Class"
+# ref; the declared class IS the wired class, no parallel hardcoded map),
+# and a `link:` describing the transport. `simulated: true` runs the
+# adapter's `simulator()` behind a MockTransport instead of opening the
+# real port — keep every controller simulated until you've walked it live
+# (see ../SAFETY_CHECKLIST.md) and flip one controller at a time.
+controllers:
+  # Example 1: a serial-attached motor controller relayed through a
+  # single-board computer's ZMQ REQ socket (the JP01 "Jetson owns the
+  # serial port" pattern — swap for a direct serial `link:` with no
+  # `relay:` block if your controller's port is reachable directly from
+  # wherever boot.py runs).
+  primary_motor:
+    node: motor                          # jaeger_os.nodes.motor:MotorNode
+    adapter: "{{package_name}}.adapters.primary_motor:PrimaryMotorAdapter"
+    link:
+      transport: serial
+      port: /dev/cu.usbserial-000        # TODO: your board's real device path
+      baud: 115200
+      protocol: ascii_bracket             # or whatever this board's firmware speaks
+      # Delete this `relay:` block entirely if the port above is opened
+      # directly (no single-board-computer in between). Keep it if a
+      # Jetson/RPi/etc. owns the serial port and this process reaches it
+      # over the network instead (the JP01 CC01 pattern):
+      relay:
+        transport: zmq_req
+        endpoint: tcp://192.168.1.2:5556  # TODO: your relay host's address
+        target: motion                    # the relay's command-routing key
+    simulated: true                       # flip to false only after the live walk
+    heartbeat_expect_s: 30
+
+  # Example 2: a second controller with no relay — a direct link, no SBC
+  # in between. Comment this whole block out if your body only has one
+  # controller; add more blocks (copy this shape) for each additional one.
+  primary_light:
+    node: light                          # jaeger_os.nodes.light:LightNode
+    adapter: "{{package_name}}.adapters.primary_light:PrimaryLightAdapter"
+    link:
+      transport: serial
+      port: /dev/cu.usbmodem000           # TODO: your board's real device path
+      baud: 115200
+      protocol: ascii_bracket
+    simulated: true
+    heartbeat_expect_s: 30
+
+# ── capabilities ─────────────────────────────────────────────────────
+# What the agent can actually DO to this body — the tools that get
+# materialized at boot by register_package_capabilities(). Each entry:
+#
+#   name          the tool name the agent sees. Umbrella naming: the
+#                 first segment (before the dot) is the tool the agent
+#                 calls; keep related actions under one umbrella
+#                 (motion.move, motion.stop, motion.status, …) so the
+#                 agent's tool list doesn't explode per-verb.
+#   controller    which entry under `controllers:` above handles this
+#                 (or "*" for a capability that reads across all of them,
+#                 like telemetry.read below).
+#   tier          the permission gate — HARDWARE (confirmation flow +
+#                 e-stop fail-closed + beta gate until the unit is
+#                 verified), WRITE_LOCAL (confirmation, no e-stop
+#                 coupling — safe to run even while latched, e.g.
+#                 status lights), or READ_ONLY (no gate, just a read).
+#   schema        a dotted "module:ClassName" ref to the Pydantic model
+#                 that validates this capability's args BEFORE they
+#                 reach the handler — out-of-range values are refused
+#                 at the tool boundary, never bent on the wire.
+#   description   what the agent reads in its tool catalog. Keep it
+#                 accurate to the firmware's actual clamps/behavior —
+#                 CONVENTIONS.md "No spec ahead of code" applies to tool
+#                 descriptions too.
+#   allow_when_latched   (optional, default false) set true ONLY for the
+#                 stop capability itself — everything else should refuse
+#                 while the e-stop is engaged.
+capabilities:
+  - name: motion.move
+    controller: primary_motor
+    tier: HARDWARE
+    schema: "{{package_name}}.capabilities:MoveArgs"
+    description: "TODO: describe the real move command and its firmware-clamped ranges."
+  - name: motion.stop
+    controller: primary_motor
+    tier: HARDWARE
+    schema: "{{package_name}}.capabilities:EmptyArgs"
+    allow_when_latched: true
+    description: "EMERGENCY STOP: neutralize the motor controller and latch the system e-stop. Release is an operator action."
+  - name: motion.status
+    controller: primary_motor
+    tier: READ_ONLY
+    schema: "{{package_name}}.capabilities:EmptyArgs"
+    description: "Cached motor-controller telemetry (last heartbeat, link health)."
+
+  - name: lights.set_mode
+    controller: primary_light
+    tier: WRITE_LOCAL
+    schema: "{{package_name}}.capabilities:LightModeArgs"
+    description: "TODO: describe the real light-mode command."
+  - name: lights.status
+    controller: primary_light
+    tier: READ_ONLY
+    schema: "{{package_name}}.capabilities:EmptyArgs"
+    description: "Cached light-controller telemetry (last heartbeat, link health)."
+
+  # telemetry → whole body, across every controller. Keep this one —
+  # it's the cheapest READ_ONLY capability to leave enabled everywhere.
+  - name: telemetry.read
+    controller: "*"
+    tier: READ_ONLY
+    schema: "{{package_name}}.capabilities:EmptyArgs"
+    description: "Cached telemetry snapshot for every controller."
+
+# ── safety ───────────────────────────────────────────────────────────
+# estop_scope                  which controllers the L2 EStopLatch
+#                               engages on `motion.stop` (or any
+#                               allow_when_latched capability). List
+#                               EVERY controller capable of causing
+#                               physical harm — moving parts, not
+#                               lights. Reviewed in SAFETY_CHECKLIST.md.
+# firmware_watchdog_required   set true if the controller(s) in
+#                               estop_scope have no independent L0
+#                               hardware watchdog yet (boot.py.example
+#                               prints a loud warning on every LIVE
+#                               boot until this is false) — leave true
+#                               until the firmware actually ships one.
+safety:
+  estop_scope: [primary_motor]
+  firmware_watchdog_required: true

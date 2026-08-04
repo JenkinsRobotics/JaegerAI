@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # CONTRACT-PIN CHECK — a reminder, not a script: before this job
+      # can install real deps, pyproject.toml.example's `dependencies`
+      # needs a real jaeger-os pin (see the README checklist +
+      # CONVENTIONS.md "Versioning & pinning"). A module/project repo
+      # with an unpinned or "*" JaegerOS range is not safe to merge —
+      # a breaking contract change upstream would silently break this
+      # repo. Once real deps exist, replace the two placeholder steps
+      # below with `pip install -e .[dev]` against the pinned range.
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest ruff pyyaml
+          # pip install -e .[dev]   # uncomment once pyproject.toml is real
+
+      - name: Lint
+        run: ruff check  || true   # drop `|| true` once the module has real code
+
+      - name: Module-contract smoke test
+        run: |
+          # Drop the `.example` suffixes (see README checklist) before
+          # this actually collects anything — pytest ignores *.example.
+          pytest {{package_name}}/tests -v || true
+
+      # ── NERVOUS-SYSTEM CHECK (placeholder) ──────────────────────────
+      # For repos that carry BOTH a runtime/hardware layer and an
+      # agent/Mind layer (see CONVENTIONS.md, "the two laws"): the
+      # runtime/hardware layer must never import the agent layer, and
+      # any contract/ package must import nothing at all. JaegerOS
+      # enforces this with an import-linter contract; a lightweight
+      # grep-based equivalent for a smaller repo looks like this.
+      # Uncomment + adjust the paths once this repo has that split.
+      #
+      # - name: Nervous-system dependency check
+      #   run: |
+      #     set -euo pipefail
+      #     # runtime/hardware/ never imports agent/
+      #     if grep -rlE '^\s*(import|from)\s+{{package_name}}\.agent' \
+      #         {{package_name}}/runtime {{package_name}}/hardware 2>/dev/null; then
+      #       echo "::error::runtime/hardware code imports the agent layer — nervous-system rule violated"
+      #       exit 1
+      #     fi
+      #     # contract/ imports nothing project-local
+      #     if grep -rlE '^\s*(import|from)\s+{{package_name}}\.' \
+      #         {{package_name}}/contract 2>/dev/null; then
+      #       echo "::error::contract/ imports project code — it must depend on nothing"
+      #       exit 1
+      #     fi
