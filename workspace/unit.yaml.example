@@ -1,0 +1,53 @@
+# unit.yaml — the identity record for ONE physical (or simulated) unit
+# this workspace brings up. Copy to unit.yaml (drop the .example suffix)
+# per real unit — a workspace that brings up multiple units keeps one
+# unit.yaml per unit (see `unit_id` below), not one shared file.
+#
+# Design source: dev/docs/roadmap/JROS_0.8_CAPABILITY_LAYER_DESIGN.md,
+# Gap 3 ("the Body has no identity record") upstream in JaegerOS. As of
+# this template's cut, unit.yaml's read/write side (the handshake in
+# package boot: read unit.yaml → check `model` matches topology.yaml →
+# query the live unit → cross-check controller presence) is DESIGNED but
+# not yet implemented in JaegerOS itself — bringup/boot.py.example's
+# handshake step is marked accordingly. Don't let that stop you filling
+# this file in now: it's the honest record of what this unit IS, and
+# `verified` is the gate this template's SAFETY_CHECKLIST.md walks you
+# through regardless of whether the automated handshake has landed yet.
+
+# This unit's manufacturer/board serial, if it has one. Free text —
+# whatever this unit's build log or nameplate says.
+serial_number: "TODO-0001"
+
+# This workspace's own identifier for this specific unit — lets telemetry
+# and health surfaces distinguish "unit A" from "unit B" once two bodies
+# share one bus (the seam JaegerOS's design leaves for multi-unit
+# fleets; out of scope for a single-unit workspace today).
+unit_id: "{{package_name}}-01"
+
+# Must match topology.yaml's `package:` field. Package boot's handshake
+# refuses to register capabilities on a model mismatch (fail-closed,
+# matching every other safety check in this stack) once that handshake
+# ships upstream.
+model: "{{package_name}}"
+
+# Free text — whatever revision marking this unit's hardware carries
+# (a board rev letter, a build date, a batch number).
+hardware_revision: "TODO"
+
+# Firmware version per controller, keyed by the same controller names
+# declared in topology.yaml's `controllers:` block. Update this whenever
+# you reflash a controller — it's part of what the handshake cross-checks.
+controllers:
+  primary_motor: "TODO-fw-version"
+  primary_light: "TODO-fw-version"
+
+# THE SAFETY GATE. Stays false until this exact unit has been walked
+# live, start to finish, by an operator present at the hardware — see
+# ../SAFETY_CHECKLIST.md. While false, every HARDWARE-tier capability
+# registers beta-gated (dev-mode-only, invisible to a normal agent
+# session) regardless of what topology.yaml declares — the same posture
+# as today's global beta flag, just scoped to THIS unit instead of every
+# unit of this model everywhere. Flip to true only after completing the
+# checklist; flip back to false immediately if the unit's hardware
+# changes (a new controller, a re-flash, a repair) until it's re-walked.
+verified: false

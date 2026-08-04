@@ -1,0 +1,91 @@
+# manifest.toml — this workspace's Jaeger app-format manifest (format 0.1).
+# Copy to manifest.toml (drop the .example suffix) once the [[node]]
+# blocks below describe what THIS workspace actually boots.
+#
+# Modelled on JROS's own jaeger.toml (the descriptive, all-nodes-parked
+# manifest) and jaeger.windowed.toml (the focused, actually-supervised
+# shape) — see both, side by side, if a field below is unclear. "A
+# different shape is a different manifest" (jaeger_os's manifest.py):
+# don't try to make one manifest describe every mode this workspace can
+# run in — copy this file (e.g. manifest.sim.toml) for a second shape.
+
+[app]
+# This workspace's own identity — matches topology.yaml's `package:` and
+# requirements.txt.example's package name.
+name = "{{package_name}}"
+version = "0.1.0"
+
+# The JaegerOS version range this manifest's format was written against
+# (a contract, not a patch — CONVENTIONS.md "Versioning & pinning").
+requires_framework = ">=0.9"
+
+# "fused" = one process, everything in it (the only mode either JROS
+# manifest uses today — daemon-arch was tried and dropped, see JROS's
+# own jaeger.toml header for why). Don't reach for a second mode unless
+# you have a concrete reason the chassis doesn't already serve.
+mode = "fused"
+
+# "qt" if this workspace has a windowed/tray face (mirrors
+# jaeger.windowed.toml); "none" if a different loop owns the process
+# (a TUI, a headless robot loop, a test harness — mirrors jaeger.toml).
+event_loop = "none"
+
+# Cosmetic today; describes the primary face for operator-facing tooling.
+ui = "tui"
+
+# True if only one instance of this workspace should run per machine
+# (a physical robot almost always wants this; a dev/sim instance usually
+# doesn't need to be exclusive).
+single_instance = true
+
+# Launch at login (macOS Login Items or equivalent). Leave false for
+# anything that isn't meant to run unattended yet.
+autostart = false
+
+# If this workspace has a windowed face: does closing its window quit
+# the whole process, or does a tray/background surface persist (the
+# macOS-canonical "chat app closes, tray stays" pattern)? Informational
+# only until event_loop = "qt".
+shell_quits_core = false
+
+# Path to a root config.yaml, or "" if this workspace uses per-instance
+# configs instead (JROS's own pattern — sandbox/.jaeger_os/instances/).
+config = ""
+
+# ── bus ──────────────────────────────────────────────────────────────
+[bus]
+backend = "inproc"   # fused mode, one process — everything shares one InProcBus.
+
+# ── nodes ────────────────────────────────────────────────────────────
+# Two different binding shapes coexist here, because engine modules and
+# hardware packages connect to the Mind through two different mechanisms
+# (CONVENTIONS.md, "The connection rule"):
+
+# 1) ENGINE MODULES bind by `slot=` — discover_modules() resolves the
+#    slot to whichever module.yaml claims it (e.g. a TTS engine's
+#    module.yaml declares `slot: "tts"`; swapping engines means swapping
+#    which module claims that slot, zero manifest edits).
+[[node]]
+id = "example_engine"
+tier = 3
+backend = "thread"
+slot = "{{slot_name}}"          # TODO: the slot this module fills (see module.yaml.example)
+restart = "on_failure"
+config_key = "example_engine"   # TODO: matches the module's config.py settings-catalog key
+enabled = false                 # TODO: flip true once the module is actually installed
+
+# 2) The HARDWARE PACKAGE binds by FACTORY, not slot — as of JaegerOS
+#    0.8/0.9 hardware packages don't have a module.yaml yet (topology.yaml
+#    is the richer, already-proven source of truth: tiers, e-stop scope,
+#    arg schemas — see dev/docs/roadmap/JROS_0.8_CAPABILITY_LAYER_DESIGN.md
+#    Gap 1 upstream). Enable this node only on a station that actually
+#    HAS the hardware wired up — a dev laptop with no body attached
+#    should leave this `enabled = false`.
+[[node]]
+id = "hardware"
+tier = 3
+backend = "thread"
+factory = "{{package_name}}.bringup.boot:load"   # bringup/boot.py.example's entry point
+restart = "on_failure"
+config_key = "hardware"
+enabled = false   # TODO: true only on a station with the real body attached

@@ -1,0 +1,24 @@
+"""Standalone CLI — every Jaeger module runs by itself.
+
+    python -m {{package_name}} [args]
+
+The convention (whisper_stt.engine precedent): build the engine/node on a
+local in-proc bus with NO agent and NO app — smoke it, bench it, or drive it
+from a terminal. A module that can't run alone isn't finished.
+"""
+import argparse
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(prog="{{package_name}}",
+                                description="{{DESCRIPTION}} — standalone runner")
+    p.add_argument("--smoke", action="store_true",
+                   help="build the module on a local bus and run one round-trip")
+    args = p.parse_args(argv)
+    # TODO: construct your engine/node here (see node.py.example) and either
+    # run the smoke round-trip or start an interactive/CLI loop.
+    raise SystemExit("wire me up: build the engine/node and run it")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,44 @@
+# {{REPO_NAME}} — packaging + dev-tooling config.
+#
+# Copy this to pyproject.toml (gitignored — see .gitignore) after filling
+# in the checklist markers. Modelled on JaegerOS's own pyproject.toml:
+# editable install, version single-sourced from the package's __init__.py,
+# runtime deps single-sourced from requirements.txt.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{{package_name}}"
+description = "{{DESCRIPTION}}"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dynamic = ["version", "dependencies"]
+
+# The pin every module/hardware-package/project repo carries: the range
+# of JaegerOS releases this repo is proven against. Contract changes on
+# the JaegerOS side (topics, module.yaml fields, the capability-layer
+# API) bump this range — see CONVENTIONS.md "Versioning & pinning".
+# jaeger-os is not on PyPI yet; until it is, pin via requirements.txt
+# (e.g. a git URL or VCS ref) rather than here.
+dependencies = [
+    # "jaeger-os>=0.9,<0.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff"]
+
+[tool.setuptools.dynamic]
+version = {attr = "{{package_name}}.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["{{package_name}}*"]
+
+[tool.pytest.ini_options]
+testpaths = ["{{package_name}}/tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
