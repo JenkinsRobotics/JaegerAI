@@ -1,0 +1,74 @@
+schema: jros.skill/v3
+id: macos_computer
+version: 1.0.0
+
+origin: human_authored
+package: code_skill
+runtime: in_process
+
+domains: [productivity, sensing]
+
+description: >
+  macOS-native computer control via a capability ladder — AppleScript
+  → CDP → Accessibility → screenshot. 10-30× faster than the
+  screenshot loop for Mac apps, focus-preserving where possible. The
+  recommended computer-use path on a Jaeger unit running macOS.
+
+embodiment:
+  platforms: [macos]
+  bodies: []
+  sensors: []
+  actuators: []
+
+permissions:
+  tier: 2                          # EXTERNAL_EFFECT — drives the host UI
+  resource_scopes:
+    - display
+    - subprocess
+    - fs.workspace
+    - clipboard
+
+# 0.3.0 baseline: three capabilities matching the registered tools.
+# Each can grow its own scorer over time so the operator can see
+# whether (e.g.) the planner is improving while the lower-level
+# action surface stays stable.
+capabilities:
+  - id: plan_and_execute
+    signature: "computer_do(goal) -> {ok, plan, steps, result}"
+    description: >
+      High-level planner: take a natural-language goal, plan a
+      capability-ladder sequence, execute it, return results.
+    level:
+      current: 2
+      bands: [0.5, 0.7, 0.8, 0.9, 0.95]
+      scorer: tests/smoke_test.py
+
+  - id: direct_action
+    signature: "computer_use(action, ...) -> {ok, result}"
+    description: >
+      Direct dispatch to one engine + action without going through
+      the planner — for callers that already know which engine to
+      use.
+    level:
+      current: 2
+      bands: [0.5, 0.7, 0.8, 0.9, 0.95]
+      scorer: tests/smoke_test.py
+
+  - id: read_state
+    signature: "computer_look() -> {ok, app, windows, ax_tree}"
+    description: >
+      Read-only inspection: focused app, window list, Accessibility
+      tree.  Lowest-risk capability — no side effects on the host.
+    level:
+      current: 3
+      bands: [0.5, 0.7, 0.8, 0.9, 0.95]
+      scorer: tests/smoke_test.py
+
+dependencies:
+  tools: []
+  capabilities: []
+  commands: []
+
+entrypoint:
+  module: macos_computer
+  attr: register
