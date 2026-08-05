@@ -15,13 +15,13 @@ from typing import Any
 
 import pytest
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     JaegerAgent,
     Message,
     ProviderAdapter,
     clear_registry,
 )
-from jaeger_ai.agent.loop.jaeger_agent import JaegerAgent as _JA
+from jaeger_agent.loop.jaeger_agent import JaegerAgent as _JA
 
 
 class _ScriptedAdapter(ProviderAdapter):

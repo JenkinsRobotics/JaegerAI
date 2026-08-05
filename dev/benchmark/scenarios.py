@@ -118,10 +118,10 @@ def _read_memory_view(layout: Any):
     schedules: list[dict] = []
     board: list[dict] = []
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.memory import memory as mem
+        from jaeger_agent.memory import memory as mem
         facts = mem.list_facts(None) or {}
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.memory import memory as mem
+        from jaeger_agent.memory import memory as mem
         schedules = mem.list_schedules() or []
     with contextlib.suppress(Exception):
         import json
@@ -146,7 +146,7 @@ _persona_lane_engagement = {"turns_seen": 0, "engaged": 0}
 
 
 def _build_agent(client: Any):
-    from jaeger_ai.agent.loop.runtime_bridge import build_jaeger_agent
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
     from jaeger_ai.main import SKIP_FINAL_TOOLS, _get_agent, _pipeline
 
     _get_agent(client)  # mirror tools onto the registry
@@ -199,7 +199,7 @@ def _drive_turn_worker(agent: Any, prompt: str, timeout_s: float):
     import io
     from contextlib import redirect_stdout
 
-    from jaeger_ai.agent.loop.runtime_bridge import drive_one_turn
+    from jaeger_agent.loop.runtime_bridge import drive_one_turn
     from jaeger_ai.core.bench.scenarios import Turn
 
     box: dict[str, Any] = {}

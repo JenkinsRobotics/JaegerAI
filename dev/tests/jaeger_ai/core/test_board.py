@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent import tools
-from jaeger_ai.agent.background.board import Board, board_for_layout
-from jaeger_ai.agent.background.deep_think import queue_for_layout
+from jaeger_agent import tools
+from jaeger_agent.background.board import Board, board_for_layout
+from jaeger_agent.background.deep_think import queue_for_layout
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 

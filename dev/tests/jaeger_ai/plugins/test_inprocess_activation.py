@@ -10,7 +10,7 @@ state (no confabulated reasons).
 import pathlib
 import tempfile
 
-from jaeger_ai.core import credentials as creds
+from jaeger_agent import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.plugins import plugin_credential, start_bridge
 
@@ -93,9 +93,9 @@ def test_uppercase_saved_credential_reads_as_configured(tmp_path) -> None:
     module.yaml-only messaging module — it no longer has a plugin.yaml
     for ``setup_plugin`` to read; homeassistant is still a real plugin
     with an env-gated credential, same shape this regression needs)."""
-    from jaeger_ai.agent import tools as agent_tools
-    from jaeger_ai.agent.tools.plugins import setup_plugin
-    from jaeger_ai.core import credentials as creds
+    from jaeger_agent import tools as agent_tools
+    from jaeger_agent.tools.plugins import setup_plugin
+    from jaeger_agent import credentials as creds
 
     layout = InstanceLayout(root=tmp_path)
     creds.set_credential(layout, "HASS_TOKEN", "tok:val")

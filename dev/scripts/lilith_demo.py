@@ -31,8 +31,12 @@ sys.path.insert(0, str(REPO))
 from jaeger_ai.nodes.animation.adapters import MathAdapter
 
 
+# The face ships with the CHARACTER that uses it. This pointed at
+# jaeger_os/agent/personas/ — stale since the 0.9 framework split, and
+# stale twice over after 0.10 rehomed the avatar bundle beside Lilith's
+# cards.
 FACE_SCRIPT = (
-    REPO / "jaeger_os" / "agent" / "personas" / "lilith"
+    REPO / "jaeger_ai" / "personality" / "characters" / "lilith"
     / "avatar" / "faces" / "lilith_face.py"
 )
 

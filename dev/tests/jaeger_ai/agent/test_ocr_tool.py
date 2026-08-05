@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent.tools import ocr
+from jaeger_agent.tools import ocr
 from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
 
 

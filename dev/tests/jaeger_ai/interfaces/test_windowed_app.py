@@ -25,7 +25,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from jaeger_ai.agent.loop.bridge import AgentBridge  # noqa: E402
+from jaeger_ai.core.agent_bridge import AgentBridge  # noqa: E402
 from jaeger_os.transport import InProcBus  # noqa: E402
 from jaeger_ai.core.messages import AgentState, ChatReply  # noqa: E402
 from jaeger_ai.interfaces.pyside6.pill.qt import Pill  # noqa: E402
@@ -171,7 +171,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         # supervisor ever started it.
         tts_spec = next(n for n in app.spec.nodes if n.id == "tts")
         assert tts_spec.slot == "tts"
-        assert tts_spec.factory == "jaeger_kokoro_tts.nodes.kokoro_tts:make_tts_node"
+        assert tts_spec.factory == "jaeger_kokoro_tts:make_tts_node"
         # ensure_*_node() (what the agent's speak/avatar tools call)
         # must delegate to the SAME supervisor-managed objects — no
         # double-spawn (the pre-U3b reason these nodes stayed disabled).
@@ -278,7 +278,7 @@ def test_chat_session_routing_and_slash_commands(qapp):
 def test_agent_tool_events_reach_the_bus(qapp):
     """The agent loop's ``tool.progress`` hook → chassis ``ToolEvent`` via
     the bridge adapter (the seam that lights up 'see tool use')."""
-    from jaeger_ai.agent.loop.bridge import _BusEventAdapter
+    from jaeger_ai.core.agent_bridge import _BusEventAdapter
     from jaeger_ai.core.messages import ToolEvent
 
     bus = InProcBus()

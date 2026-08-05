@@ -742,7 +742,7 @@ class PersonaConfig(BaseModel):
 # ``jaeger_os/nodes/kokoro_tts/config.py``, not here. Importing it here
 # to nest it into ``Config`` (below) pulls in ``jaeger_os.nodes`` (this
 # import forces that package's ``__init__.py`` to run, which imports
-# ``jaeger_kokoro_tts.nodes.kokoro_tts``). The FIRST cut of this had
+# ``jaeger_kokoro_tts``). The FIRST cut of this had
 # ``config.py`` import ``_setting`` straight from this file — a
 # textbook two-file cycle (schemas -> module -> schemas) that broke
 # with an ``ImportError`` on whichever side happened to import first.
@@ -754,7 +754,7 @@ class PersonaConfig(BaseModel):
 # imports catalog metadata from ``setting_meta.py``, never from
 # ``schemas.py`` directly.
 try:
-    from jaeger_kokoro_tts.nodes.kokoro_tts.config import KokoroTTSConfig
+    from jaeger_kokoro_tts.config import KokoroTTSConfig
 except ImportError:
     # 0.8 M2a: the kokoro_tts directory (config.py included) can be
     # deleted entirely. This stand-in is structurally identical to the
@@ -775,7 +775,7 @@ except ImportError:
 # ImportError fallback so a deleted ``nodes/whisper_stt/`` directory
 # degrades instead of breaking config load).
 try:
-    from jaeger_whisper_stt.nodes.whisper_stt.config import WhisperSTTConfig
+    from jaeger_whisper_stt.config import WhisperSTTConfig
 except ImportError:
     # Structurally identical to the real leaf (same fields/defaults) so
     # an existing config.yaml's ``whisper_stt:`` block — or the

@@ -89,7 +89,7 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     """
     if layout is not None and ext.api_key_credential:
         try:
-            from jaeger_ai.core import credentials as creds
+            from jaeger_agent import credentials as creds
 
             return creds.get_credential(layout, ext.api_key_credential)
         except Exception:  # noqa: BLE001 — missing credential is expected
@@ -202,7 +202,7 @@ class ExternalModelClient:
         Cloud calls are wrapped in :func:`cloud_errors.retry_call` — a
         rate-limit or transient 5xx is retried with jittered backoff; a
         bad key / unknown model is raised straight through (audit A8)."""
-        from jaeger_ai.core.runtime.cloud_errors import retry_call
+        from jaeger_agent.errors import retry_call
 
         is_oai = self.provider in _OPENAI_COMPATIBLE
 
@@ -293,7 +293,7 @@ class ExternalModelClient:
         except Exception as exc:  # noqa: BLE001
             # Classify the failure so the user sees "bad API key" rather
             # than a raw exception repr (audit A8).
-            from jaeger_ai.core.runtime.cloud_errors import classify_exception, friendly_message
+            from jaeger_agent.errors import classify_exception, friendly_message
             return {
                 "ok": False,
                 "detail": friendly_message(exc, provider=self.provider),

@@ -14,12 +14,9 @@ Pins the new fields added in the "registry maturity" pass:
 
 from __future__ import annotations
 
-import os
-
-import pytest
 from pydantic import BaseModel
 
-from jaeger_ai.agent.dialects import normalize_tool_name
+from jaeger_agent.dialects import normalize_tool_name
 from jaeger_os.core.tools.tool_schema import ToolDef
 
 

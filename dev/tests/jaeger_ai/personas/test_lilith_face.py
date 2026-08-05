@@ -30,34 +30,37 @@ _DEV_ONLY = pytest.mark.skipif(
 )
 
 
-# ── persona YAML present + parseable ───────────────────────────────
+# ── character YAML present + parseable ─────────────────────────────
+#
+# 0.10: these read ``personality/characters/lilith/character.yaml``.
+# They used to read ``agent/personas/lilith.yaml`` — the wizard-prefill
+# template retired at 0.5.0 and deleted at 0.10 once the character
+# carried the same soul text plus traits, lore, and assets. The
+# invariant under test never changed: Lilith's structured personality
+# must ship and must parse into the Personality schema.
 
-def test_lilith_persona_yaml_ships() -> None:
+_CHARACTER_PATH = (
+    Path(__file__).resolve().parents[4]
+    / "jaeger_ai" / "personality" / "characters" / "lilith" / "character.yaml"
+)
+
+
+def test_lilith_character_yaml_ships() -> None:
     import yaml
-    persona_path = (
-        Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith.yaml"
-    )
-    assert persona_path.exists(), "Lilith persona YAML must ship"
-    data = yaml.safe_load(persona_path.read_text())
+    assert _CHARACTER_PATH.exists(), "Lilith character YAML must ship"
+    data = yaml.safe_load(_CHARACTER_PATH.read_text())
     assert data["id"] == "lilith"
     assert data["name"] == "Lilith"
-    assert "personality_v2" in data
-    assert "hexaco" in data["personality_v2"]
-    assert "avatar" in data
-    assert "expressions" in data["avatar"]
+    assert "hexaco" in data["traits"]
+    # The avatar bundle ships with the character that uses it.
+    assert (_CHARACTER_PATH.parent / data["assets"]["avatar"]).is_dir()
 
 
-def test_lilith_persona_structured_personality_block_valid() -> None:
-    """The personality_v2 block parses cleanly into our Personality
-    schema."""
+def test_lilith_character_structured_personality_block_valid() -> None:
+    """The traits block parses cleanly into our Personality schema."""
     import yaml
-    persona_path = (
-        Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith.yaml"
-    )
-    data = yaml.safe_load(persona_path.read_text())
-    p_data = data["personality_v2"]
+    data = yaml.safe_load(_CHARACTER_PATH.read_text())
+    p_data = data["traits"]
 
     from jaeger_ai.personality import (
         Domains, Expression, HEXACO, Personality, SPECIAL,
@@ -68,14 +71,17 @@ def test_lilith_persona_structured_personality_block_valid() -> None:
         special=SPECIAL(**p_data["special"]),
         expression=Expression(**p_data["expression"]),
         domains=Domains(**p_data["domains"]),
-        speech_patterns=tuple(p_data.get("speech_patterns", ())),
+        # Speech patterns are prompt material, not a measured trait, so
+        # the character schema keeps them under ``prompt`` — the flat
+        # persona/v1 template had them beside the numbers.
+        speech_patterns=tuple(data["prompt"].get("speech_patterns", ())),
     )
     # Per the test against the personality module's pinned wording.
     from jaeger_ai.personality import compose_block
     block = compose_block(persona)
     assert "Lilith" in block
     assert "directness" in block
-    assert "Speaks with quiet precision" in block
+    assert "Quiet, measured, slightly cool" in block
 
 
 # ── face script loads as a MathScript ──────────────────────────────
@@ -84,8 +90,8 @@ def test_lilith_persona_structured_personality_block_valid() -> None:
 def test_face_script_loads_via_math_adapter() -> None:
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith" / "avatar"
-        / "faces" / "lilith_face.py"
+        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "avatar" / "faces" / "lilith_face.py"
     )
     assert face_path.exists()
 
@@ -111,8 +117,8 @@ def test_every_emotion_renders(emotion: str) -> None:
     """All 7 emotions render a frame without crashing."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith" / "avatar"
-        / "faces" / "lilith_face.py"
+        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "avatar" / "faces" / "lilith_face.py"
     )
     adapter = MathAdapter()
     adapter.open(
@@ -135,8 +141,8 @@ def test_face_breathes_over_time() -> None:
     breath offset moves the face."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith" / "avatar"
-        / "faces" / "lilith_face.py"
+        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "avatar" / "faces" / "lilith_face.py"
     )
     adapter = MathAdapter()
     adapter.open(
@@ -159,8 +165,8 @@ def test_speaking_amplitude_changes_mouth() -> None:
     different frame than amplitude=0."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "agent" / "personas" / "lilith" / "avatar"
-        / "faces" / "lilith_face.py"
+        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "avatar" / "faces" / "lilith_face.py"
     )
     a = MathAdapter()
     a.open(str(face_path), width=128, height=128,
@@ -184,7 +190,7 @@ def test_avatar_tool_falls_back_to_framework_defaults(
     """A fresh instance with no avatar/ directory should still get
     Lilith's face — the avatar tool falls back to the framework
     default location."""
-    from jaeger_ai.agent.tools import avatar
+    from jaeger_ai.nodes.animation import tools as avatar
     from jaeger_ai.core import context as tool_common
     from jaeger_ai.core.instance.instance import InstanceLayout
 

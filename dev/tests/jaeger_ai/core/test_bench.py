@@ -515,7 +515,7 @@ def test_bench_scope_auto_approves_sandbox_tiers():
     from jaeger_os.core.safety.permissions import (
         PermissionRequest, PermissionTier,
     )
-    from jaeger_ai.agent.tools.bench import _bench_permission_scope
+    from jaeger_agent.tools.bench import _bench_permission_scope
     from jaeger_os.core.safety.permissions import current_policy
 
     with _bench_permission_scope():
@@ -609,7 +609,7 @@ def test_bench_scope_still_defers_higher_tiers_to_outer():
     from jaeger_os.core.safety.permissions import (
         PermissionPolicy, PermissionRequest, PermissionTier, install_policy,
     )
-    from jaeger_ai.agent.tools.bench import _bench_permission_scope
+    from jaeger_agent.tools.bench import _bench_permission_scope
     from jaeger_os.core.safety.permissions import current_policy
 
     # Track what the outer provider sees.

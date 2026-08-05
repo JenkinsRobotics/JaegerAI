@@ -25,8 +25,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent import tools
-from jaeger_ai.agent.skill_registry.toolset_scoping import (
+from jaeger_agent import tools
+from jaeger_agent.skill_registry.toolset_scoping import (
     CORE, LEAN_CORE, enable_toolset, reset_toolsets, tool_visible,
 )
 
@@ -94,7 +94,7 @@ def test_core_and_lean_core_share_an_intentional_subset() -> None:
 
 @pytest.fixture()
 def bound(tmp_path):
-    from jaeger_ai.core.memory import memory as mem
+    from jaeger_agent.memory import memory as mem
     mem.bind(SimpleNamespace(memory_dir=tmp_path / "memory"))
     yield
 

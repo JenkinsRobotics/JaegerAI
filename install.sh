@@ -16,7 +16,7 @@
 # (requirements.txt, @master for 0.9) — installing JaegerAI (editable,
 # below) pulls the whole stack from GitHub automatically, no manual
 # multi-repo assembly needed. A dev machine with sibling checkouts at
-# ~/GITHUB/{JaegerOS,JaegerKokoroTTS,JaegerWhisperSTT} gets those
+# ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
 # installed EDITABLE instead (step 3b below) — local changes to the
 # framework/engines are live without a push+reinstall round-trip.
 
@@ -125,7 +125,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
 
   # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
   # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
-  # JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
+  # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
   # copies so local framework/engine changes go live immediately.
   # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
   # migration) must run the OFFICIAL pinned releases inside its own
@@ -140,7 +140,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
   SIBLINGS_FOUND=()
   [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerOS JaegerKokoroTTS JaegerWhisperSTT; do
+  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
     if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
       SIBLINGS_FOUND+=("$sib")
     fi

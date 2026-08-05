@@ -337,7 +337,7 @@ def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
     would deadlock the fired turn."""
     _FakeCron.instances.clear()
     monkeypatch.setattr(
-        "jaeger_ai.agent.background.cron_runner.CronRunner", _FakeCron,
+        "jaeger_agent.background.cron_runner.CronRunner", _FakeCron,
         raising=False)
 
     rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
@@ -687,12 +687,12 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     from jaeger_os.core.safety.permissions import (
         PermissionGrants, PermissionPolicy, use_policy,
     )
-    from jaeger_ai.agent.tools.host import _t_open_on_host
+    from jaeger_agent.tools.host import _t_open_on_host
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
 
     opened = []
     monkeypatch.setattr(
-        "jaeger_ai.agent.tools.host._run_open",
+        "jaeger_agent.tools.host._run_open",
         lambda args, label: opened.append(args) or {"opened": True, **label})
 
     ctx = _Ctx()
@@ -780,7 +780,7 @@ def test_speak_command_roundtrip(monkeypatch):
     # Patch the MODULE object, not the dotted string: the tools package
     # re-exports a ``speak`` FUNCTION that shadows the submodule on
     # attribute lookup, so the string form patches the wrong object.
-    speak_mod = importlib.import_module("jaeger_ai.agent.tools.speak")
+    speak_mod = importlib.import_module("jaeger_agent.tools.speak")
     monkeypatch.setattr(speak_mod, "speak", fake_speak)
     stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
              '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'

@@ -23,10 +23,10 @@ import tempfile
 import pytest
 
 import jaeger_ai.main as m
-from jaeger_ai.agent import tools
-from jaeger_ai.agent.prompts import persona_lane
-from jaeger_ai.agent.tools import credentials as creds_tool
-from jaeger_ai.core import credentials as creds
+from jaeger_agent import tools
+from jaeger_agent.prompts import persona_lane
+from jaeger_agent.tools import credentials as creds_tool
+from jaeger_agent import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
 
@@ -173,7 +173,7 @@ def test_app_control_unavailable_reason_reads_the_skill_loaders_last_skip(monkey
     loader for the REAL skip reason (by every plausible app-control
     skill id) rather than inventing its own text — a fabricated failing
     ``macos_computer`` skill's recorded reason flows straight through."""
-    from jaeger_ai.agent.skill_registry import skill_loader
+    from jaeger_agent.skill_registry import skill_loader
 
     fabricated_reason = ("import/register failed: ModuleNotFoundError: "
                           "No module named 'pyobjc'\ntraceback...")
@@ -188,7 +188,7 @@ def test_app_control_unavailable_reason_reads_the_skill_loaders_last_skip(monkey
 
 
 def test_app_control_unavailable_reason_falls_back_when_nothing_was_skipped(monkeypatch):
-    from jaeger_ai.agent.skill_registry import skill_loader
+    from jaeger_agent.skill_registry import skill_loader
 
     monkeypatch.setattr(skill_loader, "last_skip_reason", lambda *names: None)
     reason = persona_lane._app_control_unavailable_reason()
@@ -218,7 +218,7 @@ def test_send_email_actually_registers_the_email_group_on_the_real_registry():
     """Not just the toolset-scoping wiring in isolation — importing the
     real tools/email.py module (as main.py's boot path does) must make
     the live self-model block show the email group."""
-    import jaeger_ai.agent.tools.email  # noqa: F401 — registers send_email
+    import jaeger_agent.tools.email  # noqa: F401 — registers send_email
 
     block = persona_lane.build_self_model_block()
     assert "email" in block

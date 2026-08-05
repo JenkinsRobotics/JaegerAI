@@ -70,12 +70,12 @@ def _stage_instance(root: Path) -> None:
 
 
 def _load_client_and_agent(root: Path):
-    from jaeger_ai.agent import tools as jaeger_tools
+    from jaeger_agent import tools as jaeger_tools
     from jaeger_ai.core.instance.instance import InstanceLayout
     from jaeger_ai.main import (
         LlamaCppPythonClient, _get_agent, _pipeline,
     )
-    from jaeger_ai.agent.prompts.prompts import build_system_prompt
+    from jaeger_agent.prompts.prompts import build_system_prompt
     from jaeger_ai.core.instance.schemas import Config, load_yaml
 
     layout = InstanceLayout(root=root)
@@ -144,7 +144,7 @@ def main() -> int:
     _stage_instance(root)
 
     # Stage a credential first via the public API so we can test get_credential.
-    from jaeger_ai.core import credentials as creds
+    from jaeger_agent import credentials as creds
     from jaeger_ai.core.instance.instance import InstanceLayout
     layout = InstanceLayout(root=root)
     creds.set_credential(layout, "demo_api_key", "sk_test_abc123")

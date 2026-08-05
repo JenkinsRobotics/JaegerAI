@@ -18,8 +18,8 @@ from __future__ import annotations
 import pathlib
 import tempfile
 
-from jaeger_ai.agent import tools as agent_tools
-from jaeger_ai.agent.tools.plugins import list_plugins, setup_plugin
+from jaeger_agent import tools as agent_tools
+from jaeger_agent.tools.plugins import list_plugins, setup_plugin
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
@@ -84,7 +84,7 @@ def test_setup_plugin_channel_path_stores_the_right_credential_names() -> None:
     list_plugins must flip that channel's status to reflect it — proving
     the name setup_plugin surfaces is EXACTLY the name the credential
     store / activate_plugin's plugin_credential lookup reads back."""
-    from jaeger_ai.core.credentials import set_credential
+    from jaeger_agent.credentials import set_credential
 
     root = pathlib.Path(tempfile.mkdtemp())
     layout = InstanceLayout(root=root)

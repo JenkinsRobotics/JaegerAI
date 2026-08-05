@@ -3,7 +3,7 @@
 import pathlib
 import tempfile
 
-from jaeger_ai.core.skill_improvement import skill_notes
+from jaeger_agent.skill_improvement import skill_notes
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 

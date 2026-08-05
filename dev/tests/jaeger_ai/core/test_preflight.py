@@ -198,7 +198,7 @@ def test_tool_registry_check_with_booted_agent(monkeypatch):
     tool names and reports unresolved CORE / LEAN_CORE entries as
     failures. We simulate a healthy boot by injecting a fake agent
     whose registry covers everything in both tiers."""
-    from jaeger_ai.agent.skill_registry.toolset_scoping import CORE, LEAN_CORE
+    from jaeger_agent.skill_registry.toolset_scoping import CORE, LEAN_CORE
     fake_registry = dict.fromkeys(CORE | LEAN_CORE, "stub")
 
     class _FakeToolset:

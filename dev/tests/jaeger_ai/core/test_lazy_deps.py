@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from jaeger_ai.core.models import lazy_deps
-from jaeger_ai.core.models.lazy_deps import (
+from jaeger_agent.util.lazy_deps import (
     FeatureUnavailable,
     LAZY_DEPS,
     available,

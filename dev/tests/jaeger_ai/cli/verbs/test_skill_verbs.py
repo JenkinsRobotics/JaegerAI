@@ -62,7 +62,7 @@ def fake_bundled(tmp_path, monkeypatch):
     bundled_root.mkdir()
     _seed_bundled(bundled_root, "my_tool", version=1)
     _seed_bundled(bundled_root, "other_tool", version=2)
-    from jaeger_ai.agent.skill_registry import skill_loader as _sl
+    from jaeger_agent.skill_registry import skill_loader as _sl
     monkeypatch.setattr(_sl, "CORE_SKILLS_DIR", bundled_root, raising=True)
     return bundled_root
 
@@ -134,7 +134,7 @@ def test_clone_picks_highest_version_when_multiple(fake_layout, tmp_path, monkey
     bundled_root.mkdir()
     _seed_bundled(bundled_root, "my_tool", version=1)
     _seed_bundled(bundled_root, "my_tool", version=2)  # newer
-    from jaeger_ai.agent.skill_registry import skill_loader as _sl
+    from jaeger_agent.skill_registry import skill_loader as _sl
     monkeypatch.setattr(_sl, "CORE_SKILLS_DIR", bundled_root, raising=True)
 
     rc = skill_verbs._skill_clone(["my_tool"])

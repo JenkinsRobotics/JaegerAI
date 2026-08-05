@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.core.memory import sqlite_store
+from jaeger_agent.memory import sqlite_store
 
 
 @pytest.fixture(autouse=True)

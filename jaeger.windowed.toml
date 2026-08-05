@@ -14,7 +14,9 @@
 #  manifest" (manifest.py) — like jaeger.sim.toml.
 
 [app]
+id = "org.jenkinsrobotics.app.jaeger-ai"
 name = "jros-windowed"
+type = "application"
 version = "0.5.0"
 requires_framework = ">=0.1"
 mode = "fused"
@@ -36,7 +38,7 @@ backend = "inproc"            # fused mode, one process — the chassis
 # ── core: the Tier-1 agent/model brain (main-thread init, not
 #    supervised). The model boot + AgentBridge live here. ───────────
 [core]
-factory = "jaeger_ai.agent.loop.agent_core:make_core"
+factory = "jaeger_ai.core.agent_core:make_core"
 config_key = "agent"
 
 # ── nodes: Tier-3 voice/animation subsystems, supervisor-owned ──────

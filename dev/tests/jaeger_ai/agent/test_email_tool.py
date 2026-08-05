@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent.tools import email
+from jaeger_agent.tools import email
 from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
 
 

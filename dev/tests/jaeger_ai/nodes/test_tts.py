@@ -1,4 +1,4 @@
-"""Tests for ``jaeger_kokoro_tts.nodes.kokoro_tts`` (``TTSNode`` — the node half
+"""Tests for ``jaeger_kokoro_tts`` (``TTSNode`` — the node half
 of the 0.8 M1 engine-module; folded in from ``jaeger_os.nodes.tts``) —
 Track B.1.
 

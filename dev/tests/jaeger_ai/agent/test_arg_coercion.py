@@ -184,7 +184,7 @@ def test_dispatch_now_coerces_arrays_before_pydantic_validation():
     in ``dispatch``. Without coercion, Pydantic would reject the bare
     string ``"a"`` against a ``list[str]`` field."""
     from pydantic import BaseModel
-    from jaeger_ai.agent import ToolDef
+    from jaeger_agent import ToolDef
 
     class Args(BaseModel):
         tags: list[str]

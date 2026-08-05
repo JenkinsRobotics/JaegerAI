@@ -3,6 +3,81 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.10.0` — the agent is a module
+
+The brain moved out. `jaeger_ai/agent/` is gone: its tools, skills,
+prompts, skill registry, background workers, adapters, dialects, loop and
+workspace sandbox now ship as **jaeger-agent**, a JaegerOS `slot: mind`
+module any project can install. Roughly 43,000 lines left this repo;
+what stayed is what needs an instance, a desktop or a character.
+
+Why the whole folder rather than the loop: the loop alone was never the
+useful part. An embedder got a turn machine and an empty tool registry,
+so every project would have rebuilt file access, web fetch, code
+execution, memory, scheduling and skills before its agent could do
+anything. Those were general agent capabilities that happened to live in
+an application. `pip install jaeger-agent` now yields 96 tools, 107
+skills, and llama.cpp weights in-process — no server, no API key.
+
+JaegerAI keeps four files, in `core/`, and none of them is agent code —
+every one imports `jaeger_ai.main`:
+
+  `core/mind_runtime.py`  an `AgentRuntime` over JaegerAI's boot pipeline
+  `core/mind_node.py`     `MindNode` preconfigured with it
+  `core/agent_core.py`    the windowed chassis's Tier-1 core
+  `core/agent_bridge.py`  the 0.9-era constructor, kept for old callers
+
+They live beside `core/windowed.py`, which already referenced
+`AgentCore`. There is no shim package and no alias layer: all 248
+`jaeger_ai.agent.*` call sites now import `jaeger_agent` directly.
+
+Also gone: `agent/personas/`, the wizard-prefill templates retired at
+0.5.0 and superseded by `personality/characters/` — the character YAML
+carries the same soul text plus traits, lore and assets. Lilith's avatar
+bundle moved to `personality/characters/lilith/avatar/`, which is where
+the character schema's own `assets.avatar` pointer always said it was.
+`core/instance/personas.py`, the v1 loader for those templates, had zero
+callers and pointed at a directory that no longer existed.
+
+New `jaeger_ai/modules/` names the imported modules explicitly — one
+file per provider (`jaeger_agent.py`, `jaeger_kokoro_tts.py`,
+`jaeger_whisper_stt.py`), each declaring its slot, package, watched
+topics and availability gate. An operator reading the directory can see
+which provider fills each slot without tracing discovery.
+
+Two things worth knowing for anyone doing a similar move. Module-scope
+host imports are what break a standalone install, so the guard is now
+"no `jaeger_ai` import at column 0" enforced by actually importing the
+package in a subprocess with the host blocked. And `__file__`-relative
+paths fail SILENTLY across a move: skill and plugin discovery treat a
+missing directory as an empty one, so the agent booted reporting zero
+skills without raising — tests stayed green and only the benchmark
+caught it.
+
+Memory went with it. `core/memory/` was 1,796 lines with zero host
+imports — conversation and fact storage that was agent infrastructure
+filed under an application. So did the credential store, skill notes,
+the per-skill venv manager and the lazy-dependency gate. Traffic ran the
+other way too: the avatar tools moved to `nodes/animation/tools.py`,
+beside the node whose face they drive, and the fal.ai image/video tools
+stayed with their plugin. The test is not "is this useful" — everything
+is. It is whether the thing needs an application to mean anything.
+Memory does not; an avatar does.
+
+Dependency pins now track `@master` for all four Jaeger repos. The
+`@0.9.0` pins they replaced were actively wrong rather than merely
+stale: 0.10 is tested against jaeger-os 0.10.0, kokoro_tts 0.12.0 and
+whisper_stt 2.0.0, and 0.9.0 is the only tag any of those repos has
+published — so a fresh clone installed engines OLDER than anything this
+release was tested with. Not theoretical: kokoro's config schema dropped
+`sample_rate` between 0.9 and 2.0, and the mismatch aborts boot with a
+pydantic error rather than degrading. (`jaeger-agent@v1` was worse — that
+branch exists on no remote, so the requirement could not resolve at all.)
+
+Benchmark unchanged across the whole move: 80/81 on
+`gemma-4-e4b-it-q4_k_m`, 179 loop iterations against a 176 baseline,
+121 tools and 107 skills at boot.
+
 ## `0.9.6` — one word, one app, your name
 
 The de-confusion release. `jaeger` is system-wide: product installs

@@ -8,7 +8,7 @@ the always-on OPERATING_DISCIPLINE block, and the optional per-instance
 from __future__ import annotations
 
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.agent.prompts.prompts import _load_soul, build_system_prompt
+from jaeger_agent.prompts.prompts import _load_soul, build_system_prompt
 
 
 # ── operating discipline ────────────────────────────────────────────
@@ -200,7 +200,7 @@ def test_self_check_is_exposed_to_agent() -> None:
     ``run_benchmark`` (substrate health vs. answer quality).
 
     The old ``system_health`` name must be gone everywhere."""
-    from jaeger_ai.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
+    from jaeger_agent.skill_registry.toolset_scoping import CORE, TOOLSETS
     diagnostics = TOOLSETS.get("diagnostics", frozenset())
     assert "self_check" in diagnostics, (
         "self_check (the agent doctor) must be in the diagnostics toolset"

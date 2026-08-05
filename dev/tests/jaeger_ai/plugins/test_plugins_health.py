@@ -13,7 +13,7 @@ import pathlib
 import yaml
 
 import jaeger_ai.plugins as _plugins_pkg
-from jaeger_ai.agent.tools.plugins import list_plugins, setup_plugin
+from jaeger_agent.tools.plugins import list_plugins, setup_plugin
 
 PLUGINS_DIR = pathlib.Path(_plugins_pkg.__file__).parent
 
@@ -70,7 +70,7 @@ def test_setup_plugin_works_with_a_bound_layout() -> None:
     import pathlib
     import tempfile
 
-    from jaeger_ai.agent import tools as agent_tools
+    from jaeger_agent import tools as agent_tools
     from jaeger_ai.core.instance.instance import InstanceLayout
 
     try:

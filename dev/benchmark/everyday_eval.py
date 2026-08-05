@@ -360,10 +360,10 @@ def main() -> int:
         # SAFETY stubs -- see module docstring. Patched around the whole
         # drive loop; every case still exercises the real tool dispatch
         # + tier gating, only the final external side effect is faked.
-        import jaeger_ai.agent.tools.host as host_mod
-        import jaeger_ai.agent.tools.email as email_mod
-        import jaeger_ai.agent.tools.shortcuts as shortcuts_mod
-        import jaeger_ai.agent.tools.calendar as calendar_mod
+        import jaeger_agent.tools.host as host_mod
+        import jaeger_agent.tools.email as email_mod
+        import jaeger_agent.tools.shortcuts as shortcuts_mod
+        import jaeger_agent.tools.calendar as calendar_mod
 
         opened_calls: list[list[str]] = []
         sent_calls: list[tuple[str, str, str]] = []

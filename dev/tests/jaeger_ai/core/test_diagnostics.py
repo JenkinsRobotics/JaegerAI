@@ -155,10 +155,10 @@ def test_check_memory_uses_explicit_submodule_imports():
     ]
     code_text = "\n".join(code_lines)
     # The fix: explicit submodule path.
-    assert "from jaeger_ai.agent.tools.memory import" in code_text
+    assert "from jaeger_agent.tools.memory import" in code_text
     # The trap: package-level import that shadows the submodule with
     # the re-exported umbrella function.
-    assert "from jaeger_ai.agent.tools import memory" not in code_text
+    assert "from jaeger_agent.tools import memory" not in code_text
 
 
 def test_check_memory_round_trip_succeeds_on_bound_layout(tmp_path):
@@ -167,8 +167,8 @@ def test_check_memory_round_trip_succeeds_on_bound_layout(tmp_path):
     future change to the remember/recall return shape that makes the
     probe's ``.get('value')`` extraction fail."""
     from types import SimpleNamespace
-    from jaeger_ai.core.memory import memory as memmod
-    from jaeger_ai.core.memory import sqlite_store
+    from jaeger_agent.memory import memory as memmod
+    from jaeger_agent.memory import sqlite_store
     from jaeger_ai.core import context as _common
     from jaeger_ai.core.diagnostics.probe import _check_memory
 
@@ -241,7 +241,7 @@ def test_check_tool_registry_reads_jaeger_agent_dispatch_map():
     legacy ``_function_toolset``). A stub agent with the right shape
     must be detected; missing CORE names surface as a failure."""
     from jaeger_ai.core.diagnostics.probe import _check_tool_registry
-    from jaeger_ai.agent.skill_registry.toolset_scoping import CORE
+    from jaeger_agent.skill_registry.toolset_scoping import CORE
     from jaeger_ai import main as jmain
 
     # Stub: a CORE-complete dispatch map should pass.

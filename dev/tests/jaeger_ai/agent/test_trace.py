@@ -5,7 +5,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from jaeger_ai.agent import trace
+from jaeger_agent import trace
 from jaeger_os.transport import topics
 from jaeger_os.transport.inproc_bus import InProcBus
 

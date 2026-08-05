@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from jaeger_ai.agent.tools import skills as skill_tool
+from jaeger_agent.tools import skills as skill_tool
 
 
 def _stub_playbook(name: str, category: str, desc: str = "") -> Any:
@@ -45,7 +45,7 @@ def fake_playbooks(monkeypatch):
         _stub_playbook("epsilon", "code"),
         _stub_playbook("zeta",    "research"),
     ]
-    from jaeger_ai.agent.skill_registry import playbook_skills as _pb
+    from jaeger_agent.skill_registry import playbook_skills as _pb
     monkeypatch.setattr(_pb, "available_playbooks", lambda: list(corpus))
     return corpus
 

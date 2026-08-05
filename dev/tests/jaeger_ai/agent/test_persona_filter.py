@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from jaeger_ai.agent.prompts.persona_filter import (
+from jaeger_agent.prompts.persona_filter import (
     DEFAULT_MAX_CHARS,
     apply_persona_voice,
     filter_enabled,

@@ -240,7 +240,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_whisper_stt.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
+    ``jaeger_whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401
@@ -274,7 +274,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_kokoro_tts.nodes.kokoro_tts.persistent_player import (
+        from jaeger_kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401
@@ -303,8 +303,8 @@ def _check_skill_matrix(env: dict[str, str]) -> tuple[bool, str]:
                 resolve_instance_dir,
             )
             from jaeger_ai.core.instance.instance import InstanceLayout
-            from jaeger_ai.agent.skill_registry.skill_loader import discover_skills
-            from jaeger_ai.agent.skill_registry.playbook_skills import discover_playbooks
+            from jaeger_agent.skill_registry.skill_loader import discover_skills
+            from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
             root = Path(resolve_instance_dir(INSTANCE_NAME))
             layout = InstanceLayout(root=root)
             skills = discover_skills(layout)

@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-import jaeger_ai.agent.loop.bridge as bridge_mod
-from jaeger_ai.agent.loop.bridge import AgentBridge
+import jaeger_ai.core.agent_bridge as bridge_mod
+from jaeger_ai.core.agent_bridge import AgentBridge
 from jaeger_os.transport import InProcBus, topics
 from jaeger_ai.core.messages import ChatMessage, ChatReply
 

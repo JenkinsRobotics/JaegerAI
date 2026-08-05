@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent.skills.macos_computer_v1.goal_parser import parse_goal
+from jaeger_agent.skills.macos_computer_v1.goal_parser import parse_goal
 
 
 # ── opens ──────────────────────────────────────────────────────────

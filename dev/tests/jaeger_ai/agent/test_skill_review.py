@@ -6,8 +6,8 @@ run, smoke/benchmark-gated. Opted out → manual + backlog.
 import pathlib
 import tempfile
 
-from jaeger_ai.agent.background import skill_review
-from jaeger_ai.core.skill_improvement import skill_notes
+from jaeger_agent.background import skill_review
+from jaeger_agent.skill_improvement import skill_notes
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 

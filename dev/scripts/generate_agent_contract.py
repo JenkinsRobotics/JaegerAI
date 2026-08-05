@@ -95,7 +95,7 @@ def render() -> str:
     # Lazy import so a syntax error in rules.py surfaces here, not at
     # script-collection time.
     sys.path.insert(0, str(REPO / "src"))
-    from jaeger_ai.agent.prompts import rules as _rules
+    from jaeger_agent.prompts import rules as _rules
 
     for name, intro in _SECTIONS:
         text = getattr(_rules, name, None)

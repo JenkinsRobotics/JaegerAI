@@ -65,7 +65,7 @@ def plugin_credential(layout: Any, name: str) -> str:
     it."""
     if layout is not None:
         try:
-            from jaeger_ai.core import credentials as creds
+            from jaeger_agent import credentials as creds
             return creds.get_credential(layout, name)
         except Exception:  # noqa: BLE001 — absent/garbled in the store → try env
             pass
