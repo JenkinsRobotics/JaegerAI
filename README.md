@@ -1,206 +1,168 @@
-<h1 align="center">{{REPO_NAME}}</h1>
+# JaegerAgent
 
-<p align="center">
-  <em>{{DESCRIPTION}}</em>
-</p>
+JaegerAgent is the reusable, headless agent-brain module for JaegerOS.
 
-<p align="center">
-  <a href="https://github.com/JenkinsRobotics/{{REPO_NAME}}/releases"><img src="https://img.shields.io/badge/version-0.1.0-2EA44F?style=for-the-badge" alt="Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
-  <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/JaegerOS-pinned-58A6FF?style=for-the-badge" alt="JaegerOS pinned">
-</p>
-
----
-
-> ## Replace-these checklist (delete this block once done)
->
-> - [ ] `{{REPO_NAME}}` — every occurrence, this file + `docs/index.html` + `pyproject.toml.example`
-> - [ ] `{{DESCRIPTION}}` — one-line description, this file + `docs/index.html`
-> - [ ] `{{package_name}}` — the Python import name (snake_case) — rename the
->       `{{package_name}}/` directory itself, and every path inside it
-> - [ ] Fill in `{{package_name}}/module.yaml` (drop the `.example`
->       suffix from every `*.example` file once real values are in)
-> - [ ] Pin a real JaegerOS version range in `pyproject.toml.example`
->       (see [Ecosystem links](#ecosystem-links))
-> - [ ] Seed `dev/docs/reality/STATUS.md` with today's date and truth
-> - [ ] Enable GitHub Pages from `docs/` (see `docs/SITE.md`)
-> - [ ] Pick a LICENSE (Apache-2.0 shipped by default — swap if this repo
->       needs different terms)
-> - [ ] Building a project (a robot, a rig) instead of a module? Use
->       [`workspace/`](workspace/) instead of `{{package_name}}/` — see
->       [`workspace/README.md`](workspace/README.md) for its own checklist
-
----
-
-## What it is
-
-`{{REPO_NAME}}` is a **{{DESCRIPTION}}** built on
-[JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) — the framework
-layer of the Jaeger ecosystem (Bus · Node · modules/slots · supervisor ·
-safety · contract · capability layer). This repo doesn't fork or edit
-JaegerOS; it **pins** a release and builds on top of it, the same way a
-ROS package builds on ROS.
-
-This template scaffolds three different repo shapes. Pick the one that
-matches what you're building — see [`CONVENTIONS.md`](CONVENTIONS.md)
-for the full picture and when to reach for each:
-
-- **Module repo** (the `{{package_name}}/` directory at this repo's
-  root) — a self-contained capability (`module.yaml` + `config.py` +
-  `node.py` + tests) that plugs into **any** JaegerOS project through a
-  **slot** (see [`jaeger_os/nodes/kokoro_tts/`](https://github.com/JenkinsRobotics/JaegerOS/tree/master/jaeger_os/nodes/kokoro_tts)
-  for the canonical shape this mirrors). Use this when you're building
-  one swappable engine (a TTS backend, an STT backend, …) meant to be
-  used by many different projects.
-- **Workspace repo** (the [`workspace/`](workspace/) directory) — a
-  project that owns a **Body's bringup**: `topology.yaml` (controllers,
-  capabilities, e-stop scope), `manifest.toml` (the node graph that
-  actually boots), `unit.yaml` (this physical/simulated unit's identity
-  + live-verified gate), and `bringup/boot.py` (links → adapters →
-  e-stop → capabilities → runtime). Mirrors JaegerOS's own reference
-  hardware package, `jaeger_os/hardware/packages/jp01/`. Use this when
-  you're standing up a robot, a rig, or any other physical/simulated
-  body — see [`workspace/README.md`](workspace/README.md) to start.
-- **Suite app** — a project that owns a **Mind-facing product**: its
-  own faces (chat window, tray, voice), assembling JaegerOS + Jaeger AI
-  + whichever modules it needs (the `jaeger.toml` / `jaeger.windowed.toml`
-  manifest shapes in [Jaeger-AI](https://github.com/JenkinsRobotics/Jaeger-AI)
-  are the reference). Use this when you're building an agentic product
-  surface rather than a hardware bringup. **(planned)** — this template
-  doesn't scaffold a suite-app skeleton yet; start from Jaeger-AI itself
-  and pin forward rather than improvising one from this repo.
-
-See [`CONVENTIONS.md`](CONVENTIONS.md) for the rules every repo in the
-ecosystem follows, and the tier map in
-[Ecosystem links](#ecosystem-links). For the formal version of that
-tier map — five compositional roles (NODE, MODULE,
-PACKAGE/WORKSPACE, APP, DISTRIBUTION), a ROS comparison, and
-marketplace tagging — see [`TAXONOMY.md`](TAXONOMY.md). See
-[`examples/`](examples/README.md) for six worked concept mappings
-(a bare TTS module, a chatbot, JP01's own head, a lidar+SLAM demo, a
-six-axis arm, and JP01 itself) that exercise the taxonomy against
-real and archetypal apps, honest about what already exists versus
-what still needs building.
-
-## Install
+It is the piece an application or robot imports when it needs a working
+agent — not a loop you then have to furnish. A bare install brings its own
+tool surface, skill corpus, prompt assembly, workspace sandbox and local
+inference. It does not own a desktop window, installer, default character,
+or complete product experience; those belong to applications such as
+JaegerAI.
 
 ```bash
-git clone https://github.com/JenkinsRobotics/{{REPO_NAME}}.git
-cd {{REPO_NAME}}
-python3 -m venv .venv && source .venv/bin/activate
-cp pyproject.toml.example pyproject.toml   # after filling in the pin — see checklist above
-pip install -e .
+pip install jaeger-agent          # llama.cpp included; no server, no API key
 ```
 
-This repo depends on a **pinned** `jaeger-os` release — it does not
-vendor or fork the framework. See `pyproject.toml.example` for where the
-version range is declared.
+```python
+import jaeger_agent.tools         # ~96 tools register themselves
+from jaeger_agent import JaegerAgent, get_tools
+len(get_tools())                  # 96
+```
 
-## Quick start
+## Ecosystem identity
+
+| Field | Value |
+| --- | --- |
+| Repository | `jaeger-agent` |
+| Python distribution | `jaeger-agent` |
+| Python import | `jaeger_agent` |
+| Ecosystem ID | `org.jenkinsrobotics.mind.agent` |
+| Type | `module` |
+| JaegerOS slot / kind | `mind` / `mind` |
+
+JaegerAgent sits beside universal modules such as JaegerKokoroTTS and
+JaegerWhisperSTT. The difference is its slot: it provides the brain rather
+than one speech engine.
+
+## What belongs here
+
+The 0.11 extraction moved the whole agent surface out of JaegerAI, not just
+the loop — roughly 43,000 lines across 178 modules:
+
+- The agent loop, interruption, retries, loop backstop, verify gate
+- OpenAI, Anthropic, Hermes XML, llama.cpp and MLX adapters, plus six model
+  dialects and the drift parser local models need
+- **~96 tools** — files, web, code, memory, scheduling, board, background
+- **107 skills**, the v3 skill manifest, loader, curator and capability state
+- Toolset scoping and the tool-bundle groupings that keep a catalogue from
+  eating the context window
+- Prompt assembly and context blocks
+- The workspace sandbox — path resolution, read/write gates, audit trail
+- Tool validation, dispatch, parallel reads, and the context guard
+- The headless runtime contract (`AgentRuntime`), turn bridge, session
+  routing, bus messages, and a JaegerOS `slot: mind` node
+
+What remains in JaegerAI:
+
+- Windowed, TUI, tray, voice, and installer experiences
+- Characters, personas and the personality system
+- Desktop/personal-assistant tools that need a Mac rather than an agent
+- Instance management, model catalogue, plugins, and product policy
+- Its own `AgentRuntime` implementation over that pipeline
+
+A short list of seams still reaching back into the host — a memory backend,
+a credential store, a venv manager — is tracked in `jaeger_agent/host.py`.
+Each is bound lazily, so the package imports and runs without JaegerAI
+installed; only the individual tool that needs the missing piece fails, and
+it says so. That file is a ledger meant to shrink to nothing.
+
+MCP is an optional edge adapter for exposing tools or connecting remote
+clients. It is not the internal connection between JaegerAgent and a JaegerOS
+device; that connection uses the JaegerOS bus, topics, tools, and capabilities.
+
+## Install for development
 
 ```bash
-# Run this module's contract smoke test — proves module.yaml parses,
-# the factory builds a live node, and the bus contract round-trips —
-# all without touching real hardware or models.
-pytest {{package_name}}/tests
-
-# Or run it directly:
-python -m {{package_name}}.tests.test_module_contract
+git clone https://github.com/JenkinsRobotics/jaeger-agent.git
+cd jaeger-agent
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+pytest
 ```
 
-Wire the module into a running JaegerOS instance by pointing its module
-discovery at this package (see JaegerOS's `jaeger_os/core/modules.py` for
-how `discover_modules()` walks module roots) — or, for a project-tier
-repo, declare it in your instance's manifest.
+The package declares the compatible JaegerOS version range; CI currently tests
+against JaegerOS `master` while the new identity metadata settles. Pin the
+tested release range before publishing a JaegerAgent release.
 
-## Module layout
+## Use the agent directly
 
-The canonical shape every module/hardware-package repo in the ecosystem
-follows, mirroring [`jaeger_os/nodes/kokoro_tts/`](https://github.com/JenkinsRobotics/JaegerOS/tree/master/jaeger_os/nodes/kokoro_tts)
-in JaegerOS itself:
+The completed package can run a tool-using agent without JaegerAI:
 
-```
-{{package_name}}/
-├── __init__.py            ← exports the factory (module.yaml's `factory:` target)
-├── module.yaml.example    ← the manifest: slot, topics, tools, requires_*
-├── config.py.example      ← this module's settings-catalog schema slice
-├── node.py.example        ← the four-phase Node (setup → tick → teardown → health)
-├── docs/                  ← this module's own design notes
-│   └── DESIGN.md.example
-└── tests/
-    └── test_module_contract.py.example   ← the module-contract smoke test
-```
+```python
+from jaeger_agent import JaegerAgent, OpenAIAdapter
 
-One copy of every truth: the manifest (`module.yaml`) is the single
-source for what this module consumes, produces, and requires — nothing
-else in the repo should restate it.
+agent = JaegerAgent(
+    adapter=OpenAIAdapter(
+        provider="openai",
+        model="your-model",
+        api_key="...",
+    ),
+    system_prompt="You are the brain for this JaegerOS project.",
+)
 
-## Workspace layout
-
-The project-tier shape — a repo that brings up a Body (or any project
-that owns its own bringup), mirroring JaegerOS's own reference hardware
-package (`jaeger_os/hardware/packages/jp01/`):
-
-```
-workspace/
-├── README.md                  ← what a workspace repo is, and why these files
-├── topology.yaml.example      ← controllers, capabilities, safety — the
-│                                 Body's capability declaration
-├── manifest.toml.example      ← [[node]] graph: engine modules bind by
-│                                 slot=, the hardware package binds by factory
-├── unit.yaml.example          ← this unit's identity + live-verified gate
-├── requirements.txt.example   ← the pinned-stack pattern (JaegerOS +
-│                                 modules @ tag)
-├── bringup/
-│   └── boot.py.example         ← links → adapters → e-stop → capabilities
-│                                  → runtime
-└── SAFETY_CHECKLIST.md        ← walk before any live (non-simulated) run
+print(agent.run_turn("Inspect the available tools and report system health."))
 ```
 
-Start at [`workspace/README.md`](workspace/README.md) if this repo is a
-workspace rather than a module — it has its own replace-these checklist.
+`llama-cpp-python` is a BASE dependency, not an extra, because
+`provider = "llama_cpp"` is the default — a robot that pip-installs this
+gets a brain that runs on its own hardware with no server and no account:
 
-## Development
+```python
+from jaeger_agent.runtime import create_runtime
 
-```bash
-pytest {{package_name}}/tests    # module-contract smoke test
-ruff check                       # lint, if configured
+runtime = create_runtime(config={
+    "model_path": "~/models/gemma-4-E4B-it-Q4_K_M.gguf",
+    "ctx": 8192,
+})
+runtime.run_turn("what tools do you have?", session_key="s")
 ```
 
-Follow [`CONVENTIONS.md`](CONVENTIONS.md) — especially: no doc describes
-behavior the code doesn't implement yet (mark it `(planned)` instead),
-and `dev/docs/reality/STATUS.md` stays truthful — any commit that changes
-behavior updates it in the same commit.
+Extras are only for the other backends: `.[openai]` (which is a client for
+the OpenAI-compatible *wire format* — LM Studio, Ollama, llama.cpp's server
+and vLLM all speak it, so it covers local servers too), `.[anthropic]`, or
+`.[mlx]`.
 
-CI (`.github/workflows/ci.yml`) runs the test suite and, if this repo
-sits below the Mind in the dependency graph, the nervous-system dependency
-check (see `CONVENTIONS.md` → "The connection rule").
+## Embed a runtime node
 
-## Ecosystem links
+Implement the small runtime boundary and inject it directly:
 
-- [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) — the framework
-  this repo pins (Bus · Node · modules/slots · supervisor · safety ·
-  contract · capability layer). You build on it; you don't edit it.
-- [Jaeger-AI](https://github.com/JenkinsRobotics/Jaeger-AI) — the turnkey
-  agentic product (the Mind): loop, tools, skills, memory, persona, local
-  inference, and its own faces (chat app, TUI, voice).
-- [JP01](https://github.com/JenkinsRobotics/JP01) — the reference
-  hardware Jaeger (the Body); the first repo to consume out-of-tree
-  modules and hardware packages the way this template scaffolds.
+```python
+from jaeger_agent import MindNode, TurnResult
 
----
+
+class MyRuntime:
+    def run_turn(self, text: str, *, session_key: str) -> TurnResult:
+        return TurnResult(text=f"You said: {text}")
+
+    def close(self) -> None:
+        pass
+
+
+node = MindNode(bus=bus, runtime=MyRuntime())
+```
+
+For manifest-driven use, expose a factory with this shape:
+
+```python
+def create_runtime(*, bus, config):
+    return MyRuntime()
+```
+
+Then configure `runtime_factory = "my_project.agent:create_runtime"` for the
+mind node. The package resolves that factory without importing the containing
+application itself.
+
+## Extraction status
+
+The JaegerAI `0.10` split is complete. JaegerAgent owns the reusable runtime,
+loop, provider adapters, message schemas, tool execution, context management,
+and mind module. JaegerAI consumes this package and retains only its application
+surfaces, bundled content, product configuration, and product-specific hooks.
+
+See [`docs/EXTRACTION.md`](docs/EXTRACTION.md) for ownership rules and the
+ordered migration milestones.
 
 ## License
 
 [Apache-2.0](LICENSE) © Jenkins Robotics
-
-## Standalone use
-
-Every module runs by itself — no agent, no app:
-
-    python -m {{package_name}} --smoke
-
-See `__main__.py` (from the `.example`). Inputs/outputs are declared in
-`module.yaml` (`consumes`/`produces` topics, `tools`, `requires_*`) — the
-slot contract IS the interface.
