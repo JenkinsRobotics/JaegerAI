@@ -5,7 +5,7 @@ AgentActivity message, the display.activity_trace setting, and the bridge's
 event adapter forwarding agent.activity onto the chassis bus.
 """
 
-from jaeger_ai.agent.loop.bridge import _BusEventAdapter
+from jaeger_ai.core.agent_bridge import _BusEventAdapter
 from jaeger_ai.core.instance.schemas import DisplayConfig
 from jaeger_ai.core.messages import AgentActivity
 

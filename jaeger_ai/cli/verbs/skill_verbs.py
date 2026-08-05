@@ -70,7 +70,7 @@ def _skill_list(argv: list[str]) -> int:
 
     # Tool-skills (the ``<name>_v<N>`` pattern) — discovered by the
     # skill loader with instance-wins-on-collision merge.
-    from jaeger_ai.agent.skill_registry.skill_loader import discover_skills
+    from jaeger_agent.skill_registry.skill_loader import discover_skills
     tool_skills = discover_skills(layout)
     print(f"# Tool-skills (active resolver) — instance {name!r}")
     if not tool_skills:
@@ -85,7 +85,7 @@ def _skill_list(argv: list[str]) -> int:
     print()
     print(f"# Playbook skills (loaded via skill(action='view'))")
     try:
-        from jaeger_ai.agent.skill_registry import playbook_skills as _pb
+        from jaeger_agent.skill_registry import playbook_skills as _pb
         playbooks = _pb.available_playbooks()
     except Exception as exc:  # noqa: BLE001
         print(f"  (couldn't load playbook list: {exc})", file=sys.stderr)
@@ -122,7 +122,7 @@ def _skill_clone(argv: list[str]) -> int:
     from jaeger_ai.core.instance.instance import (
         InstanceLayout, default_instance_name, resolve_instance_dir,
     )
-    from jaeger_ai.agent.skill_registry.skill_loader import (
+    from jaeger_agent.skill_registry.skill_loader import (
         CORE_SKILLS_DIR, _scan_zone,
     )
 
@@ -146,7 +146,7 @@ def _skill_clone(argv: list[str]) -> int:
               file=sys.stderr)
         # Hint about playbook skills, which require a manual cp.
         try:
-            from jaeger_ai.agent.skill_registry import playbook_skills as _pb
+            from jaeger_agent.skill_registry import playbook_skills as _pb
             pb_match = next(
                 (p for p in _pb.available_playbooks() if p.name == args.name),
                 None,

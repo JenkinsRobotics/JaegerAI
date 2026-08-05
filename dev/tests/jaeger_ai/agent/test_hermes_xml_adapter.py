@@ -16,13 +16,13 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     HermesXMLAdapter,
     JaegerAgent,
     clear_registry,
     register_tool,
 )
-from jaeger_ai.agent.adapters.hermes_xml import HERMES_TOOL_INSTRUCTIONS
+from jaeger_agent.adapters.hermes_xml import HERMES_TOOL_INSTRUCTIONS
 from jaeger_os.core.tools.tool_schema import ToolDef
 
 

@@ -13,7 +13,7 @@ import pathlib
 import tempfile
 import textwrap
 
-from jaeger_ai.agent.skill_registry.skill_loader import reset_registered
+from jaeger_agent.skill_registry.skill_loader import reset_registered
 from jaeger_ai.core.diagnostics.doctor import run_doctor
 from jaeger_ai.core.instance.instance import InstanceLayout
 

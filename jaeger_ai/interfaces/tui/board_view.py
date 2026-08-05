@@ -18,7 +18,7 @@ from rich.console import Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
-from jaeger_ai.agent.background.board import COLUMNS, Card
+from jaeger_agent.background.board import COLUMNS, Card
 
 
 # Same column-tint as the legacy vertical view, kept stable so the eye

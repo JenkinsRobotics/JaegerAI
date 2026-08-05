@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-from jaeger_ai.agent.skill_registry.skill_preprocessing import preprocess_skill
+from jaeger_agent.skill_registry.skill_preprocessing import preprocess_skill
 
 
 def test_body_without_placeholders_is_unchanged():

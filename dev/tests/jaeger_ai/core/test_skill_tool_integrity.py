@@ -54,7 +54,7 @@ def _decorated_tool_names(src: str) -> set[str]:
 
 @pytest.fixture(scope="module")
 def registry_names() -> set[str]:
-    import jaeger_ai.agent.tools  # noqa: F401 — triggers module-level registration
+    import jaeger_agent.tools  # noqa: F401 — triggers module-level registration
     from jaeger_os.core.tools.tool_registry import get_tools
     names = {t.name for t in get_tools()}
     for path in _SOURCE_ROOT.rglob("*.py"):
@@ -109,8 +109,8 @@ def test_toolset_maps_only_name_real_tools(registry_names):
     removed kanban umbrella, the renamed `skill`, never-registered
     read_traits/adjust_trait, and seven pre-rename computer_* names
     lingering here)."""
-    from jaeger_ai.agent.skill_registry.toolset_scoping import CORE, TOOLSETS
-    from jaeger_ai.agent.schemas.tool_bundles import JAEGER_TOOLSETS
+    from jaeger_agent.skill_registry.toolset_scoping import CORE, TOOLSETS
+    from jaeger_agent.schemas.tool_bundles import JAEGER_TOOLSETS
     offenders: list[str] = []
     for name in CORE:
         if name not in registry_names:

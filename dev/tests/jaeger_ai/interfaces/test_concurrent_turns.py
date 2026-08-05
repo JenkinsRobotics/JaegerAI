@@ -222,7 +222,7 @@ def test_text_turn_speaks_answer_when_model_misses_tts_tool(monkeypatch):
     tui._render_answer = lambda text, **_k: rendered.append(text)
 
     import jaeger_ai.main as main
-    speak_mod = importlib.import_module("jaeger_ai.agent.tools.speak")
+    speak_mod = importlib.import_module("jaeger_agent.tools.speak")
 
     monkeypatch.setattr(
         main,

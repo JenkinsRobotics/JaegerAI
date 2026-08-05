@@ -342,7 +342,7 @@ class ChatWindow(QWidget):
         <name>` → bring one live in-process from its saved credential (same
         path as the agent's activate_plugin tool + the Studio button)."""
         try:
-            from jaeger_ai.agent.tools.plugins import list_plugins
+            from jaeger_agent.tools.plugins import list_plugins
             from jaeger_ai.main import activate_plugin_inprocess
             from jaeger_ai.plugins import list_bridges
         except Exception as exc:  # noqa: BLE001

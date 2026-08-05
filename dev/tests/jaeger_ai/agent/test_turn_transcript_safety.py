@@ -19,14 +19,14 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     JaegerAgent,
     Message,
     ProviderAdapter,
     clear_registry,
     register_tool,
 )
-from jaeger_ai.agent.util.context_guard import (
+from jaeger_agent.util.context_guard import (
     ContextBudget,
     ContextGuard,
     ContextOverflow,
@@ -281,7 +281,7 @@ def test_interrupted_turn_does_not_resurface_previous_turns_answer():
         flight — exactly what ``interruptible_call`` produces."""
 
         def call(self, formatted, interrupt_event, **kwargs):  # noqa: ARG002
-            from jaeger_ai.agent.loop.interrupt import AgentInterrupted
+            from jaeger_agent.loop.interrupt import AgentInterrupted
             interrupt_event.set()
             raise AgentInterrupted("cancelled")
 

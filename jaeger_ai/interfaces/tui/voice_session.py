@@ -57,7 +57,7 @@ def _wake_phrases(name: str | None) -> tuple[str, ...]:
     banner. The "jaeger" defaults carry phonetic variants (yeager / yager /
     jager) that Whisper tends to mishear.
     """
-    from jaeger_whisper_stt.nodes.whisper_stt.engine._base import DEFAULT_WAKE_PHRASES
+    from jaeger_whisper_stt.engine._base import DEFAULT_WAKE_PHRASES
 
     clean = (name or "").strip().lower()
     if not clean or clean == "jaeger":
@@ -206,7 +206,7 @@ class VoiceController:
             self._chimes = None
 
         try:
-            from jaeger_ai.agent.tools.speak import warm_kokoro
+            from jaeger_agent.tools.speak import warm_kokoro
             warm_kokoro()  # idempotent — usually already warm from boot
         except Exception:  # noqa: BLE001
             pass

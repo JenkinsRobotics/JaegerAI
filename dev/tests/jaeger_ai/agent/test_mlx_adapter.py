@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from jaeger_ai.agent import MLXAdapter
+from jaeger_agent import MLXAdapter
 
 
 class _FakeTokenizer:
@@ -174,7 +174,7 @@ def test_stream_emits_deltas_and_ttft(monkeypatch):
 
 
 def test_interrupt_breaks_stream_at_token_boundary(monkeypatch):
-    from jaeger_ai.agent.loop.interrupt import AgentInterrupted
+    from jaeger_agent.loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
     chunks = ["a"] * 50
@@ -242,7 +242,7 @@ def test_parse_tags_thinking_exhaustion():
 
 
 def test_bridge_selects_mlx_adapter_for_mlx_client_shape():
-    from jaeger_ai.agent.loop.runtime_bridge import _adapter_for_client
+    from jaeger_agent.loop.runtime_bridge import _adapter_for_client
 
     fake_client = SimpleNamespace(
         _mlx_model=object(),
@@ -298,7 +298,7 @@ def test_heldback_prefix_flushes_when_stream_ends(monkeypatch):
 
 
 def test_scan_stream_text_pure_helper():
-    from jaeger_ai.agent.adapters.mlx import _scan_stream_text
+    from jaeger_agent.adapters.mlx import _scan_stream_text
     stops = ("<|im_end|>",)
     # Full marker in one piece → emit head, stop.
     emit, pending, stopped = _scan_stream_text("", "answer<|im_end|>tail", stops)

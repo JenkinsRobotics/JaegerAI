@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent.background.deepthink_runner import run_one_task
-from jaeger_ai.core.memory import sqlite_store
-from jaeger_ai.core.skill_improvement import skill_revisions
+from jaeger_agent.background.deepthink_runner import run_one_task
+from jaeger_agent.memory import sqlite_store
+from jaeger_agent.skill_improvement import skill_revisions
 
 
 @pytest.fixture()

@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.core.memory import memory as mem
-from jaeger_ai.core.memory import sqlite_store
+from jaeger_agent.memory import memory as mem
+from jaeger_agent.memory import sqlite_store
 
 
 @pytest.fixture(autouse=True)

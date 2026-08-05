@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent.background.deepthink_verify import (
+from jaeger_agent.background.deepthink_verify import (
     RETRY_TAG,
     settle_task,
     verify_outcome,
 )
-from jaeger_ai.core.memory import sqlite_store
+from jaeger_agent.memory import sqlite_store
 
 
 @pytest.fixture()

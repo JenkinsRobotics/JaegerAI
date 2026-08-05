@@ -104,7 +104,7 @@ def test_run_shell_blocks_a_hardline_command_below_the_tier_prompt():
     """The guard is applied OUTSIDE @requires_tier — a catastrophic
     command is refused with no policy installed and no prompt shown: the
     tier-gated body is never reached."""
-    from jaeger_ai.agent.tools.code import run_shell
+    from jaeger_agent.tools.code import run_shell
 
     out = run_shell(command="rm -rf /")
     assert out["hardline_blocked"] is True
@@ -120,7 +120,7 @@ def test_run_shell_lets_a_safe_command_reach_the_tier_layer():
         PermissionPolicy,
         use_policy,
     )
-    from jaeger_ai.agent.tools.code import run_shell
+    from jaeger_agent.tools.code import run_shell
 
     with use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
         out = run_shell(command="echo hello", timeout_s=10)

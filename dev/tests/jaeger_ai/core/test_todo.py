@@ -7,7 +7,7 @@ every item is done.
 
 from __future__ import annotations
 
-from jaeger_ai.agent.tools.todo import TodoStore, reset_todos, todo
+from jaeger_agent.tools.todo import TodoStore, reset_todos, todo
 
 
 # ── TodoStore ───────────────────────────────────────────────────────

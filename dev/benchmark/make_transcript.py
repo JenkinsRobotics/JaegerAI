@@ -70,7 +70,7 @@ def _tool_schema() -> str:
     each tool's name + description + params, and use_skill's skill-name enum.
     This is the OTHER half of 'what we send' — the prompt is the first half."""
     try:
-        import jaeger_ai.agent.tools  # noqa: F401 — registers tools on import
+        import jaeger_agent.tools  # noqa: F401 — registers tools on import
         from jaeger_os.core.tools.tool_registry import get_tools
         tools = sorted(get_tools(), key=lambda t: t.name)
     except Exception as e:  # pragma: no cover

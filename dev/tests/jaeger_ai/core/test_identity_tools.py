@@ -8,7 +8,7 @@ model from corrupting its own identity.
 
 from __future__ import annotations
 
-from jaeger_ai.agent.tools.identity_tools import set_name, update_soul
+from jaeger_agent.tools.identity_tools import set_name, update_soul
 
 
 def test_set_name_rejects_empty() -> None:

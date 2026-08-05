@@ -28,8 +28,8 @@ from jaeger_os.core.safety.permissions import (
     PermissionPolicy,
     use_policy,
 )
-from jaeger_ai.agent.tools import remote as remote_tool
-from jaeger_ai.agent.tools.remote import ssh_exec
+from jaeger_agent.tools import remote as remote_tool
+from jaeger_agent.tools.remote import ssh_exec
 
 
 # ── host validation (no SSH binary needed) ─────────────────────────

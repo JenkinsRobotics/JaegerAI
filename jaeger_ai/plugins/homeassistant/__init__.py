@@ -67,7 +67,7 @@ def _credential(*names: str) -> str:
     ``jaeger_os.plugins.plugin_credential`` with alias support."""
     layout = _layout_or_none()
     if layout is not None:
-        from jaeger_ai.core import credentials as creds
+        from jaeger_agent import credentials as creds
         for name in names:
             try:
                 value = creds.get_credential(layout, name)

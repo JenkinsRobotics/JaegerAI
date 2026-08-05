@@ -32,8 +32,8 @@ def _registered_tools():
     # remain main.py builtins (via _register_builtins). Do NOT clear_registry()
     # — module wrappers can't re-register after a clear (import-cached), and
     # clearing also polluted later tests. Import both sources and read.
-    import jaeger_ai.agent.tools  # noqa: F401 — module-level tool registrations
-    from jaeger_ai.agent import get_tools
+    import jaeger_agent.tools  # noqa: F401 — module-level tool registrations
+    from jaeger_agent import get_tools
     from jaeger_ai.main import _register_builtins
     _register_builtins(client=None)
     return {t.name: t.fn for t in get_tools()}
@@ -72,7 +72,7 @@ def test_read_tools_carry_the_read_only_tier() -> None:
 
 def test_run_shell_impl_is_privileged() -> None:
     # `terminal` wraps run_shell, which is gated at the implementation.
-    from jaeger_ai.agent.tools.code import run_shell
+    from jaeger_agent.tools.code import run_shell
     assert get_tier(run_shell) == PermissionTier.PRIVILEGED
 
 

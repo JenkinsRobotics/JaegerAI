@@ -9,19 +9,34 @@
 # re-listed here. Pinned to lower bounds so a fresh clone gets the
 # latest patch releases.
 
-# --- framework + engine modules (git dependencies — none of the three
-# have PyPI releases yet). PEP 508 direct references, not `-e ../X` —
-# setuptools' dynamic-dependencies file parser only accepts requirement
-# specifiers, not pip's `-e`/`-r` directives. Pinned to @master for 0.9;
-# switch to tag pins (e.g. @0.9.0 / @1.0.0 / @1.0.0) once each repo cuts
-# a release tag. A dev clone with sibling ~/GITHUB/{JaegerOS,
-# JaegerKokoroTTS,JaegerWhisperSTT} checkouts gets editable installs of
-# those instead — see install.sh's sibling-detection step. kokoro_tts +
-# whisper_stt are DEFAULT deps (not optional extras) as of 0.9: a robot
-# needs a voice out of the curl one-liner, not a follow-up install. ---
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
-jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@0.9.0
-jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@0.9.0
+# --- framework + reusable mind + engine modules (git dependencies —
+# none of these have PyPI releases yet). PEP 508 direct references, not
+# `-e ../X` — setuptools' dynamic-dependencies file parser only accepts
+# requirement specifiers, not pip's `-e`/`-r` directives. A dev clone
+# with sibling ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,
+# JaegerWhisperSTT} checkouts gets editable installs of those instead —
+# see install.sh's sibling-detection step. kokoro_tts + whisper_stt are
+# DEFAULT deps (not optional extras) as of 0.9: a robot needs a voice out
+# of the curl one-liner, not a follow-up install.
+#
+# ALL FOUR TRACK @master, and the 0.9.0 tag pins they replaced were
+# actively wrong rather than merely stale. 0.10 is tested against
+# jaeger-os 0.10.0, kokoro_tts 0.12.0, whisper_stt 2.0.0 and jaeger-agent
+# 1.0.0; the only tag any of those repos has published is 0.9.0. A fresh
+# clone pinned there installed engines OLDER than anything this release
+# was tested with, and that is not a theoretical hazard — kokoro's config
+# schema dropped `sample_rate` between 0.9 and 2.0, so the mismatch
+# aborted boot with a pydantic extra_forbidden error rather than
+# degrading. (jaeger-agent@v1 was worse: that branch does not exist on
+# the remote at all, so the requirement could not resolve for anyone.)
+#
+# Switch each back to a tag pin the moment that repo cuts one matching
+# the version this release was tested against. Tracking a branch is the
+# lesser evil while four repos release together, not the destination.
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
+jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@master
+jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
+jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master
 
 # --- agent core ---
 pydantic>=2.0

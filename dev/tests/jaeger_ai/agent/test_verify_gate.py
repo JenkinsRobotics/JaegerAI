@@ -8,9 +8,8 @@ Design: dev/docs/reality/agentic_runners.md.
 
 from __future__ import annotations
 
-import pytest
-
-from jaeger_ai.agent.loop.verify_gate import (
+from jaeger_agent.adapters.base import ProviderAdapter
+from jaeger_agent.loop.verify_gate import (
     CLAIM_NUDGE,
     PLAN_NUDGE,
     gate_enabled,
@@ -138,9 +137,6 @@ def test_kill_switch(monkeypatch):
 # ── loop wiring: one nudge max, nudge never persists ───────────────
 
 
-from jaeger_ai.agent.adapters.base import ProviderAdapter
-
-
 class _ScriptedAdapter(ProviderAdapter):
     """Returns scripted assistant messages in order (mirrors the
     test_hermes_adoption pattern)."""
@@ -175,7 +171,7 @@ class _NamedTool:
 
 
 def _agent(replies):
-    from jaeger_ai.agent.loop.jaeger_agent import JaegerAgent
+    from jaeger_agent.loop.jaeger_agent import JaegerAgent
     agent = JaegerAgent(adapter=_ScriptedAdapter(replies))
     agent._all_tools = [_NamedTool("execute_code")]
     return agent

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent.tools import contacts
+from jaeger_agent.tools import contacts
 from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
 
 

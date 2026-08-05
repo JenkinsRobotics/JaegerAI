@@ -22,7 +22,7 @@ from jaeger_ai.core.context import (
     SandboxError, _require_layout, _resolve_write,
 )
 import jaeger_ai.core.context as _common
-from jaeger_ai.agent.tools import files as file_tools
+from jaeger_agent.tools import files as file_tools
 
 
 # ── layout / ensure_dirs ────────────────────────────────────────────
@@ -159,7 +159,7 @@ def test_workspace_override_redirects_writes(tmp_path, monkeypatch):
     """When ``bind(..., workspace_override=...)`` is called, every
     ``workspace/...`` write lands at the override path instead of
     ``<instance>/workspace/``."""
-    from jaeger_ai.agent import tools as jaeger_tools
+    from jaeger_agent import tools as jaeger_tools
 
     inst_root = tmp_path / "inst"
     inst_root.mkdir()
@@ -182,7 +182,7 @@ def test_workspace_override_redirects_writes(tmp_path, monkeypatch):
 
 def test_workspace_override_creates_target_dir(tmp_path):
     """``bind()`` creates the override dir if it doesn't exist."""
-    from jaeger_ai.agent import tools as jaeger_tools
+    from jaeger_agent import tools as jaeger_tools
 
     inst = tmp_path / "inst"
     inst.mkdir()
@@ -197,7 +197,7 @@ def test_workspace_override_creates_target_dir(tmp_path):
 
 def test_workspace_override_expands_user(tmp_path, monkeypatch):
     """``~/Documents/foo`` is expanded relative to $HOME."""
-    from jaeger_ai.agent import tools as jaeger_tools
+    from jaeger_agent import tools as jaeger_tools
 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()

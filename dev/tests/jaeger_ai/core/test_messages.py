@@ -20,8 +20,12 @@ def test_topics_follow_act_sense_convention() -> None:
     # core.messages dataclass shadow) — AgentBridge subscribes to it
     # directly; pin the topic string here too. (msgspec Struct fields
     # are class-level descriptors, not the default value — check an
-    # instance, same as ``topics.SENSE_TRANSCRIPT``.)
-    assert topics.Transcript().topic == topics.SENSE_TRANSCRIPT == "/sense/transcript"
+    # instance, same as ``topics.SENSE_STT_TRANSCRIPT``.)
+    assert (
+        topics.Transcript().topic
+        == topics.SENSE_STT_TRANSCRIPT
+        == "/sense/stt/transcript"
+    )
 
 
 def test_chat_message_round_trips_over_the_bus() -> None:

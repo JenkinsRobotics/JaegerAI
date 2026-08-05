@@ -1,0 +1,315 @@
+{
+  "total": 81,
+  "passed": 80,
+  "pass_rate": 0.988,
+  "routing_passed": 63,
+  "routing_total": 63,
+  "answer_passed": 47,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 497.16,
+  "metrics": {
+    "avg_latency_s": 6.138,
+    "p50_latency_s": 2.55,
+    "p95_latency_s": 26.158,
+    "min_latency_s": 0.331,
+    "max_latency_s": 50.336,
+    "total_tool_dispatches": 114,
+    "avg_tools_per_turn": 1.41,
+    "answer_tokens_total": 9937,
+    "answer_tokens_avg": 122.7,
+    "answer_tokens_per_sec": 20.0,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 3143926,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.33,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 0.739,
+    "ttft_p50_s": 0.227,
+    "ttft_p95_s": 0.42,
+    "ttft_reported": 81
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 9.514,
+      "p95_latency_s": 41.609,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "pass_rate": 0.964,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 5.51,
+      "p95_latency_s": 41.609,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "pass_rate": 1.0,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 5.69,
+      "p95_latency_s": 13.49,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 12,
+      "pass_rate": 1.0,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 1.965,
+      "p95_latency_s": 3.327,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "pass_rate": 1.0,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 2.598,
+      "p95_latency_s": 4.135,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 81,
+      "passed": 80,
+      "pass_rate": 0.988,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 6.138,
+      "p95_latency_s": 26.158,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 27,
+      "avg_latency_s": 5.51
+    },
+    "files": {
+      "total": 15,
+      "passed": 15,
+      "avg_latency_s": 4.002
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 2.615
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 3.478
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 1.857
+    },
+    "code": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 5.914
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.119
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 5.69
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 12,
+      "avg_latency_s": 1.965
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 2.598
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 5.786
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.791
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.178
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 1.955
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 11.503
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.662
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 4.299
+    },
+    "skill": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 29.41
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 12.977
+    },
+    "research": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 29.439
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 4.537
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 5.34
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.652
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 7.182
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.368
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 24.889
+    }
+  },
+  "failures": [
+    {
+      "id": "free_text_story",
+      "prompt": "tell me a one sentence story about a robot",
+      "tools_called": [],
+      "answer": "Jaeger, a gleaming chrome automaton, polished the last dust mote from the forgotten corner of the moon base, humming a forgotten lullaby into the silent vacuum.",
+      "routing_ok": null,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 513.48,
+  "load_s": 52.22,
+  "category_breakdown": {
+    "routing": {
+      "passed": 27,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 11,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 9,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 12,
+      "total": 12
+    },
+    "files": {
+      "passed": 15,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 5,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 4,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 5,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 1,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 2,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260712-210421",
+  "benchmark_version": "1.3"
+}

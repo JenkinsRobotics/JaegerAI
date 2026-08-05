@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent.util.context_guard import (
+from jaeger_agent.util.context_guard import (
     ContextBudget,
     ContextGuard,
     ContextOverflow,

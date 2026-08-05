@@ -70,11 +70,11 @@ from ..main import (
     run_for_voice,
     shutdown_extensions,
 )
-from ..agent import tools as agent_tools
-from jaeger_ai.agent.background.cron_runner import CronRunner
+from jaeger_agent import tools as agent_tools
+from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import InstanceLayout, default_instance_name, resolve_instance_dir
 from jaeger_ai.core.instance.schemas import Config, load_yaml
-from jaeger_ai.agent.prompts.prompts import build_system_prompt
+from jaeger_agent.prompts.prompts import build_system_prompt
 
 
 def main() -> int:
@@ -252,7 +252,7 @@ def main() -> int:
     )
 
     # ── Warm TTS (and wire the reference buffer if barge-in is on) ───
-    from ..agent.tools.speak import _get_tts
+    from jaeger_agent.tools.speak import _get_tts
     tts = _get_tts()
     if reference_buffer is not None:
         tts.reference_buffer = reference_buffer
@@ -285,7 +285,7 @@ def main() -> int:
     # AVAudioEngine (PyObjC), otherwise it comes up via sounddevice
     # exactly as in 0.2.x.
     if args.stt_mode == "continuous":
-        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTContinuous
+        from jaeger_whisper_stt.engine import WhisperSTTContinuous
         stt = WhisperSTTContinuous(
             model_name=args.fast_model,
             require_wake_word=require_wake_word,
@@ -294,7 +294,7 @@ def main() -> int:
             audio_backend=args.audio_backend,
         )
     else:
-        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTTwoPass
+        from jaeger_whisper_stt.engine import WhisperSTTTwoPass
         stt = WhisperSTTTwoPass(
             fast_model_name=args.fast_model,
             accurate_model_name=args.accurate_model,

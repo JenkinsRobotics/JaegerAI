@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     JaegerAgent,
     Message,
     ProviderAdapter,
@@ -23,7 +23,7 @@ from jaeger_ai.agent import (
     clear_registry,
     register_tool_instance,
 )
-from jaeger_ai.agent.util.context_guard import (
+from jaeger_agent.util.context_guard import (
     DIGEST_PREFIX,
     ContextBudget,
     ContextGuard,
@@ -178,7 +178,7 @@ class _AuthenticationError(Exception):
 
 
 def test_rate_limit_retries_same_adapter_then_succeeds(monkeypatch):
-    import jaeger_ai.agent.loop.jaeger_agent as loop_mod
+    import jaeger_agent.loop.jaeger_agent as loop_mod
     monkeypatch.setattr(loop_mod, "_retry_delay", lambda kind, attempt: 0.01)
 
     primary = _ScriptedAdapter([
@@ -195,7 +195,7 @@ def test_rate_limit_retries_same_adapter_then_succeeds(monkeypatch):
 
 
 def test_auth_error_skips_retry_and_falls_back_immediately(monkeypatch):
-    import jaeger_ai.agent.loop.jaeger_agent as loop_mod
+    import jaeger_agent.loop.jaeger_agent as loop_mod
     monkeypatch.setattr(loop_mod, "_retry_delay", lambda kind, attempt: 0.01)
 
     primary = _ScriptedAdapter([
@@ -381,7 +381,7 @@ def test_lone_surrogates_scrubbed_before_model_call():
 
 
 def test_repair_recovers_truncated_tool_args():
-    from jaeger_ai.agent.dialects import repair_arguments
+    from jaeger_agent.dialects import repair_arguments
     args, ok = repair_arguments('{"path": "notes.txt", "content": "abc')
     assert ok is True
     assert args["path"] == "notes.txt"
@@ -389,7 +389,7 @@ def test_repair_recovers_truncated_tool_args():
 
 
 def test_repair_recovers_control_chars_with_truncation():
-    from jaeger_ai.agent.dialects import repair_arguments
+    from jaeger_agent.dialects import repair_arguments
     args, ok = repair_arguments('{"text": "line one\nline two", "n": 2')
     assert ok is True
     assert args["n"] == 2
@@ -599,7 +599,7 @@ def test_summarizer_failure_falls_back_to_deterministic_digest():
 
 
 def test_loop_passes_on_delta_only_when_listener_installed():
-    from jaeger_ai.agent import AgentCallbacks
+    from jaeger_agent import AgentCallbacks
 
     captured: dict[str, Any] = {}
 
@@ -628,8 +628,8 @@ def test_loop_passes_on_delta_only_when_listener_installed():
 
 def test_aggregator_emits_text_deltas():
     import threading
-    from jaeger_ai.agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_ai.agent.loop.interrupt import CallProgress
+    from jaeger_agent.adapters.openai import _aggregate_chat_stream
+    from jaeger_agent.loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _chunk(text):
@@ -650,8 +650,8 @@ def test_aggregator_emits_text_deltas():
 
 def test_aggregator_partial_stream_recovery_text_only():
     import threading
-    from jaeger_ai.agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_ai.agent.loop.interrupt import CallProgress
+    from jaeger_agent.adapters.openai import _aggregate_chat_stream
+    from jaeger_agent.loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _chunk(text):
@@ -676,8 +676,8 @@ def test_aggregator_partial_stream_recovery_text_only():
 
 def test_aggregator_partial_with_tool_call_in_flight_reraises():
     import threading
-    from jaeger_ai.agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_ai.agent.loop.interrupt import CallProgress
+    from jaeger_agent.adapters.openai import _aggregate_chat_stream
+    from jaeger_agent.loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _tool_chunk():
@@ -758,7 +758,7 @@ def test_thinking_exhausted_surfaces_plainly_no_retry():
 
 
 def test_local_parse_tags_thinking_exhaustion():
-    from jaeger_ai.agent import LocalLlamaAdapter
+    from jaeger_agent import LocalLlamaAdapter
 
     class _FakeLlama:
         def create_chat_completion(self, **kwargs):

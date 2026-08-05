@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 def test_messaging_setup_is_discovered() -> None:
-    from jaeger_ai.agent.skill_registry.playbook_skills import discover_playbooks
+    from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
 
     playbooks = discover_playbooks()
     matches = [p for p in playbooks if p.name == "messaging_setup"]
@@ -23,7 +23,7 @@ def test_messaging_setup_is_discovered() -> None:
 
 
 def test_messaging_setup_requires_tools_are_all_registered() -> None:
-    from jaeger_ai.agent.skill_registry.playbook_skills import discover_playbooks
+    from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
     import jaeger_ai.main as m
     from jaeger_os.core.tools import tool_registry as R
 
