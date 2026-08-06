@@ -246,3 +246,22 @@ def test_manifest_points_at_the_agent_config_group() -> None:
     assert manifest["tools"] == []  # the mind calls tools, it does not supply them
     for field in AgentConfig.model_fields:
         assert field  # config group is non-empty, so the pointer means something
+
+
+def test_no_tools_also_suppresses_skill_registered_tools(monkeypatch) -> None:
+    """A bare loop must not get desktop control back via the skill loader.
+
+    JAEGER_AGENT_NO_TOOLS used to gate only the tools package, while the
+    runtime went on to load skills — and the shipped computer_use skill
+    registers ten tools including computer_click, computer_type_text and
+    computer_read_screen. An embedder that declined tools was handed
+    those anyway. Caught reviewing a chat-only embedder.
+    """
+    from jaeger_agent.runtime import _load_skills
+
+    monkeypatch.setenv("JAEGER_AGENT_NO_TOOLS", "1")
+    assert _load_skills(object()) is None
+
+    monkeypatch.delenv("JAEGER_AGENT_NO_TOOLS", raising=False)
+    monkeypatch.setenv("JAEGER_AGENT_NO_SKILLS", "1")
+    assert _load_skills(object()) is None
