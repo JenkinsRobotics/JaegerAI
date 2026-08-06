@@ -74,7 +74,15 @@ def _load_skills(workspace: Any) -> Any:
     call ``load_and_register(..., run_smoke_tests=True)`` itself — that
     gate exists for skills whose provenance you do not control.
     """
-    if os.environ.get("JAEGER_AGENT_NO_SKILLS"):
+    # JAEGER_AGENT_NO_TOOLS counts here too, and that is not a courtesy.
+    # Skills register TOOLS — the shipped computer_use skill alone adds
+    # ten, including computer_click, computer_type_text, computer_press_key
+    # and computer_read_screen. An embedder that asked for a bare chat
+    # loop and got desktop control back through the skill loader has been
+    # handed a capability it declined, not merely ~1,000 tokens of schema
+    # it did not budget for. Found reviewing Mochi, whose chat_only()
+    # correctly suppressed 96 tools and then received 10 anyway.
+    if os.environ.get("JAEGER_AGENT_NO_SKILLS") or os.environ.get("JAEGER_AGENT_NO_TOOLS"):
         return None
     try:
         from .skill_registry.skill_loader import load_and_register
