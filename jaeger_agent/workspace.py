@@ -63,9 +63,70 @@ def bind(layout: InstanceLayout,
     mem.bind(layout)
 
 
-def _require_layout() -> InstanceLayout:
+class DefaultWorkspace:
+    """The seven paths every tool in this module needs, and nothing else.
+
+    That is the whole contract a host has to satisfy — JaegerAI's
+    ``InstanceLayout`` satisfies it structurally, and so does this. It
+    exists so an embedder is not forced to write a layout class before
+    ``read_file`` works.
+
+    Rooted at ``<cwd>/.jaeger_agent`` on purpose. A brain that scatters
+    state into ``~`` or a temp directory is one you cannot inspect,
+    commit, or delete alongside the project it belongs to; a robot's
+    workspace lives with the robot's code. Pass ``root=`` for anywhere
+    else.
+    """
+
+    def __init__(self, root: Path | str | None = None) -> None:
+        self.root = Path(root or Path.cwd() / ".jaeger_agent").expanduser().resolve()
+        self.logs_dir = self.root / "logs"
+        self.skills_dir = self.root / "skills"
+        self.memory_dir = self.root / "memory"
+        self.workspace_dir = self.root / "workspace"
+        self.audit_log_path = self.logs_dir / "audit.log"
+        self.config_path = self.root / "config.yaml"
+        self.identity_path = self.root / "identity.yaml"
+
+    def create(self) -> "DefaultWorkspace":
+        for directory in (self.logs_dir, self.skills_dir,
+                          self.memory_dir, self.workspace_dir):
+            directory.mkdir(parents=True, exist_ok=True)
+        return self
+
+
+def ensure_bound(root: Path | str | None = None) -> InstanceLayout:
+    """Bind a workspace if the host has not, creating it on disk.
+
+    Idempotent: an application that already called :func:`bind` keeps
+    its own layout untouched.
+    """
+    global _layout
     if _layout is None:
-        raise RuntimeError("tools not bound — call jaeger_os.agent.tools.bind(layout) first")
+        bind(DefaultWorkspace(root).create())
+    return _layout  # type: ignore[return-value]
+
+
+def _require_layout() -> InstanceLayout:
+    """The bound layout, or a clear error.
+
+    Deliberately does NOT auto-create. An earlier cut had it call
+    :func:`ensure_bound` so a bare install could write files with no
+    setup — which also meant a read-only STATUS probe minted a
+    ``.jaeger_agent`` directory as a side effect of rendering a line of
+    text. Creating state is not something a getter may do.
+
+    Auto-creation happens once, where an agent is actually built:
+    :class:`~jaeger_agent.runtime.DefaultAgentRuntime` calls
+    :func:`ensure_bound` in its constructor. An application binds its
+    own instance instead and never reaches either path.
+    """
+    if _layout is None:
+        raise RuntimeError(
+            "no workspace bound — call jaeger_agent.workspace.ensure_bound() "
+            "for a default at <cwd>/.jaeger_agent, or bind(layout) to use "
+            "your own"
+        )
     return _layout
 
 
