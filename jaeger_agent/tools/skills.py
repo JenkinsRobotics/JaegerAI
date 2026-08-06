@@ -410,3 +410,27 @@ def _register_use_skill() -> None:
 
 
 _register_use_skill()
+
+
+@register_tool_from_function
+def reload_skills() -> dict:
+    """Re-scan core skills/ + instance skills/ and register any
+    newly-authored or newly-versioned skills onto this agent.
+
+    Call after writing all the files for a new skill (SKILL.md + module
+    + tests/smoke_test.py). The loader runs each skill's smoke test
+    before activation; a failing test means the skill is NOT registered
+    and you must fix the skill, not the test. Returns the names of
+    skills newly registered this call.
+    """
+    from jaeger_agent.skill_registry.skill_loader import (
+        _REGISTERED_KEYS, load_and_register,
+    )
+    from jaeger_agent.workspace import _require_layout
+
+    before = set(_REGISTERED_KEYS)
+    report = load_and_register(None, _require_layout())
+    added = sorted(k for k in _REGISTERED_KEYS if k not in before)
+    return {"reloaded": True, "newly_registered": added,
+            "total": len(_REGISTERED_KEYS),
+            "skipped": [s.name for s in getattr(report, "skipped", []) or []]}

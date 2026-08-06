@@ -55,6 +55,35 @@ _DEFAULT_KEY_ENV = {
 _LOCAL_WEIGHT_PROVIDERS = frozenset({"llama_cpp", "llama-cpp", "local", "local-llama"})
 
 
+def _load_skills(workspace: Any) -> Any:
+    """Register the shipped skill corpus, the way tools self-register.
+
+    The module ships 107 skills AND the loader, and until 0.11 nothing
+    ran it: an embedder got a `use_skill` tool over an empty corpus,
+    while `import jaeger_agent` had already armed ~94 tools. That
+    asymmetry showed up as a measurable hole — skill cases in the
+    benchmark failed against a bare module for no reason other than
+    nobody having called the loader.
+
+    Here rather than at import time because loading needs a workspace,
+    and a workspace should not be minted by an import.
+
+    Smoke tests are skipped: they fork a subprocess per code-skill and
+    the corpus is the one shipped inside this package, already tested at
+    release. An application installing UNTRUSTED instance skills should
+    call ``load_and_register(..., run_smoke_tests=True)`` itself — that
+    gate exists for skills whose provenance you do not control.
+    """
+    if os.environ.get("JAEGER_AGENT_NO_SKILLS"):
+        return None
+    try:
+        from .skill_registry.skill_loader import load_and_register
+
+        return load_and_register(None, workspace, run_smoke_tests=False)
+    except Exception:  # noqa: BLE001 — a broken skill must not stop the brain
+        return None
+
+
 def _select_config(raw: Mapping[str, Any] | None) -> AgentConfig:
     """Build an :class:`AgentConfig` from a node's config mapping.
 
@@ -157,6 +186,18 @@ class DefaultAgentRuntime:
     ) -> None:
         self.bus = bus
         self.config = _select_config(config)
+        # Building an agent is the moment a workspace becomes necessary —
+        # ~40 tools resolve paths through it. Doing it here rather than
+        # lazily inside _require_layout keeps directory creation out of
+        # read-only status probes, and keeps it to one predictable place.
+        #
+        # Lands at <cwd>/.jaeger_agent: with the project, never in the
+        # home directory or a temp dir. An application that binds its own
+        # instance first keeps it — ensure_bound is idempotent.
+        from .workspace import ensure_bound
+
+        workspace = ensure_bound()
+        self.skills = _load_skills(workspace)
         # A caller-supplied adapter wins — this is the seam for
         # in-process weights the config language cannot describe.
         self._adapter = adapter

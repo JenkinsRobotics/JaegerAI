@@ -4,6 +4,8 @@ Applications import this package to add a headless agent brain.  Product
 surfaces, model bundles, and robot-specific policy remain outside it.
 """
 
+import os
+
 from .bridge import AgentBridge
 from .config import AgentConfig
 from .contracts import AgentRuntime, RuntimeEvents, TurnResult
@@ -131,3 +133,37 @@ __all__ = [
     "schema_sanitizer",
     "unregister_tool",
 ]
+
+
+# ── batteries, attached ──────────────────────────────────────────────
+#
+# Importing this package registers its ~94 tools. That is the whole
+# point of the module: `pip install jaeger-agent` should hand a project
+# a working agent — files, web, code, memory, scheduling, skills, the
+# lot — not a turn machine and an empty registry it has to furnish
+# before anything works.
+#
+# It is done here, at the END of __init__, rather than lazily from
+# somewhere inside the loop. A registration that happens as a SIDE
+# EFFECT of some unrelated import is how you get a chat app that never
+# asked for tools quietly paying 15,000 tokens of schema on every turn
+# — which is exactly what an earlier cut of the turn-start hook did.
+# Explicit and at import time is predictable; implicit and deferred is
+# not.
+#
+# THE CONTEXT COST IS REAL and an embedder has to plan for it: ~94 tool
+# schemas are ~15,000 tokens on every turn, so a 4096- or 8192-token
+# window cannot hold the catalogue at all, let alone a conversation.
+# Two ways out, and they compose:
+#
+#   JAEGER_TOOLSET_SCOPING=1   show a ~17-tool core set (~3,600 tokens)
+#                              and let the model widen on demand —
+#                              list_tools/describe_tool/load_tools are
+#                              in the core set precisely so it can.
+#   ctx = 16384 or more        just hold the whole catalogue.
+#
+# JAEGER_AGENT_NO_TOOLS=1 skips this entirely, for an embedder that
+# wants the bare loop and its own tools — `jaeger_agent.tools` is still
+# importable by hand afterwards.
+if not os.environ.get("JAEGER_AGENT_NO_TOOLS"):
+    from . import tools as _tools  # noqa: F401,E402

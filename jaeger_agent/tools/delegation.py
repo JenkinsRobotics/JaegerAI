@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_os.core.tools.tool_registry import register_tool_from_function
+
 
 def ask_user(question: str) -> dict[str, Any]:
     """Ask the user a clarifying question instead of guessing.
@@ -47,6 +49,7 @@ CAPABILITY_SUMMARY = (
 )
 
 
+@register_tool_from_function(side_effect="read")
 def help_me() -> dict[str, Any]:
     """Capability summary — call when the user asks 'what can you do?'."""
     return {"summary": CAPABILITY_SUMMARY}
