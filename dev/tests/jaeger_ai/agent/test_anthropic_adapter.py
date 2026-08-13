@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import AnthropicAdapter
+from jaeger_agent import AnthropicAdapter
 from jaeger_os.core.tools.tool_schema import ToolDef
 
 
@@ -395,7 +395,7 @@ def test_call_interrupt_mid_stream_closes_stream_and_raises():
     generating) and surface AgentInterrupted."""
     import threading
 
-    from jaeger_ai.agent.loop.interrupt import AgentInterrupted
+    from jaeger_agent.loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
 

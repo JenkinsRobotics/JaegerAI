@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from jaeger_ai.agent import jittered_backoff, retry_with_backoff
+from jaeger_agent import jittered_backoff, retry_with_backoff
 
 
 # ── jittered_backoff ───────────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_on_retry_exception_does_not_break_retry():
 def test_anthropic_cache_markers_cover_last_three_messages():
     """The Phase-8 cache pattern marks system + the trailing 3
     messages so multi-tool sequences hit cache on the next round."""
-    from jaeger_ai.agent import AnthropicAdapter
+    from jaeger_agent import AnthropicAdapter
 
     a = AnthropicAdapter(
         api_key="x", prompt_caching=True,
@@ -216,7 +216,7 @@ def test_anthropic_cache_markers_cover_last_three_messages():
 def test_anthropic_cache_handles_fewer_than_three_messages():
     """If the conversation is short, mark whatever messages exist
     without raising."""
-    from jaeger_ai.agent import AnthropicAdapter
+    from jaeger_agent import AnthropicAdapter
 
     a = AnthropicAdapter(
         api_key="x", prompt_caching=True, client=object(),

@@ -18,8 +18,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.agent.prompts import persona_lane
-from jaeger_ai.agent.prompts.persona_lane import (
+from jaeger_agent.prompts import persona_lane
+from jaeger_agent.prompts.persona_lane import (
     LANE_CONTRACT,
     LANE_TOOLS_BLOCK,
     MAX_HISTORY_CHARS,

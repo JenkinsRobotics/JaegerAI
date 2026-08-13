@@ -119,7 +119,7 @@ def _full_tool_registry_snapshot():
     (registered as an import side-effect in tools/*.py, which CANNOT be
     re-run after a clear_registry() because the modules are import-cached)
     PLUS the remaining main.py builtins."""
-    import jaeger_ai.agent.tools  # noqa: F401 — module-level tool registrations
+    import jaeger_agent.tools  # noqa: F401 — module-level tool registrations
     from jaeger_os.core.tools import tool_registry as R
     try:
         from jaeger_ai.main import _register_builtins

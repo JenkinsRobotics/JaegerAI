@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     AgentCallbacks,
     JaegerAgent,
     ProviderAdapter,
@@ -105,7 +105,7 @@ def test_interrupt_still_wins_over_stale_timeout():
     """When the interrupt event fires before stale_timeout, raise
     AgentInterrupted — operator cancel takes priority over the hang
     detector."""
-    from jaeger_ai.agent import AgentInterrupted
+    from jaeger_agent import AgentInterrupted
 
     ev = threading.Event()
 
@@ -364,7 +364,7 @@ def test_progress_touches_keep_long_healthy_call_alive():
     """A call whose worker reports progress (chunks/tokens flowing)
     must survive a stale_timeout shorter than its total duration —
     'stale' means silence, not slowness."""
-    from jaeger_ai.agent.loop.interrupt import CallProgress
+    from jaeger_agent.loop.interrupt import CallProgress
 
     ev = threading.Event()
     prog = CallProgress()
@@ -385,7 +385,7 @@ def test_progress_touches_keep_long_healthy_call_alive():
 def test_progress_silence_still_trips_stale():
     """With a progress beacon attached, a worker that STOPS reporting
     progress trips the detector after the quiet period."""
-    from jaeger_ai.agent.loop.interrupt import CallProgress
+    from jaeger_agent.loop.interrupt import CallProgress
 
     ev = threading.Event()
     prog = CallProgress()

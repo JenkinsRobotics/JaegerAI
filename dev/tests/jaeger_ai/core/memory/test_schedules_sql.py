@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.core.memory import memory as mem
-from jaeger_ai.core.memory import sqlite_store
+from jaeger_agent.memory import memory as mem
+from jaeger_agent.memory import sqlite_store
 
 
 @pytest.fixture(autouse=True)
@@ -233,7 +233,7 @@ def test_cron_runner_fires_persisted_schedule_via_callback(bound):
     claimed and the CronRunner invokes the callback with the prompt and a
     ``cron:<name>`` session key (the shape the bridge relies on)."""
     import threading
-    from jaeger_ai.agent.background.cron_runner import CronRunner
+    from jaeger_agent.background.cron_runner import CronRunner
 
     mem.add_schedule("* * * * *", "fire me", name="rm")
     with sqlite_store.writer() as wconn:

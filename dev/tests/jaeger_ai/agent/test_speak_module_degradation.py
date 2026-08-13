@@ -22,7 +22,7 @@ from __future__ import annotations
 import importlib
 import time
 
-from jaeger_ai.agent import availability as _avail_mod
+from jaeger_agent import availability as _avail_mod
 
 # ``jaeger_os.agent.tools``'s __init__ does ``from .speak import speak``,
 # which rebinds the package attribute ``tools.speak`` to the FUNCTION —
@@ -31,7 +31,7 @@ from jaeger_ai.agent import availability as _avail_mod
 # the hood) resolve to that function, not this submodule.
 # ``importlib.import_module`` fetches the real module straight out of
 # ``sys.modules`` by fully-qualified name, sidestepping the shadowing.
-_speak_mod = importlib.import_module("jaeger_ai.agent.tools.speak")
+_speak_mod = importlib.import_module("jaeger_agent.tools.speak")
 
 _NO_MODULE_RESULT = {"spoken": False, "reason": "no tts module installed"}
 

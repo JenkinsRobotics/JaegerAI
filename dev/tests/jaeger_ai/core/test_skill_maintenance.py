@@ -4,7 +4,7 @@ guarded: moves to .archive/, never deletes; never retires a user-written skill."
 import pathlib
 import tempfile
 
-from jaeger_ai.core.skill_improvement import skill_maintenance as sm, skill_notes, skill_revisions
+from jaeger_agent.skill_improvement import skill_maintenance as sm, skill_notes, skill_revisions
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
@@ -46,7 +46,7 @@ def test_eligible_only_for_agent_owned() -> None:
 
 
 def test_archive_keeps_top_k_and_hides_from_loader() -> None:
-    from jaeger_ai.agent.skill_registry import skill_loader
+    from jaeger_agent.skill_registry import skill_loader
     layout = _layout()
     root = _versioned_skill(layout, "w", (1, 2, 3))
     moved = sm.archive_superseded_versions(layout, "w", keep=1)

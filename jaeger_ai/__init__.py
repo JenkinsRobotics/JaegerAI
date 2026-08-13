@@ -1,6 +1,6 @@
 """JaegerAI — the turnkey agentic-AI product (the Mind) of the Jaeger ecosystem.
 
-Agent loop, tools, skills, memory, the id/ego persona pipeline, local
+JaegerAgent-powered tools, skills, memory, the id/ego persona pipeline, local
 inference, and its own faces (chat app, TUI, voice, protocol). Runs on
 device by default, on top of a pinned JaegerOS (the framework tier).
 Concrete agents (Lilith, ARES, …) are *instances* of this product, not
@@ -21,4 +21,4 @@ import os as _os
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-__version__ = "0.9.5"
+__version__ = "0.10.0"

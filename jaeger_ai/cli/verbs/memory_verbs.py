@@ -107,8 +107,8 @@ def _memory_export(argv: list[str]) -> int:
     if layout is None:
         return 1
 
-    from jaeger_ai.core.memory import memory as mem
-    from jaeger_ai.core.memory import sqlite_store
+    from jaeger_agent.memory import memory as mem
+    from jaeger_agent.memory import sqlite_store
 
     # Bind so the DB is open + lazy imports run.
     mem.bind(layout)
@@ -170,8 +170,8 @@ def _memory_stats(argv: list[str]) -> int:
     if layout is None:
         return 1
 
-    from jaeger_ai.core.memory import memory as mem
-    from jaeger_ai.core.memory import sqlite_store
+    from jaeger_agent.memory import memory as mem
+    from jaeger_agent.memory import sqlite_store
     mem.bind(layout)
     conn = sqlite_store.connection()
 

@@ -96,22 +96,22 @@ def _vision_enabled(config: Any) -> bool:
 
 
 def _warm_tts() -> Any:
-    from jaeger_ai.agent.tools.speak import warm_kokoro
+    from jaeger_agent.tools.speak import warm_kokoro
     return warm_kokoro()
 
 
 def _warm_stt() -> Any:
-    from jaeger_ai.agent.tools.listen import warm_listen
+    from jaeger_agent.tools.listen import warm_listen
     return warm_listen()
 
 
 def _warm_vision() -> Any:
-    from jaeger_ai.agent.tools.vision import warm_vision
+    from jaeger_agent.tools.vision import warm_vision
     return warm_vision()
 
 
 def _warm_avatar() -> Any:
-    from jaeger_ai.agent.tools.avatar import warm_avatar
+    from jaeger_agent.tools.avatar import warm_avatar
     return warm_avatar()
 
 

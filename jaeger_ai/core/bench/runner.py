@@ -155,7 +155,7 @@ def _drive_one(
     tokenizer counts on llama-cpp / OpenAI / Anthropic. Adapters that
     don't expose usage contribute zero; the summary then falls back
     to a whitespace-split estimate."""
-    from jaeger_ai.agent.loop.runtime_bridge import (
+    from jaeger_agent.loop.runtime_bridge import (
         build_jaeger_agent, drive_one_turn,
     )
     from jaeger_ai.main import SKIP_FINAL_TOOLS, _get_agent, _pipeline
@@ -453,7 +453,7 @@ def _checkpoint_sqlite() -> None:
     """Fold the state.db WAL into the main db file so a plain file copy
     of ``state.db`` is a complete, consistent snapshot. Best-effort."""
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.memory import sqlite_store
+        from jaeger_agent.memory import sqlite_store
         if sqlite_store.is_bound():
             sqlite_store.connection().execute(
                 "PRAGMA wal_checkpoint(TRUNCATE)")
@@ -465,7 +465,7 @@ def _close_sqlite_stores() -> bool:
     Returns True when something was closed (caller should re-bind)."""
     closed = False
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.memory import sqlite_store
+        from jaeger_agent.memory import sqlite_store
         if sqlite_store.is_bound():
             sqlite_store.close()
             closed = True
@@ -479,7 +479,7 @@ def _rebind_sqlite_stores(layout: Any) -> None:
     """Reopen the memory store against the (restored) files. The sessions
     store reopens lazily on its next ``get_store`` call."""
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.memory import memory as _memory_mod
+        from jaeger_agent.memory import memory as _memory_mod
         _memory_mod.bind(layout)
 
 
@@ -612,7 +612,7 @@ def run_bench(
     # masquerades as the operator's (and is trivially purgeable). Belt-and-
     # suspenders with the hermetic snapshot, which rolls the writes back.
     try:
-        from jaeger_ai.core.memory import memory as _mem
+        from jaeger_agent.memory import memory as _mem
         _prev_source = _mem.set_memory_source("benchmark")
     except Exception:  # noqa: BLE001
         _mem = None
@@ -647,7 +647,7 @@ def run_bench(
         prev_prompt: str | None = None
         pipeline: Any = None
         try:
-            from jaeger_ai.agent.prompts.prompts import build_system_prompt
+            from jaeger_agent.prompts.prompts import build_system_prompt
             from jaeger_ai.main import _pipeline
             layout = _pipeline.get("layout")
             if layout is not None:

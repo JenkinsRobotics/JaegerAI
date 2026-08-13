@@ -13,7 +13,7 @@ import os
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     JAEGER_TOOLSETS,
     JaegerAgent,
     ProviderAdapter,
@@ -230,7 +230,7 @@ def test_agent_explicit_tools_arg_wins_over_toolsets():
     def _r(value: str = "x") -> dict:
         return {}
 
-    from jaeger_ai.agent import get_tool
+    from jaeger_agent import get_tool
     only_read = JaegerAgent(
         adapter=_StubAdapter(),
         tools=[get_tool("read_file")],
@@ -249,7 +249,7 @@ def test_agent_tools_arg_alone_leaves_toolsets_empty():
     the diagnostic ``self.toolsets`` reflects the absence — useful so
     the /runtime panel can distinguish "scoped by toolset" from
     "scoped by explicit list"."""
-    from jaeger_ai.agent import get_tool
+    from jaeger_agent import get_tool
 
     @register_tool("only", "", _SmallArgs)
     def _o(value: str = "x") -> dict:

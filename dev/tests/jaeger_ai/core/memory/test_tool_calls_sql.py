@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.core.memory import memory as mem
-from jaeger_ai.core.memory import sqlite_store
+from jaeger_agent.memory import memory as mem
+from jaeger_agent.memory import sqlite_store
 
 
 @pytest.fixture(autouse=True)
@@ -301,7 +301,7 @@ def test_agent_tool_done_callback_records_to_sql(bound):
     wired the way main.py wires it, fire a fake dispatch, and assert
     the row landed. Doesn't need a real model — just the dispatch
     plumbing in _dispatch_one_tool."""
-    from jaeger_ai.agent.loop.callbacks import AgentCallbacks
+    from jaeger_agent.loop.callbacks import AgentCallbacks
 
     captured = []
 
@@ -338,7 +338,7 @@ def test_agent_tool_done_callback_swallows_handler_errors(bound):
     """The on_tool_done helper must swallow exceptions from the
     handler — same posture as every other callback. A buggy
     observer cannot break a turn."""
-    from jaeger_ai.agent.loop.callbacks import AgentCallbacks
+    from jaeger_agent.loop.callbacks import AgentCallbacks
 
     def _broken(name, args, result, ok, error, elapsed_s):
         raise RuntimeError("boom")
@@ -350,7 +350,7 @@ def test_agent_tool_done_callback_swallows_handler_errors(bound):
 
 def test_agent_tool_done_callback_noop_when_unset(bound):
     """Default AgentCallbacks (no tool_done) is a silent no-op."""
-    from jaeger_ai.agent.loop.callbacks import AgentCallbacks
+    from jaeger_agent.loop.callbacks import AgentCallbacks
 
     cb = AgentCallbacks()  # all callbacks None
     cb.on_tool_done("t", {}, {"ok": True}, True, None, 0.0)

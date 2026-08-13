@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jaeger_ai.agent.skill_registry.playbook_skills import (
+from jaeger_agent.skill_registry.playbook_skills import (
     PlaybookSkill,
     _current_platform,
     _normalize_platforms,

@@ -31,7 +31,7 @@ def test_agentcore_prewarms_model_even_with_voice_warmup_off(monkeypatch) -> Non
 
     monkeypatch.setattr(m, "boot_for_tui", _fake_boot)
 
-    from jaeger_ai.agent.loop.agent_core import AgentCore
+    from jaeger_ai.core.agent_core import AgentCore
     AgentCore(bus=object(), warmup=False)
 
     assert captured.get("prewarm_model") is True   # LLM still primed → warm first turn

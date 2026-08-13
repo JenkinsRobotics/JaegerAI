@@ -18,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 
 def main() -> int:
-    from jaeger_ai.agent import trace
+    from jaeger_agent import trace
     from jaeger_ai.core.instance.instance import InstanceLayout
 
     layout = InstanceLayout(root=pathlib.Path(tempfile.mkdtemp()))

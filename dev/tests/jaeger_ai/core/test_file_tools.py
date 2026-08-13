@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent import tools
+from jaeger_agent import tools
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 

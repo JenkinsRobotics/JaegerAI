@@ -689,7 +689,7 @@ class JaegerTUI:
         if is_err:
             # Recognise common model-server failures and surface a clear,
             # actionable hint instead of the raw HTTP body.
-            from jaeger_ai.core.runtime.cloud_errors import friendly_error_text
+            from jaeger_agent.errors import friendly_error_text
             body = friendly_error_text(body, model_name=self.model_name)
         else:
             self._last_answer = body   # for /copy
@@ -836,7 +836,7 @@ class JaegerTUI:
             # visible tool. Cheap enough to recompute per refresh.
             try:
                 from jaeger_os.core.tools.tool_registry import get_tools
-                from jaeger_ai.agent.skill_registry.toolset_scoping import tool_visible
+                from jaeger_agent.skill_registry.toolset_scoping import tool_visible
                 import json as _json2
                 for t in get_tools():
                     if tool_visible(t.name) and hasattr(t, "to_openai_schema"):
@@ -899,7 +899,7 @@ class JaegerTUI:
         # Expand @file / @url references — the header above shows the
         # concise original; the agent receives the inlined content (A4).
         try:
-            from jaeger_ai.agent.prompts.context_refs import expand_references
+            from jaeger_agent.prompts.context_refs import expand_references
             agent_text = expand_references(user_text)
         except Exception:  # noqa: BLE001 — never let expansion break a turn
             agent_text = user_text
@@ -923,7 +923,7 @@ class JaegerTUI:
         answers in text only, leaving the user with silence.
         """
         try:
-            from jaeger_ai.agent.tools.speak import speak
+            from jaeger_agent.tools.speak import speak
             result = speak(text=text)
         except Exception as exc:  # noqa: BLE001
             self.console.print(
@@ -1199,13 +1199,13 @@ class JaegerTUI:
         the in-progress task is flipped back to ``pending`` so it
         resumes next time, and the realtime model is reloaded."""
         from jaeger_ai.main import run_command, switch_model
-        from jaeger_ai.agent.background.deep_think import queue_for_layout
+        from jaeger_agent.background.deep_think import queue_for_layout
         from jaeger_ai.core.instance.instance import InstanceLayout
         from jaeger_ai.core.models.model_resolver import (
             DEFAULT_CODER_MODEL,
             DEFAULT_MODEL,
         )
-        from jaeger_ai.agent.prompts.reflection import reflect_on_task, save_reflection
+        from jaeger_agent.prompts.reflection import reflect_on_task, save_reflection
 
         # The pipeline must be booted (config/lock/layout) before we can
         # swap models — _ensure_agent does that on first use.
@@ -1262,7 +1262,7 @@ class JaegerTUI:
                     # other auto-prompts (idle board pickup, cron),
                     # so the full set of "things the framework sends
                     # as the user" is one read.
-                    from jaeger_ai.agent.prompts import deep_think_directive
+                    from jaeger_agent.prompts import deep_think_directive
                     directive = deep_think_directive(task.description)
                     run_command(self._client, directive,
                                 session_key=f"deepthink_{task.id}")
@@ -1566,7 +1566,7 @@ class JaegerTUI:
         True when DT was started (so the caller skips the board path).
         Quietly returns False when nothing approved is pending."""
         try:
-            from jaeger_ai.agent.background.deep_think import queue_for_layout
+            from jaeger_agent.background.deep_think import queue_for_layout
             from jaeger_ai.core.instance.instance import InstanceLayout
             queue_ = queue_for_layout(InstanceLayout(root=self.instance_dir))
             if queue_.next_pending() is None:
@@ -1599,9 +1599,9 @@ class JaegerTUI:
         lives in ``core/prompts/synthetic.py`` — one place to find
         every framework-injected message."""
         try:
-            from jaeger_ai.agent.background.board import has_actionable_work
+            from jaeger_agent.background.board import has_actionable_work
             from jaeger_ai.core.instance.instance import InstanceLayout
-            from jaeger_ai.agent.prompts import AUTO_BOARD_PROMPT
+            from jaeger_agent.prompts import AUTO_BOARD_PROMPT
             layout = InstanceLayout(root=self.instance_dir)
             if not has_actionable_work(layout):
                 return False

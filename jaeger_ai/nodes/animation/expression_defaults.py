@@ -41,13 +41,13 @@ DEFAULT_EXPRESSIONS: dict[str, dict[str, Any]] = {
 }
 
 
-# Framework default face scripts ship under agent/personas/lilith/avatar
-# (the character-asset bundle location, unchanged by this move — only
-# the constant that points at it moved). A fresh instance gets a
+# Framework default face scripts ship with the CHARACTER that uses
+# them, alongside its cards — they were stranded under the retired
+# agent/personas/ template dir until 0.10. A fresh instance gets a
 # working face out of the box without the wizard having to copy files.
 FRAMEWORK_AVATAR_DEFAULTS = (
-    Path(__file__).resolve().parents[2]  # jaeger_os/
-    / "agent" / "personas" / "lilith" / "avatar"
+    Path(__file__).resolve().parents[2]  # jaeger_ai/
+    / "personality" / "characters" / "lilith" / "avatar"
 )
 
 

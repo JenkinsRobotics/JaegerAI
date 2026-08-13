@@ -1,0 +1,319 @@
+{
+  "total": 81,
+  "passed": 80,
+  "pass_rate": 0.988,
+  "routing_passed": 65,
+  "routing_total": 65,
+  "answer_passed": 48,
+  "answer_total": 48,
+  "errors": 0,
+  "elapsed_s": 469.62,
+  "metrics": {
+    "avg_latency_s": 5.798,
+    "p50_latency_s": 3.42,
+    "p95_latency_s": 18.913,
+    "min_latency_s": 0.504,
+    "max_latency_s": 56.223,
+    "total_tool_dispatches": 106,
+    "avg_tools_per_turn": 1.31,
+    "answer_tokens_total": 7492,
+    "answer_tokens_avg": 92.5,
+    "answer_tokens_per_sec": 16.0,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 3301162,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.19,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 1.013,
+    "ttft_p50_s": 0.321,
+    "ttft_p95_s": 0.558,
+    "ttft_reported": 81
+  },
+  "suites": {
+    "smoke": {
+      "total": 5,
+      "passed": 5,
+      "pass_rate": 1.0,
+      "threshold": 0.8,
+      "meets_threshold": true,
+      "avg_latency_s": 12.841,
+      "p95_latency_s": 56.223,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 28,
+      "passed": 28,
+      "pass_rate": 1.0,
+      "threshold": 0.85,
+      "meets_threshold": true,
+      "avg_latency_s": 5.412,
+      "p95_latency_s": 12.647,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "pass_rate": 1.0,
+      "threshold": 0.65,
+      "meets_threshold": true,
+      "avg_latency_s": 7.246,
+      "p95_latency_s": 18.913,
+      "blurb": "single-turn, multiple-tool chaining"
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 12,
+      "pass_rate": 1.0,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 2.693,
+      "p95_latency_s": 4.552,
+      "blurb": "multi-turn conversations with carried history"
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "pass_rate": 1.0,
+      "threshold": 0.6,
+      "meets_threshold": true,
+      "avg_latency_s": 3.932,
+      "p95_latency_s": 6.407,
+      "blurb": "failure surface + anti-hallucination"
+    },
+    "full": {
+      "total": 81,
+      "passed": 80,
+      "pass_rate": 0.988,
+      "threshold": 0.7,
+      "meets_threshold": true,
+      "avg_latency_s": 5.798,
+      "p95_latency_s": 18.913,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 28,
+      "passed": 28,
+      "avg_latency_s": 5.412
+    },
+    "files": {
+      "total": 15,
+      "passed": 15,
+      "avg_latency_s": 5.188
+    },
+    "audio": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.912
+    },
+    "web": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 4.771
+    },
+    "memory": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 2.689
+    },
+    "code": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 7.697
+    },
+    "schedule": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 2.969
+    },
+    "multistep": {
+      "total": 11,
+      "passed": 11,
+      "avg_latency_s": 7.246
+    },
+    "multiturn": {
+      "total": 12,
+      "passed": 12,
+      "avg_latency_s": 2.693
+    },
+    "recovery": {
+      "total": 9,
+      "passed": 9,
+      "avg_latency_s": 3.932
+    },
+    "safety": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 2.664
+    },
+    "destructive": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 3.985
+    },
+    "injection": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 0.961
+    },
+    "credential": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 2.166
+    },
+    "hallucination": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 3.105
+    },
+    "cross_turn": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 3.418
+    },
+    "parallel": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 4.851
+    },
+    "skill": {
+      "total": 4,
+      "passed": 3,
+      "avg_latency_s": 20.407
+    },
+    "creative": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 16.646
+    },
+    "research": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 24.557
+    },
+    "kanban": {
+      "total": 5,
+      "passed": 5,
+      "avg_latency_s": 5.495
+    },
+    "deepthink": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 6.104
+    },
+    "self_improve": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 4.46
+    },
+    "workflow": {
+      "total": 2,
+      "passed": 2,
+      "avg_latency_s": 8.713
+    },
+    "persona": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 6.207
+    },
+    "plan_first": {
+      "total": 4,
+      "passed": 4,
+      "avg_latency_s": 9.493
+    }
+  },
+  "failures": [
+    {
+      "id": "skill_arxiv",
+      "prompt": "Find recent arXiv papers on retrieval-augmented generation and summarize the top few.",
+      "tools_called": [
+        "web_search",
+        "web_search",
+        "web_extract"
+      ],
+      "answer": "The most relevant and comprehensive paper I found is:\n\nTitle: Retrieval-Augmented Generation: A Comprehensive Survey of Architectures, Enhancements, and Robustness Frontiers\nAuthors: Chaitanya Sharma\n",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 492.77,
+  "load_s": 74.57,
+  "category_breakdown": {
+    "routing": {
+      "passed": 28,
+      "total": 28
+    },
+    "memory": {
+      "passed": 11,
+      "total": 11
+    },
+    "multistep": {
+      "passed": 11,
+      "total": 11
+    },
+    "recovery": {
+      "passed": 9,
+      "total": 9
+    },
+    "multiturn": {
+      "passed": 12,
+      "total": 12
+    },
+    "files": {
+      "passed": 15,
+      "total": 15
+    },
+    "web": {
+      "passed": 9,
+      "total": 9
+    },
+    "code": {
+      "passed": 5,
+      "total": 5
+    },
+    "schedule": {
+      "passed": 4,
+      "total": 4
+    },
+    "safety": {
+      "passed": 5,
+      "total": 5
+    },
+    "skill": {
+      "passed": 3,
+      "total": 4
+    },
+    "kanban": {
+      "passed": 5,
+      "total": 5
+    },
+    "deepthink": {
+      "passed": 1,
+      "total": 1
+    },
+    "self_improve": {
+      "passed": 1,
+      "total": 1
+    },
+    "workflow": {
+      "passed": 2,
+      "total": 2
+    },
+    "persona": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260804-212527",
+  "benchmark_version": "1.3"
+}

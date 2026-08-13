@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import json
 import threading
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from jaeger_ai.agent import LocalLlamaAdapter
-from jaeger_ai.agent.loop.interrupt import AgentInterrupted
+from jaeger_agent import LocalLlamaAdapter
+from jaeger_agent.loop.interrupt import AgentInterrupted
 
 
 class _FakeLlama:
@@ -275,14 +274,14 @@ def test_reasoning_model_gets_higher_stall_floor():
     a = LocalLlamaAdapter(llama=fake,
                           model_path="/m/DeepSeek-R1-0528-Qwen3-8B.gguf")
     captured: dict[str, Any] = {}
-    real = __import__("jaeger_ai.agent.loop.interrupt",
+    real = __import__("jaeger_agent.loop.interrupt",
                       fromlist=["interruptible_call"]).interruptible_call
 
     def _spy(fn, ev, **kw):
         captured.update(kw)
         return real(fn, ev, **kw)
 
-    with patch("jaeger_ai.agent.adapters.openai.interruptible_call", _spy):
+    with patch("jaeger_agent.adapters.openai.interruptible_call", _spy):
         a.call({"model": "x", "messages": []}, threading.Event(),
                stale_timeout=120.0)
     assert captured["stale_timeout"] == 300.0, (
@@ -300,14 +299,14 @@ def test_non_reasoning_model_keeps_caller_timeout():
     fake = _FakeLlama(_mk_response("ok"))
     a = LocalLlamaAdapter(llama=fake, model_path="/m/Qwen3.5-9B.gguf")
     captured: dict[str, Any] = {}
-    real = __import__("jaeger_ai.agent.loop.interrupt",
+    real = __import__("jaeger_agent.loop.interrupt",
                       fromlist=["interruptible_call"]).interruptible_call
 
     def _spy(fn, ev, **kw):
         captured.update(kw)
         return real(fn, ev, **kw)
 
-    with patch("jaeger_ai.agent.adapters.openai.interruptible_call", _spy):
+    with patch("jaeger_agent.adapters.openai.interruptible_call", _spy):
         a.call({"model": "x", "messages": []}, threading.Event(),
                stale_timeout=120.0)
     assert captured["stale_timeout"] == 120.0
@@ -428,7 +427,7 @@ def test_call_wires_logits_processor_for_clean_abort():
     so the facade attaches a ``logits_processor`` bound to the abort
     flag: it raises to stop a stalled decode cleanly instead of letting
     it be abandoned (which corrupts the shared KV cache)."""
-    from jaeger_ai.agent.adapters.local_llama import _AbortGeneration
+    from jaeger_agent.adapters.local_llama import _AbortGeneration
     fake = _FakeLlama(_mk_response("ok"))
     a = LocalLlamaAdapter(llama=fake)
     a.call({"model": "x", "messages": []}, threading.Event())
@@ -469,7 +468,7 @@ def test_stale_abort_stops_wedged_decode_and_keeps_instance_usable():
             if self.calls == 1:
                 for _ in range(2000):
                     if self._abort.is_set():
-                        from jaeger_ai.agent.adapters.local_llama import (
+                        from jaeger_agent.adapters.local_llama import (
                             _AbortGeneration,
                         )
                         raise _AbortGeneration()
@@ -721,14 +720,14 @@ def test_in_process_call_passes_through_stale_timeout():
 
     captured: dict[str, Any] = {}
     real_interruptible = __import__(
-        "jaeger_ai.agent.loop.interrupt", fromlist=["interruptible_call"]
+        "jaeger_agent.loop.interrupt", fromlist=["interruptible_call"]
     ).interruptible_call
 
     def _spy(fn, ev, **kw):
         captured.update(kw)
         return real_interruptible(fn, ev, **kw)
 
-    with patch("jaeger_ai.agent.adapters.openai.interruptible_call", _spy):
+    with patch("jaeger_agent.adapters.openai.interruptible_call", _spy):
         a.call(
             {"model": "x", "messages": []},
             threading.Event(),
@@ -748,7 +747,7 @@ def test_in_process_call_raises_stale_timeout_when_model_hangs():
     it bails in seconds with a clean exception."""
     import threading
     import time
-    from jaeger_ai.agent.loop.interrupt import StaleCallTimeout
+    from jaeger_agent.loop.interrupt import StaleCallTimeout
 
     class _HangingLlama:
         def create_chat_completion(self, **_kwargs):
@@ -799,7 +798,7 @@ def test_in_process_call_honours_caller_interrupt_event():
         seen["has_progress"] = kw.get("progress") is not None
         return fn()
 
-    with patch("jaeger_ai.agent.adapters.openai.interruptible_call", _spy):
+    with patch("jaeger_agent.adapters.openai.interruptible_call", _spy):
         a.call({"model": "x", "messages": []}, caller_event)
 
     assert seen == {

@@ -12,7 +12,7 @@ import threading
 
 def test_tag_confirm_session_sets_provider_session() -> None:
     import jaeger_ai.main as m
-    from jaeger_ai.agent.loop.bus_confirm import BusConfirmationProvider
+    from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.transport import InProcBus
     from jaeger_os.core.safety.permissions import current_policy
 
@@ -33,7 +33,7 @@ def test_confirm_round_trips_via_a_channel_responder() -> None:
     """The exact bus mechanism the Telegram bridge plugs into: confirm()
     publishes an AgentRequest tagged with the session; a responder for that
     session publishes an AgentResponse; confirm() unblocks with the answer."""
-    from jaeger_ai.agent.loop.bus_confirm import BusConfirmationProvider
+    from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.transport import InProcBus
     from jaeger_ai.core.messages import AgentRequest, AgentResponse
 

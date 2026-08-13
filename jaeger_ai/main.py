@@ -34,14 +34,14 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from .core import credentials as creds
+from jaeger_agent import credentials as creds
 from jaeger_ai.core.runtime import log_rotation
-from jaeger_ai.core.memory import memory as mem
-from jaeger_ai.agent.prompts import prompts as prompt_module
+from jaeger_agent.memory import memory as mem
+from jaeger_agent.prompts import prompts as prompt_module
 from jaeger_ai.core.runtime import tool_interrupt
-from .agent import tools as jaeger_tools
+from jaeger_agent import tools as jaeger_tools
 from jaeger_ai.core import context as _context
-from jaeger_ai.agent.background.cron_runner import CronRunner
+from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import (
     CoreVersionMismatch,
     InstanceLayout,
@@ -60,7 +60,7 @@ from jaeger_os.core.safety.permissions import (
 )
 from jaeger_ai.core.instance.schemas import SCHEMA_VERSION, Config
 from jaeger_ai.core.instance.schemas import load_yaml
-from jaeger_ai.agent.skill_registry.skill_loader import load_and_register
+from jaeger_agent.skill_registry.skill_loader import load_and_register
 from jaeger_ai.core.instance.setup_wizard import run_wizard
 
 
@@ -325,7 +325,7 @@ def _parse_toolsets_env() -> frozenset[str] | None:
     # Validate eagerly via ``resolve_toolsets`` — its KeyError carries
     # the offending name. Catch it here so we can decorate the error
     # with the env-var context.
-    from jaeger_ai.agent.schemas.tool_bundles import resolve_toolsets
+    from jaeger_agent.schemas.tool_bundles import resolve_toolsets
     try:
         resolve_toolsets(names)
     except KeyError as exc:
@@ -1003,9 +1003,23 @@ def _register_builtins(client: Any) -> None:
     # (invisible to the model, undispatchable) unless the process runs
     # with JAEGER_DEV_MODE=1, so an unstable animation path can't
     # break a daily-driver session. Promote by dropping the flag.
+    #
+    # 0.10: these ship with the animation NODE rather than the mind
+    # module. They drive an avatar and read that node's expression
+    # defaults — a robot's brain has no business owning a face. The
+    # import IS the registration (decorators run at import time), which
+    # is also why it has to happen here: nothing else pulls the module
+    # in, and an unimported tool is an unregistered one.
+    import jaeger_ai.nodes.animation.tools  # noqa: F401
 
-
-
+    # Same reasoning, same trap. generate_image_fal / generate_video_fal
+    # self-register inside the fal.ai plugin, and they used to come along
+    # for free because jaeger_agent's tool package imported them. It no
+    # longer does — a cloud image generator is a product feature, not
+    # something a robot's brain owns — so the import has to be explicit
+    # here or the two tools silently vanish from the catalogue. They did,
+    # for one benchmark run: 121 tools became 119 and nothing failed.
+    import jaeger_ai.plugins.ai_gen  # noqa: F401
 
 
 
@@ -1029,12 +1043,12 @@ def _register_builtins(client: Any) -> None:
     # send_message + certify_admin now live in tools/messaging.py — importing
     # it registers them (they reach runtime state via core.context accessors,
     # not a client closure, so they belong in tools/ like every other tool).
-    from jaeger_ai.agent.tools import messaging as _messaging  # noqa: F401
+    from jaeger_agent.tools import messaging as _messaging  # noqa: F401
 
     # send_email — same pattern: importing tools/email.py registers it.
     # 0.9.3 Task 2: the operator's field brief ("make/send email") — Mail.app
     # via AppleScript first, himalaya CLI as the alternate backend.
-    from jaeger_ai.agent.tools import email as _email  # noqa: F401
+    from jaeger_agent.tools import email as _email  # noqa: F401
 
     # Home Assistant plugin tools (ha_list_entities / ha_get_state /
     # ha_list_services / ha_call_service) — same pattern: importing
@@ -1076,7 +1090,7 @@ def _register_builtins(client: Any) -> None:
         the skill is NOT registered and you must fix the skill (not the
         test) before retrying. Returns the names of skills newly
         registered this call."""
-        from jaeger_ai.agent.skill_registry.skill_loader import load_and_register, _REGISTERED_KEYS
+        from jaeger_agent.skill_registry.skill_loader import load_and_register, _REGISTERED_KEYS
         cfg = _pipeline["config"]
         before = {(n, v, z) for (n, v, z) in _REGISTERED_KEYS}
         # Phase-9 sentinel: ``load_and_register`` only needs an object
@@ -1163,7 +1177,7 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
         # loop. A fresh ``JaegerAgent`` per subtask keeps history scoped
         # to the delegate's work (a child agent doesn't inherit the
         # parent's context — the spec calls this out).
-        from jaeger_ai.agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
+        from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
         _cfg = _pipeline.get("config")
         _ctx = getattr(getattr(_cfg, "model", None), "ctx", None)
         sub_agent = build_jaeger_agent(
@@ -1361,7 +1375,7 @@ def _strip_drift_markup(text: str) -> str:
     # Use the agent layer's drift parser to strip tool-call envelopes
     # from text we'd otherwise show to the user (TUI banner, finalize
     # fallback). The parser knows the same patterns as the adapters.
-    from jaeger_ai.agent.dialects import _DRIFT_PATTERNS  # noqa: PLC2701
+    from jaeger_agent.dialects import _DRIFT_PATTERNS  # noqa: PLC2701
     cleaned = text
     for pattern in _DRIFT_PATTERNS:
         cleaned = pattern.sub("", cleaned)
@@ -2071,19 +2085,33 @@ def _persona_agent_name(layout: Any) -> str:
 
 
 def _persona_identity_block(agent_name: str, character: Any) -> str:
-    """Identity vs character framing (operator decision, 2026-07-05): the
-    character supplies the PERSONA, never the agent's name — the name is
-    identity.yaml's, set at instance creation ("a robot like Jarvis, but
-    I will name him Ted"). Shared by Station 3's output filter and the
-    Mode-C persona lane so every voice in the system introduces itself
-    the same way."""
+    """Identity vs character framing (operator decision, 2026-07-05; hardened
+    2026-07-19): the character supplies the PERSONA, never the agent's name —
+    the name is identity.yaml's, set at instance creation ("a robot like
+    Jarvis, but I will name him Ted"). The old approach kept the character's
+    name in the block and ADDED a "but your name is Ted" framing line; small
+    models followed the persona's own "You are JARVIS" anyway. Now the model
+    never sees the character's name at all: every occurrence in the live
+    block is substituted with the agent's name before the prompt is built.
+    Shared by Station 3's output filter and the Mode-C persona lane so every
+    voice in the system introduces itself the same way."""
+    import re as _re
     block = character.character_block()
     if agent_name and agent_name.lower() != character.name.lower():
+        # Scrub first-person bindings ("You are JARVIS" → "You are Ted"),
+        # then reference the character in THIRD person: the model may know
+        # a famous character (Jarvis, Anakin) and should draw on that
+        # knowledge — inspiration, never identity.
+        block = _re.sub(rf"\b{_re.escape(character.name)}\b", agent_name,
+                        block, flags=_re.IGNORECASE)
+        role = getattr(character, "role", "") or ""
+        source = f"{character.name} ({role})" if role else character.name
         block = (
-            f"Your name is {agent_name}. You embody the persona and "
-            f"mannerisms of {character.name} — but YOUR name stays "
-            f"{agent_name}; never present yourself as {character.name}.\n\n"
-            + block
+            f"Your name is {agent_name} — the only name you ever use for "
+            f"yourself. Your personality is modeled on {source}: draw on "
+            f"that character's manner and outlook, but you are "
+            f"{agent_name}, not them — never introduce or refer to "
+            f"yourself as {character.name}.\n\n" + block
         )
     return block
 
@@ -2107,7 +2135,7 @@ def _apply_persona_filter(answer: str) -> str:
         if character is None:
             return answer
         block = _persona_identity_block(_persona_agent_name(layout), character)
-        from jaeger_ai.agent.prompts.persona_filter import apply_persona_voice
+        from jaeger_agent.prompts.persona_filter import apply_persona_voice
         return apply_persona_voice(
             client, answer, block, max_chars=pconf.max_chars,
         )
@@ -2252,8 +2280,8 @@ def _run_persona_lane_turn(
     # flight when it broke).
     attempted: list[bool] = [False]
     try:
-        from jaeger_ai.agent.loop.runtime_bridge import drive_one_turn
-        from jaeger_ai.agent.prompts.persona_lane import run_persona_turn
+        from jaeger_agent.loop.runtime_bridge import drive_one_turn
+        from jaeger_agent.prompts.persona_lane import run_persona_turn
 
         layout = _pipeline.get("layout")
         if layout is None:
@@ -2354,7 +2382,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     :func:`_run_turn_via_jaeger_agent` so :func:`prewarm_session` can
     construct the REAL first-turn agent at boot (prefix-exact KV warm)
     instead of approximating it."""
-    from jaeger_ai.agent.loop.runtime_bridge import build_jaeger_agent
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
 
     key = session_key
     # First call per session builds + caches a JaegerAgent. Force the
@@ -2362,7 +2390,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     # bridge's mirror both fire.
     if key not in _jaeger_agents_by_session:
         _get_agent(client)  # populates the new registry via _get_agent's mirror
-        from .agent import AgentCallbacks
+        from jaeger_agent import AgentCallbacks
         # Per-turn tool-time accumulator. The latency log was reporting
         # ``tool=0.0`` even when tools were the dominant cost; now we
         # sum the ``done`` event's ``elapsed_s`` so the report has the
@@ -2443,7 +2471,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             except Exception:  # noqa: BLE001 — observer must never break the turn
                 pass
             try:
-                from jaeger_ai.agent import trace as _trace
+                from jaeger_agent import trace as _trace
                 _trace.trace_step(
                     "tool", name, dur_s=elapsed_s, ok=ok,
                     detail=f"{args} => {error if not ok else result}",
@@ -2678,7 +2706,7 @@ def _run_turn_via_jaeger_agent(
     the loop through :class:`JaegerAgent`. Returns the exact same dict
     shape so ``run_command`` / ``run_for_voice`` don't need to know
     which loop ran."""
-    from jaeger_ai.agent.loop.runtime_bridge import drive_one_turn
+    from jaeger_agent.loop.runtime_bridge import drive_one_turn
 
     key = session_key
     jaeger_agent = _ensure_session_agent(client, key)
@@ -2689,7 +2717,7 @@ def _run_turn_via_jaeger_agent(
     # Reset the per-turn tool-time accumulator before the dispatch so
     # cross-turn leakage doesn't inflate this turn's report.
     _pipeline["turn_tool_time"] = 0.0
-    from jaeger_ai.agent import trace as _trace
+    from jaeger_agent import trace as _trace
     _trace.trace_begin(key, user_text)
     persona_handled = False
     try:
@@ -2747,11 +2775,11 @@ def _run_turn_via_jaeger_agent(
         report = LatencyReport(elapsed, 0, 0.0, 0.0, 0.0, 0.0, 0.0)
         write_log({
             "user": user_text, "session_key": key, "error": str(exc),
-            "latency": asdict(report), "framework_path": "jaeger_os_agent",
+            "latency": asdict(report), "framework_path": "jaeger_agent",
         })
         set_agent_status("error", detail=f"{type(exc).__name__}")
         try:
-            from jaeger_ai.agent import trace as _trace
+            from jaeger_agent import trace as _trace
             _trace.trace_end("", elapsed, ok=False)
         except Exception:  # noqa: BLE001
             pass
@@ -2799,7 +2827,7 @@ def _run_turn_via_jaeger_agent(
     )
 
     try:
-        from jaeger_ai.agent import trace as _trace
+        from jaeger_agent import trace as _trace
         _trace.trace_step("think", "", dur_s=report.decision,
                           detail=(first_decision or ""))
         _trace.trace_end(answer, report.total, ok=True)
@@ -2813,7 +2841,7 @@ def _run_turn_via_jaeger_agent(
         "latency": asdict(report),
         "iterations": result["iterations"],
         "halt_reason": result["halt_reason"],
-        "framework_path": "jaeger_os_agent",
+        "framework_path": "jaeger_agent",
     })
 
     # Trim per-session message history at the legacy limit so an
@@ -2825,7 +2853,7 @@ def _run_turn_via_jaeger_agent(
     # assistant call was deleted, and both cloud APIs 400 on that
     # orphan for every later turn in the session.
     if len(jaeger_agent.messages) > _MAX_HISTORY_MESSAGES * 2:
-        from jaeger_ai.agent.util.context_guard import oldest_group_size
+        from jaeger_agent.util.context_guard import oldest_group_size
         msgs = jaeger_agent.messages
         drop = 0
         while len(msgs) - drop > _MAX_HISTORY_MESSAGES * 2 and drop < len(msgs):
@@ -2874,9 +2902,9 @@ def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any
     ``run_command`` and ``run_for_voice`` are thin output adapters over
     this — see them below. Never prints; never raises.
 
-    Phase-6.2 cutover: the loop is now ``JaegerAgent`` unconditionally.
-    The legacy pydantic-ai code paths below the early-return are
-    unreachable and will be deleted in the next cleanup pass."""
+    JaegerAgent is the unconditional loop implementation; JaegerAI supplies
+    product prompts, tools, memory, personality, and user-facing policy through
+    its runtime adapter."""
     return _run_turn_via_jaeger_agent(client, user_text, session_key=session_key)
 
 
@@ -2925,7 +2953,7 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
     prompt was built, rebuild it so the new persona takes effect THIS turn
     (no restart). Cheap — rebuilds only on an actual change."""
     try:
-        from jaeger_ai.agent.prompts.prompts import build_system_prompt
+        from jaeger_agent.prompts.prompts import build_system_prompt
         from jaeger_ai.personality.character import active_character_signature
         layout = _pipeline.get("layout")
         if layout is None:
@@ -2997,7 +3025,7 @@ def _persist_plugin_autostart(name: str) -> None:
         # line (persona_lane.build_self_model_block) reads this same
         # autostart list — invalidate its per-boot cache so the next turn
         # sees the new "✓ active" status instead of a stale snapshot.
-        from jaeger_ai.agent.prompts.persona_lane import reset_self_model_cache
+        from jaeger_agent.prompts.persona_lane import reset_self_model_cache
         reset_self_model_cache()
     except Exception as exc:  # noqa: BLE001 — persistence never breaks activation
         print(f"[jaeger] could not persist plugin autostart for {name!r}: {exc}", flush=True)
@@ -3081,7 +3109,7 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_thinking:
         try:
-            from .agent.background import thinking_runner
+            from jaeger_agent.background import thinking_runner
             lock = _pipeline.get("llm_lock") or threading.Lock()
             _pipeline["llm_lock"] = lock
             # Per-instance log path keeps thinking output out of the framework
@@ -3373,7 +3401,7 @@ def self_test(layout: InstanceLayout) -> int:
 
     # Skill discovery
     try:
-        from jaeger_ai.agent.skill_registry.skill_loader import discover_skills
+        from jaeger_agent.skill_registry.skill_loader import discover_skills
         discovered = discover_skills(layout)
         names = [f"{s.name}_v{s.version}({s.zone})" for s in discovered]
         print(f"== skill discovery == {names or '(none yet — core skills/ empty)'}")
@@ -3727,7 +3755,7 @@ def parse_args() -> argparse.Namespace:
                    help="Delete a stored credential by name and exit.")
     # ``--migrate``, ``--list-instances``, ``--create-instance``,
     # ``--delete-instance``, ``--clear-instance`` removed in 0.2.0
-    # — use ``jaeger migrate`` and ``jaeger instance {list,delete,clear}``
+    # — use ``jaeger migrate`` and ``jaeger agent {list,delete,clear}``
     # (INST-2). The wizard creates new instances directly via
     # ``jaeger setup --name NAME``; the explicit ``--create-instance``
     # noninteractive shortcut is no longer the recommended path.
@@ -3854,7 +3882,7 @@ def boot_for_tui(
             jaeger_tools.bind(layout, workspace_override=config.workspace.location)
         _pipeline["layout"] = layout
         try:
-            from jaeger_ai.agent.trace import start_trace_recorder
+            from jaeger_agent.trace import start_trace_recorder
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
             pass
@@ -3896,7 +3924,7 @@ def boot_for_tui(
         # can't reach for ``send_message`` when Discord isn't set
         # up. The wiring is idempotent + best-effort.
         try:
-            from jaeger_ai.agent.availability import wire_availability_checks
+            from jaeger_agent.availability import wire_availability_checks
             wired = wire_availability_checks(agent)
             if wired:
                 print(f"[jaeger] availability wired for {wired} plugin-backed tool(s)",
@@ -4014,9 +4042,9 @@ def run_daemon(*, instance_name: str | None = None,
     """
     import signal as _signal
 
-    from jaeger_ai.agent.background.deep_think import queue_for_layout
+    from jaeger_agent.background.deep_think import queue_for_layout
     from jaeger_ai.core.models.model_resolver import DEFAULT_CODER_MODEL, DEFAULT_MODEL
-    from jaeger_ai.agent.prompts.reflection import reflect_on_task, save_reflection
+    from jaeger_agent.prompts.reflection import reflect_on_task, save_reflection
 
     print("[jaeger-daemon] booting…", flush=True)
     boot = boot_for_tui(instance_name=instance_name, with_memory=True,
@@ -4056,14 +4084,14 @@ def run_daemon(*, instance_name: str | None = None,
             # probabilistically queue the worst few for review. Bounded by the
             # open-review dedup + the 'reviewing' marker resetting activation.
             try:
-                from jaeger_ai.agent.background import skill_review as _sr
+                from jaeger_agent.background import skill_review as _sr
                 _sr.sweep(layout, queue)
             except Exception:  # noqa: BLE001 — a sweep failure never blocks deep-think
                 pass
             # Lifecycle maintenance: archive superseded versions + retire
             # eligible low-win skills. Recoverable (.archive/) + guarded.
             try:
-                from jaeger_ai.core.skill_improvement import skill_maintenance as _sm
+                from jaeger_agent.skill_improvement import skill_maintenance as _sm
                 _sm.maintenance_sweep(layout)
             except Exception:  # noqa: BLE001 — maintenance never blocks deep-think
                 pass
@@ -4097,7 +4125,7 @@ def run_daemon(*, instance_name: str | None = None,
                         # → VERIFY on observable evidence + per-task-type
                         # receipts → SETTLE (done / one informed retry /
                         # failed). Never trust-by-return.
-                        from jaeger_ai.agent.background.deepthink_runner import (
+                        from jaeger_agent.background.deepthink_runner import (
                             run_one_task,
                         )
                         outcome = run_one_task(
@@ -4347,7 +4375,7 @@ def _main_dispatch() -> int:
     layout = InstanceLayout(root=root)
 
     # Instance-management commands now live under ``jaeger setup`` /
-    # ``jaeger instance {list,use,inspect,delete,clear}`` / ``jaeger
+    # ``jaeger agent {list,use,inspect,delete,clear}`` / ``jaeger
     # migrate`` — see ``daemon/instance_verbs.py`` (INST-2). The old
     # ``--list-instances`` / ``--create-instance`` / ``--delete-
     # instance`` / ``--clear-instance`` / ``--migrate`` flags were
@@ -4504,7 +4532,7 @@ def _main_dispatch() -> int:
         config: Config = load_yaml(layout.config_path, Config)
         _pipeline["layout"] = layout
         try:
-            from jaeger_ai.agent.trace import start_trace_recorder
+            from jaeger_agent.trace import start_trace_recorder
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
             pass

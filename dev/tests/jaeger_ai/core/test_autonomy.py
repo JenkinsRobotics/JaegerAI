@@ -35,7 +35,7 @@ class _FakeBus:
 
 
 def test_confirm_honors_each_mode() -> None:
-    from jaeger_ai.agent.loop.bus_confirm import BusConfirmationProvider
+    from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.core.safety import session_trust
 
     sess = "test:autonomy-gate"

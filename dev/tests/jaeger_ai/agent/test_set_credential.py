@@ -12,7 +12,7 @@ import tempfile
 
 import pytest
 
-from jaeger_ai.core import credentials as creds
+from jaeger_agent import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
@@ -41,5 +41,5 @@ def test_set_credential_is_visible_in_the_credentials_toolset() -> None:
     # Membership here is what makes the model actually SEE set_credential
     # when the credentials toolset is scoped in — without it the tool is
     # registered but invisible, which is how this gap stayed hidden.
-    from jaeger_ai.agent.skill_registry.toolset_scoping import TOOLSETS
+    from jaeger_agent.skill_registry.toolset_scoping import TOOLSETS
     assert "set_credential" in TOOLSETS["credentials"]

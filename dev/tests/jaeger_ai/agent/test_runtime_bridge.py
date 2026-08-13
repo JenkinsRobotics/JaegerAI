@@ -1,34 +1,31 @@
-"""Phase-6 runtime bridge — adapter selection, drive_one_turn, env gate.
+"""JaegerAgent product bridge — adapter selection and turn driving.
 
-These tests stand between the legacy ``_run_turn`` and the new
-``_run_turn_via_jaeger_agent``. They exercise the bridge's selection
-logic and turn-driving without booting a real Jaeger instance or
-hitting a model — fake clients duck-type the surface the bridge probes.
+These tests exercise JaegerAI's provider selection and product hooks around
+the reusable loop without booting a real Jaeger instance or hitting a model;
+fake clients duck-type the surface the bridge probes.
 """
 
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     AnthropicAdapter,
-    JaegerAgent,
     LocalLlamaAdapter,
     OpenAIAdapter,
     ProviderAdapter,
     clear_registry,
     register_tool,
 )
-from jaeger_ai.agent.loop.runtime_bridge import (
+from jaeger_agent import JaegerAgent
+from jaeger_agent.loop.runtime_bridge import (
     _adapter_for_client,
     build_jaeger_agent,
     drive_one_turn,
-    jaeger_agent_enabled,
 )
 
 
@@ -74,7 +71,7 @@ def test_local_adapter_falls_back_to_default_max_tokens_with_no_pipeline():
     """No active pipeline (early boot / unit-test context with no config)
     must keep the 0.1.0-default 4096 — closing the configurability hole
     can't change unsuspecting callers' behaviour."""
-    from jaeger_ai.agent.loop.runtime_bridge import _resolve_local_max_tokens
+    from jaeger_agent.loop.runtime_bridge import _resolve_local_max_tokens
     # Force the lazy import to find no pipeline: clear any cached config.
     import jaeger_ai.main as _main
     saved = _main._pipeline.get("config")
@@ -90,7 +87,7 @@ def test_local_adapter_honours_config_max_tokens(monkeypatch):
     it — that's the whole point of plumbing it through. 0.1.0 silently
     ignored it because the bridge always constructed the adapter with
     the hardcoded default."""
-    from jaeger_ai.agent.loop import runtime_bridge as rb
+    from jaeger_agent.loop import runtime_bridge as rb
     import types
     fake_cfg = types.SimpleNamespace(
         model=types.SimpleNamespace(max_tokens=1536))
@@ -108,7 +105,7 @@ def test_local_adapter_honours_config_max_tokens(monkeypatch):
 def test_local_adapter_max_tokens_resolver_swallows_bad_config():
     """A malformed / missing-attribute config must not crash adapter
     construction — fall back to 4096 silently."""
-    from jaeger_ai.agent.loop import runtime_bridge as rb
+    from jaeger_agent.loop import runtime_bridge as rb
     import jaeger_ai.main as _main
     import types
     saved = _main._pipeline.get("config")
@@ -310,7 +307,7 @@ def test_drive_one_turn_surfaces_halt_reason_when_loop_caps():
     def _impl(value: str = "x") -> dict:
         return {"ok": True}
 
-    from jaeger_ai.agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
+    from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
     script: list[dict[str, Any]] = []
     for _ in range(MAX_IDENTICAL_CALLS + 2):
         script.append({
@@ -339,23 +336,3 @@ def test_drive_one_turn_accumulates_history_across_turns():
     assert [m["role"] for m in agent.messages] == [
         "user", "assistant", "user", "assistant",
     ]
-
-
-# ── env gate ───────────────────────────────────────────────────────
-
-
-def test_jaeger_agent_enabled_off_by_default(monkeypatch):
-    monkeypatch.delenv("JAEGER_USE_NEW_AGENT", raising=False)
-    assert jaeger_agent_enabled() is False
-
-
-@pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on", " on "])
-def test_jaeger_agent_enabled_honours_truthy_values(monkeypatch, val):
-    monkeypatch.setenv("JAEGER_USE_NEW_AGENT", val)
-    assert jaeger_agent_enabled() is True
-
-
-@pytest.mark.parametrize("val", ["0", "false", "no", "off", "", "maybe"])
-def test_jaeger_agent_enabled_rejects_falsy_or_garbage(monkeypatch, val):
-    monkeypatch.setenv("JAEGER_USE_NEW_AGENT", val)
-    assert jaeger_agent_enabled() is False

@@ -1,13 +1,13 @@
 """The REAL boot-path registration test.
 
 0.9.3 shipped with send_email implemented, unit-tested — and never imported
-by `jaeger_ai.agent.tools`, so production boots registered no email tool
+by `jaeger_agent.tools`, so production boots registered no email tool
 while the evals (which import modules directly) passed. This test closes
 that class: it imports EXACTLY what the app boot imports and asserts every
 user-facing tool is live in the registry. If you add a tool module, its
 name belongs in EXPECTED — and the import belongs in agent/tools/__init__.
 """
-import jaeger_ai.agent.tools  # the production boot import — nothing else
+import jaeger_agent.tools  # the production boot import — nothing else
 from jaeger_os.core.tools.tool_registry import get_tools
 
 EXPECTED = {
