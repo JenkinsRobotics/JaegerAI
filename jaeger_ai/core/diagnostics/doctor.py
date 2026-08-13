@@ -28,7 +28,7 @@ def _bind(layout: Any) -> None:
     already bound (it just re-points at the same layout)."""
     try:
         from jaeger_ai.core import context as _tcommon
-        from jaeger_ai.core.memory import memory as _memmod
+        from jaeger_agent.memory import memory as _memmod
         _memmod.bind(layout)
         _tcommon._layout = layout
     except Exception:  # noqa: BLE001 — binding is best-effort for the probe
@@ -142,7 +142,7 @@ def _skill_skip_checks(layout: Any) -> list[Any]:
     unimplemented manifest are left out — those aren't dependency
     problems, they're operator choices."""
     from jaeger_ai.core.runtime.preflight import Check
-    from jaeger_ai.agent.skill_registry.skill_loader import (
+    from jaeger_agent.skill_registry.skill_loader import (
         classify_skip, load_and_register, skip_fix_hint,
         _SKIP_CLASS_DISABLED, _SKIP_CLASS_UNSUPPORTED,
     )

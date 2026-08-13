@@ -44,11 +44,11 @@ from ..main import (
     run_for_voice,
     shutdown_extensions,
 )
-from ..agent import tools as agent_tools
-from jaeger_ai.agent.background.cron_runner import CronRunner
+from jaeger_agent import tools as agent_tools
+from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import InstanceLayout, default_instance_name, resolve_instance_dir
 from jaeger_ai.core.instance.schemas import Config, load_yaml
-from jaeger_ai.agent.prompts.prompts import build_system_prompt
+from jaeger_agent.prompts.prompts import build_system_prompt
 
 
 def _make_handler(client: Any) -> "callable":

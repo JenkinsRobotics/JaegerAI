@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.core.runtime.cloud_errors import (
+from jaeger_agent.errors import (
     AUTH,
     NOT_FOUND,
     QUOTA,
@@ -182,7 +182,7 @@ def test_friendly_error_text_rewrites_context_length_400():
     """The LMStudio HTTP 400 that fires when the loaded ctx is smaller
     than the prompt — a recurring footgun — should turn into an
     actionable hint instead of being shown verbatim."""
-    from jaeger_ai.core.runtime.cloud_errors import friendly_error_text
+    from jaeger_agent.errors import friendly_error_text
 
     raw = ("status_code: 400, model_name: gemma-4-26b-a4b, body: The "
            "number of tokens to keep from the initial prompt is greater "
@@ -197,14 +197,14 @@ def test_friendly_error_text_rewrites_context_length_400():
 
 
 def test_friendly_error_text_passes_unknown_errors_through():
-    from jaeger_ai.core.runtime.cloud_errors import friendly_error_text
+    from jaeger_agent.errors import friendly_error_text
 
     raw = "some other random error — definitely not about context"
     assert friendly_error_text(raw) == raw
 
 
 def test_friendly_error_text_matches_alternate_phrasings():
-    from jaeger_ai.core.runtime.cloud_errors import friendly_error_text
+    from jaeger_agent.errors import friendly_error_text
     for needle in (
         "exceeds the maximum context",
         "exceed context window",

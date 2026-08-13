@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import OpenAIAdapter
-from jaeger_ai.agent.adapters.openai import KNOWN_PROVIDERS
+from jaeger_agent import OpenAIAdapter
+from jaeger_agent.adapters.openai import KNOWN_PROVIDERS
 from jaeger_os.core.tools.tool_schema import ToolDef
 
 
@@ -405,7 +405,7 @@ def test_call_compat_providers_do_not_send_stream_options():
 def test_call_interrupt_mid_stream_closes_and_raises():
     """An interrupt observed between chunks must close the HTTP stream
     (so the server stops generating) and surface AgentInterrupted."""
-    from jaeger_ai.agent.loop.interrupt import AgentInterrupted
+    from jaeger_agent.loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
 
@@ -581,7 +581,7 @@ def test_openai_adapter_drives_jaeger_agent_loop_to_completion():
     """End-to-end smoke: ``JaegerAgent`` drives the adapter, dispatches
     a tool, gets a final answer. Confirms the OpenAI wire format
     round-trips cleanly through the loop."""
-    from jaeger_ai.agent import (
+    from jaeger_agent import (
         JaegerAgent,
         clear_registry,
         register_tool,

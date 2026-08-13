@@ -9,13 +9,10 @@ touching a real model.
 
 from __future__ import annotations
 
-import threading
-from typing import Any
-
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     AgentCallbacks,
     JaegerAgent,
     Message,
@@ -23,7 +20,7 @@ from jaeger_ai.agent import (
     clear_registry,
     register_tool,
 )
-from jaeger_ai.agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
+from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
 
 
 # ── stub adapter ───────────────────────────────────────────────────

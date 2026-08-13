@@ -131,7 +131,7 @@ def _tools(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 
 def _facts(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List stored facts from jaeger's memory layer."""
-    from jaeger_ai.core.memory import memory as memory_mod
+    from jaeger_agent.memory import memory as memory_mod
     try:
         rows = memory_mod.list_facts()
     except RuntimeError as exc:
@@ -613,7 +613,7 @@ def _ensure_cloud_key(ctx: SlashContext, cfg: Any, provider: str) -> bool:
     The key resolves against ``cfg.external_model.api_key_credential`` —
     which the caller sets to the provider's own credential name — so
     each provider keeps a separate stored key."""
-    from jaeger_ai.core import credentials as creds
+    from jaeger_agent import credentials as creds
     from jaeger_ai.core.models.external_model import resolve_api_key
     from jaeger_ai.core.instance.instance import InstanceLayout
 
@@ -995,7 +995,7 @@ def _download(ctx: SlashContext, args: str) -> SlashResult:
 def _plugins(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List bundled plugins (discord, telegram, whisper_stt, etc.)
     with install + credential status, so the user knows what's ready."""
-    from jaeger_ai.agent.tools.plugins import list_plugins
+    from jaeger_agent.tools.plugins import list_plugins
     result = list_plugins()
     plugins = result.get("plugins") or []
     if not plugins:
@@ -1211,7 +1211,7 @@ def _goal(ctx: SlashContext, args: str) -> SlashResult:
 
 def _deep_think_queue(ctx: SlashContext):
     """Build the DeepThinkQueue for the active instance."""
-    from jaeger_ai.agent.background.deep_think import queue_for_layout
+    from jaeger_agent.background.deep_think import queue_for_layout
     from jaeger_ai.core.instance.instance import InstanceLayout
     import pathlib
     layout = InstanceLayout(root=pathlib.Path(str(ctx.instance_dir)))
@@ -1330,7 +1330,7 @@ def _board_for_ctx(ctx: SlashContext):
     """Build the kanban Board for the active instance."""
     import pathlib
 
-    from jaeger_ai.agent.background.board import board_for_layout
+    from jaeger_agent.background.board import board_for_layout
     from jaeger_ai.core.instance.instance import InstanceLayout
     layout = InstanceLayout(root=pathlib.Path(str(ctx.instance_dir)))
     return board_for_layout(layout)
@@ -1344,7 +1344,7 @@ def _board(ctx: SlashContext, args: str) -> SlashResult:
        ``/board block <id>``       mark a card blocked
        ``/board move <id> <col>``  move a card to any column
     """
-    from jaeger_ai.agent.background.board import COLUMNS
+    from jaeger_agent.background.board import COLUMNS
 
     parts = args.strip().split(None, 2)
     sub = parts[0].lower() if parts else ""
@@ -1670,7 +1670,7 @@ def _steer(ctx: SlashContext, args: str) -> SlashResult:
 def _stop(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """Stop every running background process."""
     try:
-        from jaeger_ai.agent import tools as _jt
+        from jaeger_agent import tools as _jt
         listing = _jt.list_background()
     except Exception as exc:  # noqa: BLE001
         ctx.console.print(f"[red]Couldn't list background processes:[/] {exc}")
@@ -1684,7 +1684,7 @@ def _stop(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     if not procs:
         ctx.console.print("[dim]No background processes running.[/]")
         return SlashResult()
-    from jaeger_ai.agent import tools as _jt
+    from jaeger_agent import tools as _jt
     stopped = 0
     for p in procs:
         pid = ((p.get("id") or p.get("process_id") or p.get("pid")
@@ -1943,7 +1943,7 @@ def _config(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 def _skills(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     """List the skills currently loaded — each skill is a tool bundle."""
     try:
-        from jaeger_ai.agent.skill_registry import toolset_scoping as _ts
+        from jaeger_agent.skill_registry import toolset_scoping as _ts
         summaries = dict(_ts._SKILL_SUMMARY)
         members = dict(_ts._SKILL_TOOLSETS)
     except Exception as exc:  # noqa: BLE001

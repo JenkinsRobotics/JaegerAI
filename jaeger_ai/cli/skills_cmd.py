@@ -268,7 +268,7 @@ def run_notes(args: Any) -> int:
     if layout is None:
         print(c.red("no active instance — run the setup wizard first"))
         return 1
-    from jaeger_ai.core.skill_improvement import skill_notes
+    from jaeger_agent.skill_improvement import skill_notes
     skill = (getattr(args, "skill", "") or "").strip()
     if skill:
         notes = skill_notes.notes_for(layout, skill)
@@ -285,7 +285,7 @@ def run_notes(args: Any) -> int:
     if not summary:
         print(c.dim("no skill-usage notes yet — the agent journals them as it works"))
         return 0
-    from jaeger_ai.core.skill_improvement import skill_revisions
+    from jaeger_agent.skill_improvement import skill_revisions
     revs = skill_revisions.counts(layout)
     print(f"\n{c.bold('Skill usage notes')}  {c.dim('(per-skill outcomes)')}\n")
     for sk, tally in sorted(summary.items(),
@@ -308,7 +308,7 @@ def run_revisions(args: Any) -> int:
     if layout is None:
         print(c.red("no active instance — run the setup wizard first"))
         return 1
-    from jaeger_ai.core.skill_improvement import skill_revisions
+    from jaeger_agent.skill_improvement import skill_revisions
     skill = (getattr(args, "skill", "") or "").strip()
     if skill:
         revs = skill_revisions.revisions_for(layout, skill)
@@ -344,8 +344,8 @@ def run_score(args: Any) -> int:
     if layout is None:
         print(c.red("no active instance — run the setup wizard first"))
         return 1
-    from jaeger_ai.core.skill_improvement import skill_maintenance as sm
-    from jaeger_ai.core.skill_improvement import skill_notes
+    from jaeger_agent.skill_improvement import skill_maintenance as sm
+    from jaeger_agent.skill_improvement import skill_notes
     skill = (getattr(args, "skill", "") or "").strip()
     skills = [skill] if skill else sorted(skill_notes.summary(layout))
     if not skills:

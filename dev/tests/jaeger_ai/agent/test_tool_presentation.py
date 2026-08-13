@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-from jaeger_ai.agent.dialects import (
+from jaeger_agent.dialects import (
     detect_family,
     detect_reasoning,
     render_tools_for as render_tool_presentation,
@@ -174,7 +172,7 @@ def test_textify_tool_history_chatml_drops_structured_tool_calls():
     """A prose family's tool-call history must become native text turns
     with NO structured ``tool_calls`` field — otherwise the model's GGUF
     template renders it and crashes (DeepSeek-R1)."""
-    from jaeger_ai.agent.dialects import textify_tool_history
+    from jaeger_agent.dialects import textify_tool_history
     import json as _json
     wire = [
         {"role": "user", "content": "what time is it"},
@@ -197,7 +195,7 @@ def test_textify_tool_history_chatml_drops_structured_tool_calls():
 
 def test_textify_tool_history_passthrough_for_gemma():
     """Gemma keeps the structured path — history must be untouched."""
-    from jaeger_ai.agent.dialects import textify_tool_history
+    from jaeger_agent.dialects import textify_tool_history
     wire = [
         {"role": "assistant", "content": None,
          "tool_calls": [{"id": "1", "type": "function",
@@ -209,7 +207,7 @@ def test_textify_tool_history_passthrough_for_gemma():
 def test_harmony_extracts_commentary_tool_call():
     """gpt-oss emits tool calls on the harmony ``commentary`` channel
     with a ``to=functions.NAME`` recipient — parse name + JSON args."""
-    from jaeger_ai.agent.dialects import harmony
+    from jaeger_agent.dialects import harmony
     text = (
         '<|channel|>analysis<|message|>User asks the time.<|end|>'
         '<|start|>assistant<|channel|>commentary to=functions.get_time '
@@ -222,7 +220,7 @@ def test_harmony_extracts_commentary_tool_call():
 
 
 def test_harmony_clean_channels_prefers_final():
-    from jaeger_ai.agent.dialects import harmony
+    from jaeger_agent.dialects import harmony
     text = (
         '<|channel|>analysis<|message|>thinking hard<|end|>'
         '<|channel|>final<|message|>It is 5pm in Shanghai.'
@@ -233,7 +231,7 @@ def test_harmony_clean_channels_prefers_final():
 def test_harmony_clean_channels_strips_analysis_when_no_final():
     """A pure tool-call turn has no final channel — the answer should be
     empty (not the analysis/commentary text)."""
-    from jaeger_ai.agent.dialects import harmony
+    from jaeger_agent.dialects import harmony
     text = (
         '<|channel|>analysis<|message|>need a tool<|end|>'
         '<|start|>assistant<|channel|>commentary to=functions.get_time '
@@ -243,7 +241,7 @@ def test_harmony_clean_channels_strips_analysis_when_no_final():
 
 
 def test_parse_harmony_dispatcher_wraps_calls():
-    from jaeger_ai.agent.dialects import parse_harmony
+    from jaeger_agent.dialects import parse_harmony
     text = (
         '<|channel|>commentary to=functions.calculate '
         '<|message|>{"expression": "2+2"}'

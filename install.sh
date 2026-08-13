@@ -16,7 +16,7 @@
 # (requirements.txt, @master for 0.9) — installing JaegerAI (editable,
 # below) pulls the whole stack from GitHub automatically, no manual
 # multi-repo assembly needed. A dev machine with sibling checkouts at
-# ~/GITHUB/{JaegerOS,JaegerKokoroTTS,JaegerWhisperSTT} gets those
+# ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
 # installed EDITABLE instead (step 3b below) — local changes to the
 # framework/engines are live without a push+reinstall round-trip.
 
@@ -125,7 +125,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
 
   # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
   # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
-  # JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
+  # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
   # copies so local framework/engine changes go live immediately.
   # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
   # migration) must run the OFFICIAL pinned releases inside its own
@@ -140,7 +140,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
   SIBLINGS_FOUND=()
   [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerOS JaegerKokoroTTS JaegerWhisperSTT; do
+  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
     if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
       SIBLINGS_FOUND+=("$sib")
     fi
@@ -170,6 +170,26 @@ fi
 
 # 4. Scaffold .jaeger_os/ (idempotent) — operator state root
 mkdir -p "$REPO_ROOT/.jaeger_os/instances"
+
+# 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
+#    PRODUCT installs only — a dev checkout must never claim the global
+#    name, or re-running ./install.sh in the repo would silently repoint
+#    the released `jaeger` at development code. Dev uses ./jaeger.
+#    Prefer a /usr/local/bin symlink (already on every macOS PATH); when
+#    that's not writable (no sudo), fall back to the user's shell rc.
+if [[ "$PRODUCT_MODE" -eq 1 ]]; then
+  if ln -sfn "$REPO_ROOT/jaeger" /usr/local/bin/jaeger 2>/dev/null; then
+    echo "✓ jaeger on PATH (/usr/local/bin/jaeger)"
+  else
+    RC="$HOME/.zshrc"
+    [[ "${SHELL:-}" == */bash ]] && RC="$HOME/.bashrc"
+    PATH_LINE="export PATH=\"$REPO_ROOT:\$PATH\"  # jaeger"
+    if ! grep -qsF "$PATH_LINE" "$RC"; then
+      printf '\n%s\n' "$PATH_LINE" >> "$RC"
+    fi
+    echo "✓ jaeger added to PATH via $RC — open a new terminal (or: source $RC)"
+  fi
+fi
 
 echo
 echo "✓ Local install complete"

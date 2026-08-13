@@ -80,7 +80,7 @@ def main() -> int:
             # to call the tier-2 open_on_host tool mid-turn. The
             # requires_tier wrapper consults current_policy() — by now
             # (post-boot) that's the REAL BridgeConfirmationProvider.
-            from jaeger_ai.agent.tools.host import _t_open_on_host
+            from jaeger_agent.tools.host import _t_open_on_host
             result = _t_open_on_host(target="https://youtube.com")
             print(f"  [{label}] tool result: {result}")
             return {"text": f"opened it ({result.get('opened')})", "error": None}
@@ -95,7 +95,7 @@ def main() -> int:
                         create=True), \
              mock.patch("jaeger_ai.main.run_for_voice", make_run_for_voice(label),
                         create=True), \
-             mock.patch("jaeger_ai.agent.tools.host._run_open", fake_run_open):
+             mock.patch("jaeger_agent.tools.host._run_open", fake_run_open):
             from jaeger_ai.interfaces import bridge
             rc = bridge.main(argv=[])
         frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]

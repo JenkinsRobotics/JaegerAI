@@ -65,9 +65,6 @@ what's misleading" snapshot, so future work has a target list. Dated 2026-07-01.
 - **Two parallel Bus stacks** — `transport/*` (msgspec-typed, has `request()`) and
   `app/bus/*` (dataclass + `MessageRegistry`, no `request()`), non-shared, different
   endpoints/env vars. Architectural duplication.
-- **Agent-path migration flag** — `JAEGER_USE_NEW_AGENT` docstring says "off by
-  default" yet the `JaegerAgent` path is driven unconditionally. Unclear which path
-  is canonical; the migration is mid-flight.
 - **Skill folder naming** — `computer_use_v1` / `macos_computer_v1` carry `_v1` in
   the folder (duplicating the manifest version); the "computer" family (2 tool-skills
   + the `apple/macos-computer-use` playbook) overlaps confusingly. → **P5 cleanup.**
@@ -85,7 +82,6 @@ what's misleading" snapshot, so future work has a target list. Dated 2026-07-01.
    engine, or drop it and document that format decides.
 6. **Voice config** — wire `follow_up`/`follow_up_seconds` (or remove the fields).
 7. **Bus consolidation** — pick one Bus stack (`transport/*` vs `app/bus/*`) pre-1.0.
-8. **Resolve the agent-path migration** — make `JAEGER_USE_NEW_AGENT` truthful or retire it.
 
 > Skill-pipeline items (P1–P7) are tracked in detail in
 > `dev/docs/agentic_skill_pipeline_backlog.md`. This doc is the broader,

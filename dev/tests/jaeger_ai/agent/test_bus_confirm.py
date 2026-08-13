@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 import types
 
-from jaeger_ai.agent.loop.bus_confirm import BusConfirmationProvider
+from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
 from jaeger_ai.core.messages import AgentRequest, AgentResponse
 from jaeger_os.transport.inproc_bus import InProcBus
 

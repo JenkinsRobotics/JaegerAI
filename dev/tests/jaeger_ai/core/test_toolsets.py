@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent.skill_registry import toolset_scoping as ts
+from jaeger_agent.skill_registry import toolset_scoping as ts
 
 
 @pytest.fixture(autouse=True)
@@ -176,7 +176,7 @@ def test_every_registered_tool_is_classified_or_explicit_fail_open(monkeypatch) 
     # to cover the always-on path — and assert only against what's
     # available.
     from jaeger_os.core.tools.tool_registry import get_tools  # noqa
-    import jaeger_ai.agent.tools  # noqa — pulls module-level registrations
+    import jaeger_agent.tools  # noqa — pulls module-level registrations
 
     all_classified: set[str] = set(ts.CORE)
     for members in ts.TOOLSETS.values():

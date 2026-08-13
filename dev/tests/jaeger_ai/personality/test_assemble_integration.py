@@ -39,7 +39,7 @@ def layout(tmp_path: Path):
 # ── the worker prompt is vanilla in agent mode ─────────────────────
 def test_agent_prompt_has_no_persona(layout) -> None:
     """No character block, no persona boundary — the worker reasons vanilla."""
-    from jaeger_ai.agent.prompts.assemble import assemble_prompt
+    from jaeger_agent.prompts.assemble import assemble_prompt
     out = assemble_prompt(layout, mode="agent")
     assert "## My voice —" not in out
     assert "THE PERSONA BOUNDARY" not in out
@@ -52,7 +52,7 @@ def test_agent_prompt_has_no_persona(layout) -> None:
 def test_active_character_does_not_reach_worker_prompt(layout) -> None:
     from jaeger_ai.personality.character import set_active_character
     set_active_character(layout.root, "eren_yeager")   # directness 0.85
-    from jaeger_ai.agent.prompts.assemble import assemble_prompt
+    from jaeger_agent.prompts.assemble import assemble_prompt
     out = assemble_prompt(layout, mode="agent")
     assert "## My voice —" not in out
     assert "be blunt and direct" not in out   # its compiled clause is filter-only
@@ -62,7 +62,7 @@ def test_active_character_does_not_reach_worker_prompt(layout) -> None:
 def test_subagent_mode_has_no_character(layout) -> None:
     """Sub-agents get a focused brief and zero persona — their preamble is
     their whole identity."""
-    from jaeger_ai.agent.prompts.assemble import assemble_prompt
+    from jaeger_agent.prompts.assemble import assemble_prompt
     out = assemble_prompt(layout, mode="subagent",
                           goal="quick task", context="some context")
     assert "## My voice —" not in out

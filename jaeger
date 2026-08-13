@@ -8,10 +8,10 @@
 #   jaeger dev [flag]           developer toolbox (jaeger_ai.cli.devtools):
 #                               dev app/TUI boot, or pass
 #                               --stop/--status/--health/--dev-gui/…
-#   jaeger instances ...        manage agents: list / create / edit /
-#                               delete / set-default / show
+#   jaeger agent ...            manage agents: create / list / use /
+#                               inspect / delete / clear
 #   jaeger skills|personality|status|roadmap|avatar    operator console
-#   jaeger setup [name]         alias of `jaeger instances create`
+#   jaeger setup [name]         create an agent (GUI-first; `setup tui` = wizard)
 #   jaeger doctor               environment + readiness check
 #
 # Management subcommands go to the console (jaeger_ai.cli); everything
@@ -19,7 +19,15 @@
 # directly to sidestep pyenv shims.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks (install.sh links /usr/local/bin/jaeger → here) so
+# REPO_ROOT is the real install dir, not the symlink's.
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  SELF="$(readlink "$SELF")"
+  [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
+done
+REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
 VENV_PY="$REPO_ROOT/.venv/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then

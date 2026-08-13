@@ -6,8 +6,8 @@ import textwrap
 
 import pytest
 
-from jaeger_ai.agent import clear_registry, has_tool
-from jaeger_ai.agent.skill_registry.skill_loader import (
+from jaeger_agent import clear_registry, has_tool
+from jaeger_agent.skill_registry.skill_loader import (
     _ToolCapturingAgent,
     classify_skip,
     last_skip_reason,

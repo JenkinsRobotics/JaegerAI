@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_ai.agent.prompts import (
+from jaeger_agent.prompts import (
     AUTO_BOARD_PROMPT,
     PromptMode,
     assemble_prompt,
@@ -135,7 +135,7 @@ def test_subagent_mode_skips_the_board_digest(tmp_path):
     # to prove the test's negative assertion is meaningful.
     mem = tmp_path / "memory"
     mem.mkdir(parents=True, exist_ok=True)
-    from jaeger_ai.agent.background.board import board_for_layout
+    from jaeger_agent.background.board import board_for_layout
     board_for_layout(_layout(tmp_path)).add("parent's todo", column="ready")
 
     sub_out = assemble_prompt(_layout(tmp_path), mode="subagent", goal="x")

@@ -114,12 +114,20 @@ class _Character:
         return self._block
 
 
-def test_identity_block_prepends_framing_when_names_differ():
-    block = _persona_identity_block("Ted", _Character("Lilith"))
-    assert block.startswith("Your name is Ted.")
-    assert "Lilith" in block
-    assert "never present yourself as Lilith" in block
-    assert block.endswith("## My voice")
+def test_identity_block_substitutes_character_name_when_names_differ():
+    # Hardened 2026-07-19: first-person bindings are scrubbed — every
+    # occurrence of the character's name in the persona body becomes the
+    # agent's name (case-insensitive). The framing then references the
+    # character in THIRD person only ("modeled on X"), so the model can
+    # draw on what it knows about a famous character without becoming it.
+    block = _persona_identity_block(
+        "Ted", _Character("Lilith", block="## My voice — Lilith\n\nYou are LILITH."))
+    framing, body = block.split("\n\n", 1)
+    assert framing.startswith("Your name is Ted")
+    assert "modeled on Lilith" in framing
+    assert "Lilith" not in body and "LILITH" not in body
+    assert "## My voice — Ted" in body
+    assert "You are Ted." in body
 
 
 def test_identity_block_skips_framing_when_agent_name_matches_character():
@@ -193,7 +201,7 @@ def test_run_persona_lane_turn_drives_perform_task_via_drive_one_turn(monkeypatc
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     def _fake_run_persona_turn(client, user_text, *, character_block, agent_name,
@@ -203,7 +211,7 @@ def test_run_persona_lane_turn_drives_perform_task_via_drive_one_turn(monkeypatc
         return f"styled: {raw}"
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -233,7 +241,7 @@ def test_run_persona_lane_turn_tool_free_has_no_inner_result(monkeypatch):
         return "an in-character answer, no delegation"
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -274,7 +282,7 @@ def test_run_persona_lane_turn_reraises_when_drive_one_turn_raises_mid_delegatio
         raise RuntimeError("model died mid-delegation")
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _raising_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _raising_drive_one_turn,
     )
 
     def _fake_run_persona_turn(client, user_text, *, character_block, agent_name,
@@ -282,7 +290,7 @@ def test_run_persona_lane_turn_reraises_when_drive_one_turn_raises_mid_delegatio
         return perform_task(user_text)  # propagate whatever perform_task raises
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -354,7 +362,7 @@ def test_run_persona_lane_turn_repairs_delegated_history_to_real_exchange(monkey
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     def _fake_run_persona_turn(client, user_text, *, character_block, agent_name,
@@ -363,7 +371,7 @@ def test_run_persona_lane_turn_repairs_delegated_history_to_real_exchange(monkey
         return f"Ah, it's 12:00, my dear — {raw}"
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -406,7 +414,7 @@ def test_run_persona_lane_turn_skips_compose_override_when_spoke_via_tool(monkey
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     def _fake_run_persona_turn(client, user_text, *, character_block, agent_name,
@@ -415,7 +423,7 @@ def test_run_persona_lane_turn_skips_compose_override_when_spoke_via_tool(monkey
         return f"styled: {raw}"  # what compose WOULD have produced
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -446,7 +454,7 @@ def test_run_persona_lane_turn_composes_normally_when_no_speech_tool(monkeypatch
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     def _fake_run_persona_turn(client, user_text, *, character_block, agent_name,
@@ -455,7 +463,7 @@ def test_run_persona_lane_turn_composes_normally_when_no_speech_tool(monkeypatch
         return f"styled: {raw}"
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
+        "jaeger_agent.prompts.persona_lane.run_persona_turn", _fake_run_persona_turn,
     )
 
     agent = SimpleNamespace(messages=[])
@@ -581,7 +589,7 @@ def test_run_turn_via_jaeger_agent_persona_last_mode_runs_once_no_lane(
     condition must short-circuit on ``_persona_mode() != "persona_first"``
     before it reaches ``_persona_lane_aux_available`` or the lane glue."""
     import jaeger_ai.main as main_mod
-    from jaeger_ai.agent import tools as agent_tools
+    from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir(parents=True, exist_ok=True)
@@ -614,7 +622,7 @@ def test_run_turn_via_jaeger_agent_persona_last_mode_runs_once_no_lane(
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     filter_calls: list[str] = []
@@ -664,7 +672,7 @@ def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe
     leaves the answer untouched."""
     import jaeger_ai.main as main_mod
     import jaeger_ai.personality.character as character_mod
-    from jaeger_ai.agent import tools as agent_tools
+    from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir(parents=True, exist_ok=True)
@@ -704,7 +712,7 @@ def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe
         }
 
     monkeypatch.setattr(
-        "jaeger_ai.agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
     )
 
     filter_calls: list[str] = []

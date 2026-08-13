@@ -14,11 +14,11 @@ from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy
 
 # Module and its one public function share a name (``notify``) — the
 # package's ``__init__.py`` does ``from .notify import notify``, which
-# rebinds ``jaeger_ai.agent.tools.notify`` to the FUNCTION (last binding
+# rebinds ``jaeger_agent.tools.notify`` to the FUNCTION (last binding
 # wins). ``importlib.import_module`` bypasses that attribute shadowing
 # and gets the real submodule so ``.platform``/``.shutil``/``.subprocess``
 # are patchable.
-notify_mod = importlib.import_module("jaeger_ai.agent.tools.notify")
+notify_mod = importlib.import_module("jaeger_agent.tools.notify")
 
 
 def _proc(returncode: int, stdout: str = "", stderr: str = "") -> SimpleNamespace:

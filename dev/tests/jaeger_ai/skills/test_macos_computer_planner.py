@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from jaeger_ai.agent.skills.macos_computer_v1.engines import Action, EngineResult
-from jaeger_ai.agent.skills.macos_computer_v1 import planner
+from jaeger_agent.skills.macos_computer_v1.engines import Action, EngineResult
+from jaeger_agent.skills.macos_computer_v1 import planner
 
 
 # ── fake engine harness ────────────────────────────────────────────
@@ -191,7 +191,7 @@ def test_computer_use_dispatches_one_action():
     """The thin ``computer_use(action, target, **kwargs)`` wrapper
     must build an Action correctly and run it through the planner.
     We confirm by passing engines = a fake list via monkeypatch."""
-    from jaeger_ai.agent.skills.macos_computer_v1 import macos_computer as computer
+    from jaeger_agent.skills.macos_computer_v1 import macos_computer as computer
 
     seen: list[Action] = []
     fake = _FakeEngine("probe", priority=10, confidence=0.9,
@@ -217,11 +217,11 @@ def test_planner_routes_read_value_to_ax():
     AX (priority 30), not vision (90), since vision can't read
     object state. The whole point of the engine ladder is that
     this routing decision is automatic."""
-    from jaeger_ai.agent.skills.macos_computer_v1.engines.ax_engine import AXEngine
-    from jaeger_ai.agent.skills.macos_computer_v1.engines.applescript_engine import (
+    from jaeger_agent.skills.macos_computer_v1.engines.ax_engine import AXEngine
+    from jaeger_agent.skills.macos_computer_v1.engines.applescript_engine import (
         AppleScriptEngine,
     )
-    from jaeger_ai.agent.skills.macos_computer_v1.engines.vision_engine import (
+    from jaeger_agent.skills.macos_computer_v1.engines.vision_engine import (
         VisionEngine,
     )
     chosen, conf = planner.select_engine(
@@ -238,8 +238,8 @@ def test_planner_routes_read_value_to_ax():
 def test_planner_routes_focused_window_to_ax():
     """``focused_window`` powers ``computer_look()`` — must route to
     AX so the read is cheap."""
-    from jaeger_ai.agent.skills.macos_computer_v1.engines.ax_engine import AXEngine
-    from jaeger_ai.agent.skills.macos_computer_v1.engines.vision_engine import (
+    from jaeger_agent.skills.macos_computer_v1.engines.ax_engine import AXEngine
+    from jaeger_agent.skills.macos_computer_v1.engines.vision_engine import (
         VisionEngine,
     )
     chosen, _ = planner.select_engine(
@@ -253,7 +253,7 @@ def test_planner_routes_focused_window_to_ax():
 def test_computer_do_accepts_a_list_of_action_dicts():
     """``computer_do([{kind, ...}, {kind, ...}])`` runs each step
     in order through the planner, stops on the first failure."""
-    from jaeger_ai.agent.skills.macos_computer_v1 import macos_computer as computer
+    from jaeger_agent.skills.macos_computer_v1 import macos_computer as computer
 
     step1 = _FakeEngine("s1", priority=10, confidence=0.9,
                         result_payload={"ok": True})

@@ -168,8 +168,8 @@ AgentBridge._loop  (worker thread)              ← agent/loop/bridge.py
   skip-final, parallel/serial dispatch, dedupe, transcript-repair exit
   paths, callback→bus event mapping, prompt fragment order, tool
   visibility/scoping.
-- The loop lives behind a migration bridge (`runtime_bridge.py`,
-  "migration-only … collapses into `main.py` when pydantic-ai is gone");
-  `jaeger_agent_enabled()` reads `JAEGER_USE_NEW_AGENT`. This doc describes
-  the `JaegerAgent` path, which is what `_run_turn_via_jaeger_agent` /
-  `AgentBridge` drive.
+- The reusable loop and providers live in the external `jaeger-agent` package.
+  JaegerAI's `runtime_bridge.py` unconditionally configures that loop with its
+  product model, prompts, tools, and callbacks; `AgentBridge` owns the module
+  session boundary. There is no alternate agent implementation or migration
+  flag in JaegerAI 0.10.

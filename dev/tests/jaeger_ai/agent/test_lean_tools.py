@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent.loop.jaeger_agent import JaegerAgent
+from jaeger_agent.loop.jaeger_agent import JaegerAgent
 from jaeger_os.core.tools.tool_registry import (
     get_tool, get_tools, register_tool_from_function, unregister_tool,
 )
-from jaeger_ai.agent.skill_registry import toolset_scoping as ts
+from jaeger_agent.skill_registry import toolset_scoping as ts
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def stub_tools():
     ``clear_registry`` which wipes ``describe_tool`` too; re-register
     it here so the meta-tool is reachable in any test ordering."""
     from jaeger_os.core.tools.tool_registry import has_tool
-    from jaeger_ai.agent.tools.meta import describe_tool as _desc
+    from jaeger_agent.tools.meta import describe_tool as _desc
 
     if not has_tool("describe_tool"):
         register_tool_from_function(_desc)
@@ -78,7 +78,7 @@ def _make_agent_no_filter():
     ``tools`` and ``all_tools`` so a stub adapter is enough. The
     ``ProviderAdapter`` ABC requires implementations of describe/
     format/call/parse, so use a minimal subclass."""
-    from jaeger_ai.agent.adapters.base import ProviderAdapter
+    from jaeger_agent.adapters.base import ProviderAdapter
 
     class _StubAdapter(ProviderAdapter):
         def describe(self): return "stub"
@@ -145,7 +145,7 @@ def test_explicit_tools_list_bypasses_the_filter(monkeypatch):
     """When a caller passes ``tools=[...]`` explicitly, they get back
     exactly that list — the filter is for the default/toolsets paths."""
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
-    from jaeger_ai.agent.adapters.base import ProviderAdapter
+    from jaeger_agent.adapters.base import ProviderAdapter
 
     class _StubAdapter(ProviderAdapter):
         def describe(self): return "stub"

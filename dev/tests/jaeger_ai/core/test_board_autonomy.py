@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_ai.agent.background.board import (
+from jaeger_agent.background.board import (
     Board,
     board_digest,
     board_for_layout,
@@ -163,7 +163,7 @@ def test_board_add_default_kind_is_general(tmp_path, monkeypatch):
     source=agent — worked by the current loaded model when the idle
     worker fires."""
     layout = _make_layout(tmp_path)
-    import jaeger_ai.agent.tools.board as board_tool
+    import jaeger_agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
     out = board_tool.board_add("write a haiku")
@@ -180,7 +180,7 @@ def test_board_add_deepthink_lands_in_backlog_with_deepthink_source(
     moved to ``ready``, the idle-tick Deep Think worker picks it up
     (model swap to the coder model) instead of the general worker."""
     layout = _make_layout(tmp_path)
-    import jaeger_ai.agent.tools.board as board_tool
+    import jaeger_agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
     out = board_tool.board_add("port the macOS skill", kind="deepthink")
@@ -195,7 +195,7 @@ def test_board_add_rejects_unknown_kind(tmp_path, monkeypatch):
     fall back to general — otherwise the user's intent to invoke the
     coder model would be lost."""
     layout = _make_layout(tmp_path)
-    import jaeger_ai.agent.tools.board as board_tool
+    import jaeger_agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
     out = board_tool.board_add("x", kind="deepthought")
@@ -207,7 +207,7 @@ def test_board_add_passes_kind_through(tmp_path, monkeypatch):
     """``board_add(kind="deepthink")`` must forward ``kind`` so a
     deep-think card lands in ``backlog`` for the user to approve."""
     layout = _make_layout(tmp_path)
-    import jaeger_ai.agent.tools.board as board_tool
+    import jaeger_agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
     out = board_tool.board_add(title="hard task", kind="deepthink")
@@ -223,7 +223,7 @@ def test_board_move_now_allows_backlog_to_ready(tmp_path, monkeypatch):
     # Patch the tool module's _require_layout import so board_move
     # picks up the tmp_path layout without rebinding the whole tools
     # package (bind() expects an InstanceLayout; ours is a stub).
-    import jaeger_ai.agent.tools.board as board_tool
+    import jaeger_agent.tools.board as board_tool
     monkeypatch.setattr(board_tool, "_require_layout", lambda: layout)
 
     b = board_for_layout(layout)

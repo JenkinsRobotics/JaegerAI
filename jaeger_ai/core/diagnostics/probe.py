@@ -104,7 +104,7 @@ def _check_memory() -> tuple[bool, str]:
     the submodule because both live on the package. Importing the
     individual verbs explicitly avoids the shadowing.
     """
-    from jaeger_ai.agent.tools.memory import remember, recall, forget
+    from jaeger_agent.tools.memory import remember, recall, forget
     key = f"_health_probe_{uuid.uuid4().hex[:8]}"
     sentinel = "alive"
     try:
@@ -126,7 +126,7 @@ def _check_memory() -> tuple[bool, str]:
 def _check_time() -> tuple[bool, str]:
     """get_time returns a timestamp-ish string. Catches a broken
     ``time_and_math`` import or a recent rename."""
-    from jaeger_ai.agent.tools import get_time
+    from jaeger_agent.tools import get_time
     out = get_time()
     text = out if isinstance(out, str) else \
         (out.get("time") if isinstance(out, dict) else str(out))
@@ -138,7 +138,7 @@ def _check_time() -> tuple[bool, str]:
 def _check_calculate() -> tuple[bool, str]:
     """calculator answers 2+2 = 4. Round-trip through the same tool
     the agent uses, not a private eval."""
-    from jaeger_ai.agent.tools import calculate
+    from jaeger_agent.tools import calculate
     out = calculate(expression="2+2")
     body = str(out.get("result") if isinstance(out, dict) else out)
     if "4" not in body:
@@ -163,7 +163,7 @@ def _check_tool_registry() -> tuple[bool, str]:
          CORE uses (e.g. ``read_file`` vs ``file_read``), so a naive
          scan would always false-negative.
     """
-    from jaeger_ai.agent.skill_registry.toolset_scoping import CORE
+    from jaeger_agent.skill_registry.toolset_scoping import CORE
 
     registered: set[str] = set()
     source = "none"
@@ -208,7 +208,7 @@ def _check_skills_loaded() -> tuple[bool, str]:
     means the instance was created but never had its scaffold synced,
     which is a confusing failure mode — the agent boots fine but says
     "I have no skills" mid-conversation."""
-    from jaeger_ai.agent.skill_registry.skill_loader import discover_skills
+    from jaeger_agent.skill_registry.skill_loader import discover_skills
     from jaeger_ai.core.context import _require_layout
     layout = _require_layout()
     try:
@@ -233,7 +233,7 @@ def _check_drift_parser() -> tuple[bool, str]:
     ``[get_time(...)]`` is not a recognised dialect (Gemma never
     produces that) and would give a false negative.
     """
-    from jaeger_ai.agent.dialects import extract_tool_calls
+    from jaeger_agent.dialects import extract_tool_calls
     sample = '<|tool_call>call:get_time(timezone="UTC")<tool_call|>'
     try:
         calls = extract_tool_calls(sample)

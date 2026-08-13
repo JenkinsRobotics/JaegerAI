@@ -30,7 +30,7 @@ import sys
 from pydantic import BaseModel
 
 from jaeger_os.core.tools.tool_schema import ToolDef
-from jaeger_ai.agent.availability import (
+from jaeger_agent.availability import (
     _TOOL_TO_PLUGIN,
     wire_availability_checks,
 )
@@ -114,7 +114,7 @@ def test_unavailable_plugin_makes_tool_unavailable(monkeypatch):
     tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
     # Patch the plugin lister to report probe_plugin as not ready.
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
@@ -128,7 +128,7 @@ def test_ready_plugin_keeps_tool_available(monkeypatch):
     monkeypatch.setitem(_TOOL_TO_PLUGIN, "probe_tool", "probe_plugin")
     tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
@@ -143,7 +143,7 @@ def test_messaging_any_of_across_modules(monkeypatch):
     True iff ANY discovered module declaring ``slot: messaging`` has
     its requires met, so the tool stays usable when at least one
     bridge's library is importable, and fails closed when none are."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     discord = ModuleSpec(
@@ -182,7 +182,7 @@ def test_unknown_plugin_fails_open(monkeypatch):
     monkeypatch.setitem(_TOOL_TO_PLUGIN, "probe_tool", "probe_plugin")
     tools = {"probe_tool": _td("probe_tool")}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list_empty():
         return {"plugins": []}
@@ -212,7 +212,7 @@ def test_text_to_speech_unavailable_when_module_missing(monkeypatch):
     genuinely has no ``kokoro_tts`` entry in this repo, since it's
     not a plugin anymore) to prove the module-owned path never falls
     through to the plugin's unknown-plugin fail-open default."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {"text_to_speech": _td("text_to_speech")}
@@ -225,7 +225,7 @@ def test_text_to_speech_available_when_module_present_and_libs_importable(
 ):
     """A discovered module claiming ``text_to_speech`` with every
     declared ``requires_libraries`` entry importable is available."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -246,7 +246,7 @@ def test_text_to_speech_unavailable_when_required_library_missing(monkeypatch):
     module *presence*, so this case used to report available; the
     fix probes each required library and fails closed if any is
     missing."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -279,7 +279,7 @@ def test_speak_and_warm_kokoro_gated_on_module_presence():
 
 
 def test_speak_and_warm_kokoro_unavailable_when_module_missing(monkeypatch):
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {"speak": _td("speak"), "warm_kokoro": _td("warm_kokoro")}
@@ -309,7 +309,7 @@ def test_listen_unavailable_when_module_missing(monkeypatch):
     entry in this repo, since it's not a plugin anymore) to prove the
     module-owned path never falls through to the plugin's
     unknown-plugin fail-open default."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {"listen": _td("listen")}
@@ -322,7 +322,7 @@ def test_listen_available_when_module_present_and_libs_importable(
 ):
     """A discovered module claiming ``listen`` with every declared
     ``requires_libraries`` entry importable is available."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -342,7 +342,7 @@ def test_listen_unavailable_when_required_library_missing(monkeypatch):
     it declares in ``requires_libraries`` doesn't import (``find_spec``
     returns ``None``) — fails closed rather than reporting available
     on mere module presence."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -395,7 +395,7 @@ def test_avatar_tools_unavailable_when_module_missing(monkeypatch):
     3 avatar tools must be unavailable WITHOUT any help from the
     plugin mechanism — these tools have no plugin entry at all, so
     before 0.8 M2c a missing/broken module wouldn't hide them."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {
@@ -414,7 +414,7 @@ def test_avatar_tools_available_when_module_present_and_libs_importable(
 ):
     """A discovered module claiming the avatar tools with every
     declared ``requires_libraries`` entry importable is available."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -449,7 +449,7 @@ def test_homeassistant_tools_available_when_ready(monkeypatch):
         "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
     )}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [{"name": "homeassistant", "status": "ready"}]}
@@ -466,7 +466,7 @@ def test_homeassistant_tools_unavailable_when_requirements_unmet(monkeypatch):
         "ha_list_entities", "ha_get_state", "ha_list_services", "ha_call_service",
     )}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [
@@ -482,7 +482,7 @@ def test_ai_gen_tools_available_when_ready(monkeypatch):
         "generate_image_fal", "generate_video_fal",
     )}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [{"name": "ai_gen", "status": "ready"}]}
@@ -498,7 +498,7 @@ def test_ai_gen_tools_unavailable_when_fal_key_missing(monkeypatch):
         "generate_image_fal", "generate_video_fal",
     )}
     wire_availability_checks(_StubAgent(tools))
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     def _fake_list():
         return {"plugins": [{"name": "ai_gen", "status": "needs_credentials"}]}
@@ -512,7 +512,7 @@ def test_homeassistant_and_ai_gen_real_list_plugins_env_roundtrip(monkeypatch):
     env present makes both plugins report ready, env absent makes
     them report a non-ready status, and the wired tool availability
     tracks that in both directions."""
-    from jaeger_ai.agent.tools import plugins as _plugins_mod
+    from jaeger_agent.tools import plugins as _plugins_mod
 
     monkeypatch.delenv("HASS_TOKEN", raising=False)
     monkeypatch.delenv("FAL_KEY", raising=False)
@@ -540,7 +540,7 @@ def test_avatar_tools_unavailable_when_required_library_missing(monkeypatch):
     library it declares in ``requires_libraries`` doesn't import —
     fails closed rather than reporting available on mere module
     presence."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     spec = ModuleSpec(
@@ -575,7 +575,7 @@ def test_send_message_unavailable_when_messaging_slot_empty(monkeypatch):
     """No modules discovered AT ALL (not even unready ones) — the
     ``messaging`` slot is empty, so ``send_message`` must fail
     closed, mirroring a vanished module for a single-module tool."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     monkeypatch.setattr(_avail_mod, "_discovered_modules", lambda: [])
     tools = {"send_message": _td("send_message")}
@@ -587,7 +587,7 @@ def test_imessage_module_unready_on_non_darwin_platform(monkeypatch):
     """imessage declares ``requires_platform: [darwin]`` and no
     ``requires_libraries`` at all (trivially lib-satisfied) — on a
     non-darwin host it must NOT count toward the messaging ANY-OF."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     imessage = ModuleSpec(
@@ -602,7 +602,7 @@ def test_imessage_module_unready_on_non_darwin_platform(monkeypatch):
 
 
 def test_imessage_module_ready_on_darwin_platform(monkeypatch):
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
     from jaeger_os.core.modules import ModuleSpec
 
     imessage = ModuleSpec(
@@ -623,7 +623,7 @@ def test_send_message_real_discovery_finds_three_messaging_modules():
     multi-root discovery wiring in ``core/modules.py`` actually
     reaches the wired availability gate, not just the test doubles
     above)."""
-    from jaeger_ai.agent import availability as _avail_mod
+    from jaeger_agent import availability as _avail_mod
 
     names = {
         spec.module for spec in _avail_mod._discovered_modules()

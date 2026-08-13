@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from jaeger_ai.agent import (
+from jaeger_agent import (
     AgentCallbacks,
     JaegerAgent,
     Message,

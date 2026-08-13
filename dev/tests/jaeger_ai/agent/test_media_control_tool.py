@@ -18,7 +18,7 @@ from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy
 # the FUNCTION. ``importlib.import_module`` gets the real submodule so
 # ``mc.media_control(...)``/``mc.now_playing(...)`` and ``mc.platform``/
 # ``mc.shutil``/``mc.subprocess`` (for patching) both resolve.
-mc = importlib.import_module("jaeger_ai.agent.tools.media_control")
+mc = importlib.import_module("jaeger_agent.tools.media_control")
 
 
 def _proc(returncode: int, stdout: str = "", stderr: str = "") -> SimpleNamespace:

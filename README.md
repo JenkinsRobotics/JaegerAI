@@ -5,27 +5,41 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.9.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.10.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
 
 ---
 
+> **Jaeger ecosystem identity**
+> ID: `org.jenkinsrobotics.app.jaeger-ai` · Type: **application** ·
+> Role: reference intelligent application and module host
+
 ## What it is
 
-JaegerAI is the **Mind** tier of the Jaeger ecosystem — the turnkey
-agentic product, not a headless library. It ships the complete universal
-agentic agent (Hermes lineage): the loop, tools, skills, memory, the
+JaegerAI is a complete **application** built on JaegerOS — the turnkey
+agentic product and module host, not an embeddable library. It currently
+ships a complete universal agentic experience (Hermes lineage) by combining
+the reusable JaegerAgent loop with its tools, skills, memory, the
 id/ego persona pipeline, local inference, **and its own faces** — chat
 app, TUI, voice, and the protocol it serves. Headless (running on a
 robot with no display) is a **config** of JaegerAI, not a fork of it.
+
+**0.10 split complete:** the separately packaged
+[JaegerAgent](https://github.com/JenkinsRobotics/jaeger-agent) mind module is
+the reusable brain other projects embed. It owns the engine-neutral agent
+loop, provider adapters, message schemas, context management, bus bridge, and
+`slot: mind` node. JaegerAI imports that package and supplies its product tool
+bundle, prompts, skills, memory, personality system, interfaces, installer,
+and defaults through explicit host hooks.
 
 It pins [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) (the
 framework tier — bus, nodes, modules/slots, supervisor, safety, wire
 contract, capability layer) and builds everything agentic on top:
 
-- **`agent/`** — the loop, tool registry, availability gates, and the
+- **`agent/`** — JaegerAI's product integration for JaegerAgent: toolsets,
+  availability gates, prompts, skills, safety policy, and the
   **`persona_first`** pipeline (default since 0.8.0): an id/ego split
   where a persona lane speaks to the user directly, in character, and
   has exactly one tool — `perform_task(request)` — which runs the full
@@ -73,11 +87,10 @@ cd JaegerAI
 ```
 
 `pip` is the machinery underneath: it resolves the dependency chain
-across all four ecosystem packages (`jaeger-os`, `jaeger-ai`,
-`jaeger-kokoro-tts`, `jaeger-whisper-stt`) — today via `file://` path
-pins while each repo stages pre-release (see `requirements.txt`'s
-header), moving to real git/version-range pins once they publish
-releases. JaegerAI installs **editable** (PEP 660), same model as
+across the five ecosystem packages (`jaeger-os`, `jaeger-agent`,
+`jaeger-ai`, `jaeger-kokoro-tts`, `jaeger-whisper-stt`) — using sibling
+editable checkouts for development and the git refs in `requirements.txt`
+otherwise. JaegerAI installs **editable** (PEP 660), same model as
 JaegerOS: the code stays writable in place because the agent
 self-modifies its own skills.
 

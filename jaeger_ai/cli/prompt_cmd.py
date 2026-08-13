@@ -59,10 +59,10 @@ def _resolve_layout(args: Any) -> Any:
 def run_prompt(args: Any) -> int:
     layout = _resolve_layout(args)
     if layout is None:
-        print(c.red("  no active instance — run `jaeger instances create` first"))
+        print(c.red("  no active instance — run `jaeger setup` first"))
         return 1
 
-    from jaeger_ai.agent.prompts.assemble import PROMPT_FRAGMENTS, iter_fragments
+    from jaeger_agent.prompts.assemble import PROMPT_FRAGMENTS, iter_fragments
 
     rendered = iter_fragments(layout, mode=args.mode)
     fired = {frag.name for frag, _ in rendered}

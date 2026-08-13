@@ -9,9 +9,7 @@ envelope, plus the malformed inputs that used to drop calls silently.
 
 from __future__ import annotations
 
-import json
-
-from jaeger_ai.agent.dialects import (
+from jaeger_agent.dialects import (
     extract_tool_calls,
     normalize_tool_name,
     repair_arguments,

@@ -381,7 +381,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
 
             def _speak_bg() -> None:
                 try:
-                    from jaeger_ai.agent.tools.speak import speak
+                    from jaeger_agent.tools.speak import speak
                     out = speak(text=text)
                     if not out.get("spoken"):
                         print(f"[bridge] speak failed: {out.get('reason')}",
@@ -630,7 +630,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                         from jaeger_ai.main import _pipeline
                         cfg = _pipeline.get("config")
                         if cfg is not None and cfg.voice.speak_replies:
-                            from jaeger_ai.agent.tools.speak import speak
+                            from jaeger_agent.tools.speak import speak
                             speak(text=text)
                     except Exception as exc:  # noqa: BLE001 — TTS is best-effort
                         print(f"[bridge] cron speak failed: {exc}",
@@ -642,7 +642,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                   file=sys.stderr, flush=True)
 
     try:
-        from jaeger_ai.agent.background.cron_runner import CronRunner
+        from jaeger_agent.background.cron_runner import CronRunner
         ctx.cron = CronRunner(_cron_cb, llm_lock=None)
         ctx.cron.start()
     except Exception as exc:  # noqa: BLE001 — no cron is degraded, not fatal

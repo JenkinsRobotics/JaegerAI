@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.agent import tools
+from jaeger_agent import tools
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.agent.tools.browser import _dispatch, _element, _headless
+from jaeger_agent.tools.browser import _dispatch, _element, _headless
 
 
 @pytest.fixture()

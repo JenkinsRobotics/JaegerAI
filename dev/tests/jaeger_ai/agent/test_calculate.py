@@ -11,7 +11,7 @@ evaluate, letting the tool answer the evenness check directly.
 
 from __future__ import annotations
 
-from jaeger_ai.agent.tools.time_and_math import calculate
+from jaeger_agent.tools.time_and_math import calculate
 
 
 def test_arithmetic_still_works():

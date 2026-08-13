@@ -18,7 +18,7 @@ from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy
 # FUNCTION. ``importlib.import_module`` gets the real submodule so
 # ``sc.system_control(...)`` (the function) and ``sc.platform`` /
 # ``sc.shutil`` / ``sc.subprocess`` (for patching) both resolve.
-sc = importlib.import_module("jaeger_ai.agent.tools.system_control")
+sc = importlib.import_module("jaeger_agent.tools.system_control")
 
 
 def _proc(returncode: int, stdout: str = "", stderr: str = "") -> SimpleNamespace:

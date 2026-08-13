@@ -46,7 +46,9 @@
 # lives at `jaeger_os/app/` (J2). Both surfaces coexist intentionally.
 
 [app]
+id = "org.jenkinsrobotics.app.jaeger-ai"
 name = "jros"
+type = "application"
 version = "0.5.0"
 requires_framework = ">=0.1"
 mode = "fused"                # daemon-arch dropped (2026-06-14);

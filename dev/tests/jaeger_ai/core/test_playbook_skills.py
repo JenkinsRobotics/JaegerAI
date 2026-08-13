@@ -8,8 +8,8 @@ into the prompt, so the library can't bloat context.
 
 from __future__ import annotations
 
-from jaeger_ai.agent.skill_registry import playbook_skills as pb
-from jaeger_ai.agent.tools import skill
+from jaeger_agent.skill_registry import playbook_skills as pb
+from jaeger_agent.tools import skill
 
 
 # ── discovery ────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ def test_skill_view_lists_bundled_files() -> None:
 
 
 def test_bucket_skill_files_categorises(tmp_path) -> None:
-    from jaeger_ai.agent.tools.skills import _bucket_skill_files
+    from jaeger_agent.tools.skills import _bucket_skill_files
     (tmp_path / "SKILL.md").write_text("# skill\n")
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "run.py").write_text("print(1)\n")
@@ -102,7 +102,7 @@ def test_bucket_skill_files_categorises(tmp_path) -> None:
 
 
 def test_read_skill_file_reads_a_bundled_file(tmp_path) -> None:
-    from jaeger_ai.agent.tools.skills import _read_skill_file
+    from jaeger_agent.tools.skills import _read_skill_file
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts" / "go.sh").write_text("echo hi\n")
     r = _read_skill_file(tmp_path, "scripts/go.sh")
@@ -110,7 +110,7 @@ def test_read_skill_file_reads_a_bundled_file(tmp_path) -> None:
 
 
 def test_read_skill_file_rejects_escape(tmp_path) -> None:
-    from jaeger_ai.agent.tools.skills import _read_skill_file
+    from jaeger_agent.tools.skills import _read_skill_file
     assert _read_skill_file(tmp_path, "../../etc/passwd")["ok"] is False
     assert _read_skill_file(tmp_path, "/etc/passwd")["ok"] is False
 
@@ -143,7 +143,7 @@ def test_discover_playbooks_includes_instance_authored(tmp_path) -> None:
     """An agent-authored playbook in the bound instance's skills/ dir
     must be discovered — not just the bundled ones. (Agent writes are
     sandboxed to the instance, so this is where its playbooks land.)"""
-    from jaeger_ai.agent import tools
+    from jaeger_agent import tools
     from jaeger_ai.core.instance.instance import InstanceLayout
 
     layout = InstanceLayout(root=tmp_path / "inst")
