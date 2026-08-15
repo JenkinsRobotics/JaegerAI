@@ -237,7 +237,45 @@ def _backend_wikipedia(query: str, max_results: int) -> list[_Result]:
 # ── Backend chain ───────────────────────────────────────────────────
 
 
+def _backend_searxng(query: str, max_results: int) -> list[_Result]:
+    """Rackpc SearXNG (TS then LAN). Shared with Hermes. No Hermes import."""
+    import os
+    import requests
+
+    urls: list[str] = []
+    for raw in (
+        (os.environ.get("SEARXNG_URL") or "").strip().rstrip("/"),
+        (os.environ.get("SEARXNG_URL_FALLBACK") or "").strip().rstrip("/"),
+        "http://100.78.245.49:8888",
+        "http://10.15.0.239:8888",
+    ):
+        if raw and raw not in urls:
+            urls.append(raw)
+    last_exc: Exception | None = None
+    for base in urls:
+        try:
+            response = requests.get(
+                f"{base}/search",
+                params={"q": query, "format": "json"},
+                headers={"Accept": "application/json", "User-Agent": "Jaeger/1.0"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            hits = (response.json().get("results") or [])
+            if not hits:
+                raise RuntimeError(f"searxng at {base} returned zero results")
+            return [
+                _normalize(h.get("title"), h.get("url"), h.get("content"))
+                for h in hits[:max_results]
+            ]
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            continue
+    raise RuntimeError(f"searxng unreachable: {last_exc}")
+
+
 _BACKENDS: list[tuple[str, Callable[[str, int], list[_Result]]]] = [
+    ("searxng", _backend_searxng),
     ("ddgs", _backend_ddgs),
     ("duckduckgo_search", _backend_duckduckgo_legacy),
     ("ddg_html", _backend_ddg_html),
