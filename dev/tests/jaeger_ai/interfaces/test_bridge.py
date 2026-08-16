@@ -233,6 +233,23 @@ def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     assert boot.cleaned is True  # graceful teardown ran
 
 
+def test_integration_contract_is_versioned_and_self_describing():
+    contract = bridge._integration_contract()
+
+    assert contract["contract"] == "ares-jaeger"
+    assert contract["contract_version"] == 1
+    assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
+    assert contract["runtime"]["id"] == "jaeger_local"
+    assert "contract" in contract["operations"]["queries"]
+    assert "settings_set" in contract["operations"]["commands"]
+    assert contract["features"]["chat"] == {
+        "available": True,
+        "owner": "jaeger",
+        "mutable": True,
+    }
+    assert contract["features"]["skills"]["available"] is False
+
+
 def test_session_key_flows_through(monkeypatch):
     seen = {}
 
