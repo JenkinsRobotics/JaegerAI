@@ -1,12 +1,35 @@
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
 import sys
+import time
+
+from jaeger_os.core.tools.tool_registry import get_tool, has_tool
 
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.core.mcp import service
 from jaeger_ai.plugins.mcp import client
-from jaeger_os.core.tools.tool_registry import get_tool, has_tool
+
+
+def _unused_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _wait_for_port(port: int, process: subprocess.Popen, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"HTTP MCP fixture exited with {process.returncode}")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                return
+        except OSError:
+            time.sleep(0.05)
+    raise TimeoutError("HTTP MCP fixture did not start")
 
 
 def test_configure_reload_inventory_dispatch_and_restart(tmp_path, monkeypatch):
@@ -65,3 +88,60 @@ def test_configure_reload_inventory_dispatch_and_restart(tmp_path, monkeypatch):
         }
     finally:
         client.shutdown_global()
+
+
+def test_streamable_http_reload_inventory_dispatch_and_secret_persistence(tmp_path):
+    root = tmp_path / "instance"
+    root.mkdir()
+    layout = InstanceLayout(root)
+    layout.ensure_dirs()
+    port = _unused_port()
+    server = tmp_path / "http_mcp.py"
+    server.write_text(
+        "import os\n"
+        "from mcp.server.fastmcp import FastMCP\n"
+        f"server = FastMCP('http-fixture', host='127.0.0.1', port={port}, stateless_http=True)\n"
+        "@server.tool()\n"
+        "def echo(value: str) -> str:\n"
+        "    return f'http:{value}'\n"
+        "server.run(transport='streamable-http')\n",
+        encoding="utf-8",
+    )
+    process = subprocess.Popen(
+        [sys.executable, str(server)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        _wait_for_port(port, process)
+        service.configure_server(layout, "remote", {
+            "url": f"http://127.0.0.1:{port}/mcp",
+            "headers": {"Authorization": "Bearer never-in-json"},
+        })
+        assert "never-in-json" not in layout.mcp_config_path.read_text()
+
+        first = service.reload_tools(layout)
+        assert first["unavailable_servers"] == []
+        assert first["tools"][0]["name"] == "mcp__remote__echo"
+        assert service.list_servers(layout)["servers"][0]["transport"] == "http"
+        result = get_tool("mcp__remote__echo").dispatch({"value": "first"})
+        assert result["text"] == "http:first"
+
+        client.shutdown_global()
+        second = service.reload_tools(layout)
+        assert second["unavailable_servers"] == []
+        result = get_tool("mcp__remote__echo").dispatch({"value": "after-restart"})
+        assert result["text"] == "http:after-restart"
+
+        saved = json.loads(layout.mcp_config_path.read_text())["servers"][0]
+        assert saved["headers"]["Authorization"] == {
+            "secret_ref": "mcp.remote.header.Authorization",
+        }
+    finally:
+        client.shutdown_global()
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)

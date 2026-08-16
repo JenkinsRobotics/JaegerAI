@@ -93,7 +93,8 @@ discord.py>=2.4
 python-telegram-bot>=21.0
 
 # --- MCP tool servers ---
-mcp>=0.9
+mcp>=1.27,<2
+httpx>=0.27,<1
 jsonschema>=4.20
 
 # --- macOS menu-bar tray (CLI/TUI-era) ---

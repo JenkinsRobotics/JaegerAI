@@ -45,6 +45,35 @@ def test_masked_secret_is_preserved_on_update(layout):
     }
 
 
+def test_http_configuration_masks_and_resolves_headers(layout, monkeypatch):
+    monkeypatch.setattr(service, "_runtime", lambda: ({}, {}, False))
+    service.configure_server(layout, "remote", {
+        "url": "https://mcp.example.test/v1",
+        "headers": {"Authorization": "Bearer secret", "X-Mode": "safe"},
+    })
+
+    listed = service.list_servers(layout)["servers"][0]
+    assert listed["transport"] == "http"
+    assert listed["url"] == "https://mcp.example.test/v1"
+    assert listed["headers"] == {"Authorization": "********", "X-Mode": "********"}
+    saved = json.loads(layout.mcp_config_path.read_text())["servers"][0]
+    assert saved["headers"]["Authorization"] == {
+        "secret_ref": "mcp.remote.header.Authorization",
+    }
+    assert service.resolve_server_headers(layout, saved) == {
+        "Authorization": "Bearer secret", "X-Mode": "safe",
+    }
+
+    service.configure_server(layout, "remote", {
+        "url": "https://mcp.example.test/v2",
+        "headers": {"Authorization": "********"},
+    })
+    saved = json.loads(layout.mcp_config_path.read_text())["servers"][0]
+    assert saved["headers"]["Authorization"] == {
+        "secret_ref": "mcp.remote.header.Authorization",
+    }
+
+
 def test_legacy_inline_secret_is_migrated_explicitly(layout):
     layout.mcp_config_path.write_text(json.dumps({"servers": [{
         "name": "legacy", "command": "server", "env": {"PASSWORD": "old-secret"},
@@ -64,12 +93,29 @@ def test_resolve_server_env_fails_closed_for_missing_credential(layout):
         }})
 
 
-def test_toggle_remove_and_validation(layout):
-    service.configure_server(layout, "web", {"command": "uvx", "enabled": True})
+def test_toggle_remove_and_validation(layout, monkeypatch):
+    service.configure_server(layout, "web", {
+        "command": "uvx", "enabled": True, "env": {"TOKEN": "remove-me"},
+    })
+    credential = layout.credentials_dir / "mcp.web.TOKEN"
+    assert credential.exists()
     assert service.set_server_enabled(layout, "web", False)["enabled"] is False
+    monkeypatch.setattr(service, "_runtime", lambda: ({}, {}, False))
+    assert service.list_servers(layout)["servers"][0]["status"] == "disabled"
     assert service.remove_server(layout, "web")["removed"] is True
-    with pytest.raises(service.MCPServiceError, match="stdio"):
-        service.configure_server(layout, "remote", {"url": "https://example.test"})
+    assert not credential.exists()
+    with pytest.raises(service.MCPServiceError, match="exactly one"):
+        service.configure_server(layout, "remote", {
+            "url": "https://example.test/mcp", "command": "uvx",
+        })
+    with pytest.raises(service.MCPServiceError, match="must use https"):
+        service.configure_server(layout, "remote", {"url": "http://example.test/mcp"})
+    with pytest.raises(service.MCPServiceError, match="embedded credentials"):
+        service.configure_server(layout, "remote", {"url": "https://user:pass@example.test/mcp"})
+    with pytest.raises(service.MCPServiceError, match="header name"):
+        service.configure_server(layout, "remote", {
+            "url": "https://example.test/mcp", "headers": {"Bad Header": "value"},
+        })
     with pytest.raises(service.MCPServiceError, match="server name"):
         service.configure_server(layout, "../bad", {"command": "x"})
 

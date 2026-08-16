@@ -259,6 +259,9 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert {"configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
             "remove_mcp_server", "reload_tools"}.issubset(contract["operations"]["commands"])
     assert contract["features"]["mcp_server_config"]["available"] is True
+    assert contract["features"]["mcp_server_config"]["transports"] == [
+        "stdio", "streamable_http",
+    ]
 
 
 def test_session_key_flows_through(monkeypatch):
