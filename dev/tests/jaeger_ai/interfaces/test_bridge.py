@@ -255,6 +255,10 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert {"list_skills", "get_skill"}.issubset(contract["operations"]["queries"])
     assert {"clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill"}.issubset(
         contract["operations"]["commands"])
+    assert {"list_mcp_servers", "list_tools"}.issubset(contract["operations"]["queries"])
+    assert {"configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
+            "remove_mcp_server", "reload_tools"}.issubset(contract["operations"]["commands"])
+    assert contract["features"]["mcp_server_config"]["available"] is True
 
 
 def test_session_key_flows_through(monkeypatch):
