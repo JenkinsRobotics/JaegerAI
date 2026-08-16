@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -98,10 +99,12 @@ class _MCPClient:
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
+        inherited = {key: value for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")
+                     if (value := os.environ.get(key))}
         params = StdioServerParameters(
             command=self.config.command,
             args=self.config.args,
-            env=self.config.env or None,
+            env={**inherited, **self.config.env},
         )
         self._exit_stack = AsyncExitStack()
         read, write = await self._exit_stack.enter_async_context(stdio_client(params))
@@ -227,7 +230,7 @@ _GLOBAL_REGISTRY: MCPRegistry | None = None
 _LAST_ERRORS: dict[str, str] = {}
 
 
-def init_from_config(config_path: Path | None = None) -> MCPRegistry:
+def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> MCPRegistry:
     """Initialize the global MCP registry from a JSON config file."""
     global _GLOBAL_REGISTRY, _LAST_ERRORS
     if _GLOBAL_REGISTRY is not None:
@@ -243,17 +246,22 @@ def init_from_config(config_path: Path | None = None) -> MCPRegistry:
     for entry in data.get("servers", []):
         if not entry.get("enabled", True):
             continue
-        config = MCPServerConfig(
-            name=entry["name"],
-            command=entry["command"],
-            args=entry.get("args", []),
-            env=entry.get("env", {}),
-        )
+        name = str(entry.get("name") or "unknown")
         try:
+            env = entry.get("env", {})
+            if layout is not None:
+                from jaeger_ai.core.mcp.service import resolve_server_env
+                env = resolve_server_env(layout, entry)
+            config = MCPServerConfig(
+                name=name,
+                command=entry["command"],
+                args=entry.get("args", []),
+                env=env,
+            )
             registry.add_server(config)
         except Exception as exc:
-            errors[config.name] = str(exc)
-            print(f"[mcp] failed to connect '{config.name}': {exc}", flush=True)
+            errors[name] = str(exc)
+            print(f"[mcp] failed to connect '{name}': {exc}", flush=True)
     _GLOBAL_REGISTRY = registry
     _LAST_ERRORS = errors
     return registry
@@ -267,7 +275,7 @@ def connection_errors() -> dict[str, str]:
     return dict(_LAST_ERRORS)
 
 
-def reload_from_config(config_path: Path) -> MCPRegistry:
+def reload_from_config(config_path: Path, *, layout: Any = None) -> MCPRegistry:
     """Replace the live registry with the instance-owned configuration."""
     global _GLOBAL_REGISTRY, _LAST_ERRORS
     previous = _GLOBAL_REGISTRY
@@ -275,7 +283,7 @@ def reload_from_config(config_path: Path) -> MCPRegistry:
     _LAST_ERRORS = {}
     if previous is not None:
         previous.shutdown()
-    return init_from_config(config_path)
+    return init_from_config(config_path, layout=layout)
 
 
 def shutdown_global() -> None:

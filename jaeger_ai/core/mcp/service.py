@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,69 @@ def _load(layout: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or not isinstance(data.get("servers", []), list):
         raise MCPServiceError("invalid MCP configuration: servers must be a list")
     return data
+
+
+def _credential_name(server: str, env_name: str) -> str:
+    raw = f"mcp.{server}.{env_name}"
+    clean = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)
+    if len(clean) <= 64:
+        return clean
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+    return f"{clean[:53]}.{digest}"
+
+
+def _secret_ref(value: Any) -> str | None:
+    if not isinstance(value, dict) or set(value) != {"secret_ref"}:
+        return None
+    ref = value.get("secret_ref")
+    return str(ref).strip() if isinstance(ref, str) and ref.strip() else None
+
+
+def _migrate_inline_secrets(layout: Any, data: dict[str, Any]) -> bool:
+    """Move legacy inline secret-looking env values to the credential store."""
+    from jaeger_agent import credentials
+
+    changed = False
+    for server in data.get("servers", []):
+        if not isinstance(server, dict) or not isinstance(server.get("env"), dict):
+            continue
+        server_name = str(server.get("name") or "server")
+        for key, value in list(server["env"].items()):
+            if _SECRET.search(str(key)) and isinstance(value, str) and value and value != _MASK:
+                ref = _credential_name(server_name, str(key))
+                credentials.set_credential(layout, ref, value)
+                server["env"][key] = {"secret_ref": ref}
+                changed = True
+    return changed
+
+
+def migrate_inline_secrets(layout: Any) -> bool:
+    """Secure legacy config explicitly during boot/reload or mutation."""
+    data = _load(layout)
+    changed = _migrate_inline_secrets(layout, data)
+    if changed:
+        _write(layout, data)
+    return changed
+
+
+def resolve_server_env(layout: Any, server: dict[str, Any]) -> dict[str, str]:
+    """Resolve credential references only for the child-process launch."""
+    from jaeger_agent import credentials
+
+    env = server.get("env") if isinstance(server.get("env"), dict) else {}
+    resolved: dict[str, str] = {}
+    for key, value in env.items():
+        if isinstance(value, str):
+            resolved[str(key)] = value
+            continue
+        ref = _secret_ref(value)
+        if ref is None:
+            raise MCPServiceError(f"invalid environment value for {key!r}")
+        try:
+            resolved[str(key)] = credentials.get_credential(layout, ref)
+        except Exception as exc:
+            raise MCPServiceError(f"missing MCP credential {ref!r} for {key}") from exc
+    return resolved
 
 
 def _write(layout: Any, data: dict[str, Any]) -> None:
@@ -82,10 +146,13 @@ def list_servers(layout: Any) -> dict[str, Any]:
         name = str(raw.get("name") or "")
         active_tools = tools.get(name, [])
         env = raw.get("env") if isinstance(raw.get("env"), dict) else {}
+        masked_env = {}
+        for key, value in env.items():
+            masked_env[str(key)] = _MASK if _secret_ref(value) or (_SECRET.search(str(key)) and value) else str(value)
         rows.append({
             "name": name, "transport": "stdio", "command": raw.get("command", ""),
             "args": list(raw.get("args") or []),
-            "env": {str(k): (_MASK if _SECRET.search(str(k)) and v else str(v)) for k, v in env.items()},
+            "env": masked_env,
             "enabled": bool(raw.get("enabled", True)), "active": bool(active_tools),
             "status": "error" if name in errors else ("active" if active_tools else "configured"),
             "error": errors.get(name), "tool_count": len(active_tools),
@@ -135,13 +202,26 @@ def configure_server(layout: Any, name: Any, payload: Any) -> dict[str, Any]:
     env = payload.get("env", existing.get("env", {}))
     if not isinstance(args, list) or not all(isinstance(x, str) for x in args):
         raise MCPServiceError("args must be a list of strings")
-    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
-        raise MCPServiceError("env must map strings to strings")
+    if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
+        raise MCPServiceError("env must be an object with string keys")
     old_env = existing.get("env") if isinstance(existing.get("env"), dict) else {}
-    env = {k: (old_env.get(k, "") if v == _MASK else v) for k, v in env.items()}
+    normalized_env: dict[str, Any] = {}
+    for key, value in env.items():
+        if value == _MASK:
+            if key not in old_env:
+                raise MCPServiceError(f"masked value for {key!r} has no existing secret")
+            normalized_env[key] = old_env[key]
+        elif isinstance(value, str):
+            normalized_env[key] = value
+        elif _secret_ref(value):
+            normalized_env[key] = {"secret_ref": _secret_ref(value)}
+        else:
+            raise MCPServiceError(f"env value for {key!r} must be a string or secret_ref")
+    env = normalized_env
     row = {"name": name, "command": command, "args": args, "env": env,
            "enabled": bool(payload.get("enabled", existing.get("enabled", True)))}
     data["servers"] = [x for x in data["servers"] if not isinstance(x, dict) or x.get("name") != name] + [row]
+    _migrate_inline_secrets(layout, data)
     _write(layout, data)
     return {"ok": True, "server": name, "reload_required": True}
 
@@ -172,9 +252,10 @@ def reload_tools(layout: Any) -> dict[str, Any]:
     from jaeger_ai.main import _agent_cache, _pipeline
     from jaeger_ai.plugins.mcp import client
     path = _path(layout)
+    migrate_inline_secrets(layout)
     if not path.exists():
         _write(layout, _load(layout))
-    registry = client.reload_from_config(path)
+    registry = client.reload_from_config(path, layout=layout)
     specs = registry.list_tools()
     _pipeline["mcp_specs"] = specs
     _pipeline["with_mcp"] = True

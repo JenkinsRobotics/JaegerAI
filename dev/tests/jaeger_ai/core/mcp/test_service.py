@@ -12,7 +12,10 @@ from jaeger_ai.core.mcp import service
 def layout(tmp_path):
     root = tmp_path / "instance"
     root.mkdir()
-    return SimpleNamespace(root=root, mcp_config_path=root / "mcp.json")
+    credentials = root / "credentials"
+    credentials.mkdir()
+    return SimpleNamespace(root=root, mcp_config_path=root / "mcp.json",
+                           credentials_dir=credentials)
 
 
 def test_configure_lists_and_masks_secrets(layout, monkeypatch):
@@ -26,7 +29,10 @@ def test_configure_lists_and_masks_secrets(layout, monkeypatch):
     assert result["owner"] == "jaeger"
     assert result["servers"][0]["env"] == {"API_KEY": "********", "MODE": "safe"}
     saved = json.loads(layout.mcp_config_path.read_text())
-    assert saved["servers"][0]["env"]["API_KEY"] == "secret"
+    assert saved["servers"][0]["env"]["API_KEY"] == {
+        "secret_ref": "mcp.search.API_KEY",
+    }
+    assert (layout.credentials_dir / "mcp.search.API_KEY").read_text().strip() == "secret"
     assert layout.mcp_config_path.stat().st_mode & 0o777 == 0o600
 
 
@@ -34,7 +40,28 @@ def test_masked_secret_is_preserved_on_update(layout):
     service.configure_server(layout, "search", {"command": "one", "env": {"TOKEN": "secret"}})
     service.configure_server(layout, "search", {"command": "two", "env": {"TOKEN": "********"}})
     saved = json.loads(layout.mcp_config_path.read_text())
-    assert saved["servers"][0]["env"]["TOKEN"] == "secret"
+    assert saved["servers"][0]["env"]["TOKEN"] == {
+        "secret_ref": "mcp.search.TOKEN",
+    }
+
+
+def test_legacy_inline_secret_is_migrated_explicitly(layout):
+    layout.mcp_config_path.write_text(json.dumps({"servers": [{
+        "name": "legacy", "command": "server", "env": {"PASSWORD": "old-secret"},
+    }]}))
+    assert service.migrate_inline_secrets(layout) is True
+    saved = json.loads(layout.mcp_config_path.read_text())
+    assert saved["servers"][0]["env"]["PASSWORD"] == {
+        "secret_ref": "mcp.legacy.PASSWORD",
+    }
+    assert "old-secret" not in layout.mcp_config_path.read_text()
+
+
+def test_resolve_server_env_fails_closed_for_missing_credential(layout):
+    with pytest.raises(service.MCPServiceError, match="missing MCP credential"):
+        service.resolve_server_env(layout, {"env": {
+            "TOKEN": {"secret_ref": "mcp.missing.TOKEN"},
+        }})
 
 
 def test_toggle_remove_and_validation(layout):
