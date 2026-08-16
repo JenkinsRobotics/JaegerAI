@@ -6,7 +6,7 @@ the rest of the agent can stay synchronous.
 
 Architecture:
 - A persistent asyncio event loop runs in a daemon thread
-- Each configured MCP server gets an MCPClient that holds an open stdio session
+- Each configured MCP server gets an MCPClient that holds an open transport session
 - Sync calls are submitted as coroutines and awaited via run_coroutine_threadsafe
 - Tools are registered globally with names like "mcp:<server>/<tool>"
 
@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # Quiet down the mcp SDK's own logging unless something goes wrong.
 logging.getLogger("mcp").setLevel(logging.WARNING)
 
@@ -39,9 +38,11 @@ DEFAULT_CONFIG_PATH = ROOT / "mcp_config.json"
 @dataclass
 class MCPServerConfig:
     name: str
-    command: str
+    command: str | None = None
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
+    url: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,8 +62,12 @@ def _agent_tool_name(server: str, tool: str) -> str:
 
 def _register_agent_tool(spec: MCPToolSpec) -> None:
     """Expose a connected MCP tool through Jaeger's canonical registry."""
+    from jaeger_os.core.tools.tool_registry import (
+        ToolDef,
+        has_tool,
+        register_tool_instance,
+    )
     from pydantic import BaseModel, ConfigDict
-    from jaeger_os.core.tools.tool_registry import ToolDef, has_tool, register_tool_instance
 
     schema = dict(spec.input_schema or {"type": "object", "properties": {}})
 
@@ -97,17 +102,32 @@ class _MCPClient:
         from contextlib import AsyncExitStack
 
         from mcp import ClientSession
-        from mcp.client.stdio import StdioServerParameters, stdio_client
-
-        inherited = {key: value for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")
-                     if (value := os.environ.get(key))}
-        params = StdioServerParameters(
-            command=self.config.command,
-            args=self.config.args,
-            env={**inherited, **self.config.env},
-        )
         self._exit_stack = AsyncExitStack()
-        read, write = await self._exit_stack.enter_async_context(stdio_client(params))
+        if self.config.url:
+            import httpx
+            from mcp.client.streamable_http import streamable_http_client
+
+            # Redirects are deliberately disabled so credentials cannot be
+            # forwarded to a different origin by a configured endpoint.
+            http_client = await self._exit_stack.enter_async_context(httpx.AsyncClient(
+                headers=self.config.headers,
+                follow_redirects=False,
+                timeout=httpx.Timeout(30.0, read=300.0),
+            ))
+            transport = await self._exit_stack.enter_async_context(
+                streamable_http_client(self.config.url, http_client=http_client))
+            read, write = transport[0], transport[1]
+        else:
+            from mcp.client.stdio import StdioServerParameters, stdio_client
+
+            inherited = {key: value for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")
+                         if (value := os.environ.get(key))}
+            params = StdioServerParameters(
+                command=self.config.command or "",
+                args=self.config.args,
+                env={**inherited, **self.config.env},
+            )
+            read, write = await self._exit_stack.enter_async_context(stdio_client(params))
         self._session = await self._exit_stack.enter_async_context(ClientSession(read, write))
         await self._session.initialize()
         listing = await self._session.list_tools()
@@ -249,14 +269,21 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
         name = str(entry.get("name") or "unknown")
         try:
             env = entry.get("env", {})
+            headers = entry.get("headers", {})
             if layout is not None:
-                from jaeger_ai.core.mcp.service import resolve_server_env
+                from jaeger_ai.core.mcp.service import (
+                    resolve_server_env,
+                    resolve_server_headers,
+                )
                 env = resolve_server_env(layout, entry)
+                headers = resolve_server_headers(layout, entry)
             config = MCPServerConfig(
                 name=name,
-                command=entry["command"],
+                command=entry.get("command"),
                 args=entry.get("args", []),
                 env=env,
+                url=entry.get("url"),
+                headers=headers,
             )
             registry.add_server(config)
         except Exception as exc:

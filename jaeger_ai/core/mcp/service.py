@@ -9,9 +9,12 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_SECRET = re.compile(r"(token|secret|password|api[_-]?key|credential)", re.I)
+_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_SECRET = re.compile(
+    r"(authorization|cookie|token|secret|password|api[_-]?key|credential)", re.IGNORECASE)
 _MASK = "********"
 
 
@@ -38,8 +41,9 @@ def _load(layout: Any) -> dict[str, Any]:
     return data
 
 
-def _credential_name(server: str, env_name: str) -> str:
-    raw = f"mcp.{server}.{env_name}"
+def _credential_name(server: str, value_name: str, *, scope: str = "") -> str:
+    # Preserve the existing environment reference format for compatibility.
+    raw = f"mcp.{server}.{scope + '.' if scope else ''}{value_name}"
     clean = re.sub(r"[^A-Za-z0-9_.-]", "_", raw)
     if len(clean) <= 64:
         return clean
@@ -55,20 +59,25 @@ def _secret_ref(value: Any) -> str | None:
 
 
 def _migrate_inline_secrets(layout: Any, data: dict[str, Any]) -> bool:
-    """Move legacy inline secret-looking env values to the credential store."""
+    """Move inline environment and HTTP-header secrets to the credential store."""
     from jaeger_agent import credentials
 
     changed = False
     for server in data.get("servers", []):
-        if not isinstance(server, dict) or not isinstance(server.get("env"), dict):
+        if not isinstance(server, dict):
             continue
         server_name = str(server.get("name") or "server")
-        for key, value in list(server["env"].items()):
-            if _SECRET.search(str(key)) and isinstance(value, str) and value and value != _MASK:
-                ref = _credential_name(server_name, str(key))
-                credentials.set_credential(layout, ref, value)
-                server["env"][key] = {"secret_ref": ref}
-                changed = True
+        for field, scope in (("env", ""), ("headers", "header")):
+            values = server.get(field)
+            if not isinstance(values, dict):
+                continue
+            for key, value in list(values.items()):
+                should_secure = field == "headers" or _SECRET.search(str(key))
+                if should_secure and isinstance(value, str) and value and value != _MASK:
+                    ref = _credential_name(server_name, str(key), scope=scope)
+                    credentials.set_credential(layout, ref, value)
+                    values[key] = {"secret_ref": ref}
+                    changed = True
     return changed
 
 
@@ -81,24 +90,34 @@ def migrate_inline_secrets(layout: Any) -> bool:
     return changed
 
 
-def resolve_server_env(layout: Any, server: dict[str, Any]) -> dict[str, str]:
-    """Resolve credential references only for the child-process launch."""
+def _resolve_values(layout: Any, server: dict[str, Any], field: str) -> dict[str, str]:
+    """Resolve one config mapping only at the transport boundary."""
     from jaeger_agent import credentials
 
-    env = server.get("env") if isinstance(server.get("env"), dict) else {}
+    values = server.get(field) if isinstance(server.get(field), dict) else {}
     resolved: dict[str, str] = {}
-    for key, value in env.items():
+    for key, value in values.items():
         if isinstance(value, str):
             resolved[str(key)] = value
             continue
         ref = _secret_ref(value)
         if ref is None:
-            raise MCPServiceError(f"invalid environment value for {key!r}")
+            raise MCPServiceError(f"invalid {field} value for {key!r}")
         try:
             resolved[str(key)] = credentials.get_credential(layout, ref)
         except Exception as exc:
             raise MCPServiceError(f"missing MCP credential {ref!r} for {key}") from exc
     return resolved
+
+
+def resolve_server_env(layout: Any, server: dict[str, Any]) -> dict[str, str]:
+    """Resolve environment credential references only for child-process launch."""
+    return _resolve_values(layout, server, "env")
+
+
+def resolve_server_headers(layout: Any, server: dict[str, Any]) -> dict[str, str]:
+    """Resolve HTTP header credential references only while opening the connection."""
+    return _resolve_values(layout, server, "headers")
 
 
 def _write(layout: Any, data: dict[str, Any]) -> None:
@@ -120,11 +139,71 @@ def _write(layout: Any, data: dict[str, Any]) -> None:
             pass
 
 
+def _owned_secret_refs(server: dict[str, Any]) -> set[str]:
+    name = str(server.get("name") or "")
+    prefix = f"mcp.{name}."
+    refs: set[str] = set()
+    for field in ("env", "headers"):
+        values = server.get(field) if isinstance(server.get(field), dict) else {}
+        for value in values.values():
+            if (ref := _secret_ref(value)) and ref.startswith(prefix):
+                refs.add(ref)
+    return refs
+
+
+def _delete_credentials(layout: Any, refs: set[str]) -> None:
+    from jaeger_agent import credentials
+
+    for ref in refs:
+        credentials.delete_credential(layout, ref)
+
+
 def _name(value: Any) -> str:
     name = str(value or "").strip()
     if not _NAME.fullmatch(name):
         raise MCPServiceError("server name must use 1-64 letters, numbers, dots, dashes, or underscores")
     return name
+
+
+def _url(value: Any) -> str:
+    url = str(value or "").strip()
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise MCPServiceError("HTTP MCP URL must use http:// or https:// and include a host")
+    if parsed.username is not None or parsed.password is not None:
+        raise MCPServiceError("HTTP MCP URL must not contain embedded credentials")
+    if parsed.fragment:
+        raise MCPServiceError("HTTP MCP URL must not contain a fragment")
+    loopback = parsed.hostname.lower() in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme == "http" and not loopback:
+        raise MCPServiceError("remote HTTP MCP servers must use https://")
+    return url
+
+
+def _mapping(payload: Any, existing: Any, *, field: str) -> dict[str, Any]:
+    values = payload if payload is not None else existing
+    if values is None:
+        values = {}
+    if not isinstance(values, dict) or not all(isinstance(key, str) for key in values):
+        raise MCPServiceError(f"{field} must be an object with string keys")
+    previous = existing if isinstance(existing, dict) else {}
+    normalized: dict[str, Any] = {}
+    for key, value in values.items():
+        if field == "headers" and not _HEADER_NAME.fullmatch(key):
+            raise MCPServiceError(f"invalid HTTP header name: {key!r}")
+        if value == _MASK:
+            if key not in previous:
+                raise MCPServiceError(f"masked value for {key!r} has no existing secret")
+            normalized[key] = previous[key]
+        elif isinstance(value, str):
+            if "\r" in value or "\n" in value:
+                raise MCPServiceError(f"{field} value for {key!r} contains a newline")
+            normalized[key] = value
+        elif _secret_ref(value):
+            normalized[key] = {"secret_ref": _secret_ref(value)}
+        else:
+            raise MCPServiceError(f"{field} value for {key!r} must be a string or secret_ref")
+    return normalized
 
 
 def _runtime() -> tuple[dict[str, list[Any]], dict[str, str], bool]:
@@ -146,15 +225,23 @@ def list_servers(layout: Any) -> dict[str, Any]:
         name = str(raw.get("name") or "")
         active_tools = tools.get(name, [])
         env = raw.get("env") if isinstance(raw.get("env"), dict) else {}
-        masked_env = {}
-        for key, value in env.items():
-            masked_env[str(key)] = _MASK if _secret_ref(value) or (_SECRET.search(str(key)) and value) else str(value)
+        headers = raw.get("headers") if isinstance(raw.get("headers"), dict) else {}
+        masked_env = {str(key): _MASK if _secret_ref(value) or
+                      (_SECRET.search(str(key)) and value) else str(value)
+                      for key, value in env.items()}
+        masked_headers = {str(key): _MASK if _secret_ref(value) or
+                          (_SECRET.search(str(key)) and value) else str(value)
+                          for key, value in headers.items()}
+        transport = "http" if raw.get("url") else "stdio"
+        enabled = bool(raw.get("enabled", True))
         rows.append({
-            "name": name, "transport": "stdio", "command": raw.get("command", ""),
+            "name": name, "transport": transport, "command": raw.get("command", ""),
             "args": list(raw.get("args") or []),
-            "env": masked_env,
-            "enabled": bool(raw.get("enabled", True)), "active": bool(active_tools),
-            "status": "error" if name in errors else ("active" if active_tools else "configured"),
+            "env": masked_env, "url": raw.get("url", ""), "headers": masked_headers,
+            "enabled": enabled, "active": bool(active_tools),
+            "status": ("disabled" if not enabled else
+                       ("error" if name in errors else
+                        ("active" if active_tools else "configured"))),
             "error": errors.get(name), "tool_count": len(active_tools),
         })
     return {"ok": True, "owner": "jaeger", "servers": rows,
@@ -191,38 +278,33 @@ def configure_server(layout: Any, name: Any, payload: Any) -> dict[str, Any]:
     name = _name(name)
     if not isinstance(payload, dict):
         raise MCPServiceError("server configuration must be an object")
-    if payload.get("url"):
-        raise MCPServiceError("Jaeger currently supports stdio MCP servers only")
     data = _load(layout)
     existing = next((x for x in data["servers"] if isinstance(x, dict) and x.get("name") == name), {})
-    command = str(payload.get("command", existing.get("command", ""))).strip()
-    if not command:
-        raise MCPServiceError("command is required for a stdio MCP server")
-    args = payload.get("args", existing.get("args", []))
-    env = payload.get("env", existing.get("env", {}))
-    if not isinstance(args, list) or not all(isinstance(x, str) for x in args):
-        raise MCPServiceError("args must be a list of strings")
-    if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
-        raise MCPServiceError("env must be an object with string keys")
-    old_env = existing.get("env") if isinstance(existing.get("env"), dict) else {}
-    normalized_env: dict[str, Any] = {}
-    for key, value in env.items():
-        if value == _MASK:
-            if key not in old_env:
-                raise MCPServiceError(f"masked value for {key!r} has no existing secret")
-            normalized_env[key] = old_env[key]
-        elif isinstance(value, str):
-            normalized_env[key] = value
-        elif _secret_ref(value):
-            normalized_env[key] = {"secret_ref": _secret_ref(value)}
-        else:
-            raise MCPServiceError(f"env value for {key!r} must be a string or secret_ref")
-    env = normalized_env
-    row = {"name": name, "command": command, "args": args, "env": env,
-           "enabled": bool(payload.get("enabled", existing.get("enabled", True)))}
+    explicit_url = str(payload.get("url") or "").strip() if "url" in payload else ""
+    explicit_command = str(payload.get("command") or "").strip() if "command" in payload else ""
+    if explicit_url and explicit_command:
+        raise MCPServiceError("configure exactly one MCP transport: url or command")
+    use_http = bool(explicit_url or (not explicit_command and existing.get("url")))
+    enabled = bool(payload.get("enabled", existing.get("enabled", True)))
+    if use_http:
+        url = _url(explicit_url or existing.get("url"))
+        headers = _mapping(payload.get("headers"), existing.get("headers"), field="headers")
+        row = {"name": name, "url": url, "headers": headers, "enabled": enabled}
+    else:
+        command = explicit_command or str(existing.get("command") or "").strip()
+        if not command:
+            raise MCPServiceError("command is required for a stdio MCP server")
+        args = payload.get("args", existing.get("args", []))
+        if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
+            raise MCPServiceError("args must be a list of strings")
+        env = _mapping(payload.get("env"), existing.get("env"), field="env")
+        row = {"name": name, "command": command, "args": args, "env": env,
+               "enabled": enabled}
     data["servers"] = [x for x in data["servers"] if not isinstance(x, dict) or x.get("name") != name] + [row]
     _migrate_inline_secrets(layout, data)
     _write(layout, data)
+    saved = next(x for x in data["servers"] if isinstance(x, dict) and x.get("name") == name)
+    _delete_credentials(layout, _owned_secret_refs(existing) - _owned_secret_refs(saved))
     return {"ok": True, "server": name, "reload_required": True}
 
 
@@ -240,11 +322,15 @@ def set_server_enabled(layout: Any, name: Any, enabled: bool) -> dict[str, Any]:
 def remove_server(layout: Any, name: Any) -> dict[str, Any]:
     name = _name(name)
     data = _load(layout)
+    row = next((x for x in data["servers"]
+                if isinstance(x, dict) and x.get("name") == name), None)
+    if row is None:
+        raise MCPServiceError(f"unknown MCP server: {name}")
     before = len(data["servers"])
     data["servers"] = [x for x in data["servers"] if not isinstance(x, dict) or x.get("name") != name]
-    if len(data["servers"]) == before:
-        raise MCPServiceError(f"unknown MCP server: {name}")
+    assert len(data["servers"]) < before
     _write(layout, data)
+    _delete_credentials(layout, _owned_secret_refs(row))
     return {"ok": True, "server": name, "removed": True, "reload_required": True}
 
 

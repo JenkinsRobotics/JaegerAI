@@ -180,6 +180,7 @@ def _integration_contract() -> dict[str, Any]:
             "skills": {"available": True, "owner": "jaeger", "mutable": True},
             "mcp_server_config": {
                 "available": True, "owner": "jaeger", "mutable": True,
+                "transports": ["stdio", "streamable_http"],
             },
             "tool_inventory": {"available": True, "owner": "jaeger", "mutable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
