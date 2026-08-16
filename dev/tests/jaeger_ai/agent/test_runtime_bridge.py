@@ -132,6 +132,32 @@ def test_openai_compat_providers_resolve_to_openai_adapter():
         assert adapter.api_key == "fake-key"
 
 
+def test_ollama_cloud_adapter_does_not_inherit_a_num_ctx():
+    """Cloud already uses the model max. A fake/local leftover must
+    not land on the wire as ``options.num_ctx``."""
+    client = _FakeExternalClient(provider="ollama-cloud", model="qwen3.5:397b")
+    client.num_ctx = 8192
+    adapter = _adapter_for_client(client)
+    assert isinstance(adapter, OpenAIAdapter)
+    assert adapter.num_ctx == 8192
+    out = adapter.format_messages(
+        [{"role": "user", "content": "hi"}], [], "",
+    )
+    assert "extra_body" not in out
+
+
+def test_local_ollama_adapter_forwards_client_num_ctx():
+    client = _FakeExternalClient(provider="ollama", model="llama3.2")
+    client.ext.base_url = "http://localhost:11434/v1"
+    client.num_ctx = 32768
+    adapter = _adapter_for_client(client)
+    assert isinstance(adapter, OpenAIAdapter)
+    out = adapter.format_messages(
+        [{"role": "user", "content": "hi"}], [], "",
+    )
+    assert out["extra_body"]["options"]["num_ctx"] == 32768
+
+
 def test_unknown_client_shape_raises_with_diagnostic():
     class _Mystery:
         pass

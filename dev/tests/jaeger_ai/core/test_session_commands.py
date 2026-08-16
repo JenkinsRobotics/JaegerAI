@@ -151,12 +151,42 @@ def test_last_ctx_snapshot_empty_without_agent(monkeypatch):
 def test_last_ctx_snapshot_computes_pct(monkeypatch):
     guard = SimpleNamespace(
         estimate_messages_tokens=lambda msgs, system_prompt, tools: 500,
-        budget=SimpleNamespace(prompt_budget=2000),
+        budget=SimpleNamespace(ctx_window=2000, prompt_budget=1800),
     )
     agent = SimpleNamespace(messages=[], system_prompt="", tools=[],
                             context_guard=guard)
     monkeypatch.setattr(main, "_jaeger_agents_by_session", {"s": agent})
-    assert main.last_ctx_snapshot("s") == {"tokens": 500, "pct": 25}
+    assert main.last_ctx_snapshot("s") == {"tokens": 500, "max": 2000, "pct": 25}
+
+
+def test_last_ctx_snapshot_prefers_adapter_billed_tokens(monkeypatch):
+    guard = SimpleNamespace(
+        estimate_messages_tokens=lambda msgs, system_prompt, tools: 28_200,
+        budget=SimpleNamespace(ctx_window=1_048_576, prompt_budget=1_044_000),
+    )
+    agent = SimpleNamespace(
+        messages=[], system_prompt="", tools=[], context_guard=guard,
+        adapter=SimpleNamespace(last_usage={"prompt_tokens": 4_100}),
+    )
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {"s": agent})
+    assert main.last_ctx_snapshot("s") == {
+        "tokens": 4_100, "max": 1_048_576, "pct": 0,
+    }
+
+
+def test_bridge_ctx_usage_uses_serving_window_not_local_leftover(monkeypatch):
+    """Swift reads ``_ctx_usage``. A leftover local ``model.ctx`` of
+    131K must not win over the 1M Cloud window last_ctx_snapshot /
+    loaded_ctx already know."""
+    from jaeger_ai.interfaces import bridge
+
+    monkeypatch.setattr(
+        "jaeger_ai.main.last_ctx_snapshot",
+        lambda session: {"tokens": 28_200, "max": 1_048_576, "pct": 3},
+    )
+    used, mx = bridge._ctx_usage("desktop-app")
+    assert used == 28_200
+    assert mx == 1_048_576
 
 
 # ── resume_session_from_store (native History → load_session) ───────────

@@ -236,10 +236,11 @@ def _do_switch_instance(ctx: SlashContext, name: str) -> SlashResult:
 # phones out, needs a real API key, and stores that key under its OWN
 # credential name — so switching between providers never clobbers the
 # previous one's key.
-_CLOUD_PROVIDERS = ("ollama-cloud", "openai", "anthropic", "gemini")
+_CLOUD_PROVIDERS = ("ollama-cloud", "openai", "anthropic", "gemini", "xai")
 _CLOUD_ALIASES = {
     "ollamacloud": "ollama-cloud", "cloud": "ollama-cloud",
     "claude": "anthropic", "google": "gemini",
+    "grok": "xai", "xai": "xai",
 }
 _CLOUD_BASE_URL = {
     "ollama-cloud": "https://ollama.com/v1",
@@ -248,12 +249,14 @@ _CLOUD_BASE_URL = {
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
     # Unused by the Anthropic SDK; set so the saved config self-documents.
     "anthropic": "https://api.anthropic.com",
+    "xai": "https://api.x.ai/v1",
 }
 _CLOUD_CRED = {
     "ollama-cloud": "ollama_cloud_api_key",
     "openai": "openai_api_key",
     "anthropic": "anthropic_api_key",
     "gemini": "gemini_api_key",
+    "xai": "xai_api_key",
 }
 # (human label, where-to-get-a-key) — shown by the key prompt.
 _CLOUD_KEY_HINT = {
@@ -261,6 +264,7 @@ _CLOUD_KEY_HINT = {
     "openai": ("OpenAI", "platform.openai.com/api-keys"),
     "anthropic": ("Anthropic", "console.anthropic.com → Settings → API Keys"),
     "gemini": ("Google Gemini", "aistudio.google.com/apikey"),
+    "xai": ("xAI", "x.ai → Settings → API Keys"),
 }
 # An example model id per provider — shown when no model is given.
 _CLOUD_EXAMPLE = {
@@ -268,6 +272,7 @@ _CLOUD_EXAMPLE = {
     "openai": "gpt-4o",
     "anthropic": "claude-opus-4-7",
     "gemini": "gemini-2.5-flash",
+    "xai": "grok-4.6",
 }
 
 
@@ -295,6 +300,7 @@ def _model(ctx: SlashContext, args: str) -> SlashResult:
        /model use openai <model>       OpenAI API (prompts for a key)
        /model use anthropic <model>    Claude via the Anthropic API
        /model use gemini <model>       Google Gemini API
+       /model use xai <model>          xAI API
     """
     parts = args.split()
     if parts and parts[0].lower() == "use":
@@ -302,6 +308,33 @@ def _model(ctx: SlashContext, args: str) -> SlashResult:
     if parts and parts[0].lower() in ("list", "ls", "all"):
         return _model_list(ctx)
     return _model_picker(ctx)
+
+
+def _autowrite_ollama_ctx(cfg: Any) -> None:
+    """Persist the autodetected Ollama / Ollama Cloud window onto
+    ``external_model.ctx`` so the next boot's context guard does not
+    fall back to the leftover local llama.cpp number."""
+    ext = getattr(cfg, "external_model", None)
+    if ext is None or getattr(ext, "provider", "") not in ("ollama", "ollama-cloud"):
+        return
+    try:
+        from jaeger_ai.core.models.external_model import resolve_api_key
+        from jaeger_ai.core.models.ollama_context import resolve_serving_context
+        from jaeger_ai.main import _pipeline
+
+        api_key = resolve_api_key(ext, _pipeline.get("layout")) or ""
+        detected, _source = resolve_serving_context(
+            provider=ext.provider,
+            model=ext.model,
+            base_url=ext.base_url,
+            api_key=api_key,
+            configured_ctx=int(getattr(ext, "ctx", 0) or 0),
+            fallback_ctx=int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0) or None,
+        )
+        if detected:
+            ext.ctx = detected
+    except Exception:  # noqa: BLE001 — switch must still persist
+        pass
 
 
 def _resolve_cloud_key(ctx: SlashContext) -> str:
@@ -415,12 +448,14 @@ def _build_providers_list(
             GEMINI_CURATED,
             OLLAMA_CLOUD_CURATED,
             OPENAI_CURATED,
+            XAI_CURATED,
         )
     except Exception:  # noqa: BLE001
         OLLAMA_CLOUD_CURATED = ()  # type: ignore[assignment]
         OPENAI_CURATED = ()         # type: ignore[assignment]
         ANTHROPIC_CURATED = ()      # type: ignore[assignment]
         GEMINI_CURATED = ()         # type: ignore[assignment]
+        XAI_CURATED = ()            # type: ignore[assignment]
 
     def _cloud_entry(slug: str, name: str, *, live: list[str] | None = None,
                      curated: tuple[str, ...] = ()) -> dict[str, Any]:
@@ -444,6 +479,7 @@ def _build_providers_list(
     providers.append(_cloud_entry("openai",    "OpenAI",    curated=OPENAI_CURATED))
     providers.append(_cloud_entry("anthropic", "Anthropic", curated=ANTHROPIC_CURATED))
     providers.append(_cloud_entry("gemini",    "Google",    curated=GEMINI_CURATED))
+    providers.append(_cloud_entry("xai",       "xAI",       curated=XAI_CURATED))
 
     return providers
 
@@ -599,7 +635,7 @@ def _model_list(ctx: SlashContext) -> SlashResult:
         "  ·  /model use ollama <name>  ·  /model use lmstudio <name>"
         "\n[dim]switch · cloud API:[/]  /model use ollama-cloud <model>"
         "  ·  /model use openai <model>  ·  /model use anthropic <model>"
-        "  ·  /model use gemini <model>"
+        "  ·  /model use gemini <model>  ·  /model use xai <model>"
     )
     return SlashResult()
 
@@ -663,7 +699,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         ctx.console.print(
             "[yellow]Usage:[/] /model use local [name] | mlx <name> | "
             "ollama <name> | lmstudio <name> | ollama-cloud <model> | "
-            "openai <model> | anthropic <model> | gemini <model>")
+            "openai <model> | anthropic <model> | gemini <model> | xai <model>")
         return SlashResult()
 
     from jaeger_ai.main import _pipeline
@@ -761,6 +797,8 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         )
         cfg.external_model.model = wanted
         summary = f"external · {provider} · {wanted}"
+        if provider == "ollama":
+            _autowrite_ollama_ctx(cfg)
     elif _CLOUD_ALIASES.get(target, target) in _CLOUD_PROVIDERS:
         provider = _CLOUD_ALIASES.get(target, target)
         if not wanted:
@@ -782,11 +820,12 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         if not _ensure_cloud_key(ctx, cfg, provider):
             return SlashResult()
         summary = f"external · {provider} · {wanted}"
+        _autowrite_ollama_ctx(cfg)
     else:
         ctx.console.print(
             f"[yellow]Unknown target {target!r}[/] — use local / mlx / "
             "ollama / lmstudio / ollama-cloud / openai / anthropic / "
-            "gemini.")
+            "gemini / xai.")
         return SlashResult()
 
     # Persist to config.yaml, then reboot so make_client rebuilds the brain.

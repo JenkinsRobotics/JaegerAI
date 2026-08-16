@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 from typing import Any, Callable
 
 from jaeger_os.contract import protocol
@@ -38,6 +39,7 @@ class JrosClient:
         self._env = env
         self._cwd = cwd
         self._proc: subprocess.Popen | None = None
+        self._write_lock = threading.Lock()
         self.ready: dict[str, Any] | None = None
 
     # ── lifecycle ─────────────────────────────────────────────────
@@ -112,8 +114,23 @@ class JrosClient:
                 raise JrosError(str(frame.get("error", "bridge failed")))
         raise JrosError("bridge exited mid-turn")
 
+    def cancel(self, session: str = "") -> None:
+        """Cooperatively interrupt the in-flight bridge turn."""
+        del session  # reserved for a future multi-worker bridge
+        if self._proc is None:
+            raise JrosError("not started")
+        self._write({"op": "cancel"})
+
+    def steer(self, text: str, session: str = "") -> None:
+        """Inject guidance into the in-flight bridge turn."""
+        del session  # reserved for a future multi-worker bridge
+        if self._proc is None:
+            raise JrosError("not started")
+        self._write({"op": "steer", "text": str(text or "")})
+
     # ── internals ─────────────────────────────────────────────────
     def _write(self, frame: dict[str, Any]) -> None:
         assert self._proc is not None and self._proc.stdin is not None
-        self._proc.stdin.write(protocol.encode(frame))
-        self._proc.stdin.flush()
+        with self._write_lock:
+            self._proc.stdin.write(protocol.encode(frame))
+            self._proc.stdin.flush()

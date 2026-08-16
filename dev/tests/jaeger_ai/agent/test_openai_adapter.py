@@ -281,6 +281,43 @@ def test_format_messages_temperature_top_p_max_tokens_carried_through():
     assert out["top_p"] == 0.5
 
 
+def test_local_ollama_sends_num_ctx_in_extra_body():
+    """Local Ollama's OpenAI-compat path defaults to a small window
+    unless the request carries ``options.num_ctx``."""
+    a = OpenAIAdapter(
+        provider="ollama", model="llama3.2",
+        base_url="http://localhost:11434/v1",
+        num_ctx=32768,
+        client=_FakeClient(_mk_response("ok")),
+    )
+    out = a.format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert out["extra_body"]["options"]["num_ctx"] == 32768
+
+
+def test_ollama_cloud_does_not_send_num_ctx_even_when_set():
+    """Cloud models already load at their max window. Sending a leftover
+    local number would shrink them."""
+    a = OpenAIAdapter(
+        provider="ollama-cloud", model="qwen3.5:397b",
+        base_url="https://ollama.com/v1",
+        num_ctx=8192,
+        client=_FakeClient(_mk_response("ok")),
+    )
+    out = a.format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert "extra_body" not in out
+
+
+def test_cloud_tag_on_local_ollama_does_not_send_num_ctx():
+    a = OpenAIAdapter(
+        provider="ollama", model="qwen3.5:397b:cloud",
+        base_url="http://localhost:11434/v1",
+        num_ctx=8192,
+        client=_FakeClient(_mk_response("ok")),
+    )
+    out = a.format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert "extra_body" not in out
+
+
 # ── call ───────────────────────────────────────────────────────────
 
 

@@ -21,7 +21,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+try:
+    from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+except Exception:
+    ANIMATION_BRIDGE_DEFAULT_PORT = 9999
 
 # ``_setting``'s canonical definition moved to ``setting_meta.py`` at 0.8
 # M1 so an engine-module's config slice (e.g. ``jaeger_os/nodes/
@@ -30,7 +33,7 @@ from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
 # circular import (see this file's ``Config`` import site, below).
 # Re-exported here so every existing ``_setting(...)`` call in this file
 # is unchanged.
-from jaeger_os.core.instance.setting_meta import _setting
+from jaeger_ai.core.instance.setting_meta import _setting
 
 
 # Bumped whenever the on-disk shape of identity.yaml / config.yaml
@@ -112,12 +115,15 @@ class ModelConfig(BaseModel):
         ),
     )
     ctx: int = Field(
-        8192, ge=512, le=131_072,
+        8192, ge=512, le=2_097_152,
         json_schema_extra=_setting("model", restart=True),
         description="Context window (tokens) for the WORKER lane — the "
                     "agent loop's llama.cpp context. Bigger = longer "
                     "conversations before compaction, at the cost of KV "
-                    "memory and cold-prefill time. Applies on restart.",
+                    "memory and cold-prefill time. Applies on restart. "
+                    "The ceiling allows the 1M+ windows current models "
+                    "ship with (deepseek-v4-pro reports 1048576); a local "
+                    "GGUF still wants a value its KV budget can hold.",
     )
     aux_ctx: int = Field(
         4096, ge=0, le=131_072,
@@ -452,11 +458,12 @@ class ExternalModelConfig(BaseModel):
       • ``openai``       — any OpenAI-compatible cloud / self-hosted endpoint
       • ``anthropic``    — Claude via the Anthropic API
       • ``gemini``       — Google Gemini via its OpenAI-compatible endpoint
+      • ``xai``          — xAI Grok via its OpenAI-compatible endpoint
 
     ``lmstudio`` and ``ollama`` are both still on-device — a separate
     local server, used to A/B against the in-process model when
     troubleshooting whether the local llama-cpp model is at fault.
-    ``ollama-cloud``, ``openai``, ``anthropic`` and ``gemini`` are true
+    ``ollama-cloud``, ``openai``, ``anthropic``, ``gemini`` and ``xai`` are true
     cloud brains (the agent phones out) — off by default, like the rest
     of this block.
 
@@ -469,7 +476,7 @@ class ExternalModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = False
     provider: Literal[
-        "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini",
+        "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
     ] = "lmstudio"
     base_url: str = Field(
         "http://localhost:1234/v1",
@@ -488,8 +495,20 @@ class ExternalModelConfig(BaseModel):
         "",
         description="Env var to read the key from when the credential is absent.",
     )
-    max_tokens: int = Field(1024, ge=16, le=32_768)
+    max_tokens: int = Field(1024, ge=16, le=131_072)
     timeout_s: float = Field(60.0, gt=0, le=600)
+    ctx: int = Field(
+        0, ge=0, le=2_097_152,
+        json_schema_extra=_setting("model", restart=True),
+        description="Context window (tokens) of the EXTERNAL model, when "
+                    "one is serving. ``model.ctx`` sizes the local "
+                    "llama.cpp/MLX lane and says nothing about a cloud "
+                    "model's window — budgeting a 1M-context cloud model "
+                    "against the local default refused turns that fit "
+                    "fine. 0 means 'unknown, fall back to model.ctx'. "
+                    "ARES writes this when it syncs a model; it can also "
+                    "be set by hand.",
+    )
 
 
 class WarmupConfig(BaseModel):

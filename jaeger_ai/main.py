@@ -697,24 +697,8 @@ def _record_episodic(entry: dict[str, Any]) -> None:
 
 def _estimate_model_context_length(model_name: str) -> int:
     """Infer context window capacity based on model family and size."""
-    m = str(model_name or "").lower().strip()
-    if not m:
-        return 8192
-    if "gemini" in m or "1m" in m:
-        return 1048576
-    if "kimi" in m or "256k" in m:
-        return 262144
-    if "qwen3.5" in m or "qwen3" in m or "128k" in m or "llama-3" in m or "mistral" in m:
-        return 131072
-    if "sonnet" in m or "opus" in m or "haiku" in m or "claude" in m or "gpt-4" in m or "200k" in m:
-        return 200000
-    if "deepseek" in m or "64k" in m:
-        return 65536
-    if "32k" in m:
-        return 32768
-    if "16k" in m:
-        return 16384
-    return 131072
+    from jaeger_ai.core.models.ollama_context import estimate_model_context_length
+    return estimate_model_context_length(model_name)
 
 
 def _context_budget_for(cfg: Any) -> tuple[int | None, int | None]:
@@ -729,6 +713,12 @@ def _context_budget_for(cfg: Any) -> tuple[int | None, int | None]:
     ``model.ctx`` and ``external_model.ctx`` when it syncs a model, but
     they drift the moment either side is edited alone, so prefer the
     lane in use and fall back to the other.
+
+    Ollama / Ollama Cloud go one step further: the OpenAI-compat
+    ``/v1/models`` list does not carry a window, so we probe native
+    ``/api/show`` (and fall back to a family estimate) rather than
+    trusting a leftover local ``model.ctx``. See
+    :mod:`jaeger_ai.core.models.ollama_context`.
 
     The reserve tracks the configured ``max_tokens``: the server counts
     prompt + completion against one window, so reserving less than the
@@ -749,13 +739,87 @@ def _context_budget_for(cfg: Any) -> tuple[int | None, int | None]:
         return value if value > 0 else None
 
     ctx = _positive(serving, "ctx") or _positive(model_cfg, "ctx")
-    if (ctx is None or ctx <= 8192) and ext_cfg is not None and getattr(ext_cfg, "enabled", False):
-        model_name = getattr(ext_cfg, "model", "")
-        if model_name:
-            ctx = _estimate_model_context_length(model_name)
+    if ext_cfg is not None and getattr(ext_cfg, "enabled", False):
+        ctx = _external_serving_ctx(ext_cfg, model_cfg, ctx)
+    else:
+        # Local lane: the process's loaded n_ctx is the hard ceiling,
+        # not the wizard value that may have drifted (code review
+        # 2026-05-24 — TUI already preferred loaded_ctx; the guard
+        # must match or it trims against the wrong window).
+        try:
+            client = _pipeline.get("client")
+        except Exception:  # noqa: BLE001
+            client = None
+        if client is not None and getattr(client, "kind", "local") != "external":
+            loaded = _positive_int(getattr(client, "loaded_ctx", 0))
+            if loaded is not None:
+                ctx = loaded
 
     reserve = _positive(serving, "max_tokens") or _positive(model_cfg, "max_tokens")
     return ctx, reserve
+
+
+def _external_serving_ctx(
+    ext_cfg: Any, model_cfg: Any, current: int | None,
+) -> int | None:
+    """Window for an enabled external lane.
+
+    Prefer a live probe the client already ran (``loaded_ctx``). Ollama
+    family otherwise auto-detects via ``/api/show`` + name estimate so
+    a leftover local 8K/32K does not cap a 128K cloud model. Other
+    providers keep the previous rule: estimate only when the configured
+    number looks like the local default (≤ 8192).
+    """
+    provider = str(getattr(ext_cfg, "provider", "") or "")
+    model_name = str(getattr(ext_cfg, "model", "") or "")
+
+    try:
+        client = _pipeline.get("client")
+    except Exception:  # noqa: BLE001
+        client = None
+    if (
+        client is not None
+        and getattr(client, "kind", "") == "external"
+        and getattr(client, "provider", "") == provider
+        and getattr(client, "model_name", "") == model_name
+    ):
+        loaded = _positive_int(getattr(client, "loaded_ctx", 0))
+        if loaded is not None:
+            return loaded
+
+    if provider in {"ollama", "ollama-cloud"}:
+        from jaeger_ai.core.models.ollama_context import resolve_serving_context
+
+        api_key = ""
+        if client is not None and getattr(client, "provider", "") == provider:
+            api_key = str(getattr(client, "_api_key", "") or "")
+        if not api_key:
+            try:
+                from jaeger_ai.core.models.external_model import resolve_api_key
+                api_key = resolve_api_key(ext_cfg, _pipeline.get("layout")) or ""
+            except Exception:  # noqa: BLE001
+                api_key = ""
+        detected, _source = resolve_serving_context(
+            provider=provider,
+            model=model_name,
+            base_url=str(getattr(ext_cfg, "base_url", "") or ""),
+            api_key=api_key,
+            configured_ctx=int(getattr(ext_cfg, "ctx", 0) or 0),
+            fallback_ctx=_positive_int(getattr(model_cfg, "ctx", 0)),
+        )
+        return detected if detected is not None else current
+
+    if (current is None or current <= 8192) and model_name:
+        return _estimate_model_context_length(model_name)
+    return current
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _get_session_history(session_key: str) -> list[Any]:
@@ -836,19 +900,45 @@ def evict_session(session_key: str) -> bool:
 
 
 def last_ctx_snapshot(session_key: str = _DEFAULT_SESSION_KEY) -> dict[str, int]:
-    """How full a session's context window is right now: ``{tokens, pct}``.
+    """How full a session's context window is right now.
 
-    Estimates the *current* prompt size (system + history + tool schemas)
-    against the agent's prompt budget — a live "how close to compaction"
-    gauge for status bars. Empty dict when the session has no agent yet."""
+    Returns ``{tokens, max, pct}``. ``tokens`` is the live prompt-size
+    estimate (system + history + tool schemas — what the model actually
+    sees). ``max`` is the *serving* window (loaded_ctx / probed cloud
+    ctx), not leftover local ``model.ctx``. Empty dict when the
+    session has no agent yet.
+    """
     agent = _jaeger_agents_by_session.get(session_key)
     guard = getattr(agent, "context_guard", None)
     if agent is None or guard is None:
         return {}
     tokens = guard.estimate_messages_tokens(
         agent.messages, system_prompt=agent.system_prompt, tools=agent.tools)
-    budget = guard.budget.prompt_budget
-    return {"tokens": tokens, "pct": round(100 * tokens / budget) if budget else 0}
+    # After a turn the adapter's billed prompt_tokens is the honest
+    # used count. The char heuristic stays for pre-first-turn / adapters
+    # that don't report usage.
+    adapter = getattr(agent, "adapter", None)
+    last = getattr(adapter, "last_usage", None) if adapter is not None else None
+    if isinstance(last, dict):
+        billed = _positive_int(
+            last.get("prompt_tokens") or last.get("input_tokens")
+        )
+        if billed:
+            tokens = billed
+    ctx_max = _positive_int(getattr(guard.budget, "ctx_window", 0)) or 0
+    if not ctx_max:
+        try:
+            budgeted, _reserve = _context_budget_for(_pipeline.get("config"))
+        except Exception:  # noqa: BLE001
+            budgeted = None
+        ctx_max = int(budgeted or 0)
+    if not ctx_max:
+        ctx_max = _positive_int(getattr(guard.budget, "prompt_budget", 0)) or 0
+    return {
+        "tokens": tokens,
+        "max": ctx_max,
+        "pct": round(100 * tokens / ctx_max) if ctx_max else 0,
+    }
 
 
 def pop_last_exchange(session_key: str = _DEFAULT_SESSION_KEY) -> str | None:
@@ -964,6 +1054,29 @@ def _register_builtins(client: Any) -> None:
             "live": [s.as_dict() for s in probe],
             "boot_readiness": _pipeline.get("readiness"),
         }
+
+    @register_tool_from_function(side_effect="read")
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="session_search",
+                   summary="search, browse, or read conversation sessions")
+    def session_search(
+        query: str | None = None,
+        session_id: str | None = None,
+        source: str | None = None,
+        limit: int = 50,
+    ) -> dict:
+        """Search, browse, or read conversations across WebUI and CLI sessions.
+
+        Use this tool whenever asked about conversation sessions, session counts,
+        WebUI vs CLI sessions, or to search/read past conversation transcripts.
+
+        - BROWSE mode (no query, no session_id): Lists recent sessions, returns
+          counts for WebUI sessions and CLI sessions.
+        - SEARCH mode (pass query="..."): Searches across titles and transcripts.
+        - READ mode (pass session_id="..."): Reads full transcript for a session.
+        """
+        from jaeger_ai.core.session_tools import session_search as _search
+        return _search(query=query, session_id=session_id, source=source, limit=limit)
 
 
 
@@ -1558,6 +1671,64 @@ Output ONLY a JSON array (possibly empty), each item:
 Conversation:
 {transcript}
 """
+
+
+def _runtime_identity_block() -> str:
+    """State the serving model and window as system-prompt facts.
+
+    Without this the agent answers "what model are you / what is your
+    context limit?" from training-data folklore — observed answering
+    "Qwen3.5 typically supports 32K-128K tokens" while actually running
+    on a 262144-token Ollama Cloud lane, and separately naming a local
+    Gemma as "currently loaded" while a cloud model was answering. The
+    facts are cheap, small, and knowable at construction; guessing them
+    is never acceptable for a question about itself.
+
+    Frozen at construction like the facts snapshot, which is correct
+    here: the serving lane is fixed when the client is built and cannot
+    hot-swap mid-session, so the prompt stays byte-stable for prefix
+    caching.
+    """
+    try:
+        from jaeger_ai.core.models.model_resolver import serving_model
+
+        row = serving_model()
+    except Exception:  # noqa: BLE001 — never block boot on self-description
+        return ""
+    if not row:
+        return ""
+
+    name = str(row.get("name") or "").strip()
+    provider = str(row.get("provider") or "").strip()
+    location = str(row.get("location") or "").strip()
+    window = row.get("context_length")
+    lines = ["## Your runtime (authoritative — never guess these)"]
+    if name:
+        where = f" via {provider}" if provider else ""
+        kind = f" ({location})" if location else ""
+        lines.append(f"- Model actually serving you: {name}{where}{kind}")
+    if window:
+        lines.append(
+            f"- Your context window: {int(window):,} tokens. This is the real "
+            "number reported by the provider — do not substitute a "
+            "family-typical figure from memory."
+        )
+    else:
+        lines.append(
+            "- Your context window is not known to the runtime; say so "
+            "rather than estimating from the model name."
+        )
+    if row.get("fallback_active"):
+        lines.append(
+            f"- FALLBACK IN EFFECT: {row.get('requested') or 'another model'} "
+            "was configured but is not what is answering. Say this plainly if "
+            "the operator asks which model they are on."
+        )
+    lines.append(
+        "- To list other models and their windows, call list_models(); it "
+        "includes provider-reachable models, not just downloadable ones."
+    )
+    return "\n".join(lines)
 
 
 def _facts_snapshot_block(max_chars: int = _FACTS_SNAPSHOT_MAX_CHARS) -> str:
@@ -2613,10 +2784,17 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                     temperature=0.2,
                 )
                 return str(out or "")
-        # Session system prompt = base prompt + frozen facts snapshot.
-        # Frozen at construction so the prompt stays byte-stable across
-        # turns (prefix-cache friendly); new facts land next session.
+        # Session system prompt = base prompt + runtime identity + frozen
+        # facts snapshot. All frozen at construction so the prompt stays
+        # byte-stable across turns (prefix-cache friendly); new facts land
+        # next session. The runtime block goes first: which model is
+        # answering and how big its window is are facts about THIS process,
+        # and without them the agent answers questions about itself from
+        # training-data folklore.
         _session_prompt = _pipeline["system_prompt"]
+        _runtime_block = _runtime_identity_block()
+        if _runtime_block:
+            _session_prompt = f"{_session_prompt}\n\n{_runtime_block}"
         _facts_block = _facts_snapshot_block()
         if _facts_block:
             _session_prompt = f"{_session_prompt}\n\n{_facts_block}"
@@ -3078,6 +3256,17 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
             store.record(session, "user", user_text)
             if out.get("text"):
                 store.record(session, "assistant", out["text"])
+            try:
+                from jaeger_ai.core.runtime.modes import serving_brain
+                brain = serving_brain()
+                if brain.get("model"):
+                    store.stamp_brain(
+                        session,
+                        model=str(brain.get("model") or ""),
+                        provider=str(brain.get("provider") or ""),
+                    )
+            except Exception:  # noqa: BLE001
+                pass
             cfg = _pipeline.get("config")
             keep = int(getattr(getattr(cfg, "display", None),
                                "session_history_keep", 50) or 0)

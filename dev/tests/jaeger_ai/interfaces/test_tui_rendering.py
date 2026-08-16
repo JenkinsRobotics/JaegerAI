@@ -32,6 +32,7 @@ def test_kfmt_compacts_thousands() -> None:
     smart precision and trailing zeros trimmed."""
     assert _kfmt(27800) == "27.8K"
     assert _kfmt(262144) == "262K"
+    assert _kfmt(1_048_576) == "1M"
     assert _kfmt(1_500_000) == "1.5M"
     assert _kfmt(980) == "980"
     assert _kfmt(0) == "0"
@@ -224,6 +225,40 @@ def test_ctx_max_falls_back_to_config_when_client_lacks_loaded_ctx(monkeypatch) 
 
     tui = _tui()
     assert tui._current_ctx_max() == 16_384
+
+
+def test_refresh_does_not_clobber_serving_ctx_with_local_model_ctx(monkeypatch) -> None:
+    """Regression: ``_refresh_context_estimate`` used to write
+    leftover ``model.ctx`` (131K local Qwen) over the 1M Cloud window
+    the status bar had just resolved."""
+    import jaeger_ai.main as main
+
+    class _CloudClient:
+        kind = "external"
+        loaded_ctx = 1_048_576
+
+    class _StubCfg:
+        class model:
+            ctx = 131_072
+
+        class external_model:
+            enabled = True
+            ctx = 1_048_576
+            provider = "ollama-cloud"
+            model = "deepseek-v4-flash:preview"
+            max_tokens = 4096
+            base_url = "https://ollama.com/v1"
+
+    monkeypatch.setitem(main._pipeline, "client", _CloudClient())
+    monkeypatch.setitem(main._pipeline, "config", _StubCfg())
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {})
+    monkeypatch.setattr(main, "_get_session_history", lambda key: [])
+
+    tui = _tui()
+    tui._context_max = 1_048_576
+    tui._refresh_context_estimate()
+    assert tui._current_ctx_max() == 1_048_576
+    assert tui._context_max == 1_048_576
 
 
 def test_context_estimate_counts_phase9_dict_messages(monkeypatch) -> None:

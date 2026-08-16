@@ -46,8 +46,29 @@ class SessionStore:
         self._lock = threading.Lock()
         with self._conn:
             self._conn.executescript(_SCHEMA)
+            self._ensure_brain_columns()
 
-    def record(self, session_id: str, role: str, text: str) -> None:
+    def _ensure_brain_columns(self) -> None:
+        """Sessions record the brain that served them so get_mode /
+        History answer from this conversation, not a process-global
+        preset."""
+        cols = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(sessions)")
+        }
+        if "model" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT")
+        if "provider" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN provider TEXT")
+
+    def record(
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        *,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> None:
         """Append one message; upsert the session (first user line = preview)."""
         if not session_id or not text:
             return
@@ -68,6 +89,43 @@ class SessionStore:
                 self._conn.execute(
                     "UPDATE sessions SET last_active=? WHERE id=?",
                     (now, session_id))
+            if model or provider:
+                self._conn.execute(
+                    "UPDATE sessions SET model=COALESCE(?, model), "
+                    "provider=COALESCE(?, provider) WHERE id=?",
+                    (model or None, provider or None, session_id),
+                )
+
+    def stamp_brain(
+        self,
+        session_id: str,
+        *,
+        model: str | None,
+        provider: str | None,
+    ) -> None:
+        """Remember which brain served this conversation. No new message."""
+        if not session_id or not (model or provider):
+            return
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE sessions SET model=COALESCE(?, model), "
+                "provider=COALESCE(?, provider) WHERE id=?",
+                (model or None, provider or None, session_id),
+            )
+
+    def brain(self, session_id: str) -> dict[str, str | None]:
+        """The model/provider last stamped on this session, if any."""
+        if not session_id:
+            return {"model": None, "provider": None}
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT model, provider FROM sessions WHERE id=?",
+                (session_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return {"model": None, "provider": None}
+        return {"model": row[0], "provider": row[1]}
 
     def history(self, session_id: str) -> list[dict[str, Any]]:
         """All turns for a session, oldest first."""

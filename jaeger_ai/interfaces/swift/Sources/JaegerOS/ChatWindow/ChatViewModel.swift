@@ -577,8 +577,39 @@ final class ChatViewModel: ObservableObject {
         s < 10 ? String(format: "%.1fs", s) : "\(Int(s.rounded()))s"
     }
 
-    /// "18.3K" / "512" — thousands shortened, the TUI's ctx gauge style.
-    static func fmtTokens(_ n: Int) -> String {
-        n >= 1000 ? String(format: "%.1fK", Double(n) / 1000.0) : "\(n)"
+    /// "18.3K" / "1M" / "512" — TUI ``_kfmt`` style. The old
+    /// ``n/1000 → %.1fK`` path printed a 1,048,576-token window as
+    /// ``1048.6K`` instead of ``1M``.
+    nonisolated static func fmtTokens(_ n: Int) -> String {
+        let absValue = abs(n)
+        if absValue == 1_048_576 { return n < 0 ? "-1M" : "1M" }
+        if absValue < 1_000 { return "\(n)" }
+        let sign = n < 0 ? "-" : ""
+        let threshold: Double
+        let suffix: String
+        if absValue >= 1_000_000_000 {
+            threshold = 1_000_000_000
+            suffix = "B"
+        } else if absValue >= 1_000_000 {
+            threshold = 1_000_000
+            suffix = "M"
+        } else {
+            threshold = 1_000
+            suffix = "K"
+        }
+        let scaled = Double(absValue) / threshold
+        let text: String
+        if scaled < 10 {
+            text = String(format: "%.2f", scaled)
+        } else if scaled < 100 {
+            text = String(format: "%.1f", scaled)
+        } else {
+            text = String(format: "%.0f", scaled)
+        }
+        var trimmed = text
+        while trimmed.contains(".") && (trimmed.hasSuffix("0") || trimmed.hasSuffix(".")) {
+            trimmed = String(trimmed.dropLast())
+        }
+        return "\(sign)\(trimmed)\(suffix)"
     }
 }

@@ -12,6 +12,7 @@ is enabled, the agent runs on an external provider instead:
   • ``openai``       — any OpenAI-compatible cloud / self-hosted endpoint.
   • ``anthropic``    — Claude via the Anthropic API.
   • ``gemini``       — Google Gemini via its OpenAI-compatible endpoint.
+  • ``xai``          — xAI Grok via its OpenAI-compatible endpoint.
 
 The agent loop (``agent.iter()``, skip-final, the fix loop, Deep Think)
 is model-agnostic — it only needs (a) a pydantic-ai ``Model`` for the
@@ -46,7 +47,7 @@ from jaeger_ai.core.instance.schemas import ExternalModelConfig
 # ollama, but a real API key is required. ``gemini`` is Google's
 # OpenAI-compatible endpoint (generativelanguage.googleapis.com/v1beta/
 # openai/) — so it rides the same path as openai, no native adapter.
-_OPENAI_COMPATIBLE = {"lmstudio", "ollama", "ollama-cloud", "openai", "gemini"}
+_OPENAI_COMPATIBLE = {"lmstudio", "ollama", "ollama-cloud", "openai", "gemini", "xai"}
 
 # The conventional environment variable each provider's key lives in,
 # checked last by :func:`resolve_api_key`.
@@ -56,6 +57,7 @@ _CONVENTIONAL_ENV = {
     "ollama-cloud": "OLLAMA_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "xai": "XAI_API_KEY",
 }
 
 
@@ -91,8 +93,23 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
         try:
             from jaeger_agent import credentials as creds
 
-            return creds.get_credential(layout, ext.api_key_credential)
+            val = creds.get_credential(layout, ext.api_key_credential)
+            if val:
+                return val
         except Exception:  # noqa: BLE001 — missing credential is expected
+            pass
+        try:
+            from pathlib import Path
+            root = getattr(layout, "root", None) or getattr(layout, "credentials_dir", None) or Path(str(layout))
+            if hasattr(layout, "credentials_dir"):
+                cred_file = layout.credentials_dir / ext.api_key_credential
+            else:
+                cred_file = Path(str(root)) / "credentials" / ext.api_key_credential
+            if cred_file.is_file():
+                txt = cred_file.read_text(encoding="utf-8").strip()
+                if txt:
+                    return txt
+        except Exception:
             pass
     if ext.api_key_env:
         val = os.environ.get(ext.api_key_env, "")
@@ -119,7 +136,7 @@ def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:
     Local OpenAI-compatible servers (LM Studio, local Ollama) accept
     any non-empty key; this helper injects a placeholder. True cloud
     endpoints (``openai`` / ``anthropic`` / ``ollama-cloud`` /
-    ``gemini``) genuinely require a real key.
+    ``gemini`` / ``xai``) genuinely require a real key.
     """
     if ext.provider in _OPENAI_COMPATIBLE:
         _placeholder = {"lmstudio": "lm-studio", "ollama": "ollama"}
@@ -184,6 +201,14 @@ class ExternalModelClient:
         )
         self.model_name = ext.model
         self.provider = ext.provider
+        # Context-window autodetection for the TUI gauge + the
+        # OpenAI-compat ``num_ctx`` injection. Local llama.cpp clients
+        # already expose ``loaded_ctx``; we match that surface so the
+        # status bar does not keep showing the leftover local 8K when
+        # an Ollama Cloud model is serving.
+        self.loaded_ctx = int(getattr(ext, "ctx", 0) or 0)
+        self.num_ctx: int | None = None
+        self._autodetect_ollama_context()
 
     # -- bounded completion shim -------------------------------------------
     def chat(
@@ -222,14 +247,50 @@ class ExternalModelClient:
         client = OpenAI(
             base_url=self.ext.base_url, api_key=key, timeout=self.ext.timeout_s,
         )
-        completion = client.chat.completions.create(
-            model=self.ext.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-        )
+        kwargs: dict[str, Any] = {
+            "model": self.ext.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+        # Local Ollama's OpenAI-compat path ignores the model's
+        # trained window unless the request sends ``options.num_ctx``.
+        # Cloud already loads at max — ``self.num_ctx`` stays None there.
+        if self.num_ctx:
+            kwargs["extra_body"] = {"options": {"num_ctx": self.num_ctx}}
+        completion = client.chat.completions.create(**kwargs)
         return completion.choices[0].message.content or ""
+
+    def _autodetect_ollama_context(self) -> None:
+        """Fill ``loaded_ctx`` / ``num_ctx`` from ``/api/show`` for Ollama."""
+        if self.provider not in {"ollama", "ollama-cloud"}:
+            return
+        from jaeger_ai.core.models.ollama_context import (
+            resolve_serving_context,
+            should_inject_num_ctx,
+        )
+
+        detected, source = resolve_serving_context(
+            provider=self.provider,
+            model=self.model_name,
+            base_url=self.ext.base_url,
+            api_key=self._api_key,
+            configured_ctx=int(getattr(self.ext, "ctx", 0) or 0),
+        )
+        if detected:
+            self.loaded_ctx = detected
+            # Keep the serving-lane config in lockstep so ARES / a
+            # later ``_context_budget_for`` read sees the probed window
+            # instead of a leftover 0 or local 8K.
+            try:
+                self.ext.ctx = detected
+            except Exception:  # noqa: BLE001 — pydantic frozen / missing field
+                pass
+        if should_inject_num_ctx(
+            self.provider, self.ext.base_url, self.model_name, source=source,
+        ) and detected:
+            self.num_ctx = detected
 
     def _chat_anthropic(self, messages, max_tokens, temperature, top_p) -> str:
         from anthropic import Anthropic

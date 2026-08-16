@@ -92,3 +92,19 @@ def test_prune_under_the_limit_is_a_noop(tmp_path):
         assert len(store.list_sessions()) == 1
     finally:
         store.close()
+
+
+def test_session_remembers_the_brain_that_served_it(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        store.record("s1", "user", "hi")
+        store.stamp_brain(
+            "s1", model="deepseek-v4-flash:preview", provider="ollama-cloud",
+        )
+        assert store.brain("s1") == {
+            "model": "deepseek-v4-flash:preview",
+            "provider": "ollama-cloud",
+        }
+        assert store.brain("missing") == {"model": None, "provider": None}
+    finally:
+        store.close()
