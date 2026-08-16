@@ -130,6 +130,59 @@ def _effective_icon(boot: Any, character: Any) -> str | None:
 
 _LAYERS = ("hexaco", "special", "expression", "domains")
 
+# Additive application contract carried inside protocol v1's generic query
+# envelope.  The wire protocol describes frame shapes; this contract describes
+# which product features this Jaeger build actually implements.  Clients must
+# feature-gate from this response instead of inferring support from versions or
+# repository names.
+INTEGRATION_CONTRACT_VERSION = 1
+BRIDGE_QUERIES = (
+    "contract", "identity", "characters", "character", "config",
+    "serving_model", "settings_catalog", "permissions", "instance_exists",
+    "setup_defaults", "list_sessions", "load_session", "check_update",
+)
+BRIDGE_COMMANDS = (
+    "select_character", "make_default", "save_profile", "save_traits",
+    "save_config", "save_identity", "revoke_permission", "speak",
+    "settings_set", "run_update", "new_session", "create_instance",
+)
+
+
+def _integration_contract() -> dict[str, Any]:
+    """Return the authoritative feature contract for external surfaces."""
+    from jaeger_ai import __version__
+    from jaeger_os.contract import protocol
+
+    return {
+        "contract": "ares-jaeger",
+        "contract_version": INTEGRATION_CONTRACT_VERSION,
+        "protocol_version": str(protocol.PROTOCOL_VERSION),
+        "runtime": {"id": "jaeger_local", "name": "JaegerAI", "version": __version__},
+        "operations": {
+            "queries": list(BRIDGE_QUERIES),
+            "commands": list(BRIDGE_COMMANDS),
+            "controls": ["cancel", "steer", "respond"],
+        },
+        "features": {
+            "chat": {"available": True, "owner": "jaeger", "mutable": True},
+            "sessions": {"available": True, "owner": "jaeger", "mutable": True},
+            "approvals": {"available": True, "owner": "jaeger", "mutable": True},
+            "character_persona_editing": {
+                "available": True, "owner": "jaeger", "mutable": True,
+            },
+            "runtime_settings": {"available": True, "owner": "jaeger", "mutable": True},
+            "voice_settings": {"available": True, "owner": "jaeger", "mutable": True},
+            "updates": {"available": True, "owner": "jaeger", "mutable": True},
+            "skills": {"available": False, "owner": "jaeger", "mutable": False},
+            "mcp_server_config": {
+                "available": False, "owner": "jaeger", "mutable": False,
+            },
+            "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
+            "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
+            "schedules": {"available": False, "owner": "jaeger", "mutable": False},
+        },
+    }
+
 
 def _agent_name(boot: Any) -> str | None:
     """The AGENT's own name (identity.yaml — the unique robot the operator
@@ -202,6 +255,8 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     )
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
+    if what == "contract":
+        return _integration_contract()
     if what == "identity":
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
