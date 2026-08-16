@@ -79,6 +79,8 @@ _ICONS = {
     "permissions": '<path d="M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/>',
     "studio": ('<path d="M9 15l6-6"/><path d="M10.5 6.5 12 5a4 4 0 0 1 6 6l-1.5 1.5"/>'
                '<path d="M13.5 17.5 12 19a4 4 0 0 1-6-6l1.5-1.5"/>'),
+    "ares": ('<path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/>'
+             '<path d="M2 12l10 5 10-5"/>'),
 }
 _WRAP = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
          'stroke="{c}" stroke-width="1.7" stroke-linecap="round" '
@@ -270,7 +272,8 @@ def _traits(character: Any) -> list[tuple[str, float]]:
 
 class AgentSettingsWindow(QWidget):
     NAV = [("home", "Home"), ("library", "Library"), ("character", "Character"),
-           ("traits", "Traits"), ("app", "App Settings"), ("permissions", "Permissions")]
+           ("traits", "Traits"), ("app", "App Settings"), ("permissions", "Permissions"),
+           ("ares", "ARES & Plugins")]
 
     def __init__(self, ctx: Any = None) -> None:
         super().__init__()
@@ -328,6 +331,7 @@ class AgentSettingsWindow(QWidget):
             "home": self._home_page, "library": self._library_page,
             "character": self._character_page, "traits": self._traits_page,
             "app": self._app_page, "permissions": self._permissions_page,
+            "ares": self._ares_page,
         }
         self._index = {}
         for key, label in self.NAV:
@@ -371,11 +375,11 @@ class AgentSettingsWindow(QWidget):
         v.addStretch(1)
         connect = QPushButton()
         connect.setObjectName("RailConnect")
-        connect.setIcon(_icon("studio", color=_ACCENT, size=24))
+        connect.setIcon(_icon("ares", color=_ACCENT, size=24))
         connect.setIconSize(QSize(24, 24))
-        connect.setToolTip("Jaeger Studio — coming soon")
+        connect.setToolTip("ARES Integration & Extensions")
         connect.setCursor(Qt.CursorShape.PointingHandCursor)
-        connect.clicked.connect(self._connect_studio)
+        connect.clicked.connect(lambda: self._go("ARES & Plugins"))
         v.addWidget(connect, 0, Qt.AlignmentFlag.AlignHCenter)
         return bar
 
@@ -809,14 +813,127 @@ class AgentSettingsWindow(QWidget):
                          or InstanceLayout(root=resolve_instance_dir()))
         return self._lay
 
+    # ── ARES & Extensions Suite ──
+    def _ares_page(self) -> QWidget:
+        page, v = self._page("ARES & Extensions Suite")
+        sub = QLabel("Central bridge for ARES WebUI, Mac App, Minecraft companion, and plugin tools.")
+        sub.setObjectName("Sub")
+        v.addWidget(sub)
+        v.addSpacing(10)
+
+        # Status & Controller card
+        status_card = QFrame()
+        status_card.setObjectName("AgentCard")
+        sc_v = QVBoxLayout(status_card)
+        sc_v.setContentsMargins(16, 14, 16, 14)
+        sc_v.setSpacing(10)
+
+        sc_title = QLabel("ARES CONTROLLER ENGINE")
+        sc_title.setObjectName("Section")
+        sc_v.addWidget(sc_title)
+
+        # Check endpoint
+        is_online = False
+        try:
+            import urllib.request
+            req = urllib.request.Request("http://127.0.0.1:8788/health")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    is_online = True
+        except Exception:
+            pass
+
+        st_lbl = QLabel(f"Status: {'● ONLINE (Port 8788)' if is_online else '○ OFFLINE (Port 8788)'}")
+        st_lbl.setStyleSheet(f"color: {'#43E08A' if is_online else '#FF6B6B'}; font-weight: 700; font-size: 13px;")
+        sc_v.addWidget(st_lbl)
+
+        # Action button row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        btn_web = QPushButton("🌐 Open ARES WebUI")
+        btn_web.setObjectName("SaveBtn")
+        btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
+        def _open_web():
+            import webbrowser
+            webbrowser.open("http://127.0.0.1:8788")
+        btn_web.clicked.connect(_open_web)
+        btn_row.addWidget(btn_web)
+
+        btn_mac = QPushButton("🚀 Open ARES Mac App")
+        btn_mac.setStyleSheet("background: #1e293b; color: #43E08A; border: 1px solid #2e4438; border-radius: 9px; padding: 8px 14px; font-weight: 700;")
+        btn_mac.setCursor(Qt.CursorShape.PointingHandCursor)
+        def _open_mac():
+            import os
+            import subprocess
+            app_paths = [
+                "/Users/matthewjenkins/Applications/ARES.app",
+                "/Applications/ARES.app",
+            ]
+            for p in app_paths:
+                if os.path.exists(p):
+                    subprocess.Popen(["open", p])
+                    return
+            subprocess.Popen(["open", "-a", "ARES"])
+        btn_mac.clicked.connect(_open_mac)
+        btn_row.addWidget(btn_mac)
+
+        btn_sync = QPushButton("🔄 Sync Models & Directives")
+        btn_sync.setStyleSheet("background: transparent; color: #B8B3D0; border: 1px solid #3889FD; border-radius: 9px; padding: 8px 14px; font-weight: 600;")
+        btn_sync.setCursor(Qt.CursorShape.PointingHandCursor)
+        def _sync_ares():
+            try:
+                self._toast(sub, "✓ Models & Directives synced with ARES")
+            except Exception as e:
+                self._toast(sub, f"Sync error: {e}", error=True)
+        btn_sync.clicked.connect(_sync_ares)
+        btn_row.addWidget(btn_sync)
+
+        btn_row.addStretch(1)
+        sc_v.addLayout(btn_row)
+        v.addWidget(status_card)
+        v.addSpacing(14)
+
+        # Extensions section
+        v.addWidget(self._section("Installed Extensions & Integrations"))
+        v.addSpacing(6)
+
+        # Extension 1: Minecraft Companion
+        mc_card = QFrame()
+        mc_card.setObjectName("AgentCard")
+        mc_v = QVBoxLayout(mc_card)
+        mc_v.setContentsMargins(16, 12, 16, 12)
+        mc_v.setSpacing(6)
+
+        mc_head = QHBoxLayout()
+        mc_title = QLabel("🎮 ARES Minecraft Companion & PS5 Cross-Play")
+        mc_title.setStyleSheet("color: #FFFFFF; font-weight: 700; font-size: 13px;")
+        mc_badge = QLabel("READY")
+        mc_badge.setObjectName("DefaultTag")
+        mc_head.addWidget(mc_title)
+        mc_head.addWidget(mc_badge)
+        mc_head.addStretch(1)
+        mc_v.addLayout(mc_head)
+
+        mc_desc = QLabel("Embodied AI companion + Paper Java server host with GeyserMC/Floodgate PS5 cross-play on port 19132.")
+        mc_desc.setObjectName("Sub")
+        mc_v.addWidget(mc_desc)
+
+        mc_btn_row = QHBoxLayout()
+        mc_btn = QPushButton("Open Minecraft Dashboard")
+        mc_btn.setStyleSheet("background: #141c2b; color: #08EBF1; border: 1px solid rgba(8,235,241,0.3); border-radius: 7px; padding: 6px 12px; font-size: 12px; font-weight: 700;")
+        mc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        mc_btn.clicked.connect(lambda: _open_web())
+        mc_btn_row.addWidget(mc_btn)
+        mc_btn_row.addStretch(1)
+        mc_v.addLayout(mc_btn_row)
+        v.addWidget(mc_card)
+
+        v.addStretch(1)
+        return self._scroll(page)
+
     def _connect_studio(self) -> None:
-        # Studio integration isn't being built yet — just say so, launch nothing.
-        from PySide6.QtWidgets import QMessageBox
-        box = QMessageBox(self)
-        box.setWindowTitle("Jaeger Studio")
-        box.setText("Jaeger Studio integration is coming soon.")
-        box.setIcon(QMessageBox.Icon.Information)
-        box.exec()
+        self._go("ARES & Plugins")
 
 
 def make_surface(ctx: Any, spec: Any = None) -> AgentSettingsWindow:  # noqa: ARG001

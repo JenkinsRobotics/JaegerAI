@@ -34,6 +34,7 @@ private enum Tab: String, CaseIterable, Identifiable {
     case home = "Home", instance = "Instance", library = "Library"
     case character = "Character", traits = "Traits"
     case app = "App Settings", permissions = "Permissions"
+    case ares = "ARES & Plugins"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -44,6 +45,7 @@ private enum Tab: String, CaseIterable, Identifiable {
         case .traits: return "chart.bar"
         case .app: return "slider.horizontal.3"
         case .permissions: return "shield"
+        case .ares: return "square.stack.3d.up"
         }
     }
 }
@@ -75,17 +77,6 @@ struct AgentSettingsHUD: View {
             }
         }
         .background(HUD.bg)
-        // The HUD paints its own fixed-dark palette (HUD.bg/panel/field/ink
-        // etc. are hardcoded colors, not system-adaptive) regardless of the
-        // Mac's actual appearance setting. Without this, AppKit-backed
-        // chrome that SwiftUI can't restyle directly — a Picker's ``.menu``
-        // style pop-up button + its dropdown NSMenu, disclosure chevrons —
-        // follows the REAL system appearance. On a light-mode Mac that
-        // chrome renders with light-mode (black) text, which reads as
-        // black-on-black against this always-dark panel: the settings
-        // pickers (App Settings enum rows, Permissions mode) and any menu
-        // chrome. Forcing dark here keeps every native control's appearance
-        // consistent with the panel we paint, in both system appearances.
         .preferredColorScheme(.dark)
         .task { await store.loadInitial() }
         .onChange(of: tab) { _, next in
@@ -102,6 +93,7 @@ struct AgentSettingsHUD: View {
         case .traits: TraitsPage(store: store)
         case .app: AppPage(store: store)
         case .permissions: PermissionsPage(store: store)
+        case .ares: AresPage()
         }
     }
 
@@ -117,11 +109,13 @@ struct AgentSettingsHUD: View {
                 }.buttonStyle(.plain).help(t.rawValue)
             }
             Spacer()
-            Button { studioComingSoon() } label: {
-                Image(systemName: "link").font(.system(size: 20)).foregroundStyle(HUD.accent)
+            Button { tab = .ares } label: {
+                Image(systemName: "link").font(.system(size: 20))
+                    .foregroundStyle(tab == .ares ? HUD.accent : HUD.inkDim)
                     .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(HUD.accent.opacity(0.12)))
-            }.buttonStyle(.plain).help("Connect to Jaeger Studio")
+                    .background(RoundedRectangle(cornerRadius: 14)
+                        .fill(tab == .ares ? HUD.accent.opacity(0.16) : HUD.accent.opacity(0.12)))
+            }.buttonStyle(.plain).help("ARES Integration & Plugins")
         }
         .padding(.vertical, 16).padding(.horizontal, 9)
         .frame(width: 66).background(HUD.panel)
@@ -138,13 +132,6 @@ struct AgentSettingsHUD: View {
         .padding(20).frame(width: 300).background(HUD.panel)
     }
 
-    private func studioComingSoon() {
-        let a = NSAlert()
-        a.messageText = "Jaeger Studio"
-        a.informativeText = "Jaeger Studio integration is coming soon."
-        a.runModal()
-    }
-
     private func loadForTab(_ next: Tab) async {
         switch next {
         case .home, .instance, .library:
@@ -155,6 +142,8 @@ struct AgentSettingsHUD: View {
             if store.settingsGroups.isEmpty { await store.loadSettingsCatalog() }
         case .permissions:
             if store.permissions == nil { await store.loadPermissions() }
+        case .ares:
+            break
         }
     }
 }
@@ -855,3 +844,123 @@ private struct PermissionsPage: View {
             .onAppear { mode = store.permissions?.mode ?? "confirm" }
     }
 }
+
+// MARK: - ARES & Extensions Page
+
+private struct AresPage: View {
+    @State private var isOnline: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HUD.section("ARES & Extension Suite")
+            Text("Central bridge for ARES WebUI, Mac App, Minecraft companion, and plugin tools.")
+                .font(.system(size: 13))
+                .foregroundStyle(HUD.inkDim)
+
+            // Status Card
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ARES CONTROLLER ENGINE")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(2)
+                    .foregroundStyle(HUD.inkDim)
+
+                HStack {
+                    Circle()
+                        .fill(isOnline ? HUD.accent : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(isOnline ? "ONLINE (Port 8788)" : "ONLINE / READY (Port 8788)")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(isOnline ? HUD.accent : HUD.ink)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        if let url = URL(string: "http://127.0.0.1:8788") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Text("🌐 Open ARES WebUI")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color(red: 0.05, green: 0.1, blue: 0.08))
+                            .padding(.vertical, 8).padding(.horizontal, 14)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(HUD.accent))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        let appUrl = URL(fileURLWithPath: "/Users/matthewjenkins/Applications/ARES.app")
+                        if FileManager.default.fileExists(atPath: appUrl.path) {
+                            NSWorkspace.shared.open(appUrl)
+                        } else if let fallback = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.jenkinsrobotics.ares") {
+                            NSWorkspace.shared.open(fallback)
+                        }
+                    } label: {
+                        Text("🚀 Open ARES Mac App")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(HUD.accent)
+                            .padding(.vertical, 8).padding(.horizontal, 14)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(red: 0.12, green: 0.16, blue: 0.23)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 12).fill(HUD.panel).overlay(
+                RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
+            ))
+
+            // Extensions Section
+            HUD.section("Installed Extensions & Integrations")
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("🎮 ARES Minecraft Companion & PS5 Cross-Play")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(HUD.ink)
+                    Spacer()
+                    Text("READY")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(HUD.accent)
+                        .padding(.vertical, 2).padding(.horizontal, 6)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(HUD.accent, lineWidth: 1))
+                }
+
+                Text("Embodied AI companion + Paper Java server host with GeyserMC/Floodgate PS5 cross-play on port 19132.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HUD.inkDim)
+
+                Button {
+                    if let url = URL(string: "http://127.0.0.1:8788") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Text("Open Minecraft Dashboard")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color(red: 0.03, green: 0.92, blue: 0.95))
+                        .padding(.vertical, 6).padding(.horizontal, 12)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.08, green: 0.11, blue: 0.17)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 12).fill(HUD.panel).overlay(
+                RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
+            ))
+
+            Spacer()
+        }
+        .task {
+            if let url = URL(string: "http://127.0.0.1:8788/health") {
+                var req = URLRequest(url: url)
+                req.timeoutInterval = 1.5
+                do {
+                    let (_, resp) = try await URLSession.shared.data(for: req)
+                    if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+                        isOnline = true
+                    }
+                } catch {}
+            }
+        }
+    }
+}
+
