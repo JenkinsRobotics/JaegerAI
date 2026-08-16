@@ -42,6 +42,8 @@ import os
 import queue as _queue
 import sys
 import threading
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, TextIO
 
 _emit_lock = threading.Lock()
@@ -149,6 +151,7 @@ BRIDGE_COMMANDS = (
     "clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill",
     "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
     "remove_mcp_server", "reload_tools",
+    "delete_session",
 )
 
 
@@ -567,6 +570,34 @@ class _Ctx:
         # plain FIFO ``queue.Queue`` drained by one worker thread, which
         # already ran every send as a normal turn before this existed.
         self.session_pending: dict[str, int] = {}
+        # JaegerAgent's workspace binding is process-global. Serialize every
+        # bridge/cron turn while a per-request ARES workspace is installed.
+        self.workspace_lock = threading.RLock()
+
+
+@contextmanager
+def _turn_workspace(ctx: _Ctx, requested: Any):
+    """Temporarily bind file tools to the validated ARES session workspace."""
+    from jaeger_agent import tools as jaeger_tools
+    from jaeger_ai.main import _pipeline
+
+    raw = str(requested or "").strip()
+    candidate: Path | None = None
+    if raw:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute():
+            raise ValueError("bridge workspace must be an absolute path")
+        candidate = candidate.resolve()
+        if not candidate.is_dir():
+            raise ValueError(f"bridge workspace does not exist: {candidate}")
+    with ctx.workspace_lock:
+        config = _pipeline.get("config")
+        configured = getattr(getattr(config, "workspace", None), "location", None)
+        jaeger_tools.bind(ctx.layout, workspace_override=candidate or configured)
+        try:
+            yield
+        finally:
+            jaeger_tools.bind(ctx.layout, workspace_override=configured)
 
 
 class BridgeConfirmationProvider:
@@ -682,11 +713,14 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     class _ToolEmitter:
         def publish(self, event: str, **payload: object) -> None:
             if event == "tool.progress":
-                _emit(proto, protocol.tool_frame(
+                frame = protocol.tool_frame(
                     str(payload.get("name", "")),
                     str(payload.get("phase", "start")),
                     float(payload.get("elapsed_s") or 0.0),
-                    detail=str(payload.get("detail", ""))))
+                    detail=str(payload.get("detail", "")))
+                if isinstance(payload.get("args"), dict):
+                    frame["args"] = payload["args"]
+                _emit(proto, frame)
 
     try:
         from jaeger_ai.main import _pipeline
@@ -734,7 +768,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
             _emit_state(proto, ctx, True, session)
             try:
                 from jaeger_ai.main import run_for_voice
-                result = run_for_voice(ctx.client, prompt, session_key=session)
+                with ctx.workspace_lock:
+                    result = run_for_voice(ctx.client, prompt, session_key=session)
                 text = result.get("text") or ""
                 _emit(proto, protocol.reply_frame(
                     text, result.get("error"), session,
@@ -876,7 +911,8 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         _emit_state(proto, ctx, True, session)
         try:
             from jaeger_ai.main import run_for_voice
-            result = run_for_voice(ctx.client, text, session_key=session)
+            with _turn_workspace(ctx, req.get("workspace")):
+                result = run_for_voice(ctx.client, text, session_key=session)
             used, mx = _ctx_usage(session)
             _emit(proto, protocol.reply_frame(
                 result.get("text") or "", result.get("error"), session,
@@ -1059,6 +1095,23 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     else:
                         data = skill_service.remove_skill(ctx.layout, a.get("name"))
                     _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "delete_session":
+                try:
+                    from jaeger_ai.core.sessions import get_store
+                    from jaeger_ai.main import evict_session
+
+                    sid = str((req.get("args") or {}).get("id") or "").strip()
+                    if not sid:
+                        raise ValueError("session id is required")
+                    store = get_store(ctx.layout)
+                    removed = bool(store is not None and store.delete(sid))
+                    evict_session(sid)
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), data={"ok": True, "id": sid, "removed": removed}, ok=True))
                 except Exception as exc:  # noqa: BLE001 — report through the contract
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))

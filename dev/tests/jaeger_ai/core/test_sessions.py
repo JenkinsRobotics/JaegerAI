@@ -48,6 +48,19 @@ def test_set_title_and_empty(tmp_path):
         store.close()
 
 
+def test_delete_removes_exact_session_and_messages(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        store.record("keep", "user", "keep me")
+        store.record("drop", "user", "remove me")
+        assert store.delete("drop") is True
+        assert store.delete("drop") is False
+        assert store.history("drop") == []
+        assert [row["id"] for row in store.list_sessions()] == ["keep"]
+    finally:
+        store.close()
+
+
 def test_list_sessions_carries_created_at(tmp_path):
     store = SessionStore(tmp_path / "s.db")
     try:

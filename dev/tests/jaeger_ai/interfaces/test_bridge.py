@@ -1082,6 +1082,59 @@ def test_list_sessions_query_returns_rows(monkeypatch, _instance_on_disk):
     assert result["data"][0]["preview"] == "second conversation"
 
 
+def test_delete_session_command_removes_runtime_history(monkeypatch, _instance_on_disk):
+    from jaeger_ai.core.sessions import SessionStore
+
+    (_instance_on_disk / "memory").mkdir(parents=True, exist_ok=True)
+    store = SessionStore(_instance_on_disk / "memory" / "sessions.db")
+    store.record("webui:drop", "user", "remove me")
+    store.close()
+
+    stdin = (
+        '{"op":"command","cmd":"delete_session",'
+        '"args":{"id":"webui:drop"},"id":"r1"}\n'
+        '{"op":"quit"}\n'
+    )
+    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)
+    result = next(frame for frame in frames if frame.get("id") == "r1")
+    assert result["ok"] is True
+    assert result["data"] == {"ok": True, "id": "webui:drop", "removed": True}
+
+    check = SessionStore(_instance_on_disk / "memory" / "sessions.db")
+    try:
+        assert check.history("webui:drop") == []
+    finally:
+        check.close()
+
+
+def test_turn_workspace_binds_and_restores_ares_path(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from jaeger_agent import tools as jaeger_tools
+    from jaeger_ai.main import _pipeline
+
+    configured = tmp_path / "configured"
+    requested = tmp_path / "ares-workspace"
+    configured.mkdir()
+    requested.mkdir()
+    ctx = bridge._Ctx()
+    ctx.layout = SimpleNamespace(root=tmp_path)
+    calls = []
+    monkeypatch.setattr(jaeger_tools, "bind", lambda layout, workspace_override=None:
+                        calls.append((layout, workspace_override)))
+    monkeypatch.setitem(
+        _pipeline, "config",
+        SimpleNamespace(workspace=SimpleNamespace(location=str(configured))),
+    )
+
+    with bridge._turn_workspace(ctx, str(requested)):
+        assert calls[-1][1] == requested.resolve()
+    assert calls[-1][1] == str(configured)
+
+    with pytest.raises(ValueError, match="absolute path"):
+        with bridge._turn_workspace(ctx, "relative/path"):
+            pass
+
+
 def test_load_session_query_returns_history_and_replays(monkeypatch):
     """``load_session`` answers with the full turn list AND (once the
     agent has booted) hands the client through to
