@@ -96,6 +96,8 @@ def _kfmt(n: int) -> str:
     stripped. ``27800 → '27.8K'``, ``980 → '980'``, ``1500000 → '1.5M'``.
     """
     abs_value = abs(int(n))
+    if abs_value == 1_048_576:
+        return f"{'-' if n < 0 else ''}1M"
     if abs_value < 1_000:
         return str(int(n))
     sign = "-" if n < 0 else ""
@@ -758,6 +760,11 @@ class JaegerTUI:
                 self._context_max = loaded
                 return loaded
             cfg = _pipeline.get("config")
+            from jaeger_ai.main import _context_budget_for
+            budgeted, _reserve = _context_budget_for(cfg)
+            if budgeted and budgeted > 0:
+                self._context_max = int(budgeted)
+                return int(budgeted)
             ctx = int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0)
             if ctx > 0:
                 self._context_max = ctx
@@ -803,7 +810,23 @@ class JaegerTUI:
         leaves them out underestimates and lulls the operator into
         thinking they have plenty of headroom when in fact they're
         sitting ~3-15K tokens deep before the first user message.
+
+        Prefer :func:`jaeger_ai.main.last_ctx_snapshot` — the same
+        ContextGuard estimate the Swift bar and the pre-flight trim
+        use — so the three surfaces cannot disagree. The walk below
+        is only a pre-agent fallback (tests / first paint).
         """
+        try:
+            from jaeger_ai.main import _DEFAULT_SESSION_KEY, last_ctx_snapshot
+            snap = last_ctx_snapshot(_DEFAULT_SESSION_KEY)
+            if snap:
+                self._context_tokens = int(snap.get("tokens") or 0)
+                mx = int(snap.get("max") or 0)
+                if mx > 0:
+                    self._context_max = mx
+                return
+        except Exception:  # noqa: BLE001 — fall through to the walk
+            pass
         chars = 0
         history: list = []
         try:
@@ -872,13 +895,9 @@ class JaegerTUI:
                 if content:
                     chars += len(str(content))
         self._context_tokens = chars // 4
-        try:
-            cfg = _pipeline.get("config")
-            ctx = int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0)
-            if ctx > 0:
-                self._context_max = ctx
-        except Exception:  # noqa: BLE001
-            pass
+        # Do NOT clobber ``_context_max`` with leftover local
+        # ``model.ctx`` — the denominator is the serving window
+        # (``_current_ctx_max`` / last_ctx_snapshot.max).
 
     def _run_text_turn(
         self, client: Any, user_text: str, *, source: str = "text",

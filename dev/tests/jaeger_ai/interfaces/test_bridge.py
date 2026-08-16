@@ -609,6 +609,34 @@ def test_permission_request_once_does_not_persist(monkeypatch):
     assert rc == 0
 
 
+def test_cancel_control_reaches_active_turn_immediately(monkeypatch):
+    calls = []
+    monkeypatch.setattr("jaeger_ai.main.request_turn_cancel",
+                        lambda: calls.append("cancel"))
+
+    rc, _frames, _ = _run(
+        monkeypatch,
+        '{"op":"cancel"}\n{"op":"quit"}\n',
+    )
+
+    assert calls == ["cancel"]
+    assert rc == 0
+
+
+def test_steer_control_reaches_active_turn_immediately(monkeypatch):
+    texts = []
+    monkeypatch.setattr("jaeger_ai.main.steer_active_turn",
+                        lambda text: texts.append(text) or True)
+
+    rc, _frames, _ = _run(
+        monkeypatch,
+        '{"op":"steer","text":"use metric units"}\n{"op":"quit"}\n',
+    )
+
+    assert texts == ["use metric units"]
+    assert rc == 0
+
+
 def test_permission_request_timeout_denies(monkeypatch):
     """No ``respond`` within the timeout ⇒ deny, fail-safe. The turn never
     hangs — a short fuse proves the wait actually bounds, not just that a

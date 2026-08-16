@@ -67,8 +67,17 @@ def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None
 def _model_name(boot: Any) -> str | None:
     """Best-effort model label for the status line; None if unknown.
 
-    The client's status bar falls back to the instance name when this is
-    null, so a miss here is cosmetic, not fatal."""
+    Uses the serving brain (the model THIS session is talking to), not
+    the idle local mode preset. The client's status bar falls back to
+    the instance name when this is null, so a miss here is cosmetic,
+    not fatal."""
+    try:
+        from jaeger_ai.core.runtime.modes import serving_brain
+        name = serving_brain().get("model")
+        if isinstance(name, str) and name.strip():
+            return name.rsplit("/", 1)[-1]
+    except Exception:  # noqa: BLE001
+        pass
     for owner, attr in (
         (getattr(boot, "client", None), "model_name"),
         (getattr(boot, "client", None), "model_path"),
@@ -251,6 +260,36 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 # Both apply on agent restart, not live.
                 "model_ctx": cfg.model.ctx,
                 "model_aux_ctx": cfg.model.aux_ctx}
+    if what == "serving_model":
+        # The model ACTUALLY answering, for hosts (ARES) that must show the
+        # truth rather than the selection they requested. Deliberately not
+        # derived from config: ``external_model.enabled`` is an intent, and a
+        # cloud lane that failed to start leaves that intent in the file
+        # while a local model answers. ``fallback_active`` says so out loud;
+        # a host must never report a cloud model when this is True.
+        # Pre-boot (no client yet) returns ``booted: False`` with the
+        # configured intent, so a caller can distinguish "not yet" from
+        # "something else is serving".
+        from jaeger_ai.core.models.model_resolver import serving_model
+
+        row = serving_model()
+        if row is None:
+            intent: dict[str, Any] = {"booted": False, "serving": None}
+            try:
+                from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+                cfg = load_yaml(lay.config_path, Config)
+                ext = cfg.external_model
+                intent["configured"] = {
+                    "provider": ext.provider if ext.enabled else "in-process",
+                    "model": ext.model if ext.enabled else cfg.model.model_path,
+                    "context_length": (ext.ctx or cfg.model.ctx) or None,
+                }
+            except Exception:  # noqa: BLE001
+                intent["configured"] = None
+            return intent
+        return {"booted": True, "serving": row}
+
     if what == "settings_catalog":
         # The schema-derived settings surface — the SAME catalog `jaeger
         # settings` drives. Grouped {group: [descriptor, ...]}; the native
@@ -694,21 +733,27 @@ def _run_slash(text: str, ctx: "_Ctx") -> str:
 
 def _ctx_usage(session: str) -> tuple[int | None, int | None]:
     """Post-turn context telemetry for the reply frame (v1 additive):
-    ``(used, max)`` tokens, or Nones when unavailable. ``used`` is the live
-    prompt-size estimate for this session (system + history + schemas —
-    the same gauge the TUI status bar shows); ``max`` is the loaded model's
-    context window, falling back to ``config.model.ctx``."""
+    ``(used, max)`` tokens, or Nones when unavailable.
+
+    Both numbers come from the same source the TUI gauge and the
+    ContextGuard use: ``last_ctx_snapshot`` (prompt estimate vs the
+    *serving* window). Falling back to leftover local ``model.ctx``
+    is how a 1M Ollama Cloud model rendered as 131K in the Swift bar.
+    """
     used = mx = None
     try:
-        from jaeger_ai.main import _pipeline, last_ctx_snapshot
+        from jaeger_ai.main import _context_budget_for, _pipeline, last_ctx_snapshot
         snap = last_ctx_snapshot(session)
         if snap:
-            used = int(snap["tokens"])
-        loaded = int(getattr(_pipeline.get("client"), "loaded_ctx", 0) or 0)
-        if loaded <= 0:
-            cfg = _pipeline.get("config")
-            loaded = int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0)
-        mx = loaded or None
+            used = int(snap.get("tokens") or 0) or None
+            mx = int(snap.get("max") or 0) or None
+        if mx is None:
+            loaded = int(getattr(_pipeline.get("client"), "loaded_ctx", 0) or 0)
+            if loaded > 0:
+                mx = loaded
+            else:
+                budgeted, _reserve = _context_budget_for(_pipeline.get("config"))
+                mx = int(budgeted or 0) or None
     except Exception:  # noqa: BLE001 — telemetry never breaks a reply
         pass
     return used, mx
@@ -766,7 +811,17 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             _emit_state(proto, ctx, False, session)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
+    """Run the bridge protocol loop.
+
+    ``own_process`` says this call owns the interpreter it is running in,
+    which is what licenses the ``os._exit`` in the teardown below. The real
+    entry point is always a subprocess (``python -m
+    jaeger_ai.interfaces.bridge``), so it passes True. In-process callers —
+    the test suite, dev/scripts/walk_task1_bridge_confirmation.py — leave it
+    False, because there ``os._exit`` would take down a host process that
+    has its own work left to do.
+    """
     argv = sys.argv[1:] if argv is None else argv
 
     # The protocol stream is the REAL stdout.  Repoint sys.stdout at
@@ -881,6 +936,20 @@ def main(argv: list[str] | None = None) -> int:
             op = req.get("op")
             if op == "quit":
                 break
+            if op == "cancel":
+                # The stdin thread stays responsive while the turn worker is
+                # blocked in inference or a tool. Keep this fire-and-forget so
+                # a second client thread can interrupt without competing to
+                # read a control acknowledgement from stdout.
+                from jaeger_ai.main import request_turn_cancel
+                request_turn_cancel()
+                continue
+            if op == "steer":
+                # Steering is likewise delivered directly to the active agent
+                # instead of waiting behind the queued turn.
+                from jaeger_ai.main import steer_active_turn
+                steer_active_turn(str(req.get("text") or ""))
+                continue
             if op == "respond":
                 rid = str(req.get("id") or "")
                 pending = ctx.pending.get(rid)
@@ -1030,7 +1099,8 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:  # noqa: BLE001 — best-effort teardown
                 pass
         _emit(proto, protocol.bye_frame())
-        if "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules:
+        if own_process and (
+                "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules):
             try:
                 proto.flush()
                 sys.stderr.flush()
@@ -1042,4 +1112,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(own_process=True))

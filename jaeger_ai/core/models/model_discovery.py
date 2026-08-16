@@ -33,7 +33,11 @@ def discover_jaeger() -> list[dict[str, Any]]:
     """JROS's own GGUF models — registered, with download/cache status."""
     try:
         from jaeger_ai.core.models.model_resolver import list_registered_models
-        return list_registered_models()
+        # Registry rows only: this is the "JROS registry" section of the
+        # picker, and ``discover_all`` surveys the provider lanes itself.
+        return list_registered_models(
+            include_serving=False, include_providers=False,
+        )
     except Exception:  # noqa: BLE001
         return []
 
@@ -322,4 +326,10 @@ GEMINI_CURATED: tuple[str, ...] = (
     "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
+)
+
+XAI_CURATED: tuple[str, ...] = (
+    "grok-4.6",
+    "grok-4.5",
+    "grok-3",
 )

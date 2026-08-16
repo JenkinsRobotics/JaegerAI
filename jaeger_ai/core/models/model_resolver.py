@@ -493,30 +493,308 @@ def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
 # ── Helpers for the CLI / agent tools ───────────────────────────────
 
 
-def list_registered_models() -> list[dict[str, Any]]:
-    """Return one entry per known model with cache status. Used by the
-    ``--list-models`` CLI flag and (later) by a ``list_models`` agent
-    tool so the user/agent can see what's available + downloaded."""
+def serving_model() -> dict[str, Any] | None:
+    """The model actually answering right now, or ``None`` before boot.
+
+    Read off the live client rather than config, because config states an
+    intent and the client is the outcome: a cloud lane that failed to
+    come up leaves ``external_model.enabled: true`` in the file while a
+    local model does the answering. Anything reporting "the model you are
+    using" must read this, or it will confidently name a model that is
+    not serving.
+    """
+    try:
+        from jaeger_ai.main import _pipeline
+
+        client = _pipeline.get("client")
+    except Exception:  # noqa: BLE001 — pre-boot / import cycle
+        return None
+    if client is None:
+        return None
+
+    kind = str(getattr(client, "kind", "") or "local")
+    provider = str(getattr(client, "provider", "") or "")
+    if not provider:
+        provider = "mlx" if kind == "local" else kind
+    name = str(getattr(client, "model_name", "") or "")
+    window = 0
+    try:
+        window = int(getattr(client, "loaded_ctx", 0) or 0)
+    except (TypeError, ValueError):
+        window = 0
+    if window <= 0:
+        # ``loaded_ctx`` is filled by the client's own probe, which for an
+        # external lane can still be 0 at the moment the session prompt is
+        # frozen. Fall back to the number the context guard budgets against,
+        # so what the agent SAYS its window is and what the guard actually
+        # enforces are the same figure — a self-description that disagrees
+        # with the trimmer is worse than no number.
+        try:
+            from jaeger_ai.main import _context_budget_for, _pipeline as _p
+
+            budgeted, _reserve = _context_budget_for(_p.get("config"))
+            window = int(budgeted or 0)
+        except Exception:  # noqa: BLE001
+            window = 0
+
+    row: dict[str, Any] = {
+        "name": name or "(unnamed)",
+        "source": "serving",
+        "serving": True,
+        "kind": kind,
+        "provider": provider,
+        "location": "cloud" if kind == "external" and "cloud" in provider else (
+            "remote" if kind == "external" else "local"
+        ),
+        "context_length": window or None,
+        "status": "serving now — this is the model answering",
+        "description": "",
+    }
+    try:
+        row["description"] = str(client.describe())
+    except Exception:  # noqa: BLE001 — diagnostics only
+        pass
+
+    # Did the operator ask for something else? ``external_model.enabled``
+    # is an intent recorded in a file; the client above is the outcome. A
+    # cloud lane that failed to come up leaves the intent in place while a
+    # local model quietly answers, and nothing downstream could tell —
+    # which is the one failure mode a "which model am I using" answer must
+    # never paper over. State it in the row so every consumer sees it.
+    row["requested"] = None
+    row["fallback_active"] = False
+    try:
+        from jaeger_ai.main import _pipeline
+
+        cfg = _pipeline.get("config")
+        ext = getattr(cfg, "external_model", None)
+        if ext is not None and getattr(ext, "enabled", False):
+            wanted = str(getattr(ext, "model", "") or "")
+            wanted_provider = str(getattr(ext, "provider", "") or "")
+            row["requested"] = f"{wanted_provider}/{wanted}" if wanted else None
+            if kind != "external" or (wanted and wanted != name):
+                row["fallback_active"] = True
+                row["status"] = (
+                    f"serving now — FALLBACK: {wanted_provider}/{wanted} was "
+                    f"configured but {provider}/{name} is answering"
+                )
+        elif kind == "external":
+            # The reverse drift: config says local, a cloud client is live.
+            row["requested"] = "local (in-process)"
+            row["fallback_active"] = True
+            row["status"] = (
+                f"serving now — config selects the local lane but "
+                f"{provider}/{name} is answering"
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    return row
+
+
+def _provider_model_rows() -> list[dict[str, Any]]:
+    """Models reachable through a configured provider, with real windows.
+
+    The HF registry below only knows GGUF files this machine can
+    download; it has no idea an Ollama Cloud key is configured. Asking
+    "which model has the biggest window" against the registry alone
+    yields four local Gemmas and a guess, while a 1M-window cloud model
+    sits one API call away. Best-effort: any provider that will not
+    answer is simply absent.
+    """
+    rows: list[dict[str, Any]] = []
+    try:
+        from jaeger_ai.core.models import model_discovery
+        from jaeger_ai.core.models.ollama_context import (
+            estimate_model_context_length,
+            probe_ollama_context,
+        )
+    except Exception:  # noqa: BLE001
+        return rows
+
+    def _window(model: str, base_url: str, provider: str, api_key: str = "") -> int | None:
+        try:
+            probed, _source = probe_ollama_context(
+                model, base_url, api_key, provider=provider,
+            )
+            if probed:
+                return probed
+            return estimate_model_context_length(model) or None
+        except Exception:  # noqa: BLE001
+            return None
+
+    try:
+        local = model_discovery.discover_ollama()
+        if local.get("online"):
+            for entry in local.get("models") or []:
+                name = str(entry.get("name") or "")
+                if not name:
+                    continue
+                rows.append({
+                    "name": name,
+                    "source": "ollama",
+                    "serving": False,
+                    "kind": "external",
+                    "provider": "ollama",
+                    "location": "local",
+                    "context_length": _window(
+                        name, model_discovery.OLLAMA_URL, "ollama"),
+                    "status": "available on the local Ollama server",
+                    "description": "",
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        api_key = _ollama_cloud_key()
+        if api_key:
+            cloud = model_discovery.discover_ollama_cloud(api_key)
+            if cloud.get("online"):
+                endpoint = str(cloud.get("endpoint") or "https://ollama.com/v1")
+                for entry in cloud.get("models") or []:
+                    name = str(entry.get("name") or "")
+                    if not name:
+                        continue
+                    rows.append({
+                        "name": name,
+                        "source": "ollama-cloud",
+                        "serving": False,
+                        "kind": "external",
+                        "provider": "ollama-cloud",
+                        "location": "cloud",
+                        "context_length": _window(
+                            name, endpoint, "ollama-cloud", api_key),
+                        "status": "available on Ollama Cloud (no download needed)",
+                        "description": "",
+                    })
+    except Exception:  # noqa: BLE001
+        pass
+    return rows
+
+
+def _ollama_cloud_key() -> str:
+    """The configured Ollama Cloud key, or ``""``.
+
+    Resolved without requiring a booted pipeline: this is also called
+    from CLI and tool contexts where ``_pipeline`` is empty, and a key
+    that only resolves after boot means the cloud catalogue silently
+    disappears from those surfaces.
+    """
+    try:
+        from jaeger_ai.core.models.external_model import resolve_api_key
+        from jaeger_ai.main import _pipeline
+
+        cfg = _pipeline.get("config")
+        ext = getattr(cfg, "external_model", None)
+        if ext is not None:
+            key = resolve_api_key(ext, _pipeline.get("layout")) or ""
+            if key:
+                return key
+    except Exception:  # noqa: BLE001
+        pass
+
+    key = str(os.environ.get("OLLAMA_API_KEY") or "").strip()
+    if key:
+        return key
+
+    # Last resort: read the active instance off disk, the way every
+    # pre-boot surface (doctor, --list-models) resolves it.
+    try:
+        from jaeger_agent import credentials as creds
+
+        from jaeger_ai.core.instance.instance import (
+            InstanceLayout,
+            default_instance_name,
+            resolve_instance_dir,
+        )
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+        layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
+        cfg = load_yaml(layout.config_path, Config)
+        name = str(getattr(cfg.external_model, "api_key_credential", "") or "")
+        if name:
+            return creds.get_credential(layout, name) or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def list_registered_models(
+    *,
+    include_serving: bool = True,
+    include_providers: bool = True,
+) -> list[dict[str, Any]]:
+    """Every model the agent can talk about, most relevant first.
+
+    Row order is deliberate: the model **serving right now**, then models
+    reachable through a configured provider, then the downloadable GGUF
+    registry. The agent's ``list_models`` tool reports this list verbatim,
+    and when it held registry rows alone the agent answered a
+    "which model has the largest context?" question with four local
+    Gemmas, no window sizes, and an offer to download a 30B — while it
+    was itself being served by a 1M-window cloud model. Every row now
+    carries ``context_length``, ``provider``, ``location`` and an
+    unambiguous ``status``.
+
+    ``include_serving`` / ``include_providers`` exist for callers that
+    want the plain registry (``--list-models``, the ``/model`` picker's
+    registry section) rather than the full picture.
+    """
     out: list[dict[str, Any]] = []
+
+    if include_serving:
+        active = serving_model()
+        if active is not None:
+            out.append(active)
+
+    if include_providers:
+        serving_name = out[0]["name"] if out else ""
+        for row in _provider_model_rows():
+            # Don't list the serving model twice — mark it and move on.
+            if row["name"] == serving_name:
+                continue
+            out.append(row)
+
     for key, entry in MODEL_REGISTRY.items():
         cached_path = user_cache_dir() / key / entry["hf_file"]
         repo_models = repo_models_dir()
         repo_path = (repo_models / entry["hf_file"]) if repo_models else None
         cached = cached_path.exists()
         local_dev = repo_path is not None and repo_path.exists()
+        downloaded = cached or local_dev
         out.append({
             "name": key,
+            "source": "registry",
+            "serving": False,
+            "kind": "local",
+            "provider": "in-process",
+            "location": "local",
             "hf_repo": entry["hf_repo"],
             "filename": entry["hf_file"],
             "size_gb": entry.get("size_gb"),
+            # The registry records HF repo/file/size, not the GGUF's
+            # training window, and nothing here should guess it from the
+            # name — guessing is what produced "Qwen3 typically supports
+            # up to 256K" as an answer about a model that wasn't even
+            # loaded. Null with a stated reason; the real number arrives
+            # from ``loaded_ctx`` once a model is actually serving, and
+            # from ``/api/show`` for anything reachable via Ollama.
+            "context_length": entry.get("ctx"),
+            "context_length_unknown_reason": (
+                None if entry.get("ctx")
+                else "not recorded in the registry; known once loaded"
+            ),
             "description": entry.get("description", ""),
+            # "ready" used to read as "loaded" to anything summarising this
+            # list; downloaded and loaded are different states and only one
+            # row in this list is ever the loaded one.
             "status": (
-                "ready (user cache)" if cached
-                else "ready (repo dev)" if local_dev
+                "downloaded, not loaded (in user cache)" if cached
+                else "downloaded, not loaded (repo dev copy)" if local_dev
                 else "not downloaded"
             ),
             "path": (str(cached_path) if cached
                      else str(repo_path) if local_dev
                      else None),
+            "downloaded": downloaded,
         })
     return out

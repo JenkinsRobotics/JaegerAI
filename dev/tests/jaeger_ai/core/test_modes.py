@@ -76,8 +76,59 @@ def test_mode_info_reports_current_from_fact() -> None:
     modes._state["model"] = high_model
     info = modes.mode_info()
     assert info["mode"] == "high" and info["voice"] is False
-    assert info["model"] == high_model
+    assert info["local_preset_model"] == high_model
     assert "normal" in info["options"]
+    _reset()
+
+
+def test_mode_info_reports_the_external_brain_when_one_is_serving(monkeypatch) -> None:
+    """Status bar said DeepSeek; get_mode said Gemma. The serving
+    client is the source of truth, not the idle local preset."""
+    from types import SimpleNamespace
+
+    from jaeger_ai.core.runtime import modes
+    import jaeger_ai.main as main
+
+    monkeypatch.setitem(main._pipeline, "client", SimpleNamespace(
+        kind="external", provider="ollama-cloud",
+        model_name="deepseek-v4-flash:preview", loaded_ctx=1_048_576,
+    ))
+    monkeypatch.setitem(main._pipeline, "config", SimpleNamespace(
+        external_model=SimpleNamespace(
+            enabled=True, provider="ollama-cloud",
+            model="deepseek-v4-flash:preview", ctx=1_048_576,
+        ),
+        model=SimpleNamespace(model_path="/models/gemma-4-e4b-it-q4_k_m.gguf", ctx=8192),
+    ))
+    info = modes.mode_info()
+    assert info["model"] == "deepseek-v4-flash:preview"
+    assert info["provider"] == "ollama-cloud"
+    assert info["kind"] == "external"
+    assert info["ctx"] == 1_048_576
+    assert info["local_preset_model"] == modes.MODES["normal"]["model"]
+    _reset()
+
+
+def test_set_mode_refuses_to_swap_local_weights_while_external_serves(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from jaeger_ai.core.runtime import modes
+    import jaeger_ai.main as main
+
+    monkeypatch.setitem(main._pipeline, "client", SimpleNamespace(
+        kind="external", provider="ollama-cloud",
+        model_name="deepseek-v4-flash:preview", loaded_ctx=1_048_576,
+    ))
+    monkeypatch.setitem(main._pipeline, "config", SimpleNamespace(
+        external_model=SimpleNamespace(
+            enabled=True, provider="ollama-cloud",
+            model="deepseek-v4-flash:preview", ctx=1_048_576,
+        ),
+        model=SimpleNamespace(model_path="/models/x.gguf", ctx=8192),
+    ))
+    r = modes.set_mode("high")
+    assert r["ok"] is False
+    assert "external brain" in r["error"]
     _reset()
 
 

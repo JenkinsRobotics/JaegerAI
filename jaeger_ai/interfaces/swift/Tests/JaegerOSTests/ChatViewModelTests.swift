@@ -102,4 +102,14 @@ final class ChatViewModelTests: XCTestCase {
         let turns = try JSONDecoder().decode([SessionTurn].self, from: json)
         XCTAssertEqual(turns, [SessionTurn(role: "user", text: "hi", ts: 1_700_000_000)])
     }
+
+    // MARK: ctx gauge labels
+
+    func testFmtTokensMatchesTUICompactStyle() {
+        XCTAssertEqual(ChatViewModel.fmtTokens(512), "512")
+        XCTAssertEqual(ChatViewModel.fmtTokens(18_300), "18.3K")
+        XCTAssertEqual(ChatViewModel.fmtTokens(32_768), "32.8K")
+        XCTAssertEqual(ChatViewModel.fmtTokens(1_048_576), "1M")
+        XCTAssertEqual(ChatViewModel.fmtTokens(1_500_000), "1.5M")
+    }
 }
