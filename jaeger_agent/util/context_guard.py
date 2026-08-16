@@ -128,6 +128,11 @@ class TrimResult:
     # True when dropped turns were folded into a digest message rather
     # than silently deleted (stage 2).
     digested: bool = False
+    # How many of the IN-FLIGHT turn's own tool results were stubbed
+    # (stage 3) because that turn alone overflowed the window. Reported
+    # separately from ``pruned_count``: this one means the current turn
+    # lost detail, not that old history was tidied.
+    inflight_pruned_count: int = 0
 
 
 # ── the guard ──────────────────────────────────────────────────────
@@ -141,6 +146,13 @@ DIGEST_PREFIX = "[EARLIER CONTEXT — REFERENCE ONLY]"
 # Tool-result bodies above this many chars are eligible for stage-1
 # pruning once their turn leaves the protected tail.
 _PRUNE_RESULT_OVER_CHARS = 240
+
+# How many of the in-flight turn's most recent tool results stage 3
+# leaves untouched. The model is mid-reasoning about these: stubbing
+# the result it just asked for makes it re-issue the same call, which
+# is how a "trim" turns into a loop. Two covers the common
+# read-then-act pair while still freeing everything older.
+_INFLIGHT_PROTECT_RESULTS = 2
 
 # Token reserve subtracted from the budget while dropping groups, so
 # the digest message that replaces them always fits.
@@ -312,11 +324,16 @@ class ContextGuard:
              before, but folded into one ``DIGEST_PREFIX`` reference
              message (user asks, tools used, errors seen) instead of
              vanishing. A previous digest is merged, never stacked.
-          3. **Refuse** — :class:`ContextOverflow` when even that
+          3. **Prune in-flight** — the current turn's own oldest tool
+             results are stubbed when that turn alone overflows the
+             window. Last resort before refusing, because it costs the
+             model detail it may still want; the artifact path survives
+             in the stub so it can read any of it back.
+          4. **Refuse** — :class:`ContextOverflow` when even that
              can't fit.
 
-        Preserves the most recent user message and everything after it
-        (the in-flight turn) verbatim, always.
+        Preserves the most recent user message verbatim, always, and
+        everything after it (the in-flight turn) verbatim until stage 3.
         """
         budget = self.budget.prompt_budget
         system_tokens = self.estimate_text_tokens(system_prompt or "")
@@ -374,6 +391,7 @@ class ContextGuard:
         digest_reserve = min(_DIGEST_RESERVE_TOKENS, max(0, budget // 4))
 
         digest_affordable = True
+        inflight_pruned = 0
         while True:
             estimate = system_tokens + tools_tokens + sum(
                 self._estimate_message(m) for m in kept
@@ -387,11 +405,30 @@ class ContextGuard:
             # digest reserve, the window is simply too tight to afford
             # a digest — fall back to plain dropping rather than
             # refusing a prompt that would have fit before. Otherwise
-            # surface the typed error.
+            # try stage 3 before surfacing the typed error.
             if len(kept) <= floor:
                 if estimate <= budget:
                     digest_affordable = False
                     break
+                # ── stage 3: prune the IN-FLIGHT turn's own results ──
+                # The floor itself no longer fits: one turn read enough
+                # to overflow the window on its own (39 file reads, a
+                # directory walk, a big grep). Stages 1-2 can't touch
+                # that — they protect everything after the latest user
+                # message — so before 0.10.1 this raised and the whole
+                # turn was lost with its work only in the transcript.
+                # Stub the OLDEST in-flight results (keeping the last
+                # few, which the model is actively reasoning about, and
+                # the user message verbatim). Spilled results keep
+                # their artifact path in the stub, so the model can
+                # ``read_file`` any of it back on the next step.
+                if not inflight_pruned:
+                    kept, inflight_pruned = self._prune_inflight_tool_results(
+                        kept, floor,
+                        target_tokens=budget - system_tokens - tools_tokens,
+                    )
+                    if inflight_pruned:
+                        continue
                 raise ContextOverflow(
                     estimated=estimate,
                     budget=budget,
@@ -433,7 +470,8 @@ class ContextGuard:
                           dropped_count=len(dropped_msgs),
                           estimated_tokens=estimate,
                           pruned_count=pruned,
-                          digested=digested)
+                          digested=digested,
+                          inflight_pruned_count=inflight_pruned)
 
     def _try_llm_digest(
         self,
@@ -503,6 +541,66 @@ class ContextGuard:
             out.append({**msg, "content": stub})
             pruned += 1
         return out, pruned
+
+    def _prune_inflight_tool_results(
+        self, kept: list[Message], floor: int, *, target_tokens: int,
+    ) -> tuple[list[Message], int]:
+        """Stage 3: stub the in-flight turn's OLDEST tool-result bodies,
+        oldest first, stopping as soon as the prompt fits.
+
+        Reached only when the in-flight turn alone overflows the budget,
+        which stages 1-2 cannot help with — they protect every message
+        from the latest user message onward. Rather than refuse the turn
+        and lose its work, reclaim the bytes the model is least likely
+        to still need: its earliest results this turn.
+
+        Protected, always:
+          • the latest user message body (the instruction being served);
+          • the last :data:`_INFLIGHT_PROTECT_RESULTS` tool results (the
+            model is mid-reasoning about those);
+          • every message's structure — only ``content`` is replaced, so
+            assistant ``tool_calls`` stay paired with their results and
+            no provider 400s on an orphaned half.
+
+        ``target_tokens`` is the room the message list has to fit into
+        (budget minus the system prompt and tool schemas). Pruning stops
+        the moment the list is under it, so a turn that overran by one
+        big result loses one big result — not its whole working set.
+
+        Returns ``(new_list, pruned_count)``; neither the input list nor
+        its dicts are mutated.
+        """
+        if floor <= 0:
+            return kept, 0
+        tail_start = max(0, len(kept) - floor)
+        # Eligible = large tool-result bodies in the in-flight window,
+        # minus the most recent few. Indices are into ``kept``.
+        eligible = [
+            i
+            for i in range(tail_start, len(kept))
+            if kept[i].get("role") == "tool"
+            and isinstance(kept[i].get("content"), str)
+            and len(kept[i]["content"]) > _PRUNE_RESULT_OVER_CHARS
+        ]
+        if _INFLIGHT_PROTECT_RESULTS:
+            eligible = eligible[:-_INFLIGHT_PROTECT_RESULTS]
+        if not eligible:
+            return kept, 0
+        out = list(kept)
+        estimate = sum(self._estimate_message(m) for m in out)
+        pruned = 0
+        for i in eligible:
+            if estimate <= target_tokens:
+                break
+            original = out[i]
+            stub = {**original,
+                    "content": _result_stub(original.get("name") or "tool",
+                                            original["content"])}
+            estimate -= self._estimate_message(original)
+            estimate += self._estimate_message(stub)
+            out[i] = stub
+            pruned += 1
+        return (out, pruned) if pruned else (kept, 0)
 
     @staticmethod
     def _head_group_size(messages: list[Message]) -> int:
