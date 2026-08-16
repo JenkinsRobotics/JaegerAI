@@ -41,12 +41,12 @@ def _plugins_root() -> pathlib.Path:
     """
     try:
         import jaeger_ai
+        file_path = getattr(jaeger_ai, "__file__", None)
+        if not file_path:
+            return pathlib.Path(__file__).resolve().parent / "_no_plugins"
+        return pathlib.Path(file_path).resolve().parent / "plugins"
     except ImportError:
-        # No host: there are no plugin.yaml directories to find. Return
-        # a path that does not exist so callers list nothing, which is
-        # the truth, instead of raising.
         return pathlib.Path(__file__).resolve().parent / "_no_plugins"
-    return pathlib.Path(jaeger_ai.__file__).resolve().parent / "plugins"
 
 
 _PLUGINS_ROOT = _plugins_root()

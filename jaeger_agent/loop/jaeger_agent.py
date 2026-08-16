@@ -1165,12 +1165,25 @@ class JaegerAgent:
                 system_prompt=self.system_prompt,
                 tools=self.tools,
             )
-            if trim.dropped_count > 0 or trim.pruned_count > 0:
-                self.callbacks.on_thinking(
+            if (
+                trim.dropped_count > 0
+                or trim.pruned_count > 0
+                or trim.inflight_pruned_count > 0
+            ):
+                detail = (
                     f"[context-guard] pruned {trim.pruned_count} tool "
                     f"result(s), dropped {trim.dropped_count} old "
                     f"message(s) to fit ctx budget"
                 )
+                if trim.inflight_pruned_count > 0:
+                    # Worth calling out separately: this turn's own
+                    # results were compacted, so the model is now
+                    # working from stubs + artifact paths for those.
+                    detail += (
+                        f"; compacted {trim.inflight_pruned_count} result(s) "
+                        "from the current turn (full payloads remain on disk)"
+                    )
+                self.callbacks.on_thinking(detail)
                 self.messages = trim.messages
 
         _pre_flight_trim()

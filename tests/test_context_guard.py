@@ -24,6 +24,8 @@ This file pins the *preventive* layer:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from jaeger_agent.util.context_guard import (
@@ -201,6 +203,120 @@ def test_trim_raises_when_even_max_trimming_doesnt_fit():
     # 'budget=X, needed=Y, undroppable=Z'.
     assert err.budget == 50
     assert err.estimated > 50
+
+
+def _inflight_reader_turn(n_results: int, result_chars: int) -> list:
+    """A single in-flight turn that read ``n_results`` big things.
+
+    Shape matches what the loop actually builds: one user instruction,
+    then an assistant tool_call + its tool result per read. Nothing here
+    is droppable by stages 1-2 — it is all after the latest user
+    message, which is exactly the case stage 3 exists for.
+    """
+    msgs = [_msg("user", "audit every session file and report back")]
+    for i in range(n_results):
+        msgs.append(_msg("assistant", None, tool_calls=[{
+            "id": f"c{i}", "name": "read_file",
+            "arguments": {"path": f"/s/{i}.json"}}]))
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}",
+                     "name": "read_file", "content": "R" * result_chars})
+    return msgs
+
+
+def test_one_turn_that_reads_too_much_is_compacted_not_refused():
+    """The regression this stage exists for: a turn whose OWN tool
+    results overflow the window used to raise ``ContextOverflow`` and
+    lose the whole turn ('I had to stop mid-task…'). It must now come
+    back trimmed instead."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=4_000, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    msgs = _inflight_reader_turn(10, 1_000)   # ~10K tokens in one turn
+    result = g.trim_to_fit(msgs, system_prompt="", tools=[])
+    assert result.inflight_pruned_count > 0
+    assert result.estimated_tokens <= 4_000
+    # Nothing was dropped — the turn's structure is intact, only bodies
+    # shrank, so no provider sees an orphaned tool_call.
+    assert result.dropped_count == 0
+    assert len(result.messages) == len(msgs)
+    assert [m["role"] for m in result.messages] == [m["role"] for m in msgs]
+
+
+def test_inflight_prune_protects_the_most_recent_results():
+    """Stubbing the result the model just asked for makes it re-issue
+    the same call. The newest results stay verbatim."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=4_000, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    msgs = _inflight_reader_turn(10, 1_000)
+    result = g.trim_to_fit(msgs, system_prompt="", tools=[])
+    tool_bodies = [m["content"] for m in result.messages
+                   if m.get("role") == "tool"]
+    assert tool_bodies[-1] == "R" * 1_000
+    assert tool_bodies[-2] == "R" * 1_000
+    assert tool_bodies[0].startswith("[read_file result pruned for context")
+
+
+def test_inflight_prune_never_touches_the_user_instruction():
+    """The instruction being served is the one thing that must survive
+    verbatim — trimming it is how an agent forgets its own task."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=3_000, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    msgs = _inflight_reader_turn(8, 1_000)
+    result = g.trim_to_fit(msgs, system_prompt="", tools=[])
+    assert result.messages[0]["content"] == (
+        "audit every session file and report back")
+
+
+def test_inflight_stub_keeps_the_artifact_path_readable():
+    """A result already spilled to disk keeps its path in the stub, so
+    the model can read the bytes back instead of re-running the tool."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=2_400, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    spilled = json.dumps({
+        "ok": True,
+        "artifact_path": "/logs/tool_results/read_file-001.json",
+        "preview": "P" * 900,
+    })
+    msgs = [
+        _msg("user", "read them all"),
+        _msg("assistant", None, tool_calls=[{
+            "id": "c0", "name": "read_file", "arguments": {}}]),
+        {"role": "tool", "tool_call_id": "c0", "name": "read_file",
+         "content": spilled},
+        _msg("assistant", None, tool_calls=[{
+            "id": "c1", "name": "read_file", "arguments": {}}]),
+        {"role": "tool", "tool_call_id": "c1", "name": "read_file",
+         "content": "R" * 900},
+        _msg("assistant", None, tool_calls=[{
+            "id": "c2", "name": "read_file", "arguments": {}}]),
+        {"role": "tool", "tool_call_id": "c2", "name": "read_file",
+         "content": "R" * 900},
+    ]
+    result = g.trim_to_fit(msgs, system_prompt="", tools=[])
+    assert result.inflight_pruned_count == 1
+    stub = result.messages[2]["content"]
+    assert "/logs/tool_results/read_file-001.json" in stub
+
+
+def test_still_refuses_when_pruning_cannot_recover_enough():
+    """Stage 3 is a last resort, not a promise. When the protected
+    remainder still doesn't fit, the typed error is still the answer —
+    silently sending an oversized prompt would just fail at the server."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=600, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    # Two protected results at 2K chars each can't be recovered from.
+    msgs = _inflight_reader_turn(3, 2_000)
+    with pytest.raises(ContextOverflow):
+        g.trim_to_fit(msgs, system_prompt="", tools=[])
 
 
 def test_trim_keeps_the_latest_user_message_even_if_huge():
@@ -401,3 +517,80 @@ def test_head_group_size_for_a_plain_assistant_or_user_is_one():
         {"role": "assistant", "content": "hey"},  # no tool_calls
         {"role": "user", "content": "next"},
     ]) == 1
+
+
+# ── budget plumbing (build_jaeger_agent) ───────────────────────────
+
+
+def _cloud_client(provider="ollama-cloud", model="qwen3.5:397b"):
+    """Minimal stand-in for a JROS external client — ``_adapter_for_client``
+    duck-types on ``.ext``, so no network and no real client class."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        ext=SimpleNamespace(provider=provider, model=model,
+                            base_url="https://example.invalid/v1",
+                            timeout_s=60.0),
+        _api_key="",
+    )
+
+
+def test_completion_reserve_is_honoured():
+    """The server counts prompt + completion against one window. When the
+    caller asks for up to 4096 answer tokens, the prompt budget has to
+    give up that much — reserving the 1024 default would overflow at
+    generation time on a prompt the guard just declared fitting."""
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+    agent = build_jaeger_agent(
+        _cloud_client(), ctx_window=131_072, completion_reserve=4096,
+    )
+    assert agent.context_guard.budget.reserve_for_completion == 4096
+    assert agent.context_guard.budget.ctx_window == 131_072
+
+
+def test_completion_reserve_cannot_claim_more_than_half_the_window():
+    """A misconfigured ``max_tokens`` at or above the ctx window would
+    leave a zero prompt budget and refuse every turn. Clamp instead."""
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+    agent = build_jaeger_agent(
+        _cloud_client(), ctx_window=8192, completion_reserve=32_000,
+    )
+    assert agent.context_guard.budget.reserve_for_completion == 4096
+    assert agent.context_guard.budget.prompt_budget > 0
+
+
+def test_reserve_survives_the_per_result_cap_rebuild():
+    """The budget is rebuilt once to scale ``max_tool_result_chars`` to
+    the window. That rebuild used to drop every other override — the
+    reserve has to survive it."""
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+    agent = build_jaeger_agent(
+        _cloud_client(), ctx_window=8192, completion_reserve=2048,
+    )
+    budget = agent.context_guard.budget
+    assert budget.reserve_for_completion == 2048
+    # Rebuild happened (cap scaled down from the 24K default).
+    assert budget.max_tool_result_chars < 24_000
+
+
+def test_no_reserve_given_keeps_the_default():
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+    agent = build_jaeger_agent(_cloud_client(), ctx_window=8192)
+    assert agent.context_guard.budget.reserve_for_completion == 1024
+
+
+def test_inflight_prune_stops_as_soon_as_it_fits():
+    """Least-destructive first: a turn that overran by one result loses
+    one result, not its whole working set. Stubbing everything would
+    make the model re-read files it already had."""
+    g = ContextGuard(ContextBudget(
+        ctx_window=6_000, reserve_for_completion=0, safety_margin=0,
+        chars_per_token=1.0,
+    ))
+    # 6 results x 1000 chars = ~6K, just over budget. Dropping one or
+    # two of the oldest is enough; the rest must survive verbatim.
+    msgs = _inflight_reader_turn(6, 1_000)
+    result = g.trim_to_fit(msgs, system_prompt="", tools=[])
+    assert 0 < result.inflight_pruned_count <= 2
+    intact = [m["content"] for m in result.messages
+              if m.get("role") == "tool" and m["content"] == "R" * 1_000]
+    assert len(intact) >= 4

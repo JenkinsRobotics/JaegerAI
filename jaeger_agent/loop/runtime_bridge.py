@@ -204,6 +204,7 @@ def build_jaeger_agent(
     callbacks: AgentCallbacks | None = None,
     max_iterations: int = 24,
     ctx_window: int | None = None,
+    completion_reserve: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
     context_summarizer: Any = None,
@@ -221,11 +222,17 @@ def build_jaeger_agent(
     (default) every registered tool is exposed — useful for the
     transition period but burns ~10K tokens of schema per turn.
 
-    ``ctx_window`` plumbs ``config.model.ctx`` into the agent's
-    pre-flight :class:`ContextGuard`. When ``None`` the caller wants
-    the guard disabled (legacy bench paths); otherwise a
-    :class:`ContextGuard` with the matching budget is installed and
-    every turn's prompt is trimmed/refused before it hits the model.
+    ``ctx_window`` plumbs the SERVING model's context window into the
+    agent's pre-flight :class:`ContextGuard` — ``external_model.ctx``
+    when a cloud model is answering, ``model.ctx`` for the local worker
+    lane. When ``None`` the caller wants the guard disabled (legacy
+    bench paths); otherwise a :class:`ContextGuard` with the matching
+    budget is installed and every turn's prompt is trimmed/refused
+    before it hits the model.
+
+    ``completion_reserve`` is the configured ``max_tokens`` for that
+    same lane, held back from the prompt budget so the answer has room
+    inside the one window the server counts both against.
 
     ``artifact_dir`` (when set) is where oversized tool results are
     persisted before the in-prompt body is replaced with a preview +
@@ -245,7 +252,22 @@ def build_jaeger_agent(
     adapter = _adapter_for_client(client, system_prompt=system_prompt)
     guard = None
     if ctx_window:
-        budget = ContextBudget(ctx_window=ctx_window, artifact_dir=artifact_dir)
+        # ``completion_reserve`` is the caller's configured ``max_tokens``.
+        # The server counts prompt + completion against ONE window, so a
+        # reserve smaller than the answer we asked for overflows at
+        # generation time even though the prompt itself fit. Falls back to
+        # the dataclass default when the caller has nothing to say.
+        reserve_kwargs: dict[str, Any] = {}
+        if completion_reserve and completion_reserve > 0:
+            # Never let the reserve eat the whole window: a misconfigured
+            # max_tokens >= ctx would leave a zero prompt budget and refuse
+            # every turn. Half the window is the most an answer may claim.
+            reserve_kwargs["reserve_for_completion"] = min(
+                int(completion_reserve), max(1, ctx_window // 2),
+            )
+        budget = ContextBudget(
+            ctx_window=ctx_window, artifact_dir=artifact_dir, **reserve_kwargs,
+        )
         # Scale the per-tool-result cap to the window. The dataclass
         # default (24K chars ≈ 8K tokens) EXCEEDS the entire prompt
         # budget at ctx=8192 — one big ``run_shell`` dump would blow
@@ -262,6 +284,7 @@ def build_jaeger_agent(
                 ctx_window=ctx_window,
                 artifact_dir=artifact_dir,
                 max_tool_result_chars=per_result_cap,
+                **reserve_kwargs,
             )
         # ``context_summarizer`` upgrades stage-2 compaction from the
         # deterministic digest to an LLM-written one. Costs a model
