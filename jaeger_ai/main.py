@@ -3374,10 +3374,13 @@ def init_extensions(args: Any, client: Any) -> None:
 
     if with_mcp:
         try:
+            from .core.mcp.service import migrate_inline_secrets
             from .plugins.mcp import client as mcp_client
             layout = _pipeline.get("layout")
             config_path = layout.mcp_config_path if layout is not None else None
-            registry = mcp_client.init_from_config(config_path)
+            if layout is not None:
+                migrate_inline_secrets(layout)
+            registry = mcp_client.init_from_config(config_path, layout=layout)
             specs = registry.list_tools()
             _pipeline["mcp_specs"] = specs
             if specs:
@@ -4204,8 +4207,10 @@ def boot_for_tui(
         # in the canonical registry after every restart, not only after a UI
         # reload command in the current process.
         if layout.mcp_config_path.exists():
+            from .core.mcp.service import migrate_inline_secrets
             from .plugins.mcp import client as mcp_client
-            registry = mcp_client.init_from_config(layout.mcp_config_path)
+            migrate_inline_secrets(layout)
+            registry = mcp_client.init_from_config(layout.mcp_config_path, layout=layout)
             _pipeline["mcp_specs"] = registry.list_tools()
             _pipeline["with_mcp"] = True
         agent = _get_agent(client)
