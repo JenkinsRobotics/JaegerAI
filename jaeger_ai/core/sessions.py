@@ -154,6 +154,18 @@ class SessionStore:
             self._conn.execute("UPDATE sessions SET title=? WHERE id=?",
                                (title, session_id))
 
+    def delete(self, session_id: str) -> bool:
+        """Delete one exact session and its messages atomically."""
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,),
+            ).fetchone() is not None
+            if not exists:
+                return False
+            self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+            self._conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        return True
+
     def prune(self, keep: int) -> int:
         """Drop sessions beyond the ``keep`` most-recently-active (and their
         messages), so a long-lived install doesn't grow this file forever.

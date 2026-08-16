@@ -2673,6 +2673,22 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                             payload["detail"] = " ".join(
                                 str(data.get(k, "")).strip()
                                 for k in ("action", "name")).strip()[:60]
+                        # External surfaces need structured paths to index
+                        # artifacts. Export only path-like fields for known
+                        # file mutations; never forward arbitrary tool args,
+                        # which may contain prompts, tokens, or file contents.
+                        if phase == "start" and name in {
+                            "write_file", "append_file", "patch", "copy_file",
+                            "move_file", "rename_file", "create_directory",
+                        }:
+                            safe_args = {
+                                k: v for k, v in data.items()
+                                if k in {"path", "file_path", "src", "dst",
+                                         "source", "destination"}
+                                and isinstance(v, str)
+                            }
+                            if safe_args:
+                                payload["args"] = safe_args
                     bus.publish("tool.progress", **payload)
                     if phase == "start":
                         ap = payload.get("args_preview")
