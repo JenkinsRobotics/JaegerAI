@@ -287,6 +287,8 @@ class InstanceLayout:
     @property
     def config_path(self) -> Path:          return self.root / "config.yaml"
     @property
+    def mcp_config_path(self) -> Path:      return self.root / "mcp.json"
+    @property
     def manifest_path(self) -> Path:        return self.root / "manifest.json"
     @property
     def credentials_dir(self) -> Path:      return self.root / "credentials"

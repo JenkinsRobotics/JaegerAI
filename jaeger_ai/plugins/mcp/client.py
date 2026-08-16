@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,38 @@ class MCPToolSpec:
     tool_name: str               # "fetch"
     description: str
     input_schema: dict[str, Any]
+    agent_name: str = ""
+
+
+def _agent_tool_name(server: str, tool: str) -> str:
+    """Return a provider-safe function name while retaining MCP provenance."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", f"mcp__{server}__{tool}")[:64]
+
+
+def _register_agent_tool(spec: MCPToolSpec) -> None:
+    """Expose a connected MCP tool through Jaeger's canonical registry."""
+    from pydantic import BaseModel, ConfigDict
+    from jaeger_os.core.tools.tool_registry import ToolDef, has_tool, register_tool_instance
+
+    schema = dict(spec.input_schema or {"type": "object", "properties": {}})
+
+    class MCPArguments(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        @classmethod
+        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return schema
+
+    def invoke(**arguments: Any) -> dict[str, Any]:
+        import jsonschema
+        jsonschema.validate(arguments, schema)
+        return call_mcp_tool(spec.qualified_name, arguments)
+
+    if has_tool(spec.agent_name):
+        raise ValueError(f"MCP tool name collides with an existing tool: {spec.agent_name}")
+    register_tool_instance(ToolDef(name=spec.agent_name, description=spec.description,
+                                   args_model=MCPArguments, fn=invoke,
+                                   side_effect="external"))
 
 
 class _MCPClient:
@@ -121,9 +154,25 @@ class MCPRegistry:
                 tool_name=tool.name,
                 description=tool.description or "",
                 input_schema=schema if isinstance(schema, dict) else {},
+                agent_name=_agent_tool_name(config.name, tool.name),
             )
-            self._tools[qualified] = spec
             specs.append(spec)
+        registered: list[MCPToolSpec] = []
+        try:
+            for spec in specs:
+                _register_agent_tool(spec)
+                registered.append(spec)
+                self._tools[spec.qualified_name] = spec
+        except Exception:
+            from jaeger_os.core.tools.tool_registry import unregister_tool
+            for spec in registered:
+                unregister_tool(spec.agent_name)
+                self._tools.pop(spec.qualified_name, None)
+            try:
+                self._submit(client.close(), timeout=5.0)
+            except Exception:
+                pass
+            raise
         self._clients[config.name] = client
         print(f"[mcp] connected to '{config.name}' in {elapsed:.2f}s — {len(specs)} tool(s)", flush=True)
         return specs
@@ -143,6 +192,9 @@ class MCPRegistry:
         return qualified_name in self._tools
 
     def shutdown(self) -> None:
+        from jaeger_os.core.tools.tool_registry import unregister_tool
+        for spec in self._tools.values():
+            unregister_tool(spec.agent_name)
         for client in self._clients.values():
             try:
                 self._submit(client.close(), timeout=5.0)
@@ -172,11 +224,12 @@ def _result_to_dict(result: Any) -> dict[str, Any]:
 
 # Module-level singleton, populated by init_from_config()
 _GLOBAL_REGISTRY: MCPRegistry | None = None
+_LAST_ERRORS: dict[str, str] = {}
 
 
 def init_from_config(config_path: Path | None = None) -> MCPRegistry:
     """Initialize the global MCP registry from a JSON config file."""
-    global _GLOBAL_REGISTRY
+    global _GLOBAL_REGISTRY, _LAST_ERRORS
     if _GLOBAL_REGISTRY is not None:
         return _GLOBAL_REGISTRY
 
@@ -186,6 +239,7 @@ def init_from_config(config_path: Path | None = None) -> MCPRegistry:
 
     data = json.loads(path.read_text(encoding="utf-8"))
     registry = MCPRegistry()
+    errors: dict[str, str] = {}
     for entry in data.get("servers", []):
         if not entry.get("enabled", True):
             continue
@@ -198,13 +252,40 @@ def init_from_config(config_path: Path | None = None) -> MCPRegistry:
         try:
             registry.add_server(config)
         except Exception as exc:
+            errors[config.name] = str(exc)
             print(f"[mcp] failed to connect '{config.name}': {exc}", flush=True)
     _GLOBAL_REGISTRY = registry
+    _LAST_ERRORS = errors
     return registry
 
 
 def get_registry() -> MCPRegistry | None:
     return _GLOBAL_REGISTRY
+
+
+def connection_errors() -> dict[str, str]:
+    return dict(_LAST_ERRORS)
+
+
+def reload_from_config(config_path: Path) -> MCPRegistry:
+    """Replace the live registry with the instance-owned configuration."""
+    global _GLOBAL_REGISTRY, _LAST_ERRORS
+    previous = _GLOBAL_REGISTRY
+    _GLOBAL_REGISTRY = None
+    _LAST_ERRORS = {}
+    if previous is not None:
+        previous.shutdown()
+    return init_from_config(config_path)
+
+
+def shutdown_global() -> None:
+    """Release subprocesses, unregister tools, and clear singleton state."""
+    global _GLOBAL_REGISTRY, _LAST_ERRORS
+    registry = _GLOBAL_REGISTRY
+    _GLOBAL_REGISTRY = None
+    _LAST_ERRORS = {}
+    if registry is not None:
+        registry.shutdown()
 
 
 def call_mcp_tool(qualified_name: str, arguments: dict[str, Any]) -> dict[str, Any]:

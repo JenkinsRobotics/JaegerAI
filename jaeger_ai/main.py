@@ -3375,7 +3375,9 @@ def init_extensions(args: Any, client: Any) -> None:
     if with_mcp:
         try:
             from .plugins.mcp import client as mcp_client
-            registry = mcp_client.init_from_config()
+            layout = _pipeline.get("layout")
+            config_path = layout.mcp_config_path if layout is not None else None
+            registry = mcp_client.init_from_config(config_path)
             specs = registry.list_tools()
             _pipeline["mcp_specs"] = specs
             if specs:
@@ -3409,6 +3411,11 @@ def shutdown_extensions(wait: bool = True) -> None:
         if runner.pending() > 0:
             print("[jaeger] waiting for background thinking jobs...", flush=True)
         runner.shutdown(wait=wait)
+    try:
+        from .plugins.mcp import client as mcp_client
+        mcp_client.shutdown_global()
+    except Exception:  # noqa: BLE001 — teardown remains best-effort
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -4192,6 +4199,15 @@ def boot_for_tui(
         # not run; without this line every computer_do call in the TUI
         # fails with "no LLM client available for the loop".
         _pipeline["client"] = client
+        # An instance-owned MCP file is itself the opt-in. Reconnect its
+        # enabled servers before agent construction so their tools are present
+        # in the canonical registry after every restart, not only after a UI
+        # reload command in the current process.
+        if layout.mcp_config_path.exists():
+            from .plugins.mcp import client as mcp_client
+            registry = mcp_client.init_from_config(layout.mcp_config_path)
+            _pipeline["mcp_specs"] = registry.list_tools()
+            _pipeline["with_mcp"] = True
         agent = _get_agent(client)
         # Wire plugin readiness into per-tool ``check_fn``. Tools
         # whose backing plugin isn't ready (missing libs, missing

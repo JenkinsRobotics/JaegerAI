@@ -94,6 +94,7 @@ python-telegram-bot>=21.0
 
 # --- MCP tool servers ---
 mcp>=0.9
+jsonschema>=4.20
 
 # --- macOS menu-bar tray (CLI/TUI-era) ---
 # rumps is a pure-Python wrapper over PyObjC. Environment marker keeps

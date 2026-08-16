@@ -140,13 +140,15 @@ BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
     "setup_defaults", "list_sessions", "load_session", "check_update",
-    "list_skills", "get_skill",
+    "list_skills", "get_skill", "list_mcp_servers", "list_tools",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
     "save_config", "save_identity", "revoke_permission", "speak",
     "settings_set", "run_update", "new_session", "create_instance",
     "clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill",
+    "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
+    "remove_mcp_server", "reload_tools",
 )
 
 
@@ -177,8 +179,9 @@ def _integration_contract() -> dict[str, Any]:
             "updates": {"available": True, "owner": "jaeger", "mutable": True},
             "skills": {"available": True, "owner": "jaeger", "mutable": True},
             "mcp_server_config": {
-                "available": False, "owner": "jaeger", "mutable": False,
+                "available": True, "owner": "jaeger", "mutable": True,
             },
+            "tool_inventory": {"available": True, "owner": "jaeger", "mutable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
             "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
             "schedules": {"available": False, "owner": "jaeger", "mutable": False},
@@ -267,6 +270,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         from jaeger_ai.core.skills.service import get_skill
 
         return get_skill(lay, str(args.get("name") or ""), args.get("file"))
+    if what == "list_mcp_servers":
+        from jaeger_ai.core.mcp.service import list_servers
+
+        return list_servers(lay)
+    if what == "list_tools":
+        from jaeger_ai.core.mcp.service import list_tools
+
+        return list_tools(lay)
     if what == "identity":
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
@@ -1046,6 +1057,32 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                             ctx.layout, a.get("name"), cmd == "enable_skill")
                     else:
                         data = skill_service.remove_skill(ctx.layout, a.get("name"))
+                    _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") in {
+                "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
+                "remove_mcp_server", "reload_tools",
+            }:
+                a = req.get("args") or {}
+                cmd = str(req.get("cmd") or "")
+                try:
+                    from jaeger_ai.core.mcp import service as mcp_service
+
+                    if ctx.layout is None:
+                        raise mcp_service.MCPServiceError("no Jaeger instance is selected")
+                    if cmd == "configure_mcp_server":
+                        data = mcp_service.configure_server(
+                            ctx.layout, a.get("name"), a.get("config") or {})
+                    elif cmd in {"enable_mcp_server", "disable_mcp_server"}:
+                        data = mcp_service.set_server_enabled(
+                            ctx.layout, a.get("name"), cmd == "enable_mcp_server")
+                    elif cmd == "remove_mcp_server":
+                        data = mcp_service.remove_server(ctx.layout, a.get("name"))
+                    else:
+                        data = mcp_service.reload_tools(ctx.layout)
                     _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
                 except Exception as exc:  # noqa: BLE001 — report through the contract
                     _emit(proto, protocol.result_frame(
