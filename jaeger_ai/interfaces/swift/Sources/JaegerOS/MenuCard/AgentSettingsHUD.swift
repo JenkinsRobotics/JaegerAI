@@ -253,6 +253,35 @@ private struct HomePage: View {
                 id: \.key) { s in
             traitRow(s.key, s.val)
         }
+        Spacer().frame(height: 16)
+        HUD.section("ARES & Extensions")
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("🎮 ARES Minecraft Companion & PS5 Cross-Play")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(HUD.ink)
+                Text("Paper Dedicated Server · Bedrock Cross-Play on UDP Port 19132")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HUD.inkDim)
+            }
+            Spacer()
+            Button {
+                if let url = URL(string: "http://127.0.0.1:8788") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Text("Open HUD")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color(red: 0.05, green: 0.1, blue: 0.08))
+                    .padding(.vertical, 6).padding(.horizontal, 12)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(HUD.accent))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(HUD.panel).overlay(
+            RoundedRectangle(cornerRadius: 10).stroke(HUD.stroke, lineWidth: 1)
+        ))
     }
 
     // Read-only live facts — model, uptime, turns, character level.
