@@ -695,6 +695,69 @@ def _record_episodic(entry: dict[str, Any]) -> None:
         print(f"[jaeger] episodic append failed: {exc}", file=sys.stderr, flush=True)
 
 
+def _estimate_model_context_length(model_name: str) -> int:
+    """Infer context window capacity based on model family and size."""
+    m = str(model_name or "").lower().strip()
+    if not m:
+        return 8192
+    if "gemini" in m or "1m" in m:
+        return 1048576
+    if "kimi" in m or "256k" in m:
+        return 262144
+    if "qwen3.5" in m or "qwen3" in m or "128k" in m or "llama-3" in m or "mistral" in m:
+        return 131072
+    if "sonnet" in m or "opus" in m or "haiku" in m or "claude" in m or "gpt-4" in m or "200k" in m:
+        return 200000
+    if "deepseek" in m or "64k" in m:
+        return 65536
+    if "32k" in m:
+        return 32768
+    if "16k" in m:
+        return 16384
+    return 131072
+
+
+def _context_budget_for(cfg: Any) -> tuple[int | None, int | None]:
+    """The ``(ctx_window, completion_reserve)`` the context guard should
+    budget against, taken from whichever lane actually serves the turn.
+
+    ``model.ctx`` sizes the LOCAL worker lane (llama.cpp / MLX KV). When
+    ``external_model.enabled`` the turn is served by a cloud model whose
+    window has nothing to do with that number — reading ``model.ctx``
+    there budgets a 131K-context cloud model against the local default
+    of 8192 and refuses turns that would have fit fine. ARES writes both
+    ``model.ctx`` and ``external_model.ctx`` when it syncs a model, but
+    they drift the moment either side is edited alone, so prefer the
+    lane in use and fall back to the other.
+
+    The reserve tracks the configured ``max_tokens``: the server counts
+    prompt + completion against one window, so reserving less than the
+    answer we asked for overflows at generation time even when the
+    prompt itself fit.
+    """
+    model_cfg = getattr(cfg, "model", None)
+    ext_cfg = getattr(cfg, "external_model", None)
+    serving = model_cfg
+    if ext_cfg is not None and getattr(ext_cfg, "enabled", False):
+        serving = ext_cfg
+
+    def _positive(source: Any, field: str) -> int | None:
+        try:
+            value = int(getattr(source, field, 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    ctx = _positive(serving, "ctx") or _positive(model_cfg, "ctx")
+    if (ctx is None or ctx <= 8192) and ext_cfg is not None and getattr(ext_cfg, "enabled", False):
+        model_name = getattr(ext_cfg, "model", "")
+        if model_name:
+            ctx = _estimate_model_context_length(model_name)
+
+    reserve = _positive(serving, "max_tokens") or _positive(model_cfg, "max_tokens")
+    return ctx, reserve
+
+
 def _get_session_history(session_key: str) -> list[Any]:
     """The in-process conversation history for a session.
 
@@ -1179,13 +1242,14 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
         # parent's context — the spec calls this out).
         from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
         _cfg = _pipeline.get("config")
-        _ctx = getattr(getattr(_cfg, "model", None), "ctx", None)
+        _ctx, _reserve = _context_budget_for(_cfg)
         sub_agent = build_jaeger_agent(
             client,
             system_prompt=_pipeline["system_prompt"],
             toolsets=_pipeline.get("toolsets"),
             skip_final_tools=SKIP_FINAL_TOOLS,
             ctx_window=_ctx,
+            completion_reserve=_reserve,
         )
         lock = _pipeline.get("llm_lock")
         if lock is not None:
@@ -2516,7 +2580,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # ContextGuard so an oversized prompt is trimmed (or refused)
         # before the server sees it. See docs/context_guard.md.
         _cfg = _pipeline.get("config")
-        _ctx = getattr(getattr(_cfg, "model", None), "ctx", None)
+        _ctx, _reserve = _context_budget_for(_cfg)
         # Oversized tool results land under <instance>/logs/tool_results/
         # so the model can read the full body with read_file if the
         # in-prompt preview wasn't enough. Falls back to truncate-only
@@ -2563,6 +2627,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             skip_final_tools=SKIP_FINAL_TOOLS,
             callbacks=_status_cb,
             ctx_window=_ctx,
+            completion_reserve=_reserve,
             artifact_dir=_artifact_dir,
             stale_call_timeout_s=_stall_s,
             context_summarizer=_summarizer,
@@ -2578,7 +2643,29 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                 {"role": "assistant",
                  "content": "Noted — picking up from the earlier session."},
             ])
-    return _jaeger_agents_by_session[key]
+    agent = _jaeger_agents_by_session[key]
+    # Ensure existing session agents dynamically rescope when model/budget changes
+    try:
+        _cfg = _pipeline.get("config")
+        _active_ctx, _active_reserve = _context_budget_for(_cfg)
+        if agent is not None and getattr(agent, "context_guard", None) is not None and _active_ctx:
+            from jaeger_agent.util.context_guard import ContextBudget
+            old_b = agent.context_guard.budget
+            if old_b.ctx_window != _active_ctx or (_active_reserve and old_b.reserve_for_completion != _active_reserve):
+                per_result_cap = int(_active_ctx * old_b.chars_per_token / 4)
+                per_result_cap = max(2_000, min(old_b.max_tool_result_chars, per_result_cap))
+                agent.context_guard.budget = ContextBudget(
+                    ctx_window=_active_ctx,
+                    reserve_for_completion=_active_reserve or old_b.reserve_for_completion,
+                    safety_margin=old_b.safety_margin,
+                    chars_per_token=old_b.chars_per_token,
+                    max_tool_result_chars=per_result_cap,
+                    preview_chars=old_b.preview_chars,
+                    artifact_dir=old_b.artifact_dir,
+                )
+    except Exception:
+        pass
+    return agent
 
 
 def resume_session_from_store(
