@@ -247,7 +247,14 @@ def test_integration_contract_is_versioned_and_self_describing():
         "owner": "jaeger",
         "mutable": True,
     }
-    assert contract["features"]["skills"]["available"] is False
+    assert contract["features"]["skills"] == {
+        "available": True,
+        "owner": "jaeger",
+        "mutable": True,
+    }
+    assert {"list_skills", "get_skill"}.issubset(contract["operations"]["queries"])
+    assert {"clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill"}.issubset(
+        contract["operations"]["commands"])
 
 
 def test_session_key_flows_through(monkeypatch):

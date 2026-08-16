@@ -140,11 +140,13 @@ BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
     "setup_defaults", "list_sessions", "load_session", "check_update",
+    "list_skills", "get_skill",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
     "save_config", "save_identity", "revoke_permission", "speak",
     "settings_set", "run_update", "new_session", "create_instance",
+    "clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill",
 )
 
 
@@ -173,7 +175,7 @@ def _integration_contract() -> dict[str, Any]:
             "runtime_settings": {"available": True, "owner": "jaeger", "mutable": True},
             "voice_settings": {"available": True, "owner": "jaeger", "mutable": True},
             "updates": {"available": True, "owner": "jaeger", "mutable": True},
-            "skills": {"available": False, "owner": "jaeger", "mutable": False},
+            "skills": {"available": True, "owner": "jaeger", "mutable": True},
             "mcp_server_config": {
                 "available": False, "owner": "jaeger", "mutable": False,
             },
@@ -257,6 +259,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     lay = getattr(boot, "layout", None)
     if what == "contract":
         return _integration_contract()
+    if what == "list_skills":
+        from jaeger_ai.core.skills.service import list_skills
+
+        return list_skills(lay)
+    if what == "get_skill":
+        from jaeger_ai.core.skills.service import get_skill
+
+        return get_skill(lay, str(args.get("name") or ""), args.get("file"))
     if what == "identity":
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
@@ -1014,6 +1024,32 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     evt.set()
                 else:
                     ctx.early[rid] = str(req.get("answer") or "")
+                continue
+            if op == "command" and (req.get("cmd") or "") in {
+                "clone_skill", "install_skill", "enable_skill",
+                "disable_skill", "remove_skill",
+            }:
+                a = req.get("args") or {}
+                cmd = str(req.get("cmd") or "")
+                try:
+                    from jaeger_ai.core.skills import service as skill_service
+
+                    if ctx.layout is None:
+                        raise skill_service.SkillServiceError("no Jaeger instance is selected")
+                    if cmd == "clone_skill":
+                        data = skill_service.clone_skill(ctx.layout, a.get("name"))
+                    elif cmd == "install_skill":
+                        data = skill_service.install_skill(
+                            ctx.layout, a.get("name"), a.get("content"), a.get("category") or "")
+                    elif cmd in {"enable_skill", "disable_skill"}:
+                        data = skill_service.set_skill_enabled(
+                            ctx.layout, a.get("name"), cmd == "enable_skill")
+                    else:
+                        data = skill_service.remove_skill(ctx.layout, a.get("name"))
+                    _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
                 continue
             if op == "command" and (req.get("cmd") or "") == "settings_set":
                 # Schema-derived settings write — validates + persists via
