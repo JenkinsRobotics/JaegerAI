@@ -258,7 +258,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 3
+    assert contract["contract_version"] == 4
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -290,6 +290,11 @@ def test_integration_contract_is_versioned_and_self_describing():
         "mutable": True,
     }
     assert contract["features"]["kanban"] == {
+        "available": True,
+        "owner": "ares",
+        "mutable": True,
+    }
+    assert contract["features"]["caldav"] == {
         "available": True,
         "owner": "ares",
         "mutable": True,

@@ -137,7 +137,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 3
+INTEGRATION_CONTRACT_VERSION = 4
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
@@ -253,7 +253,7 @@ def _integration_contract() -> dict[str, Any]:
             "kanban": {"available": True, "owner": "ares", "mutable": True},
             "delegation": {"available": True, "owner": "ares", "mutable": True},
             "schedules": {"available": True, "owner": "ares", "mutable": True},
-            "caldav": {"available": False, "owner": "none", "mutable": False},
+            "caldav": {"available": True, "owner": "ares", "mutable": True},
             "deep_research": {
                 "available": False, "owner": "ares", "mutable": True,
                 "reason": "research execution is not routed through the selected runtime",
