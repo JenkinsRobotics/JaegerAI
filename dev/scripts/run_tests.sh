@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# JROS test runner — deterministic local runs, CI-equivalent defaults.
+# JaegerAI test runner — deterministic local runs, CI-equivalent defaults.
 #
 # Usage:
 #   dev/scripts/run_tests.sh                 # fast deterministic unit tests
@@ -95,10 +95,10 @@ fi
 # pytest-xdist parallel workers if installed — falls back to serial.
 # ``-n auto`` uses every core; that's noisy on a dev laptop and
 # exposes CI-vs-local differences (test ordering, fixture races).
-# ``JROS_TEST_WORKERS`` pins the count for reproducibility; export
+# ``JaegerAI_TEST_WORKERS`` pins the count for reproducibility; export
 # it = 1 to debug a flake.
 if "$PYTEST" --help 2>/dev/null | grep -q -- '-n NUMPROCESSES'; then
-    XDIST_ARGS=(-n "${JROS_TEST_WORKERS:-4}")
+    XDIST_ARGS=(-n "${JaegerAI_TEST_WORKERS:-4}")
 else
     XDIST_ARGS=()
 fi

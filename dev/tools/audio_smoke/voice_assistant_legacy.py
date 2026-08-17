@@ -64,7 +64,7 @@ import webrtcvad
 
 # ── config ─────────────────────────────────────────────────────────────
 # Resolve the LLM model path relative to this script so the demo runs
-# on any clone of the JROS repo without hand-editing.  Picks up the
+# on any clone of the JaegerAI repo without hand-editing.  Picks up the
 # Gemma weights that ship under ``jaeger_os/models/``.  Falls back to
 # the operator's LM Studio cache if the in-repo path is missing.
 _REPO_ROOT = Path(__file__).resolve().parent
@@ -340,7 +340,7 @@ def load_llm():
         raise FileNotFoundError(
             f"Gemma model not found at {LLM_MODEL_PATH}. "
             "Expected the in-repo weights under jaeger_os/models/. "
-            "Run the JROS setup wizard or copy the GGUF there."
+            "Run the JaegerAI setup wizard or copy the GGUF there."
         )
     print(f"[llm] loading {LLM_MODEL_PATH.name}...", flush=True)
     t0 = time.perf_counter()

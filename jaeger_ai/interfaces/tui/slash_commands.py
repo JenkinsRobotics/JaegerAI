@@ -556,8 +556,8 @@ def _model_list(ctx: SlashContext) -> SlashResult:
     with ctx.console.status("[dim]scanning for models…[/]"):
         found = discover_all(_resolve_cloud_key(ctx))
 
-    # JROS in-process GGUF models.
-    ctx.console.print("\n[bold]JROS models[/] [dim]· registered, in-process[/]")
+    # JaegerAI in-process GGUF models.
+    ctx.console.print("\n[bold]JaegerAI models[/] [dim]· registered, in-process[/]")
     for m in found["jaeger"]:
         dot = "[green]●[/]" if m.get("path") else "[dim]○[/]"
         size = f"{m['size_gb']} GB" if m.get("size_gb") else ""
@@ -565,8 +565,8 @@ def _model_list(ctx: SlashContext) -> SlashResult:
                           f"[dim]{m.get('status', '')}[/]")
     ctx.console.print("  [dim]download:  /download <name>[/]")
 
-    # Every .gguf on disk JROS can load in-process — repo models/, the
-    # JROS cache, LM Studio's folder. All selectable with /model use local.
+    # Every .gguf on disk JaegerAI can load in-process — repo models/, the
+    # JaegerAI cache, LM Studio's folder. All selectable with /model use local.
     local = found.get("local_gguf", [])
     if local:
         ctx.console.print(
@@ -879,7 +879,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
 
 
 def _models(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
-    """List EVERY model — the JROS registry, every local ``.gguf`` on
+    """List EVERY model — the JaegerAI registry, every local ``.gguf`` on
     disk (repo, cache, LM Studio's folder), and the LM Studio / Ollama /
     Ollama Cloud catalogues. Same aggregated view as ``/model list`` —
     ``/models`` is the obvious name, so it shows the whole picture."""
@@ -888,7 +888,7 @@ def _models(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 
 def _runtime(ctx: SlashContext, args: str) -> SlashResult:
     """The Runtime panel — inference-engine inventory AND per-format
-    selection (JROS's equivalent of LM Studio's Settings → Runtime).
+    selection (JaegerAI's equivalent of LM Studio's Settings → Runtime).
 
        /runtime                       show selections + engines
        /runtime use gguf llama-cpp-python

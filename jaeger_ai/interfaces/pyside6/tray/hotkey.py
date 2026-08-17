@@ -97,7 +97,7 @@ class GlobalHotkey:
         ) != _noErr:
             return False
 
-        hk_id = _EventHotKeyID(_fourcc("JROS"), 1)
+        hk_id = _EventHotKeyID(_fourcc("JaegerAI"), 1)
         carbon.RegisterEventHotKey.argtypes = [
             ctypes.c_uint32, ctypes.c_uint32, _EventHotKeyID,
             ctypes.c_void_p, ctypes.c_uint32,

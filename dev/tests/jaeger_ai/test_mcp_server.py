@@ -1,4 +1,4 @@
-"""JROS MCP server — exposes the agent so MCP clients (Claude Code/Cursor)
+"""JaegerAI MCP server — exposes the agent so MCP clients (Claude Code/Cursor)
 drive it. Tests the tool logic without booting a model (the FastMCP wiring
 is the SDK's responsibility)."""
 
@@ -24,5 +24,5 @@ def test_chat_surfaces_errors():
 
 def test_build_server_registers_tools():
     fake = lambda c, m, session_key=None: {"text": "ok", "error": None}  # noqa: E731
-    server = build_server(object(), "jros-dev", "gemma", run_turn=fake)
-    assert server.name == "jros"
+    server = build_server(object(), "jaeger-dev", "gemma", run_turn=fake)
+    assert server.name == "jaeger"

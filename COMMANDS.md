@@ -62,7 +62,7 @@ instance, one word now.)
 
 | Command | What it does |
 |---|---|
-| `jaeger dev` | Build (if stale) + launch the app in the dev state (`jros-dev` instance) |
+| `jaeger dev` | Build (if stale) + launch the app in the dev state (`jaeger-dev` instance) |
 | `jaeger dev --tui` | Terminal dev agent |
 | `jaeger dev --health` / `--status` / `--stop` | Dev toolbox verbs |
 | `jaeger bench …` | Benchmarks (`run` / `timing` / `compare` / `history`) |
@@ -70,6 +70,6 @@ instance, one word now.)
 | `jaeger mcp` | Run the MCP server |
 | `jaeger launcher …` | Launcher plumbing |
 
-There is ONE app bundle: `JaegerOS.app`. Dev is a launch state
+There is ONE app bundle: `JaegerAI.app`. Dev is a launch state
 (`jaeger dev`), not a separate app — one TCC permission grant covers
 everything.

@@ -1,6 +1,6 @@
 """Lean tool surface — the model sees CORE + a catalog, not all 70 schemas.
 
-This is the test net for the architectural change that flipped JROS from
+This is the test net for the architectural change that flipped JaegerAI from
 sending all tool schemas every turn (~25K tokens of overhead) to a
 catalog-plus-on-demand-describe pattern (~3K tokens).
 

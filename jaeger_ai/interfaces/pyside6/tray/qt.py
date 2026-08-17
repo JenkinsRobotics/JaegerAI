@@ -9,7 +9,7 @@ with a typed one.
 Thin by design (the GUI/logic-separation rule): the chassis owns the app /
 bus / core; this surface only shows windows and publishes nothing the chat
 window doesn't. Lilith's persona/voice menus + global hotkey are runtime
-logic JROS doesn't expose on the chassis bus yet — deliberately omitted.
+logic JaegerAI doesn't expose on the chassis bus yet — deliberately omitted.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def apply_app_icon() -> None:
 
 def _agent_name(ctx: Any) -> str:
     return (getattr(getattr(ctx, "core", None), "agent_name", None)
-            or getattr(ctx, "agent_name", None) or "JROS")
+            or getattr(ctx, "agent_name", None) or "JaegerAI")
 
 
 def _subtitle(ctx: Any) -> str:
@@ -81,7 +81,7 @@ class QtTray:
             pix = QPixmap(18, 18)
             pix.fill(QColor("#1e88e5"))
             self._icon = QSystemTrayIcon(QIcon(pix))
-        self._icon.setToolTip(f"JROS — {self._name}")
+        self._icon.setToolTip(f"JaegerAI — {self._name}")
 
         # Clicking the icon shows the rich dropdown (no native QMenu — a
         # context menu would intercept the click before our popup).

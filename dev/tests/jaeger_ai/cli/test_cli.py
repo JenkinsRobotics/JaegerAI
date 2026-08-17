@@ -152,7 +152,7 @@ def test_personality_set_name_is_string(sandbox) -> None:
 def test_status_renders_active_instance(sandbox) -> None:
     code, out = _run("status")
     assert code == 0
-    assert "JROS status" in out
+    assert "JaegerAI status" in out
     assert "TestAgent" in out  # the persona name from identity.yaml
     assert "Skill tree" in out
     assert "Mastered" in out

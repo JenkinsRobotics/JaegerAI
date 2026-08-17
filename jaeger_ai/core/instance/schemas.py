@@ -98,7 +98,7 @@ class ModelConfig(BaseModel):
     # M2 may add OpenAI-compatible HTTP endpoints; the discriminator stays here
     # so we don't have to migrate config files later.
     # llama_cpp_python = GGUF via llama.cpp (default; broadest model
-    #   support, the JROS 0.3.0 + 0.4.0 reference path).
+    #   support, the JaegerAI 0.3.0 + 0.4.0 reference path).
     # mlx_lm = Apple-Silicon-native MLX backend (1.5–2× faster
     #   per-token on M-series; model_path points at an MLX model
     #   directory, NOT a GGUF — e.g.
@@ -161,7 +161,7 @@ class ModelConfig(BaseModel):
     extra_gguf_dirs: list[str] = Field(
         default_factory=list,
         description="Extra directories to scan for local .gguf models, "
-                    "beyond the repo models/, the JROS cache, and LM "
+                    "beyond the repo models/, the JaegerAI cache, and LM "
                     "Studio. Add/remove with the model_location tool; "
                     "persisted here so the agent can extend the scan set "
                     "without editing core code.",
@@ -287,7 +287,7 @@ class DeepThinkConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    """Per-format inference-engine selection — JROS's equivalent of LM
+    """Per-format inference-engine selection — JaegerAI's equivalent of LM
     Studio's Settings → Runtime panel.
 
     Each model FORMAT (detected from the weights on disk: a ``.gguf``
@@ -651,7 +651,7 @@ class WorkspaceConfig(BaseModel):
 
 # 0.2.6: UserConfig removed. The 0.2.1 User layer (separate ``user.dir``
 # for persona / skills / prompts) collapsed into the per-instance dir
-# at ``<install_root>/.jaeger_os/instances/<name>/``. Each agent is
+# at ``<install_root>/.jaeger_ai/instances/<name>/``. Each agent is
 # self-contained — its persona, skills, prompts, files, memory, logs,
 # and credentials all live under one folder. See dev docs/architecture
 # /system_runtime_user.md → "0.2.6: two layers" for the rationale.
@@ -696,11 +696,11 @@ class InteractionConfig(BaseModel):
 
 
 class HardwareConfig(BaseModel):
-    """Hardware package selection (dev/docs/hardware/JROS_HARDWARE_FRAMEWORK_PLAN.md).
+    """Hardware package selection (dev/docs/hardware/JaegerAI_HARDWARE_FRAMEWORK_PLAN.md).
 
     ``package`` names a directory under ``jaeger_os/hardware/packages/``
     (e.g. ``"jp01"``); empty string = no robot attached (the default —
-    JROS boots exactly as before). When set, boot loads the package's
+    JaegerAI boots exactly as before). When set, boot loads the package's
     topology, opens its links (simulated controllers get mock wires),
     runs its nodes on the bus, and registers its capability tools —
     which stay ``beta``-gated (visible only under ``JAEGER_DEV_MODE=1``)

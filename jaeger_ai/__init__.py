@@ -2,7 +2,7 @@
 
 JaegerAgent-powered tools, skills, memory, the id/ego persona pipeline, local
 inference, and its own faces (chat app, TUI, voice, protocol). Runs on
-device by default, on top of a pinned JaegerOS (the framework tier).
+device by default, on top of a pinned JaegerAI (the framework tier).
 Concrete agents (Lilith, ARES, …) are *instances* of this product, not
 forks of it.
 """

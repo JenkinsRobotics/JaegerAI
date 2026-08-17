@@ -17,7 +17,7 @@ def _fake_install(tmp_path: Path, *, git: bool = False) -> Path:
     (home / "jaeger_ai" / "__init__.py").write_text("x")
     (home / ".venv" / "bin").mkdir(parents=True)
     (home / "requirements.txt").write_text("deps")
-    agent = home / ".jaeger_os" / "instances" / "default"
+    agent = home / ".jaeger_ai" / "instances" / "default"
     agent.mkdir(parents=True)
     (agent / "identity.yaml").write_text("name: default")
     if git:
@@ -41,7 +41,7 @@ def test_uninstall_removes_framework_keeps_agents(tmp_path, monkeypatch):
     assert not (home / ".venv").exists()
     assert not (home / "requirements.txt").exists()
     # agents survive
-    assert (home / ".jaeger_os" / "instances" / "default" / "identity.yaml").exists()
+    assert (home / ".jaeger_ai" / "instances" / "default" / "identity.yaml").exists()
 
 
 def test_uninstall_purge_wipes_agents(tmp_path, monkeypatch):
@@ -49,7 +49,7 @@ def test_uninstall_purge_wipes_agents(tmp_path, monkeypatch):
     monkeypatch.setattr(_PKG, home / "jaeger_ai")
     assert U._cmd_uninstall_argv(["--purge", "--yes"]) == 0
     assert not (home / "jaeger_ai").exists()
-    assert not (home / ".jaeger_os").exists()         # purged
+    assert not (home / ".jaeger_ai").exists()         # purged
 
 
 def test_uninstall_non_interactive_without_yes_refuses(tmp_path, monkeypatch, capsys):

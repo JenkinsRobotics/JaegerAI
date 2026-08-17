@@ -83,7 +83,7 @@ def test_lean_core_is_hermes_sized() -> None:
 
 def test_core_and_lean_core_share_an_intentional_subset() -> None:
     """LEAN_CORE is the hermes-style action-dispatch tier; CORE is
-    the JROS always-visible set. They overlap on the obvious
+    the JaegerAI always-visible set. They overlap on the obvious
     primitives — ``read_file``, ``write_file``, ``memory`` — so the
     doctor can cross-check both name sets resolve."""
     assert CORE & LEAN_CORE  # non-empty intersection

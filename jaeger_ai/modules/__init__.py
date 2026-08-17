@@ -22,7 +22,7 @@ Only IMPORTED modules belong here. JaegerAI's own in-tree nodes
 (``jaeger_ai/nodes/`` — animation, media) and plugins (messaging, MCP)
 are not imported modules and keep their existing homes; see
 ``jaeger_ai/module_roots.py`` for what this package registers with
-JaegerOS discovery.
+JaegerAI discovery.
 """
 
 from __future__ import annotations

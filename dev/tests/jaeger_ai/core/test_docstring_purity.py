@@ -27,7 +27,7 @@ import pytest
 
 import jaeger_os
 
-# 0.9 step 4 split: core/tools/ moved to JaegerOS (framework, a pinned
+# 0.9 step 4 split: core/tools/ moved to JaegerAI (framework, a pinned
 # dependency) — resolved off the INSTALLED package, not a monorepo-
 # relative REPO / "jaeger_os" / ... path, which stopped existing here.
 REPO = Path(__file__).resolve().parents[4]

@@ -1,4 +1,4 @@
-"""AgentCore — JROS's Tier-1 core (the chassis ``[core]`` role).
+"""AgentCore — JaegerAI's Tier-1 core (the chassis ``[core]`` role).
 
 The windowed app (bare ``./launch``) boots through the chassis
 ``JaegerApp``. At the ``init_core`` boot phase the chassis builds this
@@ -46,7 +46,7 @@ class AgentCore(Core):
                  with_memory: bool = True, warmup: bool = False,
                  **_: Any) -> None:
         super().__init__(bus=bus)            # asserts the OS main thread
-        print("[jros] booting the windowed app — loading the agent…",
+        print("[jaeger] booting the windowed app — loading the agent…",
               file=sys.stderr, flush=True)
         # instance_name=None → the runtime resolves default_instance_name()
         # (JAEGER_INSTANCE_NAME), set by main.py (run.sh) or launch.py (dev).
@@ -75,7 +75,7 @@ class AgentCore(Core):
         """Main-thread caller; spin up the bridge's own worker thread."""
         self.bridge = AgentBridge(bus=self.bus, runtime=self.runtime, session_key="gui")
         self.bridge.start()
-        print("[jros] windowed app ready.", file=sys.stderr, flush=True)
+        print("[jaeger] windowed app ready.", file=sys.stderr, flush=True)
 
     def stop(self) -> None:
         """Drain the in-flight turn, THEN tear the model down. Runs in

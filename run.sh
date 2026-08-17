@@ -1,5 +1,5 @@
 #!/bin/bash
-# JROS launcher — entry point for everything you do with the agent.
+# JaegerAI launcher — entry point for everything you do with the agent.
 #
 # AGENT MANAGEMENT
 #   ./run.sh setup [NAME]      Create a new agent (or re-run wizard against
@@ -44,7 +44,7 @@ case ":${PYTHONPATH:-}:" in
   *) export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
-# 0.2.6: the runtime resolves operator state at <install_root>/.jaeger_os/
+# 0.2.6: the runtime resolves operator state at <install_root>/.jaeger_ai/
 # (instances, models, jaeger.env). install_root() defaults to the parent
 # of the framework package, but we set JAEGER_HOME explicitly so the
 # resolver gets a stable value regardless of how python computes
@@ -168,7 +168,7 @@ cmd_delete() {
 
 cmd_help() {
   cat <<'EOF'
-JROS launcher — entry point for everything you do with the agent.
+JaegerAI launcher — entry point for everything you do with the agent.
 
 AGENT MANAGEMENT
   ./run.sh setup [NAME]      Create a new agent (or re-run wizard against

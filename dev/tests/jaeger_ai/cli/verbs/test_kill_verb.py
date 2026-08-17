@@ -37,7 +37,7 @@ def test_find_lock_files_finds_files_under_instance_run(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     _make_instance_dir(instances, "default")
     _make_instance_dir(instances, "work")
@@ -52,7 +52,7 @@ def test_find_lock_files_filters_by_instance_name(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     _make_instance_dir(instances, "default")
     _make_instance_dir(instances, "work")
@@ -68,7 +68,7 @@ def test_find_lock_files_handles_dev_sandbox(tmp_path, monkeypatch):
     shapes."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))  # empty home
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "home"))
-    sandbox = tmp_path / "sandbox" / "jros-dev"
+    sandbox = tmp_path / "sandbox" / "jaeger-dev"
     (sandbox / "run").mkdir(parents=True)
     (sandbox / "run" / "tui.pid").write_text("99999")
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(sandbox))
@@ -91,7 +91,7 @@ def test_find_lock_files_only_picks_known_names(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     inst = instances / "default"
     (inst / "run").mkdir(parents=True)
@@ -201,7 +201,7 @@ def test_kill_dry_run_lists_but_does_not_act(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     _make_instance_dir(instances, "default")
 
@@ -231,7 +231,7 @@ def test_kill_removes_stale_lock_files(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     inst = _make_instance_dir(instances, "default")
 
@@ -286,7 +286,7 @@ def test_kill_handles_processes_already_gone(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
-    instances = tmp_path / ".jaeger_os" / "instances"
+    instances = tmp_path / ".jaeger_ai" / "instances"
     instances.mkdir(parents=True)
     inst = _make_instance_dir(instances, "default")
 

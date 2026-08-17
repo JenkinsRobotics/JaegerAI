@@ -1,7 +1,7 @@
-# JaegerOS — native macOS desktop app
+# JaegerAI — native macOS desktop app
 
-> The primary UI since 0.7.0. `JaegerOS.app` (default instance) and
-> `JaegerOS-dev.app` (the `jros-dev` dev instance) are built from this
+> The primary UI since 0.7.0. `JaegerAI.app` (default instance) and
+> `JaegerAI-dev.app` (the `jaeger-dev` dev instance) are built from this
 > package; `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
 > terminal first-class. (`launch.py` was removed in 0.7.)
 
@@ -19,8 +19,8 @@ speaks **protocol v1** — the single wire contract in
 cd jaeger_os/interfaces/swift
 swift build            # debug build
 swift test             # ProtocolFixtureTests — the wire contract
-Scripts/build-app.sh --dev   # .build/JaegerOS-dev.app (pins the jros-dev instance)
-Scripts/build-app.sh         # .build/JaegerOS.app (product)
+Scripts/build-app.sh --dev   # .build/JaegerAI-dev.app (pins the jaeger-dev instance)
+Scripts/build-app.sh         # .build/JaegerAI.app (product)
 ```
 
 `xed Package.swift` opens the package in Xcode.
@@ -34,8 +34,8 @@ loops anywhere: state flows through `@Published` (Combine), animation
 through `TimelineView` schedules.
 
 ```
-Sources/JaegerOS/
-  JaegerOSApp.swift     @main MenuBarExtra scene (tray icon + card)
+Sources/JaegerAI/
+  JaegerAIApp.swift     @main MenuBarExtra scene (tray icon + card)
   AppDelegate.swift     activation policy, splash boot, orderly quit
   Bridge/               the agent seam — everything else is UI
     Protocol.swift        typed frames, NDJSON framer, protocol version

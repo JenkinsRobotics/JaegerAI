@@ -163,7 +163,7 @@ def test_write_env_file_lands_at_home_jaeger(tmp_path, monkeypatch):
     instance_root.mkdir()
     W._write_env_file(instance_root, "default")
 
-    env_path = tmp_path / ".jaeger_os" / "jaeger.env"
+    env_path = tmp_path / ".jaeger_ai" / "jaeger.env"
     assert env_path.exists()
     body = env_path.read_text(encoding="utf-8")
     assert f'export JAEGER_INSTANCE_DIR="{instance_root}"' in body
@@ -183,7 +183,7 @@ def test_write_env_file_overwrites_previous(tmp_path, monkeypatch):
     b.mkdir()
     W._write_env_file(a, "first")
     W._write_env_file(b, "second")
-    body = (tmp_path / ".jaeger_os" / "jaeger.env").read_text(encoding="utf-8")
+    body = (tmp_path / ".jaeger_ai" / "jaeger.env").read_text(encoding="utf-8")
     assert str(b) in body
     assert str(a) not in body
 

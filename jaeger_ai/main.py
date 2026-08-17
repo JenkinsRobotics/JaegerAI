@@ -1306,24 +1306,6 @@ _DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
 _delegate_depth = threading.local()
 
 
-def _hermes_delegate_enabled() -> bool:
-    """Whether Jaeger should use Hermes for delegated subtasks only."""
-    from jaeger_ai.hermes_worker import enabled
-
-    return enabled()
-
-
-def _delegate_to_hermes(subtask: str, depth: int) -> dict[str, Any]:
-    """Run one isolated Hermes CLI worker under Jaeger's control.
-
-    This deliberately uses one-shot stdio. It never connects to a Hermes
-    WebUI/backend port and ARES never imports the worker's session database.
-    """
-    from jaeger_ai.hermes_worker import run
-
-    return run(subtask, depth)
-
-
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     """Run a subtask through the same agent loop with a fresh history.
 
@@ -1342,9 +1324,6 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     clean = (subtask or "").strip()
     if not clean:
         return {"delegated": False, "error": "empty subtask"}
-
-    if _hermes_delegate_enabled():
-        return _delegate_to_hermes(clean, depth)
 
     _delegate_depth.value = depth + 1
     started = time.perf_counter()
@@ -1644,7 +1623,7 @@ def request_turn_cancel() -> None:
 
 
 # ── memory: facts snapshot + background review ──────────────────────
-# The Hermes lesson (memory comparison, 2026-06-12): JROS RECORDED
+# The Hermes lesson (memory comparison, 2026-06-12): JaegerAI RECORDED
 # everything but the agent only knew what it thought to search for.
 # Two fixes: (1) a bounded known-facts block frozen into each session's
 # system prompt — high attention, prefix-cache stable; (2) a periodic
@@ -3576,7 +3555,7 @@ class LlamaCppPythonClient:
         grammar: str | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> _ChatResult:
-        """THE AUX LANE — every bounded side-channel completion in JROS
+        """THE AUX LANE — every bounded side-channel completion in JaegerAI
         enters here (persona filter, skip-final finalizer, reflection,
         deep-think planning/digests, memory review, goal clarify/eval,
         ThinkingRunner). Ignores `stream` and `grammar`. Returns text +
@@ -4495,25 +4474,25 @@ def run_daemon(*, instance_name: str | None = None,
 
 def _swift_app_binary() -> "Path | None":
     """The built app's inner binary, or None. One bundle since
-    2026-07-14 — ``jaeger`` launches JaegerOS.app on the default
+    2026-07-14 — ``jaeger`` launches JaegerAI.app on the default
     instance; ``jaeger dev`` (cli/devtools) launches the SAME bundle
-    pinned to jros-dev via its environment. Running the inner binary
+    pinned to jaeger-dev via its environment. Running the inner binary
     (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
     swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
     candidates = [
-        _P("/Applications/JaegerOS.app"),
-        swift / "JaegerOS.app",
+        _P("/Applications/JaegerAI.app"),
+        swift / "JaegerAI.app",
     ]
     for app in candidates:
-        binary = app / "Contents" / "MacOS" / "JaegerOS"
+        binary = app / "Contents" / "MacOS" / "JaegerAI"
         if binary.exists():
             return binary
     return None
 
 
 def _launch_swift_app(binary: "Path", instance_name: str) -> int:
-    """Launch the built JaegerOS.app DETACHED (0.7.2): the app gets its
+    """Launch the built JaegerAI.app DETACHED (0.7.2): the app gets its
     own session and a log file, ``./jaeger`` returns immediately, and
     the terminal window can be closed without killing the agent.
     ``JAEGER_ATTACH=1`` keeps the pre-0.7.2 behaviour — stdout in the
@@ -4533,17 +4512,17 @@ def _launch_swift_app(binary: "Path", instance_name: str) -> int:
     # supervises this process — detaching there would make launchd
     # respawn `jaeger` (and the app) in a loop.
     if os.environ.get("JAEGER_ATTACH") or not sys.stdin.isatty():
-        print(f"[jros] launching {app_name} (attached) — "
+        print(f"[jaeger] launching {app_name} (attached) — "
               "menu-bar tray + chat window…", file=sys.stderr, flush=True)
         return _sp.run([str(binary)]).returncode
     from pathlib import Path as _P
     log = (_P(__file__).resolve().parent.parent
-           / ".jaeger_os" / "logs" / "JaegerOS.log")
+           / ".jaeger_ai" / "logs" / "JaegerAI.log")
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
         _sp.Popen([str(binary)], stdout=fh, stderr=fh,
                   start_new_session=True)
-    print(f"[jros] {app_name} launched — menu-bar tray + chat window.\n"
+    print(f"[jaeger] {app_name} launched — menu-bar tray + chat window.\n"
           f"       This terminal can be closed. (app log: {log};\n"
           "       JAEGER_ATTACH=1 to run attached)",
           file=sys.stderr, flush=True)
@@ -4598,9 +4577,9 @@ def _main_dispatch() -> int:
     # (no subcommand) falls through to the existing TUI path unchanged.
     # 0.2.6 cleanup: the pre-0.2.0 legacy-layout migration (flat
     # ``~/.jaeger/<name>/`` → nested ``~/.jaeger/instances/<name>/``)
-    # is gone. JROS instances were prototypes at that point; nothing
+    # is gone. JaegerAI instances were prototypes at that point; nothing
     # operational was running off the 0.1.0 shape. The new operator-
-    # state location at ``<install_root>/.jaeger_os/`` is a fresh
+    # state location at ``<install_root>/.jaeger_ai/`` is a fresh
     # start — operators who want to keep an old instance can copy
     # it across manually.
 
@@ -4618,7 +4597,7 @@ def _main_dispatch() -> int:
         )
         print(
             "[jaeger] streaming mode — open the Swift renderer at:\n"
-            "          jaeger_os/interfaces/avatar (swift run JROSAvatar)\n"
+            "          jaeger_os/interfaces/avatar (swift run JaegerAIAvatar)\n"
             "        connect URL:\n"
             f"          ws://{ANIMATION_BRIDGE_HOST}:{ANIMATION_BRIDGE_DEFAULT_PORT}/frames",
             flush=True,
@@ -4752,7 +4731,7 @@ def _main_dispatch() -> int:
     # called tui_main() with no args; the TUI then ignored argv,
     # silently fell back to the deleted ``jaeger_os/instance/default/``
     # bundled path, and auto-fired the wizard against ``default`` even
-    # when the operator had passed ``--instance jros-dev`` (or any
+    # when the operator had passed ``--instance jaeger-dev`` (or any
     # other name). Pass the flag through as a CLI arg the TUI's own
     # argparse honours.
     if not " ".join(args.prompt).strip():
@@ -4789,7 +4768,7 @@ def _main_dispatch() -> int:
                 return voice_main()
             finally:
                 sys.argv = _orig_argv
-        # 0.6: SWIFT-FIRST — the windowed surface is JaegerOS.app (splash,
+        # 0.6: SWIFT-FIRST — the windowed surface is JaegerAI.app (splash,
         # menu-bar tray, fast-ready bridge). Bare ``jaeger`` launches the
         # built app: the dev bundle in a checkout, /Applications when
         # installed. Falls back to the PySide6 shell, then the TUI. (This

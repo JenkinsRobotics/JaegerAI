@@ -208,7 +208,7 @@ def test_build_jaeger_agent_finalizer_delegates_to_legacy():
     ``_fast_finalize_sync`` so phrasing is identical to the
     pre-refactor path. We can't easily mock that function — instead we
     confirm the finalizer is callable, returns a string, and handles a
-    well-known JROS tool result without raising."""
+    well-known JaegerAI tool result without raising."""
     class _StubClient:
         llm = SimpleNamespace(create_chat_completion=lambda **_: {})
         model_name = "x"

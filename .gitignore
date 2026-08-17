@@ -76,7 +76,7 @@ dev/benchmark/sweep/
 !dev/benchmark/levels/history/
 !dev/benchmark/levels/history/BENCHMARK_*.md
 
-# Vendored / reference clones — NOT part of JROS source. Kept locally
+# Vendored / reference clones — NOT part of JaegerAI source. Kept locally
 # for cross-reading hermes-agent during the parity port; never tracked.
 jaeger_os/python_hermes_agent/upstream/
 
@@ -89,11 +89,11 @@ Package.resolved
 apps/*/*.xcodeproj/xcuserdata/
 apps/*/*.xcworkspace/xcuserdata/
 
-# JROS runtime artifacts
+# JaegerAI runtime artifacts
 *.pid
 *.log
-.jros/
-~/.jros/
+.jaeger/
+~/.jaeger/
 
 # Local dev/test sandbox — point JAEGER_INSTANCE_DIR here for in-repo
 # work so the bundled src/jaeger_os/instance/default/ skeleton never
@@ -107,16 +107,17 @@ sandbox/
 .env.*
 !.env.example
 
-# 0.2.6 — operator state lives at <install_root>/.jaeger_os/
+# 0.2.6 — operator state lives at <install_root>/.jaeger_ai/
 # (instances/, agents/, models/, jaeger.env, backups/). Always ignored.
-.jaeger_os/
+.jaeger_ai/
+.jaeger_os
 
 # Chassis runtime: PID slot + child registry
 .run/
 
 # built app bundles (symlink at root, bundles in swift/.build)
-/JaegerOS-dev.app
-/JaegerOS.app
+/JaegerAI-dev.app
+/JaegerAI.app
 
 # Agent workspace. jaeger_agent creates <cwd>/.jaeger_agent on first use
 # — deliberately in the project rather than $HOME, so it is inspectable

@@ -1,4 +1,4 @@
-"""Phase-1 smoke tests for the JROS agent layer.
+"""Phase-1 smoke tests for the JaegerAI agent layer.
 
 What this file pins:
 

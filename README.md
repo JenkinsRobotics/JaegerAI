@@ -1,7 +1,7 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <em>The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind. Runs on JaegerOS; headless is a config, not a fork.</em>
+  <em>The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind. Runs on JaegerAI; headless is a config, not a fork.</em>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ## What it is
 
-JaegerAI is a complete **application** built on JaegerOS — the turnkey
+JaegerAI is a complete **application** built on JaegerAI — the turnkey
 agentic product and module host, not an embeddable library. It currently
 ships a complete universal agentic experience (Hermes lineage) by combining
 the reusable JaegerAgent loop with its tools, skills, memory, the
@@ -34,7 +34,7 @@ loop, provider adapters, message schemas, context management, bus bridge, and
 bundle, prompts, skills, memory, personality system, interfaces, installer,
 and defaults through explicit host hooks.
 
-It pins [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) (the
+It pins [JaegerAI](https://github.com/JenkinsRobotics/JaegerAI) (the
 framework tier — bus, nodes, modules/slots, supervisor, safety, wire
 contract, capability layer) and builds everything agentic on top:
 
@@ -62,21 +62,21 @@ contract, capability layer) and builds everything agentic on top:
   (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
   frozen PySide6 shipping set. All faces are clients of one protocol.
 - **The client protocol** — `jaeger_ai/contract` (vendored from
-  JaegerOS) + `jaeger_ai/interfaces/client.py` (`JrosClient`), a
+  JaegerAI) + `jaeger_ai/interfaces/client.py` (`JaegerClient`), a
   versioned NDJSON wire contract any surface — including third-party
   ones — speaks over `jaeger bridge`.
 - **`cli/`** — the `jaeger` command (every real verb: `status`, `config`,
   `runtime`, `agent create/list/use/inspect/delete`, `update`, …).
-  JaegerOS ships no CLI at all — this repo is where it lives.
+  JaegerAI ships no CLI at all — this repo is where it lives.
 
 Engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
 [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
-are **optional extras** — each its own repo, pinning JaegerOS only, so a
+are **optional extras** — each its own repo, pinning JaegerAI only, so a
 robot body can run without the AI product installed at all.
 
 ## Install
 
-The standard method is the same as pre-split JROS: clone, run
+The standard method is the same as pre-split JaegerAI: clone, run
 `./install.sh`, keep current with `jaeger update`.
 
 ```bash
@@ -91,7 +91,7 @@ across the five ecosystem packages (`jaeger-os`, `jaeger-agent`,
 `jaeger-ai`, `jaeger-kokoro-tts`, `jaeger-whisper-stt`) — using sibling
 editable checkouts for development and the git refs in `requirements.txt`
 otherwise. JaegerAI installs **editable** (PEP 660), same model as
-JaegerOS: the code stays writable in place because the agent
+JaegerAI: the code stays writable in place because the agent
 self-modifies its own skills.
 
 **The from-scratch flow (a clean machine with no prior checkout) is
@@ -133,14 +133,14 @@ deployed AI that plays one, with its own memory + config:
 ## Architecture
 
 JaegerAI is the **Mind** tier — the second layer in the Jaeger ecosystem's
-four-tier map, pinning JaegerOS and pinned in turn by nothing:
+four-tier map, pinning JaegerAI and pinned in turn by nothing:
 
 ```
-JaegerOS      ← the framework this repo pins. Never forked, never edited.
+JaegerAI      ← the framework this repo pins. Never forked, never edited.
 
 JaegerAI      ← YOU ARE HERE. The Mind — loop, tools, skills, memory,
                 persona, local inference, and its own faces. Ships the
-                jaeger CLI (JaegerOS ships none).
+                jaeger CLI (JaegerAI ships none).
 
 Modules       ← engine modules this repo can optionally install:
                 JaegerKokoroTTS (tts), JaegerWhisperSTT (stt).
@@ -150,17 +150,17 @@ Projects      ← the assembled things that install JaegerAI: JP01 (the
 ```
 
 The connection rule (from
-[`JAEGER_ECOSYSTEM.md`](https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md)):
+[`JAEGER_ECOSYSTEM.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md)):
 **bodies provide capabilities · the Mind consumes them · the runtime is
 where they meet · the protocol is how outside apps reach in.** See
-[`THREE_TIER_STRUCTURE.md`](https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md)
+[`THREE_TIER_STRUCTURE.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md)
 for the full tier-map reasoning this repo is built against.
 
 ## Ecosystem
 
 | Repo | Tier | What |
 |---|---|---|
-| [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) | Framework | Bus, node, modules/slots, supervisor, safety, contract, capability layer. This repo pins it. |
+| [JaegerAI](https://github.com/JenkinsRobotics/JaegerAI) | Framework | Bus, node, modules/slots, supervisor, safety, contract, capability layer. This repo pins it. |
 | **JaegerAI** | Mind (product) | This repo — the turnkey agentic product and its faces. |
 | [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS) | Engine module (`tts` slot) | Streaming Kokoro speech synthesis. Optional extra of this repo. |
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Optional extra of this repo. |

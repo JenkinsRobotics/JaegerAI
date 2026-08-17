@@ -4,14 +4,14 @@ Dynamically loads a Python file that defines a :class:`MathScript`
 subclass; delegates rendering to it.  This is how Mochi-style faces
 (eyes blinking, mouth shapes) get authored — operator writes a small
 class that draws into an RGB numpy buffer, the adapter wraps it for
-the JROS Protocol + RGBA8 output.
+the JaegerAI Protocol + RGBA8 output.
 
 Architecture vendored from Mochi
 ─────────────────────────────────
 Distilled from Mochi's MathHandler.  Same importlib-based plug-in
-discovery; same delegation pattern.  Two changes for JROS:
+discovery; same delegation pattern.  Two changes for JaegerAI:
 
-  1. Scripts subclass JROS's :class:`MathScript` (a Protocol-ish
+  1. Scripts subclass JaegerAI's :class:`MathScript` (a Protocol-ish
      base) instead of Mochi's Animation(ABC) — keeps the contract
      minimal.
   2. Scripts draw RGB (3 channels); the adapter converts to RGBA8

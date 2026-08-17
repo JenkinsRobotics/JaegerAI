@@ -10,7 +10,7 @@ Resolution order for any input string ``name_or_path``:
 
   1. Absolute path → use as-is (errors if it doesn't exist).
   2. Registry key (e.g. ``gemma-4-26b-a4b-it-q4_k_m``) → check the
-     operator cache ``<install_root>/.jaeger_os/models/<key>/<file>``,
+     operator cache ``<install_root>/.jaeger_ai/models/<key>/<file>``,
      then the package's ``jaeger_os/models/<file>`` (dev convenience for
      symlinks to LM Studio), then the LM Studio cache, then download
      from HF Hub to the operator cache.
@@ -18,7 +18,7 @@ Resolution order for any input string ``name_or_path``:
      cwd, package models/, then the operator cache. If still not found,
      fall through to treating the basename as a registry key.
 
-The operator cache at ``<install_root>/.jaeger_os/models/<name>/<file>``
+The operator cache at ``<install_root>/.jaeger_ai/models/<name>/<file>``
 (``operator_state_root()/models``) is the production location. The
 package's ``jaeger_os/models/`` directory stays valid as a dev
 convenience — symlinks to LM Studio's cache resolve through step 2.
@@ -26,7 +26,7 @@ convenience — symlinks to LM Studio's cache resolve through step 2.
 History: weights used to resolve from ``~/.jaeger/models/`` with the dev
 dir at ``<repo>/src/jaeger_os/models/``. 0.2.6 dropped the ``src/``
 layer (the package is ``jaeger_os/`` at the repo root) and moved the
-cache to ``<install_root>/.jaeger_os/models/``; the legacy ``~/.jaeger/``
+cache to ``<install_root>/.jaeger_ai/models/``; the legacy ``~/.jaeger/``
 location is still honoured as a fallback for older installs.
 """
 
@@ -197,7 +197,7 @@ DEFAULT_CODER_MODEL = DEFAULT_ASLEEP_MODEL
 
 def user_cache_dir() -> pathlib.Path:
     """Returns ``$JAEGER_MODELS_DIR`` if set, else
-    ``<install_root>/.jaeger_os/models/``.
+    ``<install_root>/.jaeger_ai/models/``.
 
     0.2.6: cache moves from the legacy ``~/.jaeger/models/`` into the
     install's operator-state dir so all operator state sits in one
@@ -365,7 +365,7 @@ def _resolve_registered(
     entry = MODEL_REGISTRY[key]
     filename = entry["hf_file"]
 
-    # 1. User cache (JROS's production location).
+    # 1. User cache (JaegerAI's production location).
     cached = user_cache_dir() / key / filename
     if cached.exists():
         return str(cached.resolve())
@@ -381,7 +381,7 @@ def _resolve_registered(
     # 3. LM Studio's standard layout:
     # ~/.lmstudio/models/<hf_repo>/<hf_file>.  Operators who already
     # downloaded the model via LM Studio shouldn't have to re-download
-    # it for JROS.  Added 2026-06-06 after an operator hit this
+    # it for JaegerAI.  Added 2026-06-06 after an operator hit this
     # exactly — 7 GB redundant download while the file sat right
     # there on disk.
     lmstudio_repo = entry.get("hf_repo")

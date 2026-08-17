@@ -9,7 +9,7 @@ Architecture vendored from Mochi
 ─────────────────────────────────
 Mirrors Mochi's SpriteHandler (Apache 2.0; see
 ``dev/docs/library_review/mochi_demo.md``).  Same NumPy-based blit;
-swapped RGB output for RGBA8 + JROS Protocol surface.
+swapped RGB output for RGBA8 + JaegerAI Protocol surface.
 
 Skill tree
 ──────────

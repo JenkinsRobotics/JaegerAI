@@ -1,6 +1,6 @@
 // swift-tools-version: 6.0
 //
-// JaegerOS — native macOS desktop app for JROS.
+// JaegerAI — native macOS desktop app for JaegerAI.
 //
 // The 0.2.x menu-bar tray (rumps + AppleScript shell-spawn) hit a hard
 // architectural ceiling; this is the Apple-native replacement. Single
@@ -18,18 +18,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "JaegerOS",
+    name: "JaegerAI",
     platforms: [
         // macOS 14 is the floor — SwiftUI's modern ``onChange(of:_:)``
         // two-arg closure form, ``ScrollViewReader`` autoscroll
         // niceties, and Observation-friendly view bindings all need
-        // it. Apple-Silicon-first JROS operators are on 14+ anyway.
+        // it. Apple-Silicon-first JaegerAI operators are on 14+ anyway.
         .macOS(.v14),
     ],
     targets: [
         .executableTarget(
-            name: "JaegerOS",
-            path: "Sources/JaegerOS",
+            name: "JaegerAI",
+            path: "Sources/JaegerAI",
             resources: [
                 // Bundle the J icons. SwiftPM exposes them via
                 // ``Bundle.module``; load with ``NSImage(named:)``
@@ -42,9 +42,9 @@ let package = Package(
         // asserts the Python builders against. Change a frame shape → both
         // suites fail.
         .testTarget(
-            name: "JaegerOSTests",
-            dependencies: ["JaegerOS"],
-            path: "Tests/JaegerOSTests"
+            name: "JaegerAITests",
+            dependencies: ["JaegerAI"],
+            path: "Tests/JaegerAITests"
         ),
     ]
 )

@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="jaeger",
         description=(
-            "JROS operator console.  Every subcommand here is also "
+            "JaegerAI operator console.  Every subcommand here is also "
             "reachable from the GUI — terminal-first by design."
         ),
     )

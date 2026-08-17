@@ -85,7 +85,7 @@ def spawn_aux_context(
     ``n_ctx`` should be small (aux prompts are bounded by design) — every
     token of aux KV is memory the worker's window doesn't get.
 
-    Raises on failure; the caller decides the fallback (JROS falls back
+    Raises on failure; the caller decides the fallback (JaegerAI falls back
     to sharing the worker context — the pre-0.6.0 behaviour).
     """
     from llama_cpp import Llama

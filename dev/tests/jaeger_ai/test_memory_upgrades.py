@@ -1,6 +1,6 @@
 """Memory upgrades (2026-06-12) — facts snapshot + background review.
 
-The Hermes-comparison verdict: JROS recorded everything but the agent
+The Hermes-comparison verdict: JaegerAI recorded everything but the agent
 only knew what it thought to search for. These tests pin the two
 fixes: a bounded known-facts block frozen into the session system
 prompt, and the background review that promotes conversational
@@ -22,15 +22,15 @@ import jaeger_ai.main as m
 
 def test_snapshot_renders_facts_with_lead_categories_first(monkeypatch):
     monkeypatch.setattr(m.mem, "list_facts_by_category", lambda: {
-        "projects": {"jros_goal": "embodied robot brain"},
+        "projects": {"jaeger_goal": "embodied robot brain"},
         "user": {"name": "Jon", "answer_style": "short answers"},
     })
     block = m._facts_snapshot_block()
     assert "Known facts" in block
     assert "name: Jon" in block
-    assert "jros_goal" in block
+    assert "jaeger_goal" in block
     # User-identity facts lead — they shape behaviour most.
-    assert block.index("name: Jon") < block.index("jros_goal")
+    assert block.index("name: Jon") < block.index("jaeger_goal")
 
 
 def test_snapshot_respects_char_budget(monkeypatch):

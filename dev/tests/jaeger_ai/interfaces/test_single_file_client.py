@@ -1,4 +1,4 @@
-"""clients/python/jros_client.py — the copy-me single-file client.
+"""clients/python/jaeger_client.py — the copy-me single-file client.
 
 Pins it to the same protocol_v1_fixtures.json that pins the in-repo
 Python builders and the Swift decoder, so the vendored file cannot
@@ -7,7 +7,7 @@ drift from the wire contract. Also proves it is genuinely standalone
 a scripted fake bridge.
 
 0.9 step 4 split: ``jaeger_os/contract/`` no longer lives in THIS repo
-(it's JaegerOS's, a pinned dependency) — the fixtures file is read off
+(it's JaegerAI's, a pinned dependency) — the fixtures file is read off
 the INSTALLED ``jaeger_os`` package instead of a monorepo-relative
 ``REPO / "jaeger_os" / ...`` path, which stopped existing the moment
 the split moved contract/ to its own repo.
@@ -21,7 +21,7 @@ from pathlib import Path
 import jaeger_os
 
 REPO = Path(__file__).resolve().parents[4]
-CLIENT_FILE = REPO / "clients" / "python" / "jros_client.py"
+CLIENT_FILE = REPO / "clients" / "python" / "jaeger_client.py"
 FIXTURES = json.loads(
     (Path(jaeger_os.__file__).resolve().parent
      / "contract" / "protocol_v1_fixtures.json")
@@ -29,7 +29,7 @@ FIXTURES = json.loads(
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("jros_client", CLIENT_FILE)
+    spec = importlib.util.spec_from_file_location("jaeger_client", CLIENT_FILE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -85,9 +85,9 @@ for line in sys.stdin:
 def test_full_turn_against_fake_bridge():
     mod = _load()
     events = []
-    with mod.JrosClient(command=[sys.executable, "-c", FAKE_BRIDGE]) as jros:
-        assert jros.ready == {"instance": "fake", "model": "m"}
-        reply = jros.turn("hello", session="s1", on_event=events.append)
+    with mod.JaegerClient(command=[sys.executable, "-c", FAKE_BRIDGE]) as jaeger:
+        assert jaeger.ready == {"instance": "fake", "model": "m"}
+        reply = jaeger.turn("hello", session="s1", on_event=events.append)
         assert reply == {"text": "echo: hello", "error": None}
     assert [e["type"] for e in events] == ["state", "tool"]
 
@@ -95,7 +95,7 @@ def test_full_turn_against_fake_bridge():
 def test_missing_install_raises():
     mod = _load()
     try:
-        mod.JrosClient(jaeger_home="/nonexistent/nowhere")
-        raise AssertionError("expected JrosError")
-    except mod.JrosError as exc:
-        assert "no JROS install" in str(exc)
+        mod.JaegerClient(jaeger_home="/nonexistent/nowhere")
+        raise AssertionError("expected JaegerError")
+    except mod.JaegerError as exc:
+        assert "no JaegerAI install" in str(exc)

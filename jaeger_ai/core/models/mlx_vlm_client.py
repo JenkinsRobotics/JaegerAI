@@ -7,7 +7,7 @@ Same surface as :class:`~jaeger_os.core.models.mlx_client.MlxClient`
 ``_tokenizer``, ``_executor``) so the agent loop's MLX adapter and the
 ``runtime_bridge`` wiring treat it like any other in-process MLX client.
 The difference is purely the loader + generator: ``mlx_vlm`` instead of
-``mlx_lm``. JROS uses these models for text routing — images/audio are
+``mlx_lm``. JaegerAI uses these models for text routing — images/audio are
 not fed in — so generation runs the text-only path of ``mlx_vlm``.
 
 ``mlx-vlm`` is imported lazily so importing this module never drags the

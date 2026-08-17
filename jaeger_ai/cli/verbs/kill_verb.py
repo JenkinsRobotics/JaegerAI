@@ -197,7 +197,7 @@ def _find_jaeger_pids(
 
 def _find_lock_files(*, instance: str | None = None) -> list[Path]:
     """Locate stale lock/PID files under every instance dir we know
-    about (``<install_root>/.jaeger_os/instances/*/run/`` + the dev
+    about (``<install_root>/.jaeger_ai/instances/*/run/`` + the dev
     sandbox)."""
     roots: list[Path] = []
 

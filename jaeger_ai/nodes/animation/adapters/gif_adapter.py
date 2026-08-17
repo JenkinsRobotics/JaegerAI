@@ -8,7 +8,7 @@ walks the cached frames using per-frame durations from the source.
 Architecture vendored from Mochi
 ─────────────────────────────────
 Distilled from Mochi's ``GifHandler`` + ``decoders/gif_decoder.py``
-+ ``media_base.py`` chain.  Simplified to the JROS Protocol:
++ ``media_base.py`` chain.  Simplified to the JaegerAI Protocol:
 open / close / next_frame.  Loop semantics handled by walking
 elapsed time mod total_duration.  Apache 2.0; see
 ``dev/docs/library_review/mochi_demo.md`` for the audit.

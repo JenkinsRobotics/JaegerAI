@@ -24,7 +24,7 @@ def fake_instance(tmp_path, monkeypatch):
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
     monkeypatch.delenv("JAEGER_INSTANCE_NAME", raising=False)
 
-    inst = tmp_path / ".jaeger_os" / "instances" / "test"
+    inst = tmp_path / ".jaeger_ai" / "instances" / "test"
     inst.mkdir(parents=True)
     (inst / "identity.yaml").write_text("name: Test\n", encoding="utf-8")
     (inst / "config.yaml").write_text("ctx: 32768\n", encoding="utf-8")
@@ -147,7 +147,7 @@ def test_backup_skips_skills_when_no_skills(fake_instance, tmp_path):
 def test_backup_default_output_lands_in_backups_dir(fake_instance, tmp_path,
                                                      monkeypatch):
     archive = B.backup_instance("test")
-    assert archive.parent == tmp_path / ".jaeger_os" / "backups"
+    assert archive.parent == tmp_path / ".jaeger_ai" / "backups"
     assert archive.name.startswith("test-")
     assert archive.suffix == ".zip"
 

@@ -1,5 +1,5 @@
 """Plugin extension API — let third parties add tools, slash commands, and
-lifecycle hooks without forking JROS.
+lifecycle hooks without forking JaegerAI.
 
 Today's ``jaeger_os/plugins/*`` are first-party feature *backends* (TTS,
 STT, search). This is the general *extension* surface: a plugin is any

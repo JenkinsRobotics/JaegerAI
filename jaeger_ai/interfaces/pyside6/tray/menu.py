@@ -238,7 +238,7 @@ class TrayMenu(QWidget):
         menu = QMenu(self)
         if self._on_restart is not None:
             menu.addAction("Restart", lambda: (self.hide(), self._on_restart()))
-        menu.addAction("Quit JROS", lambda: (self.hide(), self._on_quit()))
+        menu.addAction("Quit JaegerAI", lambda: (self.hide(), self._on_quit()))
         btn = self.sender()
         anchor = btn.mapToGlobal(btn.rect().bottomLeft()) if btn is not None \
             else self.mapToGlobal(QPoint(0, 0))

@@ -18,7 +18,7 @@ weigh main-agent vs. subagent reasoning differently.
 
 # PORTABILITY: Layer 1. The export sink is a directory path; the caller
 # (the runtime launcher) decides where that path lives. On a desktop
-# it lands under the working directory; inside JROS it can land on the
+# it lands under the working directory; inside JaegerAI it can land on the
 # robot's persistent volume.
 """
 

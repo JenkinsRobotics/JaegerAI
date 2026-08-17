@@ -1,6 +1,6 @@
 """Mid-tool interrupt — long-running tools stop when the turn is cancelled.
 
-Audit gap #6. JROS only checked the cancel flag *between* agent-loop
+Audit gap #6. JaegerAI only checked the cancel flag *between* agent-loop
 nodes, so a 60-second ``run_shell`` or a slow ``web_fetch`` ran to
 completion before a cancel was honoured. ``core/tool_interrupt.py`` gives
 those tools one shared interrupt flag to poll mid-execution.

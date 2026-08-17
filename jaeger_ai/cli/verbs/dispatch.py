@@ -6,7 +6,7 @@ argparse + TUI/voice path so a bare ``jaeger`` keeps booting the in-process
 TUI exactly as before.
 
 History: these verbs lived under ``jaeger_os/daemon/`` while a multi-process
-daemon split was planned. That architecture was dropped on 2026-06-14 (JROS
+daemon split was planned. That architecture was dropped on 2026-06-14 (JaegerAI
 converged on fused mode — one process, TUI in foreground); the daemon-process
 machinery (socket server/client/protocol, fork lifecycle, attach, the
 daemon-attached ``rich_tui`` REPL) was deleted and the in-process verbs were
@@ -105,7 +105,7 @@ def dispatch(argv: Sequence[str]) -> int:
 
 
 def _cmd_bench(argv: list[str]) -> int:
-    """``jaeger bench …`` — run the JROS benchmark suites.
+    """``jaeger bench …`` — run the JaegerAI benchmark suites.
 
       * ``jaeger bench run [--tags …] [--ids …] [--limit N]``
         Flat routing/multistep/multiturn/recovery corpus. Boots its own
@@ -183,7 +183,7 @@ def _print_usage() -> None:
         "Usage: jaeger {bench|agent|migrate|backup|restore|update|"
         "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|health} [args]\n"
         "\n"
-        "  bench    Run a JROS benchmark — `jaeger bench run|timing|compare|history`.\n"
+        "  bench    Run a JaegerAI benchmark — `jaeger bench run|timing|compare|history`.\n"
         "  agent    Create / manage agents — create | list | use | inspect |\n"
         "           delete | clear. (`setup` + `instance` remain as aliases.)\n"
         "  migrate  Run pending agent migrations.\n"

@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>JaegerOS</string>
+	<string>JaegerAI</string>
 	<key>CFBundleExecutable</key>
-	<string>JaegerOS</string>
+	<string>JaegerAI</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.jenkinsrobotics.JaegerOS</string>
+	<string>com.jenkinsrobotics.JaegerAI</string>
 	<key>CFBundleName</key>
-	<string>JaegerOS</string>
+	<string>JaegerAI</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,12 +29,12 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>JaegerOS uses AppleScript to open the Terminal-hosted rich TUI surface.</string>
+	<string>JaegerAI uses AppleScript to open the Terminal-hosted rich TUI surface.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>JaegerOS uses the microphone for push-to-talk dictation. Audio is processed locally — it never leaves your Mac.</string>
+	<string>JaegerAI uses the microphone for push-to-talk dictation. Audio is processed locally — it never leaves your Mac.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>JaegerOS uses on-device speech recognition to transcribe dictation locally.</string>
+	<string>JaegerAI uses on-device speech recognition to transcribe dictation locally.</string>
 </dict>
 </plist>

@@ -1,10 +1,10 @@
 """``jaeger status`` — runtime snapshot.
 
-Reports what JROS knows about itself without booting the brain:
+Reports what JaegerAI knows about itself without booting the brain:
   - Active instance
   - Model that would load (path + size)
   - Voice config (enabled, gate, defaults)
-  - Whether a JROS process is currently running (via pid file)
+  - Whether a JaegerAI process is currently running (via pid file)
   - Aggregate counts: how many skills mastered, etc.
 """
 
@@ -28,7 +28,7 @@ def register(subparsers: Any) -> None:
 def run_status(args: Any) -> int:
     layout = c.get_active_instance_layout()
     print()
-    print(f"  {c.bold('JROS status')}")
+    print(f"  {c.bold('JaegerAI status')}")
     print()
     if layout is None:
         print(c.red("  no active instance"))

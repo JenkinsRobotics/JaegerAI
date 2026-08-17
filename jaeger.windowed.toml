@@ -1,4 +1,4 @@
-# JROS windowed app (Pattern 1) — the Jaeger app format, [core] role.
+# JaegerAI windowed app (Pattern 1) — the Jaeger app format, [core] role.
 # ─────────────────────────────────────────────────────────────────
 #  Bare ``./launch`` boots THIS via the chassis JaegerApp.run():
 #    init_core → AgentCore loads the model on the MAIN thread (Metal-
@@ -6,7 +6,7 @@
 #    qt.exec() owns the main loop → quit drains the turn, then cleans up.
 #
 #  ``./launch --tui`` is Pattern 0 (the in-process Rich/prompt_toolkit
-#  TUI); it does NOT use a chassis manifest — JROS owns that loop
+#  TUI); it does NOT use a chassis manifest — JaegerAI owns that loop
 #  directly. The full descriptive topology (hardware/animation/tts/
 #  audio nodes, parked) lives in jaeger.toml. This manifest is the
 #  focused windowed shape: one core, supervisor-owned tts/animation
@@ -15,20 +15,20 @@
 
 [app]
 id = "org.jenkinsrobotics.app.jaeger-ai"
-name = "jros-windowed"
+name = "jaeger-windowed"
 type = "application"
 version = "0.5.0"
 requires_framework = ">=0.1"
 mode = "fused"
 event_loop = "qt"             # the chassis _run_qt() owns the main loop
 ui = "pyside6"
-single_instance = false       # JROS's own process_slot.py (via
+single_instance = false       # JaegerAI's own process_slot.py (via
                               # boot_for_tui) is the single-instance
                               # mechanism; don't double-lock with the
                               # chassis slot (jaeger.toml documents this).
 shell_quits_core = false      # tray persists when the chat window closes
                               # (macOS-canonical: ChatGPT/Claude desktop)
-config = ""                   # JROS uses per-instance configs under
+config = ""                   # JaegerAI uses per-instance configs under
                               # sandbox/; no root config.yaml.
 
 [bus]

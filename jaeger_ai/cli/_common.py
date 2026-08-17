@@ -63,8 +63,8 @@ def list_known_instances() -> list[Path]:
     """Enumerate instance directories.
 
     Scans the **canonical** operator-state root (the install's
-    ``.jaeger_os/instances/`` — what the wizard and resolver use), plus the
-    legacy ``~/.jaeger_os`` so old installs still list. Wizard backups
+    ``.jaeger_ai/instances/`` — what the wizard and resolver use), plus the
+    legacy ``~/.jaeger_ai`` so old installs still list. Wizard backups
     (``<name>.bak.<ts>``) are hidden. Returns one Path per instance root.
     """
     candidates: list[Path] = []
@@ -77,14 +77,14 @@ def list_known_instances() -> list[Path]:
                     and ".bak." not in child.name):
                 candidates.append(child)
 
-    # The canonical location first — install_root/.jaeger_os/instances.
+    # The canonical location first — install_root/.jaeger_ai/instances.
     try:
         from jaeger_ai.core.instance.instance import user_instances_root
         _scan(user_instances_root())
     except Exception:  # noqa: BLE001 — fall back to the legacy scans
         pass
 
-    _scan(Path.home() / ".jaeger_os" / "instances")
+    _scan(Path.home() / ".jaeger_ai" / "instances")
 
     # De-dup by absolute path while preserving order.
     seen: set[Path] = set()
@@ -123,7 +123,7 @@ def swift_app_is_stale(repo: Path, bundle: Path) -> bool:
     """
     import subprocess
 
-    exe = bundle / "Contents" / "MacOS" / "JaegerOS"
+    exe = bundle / "Contents" / "MacOS" / "JaegerAI"
     if not exe.exists():
         return True
     if not (repo / ".git").exists():

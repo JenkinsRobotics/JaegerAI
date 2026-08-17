@@ -225,11 +225,11 @@ class AvatarWindow(QWidget):
             _CANVAS, _INK_DIM, _MONO, _PANEL, _RULE,
         )
         name = agent_name(ctx)
-        self.setObjectName("JrosAvatarWindow")
-        self.setWindowTitle(f"JROS — {name} · avatar")
+        self.setObjectName("JaegerAvatarWindow")
+        self.setWindowTitle(f"JaegerAI — {name} · avatar")
         self.resize(420, 560)
         self.setStyleSheet(
-            f"QWidget#JrosAvatarWindow {{ background-color: {_CANVAS}; }}"
+            f"QWidget#JaegerAvatarWindow {{ background-color: {_CANVAS}; }}"
             f"QLabel#AvatarHeader {{ font-family: {_MONO[0]}, {_MONO[1]}, monospace;"
             f" font-size: 12px; color: {_INK_DIM}; padding: 8px 16px;"
             f" background: {_PANEL}; border-bottom: 1px solid {_RULE}; }}"
@@ -237,7 +237,7 @@ class AvatarWindow(QWidget):
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        header = QLabel(f"jros · {name} · avatar")
+        header = QLabel(f"jaeger · {name} · avatar")
         header.setObjectName("AvatarHeader")
         v.addWidget(header)
         from jaeger_ai.interfaces.avatar_player.animation import make_avatar

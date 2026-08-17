@@ -11,7 +11,7 @@ Architecture vendored from Mochi
 Distilled from Mochi's ``image_handler.py`` + ``decoders/image_decoder.py``
 + ``media_base.py`` (Apache 2.0; see
 ``dev/docs/library_review/mochi_demo.md`` for the audit).  Simplified
-to the JROS :class:`AnimationAdapter` Protocol — open / close /
+to the JaegerAI :class:`AnimationAdapter` Protocol — open / close /
 next_frame — and converted to RGBA8 output so the Swift renderer
 sees a uniform pixel layout.
 

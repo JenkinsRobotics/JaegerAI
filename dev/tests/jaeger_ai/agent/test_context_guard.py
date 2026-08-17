@@ -2,7 +2,7 @@
 
 The bug we're guarding against: the assembled prompt grows past the
 server's loaded context window and the call hard-fails with
-``Requested tokens (X) exceed context window of (Y)``. JROS's reactive
+``Requested tokens (X) exceed context window of (Y)``. JaegerAI's reactive
 guardrail (``cloud_errors.friendly_error_text``) catches it *after* the
 fact and prints a helpful message — but the turn still failed.
 
@@ -246,7 +246,7 @@ def test_truncate_oversized_result_caps_a_huge_string():
 
 
 def test_truncate_oversized_result_handles_dict_payloads():
-    """JROS tools mostly return dicts. A dict whose JSON serialisation
+    """JaegerAI tools mostly return dicts. A dict whose JSON serialisation
     is huge should be truncated the same way — we serialise, check
     length, and if oversized replace with a marker dict that carries
     the original keys + a size note."""

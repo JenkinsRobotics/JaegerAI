@@ -49,7 +49,7 @@ def _jaeger_exe(home: Path) -> Path:
 
 
 def _log_path(home: Path) -> Path:
-    return home / ".jaeger_os" / "autostart.log"
+    return home / ".jaeger_ai" / "autostart.log"
 
 
 # ── service-file content (pure — unit-tested) ──────────────────────
@@ -84,7 +84,7 @@ def _systemd_unit(jaeger_exe: Path, home: Path, args: list[str]) -> str:
     execstart = " ".join([str(jaeger_exe), *args])
     return (
         "[Unit]\n"
-        "Description=JROS (Jaeger-OS) agent\n"
+        "Description=JaegerAI (Jaeger-OS) agent\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n"
         "\n"

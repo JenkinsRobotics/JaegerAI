@@ -49,7 +49,7 @@ def test_update_status_shape(monkeypatch):
 
 def test_repo_slug_default_and_from_env(monkeypatch):
     monkeypatch.delenv("JAEGER_REPO_URL", raising=False)
-    assert V.repo_slug() == "JenkinsRobotics/JROS"
+    assert V.repo_slug() == "JenkinsRobotics/JaegerAI"
     monkeypatch.setenv("JAEGER_REPO_URL", "https://github.com/acme/fork.git")
     assert V.repo_slug() == "acme/fork"
 
@@ -83,7 +83,7 @@ def test_cached_update_status_shape_when_available(monkeypatch, tmp_path):
     st = V.cached_update_status(lay)
     assert st["available"] is True
     assert st["latest"] == "99.0.0"
-    assert st["notes_url"] == "https://github.com/JenkinsRobotics/JROS/releases/tag/99.0.0"
+    assert st["notes_url"] == "https://github.com/JenkinsRobotics/JaegerAI/releases/tag/99.0.0"
 
 
 def test_cached_update_status_reuses_cache_within_ttl(monkeypatch, tmp_path):

@@ -6,7 +6,7 @@ surfaces. It is now the **default** windowed UI (`interaction.ui = "swift"`).
 ## 1. Current state — MUCH further along than a skeleton
 
 `interfaces/swift/` is a 23-file SwiftPM app that **builds clean** (`swift build -c
-release` → `JaegerOS`). Already implemented:
+release` → `JaegerAI`). Already implemented:
 
 - **Connection:** `Bridge/BridgeProcess.swift` + `AgentBridge.swift` — spawns
   `jaeger bridge` (Python NDJSON stdio child, `interfaces/bridge.py`) and exchanges
@@ -43,7 +43,7 @@ live orb data (tts amplitude / audio frames / agent-state phases).
 
 - `InteractionConfig.ui: "pyside6" | "swift" = "swift"`.
 - `launch.py cmd_boot_windowed` → `_ui_toolkit()` reads config; `_boot_swift()` does
-  `swift build -c release` + runs `JaegerOS` with the venv on PATH; **falls back to
+  `swift build -c release` + runs `JaegerAI` with the venv on PATH; **falls back to
   PySide6** on any failure.
 - App Settings → "Windowed UI toolkit" selector.
 
