@@ -12,6 +12,8 @@ never breaks a turn.
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 import threading
 import time
@@ -34,7 +36,29 @@ CREATE TABLE IF NOT EXISTS messages (
     ts         REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+CREATE TABLE IF NOT EXISTS session_tombstones (
+    id         TEXT PRIMARY KEY,
+    deleted_at REAL NOT NULL
+);
 """
+
+SESSION_CONTRACT_VERSION = 2
+_LEGACY_ARES_PREFIX = "webui:"
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$")
+
+
+def canonical_session_id(value: object) -> str:
+    """Return the shared opaque id used by every session-contract operation.
+
+    ``webui:`` is accepted only as a migration alias for pre-v2 ARES rows; it
+    is never emitted or stored by the v2 contract.
+    """
+    session_id = str(value or "").strip()
+    if session_id.startswith(_LEGACY_ARES_PREFIX):
+        session_id = session_id[len(_LEGACY_ARES_PREFIX):]
+    if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError("invalid session id")
+    return session_id
 
 
 class SessionStore:
@@ -47,6 +71,12 @@ class SessionStore:
         with self._conn:
             self._conn.executescript(_SCHEMA)
             self._ensure_brain_columns()
+            self._ensure_contract_columns()
+            self._migrate_legacy_ares_ids()
+            self._conn.execute(
+                "UPDATE sessions SET execution_state='interrupted' "
+                "WHERE execution_state='running'"
+            )
 
     def _ensure_brain_columns(self) -> None:
         """Sessions record the brain that served them so get_mode /
@@ -60,6 +90,63 @@ class SessionStore:
         if "provider" not in cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN provider TEXT")
 
+    def _ensure_contract_columns(self) -> None:
+        session_cols = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(sessions)")
+        }
+        if "execution_state" not in session_cols:
+            self._conn.execute(
+                "ALTER TABLE sessions ADD COLUMN execution_state TEXT "
+                "DEFAULT 'idle'"
+            )
+        message_cols = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(messages)")
+        }
+        if "metadata" not in message_cols:
+            self._conn.execute("ALTER TABLE messages ADD COLUMN metadata TEXT")
+
+    def _migrate_legacy_ares_ids(self) -> None:
+        """Collapse pre-v2 ``webui:`` rows onto their shared opaque ids."""
+        legacy = self._conn.execute(
+            "SELECT id FROM sessions WHERE id LIKE 'webui:%'"
+        ).fetchall()
+        for (old_id,) in legacy:
+            try:
+                new_id = canonical_session_id(old_id)
+            except ValueError:
+                continue
+            target = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (new_id,)
+            ).fetchone()
+            if target:
+                self._conn.execute(
+                    "UPDATE messages SET session_id=? WHERE session_id=?",
+                    (new_id, old_id),
+                )
+                self._conn.execute("DELETE FROM sessions WHERE id=?", (old_id,))
+            else:
+                self._conn.execute(
+                    "UPDATE messages SET session_id=? WHERE session_id=?",
+                    (new_id, old_id),
+                )
+                self._conn.execute(
+                    "UPDATE sessions SET id=? WHERE id=?", (new_id, old_id)
+                )
+        legacy_tombstones = self._conn.execute(
+            "SELECT id, deleted_at FROM session_tombstones WHERE id LIKE 'webui:%'"
+        ).fetchall()
+        for old_id, deleted_at in legacy_tombstones:
+            try:
+                new_id = canonical_session_id(old_id)
+            except ValueError:
+                continue
+            self._conn.execute(
+                "INSERT INTO session_tombstones(id, deleted_at) VALUES(?,?) "
+                "ON CONFLICT(id) DO UPDATE SET deleted_at=MAX(deleted_at, excluded.deleted_at)",
+                (new_id, deleted_at),
+            )
+            self._conn.execute("DELETE FROM session_tombstones WHERE id=?", (old_id,))
+
     def record(
         self,
         session_id: str,
@@ -68,18 +155,29 @@ class SessionStore:
         *,
         model: str | None = None,
         provider: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Append one message; upsert the session (first user line = preview)."""
         if not session_id or not text:
             return
+        try:
+            session_id = canonical_session_id(session_id)
+        except ValueError:
+            return
         now = time.time()
         with self._lock, self._conn:
+            if self._is_tombstoned_locked(session_id):
+                return
             self._conn.execute(
                 "INSERT OR IGNORE INTO sessions(id, created_at, last_active) "
                 "VALUES(?,?,?)", (session_id, now, now))
             self._conn.execute(
-                "INSERT INTO messages(session_id, role, text, ts) VALUES(?,?,?,?)",
-                (session_id, role, text, now))
+                "INSERT INTO messages(session_id, role, text, ts, metadata) "
+                "VALUES(?,?,?,?,?)",
+                (
+                    session_id, role, text, now,
+                    json.dumps(metadata, ensure_ascii=False) if metadata else None,
+                ))
             if role == "user":
                 self._conn.execute(
                     "UPDATE sessions SET last_active=?, "
@@ -89,6 +187,10 @@ class SessionStore:
                 self._conn.execute(
                     "UPDATE sessions SET last_active=? WHERE id=?",
                     (now, session_id))
+            self._conn.execute(
+                "UPDATE sessions SET execution_state='idle' WHERE id=?",
+                (session_id,),
+            )
             if model or provider:
                 self._conn.execute(
                     "UPDATE sessions SET model=COALESCE(?, model), "
@@ -106,6 +208,7 @@ class SessionStore:
         """Remember which brain served this conversation. No new message."""
         if not session_id or not (model or provider):
             return
+        session_id = canonical_session_id(session_id)
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE sessions SET model=COALESCE(?, model), "
@@ -117,6 +220,7 @@ class SessionStore:
         """The model/provider last stamped on this session, if any."""
         if not session_id:
             return {"model": None, "provider": None}
+        session_id = canonical_session_id(session_id)
         with self._lock:
             cur = self._conn.execute(
                 "SELECT model, provider FROM sessions WHERE id=?",
@@ -129,10 +233,23 @@ class SessionStore:
 
     def history(self, session_id: str) -> list[dict[str, Any]]:
         """All turns for a session, oldest first."""
+        session_id = canonical_session_id(session_id)
         cur = self._conn.execute(
-            "SELECT role, text, ts FROM messages WHERE session_id=? ORDER BY id",
+            "SELECT role, text, ts, metadata FROM messages "
+            "WHERE session_id=? ORDER BY id",
             (session_id,))
-        return [{"role": r, "text": t, "ts": ts} for r, t, ts in cur.fetchall()]
+        rows = []
+        for role, text, ts, metadata in cur.fetchall():
+            row = {"role": role, "text": text, "ts": ts}
+            if metadata:
+                try:
+                    parsed = json.loads(metadata)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    row["metadata"] = parsed
+            rows.append(row)
+        return rows
 
     def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         """Recent sessions (most-active first) with preview + turn count.
@@ -142,29 +259,192 @@ class SessionStore:
         unspecified tie order."""
         cur = self._conn.execute(
             "SELECT s.id, s.title, s.preview, s.created_at, s.last_active, "
-            "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id) "
+            "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), "
+            "  s.model, s.provider, s.execution_state "
             "FROM sessions s ORDER BY s.last_active DESC, s.rowid DESC "
             "LIMIT ?", (limit,))
         return [{"id": i, "title": ti, "preview": p, "created_at": ca,
-                 "last_active": la, "messages": n}
-                for i, ti, p, ca, la, n in cur.fetchall()]
+                 "last_active": la, "messages": n, "model": model,
+                 "provider": provider, "execution_state": state or "idle"}
+                for i, ti, p, ca, la, n, model, provider, state in cur.fetchall()]
 
-    def set_title(self, session_id: str, title: str) -> None:
+    def create(self, session_id: str) -> dict[str, Any]:
+        """Idempotently create one transcript unless its id is tombstoned."""
+        session_id = canonical_session_id(session_id)
+        now = time.time()
         with self._lock, self._conn:
-            self._conn.execute("UPDATE sessions SET title=? WHERE id=?",
-                               (title, session_id))
+            if self._is_tombstoned_locked(session_id):
+                return {"id": session_id, "created": False, "tombstoned": True}
+            existed = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,)
+            ).fetchone() is not None
+            self._conn.execute(
+                "INSERT OR IGNORE INTO sessions(id, created_at, last_active, execution_state) "
+                "VALUES(?,?,?,'idle')", (session_id, now, now),
+            )
+        return {"id": session_id, "created": not existed, "tombstoned": False}
 
-    def delete(self, session_id: str) -> bool:
-        """Delete one exact session and its messages atomically."""
+    def exists(self, session_id: str) -> bool:
+        session_id = canonical_session_id(session_id)
+        with self._lock:
+            return self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,)
+            ).fetchone() is not None
+
+    def set_execution_state(self, session_id: str, state: str) -> bool:
+        session_id = canonical_session_id(session_id)
+        normalized = str(state or "").strip().lower()
+        if normalized not in {"idle", "running", "interrupted", "failed"}:
+            raise ValueError("invalid execution state")
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE sessions SET execution_state=?, last_active=? WHERE id=?",
+                (normalized, time.time(), session_id),
+            )
+        return cur.rowcount > 0
+
+    def set_title(self, session_id: str, title: str) -> bool:
+        session_id = canonical_session_id(session_id)
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE sessions SET title=? WHERE id=?", (title, session_id)
+            )
+        return cur.rowcount > 0
+
+    def clear(self, session_id: str) -> bool:
+        """Idempotently clear runtime history while retaining the session."""
+        session_id = canonical_session_id(session_id)
         with self._lock, self._conn:
             exists = self._conn.execute(
-                "SELECT 1 FROM sessions WHERE id=?", (session_id,),
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,)
             ).fetchone() is not None
             if not exists:
                 return False
             self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
+            self._conn.execute(
+                "UPDATE sessions SET preview=NULL, execution_state='idle', "
+                "last_active=? WHERE id=?", (time.time(), session_id),
+            )
+        return exists
+
+    def search(self, query: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Search canonical transcript text and runtime titles."""
+        needle = str(query or "").strip()
+        if not needle:
+            return self.list_sessions(limit=limit)
+        escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT DISTINCT s.id FROM sessions s LEFT JOIN messages m "
+                "ON m.session_id=s.id WHERE s.title LIKE ? ESCAPE '\\' "
+                "OR s.preview LIKE ? ESCAPE '\\' OR m.text LIKE ? ESCAPE '\\' "
+                "ORDER BY s.last_active DESC LIMIT ?",
+                (pattern, pattern, pattern, max(1, min(int(limit), 500))),
+            )
+            ids = [row[0] for row in cur.fetchall()]
+        if not ids:
+            return []
+        rows = {row["id"]: row for row in self.list_sessions(limit=100_000)}
+        return [rows[i] for i in ids if i in rows]
+
+    def reconcile_visible_transcript(
+        self, session_id: str, messages: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Replace wrapped user prompts with their ARES-visible text safely.
+
+        Roles and assistant text must already match exactly after whitespace
+        normalization. This migration cannot rewrite model output or change the
+        number/order of turns.
+        """
+        session_id = canonical_session_id(session_id)
+        proposed = [
+            (str(row.get("role") or ""), str(row.get("text") or ""))
+            for row in messages
+            if isinstance(row, dict) and row.get("role") in {"user", "assistant"}
+        ]
+        with self._lock, self._conn:
+            current = self._conn.execute(
+                "SELECT id, role, text FROM messages WHERE session_id=? "
+                "AND role IN ('user','assistant') ORDER BY id", (session_id,),
+            ).fetchall()
+            if len(current) != len(proposed):
+                raise ValueError("transcript message counts do not match")
+            updates = []
+            for (message_id, current_role, current_text), (new_role, new_text) in zip(
+                current, proposed
+            ):
+                if current_role != new_role:
+                    raise ValueError("transcript roles do not match")
+                if new_role == "assistant" and " ".join(current_text.split()) != " ".join(new_text.split()):
+                    raise ValueError("assistant transcript text does not match")
+                if new_role == "user" and not new_text.strip():
+                    raise ValueError("user transcript text cannot be empty")
+                if new_role == "user" and current_text != new_text:
+                    updates.append((new_text, message_id))
+            self._conn.executemany("UPDATE messages SET text=? WHERE id=?", updates)
+            if proposed:
+                first_user = next((text for role, text in proposed if role == "user"), None)
+                if first_user is not None:
+                    self._conn.execute(
+                        "UPDATE sessions SET preview=? WHERE id=?",
+                        (first_user[:100], session_id),
+                    )
+        return {"id": session_id, "updated_user_messages": len(updates)}
+
+    def reconcile_visible_user_messages(
+        self, session_id: str, user_messages: list[str]
+    ) -> dict[str, Any]:
+        """Reconcile visible user text when ARES deduplicated assistant rows."""
+        session_id = canonical_session_id(session_id)
+        proposed = [str(text) for text in user_messages]
+        if any(not text.strip() for text in proposed):
+            raise ValueError("user transcript text cannot be empty")
+        with self._lock, self._conn:
+            current = self._conn.execute(
+                "SELECT id, text FROM messages WHERE session_id=? AND role='user' "
+                "ORDER BY id", (session_id,),
+            ).fetchall()
+            if len(current) != len(proposed):
+                raise ValueError("user transcript message counts do not match")
+            updates = [
+                (new_text, message_id)
+                for (message_id, current_text), new_text in zip(current, proposed)
+                if current_text != new_text
+            ]
+            self._conn.executemany("UPDATE messages SET text=? WHERE id=?", updates)
+            if proposed:
+                self._conn.execute(
+                    "UPDATE sessions SET preview=? WHERE id=?",
+                    (proposed[0][:100], session_id),
+                )
+        return {"id": session_id, "updated_user_messages": len(updates)}
+
+    def delete(self, session_id: str) -> bool:
+        """Idempotently delete and tombstone one canonical transcript."""
+        session_id = canonical_session_id(session_id)
+        with self._lock, self._conn:
+            exists = self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,),
+            ).fetchone() is not None
+            self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
             self._conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
-        return True
+            self._conn.execute(
+                "INSERT INTO session_tombstones(id, deleted_at) VALUES(?,?) "
+                "ON CONFLICT(id) DO UPDATE SET deleted_at=excluded.deleted_at",
+                (session_id, time.time()),
+            )
+        return exists
+
+    def is_tombstoned(self, session_id: str) -> bool:
+        session_id = canonical_session_id(session_id)
+        with self._lock:
+            return self._is_tombstoned_locked(session_id)
+
+    def _is_tombstoned_locked(self, session_id: str) -> bool:
+        return self._conn.execute(
+            "SELECT 1 FROM session_tombstones WHERE id=?", (session_id,)
+        ).fetchone() is not None
 
     def prune(self, keep: int) -> int:
         """Drop sessions beyond the ``keep`` most-recently-active (and their

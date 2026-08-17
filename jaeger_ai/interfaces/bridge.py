@@ -137,11 +137,12 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 1
+INTEGRATION_CONTRACT_VERSION = 2
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
-    "setup_defaults", "list_sessions", "load_session", "check_update",
+    "setup_defaults", "session_contract", "list_sessions", "load_session",
+    "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
 )
 BRIDGE_COMMANDS = (
@@ -151,8 +152,46 @@ BRIDGE_COMMANDS = (
     "clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill",
     "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
     "remove_mcp_server", "reload_tools",
-    "delete_session",
+    "create_session", "clear_session", "delete_session", "reconcile_session_transcript",
 )
+
+
+def _session_contract() -> dict[str, Any]:
+    """Versioned ownership contract consumed by ARES and native surfaces."""
+    return {
+        "name": "ares-jaeger-sessions",
+        "version": 2,
+        "identifier": {
+            "format": "opaque",
+            "max_length": 256,
+            "legacy_aliases_accepted": ["webui:<id>"],
+            "emits_namespaces": False,
+        },
+        "ownership": {
+            "transcript": "jaeger",
+            "execution_state": "jaeger",
+            "tool_calls": "jaeger",
+            "runtime_history": "jaeger",
+            "workspace": "ares",
+            "project": "ares",
+            "pin": "ares",
+            "archive": "ares",
+            "display_title": "ares",
+            "draft": "ares",
+        },
+        "operations": {
+            "create": {"available": True, "owner": "jaeger", "mutable": True},
+            "list": {"available": True, "owner": "jaeger", "mutable": False},
+            "load": {"available": True, "owner": "jaeger", "mutable": False},
+            "rename": {"available": True, "owner": "ares", "mutable": True},
+            "clear": {"available": True, "owner": "jaeger", "mutable": True},
+            "delete": {"available": True, "owner": "jaeger", "mutable": True},
+            "archive": {"available": True, "owner": "ares", "mutable": True},
+            "search": {"available": True, "owner": "jaeger", "mutable": False},
+        },
+        "idempotent_mutations": ["create", "rename", "clear", "delete", "archive"],
+        "tombstones": {"owner": "jaeger", "durable": True},
+    }
 
 
 def _integration_contract() -> dict[str, Any]:
@@ -172,7 +211,10 @@ def _integration_contract() -> dict[str, Any]:
         },
         "features": {
             "chat": {"available": True, "owner": "jaeger", "mutable": True},
-            "sessions": {"available": True, "owner": "jaeger", "mutable": True},
+            "sessions": {
+                "available": True, "owner": "jaeger", "mutable": True,
+                "contract": _session_contract(),
+            },
             "approvals": {"available": True, "owner": "jaeger", "mutable": True},
             "character_persona_editing": {
                 "available": True, "owner": "jaeger", "mutable": True,
@@ -405,6 +447,16 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         if store is None:
             return []
         return store.list_sessions(limit=int(args.get("limit") or 50))
+    if what == "session_contract":
+        return _session_contract()
+    if what == "search_sessions":
+        from jaeger_ai.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            return []
+        return store.search(
+            str(args.get("query") or ""), limit=int(args.get("limit") or 50)
+        )
     if what == "load_session":
         # Runway item 4: the operator picked a conversation out of
         # History. Returns its full turn list for the client to rebuild
@@ -413,10 +465,17 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # turn on this id continues WITH context — see
         # ``main.resume_session_from_store`` for why this is a full
         # replay, not the usual clean-slate / lossy-digest resume.
+        from jaeger_ai.core.sessions import canonical_session_id
         from jaeger_ai.main import resume_session_from_store
-        sid = str(args.get("id") or "").strip()
-        if not sid:
+        raw_sid = str(args.get("id") or "").strip()
+        if not raw_sid:
             return []
+        sid = canonical_session_id(raw_sid)
+        if args.get("resume") is False:
+            from jaeger_ai.core.sessions import get_store
+
+            store = get_store(lay)
+            return store.history(sid) if store is not None else []
         return resume_session_from_store(
             getattr(boot, "client", None), sid, layout=lay)
     if what == "check_update":
@@ -908,11 +967,24 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             _emit(proto, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
+        try:
+            from jaeger_ai.core.sessions import get_store
+
+            store = get_store(ctx.layout)
+            if store is not None:
+                store.create(session)
+                store.set_execution_state(session, "running")
+        except Exception:  # noqa: BLE001 — state telemetry cannot fail a turn
+            pass
         _emit_state(proto, ctx, True, session)
         try:
             from jaeger_ai.main import run_for_voice
             with _turn_workspace(ctx, req.get("workspace")):
-                result = run_for_voice(ctx.client, text, session_key=session)
+                display_text = req.get("display_text")
+                voice_kwargs = {"session_key": session}
+                if display_text is not None:
+                    voice_kwargs["display_text"] = str(display_text)
+                result = run_for_voice(ctx.client, text, **voice_kwargs)
             used, mx = _ctx_usage(session)
             _emit(proto, protocol.reply_frame(
                 result.get("text") or "", result.get("error"), session,
@@ -921,6 +993,14 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(proto, protocol.reply_frame("", str(exc), session))
         finally:
+            try:
+                from jaeger_ai.core.sessions import get_store
+
+                store = get_store(ctx.layout)
+                if store is not None:
+                    store.set_execution_state(session, "idle")
+            except Exception:  # noqa: BLE001 — state telemetry is best-effort
+                pass
             _emit_state(proto, ctx, False, session)
 
 
@@ -1099,19 +1179,41 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))
                 continue
-            if op == "command" and (req.get("cmd") or "") == "delete_session":
+            if op == "command" and (req.get("cmd") or "") in {
+                "create_session", "clear_session", "delete_session",
+                "reconcile_session_transcript",
+            }:
                 try:
-                    from jaeger_ai.core.sessions import get_store
+                    from jaeger_ai.core.sessions import canonical_session_id, get_store
                     from jaeger_ai.main import evict_session
 
-                    sid = str((req.get("args") or {}).get("id") or "").strip()
-                    if not sid:
-                        raise ValueError("session id is required")
+                    cmd = str(req.get("cmd") or "")
+                    command_args = req.get("args") or {}
+                    sid = canonical_session_id(command_args.get("id"))
                     store = get_store(ctx.layout)
-                    removed = bool(store is not None and store.delete(sid))
-                    evict_session(sid)
+                    if store is None:
+                        raise RuntimeError("no Jaeger session store is available")
+                    if cmd == "create_session":
+                        data = store.create(sid)
+                    elif cmd == "reconcile_session_transcript":
+                        messages = command_args.get("messages")
+                        user_messages = command_args.get("user_messages")
+                        if isinstance(messages, list):
+                            data = store.reconcile_visible_transcript(sid, messages)
+                        elif isinstance(user_messages, list):
+                            data = store.reconcile_visible_user_messages(sid, user_messages)
+                        else:
+                            raise ValueError("messages or user_messages must be a list")
+                    elif cmd == "clear_session":
+                        cleared = store.clear(sid)
+                        evict_session(sid)
+                        data = {"id": sid, "cleared": cleared}
+                    else:
+                        removed = store.delete(sid)
+                        evict_session(sid)
+                        data = {"id": sid, "removed": removed, "tombstoned": True}
                     _emit(proto, protocol.result_frame(
-                        req.get("id"), data={"ok": True, "id": sid, "removed": removed}, ok=True))
+                        req.get("id"), data={"ok": True, **data}, ok=True))
                 except Exception as exc:  # noqa: BLE001 — report through the contract
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))
@@ -1210,7 +1312,12 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                         evict_session(old_id)
                     except Exception:  # noqa: BLE001 — cleanup only
                         pass
+                from jaeger_ai.core.sessions import get_store
+
                 new_id = uuid.uuid4().hex[:8]
+                store = get_store(ctx.layout)
+                if store is not None:
+                    store.create(new_id)
                 _emit(proto, protocol.result_frame(
                     req.get("id"), data={"id": new_id}, ok=True))
                 continue

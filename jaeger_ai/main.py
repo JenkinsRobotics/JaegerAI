@@ -3248,7 +3248,13 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
         pass
 
 
-def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:
+def run_for_voice(
+    client: Any,
+    user_text: str,
+    session_key: str | None = None,
+    *,
+    display_text: str | None = None,
+) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
     path and the messaging bridges (which pass channel-specific
@@ -3269,9 +3275,14 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
         from jaeger_ai.core.sessions import get_store
         store = get_store()
         if store is not None:
-            store.record(session, "user", user_text)
+            store.record(session, "user", display_text if display_text is not None else user_text)
             if out.get("text"):
-                store.record(session, "assistant", out["text"])
+                store.record(
+                    session,
+                    "assistant",
+                    out["text"],
+                    metadata={"tool_calls": list(out.get("tool_activity") or [])},
+                )
             try:
                 from jaeger_ai.core.runtime.modes import serving_brain
                 brain = serving_brain()
