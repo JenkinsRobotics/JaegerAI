@@ -144,6 +144,7 @@ BRIDGE_QUERIES = (
     "setup_defaults", "session_contract", "list_sessions", "load_session",
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
+    "list_credentials",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -152,6 +153,8 @@ BRIDGE_COMMANDS = (
     "clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill",
     "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
     "remove_mcp_server", "reload_tools",
+    "set_credential", "delete_credential",
+    "configure_model",
     "create_session", "clear_session", "delete_session", "reconcile_session_transcript",
 )
 
@@ -228,6 +231,8 @@ def _integration_contract() -> dict[str, Any]:
                 "transports": ["stdio", "streamable_http"],
             },
             "tool_inventory": {"available": True, "owner": "jaeger", "mutable": False},
+            "credentials": {"available": True, "owner": "jaeger", "mutable": True,
+                            "values_readable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
             "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
             "schedules": {"available": False, "owner": "jaeger", "mutable": False},
@@ -324,6 +329,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         from jaeger_ai.core.mcp.service import list_tools
 
         return list_tools(lay)
+    if what == "list_credentials":
+        from jaeger_ai.core.credential_service import list_credentials
+
+        return list_credentials(lay)
     if what == "identity":
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
@@ -1108,6 +1117,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 asleep_model=(args.get("asleep_model") or None),
                 permission_mode=str(args.get("permission_mode") or "confirm"),
                 interaction_mode=str(args.get("interaction_mode") or "gui"),
+                make_default=bool(args.get("make_default", True)),
             )
         except Exception as exc:  # noqa: BLE001 — reported, never crashes the bridge
             return False, None, str(exc)
@@ -1239,6 +1249,47 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                         data = mcp_service.remove_server(ctx.layout, a.get("name"))
                     else:
                         data = mcp_service.reload_tools(ctx.layout)
+                    _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") in {
+                "set_credential", "delete_credential",
+            }:
+                a = req.get("args") or {}
+                cmd = str(req.get("cmd") or "")
+                try:
+                    from jaeger_ai.core import credential_service
+
+                    if ctx.layout is None:
+                        raise RuntimeError("no Jaeger instance is selected")
+                    if cmd == "set_credential":
+                        data = credential_service.set_credential(
+                            ctx.layout, a.get("name"), a.get("value"))
+                    else:
+                        data = credential_service.delete_credential(
+                            ctx.layout, a.get("name"))
+                    _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "configure_model":
+                try:
+                    from jaeger_ai.core.models.configuration import configure_model
+
+                    if ctx.layout is None:
+                        raise RuntimeError("no Jaeger instance is selected")
+                    a = req.get("args") or {}
+                    data = configure_model(
+                        ctx.layout,
+                        provider=a.get("provider"),
+                        model=a.get("model"),
+                        base_url=a.get("base_url"),
+                        context_length=a.get("context_length"),
+                        dry_run=bool(a.get("dry_run", False)),
+                    )
                     _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
                 except Exception as exc:  # noqa: BLE001 — report through the contract
                     _emit(proto, protocol.result_frame(
