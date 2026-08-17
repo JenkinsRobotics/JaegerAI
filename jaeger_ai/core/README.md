@@ -3,7 +3,7 @@
 > **Modification tier: C — Framework core.** This is the instance
 > machinery, the schema definitions, the prompt assembly, the tool
 > implementations, the permission system, the safety scan. Edits here
-> affect every JROS deployment. Read first, plan minimal patches, run
+> affect every JaegerAI deployment. Read first, plan minimal patches, run
 > the test suite, and let the entry land in
 > `<instance>/audit/self_modification.jsonl`. Full policy:
 > [`/docs/SELF_MODIFICATION_BOUNDARIES.md`](../../../docs/SELF_MODIFICATION_BOUNDARIES.md).

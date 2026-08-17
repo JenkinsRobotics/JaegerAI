@@ -466,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # The tray's live indicator used to poll the daemon's
     # ``Lifecycle.status()``. The daemon architecture was removed on
-    # 2026-06-14 (JROS is fused-mode); there is no daemon to poll, so the
+    # 2026-06-14 (JaegerAI is fused-mode); there is no daemon to poll, so the
     # indicator renders a static "no daemon" state. This placeholder keeps
     # the rumps scaffolding intact for the future windowed-app in-process tray.
     class _ParkedStatus:
@@ -524,7 +524,7 @@ def run_surface(ctx, spec):  # noqa: ARG001 — chassis Surface contract
     manifest surface entry just documents the contract.
     """
     raise NotImplementedError(
-        "JROS tray runs as its own subprocess "
+        "JaegerAI tray runs as its own subprocess "
         "(python -m jaeger_os.interfaces.pyside6.tray.macos); the chassis "
         "doesn't host non-Qt surfaces in format 0.1. This stub "
         "exists so jaeger.toml's [[surface]] tray factory resolves; "

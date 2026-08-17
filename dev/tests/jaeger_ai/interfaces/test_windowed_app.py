@@ -142,7 +142,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
 
     repo = pathlib.Path(__file__).resolve().parents[4]
     app = JaegerApp(repo / "jaeger.windowed.toml")
-    assert app.spec.name == "jros-windowed"
+    assert app.spec.name == "jaeger-windowed"
     assert app.spec.event_loop == "qt"
     app.boot()   # init_core builds the AgentCore (main thread) + bridge
     try:
@@ -331,7 +331,7 @@ def test_tray_dropdown_status_labels(qapp):
 
 
 def test_tray_dropdown_closes_when_clicking_another_qt_window(qapp):
-    """Click-away must include other in-process JROS windows, not just
+    """Click-away must include other in-process JaegerAI windows, not just
     unrelated macOS apps."""
     from jaeger_ai.interfaces.pyside6.tray.menu import TrayMenu
 

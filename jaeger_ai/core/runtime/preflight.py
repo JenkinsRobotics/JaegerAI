@@ -190,7 +190,7 @@ def _check_install_method() -> Check:
             category="system",
             ok=True,
             detail=(
-                "installed via pip — legacy 0.2.2 layout. JROS 0.2.3+ "
+                "installed via pip — legacy 0.2.2 layout. JaegerAI 0.2.3+ "
                 "ships as a git-clone install (the in-tree install.sh / "
                 "scripts/install.sh curl one-liner). Re-install via the "
                 "curl one-liner so upgrades become `git pull && "

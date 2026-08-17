@@ -3,7 +3,7 @@
 Surveys three sources so the TUI's ``/model`` command can show the full
 picture at a glance:
 
-  - **JROS registry** — GGUF models JROS runs in-process (downloaded or
+  - **JaegerAI registry** — GGUF models JaegerAI runs in-process (downloaded or
     downloadable), via :mod:`model_resolver`.
   - **Ollama** — a local Ollama server's installed models (its
     ``/api/tags`` endpoint), when the server is running.
@@ -30,10 +30,10 @@ _LMSTUDIO_DIRS = ("~/.lmstudio/models", "~/.cache/lm-studio/models")
 
 
 def discover_jaeger() -> list[dict[str, Any]]:
-    """JROS's own GGUF models — registered, with download/cache status."""
+    """JaegerAI's own GGUF models — registered, with download/cache status."""
     try:
         from jaeger_ai.core.models.model_resolver import list_registered_models
-        # Registry rows only: this is the "JROS registry" section of the
+        # Registry rows only: this is the "JaegerAI registry" section of the
         # picker, and ``discover_all`` surveys the provider lanes itself.
         return list_registered_models(
             include_serving=False, include_providers=False,
@@ -82,8 +82,8 @@ def _config_extra_dirs() -> list[str]:
 
 
 def discover_local_gguf() -> list[dict[str, Any]]:
-    """Every ``.gguf`` file on disk JROS could load in-process — the
-    repo ``models/`` dir, the JROS model cache, LM Studio's model
+    """Every ``.gguf`` file on disk JaegerAI could load in-process — the
+    repo ``models/`` dir, the JaegerAI model cache, LM Studio's model
     folder, and any custom directories registered via ``model_location``
     (``model.extra_gguf_dirs`` in config). De-duplicated by absolute
     path; works with no server running (it is a pure filesystem scan)."""
@@ -266,7 +266,7 @@ def discover_ollama_cloud(api_key: str = "") -> dict[str, Any]:
 
 def discover_all(ollama_cloud_key: str = "") -> dict[str, Any]:
     """The full picture so ``/model`` can show everything selectable:
-    the JROS registry, every ``.gguf`` on disk (repo / cache / LM
+    the JaegerAI registry, every ``.gguf`` on disk (repo / cache / LM
     Studio), Ollama (live server + on-disk manifests), LM Studio's live
     server, and — when ``ollama_cloud_key`` is supplied — the Ollama
     Cloud catalogue."""

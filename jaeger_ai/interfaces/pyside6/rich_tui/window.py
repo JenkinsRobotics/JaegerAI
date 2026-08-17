@@ -102,8 +102,8 @@ class ChatWindow(QWidget):
         self._turn_timer.setInterval(1000)
         self._turn_timer.timeout.connect(self._tick_status)
 
-        self.setObjectName("JrosChatWindow")
-        self.setWindowTitle(f"JROS — {self._agent_name} · {self._mode}")
+        self.setObjectName("JaegerChatWindow")
+        self.setWindowTitle(f"JaegerAI — {self._agent_name} · {self._mode}")
         self.resize(760, 660)
         self._build_ui()
         self._emit_banner()
@@ -118,7 +118,7 @@ class ChatWindow(QWidget):
     # ── UI ────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         self.setStyleSheet(f"""
-            QWidget#JrosChatWindow {{ background-color: {_CANVAS}; }}
+            QWidget#JaegerChatWindow {{ background-color: {_CANVAS}; }}
             QLabel#HeaderLabel {{
                 font-family: {_MONO[0]}, {_MONO[1]}, monospace;
                 font-size: 12px;
@@ -174,7 +174,7 @@ class ChatWindow(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self.header = QLabel(f"jros · {self._agent_name} · local")
+        self.header = QLabel(f"jaeger · {self._agent_name} · local")
         self.header.setObjectName("HeaderLabel")
         root.addWidget(self.header)
 
@@ -334,7 +334,7 @@ class ChatWindow(QWidget):
 
     def _on_mode(self, msg: Any) -> None:
         self._mode = getattr(msg, "mode", "") or self._mode
-        self.setWindowTitle(f"JROS — {self._agent_name} · {self._mode}")
+        self.setWindowTitle(f"JaegerAI — {self._agent_name} · {self._mode}")
         self._emit_system(f"◆ mode: {self._mode}")
 
     def _handle_plugins(self, args: list[str]) -> None:

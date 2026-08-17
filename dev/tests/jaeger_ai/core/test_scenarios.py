@@ -178,7 +178,7 @@ def test_mem_override_no_blending(tmp_path: Path):
     ok, _ = sc._chk_mem_override(good, ws, MemoryView())
     assert ok
     blended = _t(_turn(answer="stored"),
-                 _turn(answer="It's /Users/jonathanjenkins/dev (was /opt/jros)."))
+                 _turn(answer="It's /Users/jonathanjenkins/dev (was /opt/jaeger)."))
     ok, detail = sc._chk_mem_override(blended, ws, MemoryView())
     assert not ok and "blend" in detail.lower()
 

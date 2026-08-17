@@ -51,7 +51,7 @@ def _wake_phrases(name: str | None) -> tuple[str, ...]:
     """Wake phrases for the active instance's name (``hey/ok/okay <name>``).
 
     "Erin Jaeger" wakes on both ``hey erin`` (the persona) AND ``hey jaeger``
-    (the system) — JaegerOS is the platform regardless of the instance's
+    (the system) — JaegerAI is the platform regardless of the instance's
     persona name, so addressing it by either is natural. The persona phrases
     are listed last so :attr:`wake_word_phrase` shows the persona one in the
     banner. The "jaeger" defaults carry phonetic variants (yeager / yager /

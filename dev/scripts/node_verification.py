@@ -179,7 +179,7 @@ def verify_multiprocess(*, timeout_s: float = 8.0) -> bool:
     print("  KNOWN INCOMPLETE: requires Track A.7 broker work.")
     print("  Running anyway to surface the failure mode...")
 
-    endpoint = f"ipc:///tmp/jros-nodetest-{uuid.uuid4().hex[:8]}.sock"
+    endpoint = f"ipc:///tmp/jaeger-nodetest-{uuid.uuid4().hex[:8]}.sock"
 
     # Parent process binds the endpoint as the broker.
     bus = ZMQBus(endpoint=endpoint, bind=True)
@@ -300,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.child_echo_node:
         return _run_child_echo_node(args.endpoint)
 
-    print("══ JROS 0.4 Track A verification gate ═══════════════════")
+    print("══ JaegerAI 0.4 Track A verification gate ═══════════════════")
     print("Echo-node round-trip across both transport modes.")
 
     results: list[tuple[str, bool]] = []

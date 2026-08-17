@@ -1,6 +1,6 @@
-"""Client protocol + JrosClient SDK — the unified wire contract.
+"""Client protocol + JaegerClient SDK — the unified wire contract.
 
-Tests the protocol builders/parse + drives ``JrosClient`` against a fake
+Tests the protocol builders/parse + drives ``JaegerClient`` against a fake
 bridge (no model boot) to pin the turn / tool-event / mid-turn-request flow.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 
 from jaeger_os.contract import protocol
-from jaeger_ai.interfaces.client import JrosClient
+from jaeger_ai.interfaces.client import JaegerClient
 from jaeger_ai.core.messages import AgentState, ChatReply, ToolEvent
 
 
@@ -61,7 +61,7 @@ for line in sys.stdin:
 
 
 def test_client_drives_a_bridge_turn():
-    with JrosClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
+    with JaegerClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
         assert c.ready == {"instance": "fake", "model": "m"}
         events: list[dict] = []
         out = c.turn("hello", on_event=events.append)
@@ -70,7 +70,7 @@ def test_client_drives_a_bridge_turn():
 
 
 def test_client_answers_mid_turn_request():
-    with JrosClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
+    with JaegerClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
         c.start  # already started by __enter__
         out = c.turn("confirm please", on_request=lambda f: "allow")
         assert out["text"] == "answered:allow"

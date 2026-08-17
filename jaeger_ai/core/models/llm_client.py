@@ -185,13 +185,12 @@ class LlamaServerClient:
 
 DEFAULT_GGUF_PATH = Path(
     os.environ.get(
-        "LILITH_AGENT_GGUF",
-        "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-        "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf",
+        "JAEGER_GGUF_PATH",
+        str(Path.home() / ".cache" / "jaeger" / "models" / "default.gguf"),
     )
 )
 """Default GGUF path for the in-process backend — mirrors the
-reference's ``DEFAULT_MODEL_PATH``. Override via ``LILITH_AGENT_GGUF``
+reference's ``DEFAULT_MODEL_PATH``. Override via ``JAEGER_GGUF_PATH``
 env or pass ``model_path=`` directly to the client constructor."""
 
 

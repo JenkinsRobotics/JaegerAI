@@ -74,14 +74,14 @@ ACTIVE_INSTANCE_FILE = "active_instance"
 # jaeger_os/core/instance/instance.py → .parent.parent.parent = jaeger_os/
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# 0.2.6: operator state lives under ``<install_root>/.jaeger_os/`` —
+# 0.2.6: operator state lives under ``<install_root>/.jaeger_ai/`` —
 # sibling to ``jaeger_os/`` — instead of the user's home ``~/.jaeger/``.
 # This collapses the two-dir installs Hermes / ComfyUI / A1111 already
 # avoid into one place: ``ls <install_root>`` shows the framework
-# (``jaeger_os/``) and the operator's state (``.jaeger_os/``) side by
-# side. ``git pull`` only touches the framework; ``.jaeger_os/`` is
+# (``jaeger_os/``) and the operator's state (``.jaeger_ai/``) side by
+# side. ``git pull`` only touches the framework; ``.jaeger_ai/`` is
 # gitignored in full.
-OPERATOR_STATE_DIR_NAME = ".jaeger_os"
+OPERATOR_STATE_DIR_NAME = ".jaeger_ai"
 
 
 def install_root() -> Path:
@@ -100,26 +100,30 @@ def install_root() -> Path:
 
 
 def operator_state_root() -> Path:
-    """The ``.jaeger_os/`` dir alongside the framework package."""
-    return install_root() / OPERATOR_STATE_DIR_NAME
+    """The ``.jaeger_ai/`` directory alongside the product package."""
+    root = install_root()
+    destination = root / OPERATOR_STATE_DIR_NAME
+    from .legacy_state import migrate_operator_state
+
+    return migrate_operator_state(root, destination)
 
 
 # Legacy alias kept for any internal call-site that still references it
 # before the migration sweep finishes. The semantics changed in 0.2.6:
 # ``USER_ROOT`` is no longer ``~/.jaeger`` — it's now
-# ``<install_root>/.jaeger_os``. The name is preserved to avoid a
+# ``<install_root>/.jaeger_ai``. The name is preserved to avoid a
 # wholesale rename.
 USER_ROOT = operator_state_root()
 
 
 def user_instances_root() -> Path:
-    """Where instances live: ``<install_root>/.jaeger_os/instances/``."""
+    """Where instances live: ``<install_root>/.jaeger_ai/instances/``."""
     return operator_state_root() / INSTANCES_DIR_NAME
 
 
 def active_instance_path() -> Path:
     """Where the sticky-default file lives:
-    ``<install_root>/.jaeger_os/active_instance``."""
+    ``<install_root>/.jaeger_ai/active_instance``."""
     return operator_state_root() / ACTIVE_INSTANCE_FILE
 
 
@@ -231,7 +235,7 @@ def resolve_instance_dir(name: str | None = None) -> Path:
     env var → sticky file → literal ``"default"``.
     """
     # (2) Explicit path override always wins. Bypasses the nesting —
-    # used by the dev sandbox (``sandbox/jros-dev/``) and by tests.
+    # used by the dev sandbox (``sandbox/jaeger-dev/``) and by tests.
     override = os.environ.get("JAEGER_INSTANCE_DIR", "").strip()
     if override:
         return Path(override).expanduser().resolve()
@@ -252,7 +256,7 @@ def resolve_instance_dir(name: str | None = None) -> Path:
 
 # 0.2.6: ``resolve_user_dir()`` removed along with the User layer.
 # Persona/skills/prompts now live inside the per-instance directory at
-# ``<install_root>/.jaeger_os/instances/<name>/``. See the architecture
+# ``<install_root>/.jaeger_ai/instances/<name>/``. See the architecture
 # note in dev docs/architecture/system_runtime_user.md → "0.2.6: two
 # layers, not three" for the rationale (each agent is self-contained;
 # nothing meaningful was shared across the User-layer boundary).

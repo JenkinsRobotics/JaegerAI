@@ -20,11 +20,11 @@
 #      dependencies pull jaeger-os / jaeger-kokoro-tts /
 #      jaeger-whisper-stt straight from GitHub — one install resolves
 #      the whole 4-package stack), app build, scaffold $JAEGER_HOME/
-#      .jaeger_os/ for instance state.
+#      .jaeger_ai/ for instance state.
 #   4. Print next steps.
 #
 # Re-running refreshes JaegerAI from the latest ref (git pull + editable
-# reinstall) while leaving .venv/ and .jaeger_os/ instance state
+# reinstall) while leaving .venv/ and .jaeger_ai/ instance state
 # untouched.
 
 set -euo pipefail
@@ -142,7 +142,7 @@ fi
 
 # 3. Run the in-repo installer (.venv + deps incl. the git-resolved
 #    jaeger-os/jaeger-kokoro-tts/jaeger-whisper-stt stack + app build +
-#    .jaeger_os/ scaffold). --product tells it this is an end-user
+#    .jaeger_ai/ scaffold). --product tells it this is an end-user
 #    install (build the release app, not the dev shell) — every clone
 #    has a dev/ tree now (0.9 split), so that can no longer be the
 #    dev-vs-product signal on its own.
@@ -155,7 +155,7 @@ cat <<EOF
 ║  ✓ JaegerAI installed at $JAEGER_HOME
 ╚══════════════════════════════════════════════╝
 
-Instance state lives under .jaeger_os/; the code stays writable in
+Instance state lives under .jaeger_ai/; the code stays writable in
 place (editable install — the agent self-modifies its own skills).
 
 Next steps:

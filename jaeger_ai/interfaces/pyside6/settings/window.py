@@ -57,7 +57,7 @@ class SettingsWindow(QWidget):
         self._cfg: Config = load_yaml(self.layout_.config_path, Config)
         self._ident: Identity = load_yaml(self.layout_.identity_path, Identity)
 
-        self.setWindowTitle("JROS — Settings")
+        self.setWindowTitle("JaegerAI — Settings")
         self.resize(560, 520)
         self._build_ui()
         self._load_values()

@@ -1,1 +1,1 @@
-"""Avatar + chat companion surface (core JROS)."""
+"""Avatar + chat companion surface (core JaegerAI)."""

@@ -1,4 +1,4 @@
-"""``jaeger runtime`` — inspect + select inference engines (JROS's
+"""``jaeger runtime`` — inspect + select inference engines (JaegerAI's
 equivalent of LM Studio's Settings → Runtime panel).
 
 Each model FORMAT (GGUF / MLX) maps to a chosen ENGINE. ``"auto"`` lets

@@ -1,4 +1,4 @@
-"""Detect whether the agent is running on a desktop or inside a JROS robot.
+"""Detect whether the agent is running on a desktop or inside a JaegerAI robot.
 
 The single source of truth for the cognitive/physical skill split. The
 launcher passes the result of :func:`detect_environment` into the
@@ -14,10 +14,10 @@ Detection signal (in order):
     1. ``LILITH_ENVIRONMENT`` env var, if set, wins (``desktop`` or ``robot``).
     2. Otherwise, default to ``"desktop"``.
 
-When JROS launches Lilith inside a robot, the JROS bootstrap sets
+When JaegerAI launches Lilith inside a robot, the JaegerAI bootstrap sets
 ``LILITH_ENVIRONMENT=robot`` in the child process's environment. There
 is no autodetection beyond that — being inside a body should be a
-deliberate decision JROS makes, not something Lilith infers.
+deliberate decision JaegerAI makes, not something Lilith infers.
 
 # PORTABILITY: Layer 1 utility. Returns a string label; consumers never
 # import platform / os / sysconfig modules to make their own guess.

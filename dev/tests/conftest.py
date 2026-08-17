@@ -1,8 +1,8 @@
 """Pytest configuration for the JaegerAI product test suite.
 
 0.9 step 4 split: this file did not exist in the initial staging pass
-(the monorepo's ``dev/tests/conftest.py`` was pruned into JaegerOS's
-copy — see JaegerOS's own conftest note — but a JaegerAI-side copy was
+(the monorepo's ``dev/tests/conftest.py`` was pruned into JaegerAI's
+copy — see JaegerAI's own conftest note — but a JaegerAI-side copy was
 never written, silently stranding the tool-registry fixtures below).
 Rebuilt from the monorepo's version, package names updated
 (``jaeger_os`` -> ``jaeger_ai`` for the parts that moved with this

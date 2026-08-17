@@ -1,6 +1,6 @@
 # JaegerAI — packaging + dev-tooling config.
 #
-# Split out of the JROS monorepo (0.9 four-way split); the turnkey
+# Split out of the JaegerAI monorepo (0.9 four-way split); the turnkey
 # product (the Mind) — JaegerAgent-powered tools, skills, memory, persona, local
 # inference, AND its own faces (chat app, TUI, voice, protocol). Ships
 # `main.py` + the `jaeger` command. Depends on jaeger-os (the framework
@@ -53,7 +53,7 @@ jaeger = "jaeger_ai.cli.entry:main"
 
 [project.entry-points."jaeger_os.module_roots"]
 # The out-of-tree discover_modules() seam (0.9 step 4 split) — see
-# jaeger_ai/module_roots.py. JaegerOS finds this WITHOUT ever naming
+# jaeger_ai/module_roots.py. JaegerAI finds this WITHOUT ever naming
 # jaeger_ai; it only knows the group.
 jaeger_ai = "jaeger_ai.module_roots:roots"
 

@@ -1,4 +1,4 @@
-"""JROS bus message vocabulary — topic contract + publish/subscribe delivery."""
+"""JaegerAI bus message vocabulary — topic contract + publish/subscribe delivery."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """Windowed-app entry — what a bare ``./launch`` runs (Pattern 1).
 
-Boots JROS's PySide6 chat window + menu-bar tray through the chassis
+Boots JaegerAI's PySide6 chat window + menu-bar tray through the chassis
 ``JaegerApp`` with a Tier-1 ``[core]``. All the substance — the model
 boot, the bus bridge, teardown order — lives in the core
 (``jaeger_os.agent.loop.agent_core:AgentCore``) and the surfaces. This

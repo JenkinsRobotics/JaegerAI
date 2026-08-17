@@ -10,10 +10,10 @@ surface asks before offering to listen.
 
 NO COMMAND VERBS, and that asymmetry is real rather than an omission.
 TTS is something you tell to speak; STT is something that tells YOU.
-The module consumes mic frames JaegerOS's audio driver publishes and
+The module consumes mic frames JaegerAI's audio driver publishes and
 emits transcripts — an application subscribes to it, it does not drive
 it. The only thing to command here is the microphone, and that belongs
-to JaegerOS's AudioIONode, not to this engine.
+to JaegerAI's AudioIONode, not to this engine.
 """
 
 from __future__ import annotations

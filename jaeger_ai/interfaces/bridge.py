@@ -14,7 +14,7 @@ Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md, approved 2026-07-04):
     on a background thread; ``agent_state`` frames stream
     ``booting → ready | failed`` so the shell separates "UI usable" from
     "agent warm".  Chat turns queue and BLOCK until boot completes, so
-    older clients (JrosClient) keep their semantics.
+    older clients (JaegerClient) keep their semantics.
   * WORKER-THREAD TURNS — the stdin loop never blocks on a turn, so
     ``respond`` (permission answers) and ``quit`` stay processable mid-turn.
   * INTERACTIVE PERMISSIONS — tier-2+ approval requests surface as
@@ -141,7 +141,7 @@ INTEGRATION_CONTRACT_VERSION = 6
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
-    "setup_defaults", "session_contract", "list_sessions", "load_session",
+    "setup_defaults", "model_catalog", "session_contract", "list_sessions", "load_session",
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials",
@@ -427,6 +427,47 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 intent["configured"] = None
             return intent
         return {"booted": True, "serving": row}
+
+    if what == "model_catalog":
+        """Canonical model inventory for external product surfaces."""
+        from jaeger_ai.core.models.model_resolver import list_registered_models, serving_model
+
+        raw_models = list_registered_models()
+        models: list[dict[str, Any]] = []
+        providers: dict[str, dict[str, Any]] = {}
+        for row in raw_models:
+            if not isinstance(row, dict):
+                continue
+            model_id = str(row.get("name") or row.get("filename") or "").strip()
+            if not model_id:
+                continue
+            provider = str(row.get("provider") or "").strip() or None
+            models.append({
+                "id": model_id,
+                "label": str(row.get("label") or model_id),
+                "location": str(row.get("location") or row.get("kind") or "unknown"),
+                "provider": provider,
+                "in_use": bool(row.get("serving")),
+                "source": str(row.get("source") or "jaeger"),
+                "notes": str(row.get("description") or row.get("status") or ""),
+                "context_length": row.get("context_length"),
+            })
+            if provider:
+                providers.setdefault(provider, {
+                    "id": provider, "label": provider,
+                    "status": "configured", "source": "jaeger",
+                })
+        active = serving_model() or {}
+        return {
+            "instance": getattr(boot, "instance_name", None),
+            "serving": {
+                "model": active.get("name"),
+                "provider": active.get("provider"),
+                "context_length": active.get("context_length"),
+            } if active else {},
+            "models": models,
+            "providers": list(providers.values()),
+        }
 
     if what == "settings_catalog":
         # The schema-derived settings surface — the SAME catalog `jaeger

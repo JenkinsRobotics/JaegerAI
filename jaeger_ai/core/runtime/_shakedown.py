@@ -44,8 +44,10 @@ def _stage_instance(root: Path) -> None:
         instance_name="shake",
         model=ModelConfig(
             model_path=Path(
-                "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/"
-                "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+                os.environ.get(
+                    "JAEGER_GGUF_PATH",
+                    str(Path.home() / ".cache" / "jaeger" / "models" / "default.gguf"),
+                )
             ),
             ctx=4096,
         ),

@@ -17,7 +17,7 @@ wording), encoded here with REAL checks.
 HERMETIC BY CONSTRUCTION
 ------------------------
 The runner (``dev/benchmark/scenarios.py``) drives these against a
-THROWAWAY temp instance — never the operator's live jros-dev. A prior
+THROWAWAY temp instance — never the operator's live jaeger-dev. A prior
 manual pass polluted live memory (an every-minute schedule that spammed on
 boot) because ``kill -9`` bypassed snapshot-restore. This suite never
 snapshots live state; it copies the live config/identity into a tempdir,
@@ -343,7 +343,7 @@ def _chk_py_text_clean(t: Transcript, ws: Path, m: MemoryView):
     low = t.text.lower()
     if "22" not in low:
         return False, "character count 22 not reported"
-    if "jros-dev-instance-2026" not in low:
+    if "jaeger-dev-instance-2026" not in low:
         return False, "cleaned string not shown"
     return True, "stripped+lowered, count=22"
 
@@ -483,10 +483,10 @@ def _chk_mem_drift(t: Transcript, ws: Path, m: MemoryView):
 
 def _chk_mem_override(t: Transcript, ws: Path, m: MemoryView):
     final = t.final_answer.lower()
-    if "/users/jonathanjenkins/dev" not in final:
+    if "/workspace/dev" not in final:
         return False, "active dev path not updated to the new value"
-    if "/opt/jros" in final:
-        return False, "old path /opt/jros blended into the answer"
+    if "/opt/jaeger" in final:
+        return False, "old path /opt/jaeger blended into the answer"
     return True, "dev path cleanly overridden, no blending"
 
 
@@ -935,7 +935,7 @@ SCENARIOS: list[ScenarioCase] = [
         check=_chk_py_json_parse),
     ScenarioCase(
         id="py-text-clean", category="code", lane="scriptable",
-        turns=["I have a string: ' JROS-dev-instance-2026 \\n'. Run a Python "
+        turns=["I have a string: ' JaegerAI-dev-instance-2026 \\n'. Run a Python "
                "command to strip the whitespace, make it lowercase, and "
                "return the exact character count."],
         check=_chk_py_text_clean),
@@ -970,7 +970,7 @@ SCENARIOS: list[ScenarioCase] = [
         turns=["Schedule a reminder prompt to ping me in 1 minute with the "
                "text: 'Time to check the terminal logs!'."],
         check=_chk_schedule_quick,
-        notes="hermetic instance only — never lands on live jros-dev"),
+        notes="hermetic instance only — never lands on live jaeger-dev"),
     ScenarioCase(
         id="edge-typo-forgive", category="interaction", lane="scriptable",
         turns=["List the filez in the current directory."],
@@ -1027,9 +1027,9 @@ SCENARIOS: list[ScenarioCase] = [
     ScenarioCase(
         id="mem-contradict-override", category="memory", lane="scriptable",
         turns=[
-            "Store a new fact: My main development directory is `/opt/jros`.",
+            "Store a new fact: My main development directory is `/opt/jaeger`.",
             "Actually, scratch that completely. Forget my development "
-            "directory and set it to `/Users/jonathanjenkins/dev`. What is my "
+            "directory and set it to `/workspace/dev`. What is my "
             "active dev path?",
         ],
         check=_chk_mem_override,
@@ -1044,7 +1044,7 @@ SCENARIOS: list[ScenarioCase] = [
         notes="setup plants broken.py (missing colon) so the loop can fire"),
     ScenarioCase(
         id="plan-resource-missing", category="planning", lane="scriptable",
-        turns=["Install the package `non_existent_jros_module_123` via your "
+        turns=["Install the package `non_existent_jaeger_module_123` via your "
                "venv tools. When it fails, find an alternative approach to "
                "mock its primary function `predict_state()` in Python and "
                "execute a test run."],

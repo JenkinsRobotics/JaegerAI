@@ -1,6 +1,6 @@
 """Tool + skill usage telemetry (audit gap #4).
 
-JROS keeps a tamper-evident audit *trail* (every op in ``logs/audit.log``)
+JaegerAI keeps a tamper-evident audit *trail* (every op in ``logs/audit.log``)
 but no usage *counters* — nothing answers "which tools fail most" or
 "which skills are dead weight." This module is the counter layer.
 

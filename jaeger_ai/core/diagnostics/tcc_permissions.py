@@ -7,7 +7,7 @@ trigger every prompt at first app boot instead of letting individual
 tools fail mid-task, and report exact grant state in ``jaeger doctor``.
 
 The catch that makes permissions look "inconsistent": a TCC grant
-attaches to the HOST APP identity (JaegerOS.app vs Terminal vs an IDE),
+attaches to the HOST APP identity (JaegerAI.app vs Terminal vs an IDE),
 so the same tool works from one launch path and fails from another.
 That's why :func:`request_all` must run inside the agent's own process
 (the bridge), not in install.sh — the prompt then names, and the grant

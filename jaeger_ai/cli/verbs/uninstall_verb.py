@@ -1,7 +1,7 @@
 """``jaeger uninstall`` — remove the framework, keep or wipe agents.
 
 Mirrors the install's two-bucket split: removes the *framework* (the product
-files + ``.venv``) and by default KEEPS ``.jaeger_os/`` (every agent's persona,
+files + ``.venv``) and by default KEEPS ``.jaeger_ai/`` (every agent's persona,
 memory, skills, credentials). ``--purge`` wipes that too (irreversible).
 
 Refuses on a dev clone (a ``.git`` at the install root) — uninstalling your
@@ -18,10 +18,10 @@ from pathlib import Path
 from jaeger_ai.cli.verbs.update_verb import _PRODUCT
 
 # Framework = the product allowlist + the venv + the updater's scratch/rollback
-# dirs. NOT ``.jaeger_os`` (instance state) — that's the operator's, gated
+# dirs. NOT ``.jaeger_ai`` (instance state) — that's the operator's, gated
 # behind --purge.
 _FRAMEWORK = (*_PRODUCT, ".venv", ".update-prev", ".update-staging")
-_STATE_DIR = ".jaeger_os"
+_STATE_DIR = ".jaeger_ai"
 
 
 def _rm(path: Path) -> None:
@@ -38,7 +38,7 @@ def _confirm(prompt: str) -> bool:
 def _cmd_uninstall_argv(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger uninstall", add_help=False)
     parser.add_argument("--purge", action="store_true",
-                        help="also wipe .jaeger_os/ (all agents + state)")
+                        help="also wipe .jaeger_ai/ (all agents + state)")
     parser.add_argument("--yes", action="store_true",
                         help="skip the confirmation prompt")
     parser.add_argument("-h", "--help", action="store_true")
@@ -47,7 +47,7 @@ def _cmd_uninstall_argv(argv: list[str]) -> int:
         print(
             "usage: jaeger uninstall [--purge] [--yes]\n"
             "\n"
-            "  Remove the framework (product files + .venv). Keeps .jaeger_os/\n"
+            "  Remove the framework (product files + .venv). Keeps .jaeger_ai/\n"
             "  (your agents) unless --purge. Refuses on a dev clone.\n",
             file=sys.stderr,
         )

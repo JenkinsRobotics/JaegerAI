@@ -99,7 +99,7 @@ def _backup_manifest(name: str, *,
 
 
 def _backups_dir() -> Path:
-    """0.2.6: backups land in ``<install_root>/.jaeger_os/backups/``
+    """0.2.6: backups land in ``<install_root>/.jaeger_ai/backups/``
     alongside instances/, not the legacy ``~/.jaeger/backups/``."""
     from jaeger_ai.core.instance.instance import operator_state_root
     return operator_state_root() / "backups"
@@ -350,7 +350,7 @@ def _ver_gt(a: str, b: str) -> bool:
 
 
 def _pick_backup_interactively() -> Path | None:
-    """List zips under ``<install_root>/.jaeger_os/backups/`` (newest
+    """List zips under ``<install_root>/.jaeger_ai/backups/`` (newest
     first) and let the user pick one. Returns ``None`` if the dir is
     empty or stdin isn't a TTY."""
     backups_dir = _backups_dir()

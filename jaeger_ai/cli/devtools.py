@@ -2,8 +2,8 @@
 """jaeger_os.cli.devtools — the developer toolbox behind `jaeger --dev`.
 
 Replaces the old repo-root launch.py (removed 2026-07-05): the windowed
-dev shell is the repo's JaegerOS.app run in the dev STATE (`jaeger --dev`
-builds + runs it pinned to the jros-dev instance — one bundle, one TCC
+dev shell is the repo's JaegerAI.app run in the dev STATE (`jaeger --dev`
+builds + runs it pinned to the jaeger-dev instance — one bundle, one TCC
 permission grant, since 2026-07-14); this module keeps the dev TUI +
 utility verbs.
 
@@ -23,7 +23,7 @@ The in-process TUI loads the plugin stack directly:
    - Gemma 4 + updated registry                         (core/models/)
    - bench infra (writer/aggregator dir fix)            (core/bench/)
 
-   ./launch                   boot the windowed JROS app
+   ./launch                   boot the windowed JaegerAI app
    ./launch --tui             boot the in-process TUI in this terminal
    ./launch --tui --no-voice   ... skipping voice startup
    ./launch --stop             kill a lingering TUI singleton
@@ -37,7 +37,7 @@ The terminal becomes the TUI.  Ctrl-C / ``/quit`` ends the session;
 Gemma + Kokoro + Whisper unload cleanly with the process.
 
 Every run uses the dev instance at
-``.jaeger_os/instances/jros-dev/`` — gitignored, so it never ships to
+``.jaeger_ai/instances/jaeger-dev/`` — gitignored, so it never ships to
 end users.  `jaeger --dev` boots the same instance through this launcher.
 """
 
@@ -71,12 +71,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 # The single dev instance, shared with `jaeger --dev`. Lives under the
-# repo's gitignored operator-state root (`.jaeger_os/`), so it never
+# repo's gitignored operator-state root (`.jaeger_ai/`), so it never
 # ships to end users. (Pre-2026-06-19 this was an isolated `sandbox/`
 # copy — removed; the two drifted, which only caused confusion.)
-DEV_INSTANCE = REPO / ".jaeger_os" / "instances" / "jros-dev"
+DEV_INSTANCE = REPO / ".jaeger_ai" / "instances" / "jaeger-dev"
 VENV_PY = REPO / ".venv" / "bin" / "python"
-INSTANCE_NAME = "jros-dev"
+INSTANCE_NAME = "jaeger-dev"
 # Legacy daemon pid-file (0.3.0 pre-pivot architecture).  Stays in tree
 # but the launcher no longer spawns it — if a previous --daemon run
 # left one lingering, cmd_boot stops it during the boot scroll so the
@@ -390,7 +390,7 @@ def dev_env() -> dict[str, str]:
     """Build the env the TUI subprocess inherits.
 
     Points JAEGER_HOME / JAEGER_INSTANCE_* at the dev instance so the
-    TUI's instance resolver picks up ``.jaeger_os/instances/jros-dev/``.
+    TUI's instance resolver picks up ``.jaeger_ai/instances/jaeger-dev/``.
     PYTHONPATH puts the top-level ``jaeger_os/`` first so the TUI imports
     the code you're editing, not a stale install."""
     env = dict(os.environ)
@@ -552,7 +552,7 @@ def cmd_boot(env: dict[str, str], *, no_voice: bool) -> int:
     if not DEV_INSTANCE.exists():
         scroll("COCKPIT VALIDATION", "FAIL",
                suffix=f"dev instance missing: {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it")
+        say("run ./run.sh setup jaeger-dev to create it")
         return 1
     scroll("COCKPIT VALIDATION", "READY", suffix=str(DEV_INSTANCE))
 
@@ -691,7 +691,7 @@ def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
         return 1
     if not DEV_INSTANCE.exists():
         fail(f"dev instance not found at {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it", prefix="launch")
+        say("run ./run.sh setup jaeger-dev to create it", prefix="launch")
         return 1
     # Toolkit routing: Swift native app (default) vs the PySide6 shell.
     if _ui_toolkit() == "swift":
@@ -730,10 +730,10 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     None to signal 'unavailable → fall back to PySide6'.
 
     Packaged-app-first (Phase 2): a bare ``./launch`` RUNS the repo's
-    built JaegerOS.app and only builds when nothing is built yet;
+    built JaegerAI.app and only builds when nothing is built yet;
     ``./launch --dev`` forces a rebuild. ONE app since 2026-07-14 —
     dev is a launch state, not a separate bundle: this launcher pins
-    the jros-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
+    the jaeger-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
     same bundle (same TCC identity, one permission grant) serves both
     dev and product.
 
@@ -741,8 +741,8 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     from its own bundle path, so no PATH injection is needed."""
     if not (SWIFT_DIR / "Package.swift").exists():
         return None
-    bundle = SWIFT_DIR / ".build" / "JaegerOS.app"
-    bundle_bin = bundle / "Contents" / "MacOS" / "JaegerOS"
+    bundle = SWIFT_DIR / ".build" / "JaegerAI.app"
+    bundle_bin = bundle / "Contents" / "MacOS" / "JaegerAI"
     # Rebuild when forced, missing, OR stale (build-commit stamp older than
     # the Swift tree) — the stale case is what keeps a station that pulls by
     # hand from launching an app that lags the core it talks to.
@@ -753,7 +753,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
             warn("swift toolchain missing — launching the existing (stale) app")
         else:
-            say("building JaegerOS.app (Scripts/build-app.sh --dev)…",
+            say("building JaegerAI.app (Scripts/build-app.sh --dev)…",
                 prefix="launch")
             build = subprocess.run(
                 [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
@@ -763,7 +763,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
     if not bundle_bin.exists():
         return None
-    say("launching JaegerOS (jros-dev instance) — menu-bar tray + chat window…",
+    say("launching JaegerAI (jaeger-dev instance) — menu-bar tray + chat window…",
         prefix="launch")
     sys.stdout.flush()
     return subprocess.run([str(bundle_bin)], env=env).returncode
@@ -799,8 +799,8 @@ def cmd_update() -> int:
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
     from jaeger_ai.cli._common import swift_app_is_stale
-    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerOS.app"):
-        say("Swift app lags the tree — rebuilding JaegerOS.app…",
+    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerAI.app"):
+        say("Swift app lags the tree — rebuilding JaegerAI.app…",
             prefix="update")
         subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),
                         "--dev"])
@@ -823,7 +823,7 @@ def main() -> int:
                         help="tell the TUI to skip voice startup")
     parser.add_argument("--tui", action="store_true",
                         help="boot the CLI/TUI in-process agent (Pattern 0). "
-                             "A bare ./launch boots the windowed JROS app.")
+                             "A bare ./launch boots the windowed JaegerAI app.")
     parser.add_argument("--update", action="store_true",
                         help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",
@@ -856,7 +856,7 @@ def main() -> int:
 
     if not DEV_INSTANCE.exists():
         fail(f"dev instance not found at {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it", prefix="launch")
+        say("run ./run.sh setup jaeger-dev to create it", prefix="launch")
         return 1
 
     env = dev_env()

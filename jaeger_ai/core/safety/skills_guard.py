@@ -8,7 +8,7 @@ exfiltration, prompt injection, destructive commands, persistence,
 reverse shells, obfuscation, and embedded secrets.
 
 Ported from hermes-agent's ``skills_guard.py`` (the threat-pattern
-corpus) and trimmed to JROS's needs.
+corpus) and trimmed to JaegerAI's needs.
 
 Call sites:
   • ``skill_loader`` scans a code skill's files before importing it.

@@ -57,7 +57,7 @@ def test_dispatch_routes_by_platform(monkeypatch):
 
 def test_macos_enable_writes_plist_and_loads(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    (home / ".jaeger_os").mkdir(parents=True)
+    (home / ".jaeger_ai").mkdir(parents=True)
     (home / "jaeger").write_text("#!/bin/sh\n")               # the wrapper exe
     plist = tmp_path / "LaunchAgents" / "jaeger.plist"
     monkeypatch.setattr(A, "_install_root", lambda: home)

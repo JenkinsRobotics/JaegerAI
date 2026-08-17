@@ -289,7 +289,7 @@ class AgentSettingsWindow(QWidget):
         self._trait_sliders: dict[tuple[str, str], QSlider] = {}
 
         self.setObjectName("AgentSettings")
-        self.setWindowTitle(f"JROS — {self._name} · settings")
+        self.setWindowTitle(f"JaegerAI — {self._name} · settings")
         self.resize(1080, 680)
         self.setStyleSheet(_QSS)
 
@@ -816,7 +816,7 @@ class AgentSettingsWindow(QWidget):
     # ── ARES & Extensions Suite ──
     def _ares_page(self) -> QWidget:
         page, v = self._page("ARES & Extensions Suite")
-        sub = QLabel("Central bridge for ARES WebUI, Mac App, Minecraft companion, and plugin tools.")
+        sub = QLabel("Connect JaegerAI runtime capabilities to ARES product surfaces.")
         sub.setObjectName("Sub")
         v.addWidget(sub)
         v.addSpacing(10)
@@ -864,16 +864,7 @@ class AgentSettingsWindow(QWidget):
         btn_mac.setStyleSheet("background: #1e293b; color: #43E08A; border: 1px solid #2e4438; border-radius: 9px; padding: 8px 14px; font-weight: 700;")
         btn_mac.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_mac():
-            import os
             import subprocess
-            app_paths = [
-                "/Users/matthewjenkins/Applications/ARES.app",
-                "/Applications/ARES.app",
-            ]
-            for p in app_paths:
-                if os.path.exists(p):
-                    subprocess.Popen(["open", p])
-                    return
             subprocess.Popen(["open", "-a", "ARES"])
         btn_mac.clicked.connect(_open_mac)
         btn_row.addWidget(btn_mac)
@@ -893,41 +884,6 @@ class AgentSettingsWindow(QWidget):
         sc_v.addLayout(btn_row)
         v.addWidget(status_card)
         v.addSpacing(14)
-
-        # Extensions section
-        v.addWidget(self._section("Installed Extensions & Integrations"))
-        v.addSpacing(6)
-
-        # Extension 1: Minecraft Companion
-        mc_card = QFrame()
-        mc_card.setObjectName("AgentCard")
-        mc_v = QVBoxLayout(mc_card)
-        mc_v.setContentsMargins(16, 12, 16, 12)
-        mc_v.setSpacing(6)
-
-        mc_head = QHBoxLayout()
-        mc_title = QLabel("🎮 ARES Minecraft Companion & PS5 Cross-Play")
-        mc_title.setStyleSheet("color: #FFFFFF; font-weight: 700; font-size: 13px;")
-        mc_badge = QLabel("READY")
-        mc_badge.setObjectName("DefaultTag")
-        mc_head.addWidget(mc_title)
-        mc_head.addWidget(mc_badge)
-        mc_head.addStretch(1)
-        mc_v.addLayout(mc_head)
-
-        mc_desc = QLabel("Embodied AI companion + Paper Java server host with GeyserMC/Floodgate PS5 cross-play on port 19132.")
-        mc_desc.setObjectName("Sub")
-        mc_v.addWidget(mc_desc)
-
-        mc_btn_row = QHBoxLayout()
-        mc_btn = QPushButton("Open Minecraft Dashboard")
-        mc_btn.setStyleSheet("background: #141c2b; color: #08EBF1; border: 1px solid rgba(8,235,241,0.3); border-radius: 7px; padding: 6px 12px; font-size: 12px; font-weight: 700;")
-        mc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        mc_btn.clicked.connect(lambda: _open_web())
-        mc_btn_row.addWidget(mc_btn)
-        mc_btn_row.addStretch(1)
-        mc_v.addLayout(mc_btn_row)
-        v.addWidget(mc_card)
 
         v.addStretch(1)
         return self._scroll(page)

@@ -1,6 +1,6 @@
 """Model discovery + the Ollama provider.
 
-Discovery surveys three sources (JROS registry / Ollama / LM Studio) so
+Discovery surveys three sources (JaegerAI registry / Ollama / LM Studio) so
 the TUI's /model command can show the full picture; a server that is
 not running must report offline, never raise. Ollama is a new external
 provider that rides the OpenAI-compatible path.

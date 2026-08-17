@@ -2,8 +2,8 @@
 # JaegerAI — local installer (runs from inside the cloned repo).
 #
 # Idempotent — safe to re-run after a `git pull`:
-#   - first run:  creates .venv, installs dependencies, scaffolds .jaeger_os/
-#   - re-run:     upgrades dependencies, leaves .jaeger_os/ alone
+#   - first run:  creates .venv, installs dependencies, scaffolds .jaeger_ai/
+#   - re-run:     upgrades dependencies, leaves .jaeger_ai/ alone
 #
 # Usage:
 #   ./install.sh                  # default — runs all steps
@@ -16,7 +16,7 @@
 # (requirements.txt, @master for 0.9) — installing JaegerAI (editable,
 # below) pulls the whole stack from GitHub automatically, no manual
 # multi-repo assembly needed. A dev machine with sibling checkouts at
-# ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
+# ~/GITHUB/{JaegerAI,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
 # installed EDITABLE instead (step 3b below) — local changes to the
 # framework/engines are live without a push+reinstall round-trip.
 
@@ -124,7 +124,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
 
   # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
-  # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
+  # On a dev machine you may editable-install ~/GITHUB/{JaegerAI,
   # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
   # copies so local framework/engine changes go live immediately.
   # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
@@ -140,7 +140,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
   SIBLINGS_FOUND=()
   [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
+  for sib in JaegerAI jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
     if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
       SIBLINGS_FOUND+=("$sib")
     fi
@@ -168,8 +168,8 @@ else
   echo "→ --skip-deps: leaving .venv untouched"
 fi
 
-# 4. Scaffold .jaeger_os/ (idempotent) — operator state root
-mkdir -p "$REPO_ROOT/.jaeger_os/instances"
+# 4. Scaffold .jaeger_ai/ (idempotent) — operator state root
+mkdir -p "$REPO_ROOT/.jaeger_ai/instances"
 
 # 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
 #    PRODUCT installs only — a dev checkout must never claim the global
@@ -199,14 +199,14 @@ if [[ "$PRODUCT_MODE" -eq 0 ]]; then
   # (git clone + ./install.sh, or a repeat run inside one). Build the
   # dev shell so the first thing a developer sees works.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerOS.app (debug)…"
+    echo; echo "building JaegerAI.app (debug)…"
     "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
-      && echo "✓ JaegerOS.app ready (symlinked at repo root)" \
+      && echo "✓ JaegerAI.app ready (symlinked at repo root)" \
       || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
   fi
   echo
   echo "Next steps:"
-  echo "  ./jaeger dev              the windowed dev shell (jros-dev instance)"
+  echo "  ./jaeger dev              the windowed dev shell (jaeger-dev instance)"
   echo "  ./jaeger dev --tui        the terminal agent"
   echo "  ./jaeger update           pull + reinstall deps + rebuild as needed"
   echo "  ./jaeger dev --health     verify the install"
@@ -215,9 +215,9 @@ else
   # PRODUCT app; it's what `./jaeger` launches. No Swift toolchain
   # (Linux/headless) → terminal remains the surface, quietly.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerOS.app (first build takes a minute)…"
+    echo; echo "building JaegerAI.app (first build takes a minute)…"
     "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
-      && echo "✓ JaegerOS.app ready" \
+      && echo "✓ JaegerAI.app ready" \
       || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
   fi
   echo

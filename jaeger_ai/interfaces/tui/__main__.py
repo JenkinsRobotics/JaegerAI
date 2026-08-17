@@ -35,8 +35,8 @@ def _boot_chassis() -> int:
     teardown. The manifest (jaeger.toml) sets ``event_loop = "none"``
     and disables every [[node]] / [[surface]] so JaegerApp.boot
     returns immediately after the slot + supervisor watchdog + signal
-    handlers are wired — JROS keeps owning the TUI loop. Returns 0
-    on success, non-zero if another JROS is already running.
+    handlers are wired — JaegerAI keeps owning the TUI loop. Returns 0
+    on success, non-zero if another JaegerAI is already running.
     """
     from jaeger_os.app import JaegerApp
     from jaeger_os.app.app import SecondInstanceError
@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         "--instance", type=str, default=None,
         help=(
             "Instance name to launch. Resolves to "
-            "<install_root>/.jaeger_os/instances/<name>/. When omitted, "
+            "<install_root>/.jaeger_ai/instances/<name>/. When omitted, "
             "falls back to JAEGER_INSTANCE_NAME env var, then the "
             "sticky-default file, then the literal 'default'."
         ),

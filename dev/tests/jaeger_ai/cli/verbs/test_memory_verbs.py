@@ -36,7 +36,7 @@ def live_instance(tmp_path, monkeypatch):
     monkeypatch.delenv("JAEGER_INSTANCE_DIR", raising=False)
     monkeypatch.delenv("JAEGER_INSTANCE_NAME", raising=False)
 
-    inst = tmp_path / ".jaeger_os" / "instances" / "default"
+    inst = tmp_path / ".jaeger_ai" / "instances" / "default"
     inst.mkdir(parents=True)
     (inst / "memory").mkdir()
     (inst / "logs").mkdir()

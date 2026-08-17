@@ -18,8 +18,7 @@ composes into its system prompt:
                     phrases things (operator-authored micro-rules)
 
 Source data for this module shape comes directly from operator's
-Lilith-AI prior work (``/Users/jonathanjenkins/GITHUB/Lilith-AI/
-archive/lilith-0.2.2/persona.json``).  We carry the schema forward
+Lilith-AI prior work (an external archived repository). We carry the schema forward
 exactly so existing personas port without conversion.
 
 Public surface::

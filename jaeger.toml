@@ -1,9 +1,9 @@
-# JROS — Jaeger app format manifest (format 0.1)
+# JaegerAI — Jaeger app format manifest (format 0.1)
 #
 # ─────────────────────────────────────────────────────────────────
 #  WINDOWED APP + TRAY target (Jenkins Robotics standard, 2026-06-14)
 # ─────────────────────────────────────────────────────────────────
-#  Long-term: JROS is a windowed-app + tray Qt app — tray as the
+#  Long-term: JaegerAI is a windowed-app + tray Qt app — tray as the
 #  always-on persistent surface (Lilith's "I'm here"), chat /
 #  avatar / settings as on-demand windows, menu bar persists when
 #  windows close, Cmd+Q quits. Same shape as ChatGPT desktop,
@@ -12,7 +12,7 @@
 #  This manifest is the DESCRIPTIVE / parked full-topology manifest:
 #  event_loop = "none", the Rich/prompt_toolkit TUI in foreground
 #  (Pattern 0, `./launch --tui`), all nodes/surfaces parked while
-#  JROS's own runtime owns them. The windowed app (Pattern 1, a bare
+#  JaegerAI's own runtime owns them. The windowed app (Pattern 1, a bare
 #  `./launch`) is BUILT (2026-06-15) and lives in its own manifest,
 #  `jaeger.windowed.toml` — event_loop = "qt", a Tier-1 [core]
 #  (jaeger_os.agent.loop.agent_core:AgentCore), chat window + tray.
@@ -21,7 +21,7 @@
 # J5B (2026-06-14) finalized the manifest after the operator
 # decision to drop the daemon-arch plan and converge on Mochi/CC01's
 # fused-mode pattern. The daemon-arch brief is archived at
-# docs/archive/JROS_DAEMON_ARCH_BRIEF.md.
+# docs/archive/JaegerAI_DAEMON_ARCH_BRIEF.md.
 #
 # Conformance vs. integration:
 #   * J1-J4 + J5A landed format-0.1 CONFORMANCE — chassis copy at
@@ -34,41 +34,41 @@
 #     own InProcBus while jaeger_os.nodes.runtime minted a second,
 #     disconnected one for TTS/animation — was resolved in 0.8 U1-U3
 #     (runtime.set_bus() injection; see
-#     dev/docs/JROS_0.8_U3_SUPERVISION_PLAN.md). THIS manifest's nodes
+#     dev/docs/JaegerAI_0.8_U3_SUPERVISION_PLAN.md). THIS manifest's nodes
 #     stay disabled below regardless: `./launch --tui` (Pattern 0)
-#     doesn't build a JaegerApp at all — it's JROS's own Rich loop,
+#     doesn't build a JaegerApp at all — it's JaegerAI's own Rich loop,
 #     with no chassis Supervisor to hand these nodes to — so enabling
 #     them here would declare a topology nothing here supervises.
 #     Graduating THIS manifest waits on the TUI path itself adopting
 #     a chassis boot root, a separate piece of work from U3.
 #
-# JROS keeps the existing `jaeger_os/` package; the format chassis
+# JaegerAI keeps the existing `jaeger_os/` package; the format chassis
 # lives at `jaeger_os/app/` (J2). Both surfaces coexist intentionally.
 
 [app]
 id = "org.jenkinsrobotics.app.jaeger-ai"
-name = "jros"
+name = "jaeger"
 type = "application"
 version = "0.5.0"
 requires_framework = ">=0.1"
 mode = "fused"                # daemon-arch dropped (2026-06-14);
-                              # JROS converges on Mochi/CC01's
+                              # JaegerAI converges on Mochi/CC01's
                               # fused-mode pattern. One process, TUI
                               # in the foreground.
-event_loop = "none"           # JROS owns the TUI loop directly via
+event_loop = "none"           # JaegerAI owns the TUI loop directly via
                               # launch.py. The chassis implements
                               # only "qt" and "none" event loops in
                               # format 0.1; "none" means caller
-                              # drives — exactly JROS's existing model.
+                              # drives — exactly JaegerAI's existing model.
 ui = "tui"
-single_instance = true        # JROS's process_slot.py (active) and
+single_instance = true        # JaegerAI's process_slot.py (active) and
                               # the chassis slot mechanism are the
                               # same PID-file pattern; the chassis
-                              # copy is currently parked so JROS's
+                              # copy is currently parked so JaegerAI's
                               # process_slot.py stays the active path.
 autostart = false             # launches like a normal Mac app via
                               # Login Items if the operator wants it
-shell_quits_core = false      # WINDOWED APP: when JROS flips to
+shell_quits_core = false      # WINDOWED APP: when JaegerAI flips to
                               # event_loop = "qt" in the future, this
                               # makes Lilith persist across window
                               # closes (macOS-canonical, same as
@@ -76,12 +76,12 @@ shell_quits_core = false      # WINDOWED APP: when JROS flips to
                               # Today (event_loop = "none"), the flag
                               # is informational — the chassis only
                               # consults it inside _run_qt().
-config = ""                   # JROS uses per-instance configs in
-                              # sandbox/.jaeger_os/instances/<name>/;
+config = ""                   # JaegerAI uses per-instance configs in
+                              # sandbox/.jaeger_ai/instances/<name>/;
                               # no root config.yaml. Empty string =
                               # chassis skips its config loader.
 
-# Bus — InProcBus for fused mode. JROS today uses
+# Bus — InProcBus for fused mode. JaegerAI today uses
 # jaeger_os/transport/inproc_bus.py; the chassis copy at
 # jaeger_os/app/bus/inproc.py is functionally the same pattern,
 # unused until J5.
@@ -89,14 +89,14 @@ config = ""                   # JROS uses per-instance configs in
 backend = "inproc"
 
 # ── Nodes ─────────────────────────────────────────────────────────
-# JROS's four nodes (hardware_jp01, animation, tts, audio_session)
+# JaegerAI's four nodes (hardware_jp01, animation, tts, audio_session)
 # are managed today by jaeger_os/nodes/runtime.py's lazy singletons
 # (ensure_*_node) and warmed by jaeger_os/main.py's _warm() routine.
 # The make_*_node factories (added in J5A) bridge the chassis
 # (bus, config) → Node contract to those existing singletons.
 #
 # enabled = false on every [[node]] because the TUI (`./launch`,
-# Pattern 0) doesn't boot a JaegerApp/Supervisor at all — JROS's own
+# Pattern 0) doesn't boot a JaegerApp/Supervisor at all — JaegerAI's own
 # runtime.py singleton (ensure_*_node) still owns these threads
 # directly, called on-demand by the agent's speak/listen/avatar
 # tools. The bus-duality + double-spawn blocker that used to justify
@@ -109,7 +109,7 @@ backend = "inproc"
 # itself adopting a chassis boot root — until then there's no
 # Supervisor here for ensure_* to delegate to, so starting them via a
 # JaegerApp nothing here even builds would be meaningless. The
-# declarations remain so the manifest describes JROS's topology
+# declarations remain so the manifest describes JaegerAI's topology
 # truthfully.
 
 [[node]]
@@ -162,9 +162,9 @@ config_key = "audio_session"
 enabled = false   # TUI path has no chassis boot root yet — see header
 
 # ── Surfaces ──────────────────────────────────────────────────────
-# JROS's existing surfaces — the TUI is the main; tray is additional.
+# JaegerAI's existing surfaces — the TUI is the main; tray is additional.
 # Format 0.1's chassis dispatches event_loop = "qt" only for surface
-# rendering; the TUI is JROS's own Rich loop launched directly by
+# rendering; the TUI is JaegerAI's own Rich loop launched directly by
 # launch.py, and the tray runs as its own
 # `python -m jaeger_ai.interfaces.pyside6.tray.macos` subprocess. The factory
 # stubs (J5A) raise NotImplementedError if the chassis ever tries to
@@ -174,7 +174,7 @@ enabled = false   # TUI path has no chassis boot root yet — see header
 id = "tui"
 main = true
 factory = "jaeger_ai.interfaces.tui:run_surface"
-enabled = false   # JROS owns the TUI loop; chassis can't host it
+enabled = false   # JaegerAI owns the TUI loop; chassis can't host it
 
 [[surface]]
 id = "tray"

@@ -13,7 +13,7 @@
 # none of these have PyPI releases yet). PEP 508 direct references, not
 # `-e ../X` — setuptools' dynamic-dependencies file parser only accepts
 # requirement specifiers, not pip's `-e`/`-r` directives. A dev clone
-# with sibling ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,
+# with sibling ~/GITHUB/{JaegerAI,jaeger-agent,JaegerKokoroTTS,
 # JaegerWhisperSTT} checkouts gets editable installs of those instead —
 # see install.sh's sibling-detection step. kokoro_tts + whisper_stt are
 # DEFAULT deps (not optional extras) as of 0.9: a robot needs a voice out
@@ -33,7 +33,7 @@
 # Switch each back to a tag pin the moment that repo cuts one matching
 # the version this release was tested against. Tracking a branch is the
 # lesser evil while four repos release together, not the destination.
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerAI@master
 jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@master
 jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
 jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master

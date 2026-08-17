@@ -22,7 +22,7 @@ from jaeger_ai.cli.verbs import update_verb as U
 
 def _make_instance(home: Path, name: str, schema_version: str = "0.5.0") -> Path:
     """Build a minimal valid instance dir under HOME."""
-    inst = home / ".jaeger_os" / "instances" / name
+    inst = home / ".jaeger_ai" / "instances" / name
     inst.mkdir(parents=True)
     (inst / "identity.yaml").write_text(f"name: {name}\nrole: r\npersonality: p\n",
                                          encoding="utf-8")
@@ -155,7 +155,7 @@ def test_update_runs_upgrade_and_skips_migrate_on_no_migrate(tmp_path, monkeypat
     # Upgrade was attempted.
     assert any("install" in c and "-U" in c for c in upgrade_calls)
     # Migration was NOT run — the manifest is still at the old version.
-    inst_mf = tmp_path / ".jaeger_os" / "instances" / "default" / "manifest.json"
+    inst_mf = tmp_path / ".jaeger_ai" / "instances" / "default" / "manifest.json"
     assert json.loads(inst_mf.read_text())["schema_version"] == "0.4.0"
 
 
@@ -220,17 +220,17 @@ def test_update_dev_checkout_clean_pulls_and_reinstalls(tmp_path, monkeypatch, c
 
 
 def _make_archive(tmp: Path, ref: str = "9.9.9") -> Path:
-    """A GitHub-style release tarball: one top dir ``JROS-<ref>/`` holding
+    """A GitHub-style release tarball: one top dir ``JaegerAI-<ref>/`` holding
     product items plus a ``dev/`` tree that the allowlist must skip."""
-    src = tmp / "src" / f"JROS-{ref}"
+    src = tmp / "src" / f"JaegerAI-{ref}"
     (src / "jaeger_ai").mkdir(parents=True)
     (src / "jaeger_ai" / "__init__.py").write_text('__version__ = "9.9.9"\n')
     (src / "requirements.txt").write_text("msgspec\n")
-    (src / "README.md").write_text("# JROS\n")
+    (src / "README.md").write_text("# JaegerAI\n")
     (src / "dev" / "tests").mkdir(parents=True)   # NOT product → must be skipped
-    tarball = tmp / "jros.tar.gz"
+    tarball = tmp / "jaeger.tar.gz"
     with tarfile.open(tarball, "w:gz") as tf:
-        tf.add(src, arcname=f"JROS-{ref}")
+        tf.add(src, arcname=f"JaegerAI-{ref}")
     return tarball
 
 
@@ -244,14 +244,14 @@ def test_extract_product_copies_allowlist_only(tmp_path):
 
 def test_swap_and_restore_preserve_venv_and_state(tmp_path):
     """The data-loss-critical path: swap replaces product, keeps the old in
-    prev, and never touches .venv/ or .jaeger_os/; restore is the exact
+    prev, and never touches .venv/ or .jaeger_ai/; restore is the exact
     inverse."""
     home = tmp_path / "home"
     (home / "jaeger_ai").mkdir(parents=True)
     (home / "jaeger_ai" / "__init__.py").write_text("OLD")
     (home / "requirements.txt").write_text("old-deps")
     (home / ".venv").mkdir(); (home / ".venv" / "marker").write_text("venv")
-    (home / ".jaeger_os").mkdir(); (home / ".jaeger_os" / "state").write_text("state")
+    (home / ".jaeger_ai").mkdir(); (home / ".jaeger_ai" / "state").write_text("state")
     staging = home / ".update-staging"
     (staging / "jaeger_ai").mkdir(parents=True)
     (staging / "jaeger_ai" / "__init__.py").write_text("NEW")
@@ -263,7 +263,7 @@ def test_swap_and_restore_preserve_venv_and_state(tmp_path):
     assert (home / "jaeger_ai" / "__init__.py").read_text() == "NEW"
     assert (prev / "jaeger_ai" / "__init__.py").read_text() == "OLD"
     assert (home / ".venv" / "marker").read_text() == "venv"          # untouched
-    assert (home / ".jaeger_os" / "state").read_text() == "state"     # untouched
+    assert (home / ".jaeger_ai" / "state").read_text() == "state"     # untouched
 
     restored = U._restore(home, prev, ["jaeger_ai", "requirements.txt"])
     assert set(restored) == {"jaeger_ai", "requirements.txt"}
@@ -399,7 +399,7 @@ def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monke
 def _swift_layout(home: Path) -> Path:
     """A fake built app + build script under HOME; returns the script."""
     swift = home / "jaeger_ai" / "interfaces" / "swift"
-    (swift / ".build" / "JaegerOS.app").mkdir(parents=True)
+    (swift / ".build" / "JaegerAI.app").mkdir(parents=True)
     script = swift / "Scripts" / "build-app.sh"
     script.parent.mkdir(parents=True)
     script.write_text("#!/bin/bash\nexit 0\n")
@@ -430,7 +430,7 @@ def test_rebuild_swift_app_skips_when_never_built(tmp_path, monkeypatch, capsys)
     calls: list = []
     monkeypatch.setattr(U.subprocess, "run",
                         lambda *a, **k: calls.append(a))
-    U._rebuild_swift_app(tmp_path)      # no .build/JaegerOS.app → no-op
+    U._rebuild_swift_app(tmp_path)      # no .build/JaegerAI.app → no-op
     assert calls == []
     assert capsys.readouterr().err == ""
 
@@ -470,7 +470,7 @@ def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys
 
 def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
     """Flavor follows the install: dev/ present -> debug build via --dev
-    (mirrors install.sh); same JaegerOS.app bundle either way."""
+    (mirrors install.sh); same JaegerAI.app bundle either way."""
     script = _swift_layout(tmp_path)
     (tmp_path / "dev").mkdir()
     ran: list = []
@@ -505,9 +505,9 @@ def test_swift_app_is_stale_basics(tmp_path):
     """Missing executable -> stale; no .git (tarball install) -> never stale
     (that path rebuilds explicitly after every product swap)."""
     from jaeger_ai.cli._common import swift_app_is_stale
-    bundle = tmp_path / "JaegerOS.app"
+    bundle = tmp_path / "JaegerAI.app"
     assert swift_app_is_stale(tmp_path, bundle) is True   # no exe
-    exe = bundle / "Contents" / "MacOS" / "JaegerOS"
+    exe = bundle / "Contents" / "MacOS" / "JaegerAI"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
     assert swift_app_is_stale(tmp_path, bundle) is False  # exe, but no .git

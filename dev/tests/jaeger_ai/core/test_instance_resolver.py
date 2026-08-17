@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.instance import instance as instance_module
+from jaeger_ai.core.instance import legacy_state
 
 
 # ── INST-1: resolver priority ───────────────────────────────────────
@@ -62,7 +63,7 @@ def test_pip_install_uses_user_instances_root(tmp_path, monkeypatch):
 
     assert instance_module.is_pip_installed() is True
     resolved = instance_module.resolve_instance_dir("default")
-    expected = (fake_home / ".jaeger_os" / "instances" / "default").resolve()
+    expected = (fake_home / ".jaeger_ai" / "instances" / "default").resolve()
     assert resolved == expected
 
 
@@ -80,7 +81,7 @@ def test_editable_install_still_treated_as_dev(tmp_path, monkeypatch):
     checkout — no ``site-packages`` ancestor, so it must NOT trigger
     the pip-install branch (the resolver returns the same
     user-instances path either way; this test pins the detection)."""
-    fake_pkg = tmp_path / "GITHUB" / "JROS" / "jaeger_os"
+    fake_pkg = tmp_path / "GITHUB" / "JaegerAI" / "jaeger_os"
     fake_pkg.mkdir(parents=True)
     monkeypatch.setattr(instance_module, "PACKAGE_ROOT", fake_pkg, raising=True)
     assert instance_module.is_pip_installed() is False
@@ -102,8 +103,8 @@ def test_default_instance_name_reads_active_instance_file(monkeypatch, tmp_path)
     monkeypatch.delenv("JAEGER_INSTANCE_NAME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
-    (tmp_path / ".jaeger_os").mkdir()
-    (tmp_path / ".jaeger_os" / "active_instance").write_text("work\n",
+    (tmp_path / ".jaeger_ai").mkdir()
+    (tmp_path / ".jaeger_ai" / "active_instance").write_text("work\n",
                                                           encoding="utf-8")
     assert instance_module.default_instance_name() == "work"
 
@@ -113,8 +114,8 @@ def test_env_var_beats_active_instance_file(monkeypatch, tmp_path):
     wins — explicit (in-shell) beats implicit (on-disk)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
-    (tmp_path / ".jaeger_os").mkdir()
-    (tmp_path / ".jaeger_os" / "active_instance").write_text("sticky-name\n",
+    (tmp_path / ".jaeger_ai").mkdir()
+    (tmp_path / ".jaeger_ai" / "active_instance").write_text("sticky-name\n",
                                                           encoding="utf-8")
     monkeypatch.setenv("JAEGER_INSTANCE_NAME", "env-name")
     assert instance_module.default_instance_name() == "env-name"
@@ -124,24 +125,38 @@ def test_write_active_instance_creates_file(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     instance_module.write_active_instance("work")
-    assert (tmp_path / ".jaeger_os" / "active_instance").read_text().strip() == "work"
+    assert (tmp_path / ".jaeger_ai" / "active_instance").read_text().strip() == "work"
+
+
+def test_legacy_operator_state_migrates_without_data_loss(monkeypatch, tmp_path):
+    legacy = tmp_path / legacy_state._LEGACY_STATE_DIR_NAME
+    legacy.mkdir()
+    (legacy / "active_instance").write_text("work\n", encoding="utf-8")
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+
+    destination = instance_module.operator_state_root()
+
+    assert destination == tmp_path / ".jaeger_ai"
+    assert (destination / "active_instance").read_text(encoding="utf-8").strip() == "work"
+    assert legacy.is_symlink()
+    assert instance_module.operator_state_root() == destination
 
 
 def test_write_active_instance_none_removes_file(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
-    (tmp_path / ".jaeger_os").mkdir()
-    (tmp_path / ".jaeger_os" / "active_instance").write_text("work\n",
+    (tmp_path / ".jaeger_ai").mkdir()
+    (tmp_path / ".jaeger_ai" / "active_instance").write_text("work\n",
                                                           encoding="utf-8")
     instance_module.write_active_instance(None)
-    assert not (tmp_path / ".jaeger_os" / "active_instance").exists()
+    assert not (tmp_path / ".jaeger_ai" / "active_instance").exists()
 
 
 def test_read_active_instance_treats_whitespace_as_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
-    (tmp_path / ".jaeger_os").mkdir()
-    (tmp_path / ".jaeger_os" / "active_instance").write_text("   \n  \n",
+    (tmp_path / ".jaeger_ai").mkdir()
+    (tmp_path / ".jaeger_ai" / "active_instance").write_text("   \n  \n",
                                                           encoding="utf-8")
     assert instance_module.read_active_instance() is None
 

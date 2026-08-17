@@ -8,7 +8,7 @@ JaegerAI resolves the model named in an instance's `config.yaml`
 through the registry (`jaeger_ai/core/models/model_resolver.py`),
 looking in this order:
 
-1. `<install_root>/.jaeger_os/models/` — the operator cache (production)
+1. `<install_root>/.jaeger_ai/models/` — the operator cache (production)
 2. `jaeger_ai/models/` — **this folder** (dev convenience)
 3. the LM Studio cache (`~/.lmstudio/models/`)
 4. a Hugging Face Hub download on first use

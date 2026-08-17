@@ -1,6 +1,6 @@
 """Per-family native tool presentation.
 
-Principle under test: JROS presents tools in each model's OWN dialect
+Principle under test: JaegerAI presents tools in each model's OWN dialect
 (we match the model; it never drifts to match us). These pins guard
 the family classifier + the per-family rendering so a refactor can't
 silently regress a family back to a foreign format.

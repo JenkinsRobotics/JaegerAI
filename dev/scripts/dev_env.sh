@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# JROS sandbox shim. Source this from your shell to make the in-repo
-# ``sandbox/`` directory behave as a full, fully-isolated JROS
+# JaegerAI sandbox shim. Source this from your shell to make the in-repo
+# ``sandbox/`` directory behave as a full, fully-isolated JaegerAI
 # install:
 #
 #   <repo>/sandbox/
 #   ├── jaeger_os/        ← REAL COPY of ../jaeger_os/ (NOT a symlink)
-#   └── .jaeger_os/       ← sandbox's own operator state
+#   └── .jaeger_ai/       ← sandbox's own operator state
 #       ├── instances/<name>/
 #       ├── models/
 #       ├── backups/
@@ -43,8 +43,8 @@
 # Usage
 # -----
 #   source dev/dev/scripts/dev_env.sh           # set up + export env into shell
-#   ./run.sh setup jros-dev             # creates sandbox's test instance
-#   ./run.sh --instance jros-dev        # launch the sandbox agent
+#   ./run.sh setup jaeger-dev             # creates sandbox's test instance
+#   ./run.sh --instance jaeger-dev        # launch the sandbox agent
 #
 # Or one-shot:
 #
@@ -54,9 +54,9 @@
 
 set -uo pipefail
 
-_jros_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-_sandbox="$_jros_repo/sandbox"
-_src="$_jros_repo/jaeger_os"
+_jaeger_repo="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+_sandbox="$_jaeger_repo/sandbox"
+_src="$_jaeger_repo/jaeger_os"
 _dst="$_sandbox/jaeger_os"
 
 # Parse flags. Use a while-loop with shift so $@ ends up holding the
@@ -91,7 +91,7 @@ if [[ $# -gt 0 && "${1:0:1}" == "#" ]]; then
 fi
 
 # Set up the sandbox structure. Idempotent — re-source is safe.
-mkdir -p "$_sandbox" "$_sandbox/.jaeger_os/instances"
+mkdir -p "$_sandbox" "$_sandbox/.jaeger_ai/instances"
 
 _need_copy=0
 if [[ ! -d "$_dst" ]]; then
@@ -141,7 +141,7 @@ esac
 if [[ "${BASH_SOURCE[0]:-}" != "${0}" ]]; then
     # Sourced — leave the exports in the caller's shell.
     printf '[dev_env] JAEGER_HOME=%s\n' "$JAEGER_HOME" >&2
-    printf '[dev_env] sandbox layout:\n  %s/jaeger_os    (isolated copy)\n  %s/.jaeger_os/    (operator state)\n' \
+    printf '[dev_env] sandbox layout:\n  %s/jaeger_os    (isolated copy)\n  %s/.jaeger_ai/    (operator state)\n' \
         "$_sandbox" "$_sandbox" >&2
     printf '[dev_env] refresh framework from parent:\n  dev/dev/scripts/dev_env.sh --refresh\n' >&2
 else

@@ -1,6 +1,6 @@
 """VoiceOrb — the agent's face inside a reactive voice-spectrum ring.
 
-The only avatar animation JROS ships for now. Two live states off the bus:
+The only avatar animation JaegerAI ships for now. Two live states off the bus:
 
   * thinking  (/sense/agent_state state="thinking") → a travelling wave-gradient
     shimmers around the ring.

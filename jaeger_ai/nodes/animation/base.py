@@ -1,7 +1,7 @@
 """AnimationAdapter Protocol — the contract every adapter implements.
 
 Vendored shape from Mochi's ``Animation(ABC)`` (Apache 2.0; see
-``dev/docs/library_review/mochi_demo.md``).  Adapted to JROS conventions:
+``dev/docs/library_review/mochi_demo.md``).  Adapted to JaegerAI conventions:
 
   * Protocol instead of ABC for duck-typed adapter swaps
   * msgspec-friendly state model

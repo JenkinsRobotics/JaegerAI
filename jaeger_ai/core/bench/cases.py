@@ -705,7 +705,7 @@ CASES: list[BenchCase] = [
               tags=["workflow", "kanban"]),
 
     # ── v1.3: PERSONA (stays in character) ──────────────────────────
-    # Light check: the agent answers in its JROS persona, not as a
+    # Light check: the agent answers in its JaegerAI persona, not as a
     # generic disclaiming chatbot. Content-only (no tool).
     BenchCase(id="persona_no_disclaimer",
               prompt="Are you just a chatbot?",

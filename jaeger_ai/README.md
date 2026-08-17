@@ -8,7 +8,7 @@ between framework code (read-only) and agent state (writable).
 
 `jaeger_os/` is the **framework** (read-only at runtime, upgraded in place by
 `jaeger update`). Operator state lives entirely under the sibling
-`.jaeger_os/instances/<name>/` (each agent's identity, config, memory, skills,
+`.jaeger_ai/instances/<name>/` (each agent's identity, config, memory, skills,
 workspace, logs, credentials) and is never touched by an upgrade. That
 boundary is the safety contract: the agent can write its own skills + state,
 never the framework code.

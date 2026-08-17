@@ -63,7 +63,7 @@ def _stub_script(jaeger_exe: Path) -> str:
     return (
         "#!/bin/bash\n"
         "# Thin launcher created locally by `jaeger launcher install` — no\n"
-        "# bundling/signing. Execs the JROS agent in place.\n"
+        "# bundling/signing. Execs the JaegerAI agent in place.\n"
         f'exec "{jaeger_exe}" "$@"\n'
     )
 

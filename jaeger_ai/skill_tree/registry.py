@@ -80,7 +80,7 @@ class SkillTreeRegistry:
 
     @classmethod
     def for_instance(cls, layout: Any) -> "SkillTreeRegistry":
-        """Convenience: derive the standard paths from a JROS
+        """Convenience: derive the standard paths from a JaegerAI
         InstanceLayout and load."""
         root = Path(layout.root)
         persist = root / "skill_tree.json"

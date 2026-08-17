@@ -1,13 +1,13 @@
 # Changelog
 
-JROS follows pragmatic semver — major.minor.patch — with the
+JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
 ## `0.10.0` — the agent is a module
 
 The brain moved out. `jaeger_ai/agent/` is gone: its tools, skills,
 prompts, skill registry, background workers, adapters, dialects, loop and
-workspace sandbox now ship as **jaeger-agent**, a JaegerOS `slot: mind`
+workspace sandbox now ship as **jaeger-agent**, a JaegerAI `slot: mind`
 module any project can install. Roughly 43,000 lines left this repo;
 what stayed is what needs an instance, a desktop or a character.
 
@@ -100,7 +100,7 @@ becoming it. The agent's name is its name.
 ## `0.9.5` — permissions up front
 
 macOS can't let an installer grant privacy permissions (TCC grants come
-only from the user, and they attach to the LAUNCHING app — JaegerOS.app,
+only from the user, and they attach to the LAUNCHING app — JaegerAI.app,
 Terminal, and an IDE are three separate grants, which is why app control
 "worked sometimes"). The ceiling is asking for everything up front, so
 0.9.5 does: first app boot triggers the Accessibility, Screen Recording,
@@ -162,7 +162,7 @@ station. Boot: never blocks on the network (HF cache trusted when complete;
 voice warm moved off the critical path — window interactive immediately);
 stale instance locks auto-break when the holder isn't a live jaeger process.
 Persona brain: the id now carries a live-derived SELF-MODEL (knows it's a
-JROS agent and what's installed), a BINDING-ASK rule (character shapes HOW,
+JaegerAI agent and what's installed), a BINDING-ASK rule (character shapes HOW,
 never WHETHER — jokes get told), and SELF-STATE delegation (capability/state
 questions check reality, never confabulate) — delegation gate 12/12, new
 joke + self-state gates pass. App: mid-turn messages queue instead of being
@@ -174,7 +174,7 @@ skill, and dark-mode-correct settings controls.
 ## `0.8.0` — modular runtime + persona_first pipeline
 
 The line that unifies the runtime and ships the "second self" pipeline as
-default. Two themes: **JROS became a modular framework** (one bus, one Node,
+default. Two themes: **JaegerAI became a modular framework** (one bus, one Node,
 one runtime, and modules that own their own engine), and **persona_first
 became the default agentic pipeline** (the id/ego split, hardened and
 gated).
@@ -245,7 +245,7 @@ and a clean inner agent does the work.
   (New Chat, History popover with resume) — closing windows or starting
   over no longer silently merges into one endless session.
 - **Swift-app update staleness fix** — `jaeger update`/launch now rebuilds
-  `JaegerOS.app` when the bundle's stamped build-commit is behind the
+  `JaegerAI.app` when the bundle's stamped build-commit is behind the
   checkout, instead of only rebuilding on `git pull` deltas; a missing app
   now builds instead of being skipped forever.
 
@@ -267,7 +267,7 @@ depends on; design drafted, awaiting the JP01 3.0 live walk.
 
 ## `0.7.3` — updater rebuilds the app
 
-- **`jaeger update` now rebuilds `JaegerOS.app`** after applying a release
+- **`jaeger update` now rebuilds `JaegerAI.app`** after applying a release
   (and after `--rollback`). The .app bundle is a build artifact the release
   tarball can't carry — updating 0.7.1 → 0.7.2 left the app binary stale
   against the new core. Skips quietly when the app was never built; warns
@@ -296,7 +296,7 @@ depends on; design drafted, awaiting the JP01 3.0 live walk.
   `show_tool_activity` setting.
 - **`./jaeger` no longer holds the terminal hostage.** From an interactive
   terminal the app now launches detached (own session, log at
-  `.jaeger_os/logs/JaegerOS.log`) and the window can be closed;
+  `.jaeger_ai/logs/JaegerAI.log`) and the window can be closed;
   `JAEGER_ATTACH=1` restores attached mode. Non-tty callers stay attached —
   the `jaeger autostart` LaunchAgent (KeepAlive) supervises the process and
   must not be detached from. Login autolaunch was already there:
@@ -306,10 +306,10 @@ depends on; design drafted, awaiting the JP01 3.0 live walk.
 
 Patch from a fresh-Mac walk of the one-line installer.
 
-- **End-user installs now build the product `JaegerOS.app`.** `install.sh`
+- **End-user installs now build the product `JaegerAI.app`.** `install.sh`
   detects its audience (a git checkout has `dev/`; the clean install never
-  does): dev checkouts keep building `JaegerOS-dev.app`; end-user installs
-  build the release `JaegerOS.app`. Previously a fresh install built only
+  does): dev checkouts keep building `JaegerAI-dev.app`; end-user installs
+  build the release `JaegerAI.app`. Previously a fresh install built only
   the dev bundle — which `./jaeger` never launches — so first run fell back
   to the terminal and dev next-steps leaked into the installer output.
 - **First run is GUI-first.** Bare `./jaeger` with no instance launches the
@@ -320,19 +320,19 @@ Patch from a fresh-Mac walk of the one-line installer.
   built and the target agent doesn't exist yet; `--tui` forces the terminal
   wizard, `--force` rebuilds stay terminal.
 - **Third-party integration:** new single-file, stdlib-only
-  `clients/python/jros_client.py` — copy it into any Python app to drive an
-  existing JROS install over `jaeger bridge`; fixture-pinned to protocol v1.
-  New README section ("Third-party apps — integrate JROS"). A localhost
+  `clients/python/jaeger_client.py` — copy it into any Python app to drive an
+  existing JaegerAI install over `jaeger bridge`; fixture-pinned to protocol v1.
+  New README section ("Third-party apps — integrate JaegerAI"). A localhost
   HTTP/WebSocket gateway (`jaeger serve`) is planned for 0.8.
 - Installer next-steps output aligned with the README quick start.
 
 ## `0.7.0` — Swift-first + the two-runner agentic core
 
-The line that grew past a patch series. Two themes: **JROS became a native
+The line that grew past a patch series. Two themes: **JaegerAI became a native
 Mac app**, and **the agentic pipeline became a measured two-runner system**.
 
-**Swift-first app.** `JaegerOS.app` is now the primary UI (menu-bar resident,
-splash → chat/settings windows, quit-from-tray), with `JaegerOS-dev.app`
+**Swift-first app.** `JaegerAI.app` is now the primary UI (menu-bar resident,
+splash → chat/settings windows, quit-from-tray), with `JaegerAI-dev.app`
 pinned to the dev instance. The Python core talks over a hardened, versioned
 NDJSON bridge (protocol v1: fast-ready in ~0.5s while the model warms behind
 it, typed frames with cross-language fixtures, a real connection state
@@ -424,17 +424,17 @@ dominated and removed.
 
 ## `0.6.0`
 
-**The product shell.** 0.5 made the agent alive; 0.6 makes JROS *feel like real
+**The product shell.** 0.5 made the agent alive; 0.6 makes JaegerAI *feel like real
 software* to install, run, and keep current — plus a measured skill
 self-improvement loop and a cleaner operator vocabulary.
 
 ### Install / update / lifecycle (the theme)
-- **Editable package + one `jaeger` command.** JROS is a proper package again
+- **Editable package + one `jaeger` command.** JaegerAI is a proper package again
   (`uv pip install -e .`, code unmoved); a single `jaeger` dispatcher behind the
   console script + the `./jaeger` wrapper; version single-sourced from
   `jaeger_os.__version__`.
 - **`jaeger update`** — on a clean install, downloads the target release and
-  swaps the product in place (no git; preserves `.venv/` + `.jaeger_os/`);
+  swaps the product in place (no git; preserves `.venv/` + `.jaeger_ai/`);
   `--rollback`, `--ref TAG`, `--channel {stable,latest}` (+ `$JAEGER_REF`). Dev
   clones fast-forward via git. `jaeger doctor` shows current-vs-latest.
 - **`jaeger reinstall`** (clean in-place reinstall, keeps agents) and
@@ -531,7 +531,7 @@ messaging, shipped to main while 0.6 continues.
 
 ## `0.5.0`
 
-**The identity statement.**  JROS = Hermes-in-`agent/` +
+**The identity statement.**  JaegerAI = Hermes-in-`agent/` +
 ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 
 ### Voice — transport-agnostic agent
@@ -642,7 +642,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   can be vetted via the harness and swapped in only once proven.  All
   **MScript** (the animation scripting language — engine + its 26 scenes +
   an `llm_command_parser`) is consolidated under
-  `nodes/animation_dev/mscript/`, kept in one isolated subfolder since JROS
+  `nodes/animation_dev/mscript/`, kept in one isolated subfolder since JaegerAI
   may or may not adopt it.
 - **Dev tooling for the imports**: `interfaces/gallery`
   (`python -m jaeger_os.interfaces.gallery` — a button per prealpha
@@ -661,7 +661,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
 - `jaeger runtime` — the inference-engine panel (see Models below).
 
 ### Models — inference engines + tier defaults
-- **Inference engines are now a first-class, swappable layer** (JROS's
+- **Inference engines are now a first-class, swappable layer** (JaegerAI's
   equivalent of LM Studio's Settings → Runtime panel).  `core/models/
   engine_registry.py` maps each model FORMAT (GGUF / MLX, detected from
   the weights on disk) to a selectable ENGINE; `config.runtime`
@@ -721,7 +721,7 @@ the destination map + execution rationale.
 
 ## `0.4.0` — 2026-06-06
 
-**Node architecture.** JROS becomes node-shaped: the brain stays
+**Node architecture.** JaegerAI becomes node-shaped: the brain stays
 one process; each peripheral subsystem (TTS, STT, vision, motors,
 lights) is its own bus-addressable node behind a clean adapter
 Protocol.  Built around the operator-locked contract — *"a tool
@@ -797,7 +797,7 @@ call now routes through a typed Bus.
 ### Architectural decisions locked
 - STT and TTS get their own nodes (not embedded in the brain) so
   audio pipelines can evolve without touching the agent loop.
-- JROS library stays universal: hardware-specific wire formats live
+- JaegerAI library stays universal: hardware-specific wire formats live
   at INSTANCE level, never in the library.  Track C ships generic
   ASCII serial protocols as the reference; per-board adapters
   (JP01-MC01, JP01-AVC01, etc.) plug in at integration time.
@@ -920,7 +920,7 @@ not wired into the launcher.  Two architecturally consequential
 0.3.0 efforts are walked back because they introduced more failure
 than they fixed on this hardware:
 
-  - the Swift JaegerOS.app + DaemonClient socket plumbing
+  - the Swift JaegerAI.app + DaemonClient socket plumbing
   - the daemon-attached `interfaces/rich_tui/`
 
 What does ship: a working in-process voice loop with two audio
@@ -965,7 +965,7 @@ path.
 
 ### Skill system v3
 
-- **Unified `manifest_v3` schema** (`jros.skill/v3`) — one Pydantic
+- **Unified `manifest_v3` schema** (`jaeger.skill/v3`) — one Pydantic
   shape covers id, version, origin, package, runtime, domains,
   embodiment, permissions, capabilities (with per-capability Level
   bands + scorer reference), dependencies, artifacts, entrypoint,
@@ -1036,7 +1036,7 @@ path.
 
 ### Skipped from the upstream 0.3.0 plan
 
-- `apps/JaegerOS/` — Swift desktop app (chat window + menu-bar icon
+- `apps/JaegerAI/` — Swift desktop app (chat window + menu-bar icon
   + DaemonClient socket protocol + floating pill + Apple Speech +
   Whisper STT backends + AVSpeechSynth + Kokoro TTS fallback).
   Stays in tree, archived.  Not wired into install or run.
@@ -1057,7 +1057,7 @@ the install root:
 ```
 ~/jaeger/                          ← install root
 ├── jaeger_os/                      ← framework code (git-tracked)
-└── .jaeger_os/                     ← operator state (gitignored)
+└── .jaeger_ai/                     ← operator state (gitignored)
     └── instances/<name>/            ← each agent, fully self-contained
 ```
 
@@ -1073,7 +1073,7 @@ upgrade.
   directly. `import jaeger_os` still works — `run.sh` exports
   `PYTHONPATH=$REPO_ROOT`.
 - **Runtime state moves from `~/.jaeger/` to
-  `<install_root>/.jaeger_os/`.** New `install_root()` helper reads
+  `<install_root>/.jaeger_ai/`.** New `install_root()` helper reads
   `$JAEGER_HOME` (set by `run.sh`) or falls back to
   `PACKAGE_ROOT.parent`. `user_instances_root()`,
   `active_instance_path()`, `user_cache_dir()` (model cache),
@@ -1083,7 +1083,7 @@ upgrade.
   `Config.user`, `resolve_user_dir()`, and the in-package
   `jaeger_os/agents/` scaffold gone. Personas, custom skills, prompt
   overlays, files, memory, logs, and credentials all live inside
-  `.jaeger_os/instances/<name>/` in one folder per agent. To share
+  `.jaeger_ai/instances/<name>/` in one folder per agent. To share
   an agent, zip the folder.
 - **Legacy 0.1.0-shape migration code deleted.** Prototype-era;
   nothing operational depended on it. The 0.2.5 → 0.2.6 transition
@@ -1208,15 +1208,15 @@ log lines) left as-is — module identifiers, not directives.
 
 No automated migration. Instances on 0.2.5 lived under
 `~/.jaeger/instances/`; 0.2.6 lives under
-`<install_root>/.jaeger_os/instances/`. Either:
+`<install_root>/.jaeger_ai/instances/`. Either:
 
 1. Run `./run.sh setup` against a fresh instance (recommended —
    prototype state, fresh start), or
 2. Manually:
    ```bash
-   mkdir -p ~/jaeger/.jaeger_os
-   cp -r ~/.jaeger/instances ~/jaeger/.jaeger_os/
-   cp -r ~/.jaeger/models     ~/jaeger/.jaeger_os/ 2>/dev/null || true
+   mkdir -p ~/jaeger/.jaeger_ai
+   cp -r ~/.jaeger/instances ~/jaeger/.jaeger_ai/
+   cp -r ~/.jaeger/models     ~/jaeger/.jaeger_ai/ 2>/dev/null || true
    ```
    Strip any `user:` block from `config.yaml` (0.2.1-era User layer
    — gone in 0.2.6, validation will reject it).
@@ -1443,7 +1443,7 @@ ritual; dependencies haven't changed since 0.2.3.
 
 ## `0.2.3` — 2026-05-31
 
-**Distribution overhaul** — JROS moves from `pip install` to git-clone
+**Distribution overhaul** — JaegerAI moves from `pip install` to git-clone
 + `./install.sh`, matching the install model used by Hermes-Agent,
 ComfyUI, A1111, and other end-user AI apps. The repo root is now the
 install root; operators see a familiar app layout (`install.sh`,
@@ -1457,10 +1457,10 @@ and how upgrades work.
 
 ### Why the move from pip
 
-- **JROS is an app, not a library.** No one writes
+- **JaegerAI is an app, not a library.** No one writes
   `import jaeger_os` to add Jaeger as a dependency in their own code
   — they run it. The pip-package shape was misleading users into
-  thinking JROS was something you `import`.
+  thinking JaegerAI was something you `import`.
 - **Operators couldn't find their data.** Per-agent personas, skills,
   and weights were buried in `site-packages/jaeger_os/` — invisible
   to the average user, hard to back up, hard to share. Clone-style
@@ -1469,13 +1469,13 @@ and how upgrades work.
   it's `git pull && ./install.sh` — one command, no separate
   framework-vs-instance dance.
 - **Industry convention.** Local AI apps (Hermes-Agent, ComfyUI, A1111,
-  Open-WebUI, LM Studio CLI) all use git-clone. JROS now matches that
+  Open-WebUI, LM Studio CLI) all use git-clone. JaegerAI now matches that
   muscle memory.
 
 ### Install — one-line curl
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/master/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/master/scripts/install.sh | bash
 ```
 
 Defaults: clones to `~/jaeger/`, creates `.venv/` in-place, installs
@@ -1502,7 +1502,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
   the new module name.
 - **`pyproject.toml` stripped to dev-tooling config only.** The
   `[build-system]`, `[project]`, `[project.scripts]`, and
-  `[tool.setuptools.*]` sections are gone. JROS no longer builds as
+  `[tool.setuptools.*]` sections are gone. JaegerAI no longer builds as
   a wheel. `[tool.pytest.*]` config preserved.
 - **Runtime deps moved from `pyproject.toml` → `requirements.txt`.**
   Same dep list; installed by `./install.sh` into the in-tree
@@ -1521,7 +1521,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
   re-run after `git pull`.
 - **`run.sh`** at repo root — launcher. Activates venv, sets
   `PYTHONPATH`, execs `src/jaeger_os/run.py "$@"`.
-- **`scripts/install.sh`** — the curl one-liner target. Clones JROS
+- **`scripts/install.sh`** — the curl one-liner target. Clones JaegerAI
   to `$JAEGER_HOME`, runs the local `install.sh`, prints next-step
   instructions. Supports `JAEGER_HOME`, `JAEGER_REF`, and
   `JAEGER_REPO_URL` overrides.
@@ -1529,7 +1529,7 @@ Idempotent. Re-runs venv setup only for changed dependencies; leaves
   in `pyproject.toml`'s `dependencies`).
 - **`src/jaeger_os/agents/`** — the User layer per-agent workspace
   root. Gitignored except for the README and `.gitignore` itself —
-  upstream JROS never ships agent content; users populate it
+  upstream JaegerAI never ships agent content; users populate it
   manually or via `jaeger create-agent`.
 - **`dev/docs/setup.md`** — canonical install / upgrade / uninstall
   guide. Covers prereqs, the curl one-liner, version pinning,
@@ -1564,7 +1564,7 @@ pipx uninstall jaeger-os
 mv ~/.jaeger ~/.jaeger.0.2.2.bak
 
 # Install 0.2.3
-curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JROS/0.2.3/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/0.2.3/scripts/install.sh | bash
 
 # Restore your instance state (the schema is unchanged from 0.2.2)
 mv ~/.jaeger.0.2.2.bak ~/.jaeger
@@ -1572,7 +1572,7 @@ mv ~/.jaeger.0.2.2.bak ~/.jaeger
 
 ### Result
 
-JROS now installs the way operators expect a local AI app to install.
+JaegerAI now installs the way operators expect a local AI app to install.
 The same agent, same skills, same memory — fronted by a one-line
 curl command and a familiar folder layout. The transition preserves
 existing import paths (`jaeger_os.main` shim) and existing instance
@@ -1609,7 +1609,7 @@ files had moved to `<repo>/src/jaeger_os/models/` in 0.2.1.
 
 **1670 tests passing.** `repo_models_dir()` now returns
 `<repo>/src/jaeger_os/models/`. Anyone installing
-`git+...JROS.git@0.2.2` gets a model resolver that matches the
+`git+...JaegerAI.git@0.2.2` gets a model resolver that matches the
 on-disk layout.
 
 ---
@@ -1620,7 +1620,7 @@ Patch theme: **architectural refactor — formal System / Runtime /
 User three-layer model**, plus repo housekeeping.
 
 This is a refinement release. No new agent features; the focus is
-making the contract between JROS-the-library and the operator's
+making the contract between JaegerAI-the-library and the operator's
 content rigorous so 0.3.x and beyond can be released without breaking
 user customisation.
 
@@ -1628,16 +1628,16 @@ user customisation.
 
 New canonical reference at
 [`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md).
-Every persistent file in a JROS deployment now belongs to exactly one
+Every persistent file in a JaegerAI deployment now belongs to exactly one
 of three layers:
 
 | Layer | Where it lives | Owner | Touched by upgrades? |
 |---|---|---|---|
-| **System** | `site-packages/jaeger_os/` (or your `git clone` for dev) | the JROS project | yes — that IS the upgrade |
-| **Runtime** | `~/.jaeger/instances/<name>/` | JROS at runtime | schema migrated; content preserved |
+| **System** | `site-packages/jaeger_os/` (or your `git clone` for dev) | the JaegerAI project | yes — that IS the upgrade |
+| **Runtime** | `~/.jaeger/instances/<name>/` | JaegerAI at runtime | schema migrated; content preserved |
 | **User** | `~/jaeger/agents/<name>/` (default; configurable) | the operator | **never** |
 
-The contract: a JROS upgrade may freely rewrite the System layer and
+The contract: a JaegerAI upgrade may freely rewrite the System layer and
 migrate the Runtime layer's schema, but **must not modify the User
 layer**. Operators put their persona, custom skills, prompt overlays,
 and workspace files in the User layer and that content survives every
@@ -1660,7 +1660,7 @@ release boundary.
 
 - **`docs/` → `dev/docs/`** — the top-level docs folder is now
   clearly developer documentation (audits, design docs, status notes
-  for contributors working *on* JROS). User-facing setup runbooks
+  for contributors working *on* JaegerAI). User-facing setup runbooks
   live in downstream consumer repos (e.g. `Lilith-AI/docs/SETUP.md`).
   *Note: the directory name has a space which can trip shell escaping
   — consider renaming to `dev-docs/` (hyphen) in a future patch.*
@@ -1681,7 +1681,7 @@ gymnastics; just a config value. See the downstream Lilith-AI
 ### Migration
 
 Pre-0.2.1 instances that don't have `user.dir` set will continue
-working — JROS reads persona / skills / prompts from the runtime
+working — JaegerAI reads persona / skills / prompts from the runtime
 instance dir as a fallback. The `0.3.0` cycle will introduce a
 `jaeger user migrate` command that moves user-authored content out
 to the new default path.
@@ -2018,7 +2018,7 @@ hit EOS earlier. Useful baseline for routing-heavy use:
 
 The 416 MB / 189-file parity-port reference clone is gone from the
 working tree. Every architectural pattern we adopted from it is
-either live in JROS (drift parser, `HermesXMLAdapter`, toolset
+either live in JaegerAI (drift parser, `HermesXMLAdapter`, toolset
 registry, schema sanitizer, permission tiers, Three Laws, audit
 log, context guard, TUI conventions) or documented in
 `docs/hermes_tool_parity.md` / `hermes_internals_audit.md` /
@@ -2054,9 +2054,9 @@ baseline 96%); gemma-4-E4B **98%**; Qwen3-Coder-30B-A3B **98%**.
 
 ## `0.1.0` — 2026-05-25
 
-The first coherent release of JROS — local-first agentic agent
+The first coherent release of JaegerAI — local-first agentic agent
 framework. Squashed onto `master` from the 22-commit
-`jaeger-os-hermes` branch. The pre-existing JROS concept import
+`jaeger-os-hermes` branch. The pre-existing JaegerAI concept import
 (`c5143fb`) was deliberately overwritten; the hardware project
 skeleton returns deliberately alongside unit bring-up.
 

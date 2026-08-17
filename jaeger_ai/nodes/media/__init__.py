@@ -5,7 +5,7 @@ our :class:`~jaeger_os.nodes.media.decoders.VideoAdapter`) into FrameBuffers
 and streams them as ``MediaFrame`` on ``/sense/media_frame``. Because it ships
 frames (not a Qt-rendered window), the same playback streams to ANY target —
 a local player, a robot LED matrix, a remote display node. The decoders live
-here so they import cleanly into JROS.
+here so they import cleanly into JaegerAI.
 """
 
 from __future__ import annotations

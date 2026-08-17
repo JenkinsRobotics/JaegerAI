@@ -1,7 +1,7 @@
-# JROS-Avatar
+# JaegerAI-Avatar
 
-Mac-native renderer for the JROS animation node.  Ships with the
-framework — JROS Python publishes animation frames on a WebSocket,
+Mac-native renderer for the JaegerAI animation node.  Ships with the
+framework — JaegerAI Python publishes animation frames on a WebSocket,
 this Swift app displays them.
 
 ## Status
@@ -15,22 +15,22 @@ See `dev/docs/avatar/0.5.0_swift_renderer_plan.md` for the roadmap.
 ```bash
 cd jaeger_os/interfaces/avatar
 swift build
-swift run JROSAvatar
+swift run JaegerAIAvatar
 ```
 
 Opens a window with a placeholder canvas + connection status.
-Set the JROS frame stream URL via the **Connect** field
+Set the JaegerAI frame stream URL via the **Connect** field
 (default `ws://127.0.0.1:8765/frames`).
 
 ## Architecture
 
 ```
-JROS Python brain
+JaegerAI Python brain
   └─ AnimationNode
        └─ frame_callback → WebSocketBridge → ws://.../frames
                                                     │
                                                     ▼
-                                          JROS-Avatar (this app)
+                                          JaegerAI-Avatar (this app)
                                           - WebSocketClient
                                           - FrameDecoder
                                           - RendererView

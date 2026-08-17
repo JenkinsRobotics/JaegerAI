@@ -14,7 +14,7 @@ path that just happens to be missing.
 Scan order (deduped, first hit wins for any given filename):
 
   1. ``JAEGER_MODEL_SCAN_PATHS`` env var (colon-separated, override)
-  2. ``~/.jaeger/models/`` (JROS production cache)
+  2. ``~/.jaeger/models/`` (JaegerAI production cache)
   3. ``<repo>/src/jaeger_os/models/`` (in-tree dev / symlink slot)
   4. ``~/.lmstudio/models/`` (LM Studio default)
   5. ``~/Library/Application Support/LM Studio/models/`` (macOS alt)
@@ -22,9 +22,9 @@ Scan order (deduped, first hit wins for any given filename):
   7. ``~/.cache/huggingface/hub/`` (Hugging Face Hub cache)
   8. ``~/Models/`` (generic catch-all)
 
-The first path that hits a given GGUF filename wins, so the JROS-
+The first path that hits a given GGUF filename wins, so the JaegerAI-
 owned locations rank above third-party caches — if a user has the
-same file in both ``~/.jaeger/models/`` and LM Studio, the JROS
+same file in both ``~/.jaeger/models/`` and LM Studio, the JaegerAI
 copy is reported.
 
 Returned ``DiscoveredModel`` records carry ``path`` (absolute,
@@ -50,8 +50,8 @@ from typing import Iterable
 # include ``~`` — they're expanded via ``Path.expanduser()`` at scan
 # time. Order matters: earlier entries win when the same filename
 # appears in multiple locations.
-# 0.2.6: ``~/.jaeger/models`` is gone — the JROS-owned cache moved into
-# ``<install_root>/.jaeger_os/models``. Added at scan time by
+# 0.2.6: ``~/.jaeger/models`` is gone — the JaegerAI-owned cache moved into
+# ``<install_root>/.jaeger_ai/models``. Added at scan time by
 # ``scan_paths()`` since it depends on the runtime install root, not
 # a static template.
 _DEFAULT_SCAN_PATHS: list[tuple[str, str]] = [
@@ -88,13 +88,13 @@ def _in_tree_models_path() -> tuple[str, str] | None:
     # core/models/local_discovery.py → core/.. → jaeger_os/models
     candidate = here.parent.parent.parent / "models"
     if candidate.is_dir():
-        return (str(candidate), "JROS in-tree (dev)")
+        return (str(candidate), "JaegerAI in-tree (dev)")
     return None
 
 
 def _operator_state_models_path() -> tuple[str, str] | None:
     """The 0.2.6 operator-state cache at
-    ``<install_root>/.jaeger_os/models/``. Lazy-imported to avoid
+    ``<install_root>/.jaeger_ai/models/``. Lazy-imported to avoid
     circular dependency on instance.py at module load."""
     try:
         from jaeger_ai.core.instance.instance import operator_state_root
@@ -102,7 +102,7 @@ def _operator_state_models_path() -> tuple[str, str] | None:
         return None
     candidate = operator_state_root() / "models"
     if candidate.is_dir():
-        return (str(candidate), "JROS cache")
+        return (str(candidate), "JaegerAI cache")
     return None
 
 
@@ -151,7 +151,7 @@ class DiscoveredModel:
     """One GGUF file found on disk by the scanner."""
     path: pathlib.Path           # absolute, symlinks NOT followed (.resolve() of name only)
     size_gb: float               # real bytes / 1e9; -1.0 if stat failed
-    source: str                  # human label: "LM Studio", "JROS cache", etc.
+    source: str                  # human label: "LM Studio", "JaegerAI cache", etc.
 
     @property
     def filename(self) -> str:
@@ -186,7 +186,7 @@ def discover_local_gguf_files() -> list[DiscoveredModel]:
 
     Returns a deduplicated list — same filename in two scan paths
     only appears once, with the source from whichever path ranked
-    higher (env override → in-tree → JROS cache → LM Studio → …).
+    higher (env override → in-tree → JaegerAI cache → LM Studio → …).
     Sorted by filename for stable, predictable wizard output.
     """
     found: dict[str, DiscoveredModel] = {}

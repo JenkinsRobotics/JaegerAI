@@ -54,7 +54,7 @@ def make_animation_node(bus: Any, config: dict[str, Any]) -> AnimationNode:
     ``jaeger_os.nodes.runtime.ensure_animation_node`` which owns the
     idempotent singleton lifecycle (and the FrameBridge WebSocket
     sidecar). The chassis ``bus`` argument is accepted but not
-    propagated — JROS's runtime uses the legacy global bus until
+    propagated — JaegerAI's runtime uses the legacy global bus until
     J5B unifies the two.
     """
     from jaeger_os.nodes.runtime import ensure_animation_node

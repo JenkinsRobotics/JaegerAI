@@ -1,6 +1,6 @@
 """The single doctor — one engine behind both surfaces.
 
-JROS used to have two diagnostics paths that drifted: ``jaeger --doctor``
+JaegerAI used to have two diagnostics paths that drifted: ``jaeger --doctor``
 (pre-boot dependency + config checks, :mod:`jaeger_os.core.runtime.preflight`)
 and ``jaeger health`` / ``system_health`` (the runtime substrate probe,
 :mod:`jaeger_os.core.diagnostics.probe`). They checked different things,
@@ -113,7 +113,7 @@ def _tcc_checks() -> list[Any]:
         elif granted is False:
             detail = (f"not granted for this app — System Settings → "
                       f"Privacy & Security → {pane}, then restart Jaeger. "
-                      "Grants are per launching app (JaegerOS.app vs "
+                      "Grants are per launching app (JaegerAI.app vs "
                       "Terminal are separate).")
         else:
             detail = "could not determine (PyObjC not installed)"

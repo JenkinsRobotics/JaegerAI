@@ -1,4 +1,4 @@
-"""JrosClient — the reusable out-of-process client for the JROS agent.
+"""JaegerClient — the reusable out-of-process client for the JaegerAI agent.
 
 Any non-Python (or separate-process) surface drives the agent through this
 one SDK instead of re-implementing the wire handling: it spawns ``jaeger
@@ -21,12 +21,12 @@ from typing import Any, Callable
 from jaeger_os.contract import protocol
 
 
-class JrosError(RuntimeError):
+class JaegerError(RuntimeError):
     """The bridge failed to boot, died mid-turn, or returned a fatal."""
 
 
-class JrosClient:
-    """Drive a JROS agent over the client protocol.
+class JaegerClient:
+    """Drive a JaegerAI agent over the client protocol.
 
     ``command`` defaults to running the bridge in this interpreter. Pass
     ``env={"JAEGER_INSTANCE_NAME": ...}`` to pick the instance.
@@ -45,7 +45,7 @@ class JrosClient:
     # ── lifecycle ─────────────────────────────────────────────────
     def start(self) -> dict[str, Any]:
         """Spawn the bridge and await its ``ready`` handshake. Returns
-        ``{"instance": ..., "model": ...}``. Raises :class:`JrosError`."""
+        ``{"instance": ..., "model": ...}``. Raises :class:`JaegerError`."""
         self._proc = subprocess.Popen(
             self._command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -61,8 +61,8 @@ class JrosClient:
                               "model": frame.get("model")}
                 return self.ready
             if frame.get("type") == "fatal":
-                raise JrosError(str(frame.get("error", "boot failed")))
-        raise JrosError("bridge exited before ready")
+                raise JaegerError(str(frame.get("error", "boot failed")))
+        raise JaegerError("bridge exited before ready")
 
     def close(self) -> None:
         if self._proc is not None and self._proc.poll() is None:
@@ -76,7 +76,7 @@ class JrosClient:
                 pass
         self._proc = None
 
-    def __enter__(self) -> "JrosClient":
+    def __enter__(self) -> "JaegerClient":
         self.start()
         return self
 
@@ -93,7 +93,7 @@ class JrosClient:
         is called for a mid-turn prompt and must return the answer (default
         "deny")."""
         if self._proc is None:
-            raise JrosError("not started")
+            raise JaegerError("not started")
         self._write(protocol.send_op(text, session))
         for line in self._proc.stdout:        # type: ignore[union-attr]
             frame = protocol.parse(line)
@@ -111,21 +111,21 @@ class JrosClient:
                 if on_event is not None:
                     on_event(frame)
             elif kind == "fatal":
-                raise JrosError(str(frame.get("error", "bridge failed")))
-        raise JrosError("bridge exited mid-turn")
+                raise JaegerError(str(frame.get("error", "bridge failed")))
+        raise JaegerError("bridge exited mid-turn")
 
     def cancel(self, session: str = "") -> None:
         """Cooperatively interrupt the in-flight bridge turn."""
         del session  # reserved for a future multi-worker bridge
         if self._proc is None:
-            raise JrosError("not started")
+            raise JaegerError("not started")
         self._write({"op": "cancel"})
 
     def steer(self, text: str, session: str = "") -> None:
         """Inject guidance into the in-flight bridge turn."""
         del session  # reserved for a future multi-worker bridge
         if self._proc is None:
-            raise JrosError("not started")
+            raise JaegerError("not started")
         self._write({"op": "steer", "text": str(text or "")})
 
     # ── internals ─────────────────────────────────────────────────

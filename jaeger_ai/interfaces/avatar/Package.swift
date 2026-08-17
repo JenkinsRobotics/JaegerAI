@@ -1,28 +1,28 @@
 // swift-tools-version:5.9
 //
-// JROS-Avatar — Mac-native renderer for the JROS animation node.
+// JaegerAI-Avatar — Mac-native renderer for the JaegerAI animation node.
 // See ../../dev_docs/0.5.0_swift_renderer_plan.md for the
 // architecture + phased delivery plan.
 
 import PackageDescription
 
 let package = Package(
-    name: "JROSAvatar",
+    name: "JaegerAIAvatar",
     platforms: [
         .macOS(.v13),
     ],
     products: [
-        .executable(name: "JROSAvatar", targets: ["JROSAvatar"]),
+        .executable(name: "JaegerAIAvatar", targets: ["JaegerAIAvatar"]),
     ],
     targets: [
         .executableTarget(
-            name: "JROSAvatar",
-            path: "Sources/JROSAvatar"
+            name: "JaegerAIAvatar",
+            path: "Sources/JaegerAIAvatar"
         ),
         .testTarget(
-            name: "JROSAvatarTests",
-            dependencies: ["JROSAvatar"],
-            path: "Tests/JROSAvatarTests"
+            name: "JaegerAIAvatarTests",
+            dependencies: ["JaegerAIAvatar"],
+            path: "Tests/JaegerAIAvatarTests"
         ),
     ]
 )

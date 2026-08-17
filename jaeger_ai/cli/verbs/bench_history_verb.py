@@ -916,7 +916,7 @@ def _installed_model_stems(repo: pathlib.Path | None = None) -> set[str]:
     benched on this machine"."""
     roots: list[pathlib.Path] = []
     home = pathlib.Path.home()
-    # 0.2.6: model cache moved into <install_root>/.jaeger_os/models/.
+    # 0.2.6: model cache moved into <install_root>/.jaeger_ai/models/.
     # Resolve lazily so this module stays import-cheap.
     try:
         from jaeger_ai.core.instance.instance import operator_state_root

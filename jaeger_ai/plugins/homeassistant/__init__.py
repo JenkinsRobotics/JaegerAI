@@ -8,7 +8,7 @@ beat an ``action=`` umbrella for the 4B — dev/docs/reality/agentic_runners.md)
   • ha_list_services(domain)        — what actions each domain supports
   • ha_call_service(domain, service, entity_id, data_json) — do the thing
 
-Ported from Hermes (tools/homeassistant_tool.py) with the JROS contract:
+Ported from Hermes (tools/homeassistant_tool.py) with the JaegerAI contract:
 tools return dicts (never raise), credentials resolve instance-store first
 (``HASS_URL`` / ``HASS_TOKEN`` via set_credential) with env-var fallback,
 and every tool returns a friendly ``{ok: False, error: …}`` setup guide

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # build-app.sh — assemble a real .app bundle from the SwiftPM
-# executable.  Produces ``apps/JaegerOS/.build/JaegerOS.app`` ready
+# executable.  Produces ``apps/JaegerAI/.build/JaegerAI.app`` ready
 # to launch via ``open``.
 #
 # Why a build script vs. a real Xcode project: SwiftPM gives us
@@ -18,18 +18,18 @@
 #      jaeger_ai/assets/ (cached if AppIcon.icns is newer than its
 #      input PNGs)
 #   3. Build the .app skeleton:
-#        JaegerOS.app/
+#        JaegerAI.app/
 #        ├── Contents/
 #        │   ├── Info.plist
-#        │   ├── MacOS/JaegerOS         (the executable)
+#        │   ├── MacOS/JaegerAI         (the executable)
 #        │   └── Resources/
 #        │       ├── AppIcon.icns
-#        │       └── JaegerOS_JaegerOS.bundle/  (SPM resources)
+#        │       └── JaegerAI_JaegerAI.bundle/  (SPM resources)
 #   4. Print the bundle path so the caller can open it
 #
 # Usage:
-#   apps/JaegerOS/Scripts/build-app.sh           # debug
-#   apps/JaegerOS/Scripts/build-app.sh --release # release
+#   apps/JaegerAI/Scripts/build-app.sh           # debug
+#   apps/JaegerAI/Scripts/build-app.sh --release # release
 
 set -euo pipefail
 
@@ -45,12 +45,12 @@ done
 
 # ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
 # split): dev is a launch STATE, not a separate bundle. `jaeger dev`
-# runs this same JaegerOS.app against the repo's jros-dev instance via
-# the environment it launches with; a separate JaegerOS-dev.app meant a
+# runs this same JaegerAI.app against the repo's jaeger-dev instance via
+# the environment it launches with; a separate JaegerAI-dev.app meant a
 # second bundle id, and macOS TCC keys permission grants on bundle id —
 # every permission had to be granted twice. `--dev` is still accepted
 # (dev-checkout builds pass it) but only means "debug config" now.
-APP_NAME="JaegerOS"
+APP_NAME="JaegerAI"
 
 # Resolve paths — APP_ROOT is jaeger_ai/interfaces/swift, REPO_ROOT is the
 # JaegerAI repo root (three levels up: swift → interfaces → jaeger_ai → repo root).
@@ -68,7 +68,7 @@ swift build -c "$CONFIG"
 # Locate the built executable.  SwiftPM puts it under
 # .build/<triple>/<config>/<name>; on Apple Silicon the triple is
 # arm64-apple-macosx.
-SWIFT_BIN="$(swift build -c "$CONFIG" --show-bin-path)/JaegerOS"
+SWIFT_BIN="$(swift build -c "$CONFIG" --show-bin-path)/JaegerAI"
 if [[ ! -x "$SWIFT_BIN" ]]; then
     echo "[build-app] ERROR — built executable not found at $SWIFT_BIN" >&2
     exit 1
@@ -127,20 +127,20 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # (the single source of truth), CFBundleVersion suffixed with the git SHA
 # so two builds of the same release line are distinguishable.
 cp "$APP_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_ai/__init__.py")"
+JaegerAI_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_ai/__init__.py")"
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
-if [[ -n "$JROS_VERSION" ]]; then
-    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JROS_VERSION" \
-        -c "Set :CFBundleVersion $JROS_VERSION+$GIT_SHA" \
+if [[ -n "$JaegerAI_VERSION" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $JaegerAI_VERSION" \
+        -c "Set :CFBundleVersion $JaegerAI_VERSION+$GIT_SHA" \
         "$APP_BUNDLE/Contents/Info.plist"
 fi
 # One-app collapse (2026-07-14): clear out a pre-collapse dev bundle so
-# a stale JaegerOS-dev.app can't linger next to the real one.
-rm -rf "$BUILD_DIR/JaegerOS-dev.app"
+# a stale JaegerAI-dev.app can't linger next to the real one.
+rm -rf "$BUILD_DIR/JaegerAI-dev.app"
 
 # Executable.
-cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerOS"
-chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerOS"
+cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerAI"
+chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerAI"
 
 # Icon.
 cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
@@ -151,7 +151,7 @@ cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 # Bundle.module can find it at runtime.  SwiftPM's resolution looks
 # for the bundle relative to the executable, so copying it next to
 # the binary in MacOS/ keeps the resource path correct.
-SPM_BUNDLE_NAME="JaegerOS_JaegerOS.bundle"
+SPM_BUNDLE_NAME="JaegerAI_JaegerAI.bundle"
 SPM_BUNDLE_SRC="$(dirname "$SWIFT_BIN")/$SPM_BUNDLE_NAME"
 if [[ -d "$SPM_BUNDLE_SRC" ]]; then
     DEST_BUNDLE="$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME"
@@ -167,9 +167,9 @@ if [[ -d "$SPM_BUNDLE_SRC" ]]; then
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.jenkinsrobotics.JaegerOS.resources</string>
+    <string>com.jenkinsrobotics.JaegerAI.resources</string>
     <key>CFBundleName</key>
-    <string>JaegerOS Resources</string>
+    <string>JaegerAI Resources</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
 </dict>
@@ -192,7 +192,7 @@ git -C "$REPO_ROOT" rev-parse HEAD > "$APP_BUNDLE/Contents/Resources/build-commi
 # story).  Distribution: export JAEGER_SIGN_IDENTITY="Developer ID
 # Application: <name> (<team>)" for a real signature; then notarize with
 #   xcrun notarytool submit <zip> --keychain-profile jaeger-notary --wait
-#   xcrun stapler staple JaegerOS.app
+#   xcrun stapler staple JaegerAI.app
 SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
 echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
 codesign --force --sign "$SIGN_IDENTITY" \
@@ -203,8 +203,8 @@ codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 ||
 # Keep the app VISIBLE at the repo root (gitignored symlink) — the
 # bundle itself lives in swift/.build, which nobody should have to find.
 # (One-app collapse 2026-07-14: also drop the old dev-shell symlink.)
-rm -f "$REPO_ROOT/JaegerOS-dev.app"
-ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS.app"
+rm -f "$REPO_ROOT/JaegerAI-dev.app"
+ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerAI.app"
 
 if [[ "$INSTALL" == "1" ]]; then
     echo "[build-app] installing -> /Applications/$APP_NAME.app"

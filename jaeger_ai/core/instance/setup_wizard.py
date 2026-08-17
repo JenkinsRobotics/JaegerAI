@@ -584,7 +584,7 @@ def run_wizard(
     interaction_mode = _ask_choice(
         "Pick a mode",
         [
-            ("gui", "Desktop app — JaegerOS window + menu-bar tray  (recommended)"),
+            ("gui", "Desktop app — JaegerAI window + menu-bar tray  (recommended)"),
             ("tui", "Terminal — text TUI (`jaeger --tui`)"),
             ("voice", "Voice — always-on mic + spoken responses  (experimental)"),
         ],
@@ -1074,14 +1074,14 @@ _ENV_FILE_HEADER = (
 
 def _env_file_path() -> Path:
     """The ``jaeger.env`` location — sits alongside the rest of the
-    operator state at ``<install_root>/.jaeger_os/jaeger.env``."""
+    operator state at ``<install_root>/.jaeger_ai/jaeger.env``."""
     from jaeger_ai.core.instance.instance import operator_state_root
     return operator_state_root() / "jaeger.env"
 
 
 def _write_env_file(instance_root: Path, instance_name: str) -> None:
     """Persist ``export JAEGER_INSTANCE_DIR=…`` (+ INSTANCE_NAME) at
-    ``<install_root>/.jaeger_os/jaeger.env`` so the user has a single,
+    ``<install_root>/.jaeger_ai/jaeger.env`` so the user has a single,
     predictable file to ``source``. Best-effort — failures print a
     note and let the wizard finish (the instance is already on disk).
     """

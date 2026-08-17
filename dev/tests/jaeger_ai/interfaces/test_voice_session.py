@@ -67,7 +67,7 @@ def test_voice_config_enabled_can_be_turned_on_explicitly() -> None:
 def test_wake_phrases_cover_both_persona_and_system_names() -> None:
     """'Erin Jaeger' must wake on either name — the persona ('hey erin') for
     natural address, the system ('hey jaeger' + phonetic variants) because
-    JaegerOS is the platform regardless of the per-instance name."""
+    JaegerAI is the platform regardless of the per-instance name."""
     phrases = _wake_phrases("Erin Jaeger")
     # persona
     for prefix in ("ok", "okay", "hey"):

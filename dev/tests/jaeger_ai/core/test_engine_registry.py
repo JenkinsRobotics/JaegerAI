@@ -76,7 +76,7 @@ def test_engines_for_format_partitions_by_format():
 
 
 def test_llama_cpp_is_available():
-    # The GGUF engine is always present in the JROS venv.
+    # The GGUF engine is always present in the JaegerAI venv.
     assert er.get_engine("llama-cpp-python").available() is True
 
 

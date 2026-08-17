@@ -7,7 +7,7 @@ What this verb actually does:
        - dev clone (.git)  → fast-forward git pull + editable reinstall;
        - clean curl install → download the target release tarball and
          swap the product files in place (no git), keeping ``.venv/`` +
-         ``.jaeger_os/``. ``--ref`` pins a version; ``--rollback`` reverts.
+         ``.jaeger_ai/``. ``--ref`` pins a version; ``--rollback`` reverts.
        - pip / pipx        → the matching upgrade command.
   2. Print "Restart `jaeger` to apply" — we don't auto-restart a
      running daemon. The user picks when to take the agent down.
@@ -56,7 +56,7 @@ def _upgrade_command(method: str) -> list[str] | None:
 #
 # A clean curl install has no ``.git``, so ``git pull`` can't update it.
 # Instead we download the target release's tarball and swap the product files
-# in place, leaving ``.venv/`` and ``.jaeger_os/`` (the model + every byte of
+# in place, leaving ``.venv/`` and ``.jaeger_ai/`` (the model + every byte of
 # instance state) untouched. ``_PRODUCT`` mirrors scripts/install.sh's PRODUCT
 # allowlist — keep the two in sync.
 
@@ -101,7 +101,7 @@ def _download_tarball(repo: str, ref: str, dest: Path) -> None:
 
 def _extract_product(tarball: Path, staging: Path) -> list[str]:
     """Extract ``tarball`` and copy the PRODUCT items into ``staging``. The
-    archive's single top-level dir (``JROS-<ref>``) is detected, not assumed.
+    archive's single top-level dir (``JaegerAI-<ref>``) is detected, not assumed.
     Returns the product items actually present in the archive."""
     staging.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -204,7 +204,7 @@ def _update_download(home: Path, *, ref: str | None = None,
     shutil.rmtree(staging, ignore_errors=True)
     try:
         with tempfile.TemporaryDirectory() as td:
-            tarball = Path(td) / "jros.tar.gz"
+            tarball = Path(td) / "jaeger.tar.gz"
             _download_tarball(repo, ref, tarball)
             copied = _extract_product(tarball, staging)
         if "jaeger_ai" not in copied:
@@ -242,30 +242,30 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
 
     Flavor follows the install: a dev checkout (``dev/`` present) builds
     debug (``--dev``); a clean product install builds ``--release``. Same
-    JaegerOS.app either way (one bundle since 2026-07-14 — dev is a launch
+    JaegerAI.app either way (one bundle since 2026-07-14 — dev is a launch
     state, not a separate app) — mirrors install.sh."""
     swift_dir = home / "jaeger_ai" / "interfaces" / "swift"
     script = swift_dir / "Scripts" / "build-app.sh"
     if not script.exists():
         return
     flag = "--dev" if (home / "dev").exists() else "--release"
-    built = swift_dir / ".build" / "JaegerOS.app"
+    built = swift_dir / ".build" / "JaegerAI.app"
     if only_if_stale:
         from jaeger_ai.cli._common import swift_app_is_stale
         if not swift_app_is_stale(home, built):
             return
     if shutil.which("swift") is None:
-        print(f"[jaeger update] ⚠ swift toolchain missing — JaegerOS.app NOT "
+        print(f"[jaeger update] ⚠ swift toolchain missing — JaegerAI.app NOT "
               "(re)built and now lags the core; build when available:",
               file=sys.stderr)
         print(f"                 bash {script} {flag}", file=sys.stderr)
         return
     verb = "rebuilding" if built.exists() else "building"
-    print(f"[jaeger update] {verb} JaegerOS.app…")
+    print(f"[jaeger update] {verb} JaegerAI.app…")
     rc = subprocess.run(["bash", str(script), flag],
                         stdout=subprocess.DEVNULL).returncode
     if rc == 0:
-        print(f"[jaeger update] ✓ JaegerOS.app ready")
+        print(f"[jaeger update] ✓ JaegerAI.app ready")
     else:
         print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
               f"bash {script} {flag}", file=sys.stderr)
@@ -562,7 +562,7 @@ def _cmd_update_argv(argv: list[str]) -> int:
 
 def _cmd_reinstall_argv(argv: list[str]) -> int:
     """``jaeger reinstall`` — clean reinstall of the framework in place,
-    keeping every agent (``.jaeger_os/`` is never touched).
+    keeping every agent (``.jaeger_ai/`` is never touched).
 
       * clean install (no .git) → re-fetch the product (current version, or
         ``--ref``) and force a dep resync — fixes corrupted/half-updated files.

@@ -2,7 +2,7 @@
 """Wheel cleanliness audit — refuse to ship a wheel that carries
 packager-machine runtime state.
 
-The 0.1.0 wheel accidentally bundled the JROS dev machine's
+The 0.1.0 wheel accidentally bundled the JaegerAI dev machine's
 ``instance/default/config.yaml`` / ``identity.yaml`` / ``manifest.json``
 plus stale ``logs/audit.log`` and ``memory/episodic.jsonl``. Every
 ``pip install jaeger-os`` user loaded our state before their own. The

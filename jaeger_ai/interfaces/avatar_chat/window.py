@@ -1,7 +1,7 @@
 """Companion surface: avatar (left) + live chat (right), framed to match the
 Chat window.
 
-A core JROS surface composed from :class:`AvatarView` + :class:`ChatWindow` — no
+A core JaegerAI surface composed from :class:`AvatarView` + :class:`ChatWindow` — no
 Studio dependency (Studio is splitting into its own app). Without a bus the chat
 pane degrades to a placeholder, so the window still opens in the dev launcher.
 """
@@ -53,11 +53,11 @@ class AvatarChatWindow(QWidget):
             _CANVAS, _INK_DIM, _MONO, _PANEL, _RULE,
         )
         name = agent_name(ctx)
-        self.setObjectName("JrosAvatarChatWindow")
-        self.setWindowTitle(f"JROS — {name} · avatar + chat")
+        self.setObjectName("JaegerAvatarChatWindow")
+        self.setWindowTitle(f"JaegerAI — {name} · avatar + chat")
         self.resize(1240, 700)
         self.setStyleSheet(
-            f"QWidget#JrosAvatarChatWindow {{ background-color: {_CANVAS}; }}"
+            f"QWidget#JaegerAvatarChatWindow {{ background-color: {_CANVAS}; }}"
             f"QFrame#Stage {{ background: {_PANEL}; border: 1px solid {_RULE};"
             f" border-radius: 12px; }}"
             f"QLabel#StageHeader {{ font-family: {_MONO[0]}, {_MONO[1]}, monospace;"

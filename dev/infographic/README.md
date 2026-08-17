@@ -1,6 +1,6 @@
-# JROS — full-stack pipeline infographics
+# JaegerAI — full-stack pipeline infographics
 
-End-to-end layouts of everything JROS touches: the sense → brain → act loop,
+End-to-end layouts of everything JaegerAI touches: the sense → brain → act loop,
 the avatar systems, voice in/out, hardware, and user input. Diagrams are
 **Mermaid in markdown** — they render as visuals in GitHub / VS Code / the
 [mermaid.live](https://mermaid.live) editor, and the source stays diffable.

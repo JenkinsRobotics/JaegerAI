@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="JaegerAI — the universal turnkey agentic agent: local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind.">
 <meta property="og:title" content="JaegerAI — the Mind of the Jaeger ecosystem">
-<meta property="og:description" content="The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. Runs on JaegerOS; headless is a config, not a fork.">
+<meta property="og:description" content="The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. Runs on JaegerAI; headless is a config, not a fork.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0d1117">
 <title>JaegerAI — the Mind of the Jaeger ecosystem</title>
@@ -303,7 +303,7 @@
 
     <h1>Local inference, tools, memory, and a persona pipeline —<span class="grad"> the Mind, ready to run.</span></h1>
 
-    <p class="lede">Local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol — one product. Runs on JaegerOS; headless is a config, not a fork.</p>
+    <p class="lede">Local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol — one product. Runs on JaegerAI; headless is a config, not a fork.</p>
 
     <div class="hero-cta">
       <a class="btn primary" href="#install">Get started →</a>
@@ -337,17 +337,17 @@
     <p class="sub">JaegerAI ships the complete universal agentic agent (Hermes lineage): loop, tools, skills, memory, persona, local inference, AND its own faces — chat app, TUI, voice, the protocol it serves. Headless (robots) is a config of JaegerAI, not a fork.</p>
 
     <p class="sub" style="margin-top: 18px;">
-      Built on <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>
+      Built on <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>
       — the framework tier (bus, node, modules/slots, supervisor, safety,
-      contract, capability layer). This repo pins a JaegerOS release; it
+      contract, capability layer). This repo pins a JaegerAI release; it
       never forks or edits it.
     </p>
 
     <p class="sub" style="margin-top: 18px;">
-      The <code class="inline">jaeger</code> CLI lives here — JaegerOS
+      The <code class="inline">jaeger</code> CLI lives here — JaegerAI
       ships no console script of its own. Engine modules
       (<code class="inline">kokoro_tts</code>, <code class="inline">whisper_stt</code>)
-      are optional extras, each its own repo, pinning JaegerOS only.
+      are optional extras, each its own repo, pinning JaegerAI only.
     </p>
   </div>
 </section>
@@ -376,7 +376,7 @@
 
       <div class="feature">
         <h3>Its own faces + protocol</h3>
-        <p>The Swift app (default windowed UI), the TUI, voice, and the frozen PySide6 set — all clients of one versioned NDJSON protocol (<code class="inline">JrosClient</code>), the same wire contract third-party apps can embed.</p>
+        <p>The Swift app (default windowed UI), the TUI, voice, and the frozen PySide6 set — all clients of one versioned NDJSON protocol (<code class="inline">JaegerClient</code>), the same wire contract third-party apps can embed.</p>
         <span class="pill">interfaces</span>
       </div>
     </div>
@@ -398,12 +398,12 @@
 <section id="architecture">
   <div class="wrap">
     <div class="eyebrow">// architecture</div>
-    <h2 class="h">The Mind — pinned to JaegerOS, never forked from it.</h2>
+    <h2 class="h">The Mind — pinned to JaegerAI, never forked from it.</h2>
     <p class="sub">
       JaegerAI is the second tier in the Jaeger ecosystem's four-tier map.
-      See <a href="https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md" target="_blank" rel="noopener">JAEGER_ECOSYSTEM.md</a>
+      See <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md" target="_blank" rel="noopener">JAEGER_ECOSYSTEM.md</a>
       for the full whole-ecosystem rundown and
-      <a href="https://github.com/JenkinsRobotics/JaegerOS/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md" target="_blank" rel="noopener">THREE_TIER_STRUCTURE.md</a>
+      <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md" target="_blank" rel="noopener">THREE_TIER_STRUCTURE.md</a>
       for the tier-map reasoning.
     </p>
 
@@ -411,12 +411,12 @@
       <div class="arch-box">
         <h4>// this repo</h4>
         <h3>JaegerAI — the Mind</h3>
-        <p>Loop, tools, skills, memory, persona (id/ego), local inference, and its own faces. Registers its module roots (agent, nodes, plugins) through the <code class="inline">jaeger_os.module_roots</code> entry-point group — JaegerOS discovers it without ever naming it.</p>
+        <p>Loop, tools, skills, memory, persona (id/ego), local inference, and its own faces. Registers its module roots (agent, nodes, plugins) through the <code class="inline">jaeger_os.module_roots</code> entry-point group — JaegerAI discovers it without ever naming it.</p>
       </div>
       <div class="arch-box">
         <h4>// pinned framework</h4>
-        <h3>JaegerOS</h3>
-        <p>Bus · Node · modules/slots · supervisor · safety · contract · capability layer. This repo builds on a pinned release; JaegerOS itself is never edited to make this repo work.</p>
+        <h3>JaegerAI</h3>
+        <p>Bus · Node · modules/slots · supervisor · safety · contract · capability layer. This repo builds on a pinned release; JaegerAI itself is never edited to make this repo work.</p>
       </div>
     </div>
   </div>
@@ -482,13 +482,13 @@
       <div class="milestone next">
         <h4>0.9.0 — Next</h4>
         <h3>Standing on its own as a repo</h3>
-        <p>Split out of the JROS monorepo with history preserved: the CI dependency rule enforced, the <code class="inline">jaeger_os</code> → <code class="inline">jaeger_ai</code> package rename, discovery-driven engine resolution, cross-install proven against JaegerOS + both engine repos in one venv.</p>
+        <p>Split out of the JaegerAI monorepo with history preserved: the CI dependency rule enforced, the <code class="inline">jaeger_os</code> → <code class="inline">jaeger_ai</code> package rename, discovery-driven engine resolution, cross-install proven against JaegerAI + both engine repos in one venv.</p>
       </div>
 
       <div class="milestone">
         <h4>Later</h4>
         <h3>1.0 — the ecosystem opens</h3>
-        <p>Contract freeze at the JaegerOS seam; engine modules and hardware packages move to independently-versioned repos once the slot contracts survive a real body and a real engine swap.</p>
+        <p>Contract freeze at the JaegerAI seam; engine modules and hardware packages move to independently-versioned repos once the slot contracts survive a real body and a real engine swap.</p>
       </div>
     </div>
   </div>
@@ -505,7 +505,7 @@
         <div class="foot-sub">
           A <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">Jenkins Robotics</a>
           project — the Mind of the Jaeger ecosystem, built on
-          <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>.
+          <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>.
         </div>
         <div class="foot-motto">&ldquo;Engineering the future, one robot at a time.&rdquo;</div>
       </div>
@@ -519,7 +519,7 @@
       </div>
       <div class="foot-col">
         <div class="foot-h">Ecosystem</div>
-        <a href="https://github.com/JenkinsRobotics/JaegerOS" target="_blank" rel="noopener">JaegerOS</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>
         <a href="https://github.com/JenkinsRobotics/JaegerKokoroTTS" target="_blank" rel="noopener">JaegerKokoroTTS</a>
         <a href="https://github.com/JenkinsRobotics/JaegerWhisperSTT" target="_blank" rel="noopener">JaegerWhisperSTT</a>
         <a href="https://github.com/JenkinsRobotics/JP01_Firmware" target="_blank" rel="noopener">JP01_Firmware</a>

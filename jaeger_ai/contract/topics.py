@@ -1,4 +1,4 @@
-"""topics.py — single source of truth for JROS node topics.
+"""topics.py — single source of truth for JaegerAI node topics.
 
 Lives in ``jaeger_os.contract`` (0.9 contract package): topic names +
 msgspec schemas are wire truth, imported by anything that puts a
@@ -13,7 +13,7 @@ import from here.
 Schemas are :class:`msgspec.Struct`, not Pydantic models — 10×
 faster on the transport hot path AND native MessagePack support
 for the binary topics (audio frames, vision frames).  Pydantic
-stays in JROS for config validation + tool schemas where its
+stays in JaegerAI for config validation + tool schemas where its
 richer ecosystem earns the overhead; transport schemas live where
 microseconds matter.  See ``dev/docs/history/ROADMAP_0.4.md`` open question
 #2 (resolved): JSON for text topics, MessagePack for binary topics.
@@ -325,7 +325,7 @@ SENSE_NODE_HEALTH = "/sense/node_health"
 
 class EStop(TopicMessage):
     """System e-stop — L2 of the hardware safety contract (see
-    dev/docs/hardware/JROS_HARDWARE_FRAMEWORK_PLAN.md §2.8). Publishing with
+    dev/docs/hardware/JaegerAI_HARDWARE_FRAMEWORK_PLAN.md §2.8). Publishing with
     ``engaged=True`` LATCHES the stop: every hardware node in the
     package's ``safety.estop_scope`` executes its node-local stop on
     receipt, and motion capabilities refuse while latched. Release
