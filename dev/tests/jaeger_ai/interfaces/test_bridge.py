@@ -233,11 +233,32 @@ def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     assert boot.cleaned is True  # graceful teardown ran
 
 
+def test_turn_executes_enriched_prompt_but_persists_display_text(monkeypatch):
+    seen = {}
+
+    def fake_run(client, text, session_key=None, display_text=None):
+        seen.update(text=text, session=session_key, display_text=display_text)
+        return {"text": "ok", "error": None}
+
+    stdin = (
+        '{"op":"send","text":"[directive] visible question",'
+        '"display_text":"visible question","session":"shared-1"}\n'
+        '{"op":"quit"}\n'
+    )
+    _run(monkeypatch, stdin, run_fn=fake_run)
+
+    assert seen == {
+        "text": "[directive] visible question",
+        "session": "shared-1",
+        "display_text": "visible question",
+    }
+
+
 def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 1
+    assert contract["contract_version"] == 2
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -246,6 +267,13 @@ def test_integration_contract_is_versioned_and_self_describing():
         "available": True,
         "owner": "jaeger",
         "mutable": True,
+    }
+    sessions = contract["features"]["sessions"]["contract"]
+    assert sessions["version"] == 2
+    assert sessions["ownership"]["transcript"] == "jaeger"
+    assert sessions["ownership"]["archive"] == "ares"
+    assert set(sessions["operations"]) == {
+        "create", "list", "load", "rename", "clear", "delete", "archive", "search",
     }
     assert contract["features"]["skills"] == {
         "available": True,
@@ -1098,13 +1126,34 @@ def test_delete_session_command_removes_runtime_history(monkeypatch, _instance_o
     _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)
     result = next(frame for frame in frames if frame.get("id") == "r1")
     assert result["ok"] is True
-    assert result["data"] == {"ok": True, "id": "webui:drop", "removed": True}
+    assert result["data"] == {
+        "ok": True, "id": "drop", "removed": True, "tombstoned": True,
+    }
 
     check = SessionStore(_instance_on_disk / "memory" / "sessions.db")
     try:
         assert check.history("webui:drop") == []
     finally:
         check.close()
+
+
+def test_v2_session_mutations_are_canonical_and_idempotent(monkeypatch, _instance_on_disk):
+    stdin = (
+        '{"op":"command","cmd":"create_session","args":{"id":"shared-1"},"id":"c1"}\n'
+        '{"op":"command","cmd":"create_session","args":{"id":"shared-1"},"id":"c2"}\n'
+        '{"op":"command","cmd":"clear_session","args":{"id":"shared-1"},"id":"x1"}\n'
+        '{"op":"command","cmd":"delete_session","args":{"id":"shared-1"},"id":"d1"}\n'
+        '{"op":"command","cmd":"delete_session","args":{"id":"shared-1"},"id":"d2"}\n'
+        '{"op":"quit"}\n'
+    )
+    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)
+    results = {frame["id"]: frame for frame in frames if frame.get("id")}
+    assert results["c1"]["data"]["created"] is True
+    assert results["c2"]["data"]["created"] is False
+    assert results["x1"]["data"]["cleared"] is True
+    assert results["d1"]["data"]["removed"] is True
+    assert results["d2"]["data"]["removed"] is False
+    assert results["d2"]["data"]["tombstoned"] is True
 
 
 def test_turn_workspace_binds_and_restores_ares_path(monkeypatch, tmp_path):
