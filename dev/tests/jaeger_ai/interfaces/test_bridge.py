@@ -263,6 +263,15 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
     assert "settings_set" in contract["operations"]["commands"]
+    assert "list_credentials" in contract["operations"]["queries"]
+    assert {"set_credential", "delete_credential"}.issubset(
+        contract["operations"]["commands"])
+    assert contract["features"]["credentials"] == {
+        "available": True,
+        "owner": "jaeger",
+        "mutable": True,
+        "values_readable": False,
+    }
     assert contract["features"]["chat"] == {
         "available": True,
         "owner": "jaeger",
@@ -290,6 +299,22 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert contract["features"]["mcp_server_config"]["transports"] == [
         "stdio", "streamable_http",
     ]
+
+
+def test_bridge_credential_inventory_never_returns_values(tmp_path):
+    from jaeger_ai.core import credential_service
+    from jaeger_ai.core.instance.instance import InstanceLayout
+
+    layout = InstanceLayout(root=tmp_path / "credential-instance")
+    layout.root.mkdir(parents=True)
+    layout.ensure_dirs()
+    credential_service.set_credential(layout, "openai_api_key", "secret-value")
+
+    result = bridge._query(
+        "list_credentials", {}, type("B", (), {"layout": layout})())
+
+    assert result == {"credentials": ["openai_api_key"], "count": 1}
+    assert "secret-value" not in repr(result)
 
 
 def test_session_key_flows_through(monkeypatch):
