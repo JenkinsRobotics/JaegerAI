@@ -137,7 +137,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 5
+INTEGRATION_CONTRACT_VERSION = 6
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
@@ -205,6 +205,7 @@ def _integration_contract() -> dict[str, Any]:
     return {
         "contract": "ares-jaeger",
         "contract_version": INTEGRATION_CONTRACT_VERSION,
+        "scope": "runtime_provider",
         "protocol_version": str(protocol.PROTOCOL_VERSION),
         "runtime": {"id": "jaeger_local", "name": "JaegerAI", "version": __version__},
         "operations": {
@@ -218,10 +219,6 @@ def _integration_contract() -> dict[str, Any]:
                 "character_persona_editing", "voice_settings",
             ],
             "extensibility": ["skills", "mcp_server_config", "tool_inventory"],
-            "work_management": ["kanban", "delegation", "schedules", "caldav"],
-            "research": ["deep_research", "model_compare", "teacher_escalation"],
-            "knowledge_media": ["cookbook_model_serving", "youtube_ingest", "pdf_forms"],
-            "creative_output": ["image_gallery", "image_editor", "visual_reports"],
         },
         "features": {
             "chat": {"available": True, "owner": "jaeger", "mutable": True},
@@ -246,26 +243,6 @@ def _integration_contract() -> dict[str, Any]:
                             "values_readable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
             "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
-            # ARES-owned features are still part of this integration contract:
-            # the contract describes the combined product boundary, not only
-            # Jaeger's internal modules. ARES must independently health-check
-            # its owned service before rendering the corresponding surface.
-            "kanban": {"available": True, "owner": "ares", "mutable": True},
-            "delegation": {"available": True, "owner": "ares", "mutable": True},
-            "schedules": {"available": True, "owner": "ares", "mutable": True},
-            "caldav": {"available": True, "owner": "ares", "mutable": True},
-            "deep_research": {
-                "available": False, "owner": "ares", "mutable": True,
-                "reason": "research execution is not routed through the selected runtime",
-            },
-            "model_compare": {"available": True, "owner": "ares", "mutable": True},
-            "teacher_escalation": {"available": True, "owner": "ares", "mutable": True},
-            "cookbook_model_serving": {"available": True, "owner": "ares", "mutable": True},
-            "youtube_ingest": {"available": False, "owner": "none", "mutable": False},
-            "pdf_forms": {"available": False, "owner": "none", "mutable": False},
-            "image_gallery": {"available": False, "owner": "none", "mutable": False},
-            "image_editor": {"available": False, "owner": "none", "mutable": False},
-            "visual_reports": {"available": False, "owner": "none", "mutable": False},
         },
     }
 
