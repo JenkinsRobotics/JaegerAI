@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 
 from jaeger_ai.modules import installed
 
@@ -33,10 +33,10 @@ PACKAGE = "jaeger_kokoro_tts"
 
 #: Topics a surface watches to follow the speech path.
 WATCH = (
-    topics.ACT_SPEECH_SAY,       # what was asked for
-    topics.ACT_SPEECH_SPOKEN,    # the done-ack: ok, duration, reason
-    topics.ACT_SPEECH_CHUNK,     # per-chunk AMPLITUDE — the lip-sync signal
-    topics.ACT_SPEAKER_STATE,    # the device: playing or idle
+    topics.ACT_SPEECH,       # what was asked for
+    topics.SENSE_SPOKEN,     # the done-ack: ok, duration, reason
+    topics.SENSE_TTS_CHUNK,  # per-chunk amplitude — the lip-sync signal
+    topics.ACT_AUDIO_OUT,    # audio sent to the output device
 )
 
 

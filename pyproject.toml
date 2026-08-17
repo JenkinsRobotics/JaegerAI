@@ -80,6 +80,7 @@ jaeger_ai = ["**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["dev/tests"]
+addopts = ["--import-mode=importlib"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration
 # suites take real wall time. Mark them and skip by default; the
 # ``dev/scripts/run_tests.sh`` driver picks the right subset for CI vs

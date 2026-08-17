@@ -18,7 +18,7 @@ to JaegerAI's AudioIONode, not to this engine.
 
 from __future__ import annotations
 
-from jaeger_os import topics
+from jaeger_os.transport import topics
 
 from jaeger_ai.modules import installed
 
@@ -29,8 +29,8 @@ PACKAGE = "jaeger_whisper_stt"
 
 #: Topics a surface watches to follow the listening path.
 WATCH = (
-    topics.SENSE_STT_SPEECH_START,  # someone started talking — barge-in cue
-    topics.SENSE_STT_TRANSCRIPT,    # what was heard
+    topics.SENSE_USER_SPEECH_START,  # someone started talking — barge-in cue
+    topics.SENSE_TRANSCRIPT,         # what was heard
 )
 
 

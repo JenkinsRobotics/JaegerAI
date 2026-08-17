@@ -33,6 +33,27 @@ logging.getLogger("mcp").setLevel(logging.WARNING)
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = ROOT / "mcp_config.json"
+_SECRET_NAME = re.compile(
+    r"(authorization|cookie|token|secret|password|api[_-]?key|credential)",
+    re.IGNORECASE,
+)
+_MASK = "********"
+
+
+def _redact_known_secrets(value: Any, secrets: set[str]) -> Any:
+    """Remove configured MCP credentials from tool results and errors."""
+    if isinstance(value, str):
+        redacted = value
+        for secret in sorted((item for item in secrets if len(item) >= 4), key=len, reverse=True):
+            redacted = redacted.replace(secret, _MASK)
+        return redacted
+    if isinstance(value, dict):
+        return {key: _redact_known_secrets(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_known_secrets(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_known_secrets(item, secrets) for item in value)
+    return value
 
 
 @dataclass
@@ -205,8 +226,18 @@ class MCPRegistry:
         if spec is None:
             raise ValueError(f"unknown MCP tool: {qualified_name}")
         client = self._clients[spec.server_name]
-        result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
-        return _result_to_dict(result)
+        secrets = set(client.config.headers.values())
+        secrets.update(
+            value
+            for key, value in client.config.env.items()
+            if _SECRET_NAME.search(key)
+        )
+        try:
+            result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
+        except Exception as exc:
+            raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
+        payload = _result_to_dict(result)
+        return _redact_known_secrets(payload, secrets)
 
     def list_tools(self) -> list[MCPToolSpec]:
         return list(self._tools.values())
@@ -267,6 +298,8 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
         if not entry.get("enabled", True):
             continue
         name = str(entry.get("name") or "unknown")
+        env: dict[str, str] = {}
+        headers: dict[str, str] = {}
         try:
             env = entry.get("env", {})
             headers = entry.get("headers", {})
@@ -287,8 +320,20 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
             )
             registry.add_server(config)
         except Exception as exc:
-            errors[name] = str(exc)
-            print(f"[mcp] failed to connect '{name}': {exc}", flush=True)
+            secrets = {
+                value
+                for value in headers.values()
+                if isinstance(value, str)
+            } if isinstance(headers, dict) else set()
+            if isinstance(env, dict):
+                secrets.update(
+                    value
+                    for key, value in env.items()
+                    if isinstance(value, str) and _SECRET_NAME.search(str(key))
+                )
+            safe_error = _redact_known_secrets(str(exc), secrets)
+            errors[name] = safe_error
+            print(f"[mcp] failed to connect '{name}': {safe_error}", flush=True)
     _GLOBAL_REGISTRY = registry
     _LAST_ERRORS = errors
     return registry

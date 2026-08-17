@@ -71,7 +71,7 @@ def test_configure_reload_inventory_dispatch_and_restart(tmp_path, monkeypatch):
         unrelated = get_tool("mcp__fixture__environment").dispatch({
             "name": "UNRELATED_SECRET_DO_NOT_INHERIT",
         })
-        assert configured["text"] == "never-in-json"
+        assert configured["text"] == "********"
         assert unrelated["text"] == ""
 
         client.shutdown_global()
