@@ -258,7 +258,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 2
+    assert contract["contract_version"] == 3
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -277,6 +277,24 @@ def test_integration_contract_is_versioned_and_self_describing():
         "owner": "jaeger",
         "mutable": True,
     }
+    assert contract["domains"]["agent_runtime"] == [
+        "chat", "sessions", "approvals", "runtime_settings",
+        "character_persona_editing", "voice_settings",
+    ]
+    assert contract["domains"]["extensibility"] == [
+        "skills", "mcp_server_config", "tool_inventory",
+    ]
+    assert contract["features"]["schedules"] == {
+        "available": True,
+        "owner": "ares",
+        "mutable": True,
+    }
+    assert contract["features"]["kanban"] == {
+        "available": True,
+        "owner": "ares",
+        "mutable": True,
+    }
+    assert contract["features"]["deep_research"]["available"] is False
     sessions = contract["features"]["sessions"]["contract"]
     assert sessions["version"] == 2
     assert sessions["ownership"]["transcript"] == "jaeger"
