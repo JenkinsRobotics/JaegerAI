@@ -258,7 +258,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 5
+    assert contract["contract_version"] == 6
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -284,28 +284,14 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert contract["domains"]["extensibility"] == [
         "skills", "mcp_server_config", "tool_inventory",
     ]
-    assert contract["features"]["schedules"] == {
-        "available": True,
-        "owner": "ares",
-        "mutable": True,
-    }
-    assert contract["features"]["kanban"] == {
-        "available": True,
-        "owner": "ares",
-        "mutable": True,
-    }
-    assert contract["features"]["caldav"] == {
-        "available": True,
-        "owner": "ares",
-        "mutable": True,
-    }
-    for feature in ("model_compare", "teacher_escalation", "cookbook_model_serving"):
-        assert contract["features"][feature] == {
-            "available": True,
-            "owner": "ares",
-            "mutable": True,
-        }
-    assert contract["features"]["deep_research"]["available"] is False
+    assert contract["scope"] == "runtime_provider"
+    assert set(contract["domains"]) == {"agent_runtime", "extensibility"}
+    assert not {
+        "kanban", "delegation", "schedules", "caldav", "deep_research",
+        "model_compare", "teacher_escalation", "cookbook_model_serving",
+        "youtube_ingest", "pdf_forms", "image_gallery", "image_editor",
+        "visual_reports",
+    }.intersection(contract["features"])
     sessions = contract["features"]["sessions"]["contract"]
     assert sessions["version"] == 2
     assert sessions["ownership"]["transcript"] == "jaeger"
