@@ -80,6 +80,15 @@ def test_pid_alive_true_for_live_jaeger_shaped_process(monkeypatch):
     assert holder == os.getpid()
 
 
+def test_pid_alive_true_for_live_ares_bridge_process(monkeypatch):
+    monkeypatch.setattr(
+        instance_mod, "pid_cmdline",
+        lambda pid, **kw: "/usr/bin/python3 -m jaeger_ai.interfaces.bridge jarvis",
+    )
+    holder = instance_mod._pid_alive(str(os.getpid()))
+    assert holder == os.getpid()
+
+
 def test_pid_alive_none_for_live_but_not_jaeger_shaped(monkeypatch, capsys):
     """The core of field bug #3: alive != jaeger-shaped."""
     monkeypatch.setattr(

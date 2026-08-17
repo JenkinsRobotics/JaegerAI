@@ -24,6 +24,7 @@ def is_real_jaeger_command(cmdline: str) -> bool:
 
       - ``... python -m jaeger_os ...``        (module form)
       - ``... python -m jaeger_os.<sub> ...``  (daemon/cli subcommands)
+      - ``... python -m jaeger_ai.interfaces.bridge ...`` (ARES bridge)
       - ``... python .../jaeger_os/__main__.py ...``
       - ``... bin/jaeger ...``                 (the venv script)
 
@@ -36,6 +37,8 @@ def is_real_jaeger_command(cmdline: str) -> bool:
     if head_name in ("zsh", "bash", "sh", "fish", "dash"):
         return False
     if " -m jaeger_os" in cmdline:
+        return True
+    if " -m jaeger_ai.interfaces.bridge" in cmdline:
         return True
     if "/jaeger_os/__main__.py" in cmdline:
         return True

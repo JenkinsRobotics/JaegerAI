@@ -102,7 +102,7 @@ def test_enum_descriptor_carries_choices_from_literal(layout):
 def test_numeric_descriptor_carries_validation_bounds(layout):
     d = describe(layout, "model.ctx")
     assert d["type"] == "int"
-    assert d["validation"] == {"min": 512, "max": 131072}
+    assert d["validation"] == {"min": 512, "max": 2_097_152}
     assert d["default"] == 8192
 
 
@@ -160,7 +160,7 @@ def test_enum_coercion_accepts_valid_rejects_invalid(layout):
 
 def test_out_of_range_is_rejected(layout):
     with pytest.raises(ValueError):
-        set_value(layout, "model.ctx", 999_999)     # le=131072
+        set_value(layout, "model.ctx", 9_999_999)     # le=2097152
     with pytest.raises(ValueError):
         set_value(layout, "model.ctx", 10)          # ge=512
     # The bad write never touched disk.

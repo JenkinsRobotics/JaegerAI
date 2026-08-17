@@ -161,6 +161,7 @@ def test_is_real_jaeger_command_rejects_shells_with_jaeger_in_argv():
         ("/usr/bin/zsh", False),
         ("/usr/bin/python -m jaeger_os start", True),
         ("/usr/bin/python -m jaeger_os.cli.verbs.dispatch kill", True),
+        ("/usr/bin/python -m jaeger_ai.interfaces.bridge jarvis", True),
         ("/repo/.venv/bin/jaeger", True),
         ("/repo/.venv/bin/jaeger start --instance default", True),
         ("/path/to/python /repo/src/jaeger_os/__main__.py", True),
