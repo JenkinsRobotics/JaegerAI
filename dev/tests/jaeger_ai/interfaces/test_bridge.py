@@ -944,9 +944,9 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
     cfg = load_yaml(tmp / "config.yaml", Config)
     assert cfg.model.ctx == 65_536 and cfg.model.aux_ctx == 2048
 
-    # Schema bounds still enforced through the bridge (ge=0 / le=131072).
+    # Schema bounds still enforced through the bridge (ge=512 / le=2097152).
     ok, err = bridge._command(
-        "save_config", {"model_ctx": 999_999},
+        "save_config", {"model_ctx": 9_999_999},
         type("B", (), {"layout": _Lay()})())
     assert not ok and err
 
@@ -993,7 +993,7 @@ def test_settings_set_command_roundtrip(monkeypatch, _instance_on_disk):
              '{"op":"command","cmd":"settings_set",'
              '"args":{"path":"model.ctx","value":16384},"id":"r2"}\n'
              '{"op":"command","cmd":"settings_set",'
-             '"args":{"path":"model.ctx","value":999999},"id":"r3"}\n'
+             '"args":{"path":"model.ctx","value":9999999},"id":"r3"}\n'
              '{"op":"quit"}\n')
     rc, frames, _ = _run(monkeypatch, stdin)
     results = {f["id"]: f for f in frames if f["type"] == "result"}

@@ -59,7 +59,7 @@ def test_set_persists_through_catalog(instance):
 
 
 def test_set_invalid_value_errors_without_writing(instance):
-    assert _cmd_settings_argv(["set", "model.ctx", "999999"]) == 1
+    assert _cmd_settings_argv(["set", "model.ctx", "9999999"]) == 1
     assert load_yaml(instance / "config.yaml", Config).model.ctx == 8192
 
 
