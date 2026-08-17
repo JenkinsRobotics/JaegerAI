@@ -137,7 +137,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 4
+INTEGRATION_CONTRACT_VERSION = 5
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
@@ -258,9 +258,9 @@ def _integration_contract() -> dict[str, Any]:
                 "available": False, "owner": "ares", "mutable": True,
                 "reason": "research execution is not routed through the selected runtime",
             },
-            "model_compare": {"available": False, "owner": "none", "mutable": False},
-            "teacher_escalation": {"available": False, "owner": "none", "mutable": False},
-            "cookbook_model_serving": {"available": False, "owner": "none", "mutable": False},
+            "model_compare": {"available": True, "owner": "ares", "mutable": True},
+            "teacher_escalation": {"available": True, "owner": "ares", "mutable": True},
+            "cookbook_model_serving": {"available": True, "owner": "ares", "mutable": True},
             "youtube_ingest": {"available": False, "owner": "none", "mutable": False},
             "pdf_forms": {"available": False, "owner": "none", "mutable": False},
             "image_gallery": {"available": False, "owner": "none", "mutable": False},
