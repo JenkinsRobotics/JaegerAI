@@ -14,7 +14,7 @@ import queue
 from jaeger_os.transport import topics
 from jaeger_os.core.audio import AudioSessionConfig
 from jaeger_os.nodes import runtime
-from jaeger_kokoro_tts import TTSNode
+from jaeger_kokoro_tts.nodes.kokoro_tts.node import TTSNode
 from jaeger_os.transport import InProcBus
 
 

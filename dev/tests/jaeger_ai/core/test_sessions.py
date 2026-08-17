@@ -6,7 +6,9 @@ by recency with preview + count, titles set, and an empty store is clean.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
 
 import pytest
 
@@ -237,3 +239,78 @@ def test_running_execution_state_becomes_interrupted_after_restart(tmp_path):
         assert restarted.list_sessions()[0]["execution_state"] == "interrupted"
     finally:
         restarted.close()
+
+
+def test_concurrent_delete_tombstone_prevents_late_turn_resurrection(tmp_path):
+    """A racing turn may finish after delete, but it cannot recreate history."""
+    store = SessionStore(tmp_path / "s.db")
+    store.record("shared-1", "user", "before delete")
+    deleted = threading.Event()
+
+    def late_turn() -> None:
+        deleted.wait(timeout=2)
+        store.record("shared-1", "assistant", "late result")
+
+    worker = threading.Thread(target=late_turn)
+    worker.start()
+    try:
+        assert store.delete("shared-1") is True
+        deleted.set()
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+        assert store.is_tombstoned("shared-1") is True
+        assert store.history("shared-1") == []
+        assert store.exists("shared-1") is False
+    finally:
+        deleted.set()
+        worker.join(timeout=2)
+        store.close()
+
+
+def test_session_messages_and_tool_metadata_never_persist_secrets(tmp_path):
+    path = tmp_path / "s.db"
+    secret = "ghp_TestFakeCredential1234567890ab"
+    store = SessionStore(path)
+    store.record(
+        "shared-1",
+        "user",
+        f"token={secret}",
+        metadata={"tool_calls": [{"args": {"api_key": secret}}]},
+    )
+    history = store.history("shared-1")
+    assert secret not in json.dumps(history)
+    assert "[REDACTED]" in history[0]["text"]
+    store.close()
+
+    # Migration also scrubs rows written by an older version.
+    conn = sqlite3.connect(path)
+    with conn:
+        conn.execute(
+            "UPDATE messages SET text=?, metadata=? WHERE session_id=?",
+            (secret, json.dumps({"password": secret}), "shared-1"),
+        )
+        conn.execute(
+            "UPDATE sessions SET preview=? WHERE id=?", (secret, "shared-1")
+        )
+    conn.close()
+    restarted = SessionStore(path)
+    try:
+        assert secret not in json.dumps(restarted.history("shared-1"))
+        assert secret not in json.dumps(restarted.list_sessions())
+    finally:
+        restarted.close()
+
+
+def test_session_messages_mask_opaque_secret_metadata_values(tmp_path):
+    store = SessionStore(tmp_path / "sessions.db")
+    store.record(
+        "secret-metadata",
+        "assistant",
+        "configured",
+        metadata={"api_key": "opaque-value", "nested": {"password": "plain-word"}},
+    )
+
+    metadata = store.history("secret-metadata")[0]["metadata"]
+    assert metadata["api_key"] == "[REDACTED]"
+    assert metadata["nested"]["password"] == "[REDACTED]"
+    store.close()

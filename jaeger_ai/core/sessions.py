@@ -73,6 +73,7 @@ class SessionStore:
             self._ensure_brain_columns()
             self._ensure_contract_columns()
             self._migrate_legacy_ares_ids()
+            self._redact_existing_messages()
             self._conn.execute(
                 "UPDATE sessions SET execution_state='interrupted' "
                 "WHERE execution_state='running'"
@@ -147,6 +148,39 @@ class SessionStore:
             )
             self._conn.execute("DELETE FROM session_tombstones WHERE id=?", (old_id,))
 
+    def _redact_existing_messages(self) -> None:
+        """One-way migration: remove credential-shaped values from history."""
+        from jaeger_ai.core.redaction import redact_text, redact_value
+
+        rows = self._conn.execute("SELECT id, text, metadata FROM messages").fetchall()
+        updates: list[tuple[str, str | None, int]] = []
+        for message_id, text, metadata in rows:
+            safe_text = redact_text(str(text or ""))
+            safe_metadata = metadata
+            if metadata:
+                try:
+                    safe_metadata = json.dumps(
+                        redact_value(json.loads(metadata)), ensure_ascii=False
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    safe_metadata = redact_text(str(metadata))
+            if safe_text != text or safe_metadata != metadata:
+                updates.append((safe_text, safe_metadata, message_id))
+        self._conn.executemany(
+            "UPDATE messages SET text=?, metadata=? WHERE id=?", updates
+        )
+        previews = self._conn.execute(
+            "SELECT id, preview FROM sessions WHERE preview IS NOT NULL"
+        ).fetchall()
+        self._conn.executemany(
+            "UPDATE sessions SET preview=? WHERE id=?",
+            [
+                (safe, session_id)
+                for session_id, preview in previews
+                if (safe := redact_text(str(preview))) != preview
+            ],
+        )
+
     def record(
         self,
         session_id: str,
@@ -164,6 +198,10 @@ class SessionStore:
             session_id = canonical_session_id(session_id)
         except ValueError:
             return
+        from jaeger_ai.core.redaction import redact_text, redact_value
+
+        text = redact_text(str(text))
+        metadata = redact_value(metadata) if metadata else None
         now = time.time()
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):

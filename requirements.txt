@@ -9,11 +9,11 @@
 # re-listed here. Pinned to lower bounds so a fresh clone gets the
 # latest patch releases.
 
-# --- framework + reusable mind + engine modules (git dependencies —
-# none of these have PyPI releases yet). PEP 508 direct references, not
+# --- framework + reusable mind (git dependencies — none of these have PyPI
+# releases yet). PEP 508 direct references, not
 # `-e ../X` — setuptools' dynamic-dependencies file parser only accepts
 # requirement specifiers, not pip's `-e`/`-r` directives. A dev clone
-# with sibling ~/GITHUB/{JaegerAI,jaeger-agent,JaegerKokoroTTS,
+# with sibling ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,
 # JaegerWhisperSTT} checkouts gets editable installs of those instead —
 # see install.sh's sibling-detection step. kokoro_tts + whisper_stt are
 # DEFAULT deps (not optional extras) as of 0.9: a robot needs a voice out
@@ -30,13 +30,14 @@
 # degrading. (jaeger-agent@v1 was worse: that branch does not exist on
 # the remote at all, so the requirement could not resolve for anyone.)
 #
-# Switch each back to a tag pin the moment that repo cuts one matching
-# the version this release was tested against. Tracking a branch is the
-# lesser evil while four repos release together, not the destination.
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerAI@master
-jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@master
-jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
-jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master
+# Commit pins make clean installs reproducible. Dependency resolution is
+# intentionally allowed to fail if these repositories advertise incompatible
+# JaegerOS contracts; install.sh must never force an incoherent runtime with
+# --no-deps.
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@149de70b4e2289e01ef49407e4ae8c37a4b23185
+jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@7db72ed3b920221453d1819d06de9b6f0246e63f
+jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@2dbc93425188b77307106e1f05f88b65a93ad8c1
+jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@3a95d53c704c61d9fee1f367b50e009d5ba55234
 
 # --- agent core ---
 pydantic>=2.0

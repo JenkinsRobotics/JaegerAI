@@ -132,3 +132,43 @@ def test_live_tool_inventory_is_truthful(layout, monkeypatch):
         "name": "url", "type": "unknown", "required": False, "description": "",
     }]
     assert result["unavailable_servers"] == []
+
+
+def test_mcp_tool_results_redact_configured_credentials():
+    from jaeger_ai.plugins.mcp.client import _redact_known_secrets
+
+    secret = "configured-secret-value"
+    payload = {
+        "text": f"server echoed {secret}",
+        "content": [{"type": "text", "text": secret}],
+    }
+    redacted = _redact_known_secrets(payload, {secret})
+    assert secret not in json.dumps(redacted)
+    assert redacted["text"] == "server echoed ********"
+
+
+def test_mcp_connection_errors_never_expose_configured_credentials(
+    tmp_path, monkeypatch, capsys
+):
+    from jaeger_ai.plugins.mcp import client
+
+    secret = "opaque-connection-secret"
+    config = tmp_path / "mcp.json"
+    config.write_text(json.dumps({"servers": [{
+        "name": "broken",
+        "command": "fixture",
+        "env": {"API_KEY": secret},
+    }]}))
+    monkeypatch.setattr(
+        client.MCPRegistry,
+        "add_server",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError(f"server rejected {secret}")
+        ),
+    )
+    try:
+        client.init_from_config(config)
+        assert secret not in json.dumps(client.connection_errors())
+        assert secret not in capsys.readouterr().out
+    finally:
+        client.shutdown_global()

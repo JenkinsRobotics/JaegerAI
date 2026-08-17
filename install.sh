@@ -16,7 +16,7 @@
 # (requirements.txt, @master for 0.9) — installing JaegerAI (editable,
 # below) pulls the whole stack from GitHub automatically, no manual
 # multi-repo assembly needed. A dev machine with sibling checkouts at
-# ~/GITHUB/{JaegerAI,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
+# ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
 # installed EDITABLE instead (step 3b below) — local changes to the
 # framework/engines are live without a push+reinstall round-trip.
 
@@ -101,11 +101,10 @@ PIP="$VENV/bin/pip"
 # 3. Install JaegerAI — EDITABLE, so the clone IS the live package: a
 #    `jaeger` command + `jaeger --version`, code still writable in place
 #    (the agent self-modifies its skills; you can hack the framework).
-#    Runtime deps come from requirements.txt via pyproject's dynamic
-#    dependencies — including the jaeger-os / jaeger-kokoro-tts /
-#    jaeger-whisper-stt git dependencies (0.9 four-way split): this one
-#    install pulls the whole stack from GitHub, no manual multi-repo
-#    assembly. Prefer uv (fast); it lives inside the .venv so we never
+#    Runtime deps come from commit-pinned requirements.txt via pyproject's
+#    dynamic dependencies. This pulls the whole stack with no manual
+#    assembly and fails closed on an incompatible dependency contract.
+#    Prefer uv (fast); it lives inside the .venv so we never
 #    touch system Python.
 if [[ "$SKIP_DEPS" -eq 0 ]]; then
   echo "→ Upgrading pip..."
@@ -124,8 +123,8 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
 
   # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
-  # On a dev machine you may editable-install ~/GITHUB/{JaegerAI,
-  # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts OVER the git-resolved
+  # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
+  # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts over the git-resolved
   # copies so local framework/engine changes go live immediately.
   # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
   # migration) must run the OFFICIAL pinned releases inside its own
@@ -140,7 +139,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
   SIBLINGS_FOUND=()
   [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerAI jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
+  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
     if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
       SIBLINGS_FOUND+=("$sib")
     fi
