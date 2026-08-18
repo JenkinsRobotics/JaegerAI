@@ -251,7 +251,20 @@ def list_servers(layout: Any) -> dict[str, Any]:
 
 
 def list_tools(layout: Any) -> dict[str, Any]:
-    tools, errors, _ = _runtime()
+    # ``running`` (the third element) says whether the MCP registry exists in
+    # THIS process at all. Discarding it made an uninitialized runtime
+    # indistinguishable from a genuinely broken server: with no registry there
+    # are no tools and every configured server computes as not-active, so this
+    # returned ok=True, total=0, and listed healthy servers under
+    # ``unavailable_servers``. A caller querying from a process that never
+    # booted the MCP client — the bridge's own list_tools path does exactly
+    # this — was told its working servers were unavailable.
+    #
+    # ``list_servers`` in this same module already reports the flag as
+    # ``runtime_initialized``; this mirrors it so both answers agree, and
+    # reserves ``unavailable_servers`` for what it is supposed to mean: the
+    # runtime IS up and these enabled servers failed to connect.
+    tools, errors, running = _runtime()
     rows = []
     for server, specs in tools.items():
         for spec in specs:
@@ -269,8 +282,16 @@ def list_tools(layout: Any) -> dict[str, Any]:
                          "input_schema": spec.input_schema,
                          "schema_summary": summary})
     configured = list_servers(layout)["servers"]
-    unavailable = [row["name"] for row in configured if row["enabled"] and not row["active"]]
+    # Only claim a server is unavailable when the runtime is actually up to
+    # judge it. Otherwise report nothing as unavailable and let
+    # ``runtime_initialized`` carry the real state, so a caller can tell
+    # "this server is broken" from "I cannot answer that from here".
+    unavailable = (
+        [row["name"] for row in configured if row["enabled"] and not row["active"]]
+        if running else []
+    )
     return {"ok": True, "owner": "jaeger", "tools": rows, "total": len(rows),
+            "runtime_initialized": running,
             "unavailable_servers": unavailable, "connection_errors": errors}
 
 
