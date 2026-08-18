@@ -440,3 +440,108 @@ def test_call_counters_reset_between_turns():
     agent.run_turn("second")
     assert agent.last_halt_reason is None
     assert agent.last_iteration_count == 2
+
+
+# ── usage telemetry ────────────────────────────────────────────────
+
+
+def _install_fake_usage_stats(monkeypatch) -> list[tuple]:
+    """Stand in for ``jaeger_ai.core.runtime.usage_stats``.
+
+    The loop imports it lazily and jaeger-ai is not a dependency of this
+    package, so injecting the module keeps the assertion honest whether
+    or not the app tier happens to be installed alongside.
+    """
+    import sys
+    import types
+
+    calls: list[tuple] = []
+    mod = types.ModuleType("jaeger_ai.core.runtime.usage_stats")
+    mod.record_tool = lambda name, *, ok=True, elapsed=0.0: calls.append(  # type: ignore[attr-defined]
+        (name, ok, round(elapsed, 6) >= 0.0)
+    )
+    for part in ("jaeger_ai", "jaeger_ai.core", "jaeger_ai.core.runtime"):
+        monkeypatch.setitem(sys.modules, part, types.ModuleType(part))
+    monkeypatch.setitem(sys.modules, "jaeger_ai.core.runtime.usage_stats", mod)
+    return calls
+
+
+def test_dispatch_counts_a_successful_tool_call(monkeypatch):
+    """``usage.json``'s tool counters stayed empty because nothing ever
+    called ``record_tool``; dispatch is the one place that must."""
+    calls = _install_fake_usage_stats(monkeypatch)
+
+    @register_tool("get_time", "Get the time.", _SmallArgs)
+    def _impl(value: str = "x") -> dict:
+        return {"now": "12:00"}
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_1", "name": "get_time", "arguments": {"value": "UTC"}},
+            ],
+        },
+        {"role": "assistant", "content": "it is noon"},
+    ])
+    JaegerAgent(adapter=adapter).run_turn("what time is it?")
+
+    assert calls == [("get_time", True, True)]
+
+
+def test_dispatch_counts_a_failing_tool_call_as_a_failure(monkeypatch):
+    """A raising tool must be counted, and counted as ``ok=False`` — the
+    "which tools fail most" question is the whole point of the counter."""
+    calls = _install_fake_usage_stats(monkeypatch)
+
+    @register_tool("boom", "Explodes.", _SmallArgs)
+    def _impl(value: str = "x") -> dict:
+        raise RuntimeError("kaboom")
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_1", "name": "boom", "arguments": {"value": "a"}},
+            ],
+        },
+        {"role": "assistant", "content": "that failed"},
+    ])
+    JaegerAgent(adapter=adapter).run_turn("go")
+
+    assert [(n, ok) for n, ok, _ in calls] == [("boom", False)]
+
+
+def test_telemetry_failure_never_breaks_the_turn(monkeypatch):
+    """Counting is best-effort; a broken counter must not fail the call
+    it only meant to observe."""
+    import sys
+    import types
+
+    mod = types.ModuleType("jaeger_ai.core.runtime.usage_stats")
+
+    def _explode(*a, **k):
+        raise RuntimeError("telemetry is down")
+
+    mod.record_tool = _explode  # type: ignore[attr-defined]
+    for part in ("jaeger_ai", "jaeger_ai.core", "jaeger_ai.core.runtime"):
+        monkeypatch.setitem(sys.modules, part, types.ModuleType(part))
+    monkeypatch.setitem(sys.modules, "jaeger_ai.core.runtime.usage_stats", mod)
+
+    @register_tool("get_time", "Get the time.", _SmallArgs)
+    def _impl(value: str = "x") -> dict:
+        return {"now": "12:00"}
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "call_1", "name": "get_time", "arguments": {"value": "UTC"}},
+            ],
+        },
+        {"role": "assistant", "content": "it is noon"},
+    ])
+    assert JaegerAgent(adapter=adapter).run_turn("what time is it?") == "it is noon"

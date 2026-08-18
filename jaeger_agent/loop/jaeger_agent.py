@@ -1620,6 +1620,19 @@ class JaegerAgent:
             content, _ok, _err, round(elapsed, 6),
         )
 
+        # Usage counters (``logs/usage.json``). ``record_skill`` was wired
+        # up from the skill tool, but its tool counterpart had no callers
+        # anywhere — so the sidecar's ``"tools"`` map stayed permanently
+        # empty and ``/usage`` could only ever report skill views. This is
+        # the single point every dispatched tool passes through with its
+        # outcome and duration already resolved, so count it here rather
+        # than at each call site. Best-effort: telemetry never breaks a turn.
+        try:
+            from jaeger_ai.core.runtime.usage_stats import record_tool
+            record_tool(name, ok=_ok, elapsed=elapsed)
+        except Exception:  # noqa: BLE001
+            pass
+
         # File-mutation verifier bookkeeping: remember failures per
         # (tool, path); a later SUCCESS on the same target supersedes.
         # Un-superseded failures surface in the final-answer footer.
