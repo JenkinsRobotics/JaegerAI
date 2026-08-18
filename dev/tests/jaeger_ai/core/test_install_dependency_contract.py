@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 COMMIT_PIN = re.compile(r"@[0-9a-f]{40}$")
 JAEGER_OS_RELEASE_REF = "@0.9.0"
-JAEGER_OS_RELEASE_COMMIT = "616e386c6cf662d7772e2bd87ed0e4fa9194e5fa"
+JAEGER_OS_RELEASE_COMMIT = "149de70b4e2289e01ef49407e4ae8c37a4b23185"
 
 
 def _git_requirements(path: Path) -> list[str]:
