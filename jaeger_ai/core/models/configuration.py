@@ -44,6 +44,56 @@ def _local_model(model: str) -> tuple[str, str]:
     raise ValueError(f"Jaeger could not resolve local model {model!r}")
 
 
+# Providers that serve exactly one vendor's models. A single-vendor API can
+# never answer for a different vendor's model, so pairing them is always a
+# configuration error rather than a preference. Multi-vendor hosts
+# (ollama, ollama-cloud, lmstudio, local, custom endpoints) are deliberately
+# absent: ollama-cloud legitimately serves gpt-oss, deepseek, qwen, gemma and
+# more, so no vendor inference is valid there.
+_SINGLE_VENDOR_PROVIDERS = {"openai", "anthropic", "gemini", "xai"}
+# Prefix → the one provider that can serve it. Kept deliberately small and
+# unambiguous; anything not listed is simply not checked.
+_MODEL_VENDOR_PREFIXES = (
+    ("claude", "anthropic"),
+    ("gemini", "gemini"),
+    ("grok", "xai"),
+)
+
+
+def _reject_cross_vendor_pair(provider: str, model: str) -> None:
+    """Refuse a provider/model pair that cannot possibly work.
+
+    A real instance was found configured with provider ``anthropic`` and model
+    ``gpt-5.4-mini`` pointed at ``https://api.anthropic.com`` — an OpenAI model
+    name sent to Anthropic's endpoint. Nothing validated the pair, so the
+    mismatch persisted silently and every turn failed or silently fell back to
+    the in-process local model, which reads to the operator as "the model
+    picker doesn't work".
+
+    Only obvious cross-vendor pairs are rejected. Multi-vendor hosts are never
+    second-guessed, so ``ollama-cloud`` + ``gpt-oss:120b`` stays valid.
+    """
+    if provider not in _SINGLE_VENDOR_PROVIDERS:
+        return
+    bare = model.strip().lower().rsplit("/", 1)[-1]
+    for prefix, owner in _MODEL_VENDOR_PREFIXES:
+        if bare.startswith(prefix) and owner != provider:
+            raise ValueError(
+                f"provider {provider!r} cannot serve model {model!r} "
+                f"({prefix}* models are served by {owner!r}). "
+                "Pick a model this provider offers, or switch provider."
+            )
+    # ``gpt`` needs its own arm: gpt-oss is an open-weights family that
+    # multi-vendor hosts legitimately serve, so it only indicts a pairing when
+    # the provider is a different single-vendor API.
+    if bare.startswith("gpt") and not bare.startswith("gpt-oss") and provider != "openai":
+        raise ValueError(
+            f"provider {provider!r} cannot serve model {model!r} "
+            "(gpt* models are served by 'openai'). "
+            "Pick a model this provider offers, or switch provider."
+        )
+
+
 def configure_model(
     layout: Any,
     *,
@@ -70,6 +120,10 @@ def configure_model(
         if context_length:
             updated.model.ctx = int(context_length)
     else:
+        # Validate the PAIR, not each half. provider and model are only
+        # meaningful together — an endpoint and a model name that disagree is
+        # a broken runtime, not a preference.
+        _reject_cross_vendor_pair(selected_provider, selected_model)
         updated.external_model.enabled = True
         updated.external_model.provider = selected_provider
         updated.external_model.model = selected_model
