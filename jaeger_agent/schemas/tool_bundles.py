@@ -163,6 +163,11 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         tools=_tools(_core("memory"), _scoping("identity")),
         includes=[],
     ),
+    "sessions": ToolsetDef(
+        description="Search and inspect canonical conversation history.",
+        tools=_tools(_scoping("sessions")),
+        includes=[],
+    ),
     "code": ToolsetDef(
         description="Run Python, run shell, manage the workspace venv + background processes.",
         tools=_tools(_core("execute_code"), _scoping("code", "background"),
@@ -283,7 +288,10 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "memory + delegate. Covers the L1/L2 bench prompts."
         ),
         tools=[],
-        includes=["essentials", "files", "web", "memory", "delegate", "schedule"],
+        includes=[
+            "essentials", "files", "web", "memory", "sessions", "delegate",
+            "schedule",
+        ],
     ),
     "default_consolidated": ToolsetDef(
         description=(
@@ -293,7 +301,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         ),
         tools=[],
         includes=[
-            "essentials", "files", "web", "memory_umbrella_only",
+            "essentials", "files", "web", "memory_umbrella_only", "sessions",
             "delegate", "schedule",
         ],
     ),

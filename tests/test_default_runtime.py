@@ -140,6 +140,12 @@ def test_sessions_keep_separate_transcripts() -> None:
     rt.close()
 
 
+def test_session_search_is_in_the_default_toolset() -> None:
+    from jaeger_agent.schemas.tool_bundles import resolve_toolsets
+
+    assert "session_search" in resolve_toolsets({"default"})
+
+
 def test_a_failing_turn_returns_an_error_not_an_exception() -> None:
     """One bad turn must not take the node down with it."""
 
