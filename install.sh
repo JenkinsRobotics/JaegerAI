@@ -13,7 +13,7 @@
 #
 # 0.9 four-way split: JaegerAI's own pyproject.toml declares git
 # dependencies on jaeger-os / jaeger-kokoro-tts / jaeger-whisper-stt
-# (requirements.txt, @master for 0.9) — installing JaegerAI (editable,
+# (requirements.txt, release-locked for 0.9) — installing JaegerAI (editable,
 # below) pulls the whole stack from GitHub automatically, no manual
 # multi-repo assembly needed. A dev machine with sibling checkouts at
 # ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
@@ -101,7 +101,7 @@ PIP="$VENV/bin/pip"
 # 3. Install JaegerAI — EDITABLE, so the clone IS the live package: a
 #    `jaeger` command + `jaeger --version`, code still writable in place
 #    (the agent self-modifies its skills; you can hack the framework).
-#    Runtime deps come from commit-pinned requirements.txt via pyproject's
+#    Runtime deps come from release-locked requirements.txt via pyproject's
 #    dynamic dependencies. This pulls the whole stack with no manual
 #    assembly and fails closed on an incompatible dependency contract.
 #    Prefer uv (fast); it lives inside the .venv so we never

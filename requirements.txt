@@ -30,11 +30,13 @@
 # degrading. (jaeger-agent@v1 was worse: that branch does not exist on
 # the remote at all, so the requirement could not resolve for anyone.)
 #
-# Commit pins make clean installs reproducible. Dependency resolution is
-# intentionally allowed to fail if these repositories advertise incompatible
-# JaegerOS contracts; install.sh must never force an incoherent runtime with
+# The voice packages publish an exact JaegerOS @0.9.0 direct reference, so the
+# root must use that same reference for pip to resolve one framework. The tag
+# resolved to 616e386c6cf662d7772e2bd87ed0e4fa9194e5fa at this release gate;
+# the contract test locks both values. Remaining repositories use immutable
+# commit references. install.sh must never force an incoherent runtime with
 # --no-deps.
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@149de70b4e2289e01ef49407e4ae8c37a4b23185
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
 jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@7db72ed3b920221453d1819d06de9b6f0246e63f
 jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@2dbc93425188b77307106e1f05f88b65a93ad8c1
 jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@3a95d53c704c61d9fee1f367b50e009d5ba55234
