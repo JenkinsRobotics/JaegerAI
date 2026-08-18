@@ -283,7 +283,7 @@ MAX_HISTORY_CHARS = 3200
 # perform_task as the one real callable, or the id treats a label as a
 # tool name and the call dies unparsed.
 _SELF_MODEL_HEADER = (
-    "You are a JROS agent running locally on this machine. Capability "
+    "You are a Jaeger agent running locally on this machine. Capability "
     "areas below are NOT tool names — you reach ALL of them through "
     "your one tool, perform_task:"
 )

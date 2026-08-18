@@ -29,9 +29,12 @@ Wire-format quirks vs Anthropic, all handled below:
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any
+
+from jaeger_os.core.tools.tool_schema import ToolDef
 
 from jaeger_agent.loop.interrupt import (
     AgentInterrupted,
@@ -39,9 +42,10 @@ from jaeger_agent.loop.interrupt import (
     interruptible_call,
 )
 from jaeger_agent.schemas.message_types import Message, ToolCall
-from jaeger_os.core.tools.tool_schema import ToolDef
+
 from .base import ProviderAdapter
 
+logger = logging.getLogger(__name__)
 
 # Backends that talk the OpenAI wire format. Mirrors
 # ``_OPENAI_COMPATIBLE`` in ``core/external_model.py`` so the slugs stay
@@ -192,6 +196,7 @@ class OpenAIAdapter(ProviderAdapter):
         max_tokens: int = 4096,
         temperature: float = 0.0,
         top_p: float = 0.95,
+        num_ctx: int | None = None,
         timeout_s: float = 60.0,
         stream_transport: bool = True,
         client: Any = None,
@@ -203,6 +208,7 @@ class OpenAIAdapter(ProviderAdapter):
         self.max_tokens = int(max_tokens)
         self.temperature = float(temperature)
         self.top_p = float(top_p)
+        self.num_ctx = int(num_ctx) if num_ctx is not None else None
         self.timeout_s = float(timeout_s)
         self.stream_transport = bool(stream_transport)
         self._client = client
@@ -300,6 +306,13 @@ class OpenAIAdapter(ProviderAdapter):
         }
         if tools:
             kwargs["tools"] = [t.to_openai_schema() for t in tools]
+        if (
+            self.provider == "ollama"
+            and self.num_ctx is not None
+            and self.num_ctx > 0
+            and ":cloud" not in self.model.lower()
+        ):
+            kwargs["extra_body"] = {"options": {"num_ctx": self.num_ctx}}
         return kwargs
 
     # ── call + parse ────────────────────────────────────────────────
@@ -554,8 +567,8 @@ def _aggregate_chat_stream(
         if close is not None:
             try:
                 close()
-            except Exception:  # noqa: BLE001 — closing is best-effort
-                pass
+            except Exception:
+                logger.debug("Could not close OpenAI-compatible stream", exc_info=True)
 
     message: dict[str, Any] = {
         "role": "assistant",
@@ -589,4 +602,4 @@ def _aggregate_chat_stream(
     return out
 
 
-__all__ = ["OpenAIAdapter", "KNOWN_PROVIDERS"]
+__all__ = ["KNOWN_PROVIDERS", "OpenAIAdapter"]
