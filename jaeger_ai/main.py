@@ -2708,6 +2708,18 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                 )
             except Exception:  # noqa: BLE001 — tracing never breaks the turn
                 pass
+            # usage_stats.record_tool() existed with a complete implementation
+            # but had no caller anywhere, so <instance>/logs/usage.json kept
+            # "tools": {} forever while skill views accumulated normally. Any
+            # surface reporting tool usage (ARES's skills/tools panel, the
+            # XP/mastery tree) therefore showed a zero it had never measured.
+            # This is the natural call site: _tool_done already runs once per
+            # dispatch with the name, outcome and duration record_tool wants.
+            try:
+                from jaeger_ai.core.runtime import usage_stats
+                usage_stats.record_tool(name, ok=ok, elapsed=elapsed_s)
+            except Exception:  # noqa: BLE001 — accounting never breaks the turn
+                pass
 
         def _heartbeat(elapsed_s: float) -> None:
             # Keep the status line honest while the first model call is
