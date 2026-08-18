@@ -1,51 +1,12 @@
-id: org.jenkinsrobotics.mind.agent
-name: JaegerAgent
-type: module
-implementation: jaeger
 module: jaeger_agent
 slot: mind
 version: 1.0.0
 
-# The OWNERSHIP axis (TAXONOMY.md "Module KINDS") — orthogonal to
-# `slot`, which says what ROLE this fills. `mind` is the agent itself:
-# a singleton, and the only kind that decides rather than executes.
-# Unlike an `engine`, swapping this module swaps how the system THINKS,
-# not which device it drives.
-kind: mind
-
-# Topics follow the hierarchy: /<category>/<class>/<message>.
-#
-# The mind is the one module whose inputs are other modules' outputs:
-# it consumes what the senses produced (`/sense/stt/transcript` comes
-# straight from the stt slot) and produces intent the actuators act on.
-# That is why it declares no hardware and no libraries — it sits at the
-# top of the stack and touches only topics.
 consumes: [/act/chat, /sense/stt/transcript, /act/response]
 produces: [/sense/chat, /sense/agent_state, /sense/tool, /sense/activity, /sense/request]
 
-# EMPTY BY DESIGN, and the one place this module inverts the engine
-# pattern. kokoro_tts declares `text_to_speech`, whisper_stt declares
-# `listen` — each engine CONTRIBUTES a tool. The mind is the thing that
-# CALLS them: it reads the process-wide registry every turn, so any
-# module, skill, or MCP server that registers a tool becomes reachable
-# without this manifest (or this package) knowing it exists. A tool
-# declared here would be a tool the brain offers itself, which is not
-# a thing.
 tools: []
 
 factory: jaeger_agent:make_mind_node
-config: agent             # its group/key in the settings catalog —
-                          # see jaeger_agent/config.py (AgentConfig)
-
-# llama_cpp only, because it is the only provider this module can
-# promise. `agent.provider` defaults to llama_cpp and llama-cpp-python
-# is a BASE dependency, so the availability gate probing it answers the
-# real question: can this install think at all, on its own, with no
-# server and no account?
-#
-# The remote backends are deliberately absent. They ship as optional
-# extras (`jaeger-agent[anthropic]`), so listing `anthropic` here would
-# report the mind unavailable to every deployment using a different
-# provider — and to an application injecting its own adapter, which
-# needs none of them.
+config: agent
 requires_libraries: [llama_cpp]
