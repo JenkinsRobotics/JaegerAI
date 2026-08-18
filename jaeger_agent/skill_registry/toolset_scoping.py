@@ -169,6 +169,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # favour of the umbrella ``memory(action=…)`` (in CORE).
         "remember", "recall", "forget", "list_facts", "search_memory",
     }),
+    "sessions": frozenset({"session_search"}),
     "board": frozenset({
         # board_add / board_view are CORE; the rest load on intent.
         "board_move", "board_update", "board_delete",
@@ -237,6 +238,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
+    "sessions": "search and inspect canonical conversation history",
     "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
     "scheduling": "schedule, list, cancel cron prompts",
     "background": "long-running background processes; open URLs/apps",
