@@ -129,8 +129,8 @@ def test_format_messages_injects_native_dialect_per_family():
     """The adapter injects tools in the model's OWN dialect (we match
     the model). A Hermes/chatml model gets <tool_call>; a Mistral model
     gets [TOOL_CALLS] — never the wrong one forced on it."""
-    from pydantic import BaseModel
     from jaeger_os.core.tools.tool_schema import ToolDef
+    from pydantic import BaseModel
 
     class _A(BaseModel):
         x: int
@@ -157,8 +157,8 @@ def test_format_messages_injects_native_dialect_per_family():
 def test_format_messages_gemma_injects_no_prose():
     """Gemma works through structured tools= — the adapter must NOT
     add prose for it (avoid perturbing a model that already routes)."""
-    from pydantic import BaseModel
     from jaeger_os.core.tools.tool_schema import ToolDef
+    from pydantic import BaseModel
 
     class _A(BaseModel):
         x: int
@@ -172,7 +172,7 @@ def test_format_messages_gemma_injects_no_prose():
     assert "<tools>" not in sys_text
     assert "[AVAILABLE_TOOLS]" not in sys_text
     # But structured tools= is still passed (gemma's working channel).
-    assert "tools" in kw and kw["tools"]
+    assert kw.get("tools")
 
 
 def test_format_messages_prose_family_drops_structured_tools():
@@ -181,8 +181,8 @@ def test_format_messages_prose_family_drops_structured_tools():
     the model's fragile GGUF tool template (DeepSeek-R1 crashes on dict
     args; Hermes builds strip the tool section). The catalogue is in the
     system prose instead."""
-    from pydantic import BaseModel
     from jaeger_os.core.tools.tool_schema import ToolDef
+    from pydantic import BaseModel
 
     class _A(BaseModel):
         x: int
@@ -747,6 +747,7 @@ def test_in_process_call_raises_stale_timeout_when_model_hangs():
     it bails in seconds with a clean exception."""
     import threading
     import time
+
     from jaeger_agent.loop.interrupt import StaleCallTimeout
 
     class _HangingLlama:
@@ -766,7 +767,10 @@ def test_in_process_call_raises_stale_timeout_when_model_hangs():
         )
     elapsed = time.perf_counter() - started
     # Should bail near the timeout, not after the 5s hang.
-    assert elapsed < 2.0, (
+    # The adapter also waits up to 1.5 s for cooperative cleanup so the
+    # shared model is not left with a zombie decode. Allow scheduler jitter
+    # around that bounded join while still proving we did not wait 5 s.
+    assert elapsed < 2.75, (
         f"watchdog should fire near stale_timeout (0.3s); "
         f"actual {elapsed:.2f}s suggests it's still waiting for the call"
     )
