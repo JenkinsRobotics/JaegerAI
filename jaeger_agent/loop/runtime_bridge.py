@@ -52,7 +52,7 @@ def _resolve_local_max_tokens() -> int:
     didn't even exist on the local ``ModelConfig`` schema — added in
     0.2.0 alongside this plumbing."""
     try:
-        from jaeger_ai.main import _pipeline  # noqa: PLC0415 — lazy
+        from jaeger_ai.main import _pipeline
         cfg = _pipeline.get("config")
         if cfg is None:
             return 4096
@@ -154,6 +154,7 @@ def _adapter_for_client(
             model=model,
             api_key=api_key,
             base_url=getattr(ext, "base_url", None),
+            num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
         )
 
@@ -240,9 +241,9 @@ def build_jaeger_agent(
     ``None``, oversized results are truncated to a preview only —
     the legacy behaviour, fine for bench / tests with no layout bound.
     """
-    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
     from jaeger_agent.schemas.tool_bundles import resolve_toolsets
     from jaeger_agent.skill_registry.toolset_scoping import tool_visible
+    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
 
     def _reset_turn_state() -> None:
         from jaeger_agent.tools.files import reset_read_tracker
