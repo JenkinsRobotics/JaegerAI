@@ -52,14 +52,13 @@ def test_declared_slots_match_what_discovery_resolves() -> None:
             continue
         spec = by_slot.get(mod.SLOT)
         assert spec is not None, f"nothing filled slot {mod.SLOT!r}"
-        # Compare against where the winning module SHIPS FROM, not its
-        # manifest ``module`` name: those are deliberately different
-        # (import package ``jaeger_kokoro_tts`` ships module
-        # ``kokoro_tts``). The claim this file makes is about the
-        # package, so that is what gets checked.
-        assert mod.PACKAGE in str(spec.source_dir), (
+        # The framework contract identifies the provider through its
+        # importable factory; ModuleSpec deliberately carries no source-tree
+        # path because installed wheels need not retain one.
+        discovery_package = getattr(mod, "DISCOVERY_PACKAGE", mod.PACKAGE)
+        assert spec.factory.split(":", 1)[0].startswith(discovery_package), (
             f"{mod.PACKAGE} claims slot {mod.SLOT!r}, but discovery "
-            f"resolved {spec.module!r} from {spec.source_dir}"
+            f"resolved {spec.module!r} through {spec.factory!r}"
         )
 
 

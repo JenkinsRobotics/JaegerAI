@@ -439,7 +439,7 @@ def _fake_layout(cfg_path):
 def test_build_audio_session_node_routes_custom_config(monkeypatch, tmp_path):
     from jaeger_ai.core.instance.schemas import (
         Config, ModelConfig, VoiceConfig, dump_yaml)
-    from jaeger_whisper_stt.config import WhisperSTTConfig
+    from jaeger_whisper_stt.nodes.whisper_stt.config import WhisperSTTConfig
     import jaeger_ai.core.context as context
 
     cfg_path = tmp_path / "config.yaml"
