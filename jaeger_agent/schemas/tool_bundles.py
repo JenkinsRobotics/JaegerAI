@@ -39,6 +39,8 @@ from typing import Any
 
 from jaeger_agent.skill_registry.toolset_scoping import (
     CORE as _SCOPING_CORE,
+)
+from jaeger_agent.skill_registry.toolset_scoping import (
     TOOLSETS as _SCOPING,
 )
 
@@ -410,7 +412,7 @@ def toolset_for_tool(tool_name: str) -> str | None:
 __all__ = [
     "JAEGER_TOOLSETS",
     "ToolsetDef",
-    "resolve_toolsets",
     "list_toolsets",
+    "resolve_toolsets",
     "toolset_for_tool",
 ]

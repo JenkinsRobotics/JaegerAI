@@ -57,14 +57,16 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+from jaeger_os.core.tools.tool_schema import ToolDef
 from pydantic import BaseModel, Field
 
 from jaeger_agent.dialects import _shared, extract_tool_calls
 from jaeger_agent.dialects.chatml import render_tools as _render_chatml_tools
 from jaeger_agent.prompts.persona_filter import _preserves_content
-from jaeger_os.core.tools.tool_schema import ToolDef
+
 # Refusal detection. Ported from JaegerAI's bench scenarios in 0.11 —
 # it was three lines and a word list behind a host import, and a module
 # that cannot tell whether the model just refused cannot run its own
@@ -727,14 +729,14 @@ def run_persona_turn(
 
 
 __all__ = [
-    "PERFORM_TASK_SPEC",
+    "COMPOSE_RULES",
     "LANE_CONTRACT",
     "LANE_TOOLS_BLOCK",
-    "COMPOSE_RULES",
-    "MAX_HISTORY_PAIRS",
     "MAX_HISTORY_CHARS",
+    "MAX_HISTORY_PAIRS",
+    "PERFORM_TASK_SPEC",
     "build_self_model_block",
-    "self_model_block",
     "reset_self_model_cache",
     "run_persona_turn",
+    "self_model_block",
 ]
