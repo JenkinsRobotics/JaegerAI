@@ -144,7 +144,7 @@ BRIDGE_QUERIES = (
     "setup_defaults", "model_catalog", "session_contract", "list_sessions", "load_session",
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
-    "list_credentials",
+    "list_credentials", "skill_usage",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -479,6 +479,29 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         from jaeger_ai.core.settings.catalog import catalog as _catalog
         return _catalog(lay, advanced=bool(args.get("advanced", True)),
                         group=args.get("group"))
+    if what == "skill_usage":
+        # usage_stats already records every skill view and tool call to
+        # <instance>/logs/usage.json; it just had no way out of the runtime,
+        # so external surfaces (ARES's skills panel) reported zeros while the
+        # real counts sat on disk. Expose the existing snapshot rather than
+        # keeping a second tally.
+        from jaeger_ai.core.runtime import usage_stats
+        snap = usage_stats.snapshot()
+        skills = snap.get("skills") or {}
+        tools = snap.get("tools") or {}
+        return {
+            "ok": True,
+            "owner": "jaeger",
+            "usage_available": True,
+            "skills": skills,
+            "tools": tools,
+            "total_skill_views": sum(
+                int(v.get("views") or 0) for v in skills.values() if isinstance(v, dict)
+            ),
+            "unique_skills_used": len(skills),
+            "top_skills": usage_stats.top_skills(10),
+            "top_tools": usage_stats.top_tools(10),
+        }
     if what == "permissions":
         from jaeger_ai.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
