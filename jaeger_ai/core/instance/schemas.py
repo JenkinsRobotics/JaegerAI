@@ -794,7 +794,7 @@ except ImportError:
 # ImportError fallback so a deleted ``nodes/whisper_stt/`` directory
 # degrades instead of breaking config load).
 try:
-    from jaeger_whisper_stt.config import WhisperSTTConfig
+    from jaeger_whisper_stt.nodes.whisper_stt.config import WhisperSTTConfig
 except ImportError:
     # Structurally identical to the real leaf (same fields/defaults) so
     # an existing config.yaml's ``whisper_stt:`` block — or the

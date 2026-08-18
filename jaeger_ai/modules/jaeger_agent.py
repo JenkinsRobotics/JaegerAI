@@ -37,6 +37,10 @@ SLOT = "mind"
 #: The exact import package integrated by this module file.
 PACKAGE = "jaeger_agent"
 
+#: JaegerAI owns the discoverable mind binding; jaeger-agent is the reusable
+#: loop used behind that binding and does not register itself as an OS module.
+DISCOVERY_PACKAGE = "jaeger_ai"
+
 #: The runtime JaegerAI hands the module — its product pipeline, not
 #: the module's config-built default. See the docstring above.
 RUNTIME_FACTORY = "jaeger_ai.core.mind_runtime:create_runtime"
@@ -84,6 +88,7 @@ def ask(bus: Any, text: str, *, session: str = "") -> None:
 __all__ = [
     "SLOT",
     "PACKAGE",
+    "DISCOVERY_PACKAGE",
     "RUNTIME_FACTORY",
     "WATCH",
     "available",

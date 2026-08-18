@@ -37,7 +37,7 @@
 # commit references. install.sh must never force an incoherent runtime with
 # --no-deps.
 jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
-jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@7db72ed3b920221453d1819d06de9b6f0246e63f
+jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@58cf369b026b187f9b9ab2c9ce7030ab0033ada2
 jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@2dbc93425188b77307106e1f05f88b65a93ad8c1
 jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@3a95d53c704c61d9fee1f367b50e009d5ba55234
 
