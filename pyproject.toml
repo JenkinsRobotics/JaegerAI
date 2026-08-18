@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-agent"
-description = "Reusable, headless agent runtime module for JaegerOS applications and robots."
+description = "Reusable, headless agent framework for AI applications and robots."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dynamic = ["version"]
@@ -34,9 +34,6 @@ openai = ["openai>=1.0"]
 local = []
 mlx = ["mlx-lm>=0.21"]
 dev = ["pytest>=8", "pyyaml>=6", "ruff>=0.4"]
-
-[project.entry-points."jaeger_os.module_roots"]
-jaeger_agent = "jaeger_agent.module_roots:roots"
 
 [tool.setuptools.dynamic]
 version = {attr = "jaeger_agent.__version__"}

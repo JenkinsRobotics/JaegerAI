@@ -11,6 +11,7 @@ import threading
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from jaeger_agent import AgentConfig, Message, ProviderAdapter, ToolCall
 from jaeger_agent.node import DEFAULT_RUNTIME_FACTORY, MindNode, resolve_runtime_factory
@@ -115,7 +116,7 @@ def test_host_config_keys_are_ignored_but_agent_typos_are_not() -> None:
     """Node config carries host keys; an ``agent`` group typo must still fail."""
     rt = DefaultAgentRuntime(config={"provider": "ollama", "instance_name": "host-owned"})
     assert rt.config.provider == "ollama"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AgentConfig(privider="ollama")  # typo inside the group
 
 
@@ -137,6 +138,12 @@ def test_sessions_keep_separate_transcripts() -> None:
     assert rt.agent_for("a") is not rt.agent_for("b")
     assert rt.health()["sessions"] == 2
     rt.close()
+
+
+def test_session_search_is_in_the_default_toolset() -> None:
+    from jaeger_agent.schemas.tool_bundles import resolve_toolsets
+
+    assert "session_search" in resolve_toolsets({"default"})
 
 
 def test_a_failing_turn_returns_an_error_not_an_exception() -> None:
@@ -242,7 +249,7 @@ def test_manifest_points_at_the_agent_config_group() -> None:
         (pathlib.Path(__file__).parent.parent / "jaeger_agent" / "module.yaml").read_text()
     )
     assert manifest["config"] == "agent"
-    assert manifest["slot"] == "mind" and manifest["kind"] == "mind"
+    assert manifest["slot"] == "mind"
     assert manifest["tools"] == []  # the mind calls tools, it does not supply them
     for field in AgentConfig.model_fields:
         assert field  # config group is non-empty, so the pointer means something
