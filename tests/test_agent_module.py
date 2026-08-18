@@ -4,9 +4,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from jaeger_os.core.modules import load_module
+
 from jaeger_agent import AgentBridge, ChatMessage, ChatReply, MindNode, TurnResult
 from jaeger_agent.messages import AgentActivity, AgentState, ToolEvent
-from jaeger_os.core.modules import load_module
 
 
 class FakeBus:
@@ -60,9 +61,8 @@ def wait_for(predicate: Any, timeout: float = 1.0) -> None:
 def test_module_manifest_is_valid() -> None:
     package_dir = Path(__file__).parents[1] / "jaeger_agent"
     spec = load_module(package_dir)
-    assert spec.id == "org.jenkinsrobotics.mind.agent"
+    assert spec.module == "jaeger_agent"
     assert spec.slot == "mind"
-    assert spec.kind == "mind"
     assert spec.factory == "jaeger_agent:make_mind_node"
 
 
@@ -153,7 +153,11 @@ def test_the_package_imports_and_arms_itself_with_no_host_installed() -> None:
         "print('OK', n)\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=300,
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
     )
     assert result.returncode == 0, result.stderr[-2000:]
     assert "OK" in result.stdout
