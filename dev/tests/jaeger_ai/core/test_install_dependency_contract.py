@@ -8,6 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 COMMIT_PIN = re.compile(r"@[0-9a-f]{40}$")
+JAEGER_OS_RELEASE_REF = "@0.9.0"
+JAEGER_OS_RELEASE_COMMIT = "616e386c6cf662d7772e2bd87ed0e4fa9194e5fa"
 
 
 def _git_requirements(path: Path) -> list[str]:
@@ -18,10 +20,19 @@ def _git_requirements(path: Path) -> list[str]:
     ]
 
 
-def test_all_git_dependencies_are_commit_pinned():
+def test_git_dependencies_are_release_locked():
     rows = _git_requirements(ROOT / "requirements.txt")
     assert len(rows) == 4
-    assert all(COMMIT_PIN.search(row) for row in rows)
+    framework = next(row for row in rows if row.startswith("jaeger-os "))
+    assert framework.endswith(JAEGER_OS_RELEASE_REF)
+    assert all(
+        COMMIT_PIN.search(row)
+        for row in rows
+        if not row.startswith("jaeger-os ")
+    )
+
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    assert JAEGER_OS_RELEASE_COMMIT in requirements
 
 
 def test_framework_dependency_points_to_jaeger_os_repository():
