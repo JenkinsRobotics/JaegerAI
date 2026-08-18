@@ -389,6 +389,26 @@ def _register_use_skill() -> None:
         if need:
             from jaeger_os.core.tools.tool_registry import get_tools
             have = {t.name for t in get_tools()}
+            # MCP tools are real, callable tools, but they never enter the
+            # native tool registry — they arrive from connected MCP servers
+            # and are tracked separately in toolset_scoping._MCP_TOOLS. The
+            # guard consulted only the native registry, so a skill that
+            # depends on an MCP-provided tool was reported as "not available
+            # on this system" even while that tool was connected and working.
+            # Observed with an ares-native server offering notes_operations:
+            # the agent was told it could not manage Apple Notes and fell
+            # back to a CLI that cannot create or move folders.
+            try:
+                from jaeger_agent.skill_registry.toolset_scoping import _MCP_TOOLS
+                have |= set(_MCP_TOOLS)
+                # MCP tools are exposed to the model under a namespaced alias
+                # (``mcp__<server>__<tool>``), so a skill may legitimately
+                # declare either the bare tool name or the namespaced one.
+                # Accept both rather than forcing skill authors to know which
+                # server will end up providing a capability.
+                have |= {n.rsplit("__", 1)[-1] for n in _MCP_TOOLS if "__" in n}
+            except Exception:  # noqa: BLE001 — availability check must not fail the call
+                pass
             missing = [t for t in need if t not in have]
             if missing:
                 recipe = (f"NOTE: this skill needs tools not available on this "
