@@ -15,12 +15,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from jaeger_os.core.tools.tool_schema import ToolDef
 from pydantic import BaseModel, Field
 
 from jaeger_agent import OpenAIAdapter
 from jaeger_agent.adapters.openai import KNOWN_PROVIDERS
-from jaeger_os.core.tools.tool_schema import ToolDef
-
 
 # ── fake SDK client ────────────────────────────────────────────────
 
@@ -279,6 +278,22 @@ def test_format_messages_temperature_top_p_max_tokens_carried_through():
     assert out["max_tokens"] == 512
     assert out["temperature"] == 0.7
     assert out["top_p"] == 0.5
+
+
+def test_only_local_ollama_sends_num_ctx():
+    local = OpenAIAdapter(provider="ollama", model="llama3.2", num_ctx=32768)
+    cloud_provider = OpenAIAdapter(
+        provider="ollama-cloud", model="qwen3.5:397b", num_ctx=8192
+    )
+    cloud_model = OpenAIAdapter(
+        provider="ollama", model="qwen3.5:397b:cloud", num_ctx=8192
+    )
+
+    assert local.format_messages([], [], "")["extra_body"] == {
+        "options": {"num_ctx": 32768}
+    }
+    assert "extra_body" not in cloud_provider.format_messages([], [], "")
+    assert "extra_body" not in cloud_model.format_messages([], [], "")
 
 
 # ── call ───────────────────────────────────────────────────────────
