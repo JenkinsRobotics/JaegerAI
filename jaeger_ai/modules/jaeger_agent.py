@@ -1,7 +1,7 @@
 """The brain — how JaegerAI uses the agent module.
 
     slot: mind               jaeger-agent fills it today
-    consumes  /act/chat, /sense/stt/transcript, /act/response
+    consumes  /act/chat, /sense/transcript, /act/response
     produces  /sense/chat, /sense/agent_state, /sense/tool,
               /sense/activity, /sense/request
 

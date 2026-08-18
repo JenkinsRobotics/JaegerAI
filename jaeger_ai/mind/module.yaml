@@ -1,7 +1,7 @@
 module: jaeger_ai
 slot: mind
 version: 1.0.0
-consumes: [/act/chat, /sense/stt/transcript, /act/response]
+consumes: [/act/chat, /sense/transcript, /act/response]
 produces: [/sense/chat, /sense/agent_state, /sense/tool, /sense/activity, /sense/request]
 tools: []
 factory: jaeger_ai.core.mind_node:make_mind_node

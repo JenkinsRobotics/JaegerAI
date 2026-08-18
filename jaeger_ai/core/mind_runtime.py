@@ -10,6 +10,24 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
+def _install_bus_confirmation(bus: Any) -> Any:
+    """Install approval routing without mutating JaegerOS's deny-all default."""
+    from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
+    from jaeger_os.core.safety.permissions import (
+        AllowAllProvider,
+        PermissionPolicy,
+        current_policy,
+        install_policy,
+    )
+
+    policy = current_policy()
+    if isinstance(policy.confirmation, AllowAllProvider):
+        return None
+    confirmation = BusConfirmationProvider(bus)
+    install_policy(PermissionPolicy(mode=policy.mode, confirmation=confirmation))
+    return confirmation
+
+
 class _PipelineEventAdapter:
     """Map the JaegerAI pipeline event hook onto JaegerAgent runtime events."""
 
@@ -55,13 +73,7 @@ class JaegerAIRuntime:
         _pipeline["event_bus"] = _PipelineEventAdapter(events)
         _pipeline["chassis_bus"] = bus
         try:
-            from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
-            from jaeger_os.core.safety.permissions import AllowAllProvider, current_policy
-
-            policy = current_policy()
-            if not isinstance(policy.confirmation, AllowAllProvider):
-                self._confirmation = BusConfirmationProvider(bus)
-                policy.confirmation = self._confirmation
+            self._confirmation = _install_bus_confirmation(bus)
         except Exception:  # noqa: BLE001 - confirmation routing is best effort
             self._confirmation = None
 

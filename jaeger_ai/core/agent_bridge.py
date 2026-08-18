@@ -50,19 +50,16 @@ class _CompatibilityRuntime:
         self._confirmation: Any = None
 
     def start(self, *, events: Any, bus: Any) -> None:
-        from jaeger_ai.core.mind_runtime import _PipelineEventAdapter
+        from jaeger_ai.core.mind_runtime import (
+            _PipelineEventAdapter,
+            _install_bus_confirmation,
+        )
         from jaeger_ai.main import _pipeline
 
         _pipeline["event_bus"] = _PipelineEventAdapter(events)
         _pipeline["chassis_bus"] = bus
         try:
-            from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
-            from jaeger_os.core.safety.permissions import AllowAllProvider, current_policy
-
-            policy = current_policy()
-            if not isinstance(policy.confirmation, AllowAllProvider):
-                self._confirmation = BusConfirmationProvider(bus)
-                policy.confirmation = self._confirmation
+            self._confirmation = _install_bus_confirmation(bus)
         except Exception:  # noqa: BLE001 - optional approval routing
             self._confirmation = None
 

@@ -758,22 +758,20 @@ class PersonaConfig(BaseModel):
 
 # 0.8 M1: kokoro_tts is the first "engine-module" — its config model
 # (``KokoroTTSConfig``) lives beside its node/engine code in
-# ``jaeger_os/nodes/kokoro_tts/config.py``, not here. Importing it here
-# to nest it into ``Config`` (below) pulls in ``jaeger_os.nodes`` (this
-# import forces that package's ``__init__.py`` to run, which imports
-# ``jaeger_kokoro_tts``). The FIRST cut of this had
+# ``jaeger_kokoro_tts/nodes/kokoro_tts/config.py``, not here. The FIRST
+# cut of this had
 # ``config.py`` import ``_setting`` straight from this file — a
 # textbook two-file cycle (schemas -> module -> schemas) that broke
 # with an ``ImportError`` on whichever side happened to import first.
 # Fixed by moving ``_setting`` to ``setting_meta.py``, a zero-dependency
-# leaf both sides import from — ``jaeger_os/nodes/kokoro_tts/config.py``
+# leaf both sides import from — ``jaeger_kokoro_tts/nodes/kokoro_tts/config.py``
 # has no import-time dependency on this file, so this import direction
 # is now a plain one-way edge, not a cycle. Any FUTURE engine-module
 # nested here the same way should follow the same shape: its config.py
 # imports catalog metadata from ``setting_meta.py``, never from
 # ``schemas.py`` directly.
 try:
-    from jaeger_kokoro_tts.config import KokoroTTSConfig
+    from jaeger_kokoro_tts.nodes.kokoro_tts.config import KokoroTTSConfig
 except ImportError:
     # 0.8 M2a: the kokoro_tts directory (config.py included) can be
     # deleted entirely. This stand-in is structurally identical to the

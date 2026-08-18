@@ -137,7 +137,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 6
+INTEGRATION_CONTRACT_VERSION = 7
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
@@ -161,13 +161,14 @@ BRIDGE_COMMANDS = (
 
 def _session_contract() -> dict[str, Any]:
     """Versioned ownership contract consumed by ARES and native surfaces."""
+    from jaeger_ai.core.sessions import SESSION_CONTRACT_VERSION
+
     return {
         "name": "ares-jaeger-sessions",
-        "version": 2,
+        "version": SESSION_CONTRACT_VERSION,
         "identifier": {
             "format": "opaque",
             "max_length": 256,
-            "legacy_aliases_accepted": ["webui:<id>"],
             "emits_namespaces": False,
         },
         "ownership": {

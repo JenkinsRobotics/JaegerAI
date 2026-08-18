@@ -2,7 +2,7 @@
 
     slot: stt                jaeger-whisper-stt fills it today
     consumes  /sense/mic/pcm
-    produces  /sense/stt/transcript, /sense/stt/speech_start,
+    produces  /sense/transcript, /sense/stt/speech_start,
               /sys/gate/decision
 
 OPTIONAL. A JaegerAI with no ears still types; ``available()`` is what a

@@ -14,9 +14,7 @@
 #  manifest" (manifest.py) — like jaeger.sim.toml.
 
 [app]
-id = "org.jenkinsrobotics.app.jaeger-ai"
 name = "jaeger-windowed"
-type = "application"
 version = "0.5.0"
 requires_framework = ">=0.1"
 mode = "fused"

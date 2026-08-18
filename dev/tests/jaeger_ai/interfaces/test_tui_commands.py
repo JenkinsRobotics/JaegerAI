@@ -151,7 +151,7 @@ def test_confirmation_roundtrip(monkeypatch, tmp_path, answer, expected) -> None
     assert result["ok"] is expected
 
 
-def test_confirmation_denies_on_non_interactive_stdin(monkeypatch) -> None:
+def test_confirmation_denies_on_non_interactive_stdin(monkeypatch, tmp_path) -> None:
     """Piped / non-tty stdin — no live user; fail safe, never block."""
     import sys
 
@@ -159,7 +159,7 @@ def test_confirmation_denies_on_non_interactive_stdin(monkeypatch) -> None:
     from jaeger_ai.interfaces.tui.app import _TuiConfirmationProvider
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    prov = _TuiConfirmationProvider(JaegerTUI(skip_model=True))
+    prov = _TuiConfirmationProvider(JaegerTUI(instance_dir=tmp_path, skip_model=True))
     req = PermissionRequest(
         tier=PermissionTier.EXTERNAL_EFFECT, skill="browser",
         operation="browser")
