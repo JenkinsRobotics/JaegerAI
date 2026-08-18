@@ -240,7 +240,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_whisper_stt.engine.two_pass`` loads at TUI boot."""
+    ``jaeger_whisper_stt.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401

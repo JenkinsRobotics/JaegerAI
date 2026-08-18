@@ -42,20 +42,13 @@ CREATE TABLE IF NOT EXISTS session_tombstones (
 );
 """
 
-SESSION_CONTRACT_VERSION = 2
-_LEGACY_ARES_PREFIX = "webui:"
+SESSION_CONTRACT_VERSION = 3
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$")
 
 
 def canonical_session_id(value: object) -> str:
-    """Return the shared opaque id used by every session-contract operation.
-
-    ``webui:`` is accepted only as a migration alias for pre-v2 ARES rows; it
-    is never emitted or stored by the v2 contract.
-    """
+    """Return the shared opaque id used by every session-contract operation."""
     session_id = str(value or "").strip()
-    if session_id.startswith(_LEGACY_ARES_PREFIX):
-        session_id = session_id[len(_LEGACY_ARES_PREFIX):]
     if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
         raise ValueError("invalid session id")
     return session_id
@@ -72,7 +65,6 @@ class SessionStore:
             self._conn.executescript(_SCHEMA)
             self._ensure_brain_columns()
             self._ensure_contract_columns()
-            self._migrate_legacy_ares_ids()
             self._redact_existing_messages()
             self._conn.execute(
                 "UPDATE sessions SET execution_state='interrupted' "
@@ -105,48 +97,6 @@ class SessionStore:
         }
         if "metadata" not in message_cols:
             self._conn.execute("ALTER TABLE messages ADD COLUMN metadata TEXT")
-
-    def _migrate_legacy_ares_ids(self) -> None:
-        """Collapse pre-v2 ``webui:`` rows onto their shared opaque ids."""
-        legacy = self._conn.execute(
-            "SELECT id FROM sessions WHERE id LIKE 'webui:%'"
-        ).fetchall()
-        for (old_id,) in legacy:
-            try:
-                new_id = canonical_session_id(old_id)
-            except ValueError:
-                continue
-            target = self._conn.execute(
-                "SELECT 1 FROM sessions WHERE id=?", (new_id,)
-            ).fetchone()
-            if target:
-                self._conn.execute(
-                    "UPDATE messages SET session_id=? WHERE session_id=?",
-                    (new_id, old_id),
-                )
-                self._conn.execute("DELETE FROM sessions WHERE id=?", (old_id,))
-            else:
-                self._conn.execute(
-                    "UPDATE messages SET session_id=? WHERE session_id=?",
-                    (new_id, old_id),
-                )
-                self._conn.execute(
-                    "UPDATE sessions SET id=? WHERE id=?", (new_id, old_id)
-                )
-        legacy_tombstones = self._conn.execute(
-            "SELECT id, deleted_at FROM session_tombstones WHERE id LIKE 'webui:%'"
-        ).fetchall()
-        for old_id, deleted_at in legacy_tombstones:
-            try:
-                new_id = canonical_session_id(old_id)
-            except ValueError:
-                continue
-            self._conn.execute(
-                "INSERT INTO session_tombstones(id, deleted_at) VALUES(?,?) "
-                "ON CONFLICT(id) DO UPDATE SET deleted_at=MAX(deleted_at, excluded.deleted_at)",
-                (new_id, deleted_at),
-            )
-            self._conn.execute("DELETE FROM session_tombstones WHERE id=?", (old_id,))
 
     def _redact_existing_messages(self) -> None:
         """One-way migration: remove credential-shaped values from history."""

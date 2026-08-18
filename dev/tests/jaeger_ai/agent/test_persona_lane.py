@@ -525,7 +525,7 @@ def test_self_model_block_is_injected_into_the_system_prompt():
     )
     system_msg = client.calls[0]["messages"][0]
     assert self_model_block() in system_msg["content"]
-    assert "You are a JaegerAI agent running locally" in system_msg["content"]
+    assert "You are a Jaeger agent running locally" in system_msg["content"]
 
 
 def test_self_model_block_is_cached_per_boot(monkeypatch):

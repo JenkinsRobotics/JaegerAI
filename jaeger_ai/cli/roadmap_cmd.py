@@ -56,8 +56,10 @@ def run_roadmap(args: Any) -> int:
 
 def _pick_roadmap(dev_docs: Path, version: str | None) -> Path | None:
     candidates = []
-    for p in dev_docs.rglob("ROADMAP*.md"):   # docs are grouped by area now (history/)
+    for p in dev_docs.rglob("*.md"):
         m = re.match(r"^ROADMAP[_\-]?(\d+\.\d+(?:\.\d+)?)\.md$", p.name)
+        if m is None and p.parent.name == "roadmap":
+            m = re.match(r"^(\d+\.\d+(?:\.\d+)?)[_\-].*\.md$", p.name)
         if m:
             candidates.append((m.group(1), p))
     if version is not None:

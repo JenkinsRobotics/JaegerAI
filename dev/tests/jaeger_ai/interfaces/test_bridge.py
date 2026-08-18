@@ -258,7 +258,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 6
+    assert contract["contract_version"] == 7
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -293,7 +293,7 @@ def test_integration_contract_is_versioned_and_self_describing():
         "visual_reports",
     }.intersection(contract["features"])
     sessions = contract["features"]["sessions"]["contract"]
-    assert sessions["version"] == 2
+    assert sessions["version"] == 3
     assert sessions["ownership"]["transcript"] == "jaeger"
     assert sessions["ownership"]["archive"] == "ares"
     assert set(sessions["operations"]) == {
@@ -1157,12 +1157,12 @@ def test_delete_session_command_removes_runtime_history(monkeypatch, _instance_o
 
     (_instance_on_disk / "memory").mkdir(parents=True, exist_ok=True)
     store = SessionStore(_instance_on_disk / "memory" / "sessions.db")
-    store.record("webui:drop", "user", "remove me")
+    store.record("drop", "user", "remove me")
     store.close()
 
     stdin = (
         '{"op":"command","cmd":"delete_session",'
-        '"args":{"id":"webui:drop"},"id":"r1"}\n'
+        '"args":{"id":"drop"},"id":"r1"}\n'
         '{"op":"quit"}\n'
     )
     _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)
@@ -1174,7 +1174,7 @@ def test_delete_session_command_removes_runtime_history(monkeypatch, _instance_o
 
     check = SessionStore(_instance_on_disk / "memory" / "sessions.db")
     try:
-        assert check.history("webui:drop") == []
+        assert check.history("drop") == []
     finally:
         check.close()
 

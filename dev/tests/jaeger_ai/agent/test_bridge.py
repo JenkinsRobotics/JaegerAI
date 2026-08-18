@@ -31,6 +31,18 @@ def _stop(b: AgentBridge, bus: InProcBus) -> None:
     bus.close()
 
 
+def test_start_does_not_mutate_process_default_permission_policy():
+    from jaeger_os.core.safety import permissions
+
+    bus = InProcBus()
+    default_confirmation = permissions._DEFAULT_POLICY.confirmation
+    bridge = _bridge(bus)
+    try:
+        assert permissions._DEFAULT_POLICY.confirmation is default_confirmation
+    finally:
+        _stop(bridge, bus)
+
+
 def test_chat_round_trip_echoes_reply() -> None:
     bus = InProcBus()
     replies: "queue.Queue[str]" = queue.Queue()

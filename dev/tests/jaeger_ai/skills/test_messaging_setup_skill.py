@@ -37,8 +37,8 @@ def test_messaging_setup_requires_tools_are_all_registered() -> None:
 
 def test_messaging_category_has_a_description() -> None:
     import pathlib
-    import jaeger_ai
-    desc = (pathlib.Path(jaeger_ai.__file__).resolve().parent
-             / "agent" / "skills" / "messaging" / "DESCRIPTION.md")
+    import jaeger_agent
+    desc = (pathlib.Path(jaeger_agent.__file__).resolve().parent
+             / "skills" / "messaging" / "DESCRIPTION.md")
     assert desc.is_file()
     assert "description:" in desc.read_text(encoding="utf-8")

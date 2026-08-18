@@ -129,37 +129,19 @@ def test_session_remembers_the_brain_that_served_it(tmp_path):
         store.close()
 
 
-def test_shared_id_normalizes_only_the_legacy_ares_alias():
-    assert canonical_session_id("webui:abc-123") == "abc-123"
+def test_shared_id_preserves_valid_opaque_namespaces():
     assert canonical_session_id("telegram:42") == "telegram:42"
+    assert canonical_session_id("shared-1") == "shared-1"
 
 
-def test_open_migrates_legacy_webui_rows_to_shared_ids(tmp_path):
-    path = tmp_path / "s.db"
-    legacy = SessionStore(path)
-    legacy.record("shared-1", "user", "legacy turn")
-    legacy.close()
-    conn = sqlite3.connect(path)
-    with conn:
-        conn.execute(
-            "UPDATE messages SET session_id='webui:shared-1' WHERE session_id='shared-1'"
-        )
-        conn.execute("UPDATE sessions SET id='webui:shared-1' WHERE id='shared-1'")
-    conn.close()
+def test_session_contract_no_longer_advertises_migration_aliases():
+    from jaeger_ai.interfaces.bridge import _session_contract
 
-    store = SessionStore(path)
-    try:
-        assert [row["id"] for row in store.list_sessions()] == ["shared-1"]
-        assert store.history("shared-1")[0]["text"] == "legacy turn"
-        conn = sqlite3.connect(path)
-        try:
-            assert conn.execute(
-                "SELECT count(*) FROM sessions WHERE id LIKE 'webui:%'"
-            ).fetchone()[0] == 0
-        finally:
-            conn.close()
-    finally:
-        store.close()
+    identifier = _session_contract()["identifier"]
+    assert _session_contract()["version"] == 3
+    assert identifier["format"] == "opaque"
+    assert identifier["emits_namespaces"] is False
+    assert "legacy_aliases_accepted" not in identifier
 
 
 def test_delete_tombstone_is_idempotent_and_blocks_stale_reimport(tmp_path):

@@ -165,8 +165,7 @@ def test_roadmap_renders_active_version() -> None:
     code, out = _run("roadmap")
     assert code == 0
     assert "Roadmap" in out
-    # Should pick the highest-numbered, which is 0.5 at present.
-    assert "0.5" in out
+    assert "0.9.3" in out
 
 
 def test_roadmap_unknown_version_errors() -> None:

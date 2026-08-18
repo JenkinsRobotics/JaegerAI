@@ -174,11 +174,11 @@ def test_mem_override_no_blending(tmp_path: Path):
     ws.mkdir()
     good = _t(_turn(prompt="t1", answer="stored"),
               _turn(prompt="t2", answer="Your active dev path is "
-                    "/Users/jonathanjenkins/dev."))
+                    "/workspace/dev."))
     ok, _ = sc._chk_mem_override(good, ws, MemoryView())
     assert ok
     blended = _t(_turn(answer="stored"),
-                 _turn(answer="It's /Users/jonathanjenkins/dev (was /opt/jaeger)."))
+                 _turn(answer="It's /workspace/dev (was /opt/jaeger)."))
     ok, detail = sc._chk_mem_override(blended, ws, MemoryView())
     assert not ok and "blend" in detail.lower()
 
