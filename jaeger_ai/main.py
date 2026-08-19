@@ -576,7 +576,7 @@ def refresh_identity() -> None:
     if layout is None:
         return
     try:
-        _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
+        _pipeline["system_prompt"] = build_system_prompt(layout)
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -1035,6 +1035,56 @@ def _register_builtins(client: Any) -> None:
 
 
 
+
+    # ── adjust_trait: runtime adaptation writes INSTANCE state ──
+    # jaeger-agent ships an ``adjust_trait`` that persists through
+    # ``save_character_traits`` — which edits the character sheet in the
+    # shared library: the file that ships with the package, is read by
+    # every instance playing that character, and is what the marketplace
+    # distributes. One robot's mid-conversation drift became everyone's
+    # personality and fought the next upgrade.
+    #
+    # This registration lands after the module's (skills and host tools
+    # override built-ins by re-registering the same name — last write
+    # wins), so the agent-facing tool is this one and the dependency
+    # needs no fork.
+    @register_tool_from_function(name="adjust_trait", side_effect="write")
+    def adjust_trait(layer: str, field: str, value: float) -> dict:
+        """Set one of your OWN character's personality sliders to ``value``
+        (0..1). ``layer`` is one of hexaco / special / expression /
+        domains; ``field`` is the slider in that layer (e.g.
+        layer="expression", field="sarcasm"). The change is saved for THIS
+        instance and is live from your next turn; the character's shipped
+        definition is left untouched."""
+        from jaeger_ai.personality import persona_state
+        from jaeger_ai.personality.character import active_character, layer_items
+
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return {"ok": False, "error": "no instance bound — cannot persist "
+                                          "a trait adjustment"}
+        character = active_character(layout.root)
+        if character is None:
+            return {"ok": False, "error": "no active character selected"}
+        key = (layer or "").lower().strip()
+        if key not in persona_state.TRAIT_LAYERS:
+            return {"ok": False,
+                    "error": f"unknown layer {key!r}; one of "
+                             f"{list(persona_state.TRAIT_LAYERS)}"}
+        current = dict(layer_items(getattr(character.personality, key)))
+        if field not in current:
+            return {"ok": False,
+                    "error": f"unknown {key} trait {field!r}; "
+                             f"options: {sorted(current)}"}
+        try:
+            stored = persona_state.set_trait_override(
+                layout.root, character.id, key, field, value)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "error": f"couldn't persist trait: {exc}"}
+        return {"ok": True, "character": character.name, "layer": key,
+                "field": field, "value": stored, "scope": "instance",
+                "note": "saved to this instance's persona_state.yaml — the "
+                        "character sheet in the library is unchanged."}
 
     @register_tool_from_function(side_effect="read")
     @requires_tier(PermissionTier.READ_ONLY, skill="host",
@@ -3259,6 +3309,21 @@ def stream_delta_listening() -> bool:
     return _pipeline.get("stream_delta_sink") is not None
 
 
+def build_system_prompt(layout: Any) -> str:
+    """Assemble the system prompt with JaegerAI's own fragments included.
+
+    The assembler lives in jaeger-agent and exposes an ordered fragment
+    registry; JaegerAI contributes the two instance context documents
+    (SOUL.md / AGENTS.md) to it. Registration is idempotent and cheap
+    after the first call, so every assembly path goes through here rather
+    than each one remembering to register first — a path that forgot
+    would silently build a prompt with no identity in it.
+    """
+    from jaeger_ai.core.prompt_documents import register_context_documents
+    register_context_documents()
+    return prompt_module.build_system_prompt(layout)
+
+
 def compose_session_prompt(base_prompt: str) -> str:
     """The full context payload a session's agent runs on, in order:
 
@@ -3298,7 +3363,6 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
     turn (no restart). Cheap: a stat per document, and a rebuild only on
     an actual change."""
     try:
-        from jaeger_agent.prompts.prompts import build_system_prompt
         from jaeger_ai.personality.character import active_character_signature
         from jaeger_ai.core.instance.instance import context_document_signature
         layout = _pipeline.get("layout")
@@ -4278,7 +4342,7 @@ def boot_for_tui(
         # mic lives in the voice INPUT layer (VAD + wake word), never in
         # the brain prompt — see the 2026-06-16 removal of the LLM voice
         # gate (it shared the agent with tool-calling and suppressed it).
-        _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
+        _pipeline["system_prompt"] = build_system_prompt(layout)
         _pipeline["with_memory"] = with_memory
         # Phase-7: optional toolset restriction at boot. ``JAEGER_TOOLSETS=...``
         # (comma-separated) keeps only the named Hermes-style groups in the
@@ -4937,7 +5001,7 @@ def _main_dispatch() -> int:
         # Transport-agnostic brain — no voice gate in the system prompt.
         # Ambient filtering lives in the voice input layer (VAD + wake
         # word), not here.  See boot_for_tui above.
-        _pipeline["system_prompt"] = prompt_module.build_system_prompt(layout)
+        _pipeline["system_prompt"] = build_system_prompt(layout)
 
         # Log rotation at startup — idempotent, never blocks the boot.
         try:
