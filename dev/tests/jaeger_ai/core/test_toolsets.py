@@ -150,8 +150,12 @@ _INTENTIONAL_FAIL_OPEN: frozenset[str] = frozenset({
     # any single one.
     "memory", "kanban", "skill", "computer_use", "computer_do", "browser",
     # Self-update is always available — the agent rewrites its own
-    # identity / soul.
-    "set_name", "update_soul",
+    # identity / soul, and tunes its own personality sliders.
+    # ``adjust_trait`` joins that family: JaegerAI registers it (the
+    # module ships the function but never registered it as a tool), and
+    # it writes the INSTANCE's persona_state.yaml, never the shared
+    # character sheet.
+    "set_name", "update_soul", "adjust_trait",
     # Scheduling — list_schedules is a read-only listing alongside the
     # gated schedule_prompt / cancel_schedule. The triplet stays as one
     # group; ``list_schedules`` is in the "scheduling" set elsewhere
