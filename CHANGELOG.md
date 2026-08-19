@@ -3,6 +3,146 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## Unreleased — the answer arrives while it is written
+
+A turn reached an external surface as one `reply` frame at the end. The
+loop had streamed all along — adapters take an `on_delta`, the TUI and
+the TTS sentence-chunker consume `on_stream_delta` — but the bridge
+protocol had no frame for it, so every remote client (ARES, the desktop
+app, anything speaking protocol v1) sat blank for the whole generation
+and then received the finished answer in a lump.
+
+`delta` frames now carry the text as it is produced, ahead of the
+authoritative `reply`. Contract v9 declares `text_deltas`; a client that
+does not know the frame ignores it and still gets the complete answer, so
+neither side needs the other to upgrade.
+
+`main.stream_delta_sink()` is how a surface says "I am listening" —
+turn-scoped, because the session agent is cached and shared, and a sink
+installed at construction would outlive the surface that wanted it.
+Nested sinks (a cron firing mid-session) restore the outer listener.
+
+Frames are coalesced: the first chunk goes out immediately, because
+time-to-first-token is the latency a person feels, and the rest batch at
+32 chars / 80ms. One frame per token would be hundreds of JSON encodes
+and flushes a second for a reader that repaints at 60Hz anyway — measured
+at 0.7µs per chunk and 20 frames for a 600-character answer.
+
+## Unreleased — who you are, and what you run
+
+Two documents now, with one job each:
+
+  `SOUL.md`   WHO this agent is — character, values, voice.
+  `AGENTS.md` HOW this deployment operates — tool directives, mission
+              objectives, hardware bindings.
+
+Before this, `soul.md` was written by the setup wizard and by the
+agent's own `update_soul` tool, and then read by **nothing**:
+`context_blocks.load_soul` existed and no prompt fragment called it. The
+docstring in `identity_tools` claiming SOUL was "loaded into the system
+prompt at startup" described behaviour that had no code. Operational
+directives had no home at all, so mission text went into the identity
+file and travelled with the persona to instances whose tools and
+hardware were different.
+
+Both documents are now declared fragments in the prompt registry
+(`jaeger_agent/prompts/assemble.py`), ingested from disk on every
+assembly, and ordered: safety → name → **SOUL.md** → framework rules →
+**AGENTS.md** → dynamic blocks. Sub-agents get neither (the parent owns
+identity and the deployment's standing directives). There is no built-in
+fallback identity: an instance without SOUL.md carries no identity prose
+rather than a persona nobody wrote. `persona.soul_in_prompt: false`
+restores the pre-split prompt.
+
+The character VOICE still does not enter the worker prompt — that is
+the measured ~7-point execution tax on a 4B, and the output filter still
+owns it. What enters is the operator's own identity document.
+
+**Session payload assembly, fixed.** The composition (base prompt →
+runtime identity tier → frozen facts tier) lived inline in
+`_ensure_session_agent`, so `_refresh_character_prompt` — which rebuilds
+mid-session when the persona changes — reassigned the *base* prompt alone
+and silently dropped the other two tiers for the rest of the session.
+Both paths now go through `compose_session_prompt`, and the refresh
+signature tracks SOUL.md/AGENTS.md mtimes as well as the character sheet,
+so editing either document reaches a running agent on its next turn.
+
+**Runtime adaptation stopped editing the character definition.**
+`adjust_trait` called `save_character_traits`, which writes
+`personality/characters/<id>/character.yaml` — a file that ships with the
+package, is shared by every instance playing that character, and is what
+the marketplace distributes. One robot's mid-conversation drift became
+everyone's personality and fought the next upgrade. Adjustments now
+persist to `<instance>/persona_state.yaml`
+(`jaeger_ai.personality.persona_state`, same storage shape as the person
+index) and are applied over the definition at load. The Studio's trait
+editor still writes the sheet — an operator editing a character is
+authoring, not adapting.
+
+ARES needed no change: its bridge sends `{op, text, session}` and never
+assembles a prompt, which is what the ownership contract requires.
+
+## Unreleased — it keeps going
+
+A big request used to end in a promise. Ask for every note in every
+folder to be read and distilled, and the reply came back *"I am starting
+a comprehensive analysis — let me begin by reading the first folder"*,
+with the prompt underneath it and nothing done. Nothing in the stack
+owned "the objective is not finished": the agent loop's exit door is
+per-TURN (a reply with no tool calls IS the final answer), and the goal
+loop only ran when the user had set a `/goal`.
+
+**Execution mode** is the new axis — `core/runtime/execution.py`, beside
+the two that already existed:
+
+  `modes.py`      which brain answers (a 60-90s model swap)
+  `autonomy.py`   whether it asks before acting
+  `execution.py`  **how long it keeps going**
+
+`interactive` (default) is one turn per prompt, unchanged. `auto` and
+`supervised` re-fire the turn until the work is done, a step budget is
+spent, or the user stops it; `deepthink` hands off to the existing Deep
+Think pipeline. Entering `auto` also loosens the confirm gate to `auto`
+and `supervised` pins it to `ask` — an unattended run that stalls on a
+y/n nobody is watching is not autonomous — and leaving restores whatever
+the user had.
+
+**The stall check** (`core/runtime/continuation.py`) is evidence-based,
+not absence-based: it re-fires on a first-person promise of work not yet
+done ("let me start by…", "next I'll check…", "3 folders remain"), and
+it stands down on a question, a stated blocker, or a completion claim.
+"Keep going until the model says DONE" was the other option and it is
+the wrong one — weak local models rarely emit a completion token
+reliably, so that rule burns the whole budget on finished work.
+
+A run with a stated objective spends one step **verifying** its own
+completion claim before it settles: re-read the artefacts, confirm the
+scope was covered, fix what is missing. A claimed write that never
+happened is a named failure mode in the loop's verify gate; in a long
+unattended run nobody is watching to catch it.
+
+Commands: `/auto on [steps]` · `/auto off` · `/mode
+interactive│auto│supervised│deepthink` (and still `/mode normal│high` for
+the brain presets) · `/plan <objective>` plans and executes in one turn ·
+`/stop` halts a run cooperatively at the next turn boundary, keeping the
+partial work · `/status` reports the mode and the live step count.
+Ctrl-C halts the run as well as the turn.
+
+The status bar carries `⚡ AUTO 12/50 · executing` for as long as a run
+is up — including between its turns, so a run never reads as standby —
+and each step prints the `● PLAN ──▶ ⚡ EXECUTING ──▶ 🔍 VERIFYING ──▶
+✔ DONE` breadcrumb with the reason it continued.
+
+Config: `automation.auto_max_steps` (default 50) and
+`automation.continue_on_narration`. `JAEGER_AUTO_MAX_STEPS` overrides
+the budget for a session; `JAEGER_AUTO_CONTINUE=0` is the kill switch.
+
+Note on layering: the per-turn ceiling still belongs to **jaeger-agent**
+— its loop backstop halts a turn above 24 tool calls, deliberately.
+Continuation runs at the turn boundary instead, which is what resets
+those counters; the two limits are complementary, and no change to the
+pinned agent was needed.
+
 ## `0.10.0` — the agent is a module
 
 The brain moved out. `jaeger_ai/agent/` is gone: its tools, skills,

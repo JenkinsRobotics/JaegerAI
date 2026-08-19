@@ -42,6 +42,7 @@ import os
 import queue as _queue
 import sys
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TextIO
@@ -130,6 +131,129 @@ def _effective_icon(boot: Any, character: Any) -> str | None:
     return str(icon) if icon else None
 
 
+# Card art is a portrait PNG (320x420 from ``generate_card``) — a few
+# hundred KB at most. The cap is a wire sanity bound, not a policy: a
+# frame this size is fine, a multi-megabyte one would stall the stdio
+# transport every surface shares.
+_CARD_MAX_BYTES = 4 * 1024 * 1024
+
+_CARD_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
+
+
+def _card_art(path: str | None, character_id: str) -> dict[str, Any] | None:
+    """Read a character's card into a base64 frame, or ``None``.
+
+    Never raises: a missing or oversized card means the surface draws its
+    own placeholder, which is a cosmetic outcome, not an error.
+    """
+    from base64 import b64encode
+    from pathlib import Path
+
+    if not path:
+        return None
+    p = Path(path)
+    try:
+        if not p.is_file():
+            return None
+        size = p.stat().st_size
+        if size > _CARD_MAX_BYTES:
+            return None
+        data = p.read_bytes()
+    except OSError:
+        return None
+    return {
+        "id": character_id,
+        "mime": _CARD_MIME.get(p.suffix.lower(), "application/octet-stream"),
+        "bytes": len(data),
+        "filename": p.name,
+        "data": b64encode(data).decode("ascii"),
+    }
+
+
+# ── text deltas ──────────────────────────────────────────────────────
+#
+# A turn used to reach an external surface as one ``reply`` frame at the
+# end, so a remote client showed nothing for the whole generation and
+# then everything at once. The loop has always streamed internally (the
+# TUI and the TTS sentence-chunker consume ``on_stream_delta``); this is
+# that stream, published on the wire.
+#
+# Coalescing: one frame per token would be hundreds of JSON encodes and
+# flushes a second on a fast model, and the reader on the other end is a
+# browser that repaints at 60Hz regardless. The FIRST chunk always goes
+# out immediately — time-to-first-token is the number a person feels —
+# and after that frames are batched until either threshold trips.
+_DELTA_MIN_CHARS = 32
+_DELTA_MAX_INTERVAL_S = 0.08
+
+
+def _delta_frame(text: str, session: str = "") -> dict[str, Any]:
+    """One incremental text frame.
+
+    Lives here rather than in ``jaeger_os.contract.protocol`` beside its
+    siblings only because that package is pinned by tag; move it there at
+    the next JaegerOS bump and import it like the others. The shape is
+    the protocol's: a ``type`` and the payload.
+    """
+    frame: dict[str, Any] = {"type": "delta", "text": text}
+    if session:
+        frame["session"] = session
+    return frame
+
+
+class _DeltaStream:
+    """Buffers token text and emits coalesced ``delta`` frames.
+
+    Not thread-safe by design — it is driven from the decode loop of one
+    turn, which is serialized by the pipeline's llm_lock.
+    """
+
+    def __init__(self, out: TextIO, session: str) -> None:
+        self._out = out
+        self._session = session
+        self._buf: list[str] = []
+        self._pending = 0
+        self._last_flush = 0.0
+        self._sent = 0          # characters actually put on the wire
+        self._started = False
+
+    def feed(self, piece: str) -> None:
+        text = str(piece or "")
+        if not text:
+            return
+        self._buf.append(text)
+        self._pending += len(text)
+        now = time.monotonic()
+        if not self._started:
+            # First token out the door immediately: this is the latency
+            # the operator actually perceives.
+            self._started = True
+            self.flush(now)
+            return
+        if (self._pending >= _DELTA_MIN_CHARS
+                or (now - self._last_flush) >= _DELTA_MAX_INTERVAL_S):
+            self.flush(now)
+
+    def flush(self, now: float | None = None) -> None:
+        if not self._buf:
+            return
+        text = "".join(self._buf)
+        self._buf.clear()
+        self._pending = 0
+        self._last_flush = time.monotonic() if now is None else now
+        self._sent += len(text)
+        _emit(self._out, _delta_frame(text, self._session))
+
+    @property
+    def sent_chars(self) -> int:
+        """How much text this turn actually streamed — the client uses it
+        to avoid re-rendering the same prefix when the reply lands."""
+        return self._sent
+
+
 _LAYERS = ("hexaco", "special", "expression", "domains")
 
 # Additive application contract carried inside protocol v1's generic query
@@ -137,9 +261,10 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 7
+INTEGRATION_CONTRACT_VERSION = 9
 BRIDGE_QUERIES = (
-    "contract", "identity", "characters", "character", "config",
+    "contract", "identity", "characters", "character", "character_card",
+    "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
     "setup_defaults", "model_catalog", "session_contract", "list_sessions", "load_session",
     "search_sessions", "check_update",
@@ -230,6 +355,26 @@ def _integration_contract() -> dict[str, Any]:
             "approvals": {"available": True, "owner": "jaeger", "mutable": True},
             "character_persona_editing": {
                 "available": True, "owner": "jaeger", "mutable": True,
+            },
+            # v8 additive: a surface can render the agent's FACE without
+            # reaching into this product's directories — Jaeger serves the
+            # bytes for the asset it owns. Clients feature-gate on this
+            # entry (or on "character_card" in operations.queries), never
+            # on a version number.
+            # v9 additive: the turn's text arrives incrementally as
+            # ``delta`` frames while it generates, ahead of the final
+            # ``reply``. A client that does not know the frame ignores it
+            # and still gets the whole answer in ``reply`` — so this is
+            # safe in both directions, and clients gate on this entry
+            # rather than on a version number.
+            "text_deltas": {
+                "available": True, "owner": "jaeger", "mutable": False,
+                "frame": "delta", "coalesce_chars": _DELTA_MIN_CHARS,
+                "coalesce_interval_s": _DELTA_MAX_INTERVAL_S,
+            },
+            "character_card_art": {
+                "available": True, "owner": "jaeger", "mutable": False,
+                "encoding": "base64", "max_bytes": _CARD_MAX_BYTES,
             },
             "runtime_settings": {"available": True, "owner": "jaeger", "mutable": True},
             "voice_settings": {"available": True, "owner": "jaeger", "mutable": True},
@@ -371,6 +516,19 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         if c is None and root is not None:
             c = active_character(root)
         return _char_detail(c) if c is not None else None
+    if what == "character_card":
+        # The card art for a character (default: whoever is active), as
+        # bytes. External surfaces get the image through the bridge
+        # rather than by reading this product's install directory — a
+        # path across the boundary is not readable by a browser anyway,
+        # and the ownership contract says the asset's owner serves it.
+        cid = args.get("id")
+        c = next((x for x in list_characters() if x.id == cid), None) if cid else None
+        if c is None and root is not None:
+            c = active_character(root)
+        if c is None:
+            return None
+        return _card_art(_effective_icon(boot, c), c.id)
     if what == "config":
         from jaeger_ai.core.instance.schemas import Config, Identity, load_yaml
         cfg = load_yaml(lay.config_path, Config)
@@ -1059,13 +1217,19 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             pass
         _emit_state(proto, ctx, True, session)
         try:
-            from jaeger_ai.main import run_for_voice
+            from jaeger_ai.main import run_for_voice, stream_delta_sink
+            deltas = _DeltaStream(proto, session)
             with _turn_workspace(ctx, req.get("workspace")):
                 display_text = req.get("display_text")
                 voice_kwargs = {"session_key": session}
                 if display_text is not None:
                     voice_kwargs["display_text"] = str(display_text)
-                result = run_for_voice(ctx.client, text, **voice_kwargs)
+                # The sink is turn-scoped: it stops the moment the turn
+                # returns, so nothing streams into a client that has
+                # already been handed its reply.
+                with stream_delta_sink(deltas.feed):
+                    result = run_for_voice(ctx.client, text, **voice_kwargs)
+            deltas.flush()
             used, mx = _ctx_usage(session)
             _emit(proto, protocol.reply_frame(
                 result.get("text") or "", result.get("error"), session,

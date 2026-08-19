@@ -17,7 +17,7 @@ from jaeger_ai.core.instance import setup_wizard as W
 from jaeger_ai.core.instance.schemas import Config, InteractionConfig
 
 
-# ── WIZ-2: role truncation + soul.md overflow ───────────────────────
+# ── WIZ-2: role truncation + SOUL.md overflow ───────────────────────
 
 
 def test_truncate_role_passthrough_short():
@@ -39,7 +39,7 @@ def test_truncate_role_cuts_at_first_sentence_boundary():
     assert len(role) <= W._ROLE_MAX_LEN
     assert role.endswith(".")
     # Overflow preserves the stripped original — the wizard's
-    # ``soul.md`` writer uses it as-is, so trailing whitespace
+    # ``SOUL.md`` writer uses it as-is, so trailing whitespace
     # being normalised is fine and desirable.
     assert overflow == raw.strip()
     assert "first sentence" in role
@@ -65,7 +65,7 @@ def test_initialise_soul_md_overflow_creates_soul_md(tmp_path):
         tmp_path, "Jarvis",
         persona_soul=None, role_overflow=full,
     )
-    soul = (tmp_path / "soul.md").read_text(encoding="utf-8")
+    soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert "# Jarvis" in soul
     assert full in soul
     # Header marks it as auto-generated.
@@ -80,7 +80,7 @@ def test_initialise_soul_md_overflow_is_idempotent(tmp_path):
                           persona_soul=None, role_overflow="first")
     W._initialise_soul_md(tmp_path, "Jarvis",
                           persona_soul=None, role_overflow="second")
-    soul = (tmp_path / "soul.md").read_text(encoding="utf-8")
+    soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert "second" in soul
     assert "first" not in soul
 
@@ -93,7 +93,7 @@ def test_initialise_soul_md_persona_only_writes_persona_body(tmp_path):
         persona_soul="## hello\nthis is from a persona",
         role_overflow=None,
     )
-    soul = (tmp_path / "soul.md").read_text(encoding="utf-8")
+    soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert "from a persona" in soul
     assert "Role (full text from setup)" not in soul
 
@@ -106,7 +106,7 @@ def test_initialise_soul_md_persona_plus_overflow_combine_in_order(tmp_path):
         persona_soul="## Persona body",
         role_overflow="detailed role " * 30,
     )
-    soul = (tmp_path / "soul.md").read_text(encoding="utf-8")
+    soul = (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     pos_persona = soul.find("Persona body")
     pos_overflow = soul.find("Role (full text from setup)")
     assert pos_persona > 0
@@ -119,7 +119,7 @@ def test_initialise_soul_md_neither_leaves_no_file(tmp_path):
     agent's ``update_soul`` tool can still write one later."""
     W._initialise_soul_md(tmp_path, "Jarvis",
                           persona_soul=None, role_overflow=None)
-    assert not (tmp_path / "soul.md").exists()
+    assert not (tmp_path / "SOUL.md").exists()
 
 
 # ── WIZ-3: InteractionConfig schema ─────────────────────────────────

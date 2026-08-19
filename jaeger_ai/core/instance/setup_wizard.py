@@ -161,8 +161,13 @@ def _initialise_soul_md(
     persona_soul: str | None,
     role_overflow: str | None,
 ) -> None:
-    """Write the initial ``soul.md`` from whatever sources the wizard
+    """Write the initial ``SOUL.md`` from whatever sources the wizard
     has — persona template + role-overflow text, in that order.
+
+    Identity only. Operational directives (tools, mission, hardware
+    bindings) belong in ``AGENTS.md`` — see
+    ``jaeger_agent.prompts.context_blocks``; the wizard writes no
+    directives because it does not know the deployment.
 
     Both sources are optional and independent:
 
@@ -171,15 +176,18 @@ def _initialise_soul_md(
       * If the operator's role overflowed the 256-char identity cap,
         append the full text under a "Role (full text from setup)"
         heading so context isn't lost.
-      * If neither, leave ``soul.md`` absent — the agent's
-        ``update_soul`` tool can create it later.
+      * If neither, leave ``SOUL.md`` absent — the agent's
+        ``update_soul`` tool can create it later, and the prompt simply
+        carries no identity prose in the meantime (no built-in default).
 
     The combined behaviour is intentionally simple: persona soul +
     overflow append cleanly without either clobbering the other.
     """
     if not persona_soul and not role_overflow:
         return
-    soul_path = root / "soul.md"
+    # Canonical spelling — the runtime resolves the legacy lowercase
+    # ``soul.md`` too, for instances created before the split.
+    soul_path = root / "SOUL.md"
     body = _SOUL_OVERFLOW_HEADER
     if persona_soul:
         body += persona_soul.strip() + "\n"
@@ -195,7 +203,7 @@ def _initialise_soul_md(
     try:
         soul_path.write_text(body, encoding="utf-8")
     except OSError as exc:
-        print(f"     ⚠  couldn't write soul.md ({exc}); identity.yaml "
+        print(f"     ⚠  couldn't write SOUL.md ({exc}); identity.yaml "
               "is still valid")
 
 

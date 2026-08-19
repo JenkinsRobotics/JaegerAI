@@ -212,6 +212,56 @@ def status_bar(
     return out
 
 
+# ── Autonomous run chrome ──────────────────────────────────────────
+
+
+# The stations an autonomous run passes through. ``settle`` is not a
+# station — it is what happens when the last one is reached.
+AUTO_PHASES: tuple[str, ...] = ("plan", "executing", "verifying", "done")
+
+_PHASE_GLYPH = {"plan": "●", "executing": "⚡", "verifying": "🔍", "done": "✔"}
+
+
+def autonomous_breadcrumb(phase: str) -> Text:
+    """``● PLAN ──▶ ⚡ EXECUTING ──▶ 🔍 VERIFYING ──▶ ✔ DONE`` with the
+    current station lit and the rest dimmed."""
+    current = (phase or "").lower()
+    line = Text()
+    for i, name in enumerate(AUTO_PHASES):
+        if i:
+            line.append(" ──▶ ", style="dim")
+        glyph = _PHASE_GLYPH[name]
+        style = ACCENT_BOLD if name == current else "dim"
+        line.append(f"{glyph} {name.upper()}", style=style)
+    return line
+
+
+def autonomous_header(
+    *,
+    step: int,
+    budget: int,
+    phase: str = "executing",
+    mode: str = "auto",
+    tool: str = "",
+    elapsed_s: float = 0.0,
+) -> Text:
+    """The one-line active header for a continuous run —
+    ``⚡ [AUTONOMOUS] Step 12/50 · Running: notes_operations · 14.2s``.
+
+    It exists so a long run never *looks* idle: between two turns the
+    spinner is down, and without this the screen reads as standby while
+    the worker is one instruction away from firing the next step."""
+    line = Text()
+    line.append(f"{_PHASE_GLYPH.get(phase, '⚡')} [{mode.upper()}]",
+                style=ACCENT_BOLD)
+    line.append(f"  Step {step}/{budget}", style="bold")
+    if tool:
+        line.append(f"  ·  Running: {tool}", style="dim cyan")
+    if elapsed_s:
+        line.append(f"  ·  Elapsed: {elapsed_s:.1f}s", style="dim")
+    return line
+
+
 # ── Thinking / activity inline ─────────────────────────────────────
 
 

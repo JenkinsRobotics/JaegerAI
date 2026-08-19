@@ -69,10 +69,10 @@ _HELP_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
                            "config", "verbose", "reboot", "shutdown", "quit")),
     ("Conversation",     ("new", "history", "copy", "save", "undo", "retry",
                           "steer", "busy", "stop", "reset")),
+    ("Automation & Mode",("auto", "mode", "plan", "goal", "deepthink", "board")),
     ("Model & Tools",    ("model", "models", "download", "runtime", "tools", "voice")),
     ("Instances",        ("instance", "instances", "factoryreset")),
-    ("Skills & Tasks",   ("skills", "deepthink", "board", "goal")),
-    ("Memory & Plugins", ("facts", "plugins")),
+    ("Memory & Skills",  ("skills", "facts", "plugins")),
 )
 
 
@@ -1245,6 +1245,182 @@ def _goal(ctx: SlashContext, args: str) -> SlashResult:
     return SlashResult(message="", quit=False, extras={"goal_just_set": True})
 
 
+# ── Automation & Planning Modes ─────────────────────────────────────
+
+
+def _exec_state() -> Any:
+    from jaeger_ai.core.runtime import execution
+    return execution
+
+
+def _auto_banner(console: Console, mode: str, autonomy: str, budget: int) -> None:
+    """One consistent banner for every entry into a continuous mode —
+    the user must be able to see, at the moment they hand over, what the
+    agent may now do without asking and where it stops."""
+    if mode == "auto":
+        console.print(
+            f"[bold green]⚡ AUTO[/] — the agent keeps executing until the "
+            f"job is done, {budget} steps are spent, or you [bold]/stop[/].\n"
+            f"[dim]confirm gate: {autonomy} · /mode interactive returns to "
+            f"one-turn-per-prompt[/]"
+        )
+    elif mode == "supervised":
+        console.print(
+            f"[bold yellow]◆ SUPERVISED[/] — continuous execution with a "
+            f"y/n on every mutation (up to {budget} steps).\n"
+            f"[dim]confirm gate: {autonomy} · /stop halts the run[/]"
+        )
+    else:
+        console.print(
+            f"[bold]○ INTERACTIVE[/] — one turn per prompt.\n"
+            f"[dim]confirm gate: {autonomy}[/]"
+        )
+
+
+def _auto(ctx: SlashContext, args: str) -> SlashResult:
+    """``/auto``          show whether continuous execution is on
+       ``/auto on``       hand the agent the wheel until the job is done
+       ``/auto off``      back to one turn per prompt
+       ``/auto on 20``    same, with a 20-step budget for this run
+    """
+    execution = _exec_state()
+    parts = args.strip().lower().split()
+    verb = parts[0] if parts else ""
+    budget = None
+    if len(parts) > 1 and parts[1].isdigit():
+        budget = int(parts[1])
+
+    if verb in ("on", "1", "true", "enable", "start"):
+        res = execution.set_execution_mode("auto")
+        if budget:
+            execution.begin_run(execution.run_progress()["objective"],
+                                budget=budget)
+        _auto_banner(ctx.console, "auto", res.get("autonomy", ""),
+                     budget or execution.max_steps())
+        return SlashResult()
+    if verb in ("off", "0", "false", "disable", "stop"):
+        res = execution.set_execution_mode("interactive")
+        execution.request_stop("/auto off")
+        _auto_banner(ctx.console, "interactive", res.get("autonomy", ""), 0)
+        return SlashResult()
+    if verb and verb not in ("status", "show"):
+        ctx.console.print("[yellow]Usage:[/] /auto · /auto on [steps] · /auto off")
+        return SlashResult()
+
+    info = execution.execution_info()
+    on = info["mode"] == "auto"
+    ctx.console.print(
+        f"Execution mode: "
+        f"{'[bold green]auto[/]' if on else '[dim]' + info['mode'] + '[/]'} — "
+        f"{info['description']}"
+    )
+    if info["active"]:
+        ctx.console.print(
+            f"[dim]run in flight · step {info['step']}/{info['budget']} · "
+            f"{info['elapsed_s']:.0f}s · phase {info['phase']}[/]"
+        )
+    ctx.console.print("[dim]Toggle with [bold]/auto on[/] · [bold]/auto off[/][/]")
+    return SlashResult()
+
+
+def _mode(ctx: SlashContext, args: str) -> SlashResult:
+    """``/mode`` switches EITHER axis, because both are called "mode"
+    in conversation and refusing one of them just moves the confusion:
+
+      execution  interactive · auto · supervised · deepthink
+                 (how long a request keeps running)
+      brain      normal · high · deep-sleep
+                 (which model is resident — a 60-90s swap)
+    """
+    execution = _exec_state()
+    from jaeger_ai.core.runtime import modes as brain_modes
+
+    body = args.strip().lower()
+    if not body:
+        info = execution.execution_info()
+        ctx.console.print(
+            f"Execution mode: [bold cyan]{info['mode']}[/] — "
+            f"{info['description']}\n"
+            f"[dim]  execution: {' · '.join(info['options'])}[/]\n"
+            f"Brain mode: [bold cyan]{brain_modes.current_mode()}[/]\n"
+            f"[dim]  brain: {' · '.join(brain_modes.list_modes())} "
+            f"(model swap)[/]"
+        )
+        if info["active"]:
+            ctx.console.print(
+                f"[dim]run in flight · step {info['step']}/{info['budget']} · "
+                f"phase {info['phase']}[/]"
+            )
+        return SlashResult()
+
+    if body in ("deepthink", "deep-think", "coder"):
+        execution.set_execution_mode("deepthink")
+        return _deepthink(ctx, "start")
+
+    target = execution.normalize(body)
+    if target is not None:
+        res = execution.set_execution_mode(target)
+        _auto_banner(ctx.console, target, res.get("autonomy", ""),
+                     execution.max_steps())
+        return SlashResult()
+
+    # Not an execution mode — try the brain presets. This is the slow
+    # path (model swap), so it says what it is doing before it blocks.
+    if body in brain_modes.list_modes():
+        ctx.console.print(
+            f"[dim]swapping the resident model for [bold]{body}[/] — "
+            f"this takes 60-90s…[/]"
+        )
+        res = brain_modes.set_mode(body)
+        if res.get("ok"):
+            ctx.console.print(
+                f"[bold green]Brain mode: {res['mode']}[/]"
+                + (" [dim](already active)[/]" if res.get("unchanged") else "")
+            )
+        else:
+            ctx.console.print(f"[yellow]{res.get('error')}[/]")
+        return SlashResult()
+
+    ctx.console.print(
+        f"[yellow]Unknown mode {body!r}.[/] "
+        f"execution: {', '.join(execution.list_modes())} · "
+        f"brain: {', '.join(brain_modes.list_modes())}"
+    )
+    return SlashResult()
+
+
+def _plan(ctx: SlashContext, args: str) -> SlashResult:
+    """``/plan <objective>`` — plan it, then execute it end to end.
+
+    One turn does both: asking for a plan in its own turn and executing
+    in the next costs a full model round-trip and gives the model a
+    chance to end on the plan (the exact failure the continuation engine
+    exists to catch)."""
+    execution = _exec_state()
+    task = args.strip()
+    if not task:
+        ctx.console.print("[yellow]Usage:[/] /plan <objective>")
+        return SlashResult()
+    res = execution.set_execution_mode("auto")
+    progress = execution.begin_run(task)
+    prompt = (
+        f"OBJECTIVE (autonomous run — plan, then execute):\n{task}\n\n"
+        f"1. Write a numbered plan of 3-5 concrete steps. Keep it short.\n"
+        f"2. Then execute it in this same turn, calling the tools the "
+        f"steps need. Do not stop after the plan, and do not narrate "
+        f"steps you have not performed.\n"
+        f"3. Work through every item; when the objective is genuinely "
+        f"met, say so and summarise what you produced and where it is."
+    )
+    ctx.console.print(
+        f"[bold cyan]⚡ autonomous run:[/] {task}\n"
+        f"[dim]● PLAN ──▶ EXECUTING ──▶ VERIFYING ──▶ DONE · budget "
+        f"{progress['budget']} steps · confirm gate "
+        f"{res.get('autonomy', '')} · /stop halts it[/]"
+    )
+    return SlashResult(extras={"plan_prompt": prompt})
+
+
 # ── Deep Think ──────────────────────────────────────────────────────
 
 
@@ -1595,6 +1771,16 @@ def _status(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
     table.add_row("Context", f"{getattr(tui, '_context_tokens', 0):,}/"
                              f"{getattr(tui, '_context_max', 0):,}")
     table.add_row("Mic", mic)
+    from jaeger_ai.core.runtime import execution
+    info = execution.execution_info()
+    table.add_row("Execution", f"{info['mode']} — {info['description']}")
+    if info["active"]:
+        table.add_row(
+            "Autonomous run",
+            f"step {info['step']}/{info['budget']} · {info['phase']} · "
+            f"{info['elapsed_s']:.0f}s"
+            + (f" · objective: {info['objective']}" if info["objective"] else "")
+        )
     ctx.console.print(table)
     return SlashResult()
 
@@ -1707,7 +1893,22 @@ def _steer(ctx: SlashContext, args: str) -> SlashResult:
 
 
 def _stop(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
-    """Stop every running background process."""
+    """Halt the autonomous run, then stop every background process.
+
+    The run halt is cooperative — it lands at the next turn boundary, so
+    whatever the current step already produced is kept."""
+    from jaeger_ai.core.runtime import execution
+    if execution.run_active() or execution.is_continuous():
+        progress = execution.run_progress()
+        execution.request_stop("/stop")
+        if progress["active"]:
+            ctx.console.print(
+                f"[yellow]⨯ autonomous run halting[/] after step "
+                f"{progress['step']}/{progress['budget']} "
+                f"({progress['elapsed_s']:.0f}s) — partial work kept."
+            )
+        execution.set_execution_mode("interactive")
+        ctx.console.print("[dim]execution mode → interactive.[/]")
     try:
         from jaeger_agent import tools as _jt
         listing = _jt.list_background()
@@ -2057,6 +2258,9 @@ REGISTRY: tuple[SlashCommand, ...] = (
     SlashCommand("download",  "`/download <name>` — fetch a model from HF Hub", _download),
     SlashCommand("runtime",   "list local inference engines (llama.cpp, MLX, Ollama, LM Studio)", _runtime),
     SlashCommand("plugins",   "list bundled plugins with setup status", _plugins),
+    SlashCommand("auto",      "hand over the wheel: continuous execution (/auto on│off)", _auto),
+    SlashCommand("mode",      "execution mode (interactive·auto·supervised·deepthink) or brain preset", _mode),
+    SlashCommand("plan",      "`/plan <objective>` — plan it, then run it to completion", _plan),
     SlashCommand("goal",      "show/set/clear an autonomous completion condition (Claude-Code-style)", _goal),
     SlashCommand("deepthink", "autonomous skill-development mode: add/list/approve/start", _deepthink),
     SlashCommand("board",     "kanban task board: show/add/approve/done/move", _board),
@@ -2075,7 +2279,7 @@ REGISTRY: tuple[SlashCommand, ...] = (
     SlashCommand("copy",      "copy the agent's last reply to the clipboard", _copy),
     SlashCommand("undo",      "drop the last user→assistant exchange", _undo),
     SlashCommand("retry",     "re-run the last user message", _retry),
-    SlashCommand("stop",      "stop all running background processes", _stop),
+    SlashCommand("stop",      "halt the autonomous run and every background process", _stop),
     SlashCommand("save",      "save the current conversation to a file", _save),
     SlashCommand("reboot",    "tear down + re-boot the pipeline (reload model/skills/config)", _reboot),
     SlashCommand("shutdown",  "shut the Jaeger down cleanly", _shutdown),
