@@ -1,6 +1,6 @@
 """Self-update tools — set_name / update_soul input validation.
 
-The happy path writes identity.yaml / soul.md at the instance root and
+The happy path writes identity.yaml / SOUL.md at the instance root and
 needs a bound layout; the validation guards (which run before any file
 access) are the unit-testable surface and the part that keeps a small
 model from corrupting its own identity.

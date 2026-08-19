@@ -28,6 +28,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2748,11 +2749,27 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                 except Exception:  # noqa: BLE001 — never let pub break the turn
                     pass
 
+        def _stream_delta(piece: str) -> None:
+            # Per-token text as the model produces it. Forwarded to
+            # whichever surface registered a sink for THIS turn (see
+            # :func:`stream_delta_sink`); no sink means the turn pays a
+            # dict lookup per chunk and nothing else. The adapters are
+            # streaming either way — this only decides whether anyone
+            # downstream hears it.
+            sink = _pipeline.get("stream_delta_sink")
+            if sink is None:
+                return
+            try:
+                sink(str(piece))
+            except Exception:  # noqa: BLE001 — a listener must never break a turn
+                pass
+
         _status_cb = AgentCallbacks(
             tool_progress=_tool_progress,
             tool_done=_tool_done,
             heartbeat=_heartbeat,
             thinking=_thinking,
+            stream_delta=_stream_delta,
         )
         # Pipe the configured ctx window into the agent's pre-flight
         # ContextGuard so an oversized prompt is trimmed (or refused)
@@ -2792,19 +2809,8 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                 )
                 return str(out or "")
         # Session system prompt = base prompt + runtime identity + frozen
-        # facts snapshot. All frozen at construction so the prompt stays
-        # byte-stable across turns (prefix-cache friendly); new facts land
-        # next session. The runtime block goes first: which model is
-        # answering and how big its window is are facts about THIS process,
-        # and without them the agent answers questions about itself from
-        # training-data folklore.
-        _session_prompt = _pipeline["system_prompt"]
-        _runtime_block = _runtime_identity_block()
-        if _runtime_block:
-            _session_prompt = f"{_session_prompt}\n\n{_runtime_block}"
-        _facts_block = _facts_snapshot_block()
-        if _facts_block:
-            _session_prompt = f"{_session_prompt}\n\n{_facts_block}"
+        # facts snapshot — see :func:`compose_session_prompt`.
+        _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
         _jaeger_agents_by_session[key] = build_jaeger_agent(
             client,
             system_prompt=_session_prompt,
@@ -3220,21 +3226,94 @@ def _tag_confirm_session(session: str) -> None:
         pass
 
 
+@contextmanager
+def stream_delta_sink(sink: Any):
+    """Route this turn's per-token text to ``sink`` for its duration.
+
+    The agent loop has always been able to stream (adapters take an
+    ``on_delta``; the TUI and TTS sentence-chunker use it), but a surface
+    outside this process had no way to say "I am listening". Without one,
+    every remote client waited for the whole answer and then received it
+    in a single lump — the bridge's ``reply`` frame.
+
+    Turn-scoped rather than agent-scoped on purpose: the session agent is
+    cached and shared, so a sink installed at construction would outlive
+    the surface that wanted it. Entering restores the previous sink on
+    exit, so a nested turn (a cron firing mid-session) cannot strand a
+    dead listener.
+
+    ``sink`` takes one string — the text chunk — and must not raise; the
+    callback swallows exceptions anyway, but a slow sink slows the decode
+    loop it runs on, so keep it to a buffer append.
+    """
+    previous = _pipeline.get("stream_delta_sink")
+    _pipeline["stream_delta_sink"] = sink
+    try:
+        yield sink
+    finally:
+        _pipeline["stream_delta_sink"] = previous
+
+
+def stream_delta_listening() -> bool:
+    """True while a surface is consuming this turn's token stream."""
+    return _pipeline.get("stream_delta_sink") is not None
+
+
+def compose_session_prompt(base_prompt: str) -> str:
+    """The full context payload a session's agent runs on, in order:
+
+      1. the assembled base prompt — safety, name, SOUL.md identity,
+         framework rules, AGENTS.md operating directives, dynamic blocks
+         (``jaeger_agent.prompts.assemble``),
+      2. the runtime identity block — which model is actually answering
+         and how big its window is,
+      3. the frozen facts snapshot.
+
+    The session stream (user turns, tool results, history) follows this
+    payload as messages; it is never spliced into it.
+
+    Frozen at construction so the prompt stays byte-stable across turns
+    (prefix-cache friendly); new facts land next session. The runtime
+    block goes before the facts because which model is answering is a
+    fact about THIS process — without it the agent answers questions
+    about itself from training-data folklore.
+
+    Every path that (re)builds a live agent's system prompt goes through
+    here. It used to exist only inline in :func:`_ensure_session_agent`,
+    so :func:`_refresh_character_prompt` — which rebuilds mid-session
+    when the persona changes — reassigned the BASE prompt alone and
+    silently dropped tiers 2 and 3 for the rest of the session.
+    """
+    parts = [(base_prompt or "").strip()]
+    for block in (_runtime_identity_block(), _facts_snapshot_block()):
+        if block:
+            parts.append(block)
+    return "\n\n".join(part for part in parts if part)
+
+
 def _refresh_character_prompt(jaeger_agent: Any) -> None:
-    """Instant-apply: if the selected character changed since the system
-    prompt was built, rebuild it so the new persona takes effect THIS turn
-    (no restart). Cheap — rebuilds only on an actual change."""
+    """Instant-apply: if the selected character — or either context
+    document (``SOUL.md`` / ``AGENTS.md``) — changed since the system
+    prompt was built, rebuild the payload so the change takes effect THIS
+    turn (no restart). Cheap: a stat per document, and a rebuild only on
+    an actual change."""
     try:
         from jaeger_agent.prompts.prompts import build_system_prompt
         from jaeger_ai.personality.character import active_character_signature
+        from jaeger_ai.core.instance.instance import context_document_signature
         layout = _pipeline.get("layout")
         if layout is None:
             return
-        sig = active_character_signature(layout.root)
+        sig = f"{active_character_signature(layout.root)}:" \
+              f"{context_document_signature(layout.root)}"
         if sig != _pipeline.get("active_character_sig"):
             _pipeline["active_character_sig"] = sig
             _pipeline["system_prompt"] = build_system_prompt(layout)
-            jaeger_agent.system_prompt = _pipeline["system_prompt"]
+            # Rebuild the WHOLE payload, not just the base: the runtime
+            # identity and facts tiers belong to this session and are not
+            # part of what build_system_prompt returns.
+            jaeger_agent.system_prompt = compose_session_prompt(
+                _pipeline["system_prompt"])
     except Exception:  # noqa: BLE001
         pass
 

@@ -297,14 +297,16 @@ def bind_character(instance_root: Path, cid: str) -> None:
 
 
 def active_character_signature(instance_root: Path) -> str:
-    """id + sheet mtime — changes when the character switches OR its traits are
-    edited, so instant-apply rebuilds the prompt for both."""
+    """id + sheet mtime + runtime-override mtime — changes when the
+    character switches, when its sheet is edited, or when this instance
+    adapts a trait, so instant-apply rebuilds the prompt for all three."""
+    from jaeger_ai.personality import persona_state
     cid = active_character_id(instance_root)
     try:
         mt = (characters_root() / cid / "character.yaml").stat().st_mtime
     except OSError:
         mt = 0.0
-    return f"{cid}:{mt}"
+    return f"{cid}:{mt}:{persona_state.signature(instance_root)}"
 
 
 def set_active_character(instance_root: Path, cid: str) -> None:
@@ -317,14 +319,29 @@ def active_character(instance_root: Path) -> "Character | None":
     """The character this instance plays — the agent's real persona; its prompt
     REPLACES the instance persona files (see agent/prompts/assemble.py). Falls
     back to the default character if the picked one is missing or broken, so a
-    running agent always has a persona. None only if no character loads at all."""
+    running agent always has a persona. None only if no character loads at all.
+
+    The sheet is the DEFINITION; this instance's runtime overrides
+    (``persona_state.yaml`` — what ``adjust_trait`` learned) are applied
+    on top. The definition file itself is never written by the runtime,
+    so the same character stays identical for every other instance
+    playing it. See :mod:`jaeger_ai.personality.persona_state`."""
+    from jaeger_ai.personality import persona_state
     for cid in (active_character_id(instance_root), DEFAULT_CHARACTER_ID):
         folder = characters_root() / cid
         if (folder / "character.yaml").exists():
             try:
-                return load_character(folder)
+                character = load_character(folder)
             except Exception:  # noqa: BLE001
                 continue
+            try:
+                persona_state.apply_overrides(
+                    character,
+                    persona_state.load_overrides(instance_root, character.id),
+                )
+            except Exception:  # noqa: BLE001 — overrides are optional
+                pass
+            return character
     return None
 
 

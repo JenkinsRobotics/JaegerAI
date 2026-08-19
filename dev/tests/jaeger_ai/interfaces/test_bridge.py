@@ -258,12 +258,19 @@ def test_integration_contract_is_versioned_and_self_describing():
     contract = bridge._integration_contract()
 
     assert contract["contract"] == "ares-jaeger"
-    assert contract["contract_version"] == 7
+    # v8 added the ``character_card`` query (card art over the bridge, so a
+    # surface never reads this product's install directory to draw a face).
+    # v9 added ``delta`` frames — the turn's text as it generates.
+    assert contract["contract_version"] == 9
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
     assert "settings_set" in contract["operations"]["commands"]
     assert "list_credentials" in contract["operations"]["queries"]
+    assert "character_card" in contract["operations"]["queries"]
+    card = contract["features"]["character_card_art"]
+    assert card["available"] is True and card["owner"] == "jaeger"
+    assert card["encoding"] == "base64" and card["max_bytes"] > 0
     assert {"set_credential", "delete_credential"}.issubset(
         contract["operations"]["commands"])
     assert contract["features"]["credentials"] == {
@@ -1503,3 +1510,202 @@ def test_run_update_command_refuses_while_a_turn_is_in_flight(monkeypatch):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ── character_card: the face, served by whoever owns it ──────────────
+
+
+def test_card_art_encodes_an_existing_card(tmp_path):
+    from base64 import b64decode
+
+    card = tmp_path / "card.png"
+    card.write_bytes(b"\x89PNG\r\n\x1a\nfake-bytes")
+    art = bridge._card_art(str(card), "clanker")
+
+    assert art["id"] == "clanker"
+    assert art["mime"] == "image/png"
+    assert art["filename"] == "card.png"
+    assert b64decode(art["data"]) == card.read_bytes()
+    assert art["bytes"] == len(card.read_bytes())
+
+
+def test_card_art_is_none_when_there_is_nothing_to_draw(tmp_path):
+    """A surface without art draws its own placeholder — a missing card is
+    cosmetic, never an error."""
+    assert bridge._card_art(None, "x") is None
+    assert bridge._card_art(str(tmp_path / "absent.png"), "x") is None
+
+
+def test_card_art_refuses_an_oversized_file(tmp_path, monkeypatch):
+    """The stdio transport is shared by every surface; one huge frame
+    would stall all of them."""
+    card = tmp_path / "card.png"
+    card.write_bytes(b"x" * 2048)
+    monkeypatch.setattr(bridge, "_CARD_MAX_BYTES", 1024)
+    assert bridge._card_art(str(card), "x") is None
+
+
+def test_card_art_names_the_mime_type_from_the_suffix(tmp_path):
+    for name, mime in (("c.jpg", "image/jpeg"), ("c.webp", "image/webp"),
+                       ("c.bin", "application/octet-stream")):
+        path = tmp_path / name
+        path.write_bytes(b"data")
+        assert bridge._card_art(str(path), "x")["mime"] == mime
+
+
+# ── delta frames: the turn's text as it generates ───────────────────
+
+
+def _delta_frames(buf) -> list[dict]:
+    import json
+    return [json.loads(line) for line in buf.getvalue().splitlines() if line.strip()]
+
+
+def test_first_chunk_is_emitted_immediately(tmp_path):
+    """Time-to-first-token is the latency a person actually feels, so the
+    opening chunk never waits for the coalescer."""
+    import io
+
+    buf = io.StringIO()
+    stream = bridge._DeltaStream(buf, "s1")
+    stream.feed("H")
+
+    frames = _delta_frames(buf)
+    assert frames == [{"type": "delta", "text": "H", "session": "s1"}]
+
+
+def test_later_chunks_are_coalesced(tmp_path):
+    """One frame per token would be hundreds of encodes+flushes a second
+    for a reader that repaints at 60Hz anyway."""
+    import io
+
+    buf = io.StringIO()
+    stream = bridge._DeltaStream(buf, "s1")
+    stream.feed("start")
+    for _ in range(4):
+        stream.feed("x" * 8)          # 32 chars — trips the size threshold
+
+    frames = _delta_frames(buf)
+    assert len(frames) == 2
+    assert frames[1]["text"] == "x" * 32
+
+
+def test_flush_emits_the_tail(tmp_path):
+    import io
+
+    buf = io.StringIO()
+    stream = bridge._DeltaStream(buf, "s1")
+    stream.feed("start")
+    stream.feed("tail")               # under the threshold — still buffered
+    assert len(_delta_frames(buf)) == 1
+    stream.flush()
+    frames = _delta_frames(buf)
+    assert frames[-1]["text"] == "tail"
+    assert stream.sent_chars == len("starttail")
+
+
+def test_flush_is_idempotent_and_empty_feed_is_ignored(tmp_path):
+    import io
+
+    buf = io.StringIO()
+    stream = bridge._DeltaStream(buf, "s1")
+    stream.flush()
+    stream.feed("")
+    stream.feed(None)
+    stream.flush()
+    assert _delta_frames(buf) == []
+    assert stream.sent_chars == 0
+
+
+def test_a_sessionless_stream_omits_the_session_key(tmp_path):
+    import io
+
+    buf = io.StringIO()
+    bridge._DeltaStream(buf, "").feed("hi")
+    assert _delta_frames(buf) == [{"type": "delta", "text": "hi"}]
+
+
+def test_contract_declares_deltas_so_clients_can_gate(tmp_path):
+    """Rule for every client: negotiate the capability, never sniff the
+    version."""
+    contract = bridge._integration_contract()
+    deltas = contract["features"]["text_deltas"]
+    assert deltas["available"] is True
+    assert deltas["frame"] == "delta"
+    assert deltas["coalesce_chars"] == bridge._DELTA_MIN_CHARS
+
+
+def test_the_sink_is_turn_scoped():
+    """A sink installed for one turn must not outlive it — the session
+    agent is cached and shared."""
+    from jaeger_ai.main import stream_delta_listening, stream_delta_sink
+
+    assert stream_delta_listening() is False
+    got: list[str] = []
+    with stream_delta_sink(got.append):
+        assert stream_delta_listening() is True
+    assert stream_delta_listening() is False
+
+
+def test_nested_sinks_restore_the_outer_listener():
+    """A cron turn firing mid-session must not strand the outer sink."""
+    from jaeger_ai.main import _pipeline, stream_delta_sink
+
+    outer: list[str] = []
+    inner: list[str] = []
+    with stream_delta_sink(outer.append):
+        with stream_delta_sink(inner.append):
+            _pipeline["stream_delta_sink"]("inner-text")
+        _pipeline["stream_delta_sink"]("outer-text")
+    assert inner == ["inner-text"]
+    assert outer == ["outer-text"]
+
+
+def test_a_turn_streams_deltas_before_its_reply(monkeypatch):
+    """End to end through the bridge loop: text reaches the client while
+    the turn runs, and the authoritative ``reply`` still lands last."""
+
+    def streaming_run(client, text, session_key=None, display_text=None):
+        from jaeger_ai.main import _pipeline
+        sink = _pipeline.get("stream_delta_sink")
+        assert sink is not None, "the bridge must install a sink for the turn"
+        sink("Hel")          # first chunk — emitted immediately
+        sink("lo")           # under the coalescer threshold — rides the flush
+        return {"text": "Hello", "error": None}
+
+    _rc, frames, _boot = _run(
+        monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n', run_fn=streaming_run)
+
+    types = [f["type"] for f in frames]
+    assert types == ["ready", "agent_state", "agent_state", "state",
+                     "delta", "delta", "reply", "state", "bye"]
+    assert [f["text"] for f in frames if f["type"] == "delta"] == ["Hel", "lo"]
+    assert all(f.get("session") == "desktop-app"
+               for f in frames if f["type"] == "delta")
+    # The reply is unchanged — deltas are a preview of it, not a
+    # replacement, so a client that ignores them loses nothing.
+    assert frames[6] == {"type": "reply", "text": "Hello", "error": None,
+                         "session": "desktop-app"}
+
+
+def test_a_turn_that_never_streams_is_unchanged(monkeypatch):
+    """No deltas, no delta frames — the pre-streaming wire shape exactly."""
+    _rc, frames, _boot = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n')
+    assert [f["type"] for f in frames] == [
+        "ready", "agent_state", "agent_state", "state", "reply", "state", "bye"]
+
+
+def test_the_sink_is_gone_once_the_turn_returns(monkeypatch):
+    """Nothing may stream into a client that already has its reply."""
+    captured = {}
+
+    def streaming_run(client, text, session_key=None, display_text=None):
+        from jaeger_ai.main import _pipeline
+        captured["during"] = _pipeline.get("stream_delta_sink")
+        return {"text": "done", "error": None}
+
+    _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n', run_fn=streaming_run)
+
+    from jaeger_ai.main import stream_delta_listening
+    assert captured["during"] is not None
+    assert stream_delta_listening() is False

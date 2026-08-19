@@ -49,6 +49,16 @@ _DEEPTHINK_SOURCE = "__deepthink__"
 
 # Slash commands that swap the model / instance / pipeline out from
 # under a turn — refused while one is running (Ctrl-C or wait first).
+# Why an autonomous run stopped, in words the operator can act on.
+# Keyed by :func:`jaeger_ai.core.runtime.continuation.classify`.
+_AUTO_END_REASON = {
+    "complete": "the agent reported the work finished",
+    "question": "the agent asked you something",
+    "blocked": "the agent is blocked and needs you",
+    "settled": "the reply looks like a finished answer",
+    "empty": "the turn produced no answer",
+}
+
 _TURN_UNSAFE_SLASH = frozenset({
     "model", "instance", "reboot", "shutdown", "factoryreset",
     "download", "deepthink",
@@ -1206,6 +1216,108 @@ class JaegerTUI:
         # The evaluator's reason becomes the next turn's directive.
         return reason
 
+    # ── Autonomous continuation ─────────────────────────────────────
+
+    @property
+    def _auto_mode(self) -> bool:
+        """Back-compat view of the execution mode: True in auto.
+
+        The flag used to live on the TUI instance, which meant nothing
+        outside the TUI could see it. It is now a window onto
+        :mod:`jaeger_ai.core.runtime.execution` so the agent-facing
+        surfaces (``/status``, the tray, a tool asking "am I allowed to
+        keep going?") all read the same state."""
+        from jaeger_ai.core.runtime import execution
+        return execution.current_mode() == "auto"
+
+    @_auto_mode.setter
+    def _auto_mode(self, value: bool) -> None:
+        from jaeger_ai.core.runtime import execution
+        execution.set_execution_mode("auto" if value else "interactive")
+
+    def _post_turn_auto_check(self) -> str | None:
+        """After a turn in a continuous mode, decide whether to re-fire.
+
+        Returns the prompt for the next auto turn, or None to hand the
+        prompt back. The run ends when the user stopped it, the budget
+        is spent, the answer needs the user (a question, a blocker), or
+        the answer is a verified completion. A completion claim on a
+        ``/plan`` run buys one verification step first — see
+        :func:`jaeger_ai.core.runtime.continuation.verification_prompt`.
+        """
+        from jaeger_ai.core.runtime import continuation, execution
+
+        if not execution.is_continuous():
+            return None
+        if execution.stop_requested():
+            self._end_auto_run("stopped by you")
+            execution.clear_stop()
+            return None
+
+        verdict = continuation.classify(self._last_answer)
+
+        if verdict == "complete" and execution.needs_verification():
+            if execution.steps_left() <= 0:
+                self._end_auto_run("budget spent before verification")
+                return None
+            execution.mark_verified()
+            step = execution.record_step("verifying")
+            progress = execution.run_progress()
+            self._print_auto_step(step, progress, "verifying")
+            return continuation.verification_prompt(progress["objective"])
+
+        if verdict != "continue" or not continuation.enabled():
+            self._end_auto_run(_AUTO_END_REASON.get(verdict, verdict))
+            return None
+
+        if not execution.run_active():
+            execution.begin_run("")
+        if execution.steps_left() <= 0:
+            progress = execution.run_progress()
+            execution.end_run("budget exhausted")
+            self.console.print(
+                f"[yellow]⚡ autonomous run stopped[/] — spent its "
+                f"{progress['budget']}-step budget without finishing. "
+                f"[dim]/auto on to keep going · /status for where it got "
+                f"to[/]"
+            )
+            return None
+
+        step = execution.record_step("executing")
+        progress = execution.run_progress()
+        self._print_auto_step(step, progress, "executing")
+        return continuation.continuation_prompt(progress["objective"])
+
+    def _print_auto_step(self, step: int, progress: dict, phase: str) -> None:
+        """Announce a continuation step — header, then breadcrumb. The
+        user needs to see that the agent kept going *and* why, or an
+        autonomous run reads as the TUI talking to itself."""
+        from jaeger_ai.interfaces.tui import status as status_mod
+        why = ("checking its own claim of completion" if phase == "verifying"
+               else "the last reply promised work it had not done")
+        self.console.print(status_mod.autonomous_header(
+            step=step, budget=progress["budget"], phase=phase,
+            mode="auto" if self._auto_mode else "supervised",
+            elapsed_s=progress["elapsed_s"],
+        ))
+        self.console.print(status_mod.autonomous_breadcrumb(phase))
+        self.console.print(f"[dim]{why}[/]")
+
+    def _end_auto_run(self, reason: str) -> None:
+        """Close out a run (if one is up) and say why it ended."""
+        from jaeger_ai.core.runtime import execution
+        if not execution.run_active():
+            return
+        progress = execution.run_progress()
+        execution.end_run(reason)
+        from jaeger_ai.interfaces.tui import status as status_mod
+        self.console.print(status_mod.autonomous_breadcrumb("done"))
+        self.console.print(
+            f"[bold green]✔ autonomous run finished[/] — {reason} "
+            f"[dim]({progress['step']} step(s), "
+            f"{progress['elapsed_s']:.0f}s)[/]"
+        )
+
     # ── Deep Think ──────────────────────────────────────────────────
 
     def run_deep_think(self) -> None:
@@ -1355,6 +1467,25 @@ class JaegerTUI:
         except Exception:  # noqa: BLE001
             return 0
 
+    def _autonomous_fragment(self) -> tuple[str, str] | None:
+        """``⚡ AUTO 12/50 · executing`` for the status bar, or None when
+        no autonomous run is in flight."""
+        try:
+            from jaeger_ai.core.runtime import execution
+            info = execution.execution_info()
+        except Exception:  # noqa: BLE001 — chrome must never break the bar
+            return None
+        if not info["active"] and not info["continuous"]:
+            return None
+        label = "AUTO" if info["mode"] == "auto" else info["mode"].upper()
+        if not info["active"]:
+            return ("fg:ansiyellow", f"⚡ {label} armed")
+        phase = info["phase"] or "executing"
+        if info["stopping"]:
+            phase = "stopping"
+        return ("fg:ansiyellow bold",
+                f"⚡ {label} {info['step']}/{info['budget']} · {phase}")
+
     def _status_fragments(self) -> list[tuple[str, str]]:
         """Status-bar segments as prompt_toolkit ``(style, text)`` fragments.
 
@@ -1392,6 +1523,15 @@ class JaegerTUI:
             else:
                 live = _cur or "ruminating"
             frags.append((f"fg:{ACCENT_PTK}", f"{frame} {live}"))
+            frags.append(SEP)
+
+        # Autonomous run segment — the answer to "is it still working
+        # through my job, and how far in?". Shown whenever a run is up,
+        # including between its turns, so the bar never implies standby
+        # while the worker is about to re-fire.
+        auto_seg = self._autonomous_fragment()
+        if auto_seg is not None:
+            frags.append(auto_seg)
             frags.append(SEP)
 
         frags.append((f"fg:{ACCENT_PTK} bold", f"✦ {self.model_name}"))
@@ -1529,6 +1669,7 @@ class JaegerTUI:
             if item is _WORKER_SHUTDOWN:
                 break
             source, text = item
+            nxt_source = "goal"
             self._turn_running.set()
             self._turn_started_at = time.perf_counter()
             self._current_activity = "ruminating"
@@ -1537,6 +1678,18 @@ class JaegerTUI:
                 if source == _DEEPTHINK_SOURCE:
                     self.run_deep_think()
                 else:
+                    # A fresh user request in a continuous mode opens a
+                    # run, with the request itself as the objective —
+                    # that is what the continuation and verification
+                    # steps restate, and what /status reports.
+                    if source in ("text", "voice"):
+                        try:
+                            from jaeger_ai.core.runtime import execution
+                            if (execution.is_continuous()
+                                    and not execution.run_active()):
+                                execution.begin_run(text)
+                        except Exception:  # noqa: BLE001
+                            pass
                     self.run_turn(text, source=source)
                     # Goal loop — evaluate after every real turn; a
                     # not-met goal re-enqueues itself as the next turn.
@@ -1550,13 +1703,22 @@ class JaegerTUI:
                         nxt = self._post_turn_goal_check()
                     except Exception:  # noqa: BLE001
                         nxt = None
+                    if nxt is None:
+                        # No goal drove the next turn — the continuous
+                        # execution modes get their say. A goal always
+                        # wins: it is the more specific instruction.
+                        try:
+                            nxt = self._post_turn_auto_check()
+                            nxt_source = "auto" if nxt else nxt_source
+                        except Exception:  # noqa: BLE001
+                            nxt = None
             except Exception as exc:  # noqa: BLE001
                 self.console.print(f"[red]turn failed:[/] {exc}")
             finally:
                 self._turn_running.clear()
                 self._current_activity = ""
             if nxt:
-                self._turn_queue.put(("goal", nxt))
+                self._turn_queue.put((nxt_source, nxt))
 
     def _idle_tick(self) -> None:
         """Called by the worker whenever the turn queue is empty —
@@ -1826,6 +1988,9 @@ class JaegerTUI:
         # line stays live while it drains the queue.
         if result.extras.get("deep_think_start"):
             self._turn_queue.put((_DEEPTHINK_SOURCE, ""))
+        # /plan <objective> fires the planning+execution turn now.
+        if result.extras.get("plan_prompt"):
+            self._submit_turn("auto", str(result.extras["plan_prompt"]))
         # /goal <condition> fires the first goal turn immediately.
         if result.extras.get("goal_just_set"):
             from jaeger_ai.main import get_goal
@@ -1877,7 +2042,12 @@ class JaegerTUI:
                     if (self._turn_running.is_set()
                             or not self._turn_queue.empty()):
                         from jaeger_ai.main import request_turn_cancel
+                        from jaeger_ai.core.runtime import execution
                         request_turn_cancel()
+                        # Ctrl-C ends the autonomous run as well —
+                        # otherwise the worker re-fires the turn the
+                        # user just interrupted.
+                        execution.request_stop("Ctrl-C")
                         self._drain_turn_queue()
                         self.console.print(
                             "[dim]⨯ interrupted — turn(s) stopped.[/]")
@@ -1934,6 +2104,8 @@ class JaegerTUI:
                         continue
                 self.run_turn(line, source=source)
                 pending_goal = self._post_turn_goal_check()
+                if pending_goal is None:
+                    pending_goal = self._post_turn_auto_check()
         finally:
             self._shutdown()
         return 0

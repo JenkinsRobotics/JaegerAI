@@ -312,6 +312,16 @@ class InstanceLayout:
     def distribution_path(self) -> Path:    return self.root / "distribution.yaml"
     @property
     def home_dir(self) -> Path:             return self.root / "home"
+    # The two context documents. Identity and operations are separate
+    # files on purpose (jaeger_agent/prompts/context_blocks.py): SOUL.md
+    # is WHO the agent is and travels with the persona; AGENTS.md is HOW
+    # this deployment operates — tools, mission, hardware — and must not.
+    # Uppercase is canonical; ``soul.md`` written by older wizard runs
+    # still resolves through ``context_document_paths``.
+    @property
+    def soul_path(self) -> Path:            return self.root / "SOUL.md"
+    @property
+    def directives_path(self) -> Path:      return self.root / "AGENTS.md"
     @property
     def workspace_dir(self) -> Path:        return self.root / "workspace"
 
@@ -327,6 +337,54 @@ class InstanceLayout:
             os.chmod(self.credentials_dir, 0o700)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Context documents (SOUL.md / AGENTS.md)
+# ---------------------------------------------------------------------------
+# Candidate spellings per document, in resolution order. Mirrors the
+# loader in ``jaeger_agent.prompts.context_blocks`` — the runtime reads
+# these files, this module only has to agree with it about their names.
+CONTEXT_DOCUMENT_NAMES: tuple[tuple[str, ...], ...] = (
+    ("SOUL.md", "soul.md"),
+    ("AGENTS.md", "agents.md"),
+)
+
+
+def context_document_paths(instance_root: Path) -> list[Path]:
+    """The context documents that actually exist for this instance, in
+    resolution order (first spelling that exists wins per document)."""
+    root = Path(instance_root)
+    found: list[Path] = []
+    for names in CONTEXT_DOCUMENT_NAMES:
+        for name in names:
+            path = root / name
+            if path.is_file():
+                found.append(path)
+                break
+    return found
+
+
+def context_document_signature(instance_root: Path) -> str:
+    """``name:mtime`` for each context document — changes when SOUL.md or
+    AGENTS.md is edited, created, or removed.
+
+    The prompt is assembled once and cached, so without a signature an
+    edit to either document sat on disk until the next restart. Stat
+    only, no reads: this runs on the turn path, next to
+    ``active_character_signature`` (same shape, same reason).
+    """
+    parts: list[str] = []
+    for names in CONTEXT_DOCUMENT_NAMES:
+        stamp = "0"
+        for name in names:
+            try:
+                stamp = f"{name}:{(Path(instance_root) / name).stat().st_mtime}"
+                break
+            except OSError:
+                continue
+        parts.append(stamp)
+    return "|".join(parts)
 
 
 # ---------------------------------------------------------------------------

@@ -286,6 +286,35 @@ class DeepThinkConfig(BaseModel):
     )
 
 
+class AutomationConfig(BaseModel):
+    """Continuous-execution settings — see
+    :mod:`jaeger_ai.core.runtime.execution`.
+
+    These govern ``/auto`` and ``/plan`` runs only. In ``interactive``
+    mode (the default) nothing here has any effect."""
+
+    model_config = ConfigDict(extra="forbid")
+    auto_max_steps: int = Field(
+        50, ge=1, le=500,
+        json_schema_extra=_setting("autonomy"),
+        description=(
+            "Hard cap on continuation steps in one /auto or /plan run. "
+            "The run ends with a wind-down summary when it is hit. "
+            "JAEGER_AUTO_MAX_STEPS overrides this for a single session."
+        ),
+    )
+    continue_on_narration: bool = Field(
+        True,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description=(
+            "In auto/supervised mode, re-fire the turn when the agent "
+            "narrates work it has not done ('let me start by...') instead "
+            "of handing the prompt back. Off = one turn per prompt even "
+            "in auto mode."
+        ),
+    )
+
+
 class RuntimeConfig(BaseModel):
     """Per-format inference-engine selection — JaegerAI's equivalent of LM
     Studio's Settings → Runtime panel.
@@ -745,6 +774,17 @@ class PersonaConfig(BaseModel):
     # agent_tool to persona_last/persona_first (pre-1.0, no shim — see
     # feedback-no-back-compat-pre-1.0) so the settings page can show
     # operator-legible names instead of internal Mode A/C jargon.
+    soul_in_prompt: bool = Field(
+        True,
+        json_schema_extra=_setting("persona"),
+        description=(
+            "Ingest the instance's SOUL.md into the system prompt as the "
+            "identity slot. Identity prose only — the character's VOICE "
+            "still travels through the output filter, and operational "
+            "directives come from AGENTS.md. Turn off to restore the "
+            "pre-split prompt (no identity document at all)."
+        ),
+    )
     mode: Literal["persona_first", "persona_last"] = Field(
         "persona_first",
         json_schema_extra=_setting("persona"),
@@ -839,6 +879,7 @@ class Config(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     deep_think: DeepThinkConfig = Field(default_factory=DeepThinkConfig)
+    automation: AutomationConfig = Field(default_factory=AutomationConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     avatar: AvatarConfig = Field(default_factory=lambda: AvatarConfig())
     external_model: ExternalModelConfig = Field(default_factory=ExternalModelConfig)
