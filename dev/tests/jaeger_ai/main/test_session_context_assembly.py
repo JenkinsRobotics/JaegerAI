@@ -117,11 +117,15 @@ def test_editing_a_context_document_triggers_a_rebuild(
     assert len(builds) == before + 1
 
 
-def test_apply_live_character_rebuilds_prompt_and_drops_history(
+def test_apply_live_character_rebuilds_prompt_and_keeps_history(
         tmp_path, stub_tiers, monkeypatch) -> None:
-    """A HUD pick has to change the RUNNING agent, not just the files.
-    Cached prompt + leftover Jarvis turns would keep answering as Jarvis
-    after the operator selected Clanker."""
+    """A HUD pick has to change the RUNNING agent, not just the files —
+    a cached prompt would keep answering as Jarvis after the operator
+    selected Clanker.
+
+    The prompt is the whole fix. The conversation stays: the operator
+    swapped a costume, not an assistant, and the earlier turns are their
+    data. This test used to assert ``agent.messages == []``."""
     layout = InstanceLayout(root=tmp_path)
     monkeypatch.setitem(main._pipeline, "layout", layout)
     monkeypatch.setattr(
@@ -139,7 +143,10 @@ def test_apply_live_character_rebuilds_prompt_and_drops_history(
     main.apply_live_character()
 
     assert "CLANKER_BASE" in agent.system_prompt
-    assert agent.messages == []
+    assert agent.messages == [
+        {"role": "user", "content": "who are you"},
+        {"role": "assistant", "content": "I am Jarvis, sir."},
+    ]
     # Signature is seeded so the next turn's refresh is a no-op, not a
     # second rebuild that would miss the just-applied payload.
     assert main._pipeline.get("active_character_sig")
