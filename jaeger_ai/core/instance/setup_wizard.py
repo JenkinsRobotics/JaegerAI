@@ -14,6 +14,7 @@ never destroys prior work.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,14 +61,69 @@ _VOICES = [
 # ── prompt helpers ───────────────────────────────────────────────────
 
 
+# Every prompt below funnels through ``_read_line`` so the wizard has ONE
+# answer to "there is no human here". Two distinct cases:
+#
+#   • ``JAEGER_NONINTERACTIVE=1`` — an explicit contract for callers that
+#     spawn setup with no operator attached (the Swift app / ARES bridge
+#     drive ``create_instance`` directly today, but the guided flow must
+#     not hard-crash if anything ever reaches for it).
+#   • stdin runs out mid-walk (Ctrl-D, a piped heredoc that ended). The
+#     first EOF latches ``_STDIN_EXHAUSTED`` so the REMAINING prompts take
+#     their defaults silently instead of raising EOFError per question.
+#
+# Deliberately NOT keyed on ``sys.stdin.isatty()``: the wizard's own tests
+# drive it with a monkeypatched ``builtins.input`` and no tty, and treating
+# that as non-interactive would skip the canned answers.
+_NONINTERACTIVE_ENV = "JAEGER_NONINTERACTIVE"
+_STDIN_EXHAUSTED = False
+
+
+def _noninteractive() -> bool:
+    """True when the caller declared that nobody can answer a prompt."""
+    raw = os.environ.get(_NONINTERACTIVE_ENV, "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _no_answer_available() -> bool:
+    """True when further prompting cannot produce an operator answer."""
+    return _noninteractive() or _STDIN_EXHAUSTED
+
+
+def _read_line(prompt: str) -> str | None:
+    """One raw prompt. ``None`` means "no answer available" — never raises.
+
+    Ctrl-C exits cleanly rather than dumping a traceback over a
+    half-finished setup walk.
+    """
+    global _STDIN_EXHAUSTED
+    if _no_answer_available():
+        return None
+    try:
+        return input(prompt)
+    except EOFError:
+        _STDIN_EXHAUSTED = True
+        print()
+        return None
+    except KeyboardInterrupt:
+        print("\n  Setup cancelled.")
+        sys.exit(1)
+
+
 def _ask(label: str, default: str = "") -> str:
     suffix = f" [{default}]" if default else ""
-    return input(f"  {label}{suffix}: ").strip() or default
+    raw = _read_line(f"  {label}{suffix}: ")
+    if raw is None:
+        return default
+    return raw.strip() or default
 
 
 def _ask_yn(label: str, default: bool) -> bool:
     hint = "Y/n" if default else "y/N"
-    raw = input(f"  {label} ({hint}): ").strip().lower()
+    raw = _read_line(f"  {label} ({hint}): ")
+    if raw is None:
+        return default
+    raw = raw.strip().lower()
     return default if not raw else raw[0] == "y"
 
 
@@ -77,6 +133,8 @@ def _ask_int(label: str, default: int) -> int:
         try:
             return int(raw)
         except ValueError:
+            if _no_answer_available():
+                return default
             print(f"     (expected a number, got {raw!r})")
 
 
@@ -87,7 +145,10 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
         marker = "›" if i == default else " "
         print(f"     {marker} {i + 1}. {label}")
     while True:
-        raw = input(f"  {prompt} [{default + 1}]: ").strip()
+        raw = _read_line(f"  {prompt} [{default + 1}]: ")
+        if raw is None:
+            return options[default][0]
+        raw = raw.strip()
         if not raw:
             return options[default][0]
         if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -343,9 +404,23 @@ def _wizard_pick_model(
               "disabled")
         return awake_choice
 
-    # Custom path
-    chosen = _ask("Path to a .gguf file", "")
-    if chosen and not Path(chosen).expanduser().exists():
+    # Custom path. Re-ask on an empty answer instead of returning "":
+    # create_instance substitutes the tier recommendation for a blank
+    # model, so falling through silently made Review print an empty
+    # "Awake model" (and, when both picks were blank, wrongly claim
+    # "same as awake — no swap") for an instance that actually got two
+    # different recommended models. Announce the fallback when no answer
+    # can be obtained at all.
+    while True:
+        chosen = _ask("Path to a .gguf file", "")
+        if chosen:
+            break
+        if _no_answer_available():
+            print(f"     → no path given — using recommended "
+                  f"({rec_entry.registry_key})")
+            return rec_entry.registry_key
+        print("     (enter a path to a .gguf file, or Ctrl-C to cancel)")
+    if not Path(chosen).expanduser().exists():
         print(f"     ⚠  {chosen} not found — saving anyway; "
               "resolve it before first use.")
     return chosen
@@ -553,8 +628,14 @@ def run_wizard(
         rec_entry=rec.asleep,
         discovered=discovered,
         by_key=by_key,
-        allow_same_as_awake=(rec.awake.registry_key
-                             != rec.asleep.registry_key),
+        # Gate on what the operator ACTUALLY picked for awake, not on the
+        # tier recommendation. On every tier where the two recommendations
+        # coincide (<=8GB and >=64GB) the old `rec.awake != rec.asleep`
+        # test hid "same as awake" outright — so an operator who picked a
+        # custom or non-recommended awake model could not decline the
+        # second model, and got an unwanted download plus a needless
+        # deep-think swap.
+        allow_same_as_awake=(model_path != rec.asleep.registry_key),
         awake_choice=model_path,
     )
     if (asleep_path == rec.asleep.registry_key
