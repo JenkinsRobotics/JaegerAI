@@ -471,6 +471,12 @@ def status_label(status: "dict[str, Any] | None" = None) -> str:
     return " ".join(parts)
 
 _session_histories: dict[str, list[Any]] = {}
+# Conversation carried across a deliberate agent REBUILD (model swap).
+# A JaegerAgent is constructed around its client (adapter, finalizer,
+# context guard), so swapping the brain must build a new agent — but the
+# conversation is the operator's data, not the client's. Stash it here on
+# teardown; _ensure_session_agent re-seeds the replacement.
+_carried_session_messages: dict[str, list[Any]] = {}
 _session_loaded: set[str] = set()
 _session_state: dict[str, dict[str, Any]] = {}
 
@@ -896,6 +902,8 @@ def evict_session(session_key: str) -> bool:
         had_state = True
     if session_key in _session_loaded:
         _session_loaded.discard(session_key)
+        had_state = True
+    if _carried_session_messages.pop(session_key, None) is not None:
         had_state = True
     return had_state
 
@@ -3044,7 +3052,13 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # digest of this session's pre-restart turns (orientation, not
         # task state — see _previous_session_digest). Seeded as a
         # user/assistant pair so the transcript stays alternating.
-        _resume_digest = _previous_session_digest(key)
+        carried = _carried_session_messages.pop(key, None)
+        if carried:
+            # A rebuild inside this same process (model swap): the real
+            # turns are still in hand, so restore them verbatim. The
+            # lossy digest below is for a COLD start, where they are not.
+            _jaeger_agents_by_session[key].messages.extend(carried)
+        _resume_digest = None if carried else _previous_session_digest(key)
         if _resume_digest:
             _jaeger_agents_by_session[key].messages.extend([
                 {"role": "user", "content": _resume_digest},
@@ -3597,9 +3611,12 @@ def apply_live_character() -> None:
     ``bind_character`` only writes files. A running process keeps its
     cached system prompt AND the in-memory conversation, so the next
     reply still sounds like whoever was talking before — the HUD looks
-    like it swapped and the agent does not. Rebuild every live session
-    agent and drop its turn history; the next message is this character
-    from a clean context. Fail-open: a pick must never crash the HUD.
+    like it swapped and the agent does not. Re-point every live session
+    agent at the rebuilt prompt so the next message is this character —
+    and KEEP the conversation. A character is a prompt layer, not an
+    owner of sessions: the operator is still talking to the same
+    assistant, so a costume change must never cost them their context.
+    Fail-open: a pick must never crash the HUD.
     """
     try:
         layout = _pipeline.get("layout")
@@ -3617,7 +3634,6 @@ def apply_live_character() -> None:
         for key, agent in list(_jaeger_agents_by_session.items()):
             if agent is not None:
                 agent.system_prompt = payload
-            reset_session(key)
     except Exception:  # noqa: BLE001
         pass
 
@@ -3657,7 +3673,14 @@ def apply_live_model() -> bool:
         _pipeline["client"] = new_client
         _pipeline["config"] = cfg
         for key in list(_jaeger_agents_by_session):
+            # The agent is built AROUND its client, so a brain swap has to
+            # rebuild it. Carry the conversation over that rebuild: the
+            # operator picked a new model, not a new conversation.
+            prior = list(getattr(
+                _jaeger_agents_by_session.get(key), "messages", None) or [])
             evict_session(key)
+            if prior:
+                _carried_session_messages[key] = prior
         _pipeline.pop("active_character_sig", None)
         _pipeline["system_prompt"] = build_system_prompt(layout)
         return True
