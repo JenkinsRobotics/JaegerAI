@@ -56,7 +56,15 @@ class Character:
     assets: dict = field(default_factory=dict)   # manifest: role -> relative path
     level: int = 1                               # progression stat; everyone starts at 1
     revision: float = 1.0                        # definition version; bumps on edit (vs level)
+    neutral: bool = False                        # see below — the no-persona default
     root: Path | None = None
+
+    # ``neutral`` marks the sheet that is NOT a character: the ``assistant``
+    # preset, a plain professional AI with no name, backstory, or affect of
+    # its own. It is the one sheet whose name yields to the instance's own
+    # (identity.yaml), because there is no one there to be — see
+    # :func:`persona_display_name`. Every other sheet IS somebody, and that
+    # somebody's name is the agent's name while it is active.
 
     @property
     def name(self) -> str:
@@ -212,6 +220,7 @@ def load_character(folder: Path) -> Character:
         assets=assets,
         level=int(data.get("level", 1) or 1),
         revision=float(data.get("revision", 1.0) or 1.0),
+        neutral=bool(data.get("neutral", False)),
         root=folder,
     )
 
@@ -253,7 +262,14 @@ def layer_items(struct: Any) -> list[tuple[str, float]]:
 _ACTIVE_FILE = "active_character"
 # ponytail: every instance ALWAYS plays a character — there is no "no persona"
 # state. An instance that hasn't picked one plays the default.
-DEFAULT_CHARACTER_ID = "jarvis"
+#
+# That default is the NEUTRAL sheet (2026-08-19). It used to be ``jarvis``,
+# which was invisible while a character's name could never reach the model
+# — and became load-bearing the moment it could: an operator who had never
+# opened the character picker got an agent that introduced itself as
+# Jarvis. A fresh instance is now a plain assistant answering to its own
+# name, and becomes somebody else only when the operator says so.
+DEFAULT_CHARACTER_ID = "assistant"
 
 
 def active_character_id(instance_root: Path) -> str:
@@ -343,6 +359,33 @@ def active_character(instance_root: Path) -> "Character | None":
                 pass
             return character
     return None
+
+
+def persona_display_name(agent_name: str, character: Any) -> str:
+    """The ONE name the agent answers to right now.
+
+    Operator decision, 2026-08-19 — reversing the 2026-07-05 framing that
+    let the instance name override the character's everywhere. That rule
+    produced a two-headed agent: the prompt said "you are Ted, modeled on
+    Clanker, never call yourself Clanker", and the surfaces said "Ted
+    playing Clanker". Asked who it was, the model had two identities to
+    pick from and picked badly. There is now exactly one:
+
+      * a character sheet is SOMEBODY — while it is active, its name IS
+        the agent's name, in the prompt and on every surface;
+      * the ``neutral`` sheet (``assistant``) is nobody in particular, so
+        the instance's own name (identity.yaml) comes through — that is
+        the sheet to pick to be "Ted, a plain assistant".
+
+    ``agent_name`` is identity.yaml's name; ``character`` may be None.
+    Falls back to whichever of the two exists.
+    """
+    agent_name = (agent_name or "").strip()
+    if character is None:
+        return agent_name
+    if getattr(character, "neutral", False):
+        return agent_name or str(getattr(character, "name", "") or "")
+    return str(getattr(character, "name", "") or "") or agent_name
 
 
 def save_character_traits(folder: Path, traits: dict) -> None:

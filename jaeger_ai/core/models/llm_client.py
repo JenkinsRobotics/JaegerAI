@@ -324,6 +324,18 @@ class LlamaCppPythonClient:
         """No-op for in-process — if ``__init__`` returned, we're up."""
         return True
 
+    def unload(self) -> None:
+        """Release the weights (and the Metal memory holding them) NOW.
+
+        In-process weights are GPU memory on Apple Silicon, and this
+        client's own docstring is emphatic that two holders of the Metal
+        device don't coexist. Dropping the last Python reference gets
+        there eventually; a bench that loads a second model, or a switch
+        to a cloud brain that never loads anything else, needs it to
+        happen at a known moment instead."""
+        from jaeger_ai.core.models.vram import release_local_client
+        release_local_client(self)
+
     # ── Internals ─────────────────────────────────────────────────
 
     @staticmethod

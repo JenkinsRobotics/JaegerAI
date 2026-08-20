@@ -75,6 +75,7 @@ def test_serving_model_reports_the_live_client(pipeline):
     pipeline["config"] = _cfg()
     row = model_resolver.serving_model()
     assert row["name"] == "qwen3.5:397b"
+    assert row["model"] == "qwen3.5:397b"
     assert row["provider"] == "ollama-cloud"
     assert row["location"] == "cloud"
     assert row["context_length"] == 262_144
@@ -126,6 +127,21 @@ def test_window_falls_back_to_the_guard_budget(pipeline):
 
 
 # ── the list the agent's list_models() tool reports ────────────────
+
+
+def test_cloud_catalog_omits_local_ollama_rows(pipeline, monkeypatch):
+    """Same model id on Ollama Cloud and local Ollama is how a cloud pick
+    started the on-device daemon. While a hosted brain is selected, local
+    rows stay out of the default catalog."""
+    pipeline["client"] = _client()
+    pipeline["config"] = _cfg()
+    monkeypatch.setattr(
+        "jaeger_ai.core.models.model_discovery.discover_ollama",
+        lambda: {"online": True, "models": [{"name": "qwen3.5:397b"}]},
+    )
+    rows = model_resolver.list_registered_models()
+    assert all(r.get("provider") != "ollama" for r in rows)
+    assert all(r.get("location") != "local" for r in rows)
 
 
 def test_listing_leads_with_the_serving_model(pipeline):

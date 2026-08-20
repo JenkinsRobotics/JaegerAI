@@ -64,7 +64,6 @@ import uuid
 from typing import Any
 
 from ..main import (
-    LlamaCppPythonClient,
     init_extensions,
     prewarm,
     run_for_voice,
@@ -199,10 +198,11 @@ def main() -> int:
     # ``run_for_voice(client, phrase)``. (The daemon-attach path was
     # removed 2026-06-14 with the daemon-arch decision — see comment
     # next to the argparse block above.)
-    print(f"[voice] loading Gemma in-process ({layout.root.name})...",
+    print(f"[voice] loading brain ({layout.root.name})...",
           flush=True)
     started = time.perf_counter()
-    client = LlamaCppPythonClient(config.model, warmup=True)
+    from ..main import make_client
+    client = make_client(config, layout, warmup=True)
     print(f"[voice] loaded in {time.perf_counter() - started:.1f}s",
           flush=True)
 

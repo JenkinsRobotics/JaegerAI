@@ -286,6 +286,32 @@ class DeepThinkConfig(BaseModel):
     )
 
 
+class HeartbeatConfig(BaseModel):
+    """Standing OpenClaw-style wake — independent of the kanban board.
+
+    The idle window (``deep_think.auto_idle_minutes``) covers Deep Think
+    and board pickup. This interval fires even when those are empty, so
+    the agent can still honour HEARTBEAT.md. 0 disables.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        True,
+        json_schema_extra=_setting("autonomy"),
+        description="Wake on a timer and read HEARTBEAT.md even when the board is empty.",
+    )
+    interval_minutes: int = Field(
+        30, ge=0, le=240,
+        json_schema_extra=_setting("autonomy"),
+        description="Minutes between standing heartbeats. 0 = off.",
+    )
+    session: str = Field(
+        "heartbeat",
+        max_length=64,
+        description="Session key synthetic heartbeat turns run under.",
+    )
+
+
 class AutomationConfig(BaseModel):
     """Continuous-execution settings — see
     :mod:`jaeger_ai.core.runtime.execution`.
@@ -474,6 +500,35 @@ class VoiceConfig(BaseModel):
     )
 
 
+class FallbackModel(BaseModel):
+    """One ordered alternative when the primary brain cannot serve."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal[
+        "local", "lmstudio", "ollama", "ollama-cloud",
+        "openai", "anthropic", "gemini", "xai",
+    ]
+    model: str = Field(..., min_length=1, max_length=256)
+    base_url: str = ""
+
+
+class WebhookConfig(BaseModel):
+    """Loopback HTTP triggers that drop a board card or fire a turn."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        True,
+        json_schema_extra=_setting("autonomy"),
+        description="Listen on loopback for POST /hook and POST /github.",
+    )
+    host: str = Field("127.0.0.1", max_length=64)
+    port: int = Field(8791, ge=1, le=65535)
+    secret: str = Field(
+        "",
+        description="Optional bearer/shared secret. Empty = loopback is enough.",
+    )
+
+
 class ExternalModelConfig(BaseModel):
     """Opt-in external-model pipeline. Jaeger is local-first — this is
     OFF by default. When ``enabled``, the agent's brain runs on an
@@ -537,6 +592,12 @@ class ExternalModelConfig(BaseModel):
                     "fine. 0 means 'unknown, fall back to model.ctx'. "
                     "ARES writes this when it syncs a model; it can also "
                     "be set by hand.",
+    )
+    fallback: list[FallbackModel] = Field(
+        default_factory=list,
+        description="Ordered alternatives when the primary cannot serve "
+                    "(connect/auth/missing-key). Timeouts, 429s, and "
+                    "context-length errors do not walk this list.",
     )
 
 
@@ -879,10 +940,12 @@ class Config(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     deep_think: DeepThinkConfig = Field(default_factory=DeepThinkConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     automation: AutomationConfig = Field(default_factory=AutomationConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     avatar: AvatarConfig = Field(default_factory=lambda: AvatarConfig())
     external_model: ExternalModelConfig = Field(default_factory=ExternalModelConfig)
+    webhooks: WebhookConfig = Field(default_factory=WebhookConfig)
     warmup: WarmupConfig = Field(default_factory=WarmupConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)

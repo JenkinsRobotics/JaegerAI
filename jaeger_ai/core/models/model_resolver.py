@@ -537,15 +537,25 @@ def serving_model() -> dict[str, Any] | None:
         except Exception:  # noqa: BLE001
             window = 0
 
+    if kind == "external" and "cloud" in provider:
+        location = "cloud"
+    elif kind == "external":
+        # Local Ollama / LM Studio — on this machine, not a hosted API.
+        location = "local"
+    else:
+        location = "local"
     row: dict[str, Any] = {
         "name": name or "(unnamed)",
+        # ARES (and other hosts) historically read ``model`` off this row
+        # while we published ``name``. Missing ``model`` made a live
+        # cloud lane look like "no model" and the picker fell through to
+        # a local Ollama id with the same spelling.
+        "model": name or "(unnamed)",
         "source": "serving",
         "serving": True,
         "kind": kind,
         "provider": provider,
-        "location": "cloud" if kind == "external" and "cloud" in provider else (
-            "remote" if kind == "external" else "local"
-        ),
+        "location": location,
         "context_length": window or None,
         "status": "serving now — this is the model answering",
         "description": "",
@@ -591,7 +601,37 @@ def serving_model() -> dict[str, Any] | None:
     return row
 
 
-def _provider_model_rows() -> list[dict[str, Any]]:
+_HOSTED_CLOUD_PROVIDERS = frozenset({
+    "ollama-cloud", "openai", "anthropic", "gemini", "xai",
+})
+
+
+def _omit_local_catalog_rows() -> bool:
+    """True when the selected brain is a hosted API.
+
+    Local Ollama / MLX / GGUF rows in the same catalog are how a cloud
+    pick with the same model id starts the on-device daemon. Hide them
+    while a cloud provider is enabled.
+    """
+    try:
+        from jaeger_ai.main import _pipeline
+
+        ext = getattr(_pipeline.get("config"), "external_model", None)
+        if ext is not None and getattr(ext, "enabled", False):
+            provider = str(getattr(ext, "provider", "") or "").strip().lower()
+            if provider in _HOSTED_CLOUD_PROVIDERS:
+                return True
+    except Exception:  # noqa: BLE001
+        pass
+    active = serving_model()
+    return bool(
+        active
+        and str(active.get("provider") or "").strip().lower()
+        in _HOSTED_CLOUD_PROVIDERS
+    )
+
+
+def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
     """Models reachable through a configured provider, with real windows.
 
     The HF registry below only knows GGUF files this machine can
@@ -623,7 +663,7 @@ def _provider_model_rows() -> list[dict[str, Any]]:
             return None
 
     try:
-        local = model_discovery.discover_ollama()
+        local = model_discovery.discover_ollama() if include_local else {}
         if local.get("online"):
             for entry in local.get("models") or []:
                 name = str(entry.get("name") or "")
@@ -746,13 +786,19 @@ def list_registered_models(
         if active is not None:
             out.append(active)
 
+    omit_local = _omit_local_catalog_rows()
     if include_providers:
         serving_name = out[0]["name"] if out else ""
-        for row in _provider_model_rows():
+        for row in _provider_model_rows(include_local=not omit_local):
             # Don't list the serving model twice — mark it and move on.
             if row["name"] == serving_name:
                 continue
             out.append(row)
+
+    if omit_local and include_providers:
+        # ARES picker (providers included): cloud brain → no GGUF/MLX rows.
+        # Registry-only CLI view still lists downloadable files.
+        return out
 
     for key, entry in MODEL_REGISTRY.items():
         cached_path = user_cache_dir() / key / entry["hf_file"]

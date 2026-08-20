@@ -62,19 +62,31 @@ def test_active_character_persona_stays_out_of_worker_prompt(tmp_path) -> None:
     assert "butler" not in sp.lower()
 
 
-def test_identity_name_never_overwritten_by_active_character(
-    tmp_path, monkeypatch,
-) -> None:
-    """Identity vs character (operator decision, 2026-07-05): the AGENT
-    NAME is identity.yaml's — the unique robot named at instance creation.
-    The character supplies personality only and must NEVER claim the name
-    ("a robot like Jarvis, but I will name him Ted"). The old
-    JAEGER_BENCH_NEUTRAL_IDENTITY flag is a no-op: identity.yaml-only is
-    the behaviour everywhere now, flag or not."""
+def test_the_active_character_supplies_the_name(tmp_path, monkeypatch) -> None:
+    """Operator decision, 2026-08-19, reversing 2026-07-05: while a
+    character is selected the agent IS that character, and its name is the
+    only name in the prompt. The old rule kept identity.yaml's name no
+    matter what, so the prompt said "you are Ted" while the persona block
+    said "you are HAL 9000" — and the model, asked who it was, reported
+    the conflict. The old JAEGER_BENCH_NEUTRAL_IDENTITY flag stays a
+    no-op.
+
+    Only the NEUTRAL sheet yields the name back to identity.yaml — see
+    :func:`jaeger_ai.personality.character.persona_display_name` and
+    dev/tests/jaeger_ai/core/test_prompt_identity.py.
+    """
     import jaeger_ai.personality.character as character
+    from jaeger_ai.core.prompt_identity import register_agent_identity
+
+    # This file builds prompts through the DEPENDENCY's assembler directly;
+    # at runtime jaeger_ai.main.build_system_prompt registers JaegerAI's
+    # fragments first. Idempotent, so calling it here just makes the test
+    # independent of whichever module registered earlier in the session.
+    register_agent_identity()
 
     class _Hal:
         name = "HAL 9000"
+        neutral = False
 
     monkeypatch.setattr(character, "active_character", lambda root: _Hal())
     (tmp_path / "identity.yaml").write_text(
@@ -82,12 +94,37 @@ def test_identity_name_never_overwritten_by_active_character(
         encoding="utf-8",
     )
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Your name is Ted." in sp                 # identity.yaml wins
-    assert "Your name is HAL 9000." not in sp        # character never names
+    assert "Your name is HAL 9000." in sp        # the character is the agent
+    assert "Your name is Ted." not in sp         # never both
 
     monkeypatch.setenv("JAEGER_BENCH_NEUTRAL_IDENTITY", "1")
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "Your name is Ted." in sp                 # flag changes nothing
+    assert "Your name is HAL 9000." in sp        # flag changes nothing
+
+
+def test_the_neutral_sheet_leaves_the_instance_name_alone(
+    tmp_path, monkeypatch,
+) -> None:
+    """The other half of the same rule: ``assistant`` is nobody in
+    particular, so identity.yaml comes through — "Ted, a plain
+    assistant" is still expressible, it is just a choice now."""
+    import jaeger_ai.personality.character as character
+    from jaeger_ai.core.prompt_identity import register_agent_identity
+
+    register_agent_identity()
+
+    class _Assistant:
+        name = "Assistant"
+        neutral = True
+
+    monkeypatch.setattr(character, "active_character", lambda root: _Assistant())
+    (tmp_path / "identity.yaml").write_text(
+        "name: Ted\nrole: assistant\npersonality: plain\n",
+        encoding="utf-8",
+    )
+    sp = build_system_prompt(InstanceLayout(root=tmp_path))
+    assert "Your name is Ted." in sp
+    assert "Your name is Assistant." not in sp
 
 
 def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:

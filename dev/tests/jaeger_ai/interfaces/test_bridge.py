@@ -261,7 +261,19 @@ def test_integration_contract_is_versioned_and_self_describing():
     # v8 added the ``character_card`` query (card art over the bridge, so a
     # surface never reads this product's install directory to draw a face).
     # v9 added ``delta`` frames — the turn's text as it generates.
-    assert contract["contract_version"] == 9
+    # v10 added ``identity.display_name`` + ``neutral`` on character rows —
+    # the single-identity projection (2026-08-19).
+    # v11 added attach socket, heartbeat/board queries, fallback_chain,
+    # and inbound webhooks.
+    # v12 added the ``cron`` query — in-flight scheduled jobs for host
+    # sidebars that otherwise treat a mid-run cron session as completed.
+    assert contract["contract_version"] == 12
+    assert "board" in contract["operations"]["queries"]
+    assert "heartbeat" in contract["operations"]["queries"]
+    assert "cron" in contract["operations"]["queries"]
+    assert contract["features"]["cron"]["available"] is True
+    assert "configure_fallback_chain" in contract["operations"]["commands"]
+    assert contract["features"]["fallback_chain"]["available"] is True
     assert contract["protocol_version"] == str(protocol.PROTOCOL_VERSION)
     assert contract["runtime"]["id"] == "jaeger_local"
     assert "contract" in contract["operations"]["queries"]
@@ -524,7 +536,8 @@ def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
-    assert set(result["data"]) == {"agent_name", "character", "icon", "avatar", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "character_id",
+                                   "display_name", "icon", "avatar", "model"}
     assert result["data"]["agent_name"] is None   # no identity.yaml yet
 
 
@@ -892,7 +905,8 @@ def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
     result = next(f for f in frames if f["type"] == "result")
     assert result["id"] == "r1"
     assert result["ok"] is True
-    assert set(result["data"]) == {"agent_name", "character", "icon", "avatar", "model"}
+    assert set(result["data"]) == {"agent_name", "character", "character_id",
+                                   "display_name", "icon", "avatar", "model"}
     assert result["data"]["agent_name"] == "Ted"
     assert rc == 0
 
@@ -1709,3 +1723,22 @@ def test_the_sink_is_gone_once_the_turn_returns(monkeypatch):
     from jaeger_ai.main import stream_delta_listening
     assert captured["during"] is not None
     assert stream_delta_listening() is False
+
+
+def test_cron_query_reports_in_flight_jobs():
+    bridge._mark_cron_running("morning")
+    try:
+        data = bridge._query("cron", {}, object())
+        assert data["running"]["morning"] > 0
+        assert bridge._session_cron_running("cron:morning") is True
+        assert bridge._session_cron_running("cron_morning_20260820_100000") is True
+        assert bridge._session_cron_running("cron_morning_full_20260820_100000") is False
+        stamped = bridge._stamp_cron_running([
+            {"id": "cron:morning"},
+            {"session_id": "chat-1"},
+        ])
+        assert stamped[0]["cron_running"] is True
+        assert stamped[1]["cron_running"] is False
+    finally:
+        bridge._mark_cron_done("morning")
+    assert bridge._query("cron", {}, object())["running"] == {}

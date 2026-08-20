@@ -514,17 +514,25 @@ class JaegerTUI:
         boot error so the slash handler can surface it."""
         import gc
 
-        from jaeger_ai.main import boot_for_tui
+        from jaeger_ai.main import boot_for_tui, unload_local_brain
         from .status import make_session_id
 
         # Release current boot before allocating the new one. On
         # unified-memory Macs we MUST drop the prior llama-cpp client
-        # first or peak RSS doubles for a moment.
+        # first or peak RSS doubles for a moment — and when the new brain
+        # is a CLOUD model, nothing else would ever free the old weights:
+        # there is no second load to force the issue, so a switch to
+        # Ollama Cloud used to leave the local model resident for the rest
+        # of the session. ``unload_local_brain`` closes it explicitly.
         if self._boot is not None:
             try:
                 self._boot.cleanup()
             except Exception:
                 pass
+        try:
+            unload_local_brain(self._client)
+        except Exception:
+            pass
         self._boot = None
         self._client = None
         self._agent = None
@@ -1288,6 +1296,26 @@ class JaegerTUI:
         self._print_auto_step(step, progress, "executing")
         return continuation.continuation_prompt(progress["objective"])
 
+    def _post_turn_completion_check(self) -> str | None:
+        """Background work that finished during the turn, as a new turn.
+
+        Returns the synthetic prompt, or None when nothing is waiting.
+        Announced to the user first: a turn the agent appears to start
+        by itself reads as the TUI talking to itself unless the reason
+        is on screen.
+        """
+        from jaeger_ai.core.runtime.completions import next_completion_turn
+
+        layout = self._boot.layout if self._boot is not None else None
+        prompt = next_completion_turn(layout)
+        if not prompt:
+            return None
+        self.console.print(
+            "[cyan]⇤ background work finished[/] "
+            "[dim]— folding the results into the conversation[/]"
+        )
+        return prompt
+
     def _print_auto_step(self, step: int, progress: dict, phase: str) -> None:
         """Announce a continuation step — header, then breadcrumb. The
         user needs to see that the agent kept going *and* why, or an
@@ -1710,6 +1738,18 @@ class JaegerTUI:
                         try:
                             nxt = self._post_turn_auto_check()
                             nxt_source = "auto" if nxt else nxt_source
+                        except Exception:  # noqa: BLE001
+                            nxt = None
+                    if nxt is None:
+                        # Nothing else claimed the next slot — deliver
+                        # any background work that finished during this
+                        # turn. THIS is the safe moment: a completion
+                        # spliced mid-turn would sit between an
+                        # assistant message and its tool results, which
+                        # breaks role alternation and the prompt prefix.
+                        try:
+                            nxt = self._post_turn_completion_check()
+                            nxt_source = "completion" if nxt else nxt_source
                         except Exception:  # noqa: BLE001
                             nxt = None
             except Exception as exc:  # noqa: BLE001

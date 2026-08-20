@@ -43,6 +43,90 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("JAEGER_NO_GUI", "1")
 
 
+# ── live-instance isolation guard ──────────────────────────────────
+#
+# Tests resolve instance directories through ``core/instance/instance.py``,
+# whose root is ``<install_root>/.jaeger_ai/instances/`` — and in a dev
+# checkout ``install_root`` IS this repository, so the real running
+# instance sits inside the tree the suite executes against. Tests that
+# isolate themselves do it by setting ``JAEGER_HOME`` to a tmp_path, but
+# that is a per-test convention, not something enforced anywhere: one
+# test that forgets writes straight into live config, memory or logs.
+#
+# Forcing ``JAEGER_INSTANCE_DIR`` here was tried and is wrong — it
+# outranks ``JAEGER_HOME`` in the resolver, so it breaks the wizard tests
+# that assert an instance directory is NAMED from the character or CLI
+# pin. Instead of overriding resolution, this watches the two real roots
+# and fails the run if the suite modified either.
+#
+# The roots are computed the way the resolver computes them with no env
+# override, so a test that sets ``JAEGER_HOME`` cannot move the target.
+def _real_operator_state_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    try:
+        import jaeger_ai
+        package_root = Path(jaeger_ai.__file__).resolve().parent
+        roots.append(package_root.parent / ".jaeger_ai")
+    except Exception:  # noqa: BLE001 — the guard must never break collection
+        pass
+    roots.append(Path.home() / ".jaeger")   # pre-0.2.6 location, still on disk
+    return tuple(roots)
+
+
+_LIVE_ROOTS = _real_operator_state_roots()
+_live_fingerprint_at_start: dict[str, tuple[int, int]] | None = None
+
+
+def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
+    """``{path: (size, mtime_ns)}`` across the live roots.
+
+    stat only, never hashing — these trees hold real memory databases and
+    this runs on every session.
+    """
+    out: dict[str, tuple[int, int]] = {}
+    for root in _LIVE_ROOTS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            try:
+                if path.is_file():
+                    st = path.stat()
+                    out[str(path)] = (st.st_size, st.st_mtime_ns)
+            except OSError:  # racing with the running app is not our failure
+                continue
+    return out
+
+
+def pytest_sessionstart(session: "pytest.Session") -> None:  # noqa: ARG001
+    global _live_fingerprint_at_start
+    _live_fingerprint_at_start = _fingerprint_live_roots()
+
+
+def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  # noqa: ARG001
+    """Fail the run if the suite wrote to a live instance tree."""
+    before = _live_fingerprint_at_start
+    if before is None:
+        return
+    after = _fingerprint_live_roots()
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    changed = sorted(k for k in set(before) & set(after) if before[k] != after[k])
+    if not (added or removed or changed):
+        return
+    report = ["", "=" * 70,
+              "TEST ISOLATION FAILURE: the suite modified a LIVE instance tree.",
+              "Tests must write only to tmp_path (set JAEGER_HOME to it).", ""]
+    for label, names in (("added", added), ("removed", removed),
+                         ("modified", changed)):
+        for name in names[:10]:
+            report.append(f"  {label}: {name}")
+        if len(names) > 10:
+            report.append(f"  ... and {len(names) - 10} more {label}")
+    report.append("=" * 70)
+    print("\n".join(report))
+    session.exitstatus = 1
+
+
 # Path-based marker rules. Order matters — first match wins.
 _PATH_MARKERS: list[tuple[str, tuple[str, ...]]] = [
     ("/jaeger_ai/daemon/test_lifecycle_e2e",  ("subprocess", "slow")),
@@ -111,6 +195,29 @@ def _reset_agent_status() -> None:
     except Exception:  # noqa: BLE001 — agent_status is optional during partial migrations
         return
     set_agent_status("ready", "")
+
+
+@_pytest.fixture(autouse=True)
+def _reset_pipeline_config() -> None:
+    """Drop ``_pipeline["config"]`` before each test.
+
+    Same process-global hazard as ``agent_status`` above, but with a
+    wider blast radius: a test that installs a config and doesn't remove
+    it changes what LATER tests read out of the shared pipeline. Two
+    real leaks this closes — the TUI's ``_configured_busy_mode()`` read
+    a previous test's ``display.busy_input_mode`` ("steer") instead of
+    the documented "interrupt" default, and bridge turn telemetry picked
+    up a stale ``ctx_max``. Both passed in isolation and only failed in
+    a full run, which is the signature of shared-state bleed.
+
+    Clearing BEFORE (not restoring after) mirrors ``_reset_agent_status``:
+    whatever a test sets for itself still applies for that test.
+    """
+    try:
+        from jaeger_ai.main import _pipeline
+    except Exception:  # noqa: BLE001
+        return
+    _pipeline.pop("config", None)
 
 
 @_pytest.fixture(scope="session")

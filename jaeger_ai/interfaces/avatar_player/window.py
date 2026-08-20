@@ -126,18 +126,22 @@ def make_surface(ctx: Any, spec: Any = None) -> FloatingAvatarPlayer:  # noqa: A
 # ── framed standalone avatar window (Chat-window chrome) ───────────────
 
 def agent_name(ctx: Any) -> str:
-    """Display name = the agent's NAME from identity.yaml (the unique instance
-    the operator named), NEVER the active character. A character is only the
-    persona being played — its name is a secondary reference, not the agent's
-    identity ("name your robot Ted, it plays HAL" — operator 2026-07-05; see
-    ``assemble._identity_name``). Falls back to the active character's name
-    only if identity has none, then the core/instance name, then a default."""
-    name = _identity_display_name(ctx)
-    if name:
-        return name
-    c = resolve_character(ctx)
-    if c is not None:
-        return c.name
+    """The one name this agent answers to right now.
+
+    A selected character IS the agent (2026-08-19): its name is what
+    every surface shows. Only the neutral ``assistant`` sheet yields, and
+    then identity.yaml's name comes through. Falls back to the core /
+    instance name, then a default."""
+    try:
+        from jaeger_ai.personality.character import persona_display_name
+        name = persona_display_name(_identity_display_name(ctx),
+                                    resolve_character(ctx))
+        if name:
+            return name
+    except Exception:  # noqa: BLE001 — a broken character never blanks a title
+        ident = _identity_display_name(ctx)
+        if ident:
+            return ident
     return (getattr(getattr(ctx, "core", None), "agent_name", None)
             or getattr(ctx, "agent_name", None) or "agent")
 
@@ -168,7 +172,7 @@ def resolve_character(ctx: Any) -> Any:
         root = getattr(getattr(ctx, "layout", None), "root", None)
         if root is None:
             # No layout on ctx → use the process's current instance dir, so we
-            # still resolve the ACTIVE character (not the jarvis default).
+            # still resolve the ACTIVE character (not the library default).
             try:
                 from jaeger_ai.core.instance.instance import resolve_instance_dir
                 root = resolve_instance_dir()

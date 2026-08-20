@@ -1251,26 +1251,60 @@ def _register_builtins(client: Any) -> None:
 
 
     @register_tool_from_function
-    def delegate_task(subtasks: list[str]) -> dict:
-        """Hand focused subtasks to fresh sub-agents. Pass a list: one
-        item runs a single sub-agent; 2+ items fan out across up to 2
-        concurrent sub-agents. Each sub-agent runs in its own context
-        (no parent history) but shares the instance's memory and tools.
-        Sub-agents share the one loaded model, so their LLM turns
-        serialize — the benefit is clean fan-out/collect, not raw speed.
-        Depth-limited. For sustained background work, prefer Deep Think
-        (/deepthink) over delegation."""
-        clean = [s for s in (subtasks or []) if s and s.strip()]
+    def delegate_task(
+        subtasks: list[str] | None = None,
+        background: bool = False,
+        goal: str | None = None,
+        tasks: list | None = None,
+        role: str = "leaf",
+        context: str | None = None,
+    ) -> dict:
+        """Hand focused subtasks to fresh sub-agents. Hermes-compatible.
+
+        Two shapes (either works):
+          * ``goal`` — one worker (optional ``context``).
+          * ``subtasks`` / ``tasks`` — a list; 2+ items fan out
+            concurrently, as wide as the current brain supports.
+
+        Each child runs in its own context (no parent history) but
+        shares the instance's memory. On an in-process local model
+        their turns serialize; on a server or cloud brain they
+        genuinely run in parallel.
+
+        ``role="leaf"`` (default) — focused worker; cannot spawn
+        further sub-agents. ``role="orchestrator"`` — may call
+        ``delegate_task`` itself, bounded by spawn depth.
+
+        ``background=True`` returns IMMEDIATELY with a handle. The
+        result arrives as a notice on a later turn (the completion
+        rail). Keep the default (wait) when you need the answer to
+        continue.
+
+        For sustained background work, prefer the kanban board /
+        Deep Think over a wide fan-out."""
+        from jaeger_ai.core.runtime.delegation import collect_goals, normalize_role
+        clean = collect_goals(
+            subtasks=subtasks, goal=goal, tasks=tasks, context=context,
+        )
         if not clean:
             return {"delegated": False, "error": "no subtasks given"}
+        role_name = normalize_role(role)
+        _delegate_role.value = role_name
+        if background:
+            return _delegate_background(client, clean, role=role_name)
         if len(clean) == 1:
             return _delegate_internal(client, clean[0])
-        return _delegate_parallel(client, clean)
+        return _delegate_parallel(client, clean, role=role_name)
 
     # send_message + certify_admin now live in tools/messaging.py — importing
     # it registers them (they reach runtime state via core.context accessors,
     # not a client closure, so they belong in tools/ like every other tool).
     from jaeger_agent.tools import messaging as _messaging  # noqa: F401
+
+    # execute_with_tools — one script, many tool calls, one inference
+    # turn. Same import-registers pattern. See
+    # :mod:`jaeger_ai.core.runtime.code_bridge`.
+    from jaeger_ai.core.runtime import code_bridge_tool as _code_bridge  # noqa: F401
 
     # send_email — same pattern: importing tools/email.py registers it.
     # 0.9.3 Task 2: the operator's field brief ("make/send email") — Mail.app
@@ -1355,6 +1389,7 @@ def _register_builtins(client: Any) -> None:
 # ---------------------------------------------------------------------------
 _DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
 _delegate_depth = threading.local()
+_delegate_role = threading.local()
 
 
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
@@ -1364,7 +1399,17 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     counter, runs the subtask, returns the answer + elapsed time.
     Depth-limited to prevent runaway recursion if a sub-agent decides
     to delegate again.
+
+    Role travels on ``_delegate_role`` (not a kwarg) so tests that
+    monkeypatch this function with ``(client, task)`` keep working.
+    ``leaf`` (Hermes default) seeds the child's depth at the cap so a
+    nested ``delegate_task`` refuses immediately. ``orchestrator`` uses
+    the normal +1 increment, bounded by ``_DELEGATE_MAX_DEPTH``.
     """
+    from jaeger_ai.core.runtime.delegation import (
+        ORCHESTRATOR, leaf_child_depth, normalize_role,
+    )
+
     depth = getattr(_delegate_depth, "value", 0)
     if depth >= _DELEGATE_MAX_DEPTH:
         return {
@@ -1376,7 +1421,11 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     if not clean:
         return {"delegated": False, "error": "empty subtask"}
 
-    _delegate_depth.value = depth + 1
+    role_name = normalize_role(getattr(_delegate_role, "value", None))
+    _delegate_depth.value = (
+        depth + 1 if role_name == ORCHESTRATOR
+        else leaf_child_depth(_DELEGATE_MAX_DEPTH)
+    )
     started = time.perf_counter()
     try:
         # Phase-6.2 cutover: delegate now drives the new JaegerAgent
@@ -1423,28 +1472,118 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     }
 
 
-# Hard cap on concurrent subagents. The robot is memory-bound — all
-# subagents share the ONE loaded Gemma model (no second model load),
-# and llama-cpp serializes decode, so 2 is the practical ceiling.
-# For sustained background work prefer Deep Think (sequential queue +
-# model swap) over fanning out parallel subagents.
-_MAX_PARALLEL_SUBAGENTS = 2
+# Concurrent-subagent cap, ASKED of the brain rather than assumed.
+#
+# This used to be the constant 2, justified by llama-cpp serializing
+# decode — true of an in-process model, false of every server brain. A
+# cloud endpoint takes eight concurrent requests without noticing, and
+# hardcoding the local number meant swapping to a cloud brain kept the
+# local brain's ceiling. See
+# :mod:`jaeger_ai.core.models.brain_profile`: in-process stays at 1
+# (a second caller only queues behind the decode lock), a local server
+# gets 3, a hosted endpoint 8, and ``JAEGER_BRAIN_CONCURRENCY``
+# overrides all of it.
+#
+# For sustained background work Deep Think is still the better
+# mechanism than a wide fan-out, on any brain.
+def _max_parallel_subagents() -> int:
+    from jaeger_ai.core.models.brain_profile import active_profile
+
+    return max(1, active_profile().max_subagents)
 
 
-def _delegate_parallel(client: Any, subtasks: list[str]) -> dict[str, Any]:
-    """Fan a small set of subtasks out across up to
-    :data:`_MAX_PARALLEL_SUBAGENTS` worker threads.
+def _delegate_background(client: Any, subtasks: list[str], *, role: str = "leaf") -> dict[str, Any]:
+    """Dispatch subtasks and return NOW; results arrive on a later turn.
 
-    All subagents share the one loaded Gemma model. llama-cpp can't
-    decode two prompts at once, so each subagent's model access
-    serializes through ``_pipeline['llm_lock']`` — the win here is
-    orchestration (queue N, collect all answers) plus overlap on
-    non-LLM tool work, NOT raw decode speedup. For sustained
-    background work, Deep Think is the better mechanism.
+    The parent's turn does not wait. Each subtask runs on a daemon
+    thread and pushes its result onto the completion rail
+    (:mod:`jaeger_ai.core.runtime.completions`), which the turn worker
+    drains between turns — never mid-turn, because a completion spliced
+    between an assistant message and its tool results breaks role
+    alternation and invalidates the prompt prefix.
 
-    More than the cap of subtasks is allowed — the thread pool runs
-    the cap at a time and queues the rest. Returns one result entry
-    per subtask, in input order."""
+    Daemon threads on purpose: background delegation is best-effort
+    detached work, so a long child must never hold the process open at
+    shutdown. A child still running when Jaeger exits is dropped, which
+    is the right trade for work nobody is waiting on.
+
+    Returns the handles immediately — the model is told the work is
+    running, not what it produced.
+    """
+    import uuid
+
+    clean = [s.strip() for s in (subtasks or []) if s and s.strip()]
+    if not clean:
+        return {"ok": False, "error": "no subtasks given"}
+
+    parent_depth = getattr(_delegate_depth, "value", 0)
+    if parent_depth >= _DELEGATE_MAX_DEPTH:
+        return {
+            "ok": False,
+            "error": f"delegate recursion limit hit ({_DELEGATE_MAX_DEPTH})",
+        }
+
+    from jaeger_ai.core.runtime.completions import record_delegation
+
+    handles: list[dict[str, str]] = []
+    for task in clean:
+        delegation_id = uuid.uuid4().hex[:8]
+        dispatched_at = time.time()
+
+        def _run(task: str = task, delegation_id: str = delegation_id,
+                 dispatched_at: float = dispatched_at) -> None:
+            _delegate_depth.value = parent_depth + 1
+            _delegate_role.value = role
+            try:
+                result = _delegate_internal(client, task)
+            except Exception as exc:  # noqa: BLE001 — a crash still reports
+                result = {
+                    "delegated": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            finally:
+                _delegate_depth.value = parent_depth
+            record_delegation(
+                task=task, result=result,
+                delegation_id=delegation_id, dispatched_at=dispatched_at,
+            )
+
+        threading.Thread(
+            target=_run, name=f"subagent-bg-{delegation_id}", daemon=True,
+        ).start()
+        handles.append({"id": delegation_id, "task": task})
+
+    return {
+        "ok": True,
+        "background": True,
+        "dispatched": len(handles),
+        "handles": handles,
+        "note": (
+            "Running in the background — results arrive on a later turn. "
+            "Carry on with what the user asked; do not wait for these."
+        ),
+    }
+
+
+def _delegate_parallel(client: Any, subtasks: list[str], *, role: str = "leaf") -> dict[str, Any]:
+    """Fan subtasks out across as many workers as the BRAIN supports.
+
+    Width comes from :func:`_max_parallel_subagents`, which asks the
+    live client (see :mod:`jaeger_ai.core.models.brain_profile`) instead
+    of assuming the local one:
+
+      * an in-process llama.cpp / MLX model runs ONE at a time — it
+        cannot decode two prompts at once, so subagents serialize
+        through ``_pipeline['llm_lock']`` and the win is orchestration
+        (queue N, collect all answers) plus overlap on non-LLM tool
+        work, never decode speedup;
+      * a server brain — LM Studio, Ollama, any hosted endpoint —
+        interleaves requests properly, so the fan-out is a real
+        wall-clock win and the width rises to match.
+
+    More subtasks than the width is fine: the pool runs that many at a
+    time and queues the rest. Returns one result entry per subtask, in
+    input order, plus the width actually used."""
     from concurrent.futures import ThreadPoolExecutor
 
     clean = [s.strip() for s in (subtasks or []) if s and s.strip()]
@@ -1463,14 +1602,18 @@ def _delegate_parallel(client: Any, subtasks: list[str]) -> dict[str, Any]:
         # thread-local, so seed it here to keep nested delegation
         # bounded.
         _delegate_depth.value = parent_depth + 1
+        _delegate_role.value = role
         try:
             return _delegate_internal(client, task)
         finally:
             _delegate_depth.value = parent_depth
 
+    # The brain in front of us decides the width, not a constant.
+    concurrency = min(_max_parallel_subagents(), len(clean))
+
     started = time.perf_counter()
     with ThreadPoolExecutor(
-        max_workers=_MAX_PARALLEL_SUBAGENTS,
+        max_workers=concurrency,
         thread_name_prefix="subagent",
     ) as pool:
         results = list(pool.map(_worker, clean))
@@ -1480,7 +1623,7 @@ def _delegate_parallel(client: Any, subtasks: list[str]) -> dict[str, Any]:
     return {
         "ok": True,
         "subtask_count": len(clean),
-        "max_concurrent": _MAX_PARALLEL_SUBAGENTS,
+        "max_concurrent": concurrency,
         "succeeded": succeeded,
         "failed": len(clean) - succeeded,
         "results": results,
@@ -2341,7 +2484,12 @@ _jaeger_agents_by_session: dict[str, Any] = {}
 def _persona_agent_name(layout: Any) -> str:
     """The instance's OWN name (identity.yaml), independent of whichever
     character is active. Best-effort: an unreadable identity file yields
-    ``""`` (the framing that follows just gets skipped, never a crash)."""
+    ``""`` (the framing that follows just gets skipped, never a crash).
+
+    This is the raw instance name, not necessarily the name the agent
+    ANSWERS to this turn — a selected character supplies that. Use
+    :func:`_persona_display_name` for anything the model or the operator
+    sees."""
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
         return (load_yaml(layout.identity_path, Identity).name or "").strip()
@@ -2349,35 +2497,63 @@ def _persona_agent_name(layout: Any) -> str:
         return ""
 
 
+def _persona_display_name(layout: Any, character: Any) -> str:
+    """The one name the agent answers to right now — the character's while
+    a character is selected, the instance's own while the neutral
+    ``assistant`` sheet is. See
+    :func:`jaeger_ai.personality.character.persona_display_name`."""
+    from jaeger_ai.personality.character import persona_display_name
+    return persona_display_name(_persona_agent_name(layout), character)
+
+
 def _persona_identity_block(agent_name: str, character: Any) -> str:
-    """Identity vs character framing (operator decision, 2026-07-05; hardened
-    2026-07-19): the character supplies the PERSONA, never the agent's name —
-    the name is identity.yaml's, set at instance creation ("a robot like
-    Jarvis, but I will name him Ted"). The old approach kept the character's
-    name in the block and ADDED a "but your name is Ted" framing line; small
-    models followed the persona's own "You are JARVIS" anyway. Now the model
-    never sees the character's name at all: every occurrence in the live
-    block is substituted with the agent's name before the prompt is built.
-    Shared by Station 3's output filter and the Mode-C persona lane so every
-    voice in the system introduces itself the same way."""
+    """The persona system text: ONE identity, never two.
+
+    Operator decision, 2026-08-19, replacing the 2026-07-05 framing (see
+    :func:`jaeger_ai.personality.character.persona_display_name` for the
+    full rationale). The old block prepended "Your name is Ted — the only
+    name you ever use — your personality is modeled on Clanker, never
+    introduce yourself as Clanker" and scrubbed every "Clanker" out of the
+    sheet. Two names in one prompt is one too many: asked who it was, the
+    model reported the conflict instead of answering ("I'm Jarvis, playing
+    Clanker").
+
+    So the block is now the character sheet, and nothing else:
+
+      * a real character → its own sheet VERBATIM. It says "You are
+        Clanker" because that is true while Clanker is selected.
+      * the ``neutral`` sheet (``assistant``) → the same sheet with the
+        placeholder name swapped for the instance's own, so a plain
+        assistant introduces itself as Ted rather than as "Assistant".
+        Nothing is added: the sheet is already written name-free.
+
+    Shared by Station 3's output filter and the Mode-C persona lane so
+    every voice in the system introduces itself the same way.
+    """
     import re as _re
     block = character.character_block()
+    if not getattr(character, "neutral", False):
+        return block
+    # Neutral sheet: it is a template, not a person. Bind the header (and
+    # the "You are X." fallback line) to whoever this instance actually is.
     if agent_name and agent_name.lower() != character.name.lower():
-        # Scrub first-person bindings ("You are JARVIS" → "You are Ted"),
-        # then reference the character in THIRD person: the model may know
-        # a famous character (Jarvis, Anakin) and should draw on that
-        # knowledge — inspiration, never identity.
         block = _re.sub(rf"\b{_re.escape(character.name)}\b", agent_name,
                         block, flags=_re.IGNORECASE)
-        role = getattr(character, "role", "") or ""
-        source = f"{character.name} ({role})" if role else character.name
-        block = (
-            f"Your name is {agent_name} — the only name you ever use for "
-            f"yourself. Your personality is modeled on {source}: draw on "
-            f"that character's manner and outlook, but you are "
-            f"{agent_name}, not them — never introduce or refer to "
-            f"yourself as {character.name}.\n\n" + block
-        )
+    return block
+
+
+def _persona_system_block(agent_name: str, character: Any) -> str:
+    """Character voice PLUS the live serving-model facts.
+
+    Mode C talks to the operator from this block, not from the worker
+    system prompt. Without the runtime facts here, "what model are you"
+    is answered from training data (qwen3.5:397b, "I'm local") while
+    gemma4:31b on Ollama Cloud is actually serving.
+    """
+    block = _persona_identity_block(agent_name, character)
+    runtime = _runtime_identity_block()
+    if runtime:
+        return f"{block}\n\n{runtime}"
     return block
 
 
@@ -2551,7 +2727,7 @@ def _run_persona_lane_turn(
         layout = _pipeline.get("layout")
         if layout is None:
             return None, None
-        block = _persona_identity_block(_persona_agent_name(layout), character)
+        block = _persona_system_block(_persona_agent_name(layout), character)
 
         inner_box: list[dict[str, Any]] = []
 
@@ -2574,7 +2750,8 @@ def _run_persona_lane_turn(
         history = list(jaeger_agent.messages)
         persona_text = run_persona_turn(
             client, user_text,
-            character_block=block, agent_name=_persona_agent_name(layout),
+            character_block=block,
+            agent_name=_persona_display_name(layout, character),
             history=history, perform_task=perform_task,
         )
         inner_result = inner_box[0] if inner_box else None
@@ -2838,26 +3015,16 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # in config.yaml. ``None`` lets ``build_jaeger_agent`` pick a
         # backend-appropriate default (120s for in-process, 30s for HTTP).
         _stall_s = getattr(getattr(_cfg, "model", None), "stall_timeout_s", None)
-        # Deep Think sessions get LLM-written compaction digests — the
-        # work loop runs in the background, so the extra model call per
-        # compaction is free there. Voice / chat sessions keep the
-        # deterministic digest (zero added latency).
-        _summarizer = None
-        if key.startswith("deepthink"):
-            def _summarizer(prompt_text: str) -> str:
-                out = client.chat(
-                    [
-                        {"role": "system", "content": (
-                            "You compress agent conversation history "
-                            "into a dense factual digest. Output ONLY "
-                            "the digest."
-                        )},
-                        {"role": "user", "content": prompt_text},
-                    ],
-                    max_tokens=400,
-                    temperature=0.2,
-                )
-                return str(out or "")
+        # Who writes the compaction digest — see
+        # :mod:`jaeger_ai.core.runtime.compaction`. Background sessions
+        # always get the LLM-written one (nobody is waiting); an
+        # interactive session gets it too when the brain doesn't
+        # serialize decode, because there the call overlaps other work
+        # instead of holding the only decode lane. Otherwise the
+        # deterministic digest stands, at zero added latency.
+        from jaeger_ai.core.runtime.compaction import summarizer_for
+
+        _summarizer = summarizer_for(client, key)
         # Session system prompt = base prompt + runtime identity + frozen
         # facts snapshot — see :func:`compose_session_prompt`.
         _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
@@ -3029,6 +3196,7 @@ def _run_turn_via_jaeger_agent(
     user_text: str,
     *,
     session_key: str,
+    allow_persona: bool = True,
 ) -> dict[str, Any]:
     """Phase-6 parallel implementation of :func:`_run_turn` that drives
     the loop through :class:`JaegerAgent`. Returns the exact same dict
@@ -3070,7 +3238,11 @@ def _run_turn_via_jaeger_agent(
         # context llm_lock exists to serialize. No aux lane this turn →
         # skip Mode C entirely and fall through to the locked persona_last
         # path.
-        if _persona_mode() == "persona_first" and _persona_lane_aux_available(client):
+        if (
+            allow_persona
+            and _persona_mode() == "persona_first"
+            and _persona_lane_aux_available(client)
+        ):
             from jaeger_ai.personality.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
@@ -3222,7 +3394,8 @@ def _run_turn_via_jaeger_agent(
     }
 
 
-def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any]:
+def _run_turn(client: Any, user_text: str, *, session_key: str,
+              allow_persona: bool = True) -> dict[str, Any]:
     """The unified agent turn — the one path every entry point shares.
 
     Runs the loop, extracts the answer + tool activity, writes the log,
@@ -3230,10 +3403,18 @@ def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any
     ``run_command`` and ``run_for_voice`` are thin output adapters over
     this — see them below. Never prints; never raises.
 
+    ``allow_persona=False`` skips the id/ego front door and drives the
+    clean worker loop directly — heartbeat, idle board pickup, and
+    cron *execution* use that so character lore does not leak into
+    tool work.
+
     JaegerAgent is the unconditional loop implementation; JaegerAI supplies
     product prompts, tools, memory, personality, and user-facing policy through
     its runtime adapter."""
-    return _run_turn_via_jaeger_agent(client, user_text, session_key=session_key)
+    return _run_turn_via_jaeger_agent(
+        client, user_text, session_key=session_key,
+        allow_persona=allow_persona,
+    )
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
@@ -3259,6 +3440,22 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         if out["skipped_final"]:
             print("  (final-LLM skipped — tool result returned directly)")
     return out["text"] or ""
+
+
+def run_worker_turn(
+    client: Any,
+    user_text: str,
+    session_key: str | None = None,
+) -> str:
+    """Persona-off turn for standing work (heartbeat, idle board, cron
+    execution). Same tools and permissions as a live turn; no character
+    lane. Returns the answer text ("" on error)."""
+    out = _run_turn(
+        client, user_text,
+        session_key=session_key or "worker",
+        allow_persona=False,
+    )
+    return out.get("text") or ""
 
 
 def _tag_confirm_session(session: str) -> None:
@@ -3314,13 +3511,18 @@ def build_system_prompt(layout: Any) -> str:
 
     The assembler lives in jaeger-agent and exposes an ordered fragment
     registry; JaegerAI contributes the two instance context documents
-    (SOUL.md / AGENTS.md) to it. Registration is idempotent and cheap
-    after the first call, so every assembly path goes through here rather
-    than each one remembering to register first — a path that forgot
-    would silently build a prompt with no identity in it.
+    (SOUL.md / AGENTS.md) to it, and re-points the ``identity_name``
+    fragment at the active character (jaeger_ai.core.prompt_identity —
+    the character IS the identity while it is selected). Registration is
+    idempotent and cheap after the first call, so every assembly path
+    goes through here rather than each one remembering to register first
+    — a path that forgot would silently build a prompt with no identity
+    in it, or with the wrong one.
     """
     from jaeger_ai.core.prompt_documents import register_context_documents
+    from jaeger_ai.core.prompt_identity import register_agent_identity
     register_context_documents()
+    register_agent_identity()
     return prompt_module.build_system_prompt(layout)
 
 
@@ -3332,7 +3534,11 @@ def compose_session_prompt(base_prompt: str) -> str:
          (``jaeger_agent.prompts.assemble``),
       2. the runtime identity block — which model is actually answering
          and how big its window is,
-      3. the frozen facts snapshot.
+      3. the batching guidance, when this brain benefits from it (see
+         :mod:`jaeger_ai.core.runtime.batching` — empty on a lane where
+         parallel dispatch buys little and added instructions have
+         historically cost points),
+      4. the frozen facts snapshot.
 
     The session stream (user turns, tool results, history) follows this
     payload as messages; it is never spliced into it.
@@ -3349,8 +3555,11 @@ def compose_session_prompt(base_prompt: str) -> str:
     when the persona changes — reassigned the BASE prompt alone and
     silently dropped tiers 2 and 3 for the rest of the session.
     """
+    from jaeger_ai.core.runtime.batching import batch_guidance_block
+
     parts = [(base_prompt or "").strip()]
-    for block in (_runtime_identity_block(), _facts_snapshot_block()):
+    for block in (_runtime_identity_block(), batch_guidance_block(),
+                  _facts_snapshot_block()):
         if block:
             parts.append(block)
     return "\n\n".join(part for part in parts if part)
@@ -3380,6 +3589,86 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
                 _pipeline["system_prompt"])
     except Exception:  # noqa: BLE001
         pass
+
+
+def apply_live_character() -> None:
+    """Make the character now on disk the one that actually answers.
+
+    ``bind_character`` only writes files. A running process keeps its
+    cached system prompt AND the in-memory conversation, so the next
+    reply still sounds like whoever was talking before — the HUD looks
+    like it swapped and the agent does not. Rebuild every live session
+    agent and drop its turn history; the next message is this character
+    from a clean context. Fail-open: a pick must never crash the HUD.
+    """
+    try:
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return
+        from jaeger_ai.core.instance.instance import context_document_signature
+        from jaeger_ai.personality.character import active_character_signature
+
+        _pipeline["system_prompt"] = build_system_prompt(layout)
+        payload = compose_session_prompt(_pipeline["system_prompt"])
+        _pipeline["active_character_sig"] = (
+            f"{active_character_signature(layout.root)}:"
+            f"{context_document_signature(layout.root)}"
+        )
+        for key, agent in list(_jaeger_agents_by_session.items()):
+            if agent is not None:
+                agent.system_prompt = payload
+            reset_session(key)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def apply_live_model() -> bool:
+    """Hot-swap the live brain to whatever config.yaml now selects.
+
+    ``configure_model`` only writes the file. ARES then resets its own
+    client cache and re-attaches to THIS process — which still has the
+    previous client (often a 15 GB local MLX/GGUF) resident. The picker
+    shows the cloud model; the GPU still holds the local one; the next
+    turn is answered by whoever booted, not whoever was picked.
+
+    Unload any local weights FIRST, then build the new client, then
+    drop every in-memory session agent so the next turn binds the new
+    brain. Returns False if a turn is in flight or construction fails
+    (config is already persisted; the next restart will honour it).
+    """
+    layout = _pipeline.get("layout")
+    if layout is None:
+        return False
+    lock = _pipeline.get("llm_lock")
+    acquired = False
+    try:
+        if lock is not None:
+            acquired = lock.acquire(blocking=False)
+            if not acquired:
+                return False
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+        cfg = load_yaml(layout.config_path, Config)
+        # Drop the old brain before allocating the new one. On unified
+        # memory a local model that stays resident while a cloud client
+        # is "selected" is exactly the leak this exists to close.
+        unload_local_brain()
+        new_client = make_client(cfg, layout, warmup=True)
+        _pipeline["client"] = new_client
+        _pipeline["config"] = cfg
+        for key in list(_jaeger_agents_by_session):
+            evict_session(key)
+        _pipeline.pop("active_character_sig", None)
+        _pipeline["system_prompt"] = build_system_prompt(layout)
+        return True
+    except Exception:  # noqa: BLE001 — config already written; don't crash the HUD
+        return False
+    finally:
+        if acquired and lock is not None:
+            try:
+                lock.release()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def run_for_voice(
@@ -3618,6 +3907,22 @@ class LlamaCppPythonClient:
     def describe(self) -> str:
         return f"local · llama-cpp · {getattr(self, 'model_name', '?')}"
 
+    def unload(self) -> None:
+        """Release the weights (and the Metal memory they occupy) NOW.
+
+        The brain client is the big allocation — 5-17 GB of unified
+        memory that IS VRAM on Apple Silicon. Every path that stops using
+        it (model swap, switch to a cloud brain, instance teardown) calls
+        this rather than trusting the collector: when the next brain is
+        an HTTP endpoint there is no second load to force the issue, so
+        "eventually" turned into "for the rest of the session".
+
+        Closes the aux lane (:mod:`~jaeger_ai.core.models.aux_lane`)
+        first — it holds a second ``llama_context`` on these same
+        weights. Safe to call twice."""
+        from jaeger_ai.core.models.vram import release_local_client
+        release_local_client(self)
+
     def __init__(self, model_cfg: Any, warmup: bool = True) -> None:
         from llama_cpp import Llama
 
@@ -3758,31 +4063,37 @@ class LlamaCppPythonClient:
 def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
     """Build the agent's brain client for ``config``.
 
-    Local-first: returns a :class:`LlamaCppPythonClient` unless
-    ``config.external_model.enabled`` is set, in which case the agent
-    runs on the configured external provider (LM Studio / OpenAI /
-    Anthropic). If the external client can't be built or reached, this
-    prints a warning and falls back to the local model — the robot is
-    never left without a brain because a cloud endpoint is down."""
+    If ``external_model.enabled`` is set, that provider is the ONLY brain
+    this process may load. A selection that cannot serve raises
+    :class:`ExternalModelSelectionError`. There is no degrade-to-local,
+    no fallback chain, and ``JAEGER_ALLOW_LOCAL_FALLBACK`` is ignored:
+    those paths allocated 15 GB of on-device weights while the picker
+    still named a cloud model.
+
+    Local GGUF/MLX is used only when the operator has not enabled an
+    external brain."""
     ext = getattr(config, "external_model", None)
     if ext is not None and getattr(ext, "enabled", False):
-        from jaeger_ai.core.models.external_model import ExternalModelClient, ExternalModelError
+        from jaeger_ai.core.models.external_model import (
+            ExternalModelClient,
+            ExternalModelError,
+            ExternalModelSelectionError,
+            selection_failure_message,
+        )
+        reason = ""
         try:
             client = ExternalModelClient(ext, layout)
             check = client.connectivity_check()
-            if not check["ok"]:
-                print(f"[jaeger] external model unreachable ({check['detail']}); "
-                      "falling back to the local model.", flush=True)
-            else:
+            if check["ok"]:
                 print(f"[jaeger] external model: {client.describe()} "
                       f"(reachable, {check['latency_s']}s)", flush=True)
                 return client
+            reason = f"unreachable — {check['detail']}"
         except ExternalModelError as exc:
-            print(f"[jaeger] external model not configured ({exc}); "
-                  "falling back to the local model.", flush=True)
+            reason = f"not configured — {exc}"
         except Exception as exc:  # noqa: BLE001
-            print(f"[jaeger] external model error ({type(exc).__name__}: {exc}); "
-                  "falling back to the local model.", flush=True)
+            reason = f"{type(exc).__name__}: {exc}"
+        raise ExternalModelSelectionError(selection_failure_message(ext, reason))
     # Local engine selection (the Runtime panel). The model FORMAT is
     # detected from the weights on disk (a ``.gguf`` file vs an MLX
     # directory); the ENGINE is the operator's per-format choice in
@@ -4363,6 +4674,13 @@ def boot_for_tui(
         # not run; without this line every computer_do call in the TUI
         # fails with "no LLM client available for the loop".
         _pipeline["client"] = client
+        # Cloud/HTTP brains must not leave a local GGUF/MLX resident.
+        # make_client already skipped the local loader; this is the
+        # belt for a process that previously served a local model in
+        # the same interpreter (tests, a failed swap, plugin bring-up).
+        if getattr(client, "kind", "") == "external":
+            from jaeger_ai.core.models.vram import release_local_client
+            release_local_client(None)
         # An instance-owned MCP file is itself the opt-in. Reconnect its
         # enabled servers before agent construction so their tools are present
         # in the canonical registry after every restart, not only after a UI
@@ -4422,12 +4740,50 @@ def boot_for_tui(
             shutdown_extensions(wait=False)
         except Exception:
             pass
+        # Free the weights as part of teardown, not as a consequence of
+        # it. ``cleanup`` runs when an instance is switched away from or
+        # the session ends; leaving 5-17 GB of Metal memory checked out
+        # until the collector notices is what made a local→cloud switch
+        # look like the local model was "still loaded". ``unload`` is a
+        # no-op on an external client and safe to call twice.
+        try:
+            client.unload()
+        except Exception:
+            pass
         try:
             lock.release()
         except Exception:
             pass
 
     return TUIBootResult(client=client, layout=layout, cleanup=cleanup)
+
+
+def unload_local_brain(client: Any = None) -> bool:
+    """Release the resident LOCAL model's weights (and its VRAM) now.
+
+    Call this on every path that stops using a local brain — swapping
+    models, switching to a cloud provider, tearing an instance down.
+    Clears ``_pipeline["client"]`` and the agent cache (which holds an
+    agent that references the client, and so the weights) and then closes
+    the model explicitly via
+    :func:`jaeger_ai.core.models.vram.release_local_client`.
+
+    On a unified-memory Mac the weights ARE VRAM: leaving a 15.7 GB local
+    model resident because a reference outlived the switch is the whole
+    reason this is a step rather than a side effect of the GC.
+
+    ``client`` defaults to whatever ``_pipeline`` holds; pass one
+    explicitly when the caller keeps its own handle (the TUI does).
+    Returns whether local weights were actually released — ``False`` when
+    the brain was already external or nothing was loaded. Callers must
+    still drop their own reference; this cannot reach their frame.
+    """
+    from jaeger_ai.core.models.vram import release_local_client
+
+    target = client if client is not None else _pipeline.get("client")
+    _pipeline["client"] = None
+    _agent_cache.clear()
+    return release_local_client(target)
 
 
 def switch_model(new_model: str, *, warmup: bool = True) -> Any:
@@ -4446,14 +4802,12 @@ def switch_model(new_model: str, *, warmup: bool = True) -> Any:
     IMPORTANT — RAM: the caller MUST drop its reference to the OLD
     client before calling this. On a unified-memory Mac, holding both
     references means both model weights are briefly co-resident, which
-    can OOM a 32 GB machine. This function nulls ``_pipeline["client"]``
-    and forces a GC before allocating the new model, but it cannot
-    reach the caller's own variable — drop it on your side first.
+    can OOM a 32 GB machine. This function releases the old weights via
+    :func:`unload_local_brain` before allocating the new model, but it
+    cannot reach the caller's own variable — drop it on your side first.
 
     Returns the new client.
     """
-    import gc
-
     config = _pipeline.get("config")
     if config is None:
         raise RuntimeError("switch_model: no active pipeline — boot first.")
@@ -4472,11 +4826,8 @@ def switch_model(new_model: str, *, warmup: bool = True) -> Any:
     new_model_cfg = config.model.model_copy(update={"model_path": new_model})
 
     # Drop the old model so llama-cpp frees its weights BEFORE we
-    # allocate the new one. _agent_cache holds the old agent (which
-    # references the old client/model) — clear it too.
-    _pipeline["client"] = None
-    _agent_cache.clear()
-    gc.collect()
+    # allocate the new one — an explicit close, not a hoped-for GC.
+    unload_local_brain()
 
     client = LlamaCppPythonClient(new_model_cfg, warmup=warmup)
     _get_agent(client)            # rebuilds the agent + reloads skills
@@ -4503,6 +4854,9 @@ def run_daemon(*, instance_name: str | None = None,
     from jaeger_agent.background.deep_think import queue_for_layout
     from jaeger_ai.core.models.model_resolver import DEFAULT_CODER_MODEL, DEFAULT_MODEL
     from jaeger_agent.prompts.reflection import reflect_on_task, save_reflection
+    # Claim / heartbeat / reclaim for background tasks — imported once so
+    # every use below is bound, including the ones inside the work loop.
+    from jaeger_ai.core.runtime import task_liveness as _live
 
     print("[jaeger-daemon] booting…", flush=True)
     boot = boot_for_tui(instance_name=instance_name, with_memory=True,
@@ -4525,7 +4879,13 @@ def run_daemon(*, instance_name: str | None = None,
         llm_lock = _pipeline.get("llm_lock")
 
         def _cron_cb(prompt: str, session_key: str | None = None) -> None:
-            run_command(boot.client, prompt, session_key=session_key)
+            text = run_command(boot.client, prompt, session_key=session_key)
+            try:
+                from jaeger_ai.core.runtime.cron_delivery import deliver_text
+                name = (session_key or "").removeprefix("cron:")
+                deliver_text(layout, name, text)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[jaeger-daemon] cron deliver failed: {exc}", flush=True)
 
         cron = CronRunner(_cron_cb, llm_lock=llm_lock)
         cron.start()
@@ -4553,7 +4913,77 @@ def run_daemon(*, instance_name: str | None = None,
                 _sm.maintenance_sweep(layout)
             except Exception:  # noqa: BLE001 — maintenance never blocks deep-think
                 pass
-            task = queue.next_pending()
+            # Reclaim before picking up work. A task whose worker died —
+            # daemon killed mid-task, a wedged tool, a model call that
+            # never returned — is otherwise stuck ``in_progress`` for
+            # good, and the queue behind it never moves. See
+            # :mod:`jaeger_ai.core.runtime.task_liveness`.
+            try:
+                _reclaimed = _live.reclaim_stale(layout)
+                for _entry in _reclaimed:
+                    print(f"[jaeger-daemon] {_live.describe_reclaim(_entry)}",
+                          flush=True)
+                if _reclaimed:
+                    # Put the abandoned cards back in the queue. The
+                    # board has no per-card requeue, and its whole-column
+                    # reset is the right tool here anyway: every
+                    # ``in_progress`` card now has no live claim, since
+                    # the surviving claims were just kept.
+                    try:
+                        queue.reset_in_progress()
+                    except Exception:  # noqa: BLE001 — best-effort requeue
+                        pass
+            except Exception as exc:  # noqa: BLE001 — never block the queue
+                print(f"[jaeger-daemon] reclaim sweep skipped: {exc}",
+                      flush=True)
+
+            from jaeger_ai.core.runtime.idle_supervisor import Action, decide
+            from jaeger_ai.core.runtime import heartbeat as _hb
+            from jaeger_ai.core.runtime.completions import (
+                next_completion_turn, pending_count,
+            )
+            from jaeger_agent.background.board import has_actionable_work
+            from jaeger_agent.prompts import AUTO_BOARD_PROMPT
+
+            _cfg = _pipeline.get("config")
+            _hb_cfg = getattr(_cfg, "heartbeat", None) if _cfg is not None else None
+            _action = decide(
+                busy=False,
+                has_completions=pending_count() > 0,
+                idle_ready=True,
+                has_deep_think=queue.next_pending() is not None,
+                has_board=has_actionable_work(layout),
+                heartbeat_due=_hb.is_due(
+                    layout,
+                    interval_minutes=int(
+                        getattr(_hb_cfg, "interval_minutes", 30) or 0),
+                    enabled=bool(getattr(_hb_cfg, "enabled", True)),
+                ),
+            )
+            if _action is Action.COMPLETION:
+                _prompt = next_completion_turn(layout)
+                if _prompt:
+                    print("[jaeger-daemon] background work finished — "
+                          "folding in.", flush=True)
+                    run_command(client, _prompt, session_key="completions")
+            elif _action is Action.BOARD:
+                print("[jaeger-daemon] idle — picking up a kanban card.",
+                      flush=True)
+                run_worker_turn(
+                    client, AUTO_BOARD_PROMPT, session_key="kanban_idle")
+            elif _action is Action.HEARTBEAT:
+                print("[jaeger-daemon] heartbeat.", flush=True)
+                _text = run_worker_turn(
+                    client, _hb.build_prompt(layout),
+                    session_key=str(
+                        getattr(_hb_cfg, "session", None) or "heartbeat"),
+                )
+                _silent = _hb.is_silent_ok(_text)
+                _hb.mark_beat(layout, silent=_silent)
+                if _text and not _silent:
+                    print(_text, flush=True)
+
+            task = queue.next_pending() if _action is Action.DEEP_THINK else None
             if task is not None:
                 # There's approved work — swap to the coder model, drain
                 # the queue, swap back. Same shape as the TUI's Deep
@@ -4573,6 +5003,11 @@ def run_daemon(*, instance_name: str | None = None,
                     if task is None:
                         break
                     queue.mark_in_progress(task.id)
+                    # Claim it: this process, this host, from now. Without
+                    # a claim a crash here leaves the card ``in_progress``
+                    # with nothing able to tell that from real work.
+                    _live.claim(layout, task.id,
+                                detail=task.description[:200])
                     print(f"[jaeger-daemon] working {task.id}: "
                           f"{task.description}", flush=True)
                     outcome = "done"
@@ -4586,15 +5021,24 @@ def run_daemon(*, instance_name: str | None = None,
                         from jaeger_agent.background.deepthink_runner import (
                             run_one_task,
                         )
-                        outcome = run_one_task(
-                            client, queue, layout, task,
-                            run_command_fn=run_command,
-                        )
+                        # One long blocking call with no place to check in
+                        # from — the heartbeat runs beside it so a wedge
+                        # is detectable without the grace window having to
+                        # exceed the slowest imaginable task.
+                        with _live.beating(layout, task.id):
+                            outcome = run_one_task(
+                                client, queue, layout, task,
+                                run_command_fn=run_command,
+                            )
                         print(f"[jaeger-daemon] {task.id}: {outcome}",
                               flush=True)
                     except Exception as exc:  # noqa: BLE001
                         outcome = f"failed: {exc}"
                         queue.mark_failed(task.id, str(exc))
+                    finally:
+                        # Settled either way — drop the claim so the next
+                        # reclaim sweep doesn't judge a finished task.
+                        _live.release(layout, task.id)
                     try:
                         refl = reflect_on_task(client, task.description, outcome)
                         if refl:
@@ -5018,7 +5462,18 @@ def _main_dispatch() -> int:
         _preflight_log()
         install_policy(PermissionPolicy(confirmation=_confirmation_provider(config, layout)))
 
-        client = make_client(config, layout, warmup=not args.no_warmup)
+        from jaeger_ai.core.models.external_model import (
+            ExternalModelSelectionError as _SelectionError,
+        )
+        try:
+            client = make_client(config, layout, warmup=not args.no_warmup)
+        except _SelectionError as exc:
+            # The selected brain can't serve. That is a configuration
+            # problem with a fix in the message — print it, don't bury it
+            # under a traceback, and don't answer from a model nobody
+            # chose. Exit 2 marks "misconfigured", not "crashed".
+            print(f"[jaeger] {exc}", file=sys.stderr, flush=True)
+            return 2
         # Force agent build now so skills load before the first prompt.
         _get_agent(client)
         # Prewarm KV cache (system prompt + tool schema) so the first

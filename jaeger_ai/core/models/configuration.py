@@ -148,4 +148,89 @@ def configure_model(
     }
 
 
-__all__ = ["configure_model"]
+def configure_fallback_chain(
+    layout: Any,
+    entries: Any,
+    *,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Persist an ordered fallback chain. Empty list clears it."""
+    from jaeger_ai.core.instance.schemas import FallbackModel
+
+    if entries is None:
+        rows: list[dict[str, Any]] = []
+    elif isinstance(entries, list):
+        rows = list(entries)
+    else:
+        raise ValueError("fallback chain must be a list of {provider, model}")
+
+    current = load_yaml(layout.config_path, Config)
+    cleaned: list[dict[str, str]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            raise ValueError("each fallback entry must be an object")
+        provider = str(raw.get("provider") or "").strip().lower()
+        model = str(raw.get("model") or "").strip()
+        if not provider or not model:
+            raise ValueError("each fallback entry needs provider and model")
+        if provider == "local":
+            raise ValueError(
+                "local fallback is disabled — a selected cloud brain must "
+                "not load on-device weights"
+            )
+        _reject_cross_vendor_pair(provider, model)
+        FallbackModel.model_validate({
+            "provider": provider,
+            "model": model,
+            "base_url": str(raw.get("base_url") or ""),
+        })
+        if provider not in {"local", *_BASE_URLS}:
+            raise ValueError(f"unsupported Jaeger provider: {provider!r}")
+        cleaned.append({
+            "provider": provider,
+            "model": model,
+            "base_url": str(raw.get("base_url") or ""),
+        })
+
+    updated = current.model_copy(deep=True)
+    updated.external_model.fallback = [
+        FallbackModel.model_validate(row) for row in cleaned
+    ]
+    validated = Config.model_validate(updated.model_dump())
+    changed = validated != current
+    if changed and not dry_run:
+        dump_yaml(layout.config_path, validated)
+    return {
+        "ok": True,
+        "owner": "jaeger",
+        "fallback": cleaned,
+        "changed": changed,
+        "restart_required": changed,
+        "dry_run": bool(dry_run),
+    }
+
+
+def dead_brain_reason(reason: str) -> bool:
+    """True when the primary cannot serve at all (walk the chain).
+
+    Timeouts, rate limits, and context-length errors stay on the same
+    brain — they are request failures, not a dead endpoint.
+    """
+    lower = (reason or "").lower()
+    if not lower:
+        return False
+    if "429" in lower or "rate limit" in lower:
+        return False
+    if "context" in lower and ("length" in lower or "window" in lower):
+        return False
+    if "timeout" in lower or "timed out" in lower:
+        return False
+    markers = (
+        "unreachable", "not configured", "connection", "connect",
+        "refused", "401", "403", "dns", "name or service", "api key",
+        "needs an api key", "failed to establish", "nodename",
+    )
+    return any(m in lower for m in markers)
+
+
+__all__ = ["configure_model", "configure_fallback_chain", "dead_brain_reason"]

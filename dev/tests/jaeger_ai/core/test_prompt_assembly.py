@@ -32,6 +32,7 @@ from jaeger_agent.prompts import (
     cron_prompt,
     deep_think_directive,
 )
+from jaeger_ai.core.runtime.heartbeat import heartbeat_prompt
 
 # The four static rule constants (JAEGER_OS_CONTEXT, MANDATORY_TOOL_RULES,
 # OPERATING_DISCIPLINE, TOOL_USAGE_RULES) were consolidated into the
@@ -223,3 +224,31 @@ def test_cron_prompt_framed_when_requested():
     out = cron_prompt("good morning", frame=True)
     assert "good morning" in out
     assert "Scheduled" in out
+
+
+def test_heartbeat_prompt_requires_silent_ok_and_inlines_the_checklist():
+    out = heartbeat_prompt("check the board", board_digest="BOARD STATUS — x")
+    assert "HEARTBEAT_OK" in out
+    assert "check the board" in out
+    assert "BOARD STATUS — x" in out
+    assert "Heartbeat" in out
+
+
+def test_idle_board_and_cron_drop_soul_identity_prose(tmp_path):
+    """Standing-work modes are the hands: SOUL.md talks to the user,
+    not the tool loop."""
+    from jaeger_ai.core.prompt_documents import register_context_documents
+    register_context_documents()
+    (tmp_path / "SOUL.md").write_text(
+        "I am a theatrical pirate and I say arrr.", encoding="utf-8",
+    )
+    (tmp_path / "config.yaml").write_text(
+        "persona:\n  soul_in_prompt: true\n", encoding="utf-8",
+    )
+    layout = _layout(tmp_path)
+    agent = assemble_prompt(layout, mode="agent")
+    idle = assemble_prompt(layout, mode="idle_board")
+    cron = assemble_prompt(layout, mode="cron")
+    assert "theatrical pirate" in agent
+    assert "theatrical pirate" not in idle
+    assert "theatrical pirate" not in cron

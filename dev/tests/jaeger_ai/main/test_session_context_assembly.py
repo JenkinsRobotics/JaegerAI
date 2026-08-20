@@ -54,10 +54,11 @@ def test_a_missing_facts_tier_does_not_shift_the_runtime_tier(
 
 
 class _Agent:
-    """Only what ``_refresh_character_prompt`` touches."""
+    """Only what ``_refresh_character_prompt`` / ``apply_live_character`` touch."""
 
     def __init__(self) -> None:
         self.system_prompt = ""
+        self.messages: list[dict] = []
 
 
 def test_refresh_keeps_every_tier(tmp_path, stub_tiers, monkeypatch) -> None:
@@ -114,6 +115,34 @@ def test_editing_a_context_document_triggers_a_rebuild(
     (tmp_path / "SOUL.md").write_text("a new identity")
     main._refresh_character_prompt(agent)
     assert len(builds) == before + 1
+
+
+def test_apply_live_character_rebuilds_prompt_and_drops_history(
+        tmp_path, stub_tiers, monkeypatch) -> None:
+    """A HUD pick has to change the RUNNING agent, not just the files.
+    Cached prompt + leftover Jarvis turns would keep answering as Jarvis
+    after the operator selected Clanker."""
+    layout = InstanceLayout(root=tmp_path)
+    monkeypatch.setitem(main._pipeline, "layout", layout)
+    monkeypatch.setattr(
+        "jaeger_agent.prompts.prompts.build_system_prompt",
+        lambda _layout: "CLANKER_BASE",
+    )
+    agent = _Agent()
+    agent.system_prompt = "OLD_JARVIS"
+    agent.messages = [
+        {"role": "user", "content": "who are you"},
+        {"role": "assistant", "content": "I am Jarvis, sir."},
+    ]
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {"desktop-app": agent})
+
+    main.apply_live_character()
+
+    assert "CLANKER_BASE" in agent.system_prompt
+    assert agent.messages == []
+    # Signature is seeded so the next turn's refresh is a no-op, not a
+    # second rebuild that would miss the just-applied payload.
+    assert main._pipeline.get("active_character_sig")
 
 
 # ── the signature itself ────────────────────────────────────────────

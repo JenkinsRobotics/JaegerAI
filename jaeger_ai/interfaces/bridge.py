@@ -261,7 +261,11 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # which product features this Jaeger build actually implements.  Clients must
 # feature-gate from this response instead of inferring support from versions or
 # repository names.
-INTEGRATION_CONTRACT_VERSION = 9
+# 10: ``identity`` carries ``display_name`` and character rows carry
+# ``neutral`` — the single-identity projection (2026-08-19).
+# 12: ``cron`` query reports in-flight scheduled jobs so a host sidebar
+# can keep those sessions marked running until the callback returns.
+INTEGRATION_CONTRACT_VERSION = 12
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -270,6 +274,7 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
+    "board", "heartbeat", "cron",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -279,7 +284,7 @@ BRIDGE_COMMANDS = (
     "configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
     "remove_mcp_server", "reload_tools",
     "set_credential", "delete_credential",
-    "configure_model",
+    "configure_model", "configure_fallback_chain",
     "create_session", "clear_session", "delete_session", "reconcile_session_transcript",
 )
 
@@ -385,12 +390,88 @@ def _integration_contract() -> dict[str, Any]:
                 "transports": ["stdio", "streamable_http"],
             },
             "tool_inventory": {"available": True, "owner": "jaeger", "mutable": False},
+            "board": {"available": True, "owner": "jaeger", "mutable": False},
+            "heartbeat": {"available": True, "owner": "jaeger", "mutable": True},
+            "cron": {"available": True, "owner": "jaeger", "mutable": False},
+            "fallback_chain": {"available": True, "owner": "jaeger", "mutable": True},
+            "webhooks": {"available": True, "owner": "jaeger", "mutable": True},
             "credentials": {"available": True, "owner": "jaeger", "mutable": True,
                             "values_readable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
             "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
         },
     }
+
+
+_CRON_RUNNING: dict[str, float] = {}
+_CRON_RUNNING_LOCK = threading.Lock()
+
+
+def _cron_job_name(session_key: str | None) -> str:
+    raw = str(session_key or "cron").strip() or "cron"
+    if raw.startswith("cron:"):
+        return raw[5:] or "cron"
+    if raw.startswith("cron_"):
+        return raw[5:] or "cron"
+    return raw
+
+
+def _mark_cron_running(name: str) -> None:
+    job = str(name or "").strip()
+    if not job:
+        return
+    with _CRON_RUNNING_LOCK:
+        _CRON_RUNNING[job] = time.time()
+
+
+def _mark_cron_done(name: str) -> None:
+    job = str(name or "").strip()
+    if not job:
+        return
+    with _CRON_RUNNING_LOCK:
+        _CRON_RUNNING.pop(job, None)
+
+
+def _cron_running_snapshot() -> dict[str, float]:
+    with _CRON_RUNNING_LOCK:
+        return dict(_CRON_RUNNING)
+
+
+def _session_cron_running(sid: str, running: dict[str, float] | None = None) -> bool:
+    """True when ``sid`` belongs to a cron job currently in ``_CRON_RUNNING``.
+
+    Jaeger fires as ``cron:<name>``. ARES/Hermes session ids are
+    ``cron_{job_id}_{YYYYMMDD_HHMMSS}``. Either shape must light the
+    sidebar spinner for the live run only.
+    """
+    jobs = _cron_running_snapshot() if running is None else running
+    if not sid or not jobs:
+        return False
+    if sid in jobs:
+        return True
+    if sid.startswith("cron:"):
+        return sid[5:] in jobs
+    for name in jobs:
+        prefix = f"cron_{name}_"
+        if sid.startswith(prefix) and len(sid) == len(prefix) + 15:
+            # YYYYMMDD_HHMMSS is 15 characters.
+            return True
+    return False
+
+
+def _stamp_cron_running(rows: list[Any]) -> list[Any]:
+    running = _cron_running_snapshot()
+    if not running:
+        for row in rows:
+            if isinstance(row, dict):
+                row["cron_running"] = False
+        return rows
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("session_id") or row.get("id") or "")
+        row["cron_running"] = _session_cron_running(sid, running)
+    return rows
 
 
 def _agent_name(boot: Any) -> str | None:
@@ -402,6 +483,22 @@ def _agent_name(boot: Any) -> str | None:
         return (load_yaml(lay.identity_path, Identity).name or "").strip() or None
     except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
         return None
+
+
+def _display_name(boot: Any) -> str | None:
+    """The one name the agent answers to right now — the active
+    character's, or the instance's own while the neutral ``assistant``
+    sheet is selected. Best-effort; a miss is cosmetic and the surface
+    falls back to ``agent_name``."""
+    try:
+        from jaeger_ai.personality.character import (
+            active_character, persona_display_name,
+        )
+        root = _instance_root(boot)
+        character = active_character(root) if root is not None else None
+        return persona_display_name(_agent_name(boot) or "", character) or None
+    except Exception:  # noqa: BLE001
+        return _agent_name(boot)
 
 
 def _instance_root(boot: Any) -> Any:
@@ -435,9 +532,13 @@ def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
             stats += [{"key": k, "val": float(v)} for k, v in layer_items(sub)]
     icon = c.icon_path()
     card = c.card_path()
+    # v1 additive ``neutral``: True for the one sheet that is nobody in
+    # particular (``assistant``). A surface shows the INSTANCE's name for
+    # that row and the CHARACTER's name for every other — same rule the
+    # prompt follows (personality/character.py persona_display_name).
     return {"id": c.id, "name": c.name, "role": c.role, "level": c.level,
             "revision": c.revision, "icon": str(icon) if icon else None,
-            "card": str(card) if card else None,
+            "card": str(card) if card else None, "neutral": bool(c.neutral),
             "active": c.id == active_id, "bound": c.id == bound_id, "stats": stats}
 
 
@@ -450,6 +551,7 @@ def _char_detail(c: Any) -> dict[str, Any]:
             traits[layer] = {k: round(float(v), 3) for k, v in layer_items(sub)}
     icon = c.icon_path()
     return {"id": c.id, "name": c.name, "role": c.role, "level": c.level,
+            "neutral": bool(c.neutral),
             "voice_tone": c.voice_tone, "voice_id": c.voice_id,
             "soul": c.soul, "backstory": c.backstory,
             "custom_instructions": getattr(c.personality, "custom_instructions", ""),
@@ -490,10 +592,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # The agent's live identity for tray/header/orb branding — cheap
         # enough to re-ask after a character switch (the client refreshes
         # this instead of waiting for the next agent_state frame).
-        # v1 additive ``agent_name``: the AGENT's name (identity.yaml —
-        # the unique robot named at instance creation). ``character`` is
-        # the persona being played; surfaces lead with agent_name and show
-        # the character as secondary flavor ("Ted · playing HAL 9000").
+        # ``agent_name`` is the instance's own name (identity.yaml) and
+        # ``character`` the selected sheet; ``display_name`` — v1 additive,
+        # 2026-08-19 — is the one name the agent actually answers to, and
+        # is what every surface should show. The character's name wins
+        # while a character is selected; the instance's own comes through
+        # only for the neutral sheet. Surfaces used to render "Ted ·
+        # playing HAL 9000", which is two identities where the operator
+        # picked one. See personality/character.py persona_display_name.
         name, icon = _active_character(boot)
         # ``avatar`` = the raw CUSTOM profile picture (None → the effective
         # ``icon`` is the character card). Surfaces use it to decide whether a
@@ -504,8 +610,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             avatar = load_yaml(lay.identity_path, Identity).avatar
         except Exception:  # noqa: BLE001
             avatar = None
+        cid = None
+        try:
+            cid = active_character_id(root) if root is not None else None
+        except Exception:  # noqa: BLE001
+            cid = None
         return {"agent_name": _agent_name(boot), "character": name, "icon": icon,
-                "avatar": avatar, "model": _model_name(boot)}
+                "character_id": cid,
+                "display_name": _display_name(boot), "avatar": avatar,
+                "model": _model_name(boot)}
     if what == "characters":
         active_id = active_character_id(root) if root else None
         bound_id = bound_character_id(root) if root else None
@@ -529,6 +642,35 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         if c is None:
             return None
         return _card_art(_effective_icon(boot, c), c.id)
+    if what == "board":
+        from jaeger_agent.background.board import (
+            board_digest, board_for_layout, has_actionable_work,
+        )
+        if lay is None:
+            return {"cards": [], "digest": "", "has_actionable": False}
+        try:
+            cards = [c.to_dict() for c in board_for_layout(lay).list()]
+        except Exception:  # noqa: BLE001
+            cards = []
+        return {
+            "cards": cards,
+            "digest": board_digest(lay),
+            "has_actionable": has_actionable_work(lay),
+        }
+    if what == "heartbeat":
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.core.runtime import heartbeat as _hb
+        enabled, interval = True, 30
+        if lay is not None:
+            try:
+                cfg = load_yaml(lay.config_path, Config)
+                enabled = bool(cfg.heartbeat.enabled)
+                interval = int(cfg.heartbeat.interval_minutes)
+            except Exception:  # noqa: BLE001
+                pass
+        return _hb.status(lay, interval_minutes=interval, enabled=enabled)
+    if what == "cron":
+        return {"running": _cron_running_snapshot()}
     if what == "config":
         from jaeger_ai.core.instance.schemas import Config, Identity, load_yaml
         cfg = load_yaml(lay.config_path, Config)
@@ -556,7 +698,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 # finalizer / reflection side calls, 0 = disabled).
                 # Both apply on agent restart, not live.
                 "model_ctx": cfg.model.ctx,
-                "model_aux_ctx": cfg.model.aux_ctx}
+                "model_aux_ctx": cfg.model.aux_ctx,
+                "heartbeat_enabled": cfg.heartbeat.enabled,
+                "heartbeat_interval_minutes": cfg.heartbeat.interval_minutes}
     if what == "serving_model":
         # The model ACTUALLY answering, for hosts (ARES) that must show the
         # truth rather than the selection they requested. Deliberately not
@@ -601,10 +745,25 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             if not model_id:
                 continue
             provider = str(row.get("provider") or "").strip() or None
+            location = str(row.get("location") or row.get("kind") or "unknown")
+            # Same model id can exist on Ollama Cloud AND local Ollama.
+            # The label has to say which, or a picker keyed by id alone
+            # will start the local daemon for a cloud pick.
+            label = str(row.get("label") or model_id)
+            if provider and provider not in label:
+                where = {
+                    "ollama-cloud": "Ollama Cloud",
+                    "ollama": "Ollama (local)",
+                    "local": "on-device",
+                    "mlx": "on-device",
+                    "in-process": "on-device",
+                    "lmstudio": "LM Studio",
+                }.get(provider, provider)
+                label = f"{model_id} · {where}"
             models.append({
                 "id": model_id,
-                "label": str(row.get("label") or model_id),
-                "location": str(row.get("location") or row.get("kind") or "unknown"),
+                "label": label,
+                "location": location,
                 "provider": provider,
                 "in_use": bool(row.get("serving")),
                 "source": str(row.get("source") or "jaeger"),
@@ -685,7 +844,8 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         store = get_store(lay)
         if store is None:
             return []
-        return store.list_sessions(limit=int(args.get("limit") or 50))
+        return _stamp_cron_running(
+            store.list_sessions(limit=int(args.get("limit") or 50)))
     if what == "session_contract":
         return _session_contract()
     if what == "search_sessions":
@@ -728,6 +888,16 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     return None
 
 
+def _apply_live_character() -> None:
+    """Rebuild the running agent's prompt + drop in-memory history so a
+    HUD pick takes effect this process, not on the next restart."""
+    try:
+        from jaeger_ai.main import apply_live_character
+        apply_live_character()
+    except Exception:  # noqa: BLE001 — bind already landed; live apply is best-effort
+        pass
+
+
 def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | None]:
     """Mutations for the settings HUD — each forwards to a tested function."""
     root = _instance_root(boot)
@@ -735,9 +905,18 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     try:
         import jaeger_ai.personality.character as ch
         if cmd == "select_character":
-            ch.set_active_character(root, args["id"]); return True, None
+            # Picking a character IS the character this instance is. A
+            # session-only override (set_active_character) survived
+            # neither restart nor the bound-character fallback, so the
+            # HUD looked like it swapped and then snapped back. Bind
+            # writes both the live file and manifest.bound_character,
+            # then the running agent rebuilds so the NEXT reply is this
+            # character — not a continuation of the previous voice.
+            ch.bind_character(root, args["id"])
+            _apply_live_character(); return True, None
         if cmd == "make_default":
-            ch.bind_character(root, args["id"]); return True, None
+            ch.bind_character(root, args["id"])
+            _apply_live_character(); return True, None
         if cmd == "save_profile":
             c = ch.active_character(root)
             ch.save_character_profile(
@@ -825,6 +1004,8 @@ def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
         "activity_trace": ("display", "activity_trace"),
         "turn_separators": ("display", "turn_separators"),
         "idle_minutes": ("deep_think", "auto_idle_minutes"),
+        "heartbeat_enabled": ("heartbeat", "enabled"),
+        "heartbeat_interval_minutes": ("heartbeat", "interval_minutes"),
         "allow_lazy_installs": ("security", "allow_lazy_installs"),
         "permission_mode": ("permissions", "mode"),
         # Context-window knobs (applies on restart — see ModelConfig).
@@ -846,6 +1027,11 @@ class _Ctx:
         self.boot: Any = None
         self.client: Any = None
         self.cron: Any = None                 # CronRunner — fires scheduled prompts
+        self.supervisor_stop: Any = None      # idle/heartbeat thread Event
+        self.bridge_sock: Any = None
+        self.webhook_httpd: Any = None
+        self.last_user_at = time.monotonic()
+        self.last_user_session = "desktop-app"
         # True while ANY turn (chat, slash, or a fired cron prompt) is
         # running — the cheap "is a turn in flight?" signal run_update's
         # guard reads before shelling out (an update mid-turn would race
@@ -1062,6 +1248,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     # lock (cron acquires → callback → _run_turn re-acquires → deadlock).
     def _cron_cb(prompt: str, session_key: str | None = None) -> None:
         session = session_key or "cron"
+        job_name = _cron_job_name(session)
+        _mark_cron_running(job_name)
         try:
             _emit_state(proto, ctx, True, session)
             try:
@@ -1072,6 +1260,15 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                 _emit(proto, protocol.reply_frame(
                     text, result.get("error"), session,
                     elapsed_s=result.get("elapsed_s")))
+                try:
+                    from jaeger_ai.core.runtime.cron_delivery import deliver_text
+                    sent = deliver_text(ctx.layout, job_name, text)
+                    if sent and not sent.get("sent"):
+                        print(f"[bridge] cron deliver skipped: {sent.get('error')}",
+                              file=sys.stderr, flush=True)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[bridge] cron deliver failed: {exc}",
+                          file=sys.stderr, flush=True)
                 # Speak a fired reminder when the instance voices its
                 # replies and the turn didn't already speak via a tool.
                 if text and not result.get("spoke_via_tool"):
@@ -1089,6 +1286,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
             print(f"[bridge] cron turn failed: {exc}",
                   file=sys.stderr, flush=True)
+        finally:
+            _mark_cron_done(job_name)
 
     try:
         from jaeger_agent.background.cron_runner import CronRunner
@@ -1096,6 +1295,25 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         ctx.cron.start()
     except Exception as exc:  # noqa: BLE001 — no cron is degraded, not fatal
         print(f"[bridge] cron runner skipped: {exc}",
+              file=sys.stderr, flush=True)
+
+    try:
+        _start_idle_supervisor(proto, ctx)
+    except Exception as exc:  # noqa: BLE001 — no idle loop is degraded, not fatal
+        print(f"[bridge] idle supervisor skipped: {exc}",
+              file=sys.stderr, flush=True)
+
+    try:
+        from jaeger_ai.main import autostart_plugins, _pipeline
+        autostart_plugins(_pipeline.get("config"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bridge] plugin autostart skipped: {exc}",
+              file=sys.stderr, flush=True)
+
+    try:
+        _start_webhooks(ctx)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bridge] webhooks skipped: {exc}",
               file=sys.stderr, flush=True)
 
     name, icon = _active_character(boot)
@@ -1169,6 +1387,148 @@ def _ctx_usage(session: str) -> tuple[int | None, int | None]:
     return used, mx
 
 
+_SYNTHETIC_SESSIONS = frozenset({
+    "heartbeat", "kanban_idle", "cron", "completions", "worker",
+})
+
+
+def _heartbeat_config(ctx: _Ctx) -> tuple[bool, int, str]:
+    enabled, interval, session = True, 30, "heartbeat"
+    try:
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.main import _pipeline
+        cfg = _pipeline.get("config")
+        if cfg is None and ctx.layout is not None:
+            cfg = load_yaml(ctx.layout.config_path, Config)
+        if cfg is not None:
+            hb = cfg.heartbeat
+            enabled = bool(hb.enabled)
+            interval = int(hb.interval_minutes)
+            session = str(hb.session or "heartbeat")
+    except Exception:  # noqa: BLE001
+        pass
+    return enabled, interval, session
+
+
+def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
+    """One supervisor tick. Never raises into the poll loop."""
+    from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
+    from jaeger_ai.core.runtime import heartbeat as hb
+    from jaeger_ai.core.runtime.completions import pending_count, next_completion_turn
+    from jaeger_ai.core.runtime.task_liveness import reclaim_stale
+    from jaeger_agent.background.board import has_actionable_work
+    from jaeger_agent.prompts import AUTO_BOARD_PROMPT
+    from jaeger_ai.main import _pipeline, run_for_voice, _run_turn
+    from jaeger_os.contract import protocol
+
+    layout = ctx.layout
+    if layout is None or ctx.client is None or ctx.busy:
+        return
+    try:
+        reclaim_stale(layout)
+    except Exception:  # noqa: BLE001
+        pass
+
+    enabled, interval, hb_session = _heartbeat_config(ctx)
+    idle_minutes = 30
+    try:
+        cfg = _pipeline.get("config")
+        if cfg is not None:
+            idle_minutes = int(cfg.deep_think.auto_idle_minutes)
+    except Exception:  # noqa: BLE001
+        idle_minutes = 30
+    has_dt = False
+    try:
+        from jaeger_agent.background.deep_think import queue_for_layout
+        has_dt = queue_for_layout(layout).next_pending() is not None
+    except Exception:  # noqa: BLE001
+        has_dt = False
+
+    action = decide(
+        busy=ctx.busy,
+        has_completions=pending_count() > 0,
+        idle_ready=window_elapsed(
+            idle_minutes * 60,
+            quiet_for=time.monotonic() - ctx.last_user_at,
+        ),
+        has_deep_think=has_dt,
+        has_board=has_actionable_work(layout),
+        heartbeat_due=hb.is_due(
+            layout, interval_minutes=interval, enabled=enabled,
+        ),
+    )
+    if action is Action.SKIP or action is Action.IDLE:
+        return
+    if action is Action.DEEP_THINK:
+        # Model swap for Deep Think stays on the TUI / --daemon path.
+        # The ARES-kept bridge works the board and the standing heartbeat
+        # without swapping the live conversational brain.
+        action = Action.BOARD if has_actionable_work(layout) else (
+            Action.HEARTBEAT if hb.is_due(
+                layout, interval_minutes=interval, enabled=enabled,
+            ) else Action.IDLE
+        )
+        if action is Action.IDLE:
+            return
+
+    session = ctx.last_user_session or "desktop-app"
+    persona = True
+    prompt = None
+    if action is Action.COMPLETION:
+        prompt = next_completion_turn(layout)
+        session = ctx.last_user_session or "completions"
+    elif action is Action.BOARD:
+        prompt = AUTO_BOARD_PROMPT
+        session = "kanban_idle"
+        persona = False
+    elif action is Action.HEARTBEAT:
+        prompt = hb.build_prompt(layout)
+        session = hb_session
+        persona = False
+    if not prompt:
+        return
+
+    _emit_state(proto, ctx, True, session)
+    try:
+        if persona:
+            result = run_for_voice(ctx.client, prompt, session_key=session)
+        else:
+            result = _run_turn(
+                ctx.client, prompt, session_key=session, allow_persona=False,
+            )
+        text = result.get("text") or ""
+        error = result.get("error")
+        if action is Action.HEARTBEAT:
+            silent = hb.is_silent_ok(text)
+            hb.mark_beat(layout, silent=silent)
+            if silent and not error:
+                return
+        _emit(proto, protocol.reply_frame(
+            text, error, session, elapsed_s=result.get("elapsed_s")))
+    finally:
+        _emit_state(proto, ctx, False, session)
+
+
+def _start_idle_supervisor(proto: TextIO, ctx: _Ctx) -> None:
+    """Poll for completions, board work, and standing heartbeats."""
+    stop = threading.Event()
+    ctx.supervisor_stop = stop
+
+    def _loop() -> None:
+        while not stop.wait(2.0):
+            if not ctx.booted.is_set() or ctx.client is None:
+                continue
+            try:
+                _idle_once(proto, ctx)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[bridge] idle supervisor: {exc}",
+                      file=sys.stderr, flush=True)
+
+    threading.Thread(
+        target=_loop, name="idle-supervisor", daemon=True,
+    ).start()
+
+
 def _turn_worker(proto: TextIO, ctx: _Ctx,
                  turns: "_queue.Queue[dict[str, Any] | None]") -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
@@ -1179,8 +1539,12 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         req = turns.get()
         if req is None:
             return
+        out = req.pop("_out", None) or proto
         text = (req.get("text") or "").strip()
         session = req.get("session") or "desktop-app"
+        if session not in _SYNTHETIC_SESSIONS:
+            ctx.last_user_at = time.monotonic()
+            ctx.last_user_session = session
         # This request is no longer "waiting" — it's about to run. Mirrors
         # the increment in ``main``'s stdin loop (item 9's queued-ack
         # counter); covers both the slash and chat branches below since
@@ -1192,18 +1556,18 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
         if text.startswith("/"):
-            _emit_state(proto, ctx, True, session)
+            _emit_state(out, ctx, True, session)
             try:
                 reply = _run_slash(text, ctx)
-                _emit(proto, protocol.reply_frame(reply, None, session))
+                _emit(out, protocol.reply_frame(reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
-                _emit(proto, protocol.reply_frame("", str(exc), session))
+                _emit(out, protocol.reply_frame("", str(exc), session))
             finally:
-                _emit_state(proto, ctx, False, session)
+                _emit_state(out, ctx, False, session)
             continue
         ctx.booted.wait()
         if ctx.client is None:
-            _emit(proto, protocol.reply_frame(
+            _emit(out, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
         try:
@@ -1215,10 +1579,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                 store.set_execution_state(session, "running")
         except Exception:  # noqa: BLE001 — state telemetry cannot fail a turn
             pass
-        _emit_state(proto, ctx, True, session)
+        _emit_state(out, ctx, True, session)
         try:
             from jaeger_ai.main import run_for_voice, stream_delta_sink
-            deltas = _DeltaStream(proto, session)
+            deltas = _DeltaStream(out, session)
             with _turn_workspace(ctx, req.get("workspace")):
                 display_text = req.get("display_text")
                 voice_kwargs = {"session_key": session}
@@ -1231,12 +1595,12 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     result = run_for_voice(ctx.client, text, **voice_kwargs)
             deltas.flush()
             used, mx = _ctx_usage(session)
-            _emit(proto, protocol.reply_frame(
+            _emit(out, protocol.reply_frame(
                 result.get("text") or "", result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx))
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            _emit(proto, protocol.reply_frame("", str(exc), session))
+            _emit(out, protocol.reply_frame("", str(exc), session))
         finally:
             try:
                 from jaeger_ai.core.sessions import get_store
@@ -1246,7 +1610,116 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     store.set_execution_state(session, "idle")
             except Exception:  # noqa: BLE001 — state telemetry is best-effort
                 pass
-            _emit_state(proto, ctx, False, session)
+            _emit_state(out, ctx, False, session)
+
+
+def _start_webhooks(ctx: _Ctx) -> None:
+    """Loopback HTTP triggers → board card or synthetic turn."""
+    from jaeger_ai.core.runtime import webhooks as hooks
+    from jaeger_ai.main import _pipeline
+
+    cfg = _pipeline.get("config")
+    wcfg = getattr(cfg, "webhooks", None) if cfg is not None else None
+    if wcfg is None or not bool(getattr(wcfg, "enabled", True)):
+        return
+    host = str(getattr(wcfg, "host", None) or hooks.DEFAULT_HOST)
+    port = int(getattr(wcfg, "port", None) or hooks.DEFAULT_PORT)
+    secret = str(getattr(wcfg, "secret", None) or "")
+
+    def _on_hook(interpreted: dict[str, str]) -> dict[str, Any]:
+        action = interpreted.get("action") or "board"
+        title = interpreted.get("title") or "webhook"
+        prompt = interpreted.get("prompt") or title
+        if action == "turn" and ctx.client is not None:
+            from jaeger_ai.main import run_worker_turn
+            text = run_worker_turn(ctx.client, prompt, session_key="webhook")
+            return {"fired": "turn", "text": (text or "")[:500]}
+        from jaeger_agent.background.board import board_for_layout
+        card = board_for_layout(ctx.layout).add(
+            title, description=prompt, column="ready",
+            source="schedule", created_by="agent",
+        )
+        return {"fired": "board", "card_id": card.id}
+
+    httpd = hooks.serve(
+        _on_hook, host=host, port=port, secret=secret,
+    )
+    ctx.webhook_httpd = httpd
+    print(f"[bridge] webhooks on {host}:{port}", file=sys.stderr, flush=True)
+
+
+def _start_bridge_socket(
+    ctx: _Ctx,
+    inbound: "_queue.Queue[tuple[dict[str, Any], Any] | None]",
+    owner_out: TextIO,
+) -> None:
+    """Listen on the instance Unix socket so a second UI can attach."""
+    from jaeger_ai.core.runtime import bridge_socket as bsock
+    from jaeger_os.contract import protocol
+
+    path = bsock.socket_path(ctx.layout)
+    if path is None:
+        return
+    sock = bsock.bind(path)
+    ctx.bridge_sock = sock
+    print(f"[bridge] attach socket {path}", file=sys.stderr, flush=True)
+
+    def _client(conn: Any) -> None:
+        f = None
+        try:
+            f = conn.makefile("rwb", buffering=0)
+            text = conn.makefile("rw", buffering=1, encoding="utf-8", newline="\n")
+            _emit(text, protocol.ready_frame(
+                getattr(getattr(ctx.layout, "root", None), "name", None) or "default",
+                _model_name(ctx.boot) if ctx.boot is not None else None,
+                agent="ready" if ctx.client is not None else "booting",
+                agent_name=_agent_name(ctx.boot if ctx.boot is not None else ctx),
+            ))
+            if ctx.client is not None:
+                name, icon = _active_character(ctx.boot)
+                _emit(text, protocol.agent_state_frame(
+                    "ready", model=_model_name(ctx.boot),
+                    character=name, icon=icon,
+                    agent_name=_agent_name(ctx.boot)))
+            for raw in text:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(parsed, dict):
+                    inbound.put((parsed, text))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[bridge] attach client dropped: {exc}",
+                  file=sys.stderr, flush=True)
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            if f is not None:
+                try:
+                    f.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def _accept() -> None:
+        while True:
+            if ctx.supervisor_stop is not None and ctx.supervisor_stop.is_set():
+                break
+            try:
+                conn, _addr = sock.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            threading.Thread(
+                target=_client, args=(conn,), name="bridge-attach", daemon=True,
+            ).start()
+
+    threading.Thread(target=_accept, name="bridge-socket", daemon=True).start()
 
 
 def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
@@ -1360,21 +1833,42 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         ctx.layout = lay
         return True, {"instance": lay.root.name, "root": str(lay.root)}, None
 
+    owner_out = proto
+    inbound: _queue.Queue[tuple[dict[str, Any], Any] | None] = _queue.Queue()
+
+    def _read_stdio() -> None:
+        try:
+            for raw in sys.stdin:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    parsed = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(parsed, dict):
+                    inbound.put((parsed, owner_out))
+        finally:
+            inbound.put(None)
+
+    threading.Thread(target=_read_stdio, name="bridge-stdio", daemon=True).start()
+    try:
+        _start_bridge_socket(ctx, inbound, owner_out)
+    except Exception as exc:  # noqa: BLE001 — stdio still works alone
+        print(f"[bridge] attach socket skipped: {exc}", file=sys.stderr, flush=True)
+
     rc = 0
     try:
-        for raw in sys.stdin:
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                req = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if not isinstance(req, dict):
-                continue
+        while True:
+            item = inbound.get()
+            if item is None:
+                break
+            req, proto = item
             op = req.get("op")
             if op == "quit":
-                break
+                if proto is owner_out:
+                    break
+                continue
             if op == "cancel":
                 # The stdin thread stays responsive while the turn worker is
                 # blocked in inference or a tool. Keep this fire-and-forget so
@@ -1526,8 +2020,48 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                         context_length=a.get("context_length"),
                         dry_run=bool(a.get("dry_run", False)),
                     )
+                    # Writing config.yaml is not enough: the live client is
+                    # the brain that answers. Without a hot swap, ARES shows
+                    # the new pick while this process keeps serving the old
+                    # one — and a same-id local Ollama model gets blamed on
+                    # Ollama Cloud. Skip the swap while a turn is in flight.
+                    if (
+                        data.get("changed")
+                        and not a.get("dry_run")
+                        and not ctx.busy
+                    ):
+                        try:
+                            from jaeger_ai.main import apply_live_model
+                            applied = bool(apply_live_model())
+                            data["applied"] = applied
+                            if applied:
+                                data["restart_required"] = False
+                                boot = ctx.boot
+                                if boot is not None:
+                                    from jaeger_ai.main import _pipeline
+                                    boot.client = _pipeline.get("client")
+                                    ctx.client = boot.client
+                        except Exception:  # noqa: BLE001
+                            data["applied"] = False
                     _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
                 except Exception as exc:  # noqa: BLE001 — report through the contract
+                    _emit(proto, protocol.result_frame(
+                        req.get("id"), ok=False, error=str(exc)))
+                continue
+            if op == "command" and (req.get("cmd") or "") == "configure_fallback_chain":
+                try:
+                    from jaeger_ai.core.models.configuration import configure_fallback_chain
+
+                    if ctx.layout is None:
+                        raise RuntimeError("no Jaeger instance is selected")
+                    a = req.get("args") or {}
+                    data = configure_fallback_chain(
+                        ctx.layout,
+                        a.get("fallback") or a.get("entries") or [],
+                        dry_run=bool(a.get("dry_run", False)),
+                    )
+                    _emit(proto, protocol.result_frame(req.get("id"), data=data, ok=True))
+                except Exception as exc:  # noqa: BLE001
                     _emit(proto, protocol.result_frame(
                         req.get("id"), ok=False, error=str(exc)))
                 continue
@@ -1629,8 +2163,20 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                         _emit(proto, protocol.result_frame(
                             req.get("id"), ok=False, error=str(exc)))
                 else:
-                    ok, err = _command(req.get("cmd") or "", req.get("args") or {}, target)
+                    cmd = req.get("cmd") or ""
+                    ok, err = _command(cmd, req.get("args") or {}, target)
                     _emit(proto, protocol.result_frame(req.get("id"), ok=ok, error=err))
+                    # Surfaces rebrand from agent_state (name, card, icon)
+                    # instead of waiting for the next turn or a restart.
+                    if ok and cmd in ("select_character", "make_default"):
+                        try:
+                            name, icon = _active_character(target)
+                            _emit(proto, protocol.agent_state_frame(
+                                "ready", model=_model_name(target),
+                                character=name, icon=icon,
+                                agent_name=_display_name(target)))
+                        except Exception:  # noqa: BLE001
+                            pass
                 continue
             # ``{"op":"send","text":...}`` (protocol) or legacy ``{"text":...}``.
             if (req.get("text") or "").strip():
@@ -1649,6 +2195,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     ctx.session_pending[session] = ctx.session_pending.get(session, 0) + 1
                     _emit(proto, protocol.queued_frame(
                         session, ctx.session_pending[session]))
+                req["_out"] = proto
                 turns.put(req)
     finally:
         # Orderly shutdown: let the boot settle (can't clean up a
@@ -1662,6 +2209,21 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             try:
                 ctx.cron.shutdown(wait=False)
             except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
+        if ctx.supervisor_stop is not None:
+            try:
+                ctx.supervisor_stop.set()
+            except Exception:  # noqa: BLE001
+                pass
+        if ctx.webhook_httpd is not None:
+            try:
+                ctx.webhook_httpd.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+        if ctx.bridge_sock is not None:
+            try:
+                ctx.bridge_sock.close()
+            except Exception:  # noqa: BLE001
                 pass
         turns.put(None)
         worker.join(timeout=30)

@@ -157,11 +157,17 @@ _EXPRESSION_CLAUSES: dict[str, tuple[str | None, str | None]] = {
     "aggression": (None, "be forceful and confrontational"),
 }
 
+# Names no framework and no second self on purpose. It used to end "there
+# you are Jaeger OS: cold, precise, literal" — which handed the model a
+# SECOND identity inside the character's own block, and the model duly
+# offered it up when asked who it was. The boundary is about REGISTER (how
+# to write a tool argument), never about who is writing it: there is one
+# identity per turn, and it is whoever persona_display_name says.
 PERSONA_BOUNDARY = (
     "THE PERSONA BOUNDARY: this voice is for prose you address to the operator "
     "ONLY. When you write a PLAN line, call a tool, fill a tool argument, or "
-    "write code, drop the persona entirely — there you are Jaeger OS: cold, "
-    "precise, literal."
+    "write code, drop the persona entirely and write cold, precise, literal "
+    "text — the voice is for the operator, never for the machinery."
 )
 
 

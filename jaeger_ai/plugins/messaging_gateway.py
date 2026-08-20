@@ -38,7 +38,6 @@ import time
 from typing import Any
 
 from ..main import (
-    LlamaCppPythonClient,
     init_extensions,
     prewarm,
     run_for_voice,
@@ -103,10 +102,11 @@ def main() -> int:
     _pipeline["show_tool_activity"] = config.display.show_tool_activity
 
     # ── LLM bring-up — local model, always ──────────────────────────
-    print(f"[gateway] loading Gemma in-process ({layout.root.name})...",
+    print(f"[gateway] loading brain ({layout.root.name})...",
           flush=True)
     started = time.perf_counter()
-    client = LlamaCppPythonClient(config.model, warmup=True)
+    from ..main import make_client
+    client = make_client(config, layout, warmup=True)
     print(f"[gateway] loaded in {time.perf_counter() - started:.1f}s",
           flush=True)
 
