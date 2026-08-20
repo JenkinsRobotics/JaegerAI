@@ -11,9 +11,9 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Window title leading with the AGENT's name (identity.yaml; instance-name
-/// fallback while the identity query is in flight — NEVER the character) —
-/// shared by both avatar surfaces ("<suffix>" ↦ "Jaeger — <name> · <suffix>").
+/// Window title leading with who the agent answers to (character, or
+/// identity.yaml while the neutral sheet is on). Shared by both avatar
+/// surfaces ("<suffix>" ↦ "Jaeger — <name> · <suffix>").
 @MainActor
 private func characterTitle(_ status: AgentStatus?, suffix: String) -> String {
     if let name = status?.displayName { return "Jaeger — \(name) · \(suffix)" }

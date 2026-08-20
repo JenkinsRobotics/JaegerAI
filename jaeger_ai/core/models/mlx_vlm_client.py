@@ -87,6 +87,14 @@ class MlxVlmClient:
     def describe(self) -> str:
         return f"local · mlx-vlm · {self.model_name}"
 
+    def unload(self) -> None:
+        """Drop the weights and clear MLX's buffer cache — same contract
+        as :meth:`jaeger_ai.core.models.mlx_client.MlxClient.unload`. A
+        VLM's vision tower makes this the heaviest local lane to leave
+        resident, so the switch away from it releases explicitly."""
+        from jaeger_ai.core.models.vram import release_local_client
+        release_local_client(self)
+
     def _warmup(self) -> None:
         """One tiny generation to prime mlx-vlm's compilation caches."""
         try:

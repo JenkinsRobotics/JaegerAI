@@ -143,6 +143,15 @@ SOUL_FRAGMENT = "soul_identity"
 DIRECTIVES_FRAGMENT = "agent_directives"
 
 
+def _user_facing(mode: str) -> bool:
+    """Soul / conversational identity — live chat and Deep Think.
+
+    Defined here rather than on jaeger-agent's assemble module so a
+    host on an older engine still drops SOUL.md from idle_board / cron.
+    """
+    return mode in ("agent", "deep_think")
+
+
 def _insert_after(fragments: list, anchor: str, fragment: Any) -> None:
     """Place ``fragment`` directly after the named anchor, or append when
     the anchor is gone (a dependency rename degrades ordering, never
@@ -169,24 +178,30 @@ def register_context_documents() -> bool:
 
     fragments = assemble.PROMPT_FRAGMENTS
     present = {f.name for f in fragments}
-    if SOUL_FRAGMENT in present and DIRECTIVES_FRAGMENT in present:
-        return True
 
-    if SOUL_FRAGMENT not in present:
-        _insert_after(fragments, "identity_name", assemble.PromptFragment(
-            SOUL_FRAGMENT, "instance", "instance/SOUL.md",
-            _soul_identity, assemble._non_subagent,  # noqa: SLF001 — the
-            # module's own mode predicate; re-implementing it here would
-            # drift the moment a mode is added.
-            "who this instance IS — dynamic, no built-in fallback; "
-            "gated by persona.soul_in_prompt",
-        ))
+    # Soul is who the agent is when talking to the user. Standing-work
+    # modes (idle_board / cron) are the hands — they keep AGENTS.md
+    # (how to operate) and drop SOUL.md (voice / identity prose).
+    soul = assemble.PromptFragment(
+        SOUL_FRAGMENT, "instance", "instance/SOUL.md",
+        _soul_identity, _user_facing,
+        "who this instance IS — user-facing modes only; "
+        "gated by persona.soul_in_prompt",
+    )
+    directives = assemble.PromptFragment(
+        DIRECTIVES_FRAGMENT, "instance", "instance/AGENTS.md",
+        _agent_directives, assemble._non_subagent,  # noqa: SLF001
+        "how this instance OPERATES — tools, mission, hardware bindings",
+    )
+    if SOUL_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == SOUL_FRAGMENT:
+                fragments[index] = soul
+                break
+    else:
+        _insert_after(fragments, "identity_name", soul)
     if DIRECTIVES_FRAGMENT not in present:
-        _insert_after(fragments, "framework", assemble.PromptFragment(
-            DIRECTIVES_FRAGMENT, "instance", "instance/AGENTS.md",
-            _agent_directives, assemble._non_subagent,  # noqa: SLF001
-            "how this instance OPERATES — tools, mission, hardware bindings",
-        ))
+        _insert_after(fragments, "framework", directives)
     return True
 
 

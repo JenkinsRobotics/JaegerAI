@@ -74,21 +74,53 @@ external_model:
 
 ## How keys are resolved
 
-In priority order: the instance credential named
-`api_key_credential` → the env var named `api_key_env` → the
-provider's conventional env var (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`).
+In priority order:
+
+1. the instance credential named `api_key_credential`
+2. the provider's standard credential names — `ollama_cloud_api_key`,
+   `openai_api_key`, `anthropic_api_key`, `gemini_api_key`,
+   `xai_api_key`, … (each provider also accepts its own aliases, e.g.
+   `google_api_key` for Gemini, `grok_api_key` for xAI)
+3. the generic `external_model_api_key` credential
+4. the env var named `api_key_env`
+5. the provider's conventional env vars — `OPENAI_API_KEY`,
+   `OLLAMA_API_KEY` / `OLLAMA_CLOUD_API_KEY`, `ANTHROPIC_API_KEY`,
+   `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `XAI_API_KEY` / `GROK_API_KEY`
+
 Keys are never written to `config.yaml` and never logged.
 
-## Boot behaviour and fallback
+## Boot behaviour — the selected model serves, or nothing does
 
-At boot, `make_client()` builds the external client and runs a tiny
-live connectivity check. If the endpoint is unreachable or the key is
-missing, it **prints a warning and falls back to the local model** —
-the robot is never left without a brain because a cloud endpoint is
-down. `/model` in the TUI shows which brain actually came up.
+At boot, `make_client()` builds the external client and runs a cheap
+`GET /models` connectivity check. If the endpoint is unreachable or the
+key is missing, it **raises `ExternalModelSelectionError`** naming the
+provider, the model, the failure, and the fixes that apply.
+
+It does **not** load the local GGUF instead. Selecting Qwen on Ollama
+Cloud and mistyping the key used to allocate ~15 GB of local weights and
+answer every turn from a model the operator never chose, with nothing on
+screen to say so. A selection we cannot honour is now an error, not a
+substitution.
+
+`/model use …` in the TUI preflights the same check *before* it writes
+`config.yaml` and reboots, so a selection that can't serve leaves the
+current brain running and prints what to fix.
+
+Set `JAEGER_ALLOW_LOCAL_FALLBACK=1` to restore the old degrade-to-local
+behaviour for unattended deployments that would rather answer from the
+wrong model than not boot. It is off by default, and the fallback
+announces itself on stdout and in `/model`.
 
 ## Notes
 
+- **Switching away from a local brain frees its VRAM.** Every local
+  client (`LlamaCppPythonClient`, `MlxClient`, `MlxVlmClient`) exposes
+  `unload()`, and the model swap, the instance switch, and `boot_for_tui`'s
+  cleanup all call it. On Apple Silicon those weights are GPU memory: when
+  the next brain is an HTTP endpoint there is no second load to force the
+  old one out, so a local→cloud switch used to leave 5–17 GB resident for
+  the rest of the session. `ExternalModelClient.unload()` is a no-op, so
+  call sites never need to ask what they're holding.
 - **Deep Think model-swap** (`switch_model`, the local Realtime ⇄ Coder
   swap) is a llama-cpp feature. With an external brain, Deep Think keeps
   running on that same external model — there is no local coder model

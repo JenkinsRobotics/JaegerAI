@@ -149,6 +149,12 @@ _INTENTIONAL_FAIL_OPEN: frozenset[str] = frozenset({
     # Umbrellas — they SUBSUME categories so by design they're outside
     # any single one.
     "memory", "kanban", "skill", "computer_use", "computer_do", "browser",
+    # ``execute_with_tools`` is the code bridge: one script that calls many
+    # tools in a single inference turn, so it subsumes every category the
+    # same way the umbrellas above do. It is not a privilege widening —
+    # it carries ``execute_code``'s WRITE_LOCAL gate, and every tool the
+    # script reaches re-checks its own tier at dispatch.
+    "execute_with_tools",
     # Self-update is always available — the agent rewrites its own
     # identity / soul, and tunes its own personality sliders.
     # ``adjust_trait`` joins that family: JaegerAI registers it (the

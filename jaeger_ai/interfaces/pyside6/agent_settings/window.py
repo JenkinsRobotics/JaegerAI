@@ -138,7 +138,8 @@ _BTN_DEFAULT = (f"QPushButton{{background:{_FIELD}; color:{_INK};"
 
 class LibraryCard(QFrame):
     """Character-library card — art fill + rev/level badges + top-3 stats over a
-    bottom gradient, with SELECT (play it) + MAKE DEFAULT (bind it)."""
+    bottom gradient, with SELECT / MAKE DEFAULT. Both bind: picking a
+    character is who this instance is (survives restart)."""
 
     CARD_W, CARD_H = 276, 356
 
@@ -343,12 +344,20 @@ class AgentSettingsWindow(QWidget):
         self._go(current)
 
     def _switch_character(self, ch: Any, goto: str = "Library") -> None:
-        """Retarget the whole app to a character — panel + all editable tabs.
-        The agent's own name (``self._name``) never changes on a persona
-        switch, so the panel heading is left alone; only the avatar/pages
-        retarget to the new character."""
+        """Retarget the whole app to a character — panel, title, and tabs.
+        The character's name is the name the agent answers to (neutral
+        sheet: identity.yaml), so the heading has to move with the pick."""
         self.character = ch
+        self._name = agent_name(self.ctx)
+        self.setWindowTitle(f"JaegerAI — {self._name} · settings")
+        if getattr(self, "_panel_name", None) is not None:
+            self._panel_name.setText(self._name.upper())
         show_card(self._avatar, ch)
+        try:
+            from jaeger_ai.main import apply_live_character
+            apply_live_character()
+        except Exception:  # noqa: BLE001 — bind already landed
+            pass
         self._build_pages(goto)
 
     # ── left rail ──
@@ -522,13 +531,16 @@ class AgentSettingsWindow(QWidget):
         return self._scroll(inner)
 
     def _select_character(self, ch: Any) -> None:
-        """SELECT — the instance plays this character now; tabs edit it."""
-        from jaeger_ai.personality.character import set_active_character
+        """SELECT — this instance is now this character. Session-only
+        ``set_active_character`` snapped back to the old binding on the
+        next boot, so the HUD looked like it swapped and then didn't."""
+        from jaeger_ai.personality.character import bind_character
         try:
             root = getattr(self._inst_layout(), "root", None)
             if root is not None:
-                set_active_character(root, ch.id)
+                bind_character(root, ch.id)
             self._active_id = ch.id
+            self._bound_id = ch.id
         except Exception:  # noqa: BLE001 — still retarget the UI
             pass
         self._switch_character(ch, goto="Library")

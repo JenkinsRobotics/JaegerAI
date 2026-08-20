@@ -236,17 +236,16 @@ final class AgentBridge: ObservableObject {
     func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
         guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
         let result = await bridge.command(cmd, args: args)
-        if result.ok && cmd == "select_character" {
+        if result.ok && (cmd == "select_character" || cmd == "make_default") {
             await refreshIdentity()
         }
         return result
     }
 
-    /// Re-ask the bridge for the agent name + active character + model and
-    /// fold the answer into ``status``. Cheap (one small query); safe to
-    /// call from any surface's appear hook. ``agent_name`` (v1 additive) is
-    /// the AGENT's own name (identity.yaml) — surfaces lead with it; the
-    /// character is the persona being played, secondary flavor.
+    /// Re-ask the bridge for the live identity and fold it into ``status``.
+    /// Cheap (one small query). Surfaces lead with ``display_name`` — the
+    /// one name the agent answers to (character, or identity.yaml while
+    /// the neutral sheet is selected).
     func refreshIdentity() async {
         let result = await query("identity")
         guard result.ok, let data = result.json,
@@ -256,6 +255,10 @@ final class AgentBridge: ObservableObject {
         raw["agent_name"] = obj["agent_name"] as? String as Any
         raw["character"] = obj["character"] as? String as Any
         raw["icon"] = obj["icon"] as? String as Any
+        if let displayName = obj["display_name"] as? String {
+            raw["display_name"] = displayName as Any
+        }
+        if let avatar = obj["avatar"] { raw["avatar"] = avatar }
         if let model = obj["model"] as? String { raw["model"] = model as Any }
         status = AgentStatus(rawDict: raw)
     }
@@ -405,18 +408,18 @@ struct AgentStatus {
     var modelName: String? { rawDict["model"] as? String }
     /// The AGENT's own name — identity.yaml's ``name``, the unique robot
     /// named at instance creation (v1 additive ``agent_name`` off the
-    /// identity query). Surfaces lead with this.
+    /// identity query). Surfaces lead with ``displayName``, not this.
     var agentName: String? { rawDict["agent_name"] as? String }
-    /// Active character's display name — the PERSONA being played,
-    /// secondary flavor next to ``agentName`` ("Ted · playing HAL 9000").
+    /// Active character's display name — who is answering while a
+    /// character sheet is selected.
     var character: String? { rawDict["character"] as? String }
-    /// What the header should lead with: the agent's name. NEVER falls
-    /// back to the character — the character is a persona preset, not the
-    /// agent's identity, and must not stand in for it on any surface that
-    /// represents the agent (window titles, tray, chat header). Falls back
-    /// to the instance (dir name / universal key) while the identity query
-    /// is still in flight.
-    var displayName: String? { agentName ?? instance }
+    /// The one name the agent answers to right now: the identity query's
+    /// ``display_name`` (the character, unless the neutral sheet is on).
+    /// Falls back to the instance name while that query is still in flight.
+    var displayName: String? {
+        if let dn = rawDict["display_name"] as? String, !dn.isEmpty { return dn }
+        return agentName ?? character ?? instance
+    }
     /// Absolute path to the agent's effective avatar (instance profile
     /// picture if set, else the active character's card).
     var iconPath: String? { rawDict["icon"] as? String }

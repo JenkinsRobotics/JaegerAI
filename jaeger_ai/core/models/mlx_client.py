@@ -75,6 +75,18 @@ class MlxClient:
     def describe(self) -> str:
         return f"local · mlx · {self.model_name}"
 
+    def unload(self) -> None:
+        """Drop the weights and hand MLX's buffer cache back to the OS.
+
+        MLX frees an array into its OWN cache rather than to the system,
+        so ``del model`` alone leaves the memory checked out of the
+        process's budget — ``mx.clear_cache()`` is what returns it, and
+        it has to run on the executor thread below because MLX pins its
+        GPU stream to whichever thread created it. See
+        :func:`jaeger_ai.core.models.vram.release_local_client`."""
+        from jaeger_ai.core.models.vram import release_local_client
+        release_local_client(self)
+
     def _warmup(self) -> None:
         """One tiny generation to prime mlx-lm's compilation caches so the
         first user-facing turn doesn't pay the cold-start tax."""

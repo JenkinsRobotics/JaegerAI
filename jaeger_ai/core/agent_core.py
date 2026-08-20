@@ -97,21 +97,26 @@ class AgentCore(Core):
 
 
 def _agent_name() -> str:
-    """The agent's display name for the window/tray title — the live
-    ``identity.yaml`` ``name`` (a separate file from ``config.yaml``);
-    'agent' only if the identity isn't reachable."""
+    """The agent's display name for the window/tray title — the one name
+    it answers to: the selected character's, or ``identity.yaml``'s while
+    the neutral sheet is selected (see
+    :func:`jaeger_ai.personality.character.persona_display_name`).
+    'agent' only if neither is reachable."""
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
         from jaeger_ai.main import _pipeline
         layout = _pipeline.get("layout")
         if layout is not None:
-            from jaeger_ai.personality.character import active_character
-            ch = active_character(layout.root)
-            if ch is not None and ch.name:
-                return str(ch.name)
-            name = load_yaml(layout.identity_path, Identity).name
+            from jaeger_ai.personality.character import (
+                active_character, persona_display_name,
+            )
+            try:
+                own = str(load_yaml(layout.identity_path, Identity).name or "")
+            except Exception:  # noqa: BLE001 — a title never blocks on a file
+                own = ""
+            name = persona_display_name(own, active_character(layout.root))
             if name:
-                return str(name)
+                return name
     except Exception:  # noqa: BLE001
         pass
     return "agent"

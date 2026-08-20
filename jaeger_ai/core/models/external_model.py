@@ -49,15 +49,32 @@ from jaeger_ai.core.instance.schemas import ExternalModelConfig
 # openai/) — so it rides the same path as openai, no native adapter.
 _OPENAI_COMPATIBLE = {"lmstudio", "ollama", "ollama-cloud", "openai", "gemini", "xai"}
 
+# Providers whose endpoint is off-box. A failure here is an auth or
+# network problem the operator can fix; a failure on a LOCAL server
+# (lmstudio / ollama) usually just means the server isn't running.
+_CLOUD_PROVIDERS = {"ollama-cloud", "openai", "anthropic", "gemini", "xai"}
+
 # The conventional environment variable each provider's key lives in,
-# checked last by :func:`resolve_api_key`.
-_CONVENTIONAL_ENV = {
-    "openai": "OPENAI_API_KEY",
-    "lmstudio": "OPENAI_API_KEY",
-    "ollama-cloud": "OLLAMA_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "xai": "XAI_API_KEY",
+# checked by :func:`resolve_api_key`. Supports multiple fallback aliases.
+_CONVENTIONAL_ENV: dict[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY",),
+    "lmstudio": ("OPENAI_API_KEY",),
+    "ollama": ("OLLAMA_API_KEY",),
+    "ollama-cloud": ("OLLAMA_API_KEY", "OLLAMA_CLOUD_API_KEY", "OLLAMA_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+}
+
+# Standard credential names per provider
+_PROVIDER_CREDENTIAL_ALIASES: dict[str, tuple[str, ...]] = {
+    "openai": ("openai_api_key", "external_model_api_key"),
+    "lmstudio": ("lmstudio_api_key", "external_model_api_key"),
+    "ollama": ("ollama_api_key", "external_model_api_key"),
+    "ollama-cloud": ("ollama_cloud_api_key", "ollama_api_key", "external_model_api_key"),
+    "anthropic": ("anthropic_api_key", "external_model_api_key"),
+    "gemini": ("gemini_api_key", "google_api_key", "external_model_api_key"),
+    "xai": ("xai_api_key", "grok_api_key", "external_model_api_key"),
 }
 
 
@@ -75,6 +92,58 @@ class ExternalModelError(RuntimeError):
     """Raised when an external model can't be built or reached."""
 
 
+class ExternalModelSelectionError(ExternalModelError):
+    """The operator SELECTED an external model and it cannot serve.
+
+    Distinct from :class:`ExternalModelError` (which any probe may raise
+    in passing) because this one is terminal by design: it is what
+    ``make_client`` raises instead of quietly loading local weights the
+    operator did not ask for. Its message is meant to be shown verbatim —
+    see :func:`selection_failure_message`.
+    """
+
+
+def selection_failure_message(ext: ExternalModelConfig, reason: str) -> str:
+    """The operator-facing explanation for a selection that can't serve.
+
+    Names the selection (provider AND model, kept separate — they are two
+    different choices and reading them back merged into one string is how
+    "ollama-cloud/qwen3.5:397b" starts looking like a model name), states
+    what went wrong, and lists the fixes that apply to THIS provider: a
+    key for a cloud endpoint, a running server for a local one.
+    """
+    provider = str(getattr(ext, "provider", "") or "?")
+    model = str(getattr(ext, "model", "") or "?")
+    lines = [
+        f"selected model cannot serve — provider {provider!r}, "
+        f"model {model!r}: {reason}",
+    ]
+    if provider in _CLOUD_PROVIDERS:
+        cred = str(getattr(ext, "api_key_credential", "") or "")
+        envs = list(_CONVENTIONAL_ENV.get(provider, ()))
+        env_named = str(getattr(ext, "api_key_env", "") or "")
+        if env_named and env_named not in envs:
+            envs.insert(0, env_named)
+        lines.append(
+            f"  • credentials: store one as `/key` (credential {cred!r}) "
+            f"or export {' / '.join(envs) or 'the provider key'}"
+        )
+        lines.append(
+            f"  • model id: confirm {model!r} exists on {provider} "
+            f"(`/model list`)"
+        )
+    else:
+        lines.append(
+            f"  • start the {provider} server, then retry "
+            f"(endpoint {getattr(ext, 'base_url', '?')})"
+        )
+    lines.append(
+        "  • fix the selected provider/model — this process will not "
+        "load a local GGUF/MLX as a substitute"
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Key resolution
 # ---------------------------------------------------------------------------
@@ -82,41 +151,62 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     """Resolve the provider API key, in priority order:
 
       1. the instance credential named ``ext.api_key_credential``
-      2. the environment variable named ``ext.api_key_env``
-      3. the provider's conventional env var (OPENAI_API_KEY /
-         ANTHROPIC_API_KEY)
+      2. provider-specific credential names (e.g. ``ollama_cloud_api_key``)
+      3. generic ``external_model_api_key`` credential
+      4. the environment variable named ``ext.api_key_env``
+      5. the provider's conventional env vars (OPENAI_API_KEY /
+         OLLAMA_CLOUD_API_KEY / ANTHROPIC_API_KEY, etc.)
 
-    Returns ``""`` when nothing is found — fine for a local LM Studio
-    server, which accepts any placeholder key.
+    Returns ``""`` when nothing is found — fine for a local LM Studio /
+    local Ollama server, which accepts any placeholder key.
     """
-    if layout is not None and ext.api_key_credential:
-        try:
-            from jaeger_agent import credentials as creds
-
-            val = creds.get_credential(layout, ext.api_key_credential)
-            if val:
-                return val
-        except Exception:  # noqa: BLE001 — missing credential is expected
-            pass
+    if layout is not None:
         try:
             from pathlib import Path
-            root = getattr(layout, "root", None) or getattr(layout, "credentials_dir", None) or Path(str(layout))
-            if hasattr(layout, "credentials_dir"):
-                cred_file = layout.credentials_dir / ext.api_key_credential
-            else:
-                cred_file = Path(str(root)) / "credentials" / ext.api_key_credential
-            if cred_file.is_file():
-                txt = cred_file.read_text(encoding="utf-8").strip()
-                if txt:
-                    return txt
-        except Exception:
+            from jaeger_agent import credentials as creds
+
+            # Collect candidate credential names to check in order
+            candidates: list[str] = []
+            if ext.api_key_credential:
+                candidates.append(ext.api_key_credential)
+            for alias in _PROVIDER_CREDENTIAL_ALIASES.get(ext.provider, ()):
+                if alias not in candidates:
+                    candidates.append(alias)
+
+            for cred_name in candidates:
+                try:
+                    val = creds.get_credential(layout, cred_name)
+                    if val:
+                        return val
+                except Exception:  # noqa: BLE001
+                    pass
+
+                try:
+                    root = getattr(layout, "root", None) or getattr(layout, "credentials_dir", None) or Path(str(layout))
+                    if hasattr(layout, "credentials_dir"):
+                        cred_file = layout.credentials_dir / cred_name
+                    else:
+                        cred_file = Path(str(root)) / "credentials" / cred_name
+                    if cred_file.is_file():
+                        txt = cred_file.read_text(encoding="utf-8").strip()
+                        if txt:
+                            return txt
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
             pass
+
     if ext.api_key_env:
-        val = os.environ.get(ext.api_key_env, "")
+        val = os.environ.get(ext.api_key_env, "").strip()
         if val:
             return val
-    conventional = _CONVENTIONAL_ENV.get(ext.provider, "")
-    return os.environ.get(conventional, "") if conventional else ""
+
+    for env_var in _CONVENTIONAL_ENV.get(ext.provider, ()):
+        val = os.environ.get(env_var, "").strip()
+        if val:
+            return val
+
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -142,13 +232,16 @@ def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:
         _placeholder = {"lmstudio": "lm-studio", "ollama": "ollama"}
         key = api_key or _placeholder.get(ext.provider, "")
         if not key:
-            env = ext.api_key_env or _CONVENTIONAL_ENV.get(
-                ext.provider, "OPENAI_API_KEY",
-            )
+            # ``_CONVENTIONAL_ENV`` holds a TUPLE of aliases per provider;
+            # interpolating it raw printed "set the ('OLLAMA_API_KEY',
+            # 'OLLAMA_CLOUD_API_KEY') env var" at the operator.
+            envs = [ext.api_key_env] if ext.api_key_env else []
+            envs += [e for e in _CONVENTIONAL_ENV.get(ext.provider, ())
+                     if e not in envs]
             raise ExternalModelError(
                 f"provider {ext.provider!r} needs an API key — set the "
-                f"{ext.api_key_credential!r} credential or the {env} "
-                f"env var."
+                f"{ext.api_key_credential!r} credential or one of these "
+                f"env vars: {', '.join(envs) or 'OPENAI_API_KEY'}."
             )
         return key
 
@@ -311,6 +404,14 @@ class ExternalModelClient:
             block.text for block in resp.content if getattr(block, "type", "") == "text"
         )
 
+    def unload(self) -> None:
+        """No-op — an external brain holds no local weights.
+
+        Present so teardown paths can call ``client.unload()`` without
+        first asking what kind of client they hold. A ``hasattr`` guard
+        at the call site is a place for the local case to get skipped by
+        accident, which is the exact bug this whole lane is about."""
+
     # -- diagnostics -------------------------------------------------------
     def describe(self) -> str:
         where = self.ext.base_url if self.provider in _OPENAI_COMPATIBLE else "api.anthropic.com"
@@ -331,14 +432,44 @@ class ExternalModelClient:
         try:
             if self.provider in _OPENAI_COMPATIBLE:
                 import requests
+
                 key = self._api_key or (
-                    "lm-studio" if self.provider == "lmstudio" else "")
-                headers = {"Authorization": f"Bearer {key}"} if key else {}
-                resp = requests.get(
-                    f"{self.ext.base_url.rstrip('/')}/models",
-                    headers=headers, timeout=self.ext.timeout_s,
+                    "lm-studio" if self.provider == "lmstudio" else (
+                        "ollama" if self.provider == "ollama" else ""
+                    )
                 )
-                resp.raise_for_status()
+                headers = {"Authorization": f"Bearer {key}"} if key else {}
+                endpoint = self.ext.base_url.rstrip("/")
+                probe_timeout = min(float(getattr(self.ext, "timeout_s", 60.0) or 60.0), 10.0)
+
+                try:
+                    resp = requests.get(
+                        f"{endpoint}/models",
+                        headers=headers,
+                        timeout=probe_timeout,
+                    )
+                    resp.raise_for_status()
+                except Exception as probe_err:
+                    if "ollama" not in self.provider:
+                        raise
+                    # Ollama also answers its native ``/api/tags``, which
+                    # some builds serve when the OpenAI-compat ``/models``
+                    # route doesn't. Worth a second shot — but only as a
+                    # second shot: if it fails too, the FIRST error is the
+                    # one that explains the failure. Letting the /api/tags
+                    # 404 propagate instead reported "404 Not Found" for
+                    # what was actually a rejected API key.
+                    root = endpoint[:-3] if endpoint.endswith("/v1") else endpoint
+                    try:
+                        resp2 = requests.get(
+                            f"{root}/api/tags",
+                            headers=headers,
+                            timeout=probe_timeout,
+                        )
+                        resp2.raise_for_status()
+                    except Exception:
+                        raise probe_err from None
+
                 return {"ok": True, "detail": "endpoint reachable",
                         "latency_s": round(time.perf_counter() - started, 2)}
             # Anthropic — a small generation probe (no /models list).

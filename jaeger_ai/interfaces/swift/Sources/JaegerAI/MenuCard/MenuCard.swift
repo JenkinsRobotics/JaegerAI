@@ -16,9 +16,8 @@ struct MenuCard: View {
     @ObservedObject var tts: TTSManager
     @ObservedObject private var settings = SettingsStore.shared
 
-    /// Display name = the AGENT's name (identity.yaml), never the character —
-    /// the character is only the persona it's playing. Falls back to the
-    /// instance while the identity query is in flight, then the default.
+    /// Display name = who the agent answers to right now (the selected
+    /// character, or identity.yaml while the neutral sheet is on).
     private var displayName: String {
         agent.status?.displayName ?? agent.status?.instance ?? AgentBridge.defaultInstanceName
     }

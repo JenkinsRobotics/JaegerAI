@@ -337,6 +337,38 @@ def _autowrite_ollama_ctx(cfg: Any) -> None:
         pass
 
 
+def _preflight_external(cfg: Any) -> tuple[bool, str]:
+    """Can the external brain in ``cfg`` actually serve? ``(ok, detail)``.
+
+    Runs the same construction + connectivity check ``make_client`` runs,
+    but BEFORE the switch is persisted and the TUI reboots onto it. Since
+    a selection that can't serve is now a hard failure rather than a
+    quiet demotion to the local GGUF, an unchecked switch would reboot
+    the operator into a brainless session; checking here keeps the
+    working brain and reports what to fix. ``detail`` is the same
+    operator-facing text the boot path raises.
+    """
+    from jaeger_ai.core.models.external_model import (
+        ExternalModelClient,
+        ExternalModelError,
+        selection_failure_message,
+    )
+    from jaeger_ai.main import _pipeline
+
+    ext = cfg.external_model
+    try:
+        client = ExternalModelClient(ext, _pipeline.get("layout"))
+        check = client.connectivity_check()
+        if check.get("ok"):
+            return True, ""
+        reason = f"unreachable — {check.get('detail', 'no detail')}"
+    except ExternalModelError as exc:
+        reason = f"not configured — {exc}"
+    except Exception as exc:  # noqa: BLE001 — any failure is a refusal
+        reason = f"{type(exc).__name__}: {exc}"
+    return False, selection_failure_message(ext, reason)
+
+
 def _resolve_cloud_key(ctx: SlashContext) -> str:
     """The stored external-model API key, if any — used to discover the
     Ollama Cloud catalogue. Empty string when none is configured."""
@@ -711,6 +743,17 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     target = args[0].lower()
     wanted = " ".join(args[1:]).strip()
 
+    # Snapshot the live selection. Every abort path below restores it —
+    # the branches mutate ``cfg`` in place, and a half-applied switch left
+    # in memory is exactly the config-says-one-thing / client-serves-
+    # another drift this command exists to prevent.
+    prior_ext = cfg.external_model.model_copy(deep=True)
+    prior_model = cfg.model.model_copy(deep=True)
+
+    def _restore() -> None:
+        cfg.external_model = prior_ext.model_copy(deep=True)
+        cfg.model = prior_model.model_copy(deep=True)
+
     if target in ("local", "llama-cpp", "llamacpp", "jaeger"):
         cfg.external_model.enabled = False
         # Explicitly land back on the GGUF engine — without this,
@@ -818,6 +861,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         # A cloud endpoint needs a real API key — make sure one is on
         # hand (prompting + storing it if not) before we reboot onto it.
         if not _ensure_cloud_key(ctx, cfg, provider):
+            _restore()
             return SlashResult()
         summary = f"external · {provider} · {wanted}"
         _autowrite_ollama_ctx(cfg)
@@ -828,6 +872,28 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
             "gemini / xai.")
         return SlashResult()
 
+    targeted_external = target not in (
+        "local", "llama-cpp", "llamacpp", "jaeger",
+        "mlx", "mlx-lm", "mlx_lm",
+    )
+
+    # Preflight an external selection BEFORE anything is persisted. The
+    # boot path no longer substitutes the local GGUF for a selection it
+    # can't serve (see ``main.make_client``), so an unchecked switch onto
+    # a bad key would reboot the operator into a session with no brain at
+    # all. Checking here costs one HTTP round-trip and keeps the working
+    # brain running while the selection is corrected.
+    if targeted_external:
+        ok, detail = _preflight_external(cfg)
+        if not ok:
+            _restore()
+            ctx.console.print(
+                f"[red]✗ Not switching[/] — {summary} can't serve.\n"
+                f"[dim]{detail}[/]\n"
+                f"[dim]Still on:[/] {_brain_line(cfg, _live_client())}"
+            )
+            return SlashResult()
+
     # Persist to config.yaml, then reboot so make_client rebuilds the brain.
     from jaeger_ai.core.instance.instance import InstanceLayout
     from jaeger_ai.core.instance.schemas import dump_yaml
@@ -836,6 +902,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     try:
         dump_yaml(layout.config_path, cfg)
     except Exception as exc:  # noqa: BLE001
+        _restore()
         ctx.console.print(f"[red]Couldn't save config:[/] {exc}")
         return SlashResult()
     ctx.console.print(
@@ -843,27 +910,34 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     try:
         ctx.tui.switch_instance(name)
     except Exception as exc:  # noqa: BLE001
+        # The reboot tore the old brain down and failed to raise a new
+        # one — the session has NO client right now. Put the previous
+        # selection back on disk and boot onto it, so a failed switch
+        # costs a reload rather than the rest of the session.
         ctx.console.print(f"[red]Reboot failed:[/] {exc}")
+        _restore()
+        try:
+            dump_yaml(layout.config_path, cfg)
+            ctx.tui.switch_instance(name)
+            ctx.console.print(
+                f"[yellow]↩ Restored:[/] {_brain_line(cfg, _live_client())}")
+        except Exception as exc2:  # noqa: BLE001
+            ctx.console.print(
+                f"[red]Couldn't restore the previous brain:[/] {exc2} — "
+                "restart the TUI, or fix config.yaml by hand.")
         return SlashResult()
-    # ``make_client`` silently falls back to the local model when an
-    # external endpoint fails its connectivity check. Tell the truth here
-    # rather than parroting the requested target — otherwise the user
-    # sees "✓ Brain is now external · ollama-cloud · X" while the actual
-    # brain is the local gguf the fallback loaded.
-    from jaeger_ai.main import _pipeline as _pl
-    active_client = _pl.get("client")
-    targeted_external = target not in (
-        "local", "llama-cpp", "llamacpp", "jaeger",
-        "mlx", "mlx-lm", "mlx_lm",
-    )
+
+    # The boot path raises rather than substituting a model now, so a
+    # reboot that returned means the requested brain IS the live one.
+    # Still read the client back: it is the outcome, and the config is
+    # only ever the intent.
+    active_client = _live_client()
     actually_local = getattr(active_client, "kind", "local") == "local"
     if targeted_external and actually_local:
         local_name = Path(str(cfg.model.model_path)).name
         ctx.console.print(
-            f"[yellow]⚠ Couldn't reach {summary}.[/] "
-            f"Fell back to [bold]local · {local_name}[/]. "
-            f"[dim]Check the endpoint / credentials, then try again.[/]"
-        )
+            f"[yellow]⚠ Asked for {summary} but [bold]local · {local_name}[/] "
+            f"is answering.[/] Restart Jaeger — local fallback is disabled.")
     else:
         ctx.console.print(f"[green]✓ Brain is now {summary}.[/]")
         # Successful switch — remember which external model the user picked so
@@ -876,6 +950,12 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
             except Exception:  # noqa: BLE001
                 pass
     return SlashResult()
+
+
+def _live_client() -> Any:
+    """The client actually serving, straight off the pipeline (or None)."""
+    from jaeger_ai.main import _pipeline
+    return _pipeline.get("client")
 
 
 def _models(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001

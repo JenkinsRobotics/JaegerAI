@@ -8,7 +8,9 @@ PERSONA_MODE_C_BUILD_PLAN.md, Task 1.
 delegated, compose-guard, lane-error) is covered in
 dev/tests/jaeger_os/agent/test_persona_lane.py. This file covers the
 main.py-side wiring: mode resolution (config default + env override in
-both directions), the shared identity framing, and the
+both directions), the single-identity rule (2026-08-19: a selected
+character IS the agent; only the neutral ``assistant`` sheet yields to
+identity.yaml), and the
 ``_run_persona_lane_turn`` / ``_persona_lane_turn_result`` glue —
 including the regression pin that mode="persona_last" (the explicit
 Station-3-only path) never reaches the Mode-C branch, the fail-safe pin
@@ -27,6 +29,7 @@ from jaeger_ai.core.instance.schemas import (
     Config, ModelConfig, PersonaConfig, SkillsConfig,
 )
 from jaeger_ai.core.instance.instance import InstanceLayout
+from jaeger_ai.personality.character import persona_display_name
 from jaeger_ai.main import (
     _agent_cache,
     _jaeger_agents_by_session,
@@ -106,28 +109,48 @@ def test_persona_mode_env_garbage_value_ignored(monkeypatch):
 
 
 class _Character:
-    def __init__(self, name: str, block: str = "## My voice"):
+    def __init__(self, name: str, block: str = "## My voice", neutral: bool = False):
         self.name = name
+        self.neutral = neutral
         self._block = block
 
     def character_block(self) -> str:
         return self._block
 
 
-def test_identity_block_substitutes_character_name_when_names_differ():
-    # Hardened 2026-07-19: first-person bindings are scrubbed — every
-    # occurrence of the character's name in the persona body becomes the
-    # agent's name (case-insensitive). The framing then references the
-    # character in THIRD person only ("modeled on X"), so the model can
-    # draw on what it knows about a famous character without becoming it.
+def test_identity_block_passes_a_character_sheet_through_verbatim():
+    """Operator decision 2026-08-19: a selected character IS the agent.
+    The sheet reaches the model exactly as written — its own name intact,
+    no "your name is really Ted" framing bolted on top. Two names in one
+    prompt is what produced "I'm Jarvis, playing Clanker"."""
+    sheet = "## My voice — Lilith\n\nYou are LILITH."
+    assert _persona_identity_block("Ted", _Character("Lilith", block=sheet)) == sheet
+
+
+def test_identity_block_binds_the_neutral_sheet_to_the_instance_name():
+    """The ``assistant`` sheet is nobody in particular, so the instance's
+    own name (identity.yaml) comes through — the way to be "Ted, a plain
+    assistant" rather than "Assistant"."""
     block = _persona_identity_block(
-        "Ted", _Character("Lilith", block="## My voice — Lilith\n\nYou are LILITH."))
-    framing, body = block.split("\n\n", 1)
-    assert framing.startswith("Your name is Ted")
-    assert "modeled on Lilith" in framing
-    assert "Lilith" not in body and "LILITH" not in body
-    assert "## My voice — Ted" in body
-    assert "You are Ted." in body
+        "Ted",
+        _Character("Assistant", block="## My voice — Assistant\n\nYou are ASSISTANT.",
+                   neutral=True),
+    )
+    assert "Assistant" not in block and "ASSISTANT" not in block
+    assert "## My voice — Ted" in block
+    assert "You are Ted." in block
+
+
+def test_identity_block_adds_no_framing_paragraph():
+    """Nothing is prepended, for either kind of sheet — the block starts
+    at the sheet's own first line."""
+    for character in (_Character("Lilith"), _Character("Assistant", neutral=True)):
+        assert _persona_identity_block("Ted", character).startswith("## My voice")
+
+
+def test_identity_block_leaves_neutral_sheet_alone_when_no_instance_name():
+    block = _persona_identity_block("", _Character("Assistant", neutral=True))
+    assert block == "## My voice"
 
 
 def test_identity_block_skips_framing_when_agent_name_matches_character():
@@ -135,9 +158,21 @@ def test_identity_block_skips_framing_when_agent_name_matches_character():
     assert block == "## My voice"
 
 
-def test_identity_block_skips_framing_when_agent_name_empty():
-    block = _persona_identity_block("", _Character("Lilith"))
-    assert block == "## My voice"
+# ── persona_display_name: the one name, shared by prompt and surfaces ─
+
+
+def test_display_name_prefers_the_character():
+    assert persona_display_name("Ted", _Character("Clanker")) == "Clanker"
+
+
+def test_display_name_yields_to_the_instance_for_the_neutral_sheet():
+    assert persona_display_name("Ted", _Character("Assistant", neutral=True)) == "Ted"
+
+
+def test_display_name_falls_back_when_one_side_is_missing():
+    # Neutral sheet on an unnamed instance still has to answer to something.
+    assert persona_display_name("", _Character("Assistant", neutral=True)) == "Assistant"
+    assert persona_display_name("Ted", None) == "Ted"
 
 
 # ── _run_persona_lane_turn: fail-open + no-double-run glue ───────────
