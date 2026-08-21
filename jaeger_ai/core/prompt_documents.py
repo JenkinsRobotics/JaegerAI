@@ -141,6 +141,21 @@ def _agent_directives(ctx: Any) -> str:
 
 SOUL_FRAGMENT = "soul_identity"
 DIRECTIVES_FRAGMENT = "agent_directives"
+SURFACES_FRAGMENT = "ares_surfaces"
+
+_ARES_SURFACES_BLOCK = """ARES WEBUI SURFACES — do not confuse these:
+
+- SCHEDULED JOBS (ARES panel "Scheduled jobs") are timed/recurring automations.
+  Create/change/stop them with `schedule_prompt`, `list_schedules`, `cancel_schedule`.
+  After you schedule, tell the user it is in Scheduled jobs. Call the tool NOW when
+  they ask to activate — do not wait for another message, and do not put the cron
+  on the kanban board instead of scheduling it.
+- KANBAN is the standing TODO / work board (backlog / ready / in_progress / done).
+  It is NOT the automation dashboard, not an on/off switch for a cron, and not
+  where the user looks to see whether a weekly job will fire.
+- A kanban card may *describe* work related to an automation (write the script),
+  but the running schedule exists only after `schedule_prompt` succeeds.
+"""
 
 
 def _user_facing(mode: str) -> bool:
@@ -202,11 +217,26 @@ def register_context_documents() -> bool:
         _insert_after(fragments, "identity_name", soul)
     if DIRECTIVES_FRAGMENT not in present:
         _insert_after(fragments, "framework", directives)
+
+    surfaces = assemble.PromptFragment(
+        SURFACES_FRAGMENT, "framework", "jaeger_ai/core/prompt_documents.py",
+        lambda _ctx: _ARES_SURFACES_BLOCK.strip(),
+        assemble._non_subagent,  # noqa: SLF001
+        "ARES Scheduled jobs vs kanban — stop treating the board as a cron UI",
+    )
+    if SURFACES_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == SURFACES_FRAGMENT:
+                fragments[index] = surfaces
+                break
+    else:
+        _insert_after(fragments, DIRECTIVES_FRAGMENT, surfaces)
     return True
 
 
 __all__ = [
     "DIRECTIVES_FRAGMENT", "DIRECTIVES_MAX_CHARS", "DIRECTIVES_NAMES",
     "SOUL_FRAGMENT", "SOUL_MAX_CHARS", "SOUL_NAMES",
+    "SURFACES_FRAGMENT",
     "load_agent_directives", "load_soul", "register_context_documents",
 ]
