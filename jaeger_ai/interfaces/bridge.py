@@ -274,7 +274,7 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
-    "board", "heartbeat", "cron",
+    "board", "heartbeat", "cron", "list_schedules",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -286,6 +286,7 @@ BRIDGE_COMMANDS = (
     "set_credential", "delete_credential",
     "configure_model", "configure_fallback_chain",
     "create_session", "clear_session", "delete_session", "reconcile_session_transcript",
+    "create_schedule", "cancel_schedule", "pause_schedule", "resume_schedule",
 )
 
 
@@ -346,7 +347,7 @@ def _integration_contract() -> dict[str, Any]:
         },
         "domains": {
             "agent_runtime": [
-                "chat", "sessions", "approvals", "runtime_settings",
+                "chat", "sessions", "approvals", "schedules", "runtime_settings",
                 "character_persona_editing", "voice_settings",
             ],
             "extensibility": ["skills", "mcp_server_config", "tool_inventory"],
@@ -358,6 +359,7 @@ def _integration_contract() -> dict[str, Any]:
                 "contract": _session_contract(),
             },
             "approvals": {"available": True, "owner": "jaeger", "mutable": True},
+            "schedules": {"available": True, "owner": "jaeger", "mutable": True},
             "character_persona_editing": {
                 "available": True, "owner": "jaeger", "mutable": True,
             },
@@ -670,7 +672,19 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 pass
         return _hb.status(lay, interval_minutes=interval, enabled=enabled)
     if what == "cron":
-        return {"running": _cron_running_snapshot()}
+        from jaeger_ai.core.runtime.schedules import list_jobs
+
+        jobs = list_jobs()
+        return {
+            "running": _cron_running_snapshot(),
+            "scheduler": "jaeger",
+            "jobs": jobs.get("schedules") or [],
+            "count": int(jobs.get("count") or 0),
+        }
+    if what == "list_schedules":
+        from jaeger_ai.core.runtime.schedules import list_jobs
+
+        return list_jobs()
     if what == "config":
         from jaeger_ai.core.instance.schemas import Config, Identity, load_yaml
         cfg = load_yaml(lay.config_path, Config)
@@ -989,6 +1003,39 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             threading.Thread(target=_speak_bg, name="bridge-speak",
                              daemon=True).start()
             return True, None
+        if cmd == "create_schedule":
+            from jaeger_ai.core.runtime.schedules import create_job
+
+            create_job(
+                prompt=str(args.get("prompt") or ""),
+                schedule=str(args.get("schedule") or args.get("cron") or ""),
+                name=args.get("name") or args.get("id"),
+                at=args.get("at"),
+                deliver=args.get("deliver"),
+                recipient=args.get("recipient"),
+            )
+            return True, None
+        if cmd == "cancel_schedule":
+            from jaeger_ai.core.runtime.schedules import cancel_job
+
+            result = cancel_job(str(args.get("name") or args.get("id") or ""))
+            return bool(result.get("cancelled")), (
+                None if result.get("cancelled") else "schedule not found"
+            )
+        if cmd == "pause_schedule":
+            from jaeger_ai.core.runtime.schedules import pause_job
+
+            result = pause_job(str(args.get("name") or args.get("id") or ""))
+            return bool(result.get("paused")), (
+                None if result.get("paused") else "schedule not found"
+            )
+        if cmd == "resume_schedule":
+            from jaeger_ai.core.runtime.schedules import resume_job
+
+            result = resume_job(str(args.get("name") or args.get("id") or ""))
+            return bool(result.get("resumed")), (
+                None if result.get("resumed") else "schedule not found"
+            )
         return False, f"unknown command: {cmd}"
     except Exception as exc:  # noqa: BLE001 — a bad command reports, never crashes the bridge
         return False, str(exc)
