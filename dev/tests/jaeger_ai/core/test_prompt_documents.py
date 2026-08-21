@@ -152,6 +152,12 @@ def test_identity_precedes_operations_in_the_prompt(layout) -> None:
     assert text.index("SOUL_MARKER") < text.index("AGENTS_MARKER")
 
 
+def test_prompt_separates_scheduled_jobs_from_kanban(layout) -> None:
+    text = _prompt(layout)
+    assert "Scheduled jobs" in text
+    assert "NOT the automation dashboard" in text
+
+
 def test_safety_still_leads_the_prompt(layout) -> None:
     """The Three Laws is fragment #1 in every mode — a document on disk
     must not be able to displace it."""
@@ -209,6 +215,7 @@ def test_registration_is_idempotent() -> None:
     names = [f.name for f in assemble.PROMPT_FRAGMENTS]
     assert names.count("soul_identity") == 1
     assert names.count("agent_directives") == 1
+    assert names.count("ares_surfaces") == 1
 
 
 def test_fragments_land_around_the_dependency_anchors() -> None:
@@ -217,6 +224,7 @@ def test_fragments_land_around_the_dependency_anchors() -> None:
     assert names.index("identity_name") < names.index("soul_identity")
     assert names.index("soul_identity") < names.index("framework")
     assert names.index("framework") < names.index("agent_directives")
+    assert names.index("agent_directives") < names.index("ares_surfaces")
 
 
 def test_a_renamed_anchor_degrades_ordering_rather_than_dropping_a_document():
