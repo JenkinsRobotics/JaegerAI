@@ -1,6 +1,6 @@
 """The brain — how JaegerAI uses the agent module.
 
-    slot: mind               jaeger-agent fills it today
+    slot: mind               pinned jaeger-agent package fills it today
     consumes  /act/chat, /sense/transcript, /act/response
     produces  /sense/chat, /sense/agent_state, /sense/tool,
               /sense/activity, /sense/request
@@ -37,8 +37,9 @@ SLOT = "mind"
 #: The exact import package integrated by this module file.
 PACKAGE = "jaeger_agent"
 
-#: JaegerAI owns the discoverable mind binding; jaeger-agent is the reusable
-#: loop used behind that binding and does not register itself as an OS module.
+#: JaegerAI owns the discoverable mind binding and product glue
+#: (aliases, cron delivery, prompt documents). The reusable loop is the
+#: pinned ``jaeger-agent`` package in this venv — not a sibling checkout.
 DISCOVERY_PACKAGE = "jaeger_ai"
 
 #: The runtime JaegerAI hands the module — its product pipeline, not

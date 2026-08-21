@@ -3535,8 +3535,10 @@ def build_system_prompt(layout: Any) -> str:
     """
     from jaeger_ai.core.prompt_documents import register_context_documents
     from jaeger_ai.core.prompt_identity import register_agent_identity
+    from jaeger_ai.core.runtime.loop_compat import install as install_loop_compat
     register_context_documents()
     register_agent_identity()
+    install_loop_compat()
     return prompt_module.build_system_prompt(layout)
 
 
@@ -4632,7 +4634,9 @@ def boot_for_tui(
     # chassis) this adopts ``get_bus()``'s own lazily-minted bus as the
     # injected one, so every later ``ensure_*`` call shares it.
     from jaeger_os.nodes import runtime as _node_runtime
+    from jaeger_ai.core.runtime.loop_compat import install as install_loop_compat
     _node_runtime.set_bus(_node_runtime.get_bus())
+    install_loop_compat()
 
     instance_name = instance_name or default_instance_name()
     root = resolve_instance_dir(instance_name)

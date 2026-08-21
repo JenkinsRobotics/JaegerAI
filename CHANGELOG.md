@@ -3,6 +3,13 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## Unreleased — the loop pin is the source
+
+JaegerAI no longer treats a sibling `GitHub/jaeger-agent` checkout as live
+source. Product aliases (ARES notes/todo), argument-key cleanup, and
+`schedule_prompt` delivery wrapping live in `jaeger_ai.core.runtime.loop_compat`
+and install at boot. The venv uses the `requirements.txt` git pin.
+
 ## Unreleased — the answer arrives while it is written
 
 A turn reached an external surface as one `reply` frame at the end. The
