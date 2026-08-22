@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import os
 """SOUL.md and AGENTS.md — this instance's two context documents.
 
 Two documents, two jobs, and keeping them apart is the point:
@@ -33,7 +36,6 @@ degraded ordering, never a lost document. Ask upstream for a real
 registration hook if this seam ever bites.
 """
 
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -178,6 +180,37 @@ def _insert_after(fragments: list, anchor: str, fragment: Any) -> None:
     fragments.append(fragment)
 
 
+
+CROSS_AGENT_FRAGMENT = "cross_agent_memory"
+CROSS_AGENT_MAX_CHARS = 2_500
+
+
+def load_cross_agent_memory(cap: int = CROSS_AGENT_MAX_CHARS) -> str:
+    """Load synthesized cross-agent profile facts from ~/.ares/memory/person.md
+
+    Allows JaegerAI to inherit user preferences, architectural rulings, and active
+    project context distilled across Claude Code, Hermes, Codex, and ARES sessions.
+    """
+    ares_home = Path(os.environ.get("ARES_HOME", Path.home() / ".ares"))
+    person_md = ares_home / "memory" / "person.md"
+    if not person_md.is_file():
+        return ""
+    try:
+        content = person_md.read_text(encoding="utf-8").strip()
+        if not content:
+            return ""
+        if len(content) > cap:
+            content = content[:cap].rstrip() + chr(10) + "…(cross-agent memory truncated)"
+        return f"[CROSS-AGENT MEMORY & PREFERENCES]" + chr(10) + content
+    except Exception:
+        return ""
+
+
+def _cross_agent_memory_block(ctx: Any) -> str:
+    """Prompt fragment builder for distilled cross-agent memory."""
+    return load_cross_agent_memory()
+
+
 def register_context_documents() -> bool:
     """Contribute the two document fragments to jaeger-agent's prompt
     registry. Idempotent; returns True when the registry now carries
@@ -231,6 +264,19 @@ def register_context_documents() -> bool:
                 break
     else:
         _insert_after(fragments, DIRECTIVES_FRAGMENT, surfaces)
+
+    cross_mem = assemble.PromptFragment(
+        CROSS_AGENT_FRAGMENT, "instance", "~/.ares/memory/person.md",
+        _cross_agent_memory_block, _user_facing,
+        "distilled cross-agent developer preferences & active projects from Claude/Hermes/ARES",
+    )
+    if CROSS_AGENT_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == CROSS_AGENT_FRAGMENT:
+                fragments[index] = cross_mem
+                break
+    else:
+        _insert_after(fragments, SOUL_FRAGMENT, cross_mem)
     return True
 
 
@@ -238,5 +284,6 @@ __all__ = [
     "DIRECTIVES_FRAGMENT", "DIRECTIVES_MAX_CHARS", "DIRECTIVES_NAMES",
     "SOUL_FRAGMENT", "SOUL_MAX_CHARS", "SOUL_NAMES",
     "SURFACES_FRAGMENT",
+    "CROSS_AGENT_FRAGMENT", "load_cross_agent_memory",
     "load_agent_directives", "load_soul", "register_context_documents",
 ]
