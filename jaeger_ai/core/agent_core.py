@@ -46,7 +46,7 @@ class AgentCore(Core):
                  with_memory: bool = True, warmup: bool = False,
                  **_: Any) -> None:
         super().__init__(bus=bus)            # asserts the OS main thread
-        print("[jaeger] booting the windowed app — loading the agent…",
+        print("[jaeger] booting the windowed app…",
               file=sys.stderr, flush=True)
         # instance_name=None → the runtime resolves default_instance_name()
         # (JAEGER_INSTANCE_NAME), set by main.py (run.sh) or launch.py (dev).
@@ -57,15 +57,31 @@ class AgentCore(Core):
         # tool schemas synchronously at boot so the FIRST user turn is instant
         # instead of a ~26s cold prefill. Boot takes ~60s longer; the first
         # turn earns it. (JAEGER_FAST_BOOT=1 skips prewarm's heavy Pass 2.)
-        self.runtime = create_runtime(
-            bus=bus,
-            config={
-                "instance_name": instance_name,
-                "with_memory": with_memory,
-                "warmup": warmup,
-                "prewarm_model": True,
-            },
-        )
+        try:
+            self.runtime = create_runtime(
+                bus=bus,
+                config={
+                    "instance_name": instance_name,
+                    "with_memory": with_memory,
+                    "warmup": warmup,
+                    "prewarm_model": True,
+                },
+            )
+        except RuntimeError as exc:
+            if "locked by pid" not in str(exc):
+                raise
+            print(f"[jaeger] {exc}", file=sys.stderr, flush=True)
+            print(
+                "[jaeger] ARES (or another jaeger bridge) already has this agent. "
+                "Quit ARES, or run `jaeger kill`, then try again.",
+                file=sys.stderr, flush=True,
+            )
+            raise SystemExit(2) from None
+        if getattr(self.runtime, "attached", False):
+            print("[jaeger] windowed app attached to the running agent.",
+                  file=sys.stderr, flush=True)
+        else:
+            print("[jaeger] loading the agent…", file=sys.stderr, flush=True)
         # Compatibility attribute for the remaining 0.9-era call sites.
         self.boot = self.runtime.boot
         self.agent_name = _agent_name()

@@ -34,10 +34,12 @@ from jaeger_ai.main import (
     _agent_cache,
     _jaeger_agents_by_session,
     _pipeline,
+    _persona_character_is_wearable,
     _persona_identity_block,
     _persona_lane_aux_available,
     _persona_lane_turn_result,
     _persona_mode,
+    _persona_text_is_leaked_tool_call,
     _run_persona_lane_turn,
     _run_turn_via_jaeger_agent,
     _spoke_via_tool,
@@ -109,13 +111,33 @@ def test_persona_mode_env_garbage_value_ignored(monkeypatch):
 
 
 class _Character:
-    def __init__(self, name: str, block: str = "## My voice", neutral: bool = False):
+    def __init__(self, name: str, block: str = "## My voice", neutral: bool = False, id: str | None = None):
         self.name = name
         self.neutral = neutral
+        self.id = id if id is not None else ("assistant" if neutral else name.lower())
         self._block = block
 
     def character_block(self) -> str:
         return self._block
+
+
+def test_neutral_assistant_sheet_is_not_a_wearable_persona():
+    assert _persona_character_is_wearable(None) is False
+    assert _persona_character_is_wearable(_Character("Assistant", neutral=True)) is False
+    assert _persona_character_is_wearable(_Character("assistant", id="assistant")) is False
+    assert _persona_character_is_wearable(_Character("Lilith")) is True
+
+
+def test_leaked_perform_task_xml_is_not_a_reply():
+    xml = (
+        '<tool_call>\n{"name": "perform_task", "arguments": '
+        '{"request": "Continue the Notes cleanup"}}\n</tool_call>'
+    )
+    assert _persona_text_is_leaked_tool_call(xml) is True
+    assert _persona_text_is_leaked_tool_call('{"name": "perform_task", "arguments": {}}') is True
+    assert _persona_text_is_leaked_tool_call("Done. Folders created.") is False
+    assert _persona_text_is_leaked_tool_call("") is False
+    assert _persona_text_is_leaked_tool_call(None) is False
 
 
 def test_identity_block_passes_a_character_sheet_through_verbatim():
@@ -782,3 +804,149 @@ def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe
     assert filter_calls == ["the plain agent answer"]  # Station 3 still runs (no-ops without a character)
     assert result["text"] == "FILTERED: the plain agent answer"
     assert lane_calls == []  # lane closure never built — the character-None guard short-circuits first
+
+
+def test_run_turn_skips_persona_lane_for_neutral_assistant_sheet(
+    monkeypatch, tmp_path,
+):
+    """ARES-default: the bound sheet is ``assistant`` (neutral). That is
+    not a costume. The persona-first lane must not run, or Qwen dumps
+    perform_task XML as the answer and the inner agent never starts."""
+    import jaeger_ai.main as main_mod
+    import jaeger_ai.personality.character as character_mod
+    from jaeger_agent import tools as agent_tools
+
+    layout = InstanceLayout(root=tmp_path / "inst")
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    agent_tools.bind(layout)
+    config = Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null"),
+        skills=SkillsConfig(run_smoke_tests=False),
+        persona=PersonaConfig(),
+    )
+    monkeypatch.setitem(_pipeline, "layout", layout)
+    monkeypatch.setitem(_pipeline, "config", config)
+    monkeypatch.setitem(_pipeline, "client", None)
+    monkeypatch.setitem(_pipeline, "llm_lock", None)
+    monkeypatch.setitem(_pipeline, "thinking_runner", None)
+    monkeypatch.setattr(
+        character_mod, "active_character",
+        lambda root: _Character("Assistant", neutral=True, id="assistant"),
+    )
+    _agent_cache.clear()
+    _jaeger_agents_by_session.clear()
+
+    client = _FakeExternalClient()
+    monkeypatch.setattr(main_mod, "_persona_lane_aux_available", lambda client: True)
+
+    drive_calls: list[tuple[object, str]] = []
+
+    def _fake_drive_one_turn(agent, text):
+        drive_calls.append((agent, text))
+        return {
+            "answer": "the plain agent answer", "tool_activity": [],
+            "first_decision": None, "elapsed_s": 0.01, "skipped": False,
+            "halt_reason": None, "iterations": 1, "new_messages": [],
+            "prompt_tokens": 0, "completion_tokens": 0, "ttft_s": 0.0,
+        }
+
+    monkeypatch.setattr(
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+    )
+    monkeypatch.setattr(main_mod, "_apply_persona_filter", lambda answer: answer)
+
+    lane_calls: list[str] = []
+
+    def _fake_run_persona_lane_turn(client, jaeger_agent, user_text, character, lock):
+        lane_calls.append(user_text)
+        return "<tool_call>{\"name\": \"perform_task\"}</tool_call>", None
+
+    monkeypatch.setattr(
+        main_mod, "_run_persona_lane_turn", _fake_run_persona_lane_turn,
+    )
+
+    try:
+        result = _run_turn_via_jaeger_agent(
+            client, "do it", session_key="test-persona-first-neutral",
+        )
+    finally:
+        _agent_cache.clear()
+        _jaeger_agents_by_session.pop("test-persona-first-neutral", None)
+
+    assert lane_calls == []
+    assert len(drive_calls) == 1
+    assert drive_calls[0][1] == "do it"
+    assert result["text"] == "the plain agent answer"
+
+
+def test_leaked_perform_task_xml_falls_through_to_clean_agent(
+    monkeypatch, tmp_path,
+):
+    import jaeger_ai.main as main_mod
+    import jaeger_ai.personality.character as character_mod
+    from jaeger_agent import tools as agent_tools
+
+    layout = InstanceLayout(root=tmp_path / "inst")
+    layout.root.mkdir(parents=True, exist_ok=True)
+    layout.ensure_dirs()
+    agent_tools.bind(layout)
+    config = Config(
+        instance_name="t", model=ModelConfig(model_path="/dev/null"),
+        skills=SkillsConfig(run_smoke_tests=False),
+        persona=PersonaConfig(),
+    )
+    monkeypatch.setitem(_pipeline, "layout", layout)
+    monkeypatch.setitem(_pipeline, "config", config)
+    monkeypatch.setitem(_pipeline, "client", None)
+    monkeypatch.setitem(_pipeline, "llm_lock", None)
+    monkeypatch.setitem(_pipeline, "thinking_runner", None)
+    monkeypatch.setattr(
+        character_mod, "active_character",
+        lambda root: _Character("Lilith"),
+    )
+    _agent_cache.clear()
+    _jaeger_agents_by_session.clear()
+
+    client = _FakeExternalClient()
+    monkeypatch.setattr(main_mod, "_persona_lane_aux_available", lambda client: True)
+
+    drive_calls: list[str] = []
+
+    def _fake_drive_one_turn(agent, text):
+        drive_calls.append(text)
+        return {
+            "answer": "cleaned up the notes", "tool_activity": [],
+            "first_decision": None, "elapsed_s": 0.01, "skipped": False,
+            "halt_reason": None, "iterations": 1, "new_messages": [],
+            "prompt_tokens": 0, "completion_tokens": 0, "ttft_s": 0.0,
+        }
+
+    monkeypatch.setattr(
+        "jaeger_agent.loop.runtime_bridge.drive_one_turn", _fake_drive_one_turn,
+    )
+    monkeypatch.setattr(main_mod, "_apply_persona_filter", lambda answer: answer)
+
+    leaked = (
+        '<tool_call>\n{"name": "perform_task", "arguments": '
+        '{"request": "Continue the Notes cleanup"}}\n</tool_call>'
+    )
+
+    def _fake_run_persona_lane_turn(client, jaeger_agent, user_text, character, lock):
+        return leaked, None
+
+    monkeypatch.setattr(
+        main_mod, "_run_persona_lane_turn", _fake_run_persona_lane_turn,
+    )
+
+    try:
+        result = _run_turn_via_jaeger_agent(
+            client, "do it", session_key="test-leaked-perform-task",
+        )
+    finally:
+        _agent_cache.clear()
+        _jaeger_agents_by_session.pop("test-leaked-perform-task", None)
+
+    assert drive_calls == ["do it"]
+    assert result["text"] == "cleaned up the notes"
+    assert "<tool_call>" not in result["text"]

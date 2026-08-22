@@ -496,7 +496,7 @@ class GoalState:
     turns_evaluated: int = 0
     tokens_spent: int = 0
     last_reason: str = ""
-    max_iterations: int = 20            # hard cap mirroring Claude's default
+    max_iterations: int = 100           # job_max_steps default; set_goal pins live value
     achieved: bool = False              # set True when eval returns "yes"
     achieved_at: float | None = None
 
@@ -509,9 +509,11 @@ def get_goal() -> "GoalState | None":
     return _pipeline.get("goal")
 
 
-def set_goal(condition: str, *, max_iterations: int = 20) -> "GoalState":
+def set_goal(condition: str, *, max_iterations: int | None = None) -> "GoalState":
     """Install a new goal, replacing any previously-active one."""
-    g = GoalState(condition=condition.strip(), max_iterations=max_iterations)
+    from jaeger_ai.core.runtime.execution import max_steps as _job_max
+    cap = int(max_iterations) if max_iterations is not None else _job_max()
+    g = GoalState(condition=condition.strip(), max_iterations=max(1, cap))
     _pipeline["goal"] = g
     return g
 
@@ -1288,6 +1290,11 @@ def _register_builtins(client: Any) -> None:
         rail). Keep the default (wait) when you need the answer to
         continue.
 
+        Long batch jobs (dozens or hundreds of items) belong on a
+        background worker so THIS conversation stays clean: the
+        child runs an autonomous loop with a work_ledger and only
+        reports a summary when complete_task succeeds.
+
         For sustained background work, prefer the kanban board /
         Deep Think over a wide fan-out."""
         from jaeger_ai.core.runtime.delegation import collect_goals, normalize_role
@@ -1313,6 +1320,23 @@ def _register_builtins(client: Any) -> None:
     # turn. Same import-registers pattern. See
     # :mod:`jaeger_ai.core.runtime.code_bridge`.
     from jaeger_ai.core.runtime import code_bridge_tool as _code_bridge  # noqa: F401
+
+    # Work ledger + complete_task — import registers them. Workers and
+    # the main session share the inspect surface; each thread has its
+    # own active ledger. See :mod:`jaeger_ai.core.runtime.work_ledger`.
+    from jaeger_ai.core.runtime import work_ledger as _work_ledger  # noqa: F401
+    from jaeger_ai.core.runtime.work_ledger import set_progress_publisher
+
+    def _publish_ledger_progress(**payload: object) -> None:
+        bus = _pipeline.get("event_bus")
+        if bus is None:
+            return
+        bus.publish("tool.progress", **payload)
+
+    set_progress_publisher(_publish_ledger_progress)
+
+    # Live screen OCR — import registers see_screen / ocr_window.
+    from jaeger_ai.core.runtime import screen as _screen  # noqa: F401
 
     # send_email — same pattern: importing tools/email.py registers it.
     # 0.9.3 Task 2: the operator's field brief ("make/send email") — Mail.app
@@ -1398,6 +1422,11 @@ def _register_builtins(client: Any) -> None:
 _DELEGATE_MAX_DEPTH = int(os.environ.get("DELEGATE_MAX_DEPTH", "2"))
 _delegate_depth = threading.local()
 _delegate_role = threading.local()
+# Whether THIS thread currently holds ``llm_lock``. Sync ``delegate_task``
+# runs inside a locked parent turn; the child must not re-acquire.
+# Background workers run on a fresh thread and MUST acquire per turn so
+# the main session can keep talking between worker batches.
+_llm_lock_held = threading.local()
 
 
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
@@ -1441,6 +1470,10 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
         # to the delegate's work (a child agent doesn't inherit the
         # parent's context — the spec calls this out).
         from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
+        from jaeger_ai.core.runtime.agent_controller import JaegerAgentController
+        from jaeger_ai.core.runtime.autonomous_runner import looks_like_batch
+        from jaeger_ai.core.runtime.execution import max_steps as _max_steps
+        from jaeger_ai.core.runtime.dispatch import prepare_turn_text
         _cfg = _pipeline.get("config")
         _ctx, _reserve = _context_budget_for(_cfg)
         sub_agent = build_jaeger_agent(
@@ -1452,11 +1485,74 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
             completion_reserve=_reserve,
         )
         lock = _pipeline.get("llm_lock")
-        if lock is not None:
-            with lock:
-                iter_out = drive_one_turn(sub_agent, clean)
-        else:
-            iter_out = drive_one_turn(sub_agent, clean)
+        parent_holds_lock = bool(getattr(_llm_lock_held, "value", False))
+
+        def _drive(prompt: str) -> dict[str, Any]:
+            prepared = prepare_turn_text(
+                sub_agent, prompt, session_key="delegate", domain=False,
+            )
+            if lock is not None and not parent_holds_lock:
+                with lock:
+                    return drive_one_turn(sub_agent, prepared)
+            return drive_one_turn(sub_agent, prepared)
+
+        if looks_like_batch(clean):
+            def _turn(_client: Any, user_text: str, *, session_key: str,
+                      allow_persona: bool = True) -> dict[str, Any]:
+                iter_out = _drive(user_text)
+                return {
+                    "text": str(iter_out.get("answer") or "").strip(),
+                    "error": None,
+                    "tool_activity": iter_out.get("tool_activity") or [],
+                    "spoke_via_tool": False,
+                    "elapsed_s": float(iter_out.get("elapsed_s") or 0.0),
+                    "skipped_final": bool(iter_out.get("skipped")),
+                }
+
+            def _on_progress(info: dict[str, Any]) -> None:
+                bus = _pipeline.get("event_bus")
+                if bus is None:
+                    return
+                from jaeger_ai.core.runtime.work_ledger import (
+                    active_ledger, progress_event,
+                )
+                ledger = active_ledger()
+                try:
+                    bus.publish("tool.progress", **progress_event(
+                        ledger,
+                        state=str(info.get("state") or "RUNNING"),
+                        step=info.get("step"),
+                    ))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            packed = JaegerAgentController(
+                client,
+                max_steps=_max_steps(),
+                turn_fn=_turn,
+                isolated=True,
+                batch=True,
+                on_progress=_on_progress,
+                allow_persona=False,
+                agent=sub_agent,
+            ).run_to_completion(clean, "delegate")
+            worker = packed["output"]
+            answer = worker.get("summary") or worker.get("text") or ""
+            elapsed = time.perf_counter() - started
+            return {
+                "delegated": True,
+                "subtask": clean,
+                "answer": str(answer).strip(),
+                "summary": str(worker.get("summary") or ""),
+                "depth": depth + 1,
+                "elapsed_s": round(elapsed, 3),
+                "autonomous": True,
+                "steps": int(worker.get("steps") or packed.get("steps") or 0),
+                "halt_reason": worker.get("halt_reason") or packed.get("reason") or "",
+                "state": packed.get("status"),
+            }
+
+        iter_out = _drive(clean)
     except Exception as exc:
         _delegate_depth.value = depth
         return {"delegated": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -2613,6 +2709,41 @@ def _persona_mode() -> str:
     return mode
 
 
+def _persona_character_is_wearable(character: Any) -> bool:
+    """True only when a real character sheet is on, not ARES-default.
+
+    ``active_character()`` always resolves to *some* sheet — the
+    ``assistant`` row is the no-costume default (``neutral=True``).
+    Running the persona-first lane on that sheet gives the model one
+    fake tool (``perform_task``). Cloud Qwen then emits the call as
+    XML in the answer, the inner agent never starts, and the UI shows
+    a blank bubble. Skip the lane unless a non-neutral character is
+    actually worn.
+    """
+    if character is None:
+        return False
+    if bool(getattr(character, "neutral", False)):
+        return False
+    cid = str(getattr(character, "id", "") or "").strip().lower()
+    if cid in ("", "assistant"):
+        return False
+    return True
+
+
+_LEAKED_TOOL_CALL_RE = re.compile(
+    r"<\s*tool_call\s*>|\"name\"\s*:\s*\"perform_task\"",
+    re.IGNORECASE,
+)
+
+
+def _persona_text_is_leaked_tool_call(text: str | None) -> bool:
+    """The persona lane answered with a tool dump instead of delegating."""
+    blob = str(text or "").strip()
+    if not blob:
+        return False
+    return bool(_LEAKED_TOOL_CALL_RE.search(blob))
+
+
 # Tool names whose activity means the model already SPOKE the answer
 # aloud this turn (``text_to_speech`` / ``speak``) — shared by the
 # voice-loop's double-play guard (below, in the turn result) and Mode
@@ -2826,6 +2957,61 @@ def _run_persona_lane_turn(
         return None, None
 
 
+def _format_tool_detail(name: str, data: dict[str, Any]) -> str:
+    """Format short, human-readable action context for tool executions."""
+    if not isinstance(data, dict):
+        return ""
+    clean_name = name.replace("mcp__ares-native__", "").replace("mcp__", "")
+    if clean_name in {"notes_operations", "notes"}:
+        action = str(data.get("action") or "").strip()
+        query = str(data.get("query") or data.get("search") or data.get("title") or data.get("folder") or "").strip()
+        if action and query:
+            return f"{action} \"{query[:40]}\""
+        if action:
+            return action
+        if query:
+            return f"\"{query[:40]}\""
+    elif clean_name in {"web_search", "search"}:
+        q = str(data.get("query") or data.get("q") or "").strip()
+        if q:
+            return f"\"{q[:40]}\""
+    elif clean_name in {"web_extract", "extract_url", "fetch_url"}:
+        url = str(data.get("url") or data.get("query") or "").strip()
+        if url:
+            return url.replace("https://", "").replace("http://", "")[:40]
+    elif clean_name in {"read_file", "write_file", "append_file", "patch", "copy_file", "delete_file"}:
+        p = str(data.get("path") or data.get("file_path") or data.get("src") or "").strip()
+        if p:
+            return p.split("/")[-1] if "/" in p else p
+    elif clean_name in {"calculate", "python", "execute_code"}:
+        expr = str(data.get("expression") or data.get("code") or "").strip()
+        if expr:
+            return expr.replace("\n", " ")[:35]
+    elif clean_name in {"terminal", "bash"}:
+        cmd = str(data.get("command") or data.get("cmd") or "").strip()
+        if cmd:
+            return cmd.replace("\n", " ")[:35]
+    elif clean_name in {"macos_automation", "macos"}:
+        target = str(data.get("target") or "").strip()
+        act = str(data.get("action") or "").strip()
+        tit = str(data.get("title") or data.get("subject") or "").strip()
+        return f"{target}.{act} {tit}"[:40].strip()
+    elif clean_name in {"apple_shortcuts", "shortcuts"}:
+        act = str(data.get("action") or "run").strip()
+        name = str(data.get("name") or "").strip()
+        return f"{act} \"{name}\""[:40].strip()
+    elif clean_name in {"spotlight_search", "spotlight", "mdfind"}:
+        q = str(data.get("query") or "").strip()
+        return f"\"{q[:40]}\""
+    elif clean_name == "skill":
+        return " ".join(str(data.get(k, "")).strip() for k in ("action", "name")).strip()[:60]
+
+    ap = str(data.get("args_preview") or "").strip()
+    if ap and ap != "{}":
+        return ap[:40]
+    return ""
+
+
 def _ensure_session_agent(client: Any, session_key: str) -> Any:
     """Build (or fetch) the per-session :class:`JaegerAgent` — the exact
     object the next turn on ``session_key`` drives. Factored out of
@@ -2879,6 +3065,10 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                         for k in ("elapsed_s", "args_preview", "result_preview"):
                             if k in data:
                                 payload[k] = data[k]
+                        if phase == "start":
+                            detail = _format_tool_detail(name, data)
+                            if detail:
+                                payload["detail"] = detail
                         # Skill calls carry WHICH skill in their args —
                         # surface it so the chat chip reads
                         # "skill · view scheduling", not a bare "skill".
@@ -3036,6 +3226,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # Session system prompt = base prompt + runtime identity + frozen
         # facts snapshot — see :func:`compose_session_prompt`.
         _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
+        from jaeger_ai.core.runtime.execution import inner_max as _inner_max
         _jaeger_agents_by_session[key] = build_jaeger_agent(
             client,
             system_prompt=_session_prompt,
@@ -3047,6 +3238,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             artifact_dir=_artifact_dir,
             stale_call_timeout_s=_stall_s,
             context_summarizer=_summarizer,
+            max_iterations=_inner_max(),
         )
         # Cross-restart continuity: seed the brand-new agent with a
         # digest of this session's pre-restart turns (orientation, not
@@ -3217,9 +3409,23 @@ def _run_turn_via_jaeger_agent(
     shape so ``run_command`` / ``run_for_voice`` don't need to know
     which loop ran."""
     from jaeger_agent.loop.runtime_bridge import drive_one_turn
+    from jaeger_ai.core.runtime.dispatch import prepare_turn_text
 
     key = session_key
     jaeger_agent = _ensure_session_agent(client, key)
+    try:
+        from jaeger_ai.core.runtime.autonomous_runner import (
+            ledger_open, looks_like_batch,
+        )
+        from jaeger_ai.core.runtime.execution import inner_max as _inner_max
+        jaeger_agent.max_iterations = _inner_max(
+            batch=bool(ledger_open() or looks_like_batch(user_text)),
+        )
+    except Exception:  # noqa: BLE001 — never block a turn on budget plumbing
+        pass
+    # Domain recall + work-ledger + compaction land on the MODEL copy of
+    # the prompt. Session transcripts still record ``user_text``.
+    model_text = prepare_turn_text(jaeger_agent, user_text, session_key=key)
 
     lock = _pipeline["llm_lock"]
     started = time.perf_counter()
@@ -3260,9 +3466,9 @@ def _run_turn_via_jaeger_agent(
             from jaeger_ai.personality.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
-            if character is not None:
+            if _persona_character_is_wearable(character):
                 persona_text, inner_result = _run_persona_lane_turn(
-                    client, jaeger_agent, user_text, character, lock,
+                    client, jaeger_agent, model_text, character, lock,
                 )
                 # Smallest honest observable hook (persona Mode C build
                 # plan, Task 2): the eval harness needs SOME way to see
@@ -3272,6 +3478,14 @@ def _run_turn_via_jaeger_agent(
                 # dev/benchmark/persona_eval.py measures. Read fresh every
                 # turn; not part of any public contract.
                 _pipeline["persona_lane_last_delegated"] = inner_result is not None
+                # Qwen (and similar) often print <tool_call> JSON as the
+                # answer instead of a native tool_calls field. That is
+                # not a reply — drop it so the clean agent loop runs.
+                if (
+                    inner_result is None
+                    and _persona_text_is_leaked_tool_call(persona_text)
+                ):
+                    persona_text = None
                 if persona_text is not None:
                     result = _persona_lane_turn_result(
                         persona_text, inner_result, started=started,
@@ -3281,9 +3495,13 @@ def _run_turn_via_jaeger_agent(
         if result is None:
             if lock is not None:
                 with lock:
-                    result = drive_one_turn(jaeger_agent, user_text)
+                    _llm_lock_held.value = True
+                    try:
+                        result = drive_one_turn(jaeger_agent, model_text)
+                    finally:
+                        _llm_lock_held.value = False
             else:
-                result = drive_one_turn(jaeger_agent, user_text)
+                result = drive_one_turn(jaeger_agent, model_text)
     except Exception as exc:  # noqa: BLE001 — match legacy crash surface
         elapsed = time.perf_counter() - started
         report = LatencyReport(elapsed, 0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -3297,9 +3515,11 @@ def _run_turn_via_jaeger_agent(
             _trace.trace_end("", elapsed, ok=False)
         except Exception:  # noqa: BLE001
             pass
+        halt = getattr(jaeger_agent, "last_halt_reason", None) or type(exc).__name__
         return {"text": "", "error": str(exc), "tool_activity": [],
                 "first_decision": None, "skipped_final": False,
-                "spoke_via_tool": False, "elapsed_s": elapsed, "report": report}
+                "spoke_via_tool": False, "elapsed_s": elapsed, "report": report,
+                "halt_reason": halt}
     finally:
         if _pipeline.get("active_jaeger_agent") is jaeger_agent:
             _pipeline["active_jaeger_agent"] = None
@@ -3309,6 +3529,22 @@ def _run_turn_via_jaeger_agent(
     first_decision = result["first_decision"]
     elapsed = result["elapsed_s"]
     skipped = result["skipped"]
+
+    # Extract model chain-of-thought reasoning if model emitted <think> tags or reasoning field
+    thought_text = ""
+    if "<think>" in answer:
+        import re
+        think_match = re.search(r"<think>(.*?)</think>", answer, re.DOTALL)
+        if think_match:
+            thought_text = think_match.group(1).strip()
+            answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+    elif result.get("reasoning_content"):
+        thought_text = str(result.get("reasoning_content")).strip()
+
+    if thought_text:
+        bus = _pipeline.get("event_bus")
+        if bus is not None:
+            bus.publish("thought", text=thought_text)
 
     # Station 3 — the persona output filter (dev/docs/reality/agentic_runners.md).
     # Applied ONLY here, the user-facing boundary: the bench and
@@ -3405,6 +3641,7 @@ def _run_turn_via_jaeger_agent(
         "first_decision": first_decision, "skipped_final": skipped,
         "spoke_via_tool": spoke_via_tool,
         "elapsed_s": elapsed, "report": report,
+        "halt_reason": result.get("halt_reason"),
     }
 
 
@@ -3752,6 +3989,7 @@ def run_for_voice(
         "text": out["text"], "tool_activity": out["tool_activity"],
         "spoke_via_tool": out["spoke_via_tool"], "elapsed_s": out["elapsed_s"],
         "skipped_final": out["skipped_final"], "error": out["error"],
+        "halt_reason": out.get("halt_reason"),
     }
 
 

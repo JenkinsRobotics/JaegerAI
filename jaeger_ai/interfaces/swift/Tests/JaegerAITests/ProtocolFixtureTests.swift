@@ -135,7 +135,7 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(elapsed ?? -1, 3.21, accuracy: 0.001)
         XCTAssertEqual(used, 18300)
         XCTAssertEqual(mx, 32768)
-        guard case .tool(let name, let phase, let elapsed, let detail)
+        guard case .tool(let name, let phase, let elapsed, let detail, let progress)
                 = try decode("tool") else {
             return XCTFail("tool")
         }
@@ -143,13 +143,15 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(phase, "done")
         XCTAssertEqual(elapsed, 1.25, accuracy: 0.001)
         XCTAssertNil(detail)   // base fixture has no detail key (additive)
-        guard case .tool(let sName, let sPhase, _, let sDetail)
+        XCTAssertNil(progress) // ordinary chips carry no ledger snapshot
+        guard case .tool(let sName, let sPhase, _, let sDetail, let sProgress)
                 = try decode("tool_skill_detail") else {
             return XCTFail("tool_skill_detail")
         }
         XCTAssertEqual(sName, "skill")
         XCTAssertEqual(sPhase, "start")
         XCTAssertEqual(sDetail, "view scheduling")
+        XCTAssertNil(sProgress)
     }
 
     func testResultRequestFatalBye() throws {

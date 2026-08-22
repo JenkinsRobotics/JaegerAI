@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+from datetime import datetime
 
 from jaeger_ai.core.runtime import heartbeat as hb
 
@@ -65,7 +66,53 @@ def test_status_names_the_silent_token(tmp_path):
 
 def test_build_prompt_inlines_the_checklist_and_ok_contract(tmp_path):
     layout = _layout(tmp_path)
-    prompt = hb.build_prompt(layout)
+    # Noon is outside both briefing windows — standing checklist path.
+    prompt = hb.build_prompt(layout, now=datetime(2026, 8, 21, 12, 0, 0))
     assert "HEARTBEAT_OK" in prompt
     assert "CHECKLIST:" in prompt
     assert "Heartbeat" in prompt
+    assert "briefing — morning" not in prompt
+
+
+def test_briefing_kind_windows():
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 8, 0, 0)) == "morning"
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 6, 0, 0)) == "morning"
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 10, 59, 0)) == "morning"
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 18, 0, 0)) == "eod"
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 12, 0, 0)) is None
+    assert hb.briefing_kind(now=datetime(2026, 8, 21, 22, 0, 0)) is None
+
+
+def test_morning_build_prompt_is_a_briefing_until_delivered(tmp_path):
+    layout = _layout(tmp_path)
+    morning = datetime(2026, 8, 21, 8, 30, 0)
+    prompt = hb.build_prompt(layout, now=morning)
+    assert "briefing — morning" in prompt
+    assert "CHECKLIST:" in prompt
+    assert "HEARTBEAT_OK" in prompt
+    assert not hb.already_briefed(layout, "morning", now=morning)
+
+    hb.mark_beat(layout, now=morning.timestamp(), silent=True)
+    assert not hb.already_briefed(layout, "morning", now=morning)
+
+    hb.build_prompt(layout, now=morning)
+    hb.mark_beat(layout, now=morning.timestamp() + 1, silent=False)
+    assert hb.already_briefed(layout, "morning", now=morning)
+    again = hb.build_prompt(layout, now=morning)
+    assert "briefing — morning" not in again
+
+
+def test_eod_briefing_is_independent_of_morning(tmp_path):
+    layout = _layout(tmp_path)
+    morning = datetime(2026, 8, 21, 8, 0, 0)
+    hb.build_prompt(layout, now=morning)
+    hb.mark_beat(layout, now=morning.timestamp(), silent=False)
+    evening = datetime(2026, 8, 21, 18, 0, 0)
+    assert not hb.already_briefed(layout, "eod", now=evening)
+    prompt = hb.build_prompt(layout, now=evening)
+    assert "briefing — end of day" in prompt
+
+
+def test_default_checklist_mentions_briefing_windows():
+    assert "Morning" in hb.DEFAULT_CHECKLIST
+    assert "17–21" in hb.DEFAULT_CHECKLIST

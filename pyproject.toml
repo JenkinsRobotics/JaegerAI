@@ -79,6 +79,7 @@ include = ["jaeger_ai*"]
 jaeger_ai = ["**/*"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["dev/tests"]
 addopts = ["--import-mode=importlib"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration

@@ -27,6 +27,9 @@ struct ChatView: View {
     @State private var showHistory = false
     @State private var sessions: [SessionSummary] = []
     @State private var sessionsLoaded = false
+    /// Live task drawer starts open so a long batch is visible without
+    /// a click; the operator can collapse it.
+    @State private var progressExpanded = true
 
     init(agent: AgentBridge) {
         _chat = StateObject(wrappedValue: ChatViewModel(agent: agent))
@@ -35,9 +38,13 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             chatToolbar
+            if let progress = agent.taskProgress {
+                TaskProgressDrawer(progress: progress, expanded: $progressExpanded)
+            }
             Rectangle().fill(Term.rule).frame(height: 1)
             messageList
             Rectangle().fill(Term.rule).frame(height: 1)
+            slashPalette
             composer
             statusBar
         }
@@ -79,6 +86,60 @@ struct ChatView: View {
             ApprovalSheetView(request: request) { answer in
                 agent.respond(to: request, answer: answer)
             }
+        }
+        .sheet(isPresented: $chat.showModelPicker) {
+            ModelPickerSheet(agent: agent, onDismiss: {
+                chat.showModelPicker = false
+            }, onSwitched: { line in
+                chat.appendSystem(line)
+            })
+        }
+    }
+
+    /// Hermes-style clickable command palette — pops above the composer
+    /// while the operator is typing a slash command.
+    @ViewBuilder
+    private var slashPalette: some View {
+        let matches = SlashRouting.matchingPalette(chat.composerText)
+        if !matches.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(matches) { item in
+                    Button {
+                        pickSlash(item)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text("/\(item.name)")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(Term.accent)
+                            Text(item.summary)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Term.inkDim)
+                                .lineLimit(1)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .background(Term.panel)
+        }
+    }
+
+    private func pickSlash(_ item: SlashRouting.Item) {
+        switch item.name {
+        case "model", "models":
+            chat.composerText = ""
+            chat.showModelPicker = true
+        case "new":
+            chat.composerText = ""
+            startNewChat()
+        case "goal", "plan", "deepthink", "mode", "steer":
+            chat.composerText = "/\(item.name) "
+        default:
+            chat.composerText = "/\(item.name)"
         }
     }
 
@@ -390,6 +451,33 @@ struct ChatView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
             }
+            // Operating Mode switcher pill (Focus, Wonder, Standby)
+            Menu {
+                ForEach(OperatingMode.allCases) { mode in
+                    Button(action: { chat.setOperatingMode(mode) }) {
+                        HStack {
+                            Text("\(mode.badgeText) · \(mode.summary)")
+                            if chat.operatingMode == mode {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Text(chat.operatingMode.badgeText)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(Term.panel)
+                            .overlay(
+                                Capsule()
+                                    .stroke(Term.rule, lineWidth: 1)
+                            )
+                    )
+            }
+            .menuStyle(.borderlessButton)
             Spacer()
             // Context gauge — the TUI status bar's "ctx 18.3K/32.8K",
             // fed by the reply frame's v1 telemetry.
@@ -450,6 +538,81 @@ struct ChatView: View {
         guard force || !sessionsLoaded else { return }
         sessions = await chat.fetchSessions()
         sessionsLoaded = true
+    }
+}
+
+// MARK: - Live task progress drawer
+
+/// Header strip driven by ``AgentBridge.taskProgress``. Collapsed it
+/// is a one-line count; expanded it shows the bar, current item, and
+/// controller state so a 300-item batch is inspectable without
+/// scrolling the transcript.
+private struct TaskProgressDrawer: View {
+    let progress: ToolProgress
+    @Binding var expanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Term.inkDim)
+                    Image(systemName: progress.completed
+                          ? "checkmark.circle.fill" : "circle.dotted")
+                        .font(.system(size: 11))
+                        .foregroundColor(progress.completed ? Color.green : Term.accent)
+                    Text(progress.title)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(Term.ink)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(progress.countLabel)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Term.accent)
+                    if progress.total > 0 {
+                        Text("\(Int((progress.fraction * 100).rounded()))%")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Term.inkDim)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Term.rule)
+                        Capsule()
+                            .fill(progress.completed ? Color.green.opacity(0.85) : Term.accent)
+                            .frame(width: max(4, geo.size.width * progress.fraction))
+                    }
+                }
+                .frame(height: 6)
+
+                HStack(spacing: 10) {
+                    if !progress.currentItem.isEmpty {
+                        Text("now \(progress.currentItem)")
+                            .lineLimit(1)
+                    }
+                    if progress.remaining > 0 {
+                        Text("\(progress.remaining) left")
+                    }
+                    if !progress.state.isEmpty {
+                        Text(progress.state.lowercased())
+                    }
+                    Spacer()
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(Term.inkDim)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Term.panel)
     }
 }
 

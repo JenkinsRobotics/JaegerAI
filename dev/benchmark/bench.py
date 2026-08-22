@@ -77,15 +77,76 @@ def _resolve_active_config_path() -> pathlib.Path:
     return root / "config.yaml"
 
 
-def _rewrite_config(text: str, *, model_path: str | None,
-                    force_allow: bool) -> str:
-    """YAML round-trip: optionally set model.model_path (+backend) and
-    force permissions.mode=allow. ruamel (comment-preserving) → pyyaml."""
+_CLOUD_PROVIDER_BASE_URLS = {
+    "ollama-cloud": "https://ollama.com/v1",
+    "ollama": "http://localhost:11434/v1",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "xai": "https://api.x.ai/v1",
+    "lmstudio": "http://localhost:1234/v1",
+}
+
+
+def _parse_model_target(target: str) -> dict[str, Any]:
+    """Disambiguate a model target string into local vs external cloud configuration."""
+    target = target.strip()
+    if ":" in target and not target.endswith(".gguf") and not os.path.exists(target):
+        prefix, _, model_id = target.partition(":")
+        prefix_lower = prefix.lower()
+        if prefix_lower in _CLOUD_PROVIDER_BASE_URLS or prefix_lower in {"ollamacloud", "cloud"}:
+            provider = "ollama-cloud" if prefix_lower in {"ollamacloud", "cloud"} else prefix_lower
+            return {
+                "is_external": True,
+                "provider": provider,
+                "model": model_id,
+                "base_url": _CLOUD_PROVIDER_BASE_URLS.get(provider, "https://ollama.com/v1"),
+            }
+    return {
+        "is_external": False,
+        "model_path": target,
+    }
+
+
+def _rewrite_config(text: str, *, model_path: str | None = None,
+                    model_target: str | None = None,
+                    force_allow: bool = True) -> str:
+    """YAML round-trip: optionally set model.model_path (+backend) or
+    external_model config and force permissions.mode=allow."""
+    target = model_target or model_path
+
     def _mutate(data: dict) -> None:
-        if model_path and isinstance(data.get("model"), dict):
-            data["model"]["model_path"] = model_path
-            is_gguf = model_path.endswith(".gguf") and not os.path.isdir(model_path)
-            data["model"]["backend"] = "llama_cpp_python" if is_gguf else "mlx_lm"
+        if target:
+            spec = _parse_model_target(target)
+            if spec.get("is_external"):
+                prov = spec["provider"]
+                mod = spec["model"]
+                ext_cfg = data.get("external_model")
+                if not isinstance(ext_cfg, dict):
+                    ext_cfg = {}
+                    data["external_model"] = ext_cfg
+                ext_cfg["enabled"] = True
+                ext_cfg["provider"] = prov
+                ext_cfg["model"] = mod
+                ext_cfg["base_url"] = spec.get("base_url", "https://ollama.com/v1")
+                if prov == "ollama-cloud":
+                    ext_cfg["api_key_credential"] = "ollama_cloud_api_key"
+                elif prov == "openai":
+                    ext_cfg["api_key_credential"] = "openai_api_key"
+                elif prov == "anthropic":
+                    ext_cfg["api_key_credential"] = "anthropic_api_key"
+                elif prov == "gemini":
+                    ext_cfg["api_key_credential"] = "gemini_api_key"
+                elif prov == "xai":
+                    ext_cfg["api_key_credential"] = "xai_api_key"
+            else:
+                if isinstance(data.get("external_model"), dict):
+                    data["external_model"]["enabled"] = False
+                mp = spec["model_path"]
+                if isinstance(data.get("model"), dict):
+                    data["model"]["model_path"] = mp
+                    is_gguf = mp.endswith(".gguf") and not os.path.isdir(mp)
+                    data["model"]["backend"] = "llama_cpp_python" if is_gguf else "mlx_lm"
         if force_allow:
             perms = data.get("permissions")
             if not isinstance(perms, dict):
@@ -116,18 +177,42 @@ def _rewrite_config(text: str, *, model_path: str | None,
 
 
 @contextlib.contextmanager
-def _prepared_config(*, model_path: str | None,
-                     force_allow: bool) -> Iterator[None]:
-    """Back up config.yaml, apply model/permission overrides, restore on
-    exit (even on crash) so the operator's instance is untouched."""
-    if not model_path and not force_allow:
-        yield
+def _prepared_config(*, model_path: str | None = None,
+                     model_target: str | None = None,
+                     force_allow: bool = True,
+                     hermetic: bool = True) -> Iterator[None]:
+    """Back up config.yaml or build a hermetic temp instance, apply
+    model/permission overrides, restore on exit (even on crash)."""
+    target = model_target or model_path
+    from jaeger_ai.core.instance.instance import resolve_instance_dir
+    live_dir = pathlib.Path(resolve_instance_dir(None))
+
+    if hermetic:
+        from jaeger_ai.core.bench.scenarios import build_hermetic_instance
+        herm = build_hermetic_instance(live_dir)
+        old_env = os.environ.get("JAEGER_INSTANCE_DIR")
+        os.environ["JAEGER_INSTANCE_DIR"] = str(herm.instance_dir)
+        try:
+            cfg_path = herm.instance_dir / "config.yaml"
+            original = cfg_path.read_text(encoding="utf-8")
+            cfg_path.write_text(
+                _rewrite_config(original, model_target=target,
+                                force_allow=force_allow),
+                encoding="utf-8")
+            yield
+        finally:
+            if old_env is not None:
+                os.environ["JAEGER_INSTANCE_DIR"] = old_env
+            else:
+                os.environ.pop("JAEGER_INSTANCE_DIR", None)
+            herm.cleanup()
         return
-    path = _resolve_active_config_path()
+
+    path = live_dir / "config.yaml"
     original = path.read_text(encoding="utf-8")
     try:
         path.write_text(
-            _rewrite_config(original, model_path=model_path,
+            _rewrite_config(original, model_target=target,
                             force_allow=force_allow),
             encoding="utf-8")
         yield
@@ -182,14 +267,15 @@ def _run_single(args: argparse.Namespace) -> int:
     tag_list = [t.strip() for t in (args.category or "").split(",") if t.strip()]
     id_list = [i.strip() for i in (args.ids or "").split(",") if i.strip()]
     cap = _QUICK_LIMIT if args.quick else (args.limit if args.limit > 0 else None)
+    target = getattr(args, "target_model", None) or None
 
-    print("=== Booting JROS pipeline ===", flush=True)
+    print(f"=== Booting JROS pipeline{' (' + target + ')' if target else ''} ===", flush=True)
     # Neutral identity from BOOT so the prewarmed first-turn prefix matches
     # the prompt run_bench's _neutral_identity_guard rebuilds (same flag →
     # identical string). Process-scoped; dies with this CLI run.
     os.environ["JAEGER_BENCH_NEUTRAL_IDENTITY"] = "1"
     boot_started = time.perf_counter()
-    with _prepared_config(model_path=None, force_allow=not args.no_force_allow):
+    with _prepared_config(model_target=target, force_allow=not args.no_force_allow):
         from jaeger_ai.main import boot_for_tui
         boot = boot_for_tui(instance_name=None, with_memory=True,
                             warmup=not args.no_warmup)
@@ -225,13 +311,28 @@ def _run_single(args: argparse.Namespace) -> int:
     summary["category_breakdown"] = _category_breakdown(summary.get("rows") or [])
 
     model_name = "unknown"
+    provider_name = "local"
     try:
         from jaeger_ai.main import _pipeline as _pl
-        _mp = getattr(getattr(_pl.get("config"), "model", None), "model_path", None)
-        if _mp:
-            summary["model_path"] = str(_mp)
-            model_name = _canonical_model_name(_mp)
+        cfg = _pl.get("config")
+        ext = getattr(cfg, "external_model", None)
+        if ext and getattr(ext, "enabled", False):
+            provider_name = getattr(ext, "provider", "external")
+            mod_id = getattr(ext, "model", "model")
+            clean_mod = mod_id.replace(":", "-").replace("/", "-")
+            model_name = f"{provider_name}-{clean_mod}"
+            summary["model_path"] = f"{provider_name}:{mod_id}"
+            summary["provider"] = provider_name
             summary["model_name"] = model_name
+            summary["is_cloud"] = provider_name in {"ollama-cloud", "openai", "anthropic", "gemini", "xai"}
+        else:
+            _mp = getattr(getattr(cfg, "model", None), "model_path", None)
+            if _mp:
+                summary["model_path"] = str(_mp)
+                model_name = _canonical_model_name(_mp)
+                summary["model_name"] = model_name
+                summary["provider"] = "local"
+                summary["is_cloud"] = False
     except Exception:  # noqa: BLE001
         pass
     ts = time.strftime("%Y%m%d-%H%M%S")
@@ -259,7 +360,7 @@ def _run_single(args: argparse.Namespace) -> int:
     # (overall → per-category → per-prompt, incl. skill selection).
     m = summary.get("metrics") or {}
     log_lines = [
-        f"# {model_name} — JROS bench  ({ts})  corpus v{summary.get('benchmark_version','?')}",
+        f"# {model_name} — JROS bench ({provider_name})  ({ts})  corpus v{summary.get('benchmark_version','?')}",
         f"# {summary['passed']}/{summary['total']} passed  errors={summary['errors']}  "
         f"wall={wall:.1f}s  load={load_s:.1f}s",
         f"# avg={m.get('avg_latency_s',0):.2f}s p50={m.get('p50_latency_s',0):.2f}s "
@@ -315,7 +416,15 @@ def _run_sweep(args: argparse.Namespace) -> int:
     """Run the SAME corpus across several models, one cold subprocess
     each (isolation — a crash on one model doesn't poison the rest).
     Each subprocess is this very script in single mode."""
-    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    models: list[str] = []
+    if getattr(args, "models", None):
+        models.extend([m.strip() for m in args.models.split(",") if m.strip()])
+    if getattr(args, "cloud_models", None):
+        for cm in [m.strip() for m in args.cloud_models.split(",") if m.strip()]:
+            if ":" not in cm:
+                cm = f"ollama-cloud:{cm}"
+            models.append(cm)
+
     print(f"=== Sweep: {len(models)} model(s) ===", flush=True)
     config_path = _resolve_active_config_path()
     original = config_path.read_text(encoding="utf-8")
@@ -323,11 +432,11 @@ def _run_sweep(args: argparse.Namespace) -> int:
     try:
         for i, mp in enumerate(models, 1):
             print(f"\n─── [{i}/{len(models)}] {mp} ───", flush=True)
-            config_path.write_text(
-                _rewrite_config(original, model_path=mp,
-                                force_allow=not args.no_force_allow),
-                encoding="utf-8")
-            child = [sys.executable, str(pathlib.Path(__file__).resolve())]
+            child = [
+                sys.executable,
+                str(pathlib.Path(__file__).resolve()),
+                "--target-model", mp,
+            ]
             if args.corpus != "A":
                 child += ["--corpus", args.corpus]
             if args.category:
@@ -338,8 +447,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 child += ["--limit", str(args.limit)]
             if args.no_warmup:
                 child += ["--no-warmup"]
-            # The child must NOT re-force perms (config already prepared)
-            # and must NOT regenerate HISTORY 15× — do it once at the end.
             child += ["--no-force-allow"]
             env = {**os.environ, "JAEGER_SUPPRESS_HISTORY": "1"}
             result = subprocess.run(child, env=env)
@@ -371,7 +478,11 @@ def main() -> int:
     p.add_argument("--quick", action="store_true",
                    help=f"Smoke run — first {_QUICK_LIMIT} cases.")
     p.add_argument("--models", default="",
-                   help="Comma-separated model paths → multi-model sweep.")
+                   help="Comma-separated model paths/specs → multi-model sweep (e.g. gemma-4-e4b-it-q4_k_m,ollama-cloud:qwen3.5:397b).")
+    p.add_argument("--cloud-models", default="",
+                   help="Comma-separated cloud models to sweep (e.g. qwen3.5:397b,gemma4:31b or provider:model).")
+    p.add_argument("--target-model", default="",
+                   help="Internal flag: target model path or provider:model for single run.")
     p.add_argument("--no-warmup", action="store_true",
                    help="Skip the llama-cpp prewarm pass.")
     p.add_argument("--no-force-allow", action="store_true",
@@ -382,7 +493,9 @@ def main() -> int:
     p.add_argument("--no-hermetic", dest="hermetic", action="store_false",
                    help="Let bench writes persist (legacy).")
     args = p.parse_args()
-    return _run_sweep(args) if args.models else _run_single(args)
+    if args.models or args.cloud_models:
+        return _run_sweep(args)
+    return _run_single(args)
 
 
 if __name__ == "__main__":

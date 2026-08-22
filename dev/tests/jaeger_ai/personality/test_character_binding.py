@@ -40,10 +40,9 @@ def test_active_override_wins_but_binding_unchanged(tmp_path):
     assert bound_character_id(tmp_path) == "kamina"  # binding untouched
 
 
-def test_hud_select_is_a_bind(tmp_path):
-    """The bridge ``select_character`` command must persist. A pick
-    that only wrote active_character snapped back to bound_character
-    on the next boot — the operator's 'swap to Jarvis' never stuck."""
+def test_hud_select_is_active_only(tmp_path):
+    """The bridge ``select_character`` command changes the live override.
+    Binding stays put until ``make_default``."""
     import types
 
     from jaeger_ai.interfaces import bridge
@@ -52,6 +51,21 @@ def test_hud_select_is_a_bind(tmp_path):
     set_active_character(tmp_path, "clanker")
     boot = types.SimpleNamespace(layout=types.SimpleNamespace(root=tmp_path))
     ok, err = bridge._command("select_character", {"id": "jarvis"}, boot)
+    assert ok is True
+    assert err is None
+    assert bound_character_id(tmp_path) == "clanker"
+    assert active_character_id(tmp_path) == "jarvis"
+
+
+def test_make_default_binds(tmp_path):
+    import types
+
+    from jaeger_ai.interfaces import bridge
+
+    _manifest(tmp_path, bound_character="clanker")
+    set_active_character(tmp_path, "clanker")
+    boot = types.SimpleNamespace(layout=types.SimpleNamespace(root=tmp_path))
+    ok, err = bridge._command("make_default", {"id": "jarvis"}, boot)
     assert ok is True
     assert err is None
     assert bound_character_id(tmp_path) == "jarvis"

@@ -87,6 +87,44 @@ def test_is_current_falls_back_to_local_when_external_disabled():
 # ── offline servers + type-a-model providers ─────────────────────────
 
 
+def test_mlx_models_get_their_own_provider():
+    found = _all_runtimes()
+    found["local_mlx"] = [
+        {"name": "qwen3.6-27b-5bit", "path": "/p/mlx", "size_gb": 18.0},
+    ]
+    providers = _build_providers_list(found, _ext(enabled=False),
+                                      current_backend="mlx_lm")
+    mlx = _by_slug(providers, "mlx")
+    assert mlx["models"] == ["qwen3.6-27b-5bit"]
+    assert mlx["is_current"] is True
+    assert _by_slug(providers, "local")["is_current"] is False
+
+
+def test_picker_catalog_shape(monkeypatch):
+    from jaeger_ai.interfaces.tui import slash_commands as slash
+
+    monkeypatch.setattr(
+        "jaeger_ai.core.models.model_discovery.discover_all",
+        lambda *_a, **_k: _all_runtimes(),
+    )
+    cfg = type("Cfg", (), {
+        "external_model": _ext(provider="ollama", model="llama3.2"),
+        "model": type("M", (), {"backend": "llama_cpp_python",
+                                "model_path": "/p/g.gguf"})(),
+    })()
+    snap = slash.picker_catalog(layout=None, cfg=cfg, cloud_key="")
+    assert snap["current_provider"] == "ollama"
+    assert snap["current_model"] == "llama3.2"
+    assert "providers" in snap and "local_paths" in snap
+    slugs = [p["slug"] for p in snap["providers"]]
+    assert "local" in slugs and "ollama" in slugs
+
+
+def test_mlx_absent_when_none_on_disk():
+    slugs = [p["slug"] for p in _build_providers_list(_all_runtimes(), _ext())]
+    assert "mlx" not in slugs
+
+
 def test_offline_servers_are_excluded():
     found = {
         "jaeger":       [{"name": "g", "path": "/p"}],

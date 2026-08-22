@@ -7,6 +7,8 @@ command handlers are testable against a model-less JaegerTUI.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from rich.console import Console
 
@@ -88,6 +90,43 @@ def test_cloud_aliases_resolve_to_real_providers() -> None:
     """Every alias must resolve to a provider in _CLOUD_PROVIDERS."""
     for alias, prov in slash._CLOUD_ALIASES.items():
         assert prov in slash._CLOUD_PROVIDERS, alias
+
+
+def test_bare_model_command_detects_picker_names() -> None:
+    assert slash.is_bare_model_command("/model")
+    assert slash.is_bare_model_command("/models")
+    assert slash.is_bare_model_command("  /MODEL  ")
+    assert not slash.is_bare_model_command("/model list")
+    assert not slash.is_bare_model_command("/model use ollama qwen")
+    assert not slash.is_bare_model_command("/help")
+
+
+def test_models_is_registered_as_picker_alias() -> None:
+    assert slash._BY_NAME["models"].handler is slash._models
+    assert slash._BY_NAME["model"].summary == "open the model picker"
+
+
+def test_bare_models_opens_the_picker(monkeypatch, ctx) -> None:
+    """``/models`` used to dump the catalogue into the transcript. It now
+    opens the same Hermes-style picker ``/model`` does."""
+    seen = {}
+
+    def fake_picker(c):  # noqa: ARG001
+        seen["picker"] = True
+        return slash.SlashResult()
+
+    def fake_list(c):  # noqa: ARG001
+        seen["list"] = True
+        return slash.SlashResult()
+
+    monkeypatch.setattr(slash, "_model_picker", fake_picker)
+    monkeypatch.setattr(slash, "_model_list", fake_list)
+    slash.dispatch("/models", ctx)
+    assert seen == {"picker": True}
+    slash.dispatch("/model", ctx)
+    assert seen["picker"] is True
+    slash.dispatch("/models list", ctx)
+    assert seen.get("list") is True
 
 
 # ── permission confirmation — the hermes-pattern fix ────────────────
@@ -209,7 +248,8 @@ def test_peek_reports_a_healthy_turn(monkeypatch) -> None:
         "repeated_max": 1, "repeated_tool": "read_file", "failures": 0,
     })
     assert "looks healthy" in out
-    assert "4 tool calls" in out
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    assert "4 tool calls" in plain
 
 
 def test_peek_flags_a_loop(monkeypatch) -> None:

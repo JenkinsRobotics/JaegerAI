@@ -685,7 +685,7 @@ def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
         pass
 
     try:
-        api_key = _ollama_cloud_key()
+        api_key = _resolve_provider_key("ollama-cloud")
         if api_key:
             cloud = model_discovery.discover_ollama_cloud(api_key)
             if cloud.get("online"):
@@ -708,36 +708,58 @@ def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
                     })
     except Exception:  # noqa: BLE001
         pass
+
+    try:
+        xai_key = _resolve_provider_key("xai")
+        if xai_key:
+            for name in ("grok-2-latest", "grok-2-vision-latest", "grok-beta"):
+                rows.append({
+                    "name": name,
+                    "source": "xai",
+                    "serving": False,
+                    "kind": "external",
+                    "provider": "xai",
+                    "location": "cloud",
+                    "context_length": 131072,
+                    "status": "available on xAI Grok (API key configured)",
+                    "description": "xAI cloud model",
+                })
+    except Exception:  # noqa: BLE001
+        pass
+
     return rows
 
 
-def _ollama_cloud_key() -> str:
-    """The configured Ollama Cloud key, or ``""``.
-
-    Resolved without requiring a booted pipeline: this is also called
-    from CLI and tool contexts where ``_pipeline`` is empty, and a key
-    that only resolves after boot means the cloud catalogue silently
-    disappears from those surfaces.
-    """
+def _resolve_provider_key(provider: str) -> str:
+    """The configured API key for a provider, or ``""`` if not set up."""
     try:
-        from jaeger_ai.core.models.external_model import resolve_api_key
+        from jaeger_ai.core.models.external_model import (
+            _CONVENTIONAL_ENV,
+            _PROVIDER_CREDENTIAL_ALIASES,
+            resolve_api_key,
+        )
         from jaeger_ai.main import _pipeline
 
         cfg = _pipeline.get("config")
         ext = getattr(cfg, "external_model", None)
-        if ext is not None:
+        if ext is not None and getattr(ext, "provider", "") == provider:
             key = resolve_api_key(ext, _pipeline.get("layout")) or ""
             if key:
                 return key
     except Exception:  # noqa: BLE001
         pass
 
-    key = str(os.environ.get("OLLAMA_API_KEY") or "").strip()
-    if key:
-        return key
+    from jaeger_ai.core.models.external_model import (
+        _CONVENTIONAL_ENV,
+        _PROVIDER_CREDENTIAL_ALIASES,
+    )
 
-    # Last resort: read the active instance off disk, the way every
-    # pre-boot surface (doctor, --list-models) resolves it.
+    for env_var in _CONVENTIONAL_ENV.get(provider, ()):
+        val = str(os.environ.get(env_var) or "").strip()
+        if val:
+            return val
+
+    # Last resort: read the active instance credentials off disk
     try:
         from jaeger_agent import credentials as creds
 
@@ -746,16 +768,19 @@ def _ollama_cloud_key() -> str:
             default_instance_name,
             resolve_instance_dir,
         )
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
 
         layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
-        cfg = load_yaml(layout.config_path, Config)
-        name = str(getattr(cfg.external_model, "api_key_credential", "") or "")
-        if name:
-            return creds.get_credential(layout, name) or ""
+        for cred_name in _PROVIDER_CREDENTIAL_ALIASES.get(provider, ()):
+            val = creds.get_credential(layout, cred_name) or ""
+            if val:
+                return val
     except Exception:  # noqa: BLE001
         pass
     return ""
+
+
+def _ollama_cloud_key() -> str:
+    return _resolve_provider_key("ollama-cloud")
 
 
 def list_registered_models(

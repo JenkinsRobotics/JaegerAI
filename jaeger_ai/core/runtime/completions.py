@@ -141,7 +141,10 @@ def _describe_delegation(event: dict[str, Any]) -> str:
     if result.get("delegated") is False or result.get("ok") is False:
         why = _one_line(result.get("error") or "no reason given", 200)
         return f"- Subagent task {task!r} FAILED: {why}"
-    answer = _one_line(result.get("answer") or result.get("result") or "", 800)
+    answer = _one_line(
+        result.get("summary") or result.get("answer") or result.get("result") or "",
+        800,
+    )
     return f"- Subagent task {task!r} finished. Its answer: {answer}"
 
 

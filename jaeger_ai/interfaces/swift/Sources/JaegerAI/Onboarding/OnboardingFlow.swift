@@ -57,6 +57,8 @@ enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
 /// bridge's ``create_instance`` command — the additive v1 op pinned in
 /// ``protocol_v1_fixtures.json``.
 struct OnboardingAnswers: Sendable, Equatable {
+    var userName: String = ""
+    var customPrimeDirective: String = ""
     var characterId: String = ""
     var displayName: String = ""
     var role: String = ""
@@ -90,13 +92,6 @@ struct OnboardingAnswers: Sendable, Equatable {
 
     /// The ``create_instance`` args. Blank optionals are OMITTED so the
     /// single source of truth for defaults stays in setup_wizard.py.
-    ///
-    /// ``name`` (the instance DIR) is sent ONLY when a CLI pin exists —
-    /// verbatim, so ``./jaeger agent create lilith`` always dirs as
-    /// ``lilith`` regardless of which character gets picked or how the
-    /// operator edits the display name afterward. With no pin, ``name``
-    /// is omitted and the server slugs the dir from ``display_name``
-    /// (unchanged, existing behaviour).
     func commandArgs() -> [String: String] {
         var args: [String: String] = [
             "character_id": characterId,
@@ -105,6 +100,8 @@ struct OnboardingAnswers: Sendable, Equatable {
             "interaction_mode": "gui",
         ]
         let optional: [(String, String)] = [
+            ("user_name", userName),
+            ("custom_prime_directive", customPrimeDirective),
             ("display_name", displayName),
             ("role", role),
             ("voice_id", voiceId),

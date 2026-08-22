@@ -64,7 +64,21 @@ struct TranscriptRow: View {
         case .system:    systemRow
         case .thinking:  thinkingRow
         case .toolCall:  toolRow
+        case .thought:   ThoughtDisclosureView(thoughtText: message.thoughtText, isStreaming: message.isStreaming)
+        case .toolGroup: ToolCommandGroupView(items: message.toolItems, isStreaming: message.isStreaming)
+        case .interactive: interactiveRow
         }
+    }
+
+    private var interactiveRow: some View {
+        let lines = message.text.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let question = lines.first ?? "Decision Required"
+        let options = lines.dropFirst().map { String($0.trimmingCharacters(in: CharacterSet(charactersIn: "-*•0123456789. "))) }
+        return InteractivePromptView(
+            question: question,
+            options: Array(options),
+            onSelect: { _ in }
+        )
     }
 
     private var userRow: some View {

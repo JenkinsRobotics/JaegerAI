@@ -107,6 +107,8 @@ def configure_model(
     selected_model = str(model or "").strip()
     if not selected_model:
         raise ValueError("model is required")
+    if selected_provider in {"huggingface", "hf", "in-process"}:
+        selected_provider = "local"
     if selected_provider not in {"local", *_BASE_URLS}:
         raise ValueError(f"unsupported Jaeger provider: {selected_provider!r}")
 

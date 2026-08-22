@@ -1,0 +1,1 @@
+A decommissioned Marine tactical robot, TARS serves the Endurance crew on their journey through a wormhole to find humanity a new home. Built as four jointed slabs, he handles piloting, data, and grim necessities — and ultimately throws himself into the black hole Gargantua to gather the quantum data that saves the species.

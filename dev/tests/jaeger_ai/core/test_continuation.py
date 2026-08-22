@@ -23,6 +23,8 @@ from jaeger_ai.core.runtime import continuation
         ("Next I will check the Archive folder.", "continue"),
         ("I finished the first folder; 13 remain.", "continue"),
         ("Processed 3 of 14 folders.", "continue"),
+        ("The get_note tool doesn't accept the x-coredata ID format. "
+         "Let me try reading by title instead.", "continue"),
         # ── the answer is finished ──
         ("All 14 folders processed. Here is the final summary: ...",
          "complete"),
@@ -57,6 +59,15 @@ def test_needs_continuation_honours_the_kill_switch(monkeypatch) -> None:
     monkeypatch.setenv("JAEGER_AUTO_CONTINUE", "0")
     assert continuation.enabled() is False
     assert continuation.needs_continuation(stall) is False
+
+
+def test_inner_cap_halt_is_not_a_finished_job() -> None:
+    assert continuation.hit_inner_cap(
+        "hit max_iterations=24 without a final answer")
+    assert continuation.hit_inner_cap("hit max_iterations=60 without a final answer")
+    assert not continuation.hit_inner_cap("stalled")
+    assert not continuation.hit_inner_cap(None)
+    assert not continuation.hit_inner_cap("")
 
 
 def test_prompts_restate_the_objective() -> None:

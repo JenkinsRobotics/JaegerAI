@@ -82,9 +82,6 @@ final class PillPanelController: NSObject {
                 guard let self, let agent = self.agent else { return }
                 self.panel?.orderOut(nil)
                 ChatWindowController.show(agent: agent)
-            },
-            notImplemented: { what in
-                NSLog("[JaegerAI][pill] \(what) — not implemented yet")
             }
         )
         let hosting = NSHostingController(
@@ -92,9 +89,8 @@ final class PillPanelController: NSObject {
                 .environmentObject(agent)
                 .environmentObject(PillBridge.shared)
         )
-        // The panel's content rect is 720 × 160 (slightly taller than
-        // the Lilith 720 × 140 so the bottom row's pills don't crowd
-        // the rounded corner).
+        // Taller than the original Lilith 720 × 140 so the HUD status
+        // row, live progress bar, and action chips all fit.
         let newPanel = PillPanel()
         newPanel.contentViewController = hosting
         // Pin the frame RIGHT AFTER the hosting assignment: AppKit derives
@@ -102,7 +98,7 @@ final class PillPanelController: NSObject {
         // positioning on first summon could measure a stale width — the
         // pill then hangs off-center (left edge at midX). Explicit size +
         // an immediate layout keeps every centre computation truthful.
-        newPanel.setContentSize(NSSize(width: 720, height: 160))
+        newPanel.setContentSize(NSSize(width: 720, height: 248))
         newPanel.layoutIfNeeded()
 
         // Auto-dismiss on key-resign — operator clicks back to whatever

@@ -79,6 +79,29 @@ def test_disable_and_enable_playbook_are_schema_validated(layout):
     assert load_yaml(instance.config_path, Config).skills.disabled_playbooks == []
 
 
+def test_instance_playbook_overrides_builtin_and_archived_is_hidden(layout):
+    instance, bundled = layout
+    _skill(bundled / "apple" / "apple-notes", "apple-notes", "Manage Apple Notes via memo CLI")
+    live = instance.skills_dir / "apple" / "apple-notes"
+    live.mkdir(parents=True)
+    (live / "SKILL.md").write_text(
+        "---\nname: apple-notes\ndescription: Process the Apple Notes inbox.\n---\nmerge\n",
+        encoding="utf-8",
+    )
+    retired = instance.skills_dir / "smart-notes-organizer"
+    retired.mkdir()
+    (retired / "SKILL.md").write_text(
+        "---\nname: smart-notes-organizer\narchived: true\ndescription: old move-all\n---\n",
+        encoding="utf-8",
+    )
+
+    rows = {row["name"]: row for row in service.list_skills(instance)["skills"]}
+    assert rows["apple-notes"]["description"] == "Process the Apple Notes inbox."
+    assert rows["apple-notes"]["zone"] == "instance"
+    assert rows["apple-notes"]["category"] == "apple"
+    assert "smart-notes-organizer" not in rows
+
+
 def test_rejects_name_traversal_and_bundled_removal(layout):
     instance, bundled = layout
     _skill(bundled / "safe", "safe")

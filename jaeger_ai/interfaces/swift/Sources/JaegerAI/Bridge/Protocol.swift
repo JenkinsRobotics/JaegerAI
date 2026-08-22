@@ -61,6 +61,147 @@ final class FrameStream {
     }
 }
 
+// MARK: - Live task progress (work_ledger frames)
+
+/// Structured snapshot of a long batch job, decoded from a ``tool``
+/// frame whose ``name`` is ``work_ledger`` (or whose ``args`` carry
+/// done/total). Additive — older cores that only send
+/// ``detail: "worker 190/292"`` still parse.
+struct ToolProgress: Sendable, Equatable {
+    let taskId: String
+    let taskName: String
+    let done: Int
+    let total: Int
+    let remaining: Int
+    let currentItem: String
+    let completed: Bool
+    let state: String
+    let detail: String
+    let step: Int?
+
+    var fraction: Double {
+        guard total > 0 else { return completed ? 1 : 0 }
+        return min(1, max(0, Double(done) / Double(total)))
+    }
+
+    var countLabel: String {
+        if total > 0 { return "\(done)/\(total)" }
+        if completed { return "done" }
+        if let step { return "step \(step)" }
+        return "running"
+    }
+
+    var title: String {
+        taskName.isEmpty ? "Task" : taskName
+    }
+
+    /// Best-effort parse. Returns nil when the frame is an ordinary
+    /// tool chip with no ledger counts.
+    static func parse(name: String, detail: String?,
+                      args: [String: Any]?) -> ToolProgress? {
+        let fromArgs = args.flatMap { Self.from(args: $0, fallbackDetail: detail) }
+        if let fromArgs { return fromArgs }
+        if name == "work_ledger" {
+            return Self.from(detail: detail ?? "", name: name)
+        }
+        if let detail, detail.contains("/") {
+            return Self.from(detail: detail, name: name)
+        }
+        return nil
+    }
+
+    private static func from(args: [String: Any],
+                             fallbackDetail: String?) -> ToolProgress? {
+        let done = intVal(args["done"])
+        let total = intVal(args["total"])
+        let remaining = intVal(args["remaining"])
+        let step = args["step"].map { intVal($0) }
+        let taskName = args["task_name"] as? String ?? ""
+        let taskId = args["task_id"] as? String ?? ""
+        let completed = boolVal(args["completed"])
+        let state = args["state"] as? String ?? (completed ? "COMPLETED" : "RUNNING")
+        let inProgress = stringList(args["in_progress"])
+        let current = inProgress.first ?? ""
+        let hasCounts = total > 0 || done > 0 || completed || !taskId.isEmpty
+        guard hasCounts else { return nil }
+        let detail = (fallbackDetail?.isEmpty == false)
+            ? fallbackDetail!
+            : [taskName, total > 0 ? "\(done)/\(total)" : nil, current.isEmpty ? nil : current]
+                .compactMap { $0 }.joined(separator: " · ")
+        return ToolProgress(
+            taskId: taskId, taskName: taskName, done: done, total: total,
+            remaining: remaining, currentItem: current, completed: completed,
+            state: state, detail: detail, step: step
+        )
+    }
+
+    private static func from(detail: String, name: String) -> ToolProgress? {
+        // "notes · 190/292 · item_190" or legacy "worker 190/292"
+        let ratio = try? NSRegularExpression(pattern: #"(\d+)\s*/\s*(\d+)"#)
+        let range = NSRange(detail.startIndex..<detail.endIndex, in: detail)
+        var done = 0
+        var total = 0
+        if let match = ratio?.firstMatch(in: detail, range: range),
+           match.numberOfRanges >= 3,
+           let doneR = Range(match.range(at: 1), in: detail),
+           let totalR = Range(match.range(at: 2), in: detail) {
+            done = Int(detail[doneR]) ?? 0
+            total = Int(detail[totalR]) ?? 0
+        }
+        var step: Int? = nil
+        if let stepMatch = detail.range(of: #"step\s+(\d+)"#, options: .regularExpression) {
+            let digits = detail[stepMatch].filter(\.isNumber)
+            step = Int(digits)
+        }
+        guard total > 0 || step != nil || name == "work_ledger" else { return nil }
+        let parts = detail.split(separator: "·").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        var taskName = ""
+        if let first = parts.first, !first.contains("/") && !first.hasPrefix("step")
+            && first != "worker" && first != "running" {
+            taskName = first
+        }
+        let current = parts.last(where: {
+            !$0.contains("/") && !$0.hasPrefix("step") && $0 != taskName
+                && $0 != "worker" && $0 != "running"
+        }) ?? ""
+        return ToolProgress(
+            taskId: "", taskName: taskName, done: done, total: total,
+            remaining: max(0, total - done), currentItem: current,
+            completed: total > 0 && done >= total,
+            state: (total > 0 && done >= total) ? "COMPLETED" : "RUNNING",
+            detail: detail, step: step
+        )
+    }
+
+    private static func intVal(_ any: Any?) -> Int {
+        if let i = any as? Int { return i }
+        if let n = any as? NSNumber { return n.intValue }
+        if let d = any as? Double { return Int(d) }
+        if let s = any as? String, let i = Int(s) { return i }
+        return 0
+    }
+
+    private static func boolVal(_ any: Any?) -> Bool {
+        if let b = any as? Bool { return b }
+        if let n = any as? NSNumber { return n.boolValue }
+        if let s = any as? String {
+            return s.lowercased() == "true" || s == "1"
+        }
+        return false
+    }
+
+    private static func stringList(_ any: Any?) -> [String] {
+        if let list = any as? [String] { return list }
+        if let list = any as? [Any] {
+            return list.compactMap { $0 as? String }.filter { !$0.isEmpty }
+        }
+        if let s = any as? String, !s.isEmpty { return [s] }
+        return []
+    }
+}
+
 // MARK: - Protocol v1 typed frames
 
 /// The protocol version this shell speaks. Compared against the ``proto``
@@ -81,7 +222,11 @@ enum ProtocolFrame {
     case state(busy: Bool)
     /// ``detail`` is a v1 ADDITIVE optional — short human context for the
     /// activity chip (today: which skill loaded, e.g. "view scheduling").
-    case tool(name: String, phase: String, elapsed: Double, detail: String?)
+    /// ``progress`` is also additive — a work-ledger snapshot for the
+    /// live task drawer / hotkey HUD. Nil on ordinary tool chips and
+    /// on older cores that omit ``args``.
+    case tool(name: String, phase: String, elapsed: Double, detail: String?,
+              progress: ToolProgress?)
     /// ``telemetry`` fields are v1 ADDITIVE optionals — a core that
     /// doesn't send them (or an older fixture) decodes to nils.
     case reply(text: String, error: String?,
@@ -128,10 +273,17 @@ enum ProtocolFrame {
         case "state":
             return .state(busy: obj["busy"] as? Bool ?? false)
         case "tool":
-            return .tool(name: obj["name"] as? String ?? "",
-                         phase: obj["phase"] as? String ?? "start",
+            let name = obj["name"] as? String ?? ""
+            let phase = obj["phase"] as? String ?? "start"
+            let detail = obj["detail"] as? String
+            let args = obj["args"] as? [String: Any]
+            return .tool(name: name,
+                         phase: phase,
                          elapsed: (obj["elapsed_s"] as? Double) ?? 0,
-                         detail: obj["detail"] as? String)
+                         detail: detail,
+                         progress: ToolProgress.parse(name: name,
+                                                      detail: detail,
+                                                      args: args))
         case "reply":
             return .reply(text: obj["text"] as? String ?? "",
                           error: obj["error"] as? String,

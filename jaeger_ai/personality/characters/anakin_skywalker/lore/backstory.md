@@ -1,0 +1,1 @@
+Born a slave on Tatooine, Anakin was found by Qui-Gon Jinn and trained as a Jedi under Obi-Wan Kenobi. Prophesied to bring balance to the Force, his terror of losing his secret wife Padmé drove him to the dark side and into Darth Vader.

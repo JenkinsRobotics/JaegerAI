@@ -90,10 +90,12 @@ _DESC = {
 # whatever the user was on before the switch instead of forcing one.
 _AUTONOMY_FOR = {"auto": "auto", "supervised": "ask"}
 
-# Hard ceiling on continuation steps in one autonomous run. The plan's
-# number; a run that needs more than this is a run that has lost the
-# thread, and the wind-down summary is more useful than step 51.
-DEFAULT_MAX_STEPS = 50
+# Outer job budget (how many inner turns a run may take). Inner-turn
+# tool fuse lives on ``inner_max()`` — hitting it continues, it does
+# not finish the job.
+DEFAULT_MAX_STEPS = 100
+INNER_MAX_CHAT = 24
+INNER_MAX_AUTO = 60
 
 _lock = threading.RLock()
 _state: dict[str, object] = {
@@ -229,11 +231,12 @@ def _publish() -> None:
 
 
 def max_steps() -> int:
-    """Step budget for one autonomous run.
+    """Outer step budget for one job (``job_max_steps``).
 
     ``JAEGER_AUTO_MAX_STEPS`` wins (handy for a one-off long job or for
-    pinning a test), then ``automation.auto_max_steps`` from the
-    instance config, then :data:`DEFAULT_MAX_STEPS`.
+    pinning a test), then ``automation.job_max_steps`` (falling back to
+    the deprecated ``auto_max_steps`` alias), then
+    :data:`DEFAULT_MAX_STEPS`.
     """
     env = os.environ.get("JAEGER_AUTO_MAX_STEPS", "").strip()
     if env:
@@ -244,12 +247,44 @@ def max_steps() -> int:
     try:
         from jaeger_ai.main import _pipeline
         cfg = _pipeline.get("config")
-        value = getattr(getattr(cfg, "automation", None), "auto_max_steps", 0)
+        auto = getattr(cfg, "automation", None)
+        value = getattr(auto, "job_max_steps", 0) or getattr(
+            auto, "auto_max_steps", 0)
         if value:
             return max(1, int(value))
     except Exception:  # noqa: BLE001
         pass
     return DEFAULT_MAX_STEPS
+
+
+def inner_max(*, batch: bool = False) -> int:
+    """Per-turn tool-call fuse.
+
+    Chat uses ``automation.inner_max_iterations`` (default 24). Auto,
+    batch, or an open ledger uses at least :data:`INNER_MAX_AUTO` (60)
+    so a notes-scale job is not cut off mid-batch. Hitting this number
+    continues the outer loop; it is not a job-complete signal.
+    ``JAEGER_INNER_MAX`` overrides both.
+    """
+    env = os.environ.get("JAEGER_INNER_MAX", "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    configured = INNER_MAX_CHAT
+    try:
+        from jaeger_ai.main import _pipeline
+        cfg = _pipeline.get("config")
+        value = getattr(getattr(cfg, "automation", None),
+                        "inner_max_iterations", 0)
+        if value:
+            configured = max(1, int(value))
+    except Exception:  # noqa: BLE001
+        pass
+    if batch or is_continuous():
+        return max(configured, INNER_MAX_AUTO)
+    return configured
 
 
 def begin_run(objective: str = "", *, budget: int | None = None) -> dict:
@@ -372,6 +407,7 @@ def reset() -> None:
 
 __all__ = [
     "ExecutionMode", "EXECUTION_MODES", "DEFAULT", "DEFAULT_MAX_STEPS",
+    "INNER_MAX_CHAT", "INNER_MAX_AUTO", "inner_max",
     "current_mode", "is_continuous", "list_modes", "normalize",
     "execution_info", "set_execution_mode", "max_steps", "begin_run",
     "record_step", "steps_left", "end_run", "run_active", "run_progress",

@@ -28,7 +28,8 @@ SUBCOMMANDS: dict[str, tuple[str, ...]] = {
     "goal": ("clear",),
     "deepthink": ("add", "list", "approve", "start", "stop"),
     "board": ("show", "add", "approve", "done", "move"),
-    "model": ("use",),
+    "model": ("use", "list"),
+    "models": ("list",),
 }
 
 

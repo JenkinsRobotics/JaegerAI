@@ -150,6 +150,7 @@ def test_delete_tombstone_is_idempotent_and_blocks_stale_reimport(tmp_path):
     try:
         assert store.create("shared-1") == {
             "id": "shared-1", "created": True, "tombstoned": False,
+            "origin": "unknown",
         }
         assert store.create("shared-1")["created"] is False
         store.record("shared-1", "user", "remove me")
@@ -296,3 +297,69 @@ def test_session_messages_mask_opaque_secret_metadata_values(tmp_path):
     assert metadata["api_key"] == "[REDACTED]"
     assert metadata["nested"]["password"] == "[REDACTED]"
     store.close()
+
+
+def test_infer_session_origin_from_surface_conventions():
+    from jaeger_ai.core.sessions import infer_session_origin
+
+    assert infer_session_origin("cli") == "tui"
+    assert infer_session_origin("desktop-app") == "app"
+    assert infer_session_origin("a7bf8364") == "app"
+    assert infer_session_origin("c3634ba2dbca") == "webui"
+    assert infer_session_origin("telegram:42") == "telegram"
+    assert infer_session_origin("test_probe") == "probe"
+    assert infer_session_origin("a7bf8364", explicit="webui") == "webui"
+    assert infer_session_origin("cli", explicit="app") == "app"
+
+
+def test_record_stamps_origin_and_first_writer_wins(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        store.record("cli", "user", "from tui")
+        store.record("a7bf8364", "user", "from app")
+        store.record("c3634ba2dbca", "user", "from webui")
+        by_id = {row["id"]: row for row in store.list_sessions()}
+        assert by_id["cli"]["origin"] == "tui"
+        assert by_id["cli"]["source"] == "tui"
+        assert by_id["a7bf8364"]["origin"] == "app"
+        assert by_id["c3634ba2dbca"]["origin"] == "webui"
+        store.record("cli", "user", "later from webui", origin="webui")
+        assert {row["id"]: row["origin"] for row in store.list_sessions()}["cli"] == "tui"
+        created = store.create("aabbccdd", origin="app")
+        assert created["origin"] == "app"
+        again = store.create("aabbccdd", origin="webui")
+        assert again["created"] is False
+        assert again["origin"] == "app"
+    finally:
+        store.close()
+
+
+def test_origin_backfill_on_existing_database(tmp_path):
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(path)
+    with conn:
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, "
+            "preview TEXT, created_at REAL, last_active REAL)"
+        )
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_id TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, "
+            "ts REAL NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO sessions(id, created_at, last_active) VALUES(?,?,?)",
+            ("a7b525a6", 1.0, 1.0),
+        )
+        conn.execute(
+            "INSERT INTO sessions(id, created_at, last_active) VALUES(?,?,?)",
+            ("c3634ba2dbca", 1.0, 2.0),
+        )
+    conn.close()
+    store = SessionStore(path)
+    try:
+        by_id = {row["id"]: row["origin"] for row in store.list_sessions()}
+        assert by_id["a7b525a6"] == "app"
+        assert by_id["c3634ba2dbca"] == "webui"
+    finally:
+        store.close()

@@ -445,17 +445,21 @@ private struct IdentityStep: View {
     @ObservedObject var model: OnboardingModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            StepTitle("Identity",
-                      subtitle: "The agent's own name — how it refers to "
-                               + "itself. The character you picked supplies "
-                               + "its persona and voice, never its name; "
-                               + "type over anything here.")
-            OnboardingField(label: "NAME", text: nameBinding,
-                            prompt: "Jarvis")
+        VStack(alignment: .leading, spacing: 16) {
+            StepTitle("Identity & Directives",
+                      subtitle: "Set up who you are, what to call your agent, "
+                               + "and your governing prime directives.")
+            OnboardingField(label: "YOUR NAME (OPERATOR)",
+                            text: $model.answers.userName,
+                            prompt: "Matthew")
+            OnboardingField(label: "AGENT NAME", text: nameBinding,
+                            prompt: "ARES")
             OnboardingField(label: "ROLE — WHAT DOES IT DO?",
                             text: $model.answers.role,
-                            prompt: "general-purpose agentic assistant")
+                            prompt: "general-purpose autonomous executive assistant")
+            OnboardingField(label: "CUSTOM PRIME DIRECTIVE (OPTIONAL)",
+                            text: $model.answers.customPrimeDirective,
+                            prompt: "e.g. Always prioritize concise execution and verify file edits")
             Spacer()
         }
     }

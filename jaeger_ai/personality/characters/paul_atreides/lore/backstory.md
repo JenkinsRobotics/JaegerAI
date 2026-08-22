@@ -1,0 +1,1 @@
+Son of Duke Leto and the Bene Gesserit Lady Jessica, Paul fled into the deserts of Arrakis when House Harkonnen destroyed his family. Among the Fremen he became Muad'Dib, drank the Water of Life, awakened terrible prescience, and led a holy war across the universe — fulfilling and dreading the destiny bred into him.

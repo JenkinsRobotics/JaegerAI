@@ -95,10 +95,14 @@ _PROMISE = re.compile(
     r"\b(?:let me|let's|i'?ll|i will|i'?m going to|i am going to|"
     r"i'?m about to|next[,]? i(?:'?ll| will)?|now i(?:'?ll| will)|"
     r"i shall|going to)\b[^.!?\n]{0,100}?"
-    r"\b(?:read|check|process|analy[sz]e|analy[sz]ing|look|review|"
-    r"continue|start|begin|scan|go through|gather|collect|extract|"
-    r"summari[sz]e|write|search|fetch|list|open|examine|inspect|"
-    r"work through|iterate|walk through|dig into)\b",
+    r"\b(?:read(?:ing)?|check(?:ing)?|process(?:ing)?|"
+    r"analy[sz]e|analy[sz]ing|look(?:ing)?|review(?:ing)?|"
+    r"continu(?:e|ing)|start(?:ing)?|begin(?:ning)?|scan(?:ning)?|"
+    r"go through|gather(?:ing)?|collect(?:ing)?|extract(?:ing)?|"
+    r"summari[sz]e|summari[sz]ing|writ(?:e|ing)|search(?:ing)?|"
+    r"fetch(?:ing)?|list(?:ing)?|open(?:ing)?|examin(?:e|ing)|"
+    r"inspect(?:ing)?|work through|iterate|walk through|dig into|"
+    r"tr(?:y|ying))\b",
     re.IGNORECASE,
 )
 
@@ -159,6 +163,17 @@ def classify(text: str) -> str:
     return "settled"
 
 
+def hit_inner_cap(halt_reason: str | None) -> bool:
+    """True when the inner tool fuse tripped — not a finished job.
+
+    ``drive_one_turn`` winds down with a summary when it hits
+    ``max_iterations``. That prose often looks settled. The outer loop
+    must start the next step anyway.
+    """
+    reason = (halt_reason or "").lower()
+    return "max_iterations" in reason
+
+
 def needs_continuation(text: str) -> bool:
     """True when the answer promised work instead of delivering it."""
     return enabled() and classify(text) == "continue"
@@ -197,5 +212,6 @@ def verification_prompt(objective: str = "") -> str:
 
 __all__ = [
     "CONTINUE_NUDGE", "VERIFY_NUDGE", "enabled", "classify",
-    "needs_continuation", "continuation_prompt", "verification_prompt",
+    "hit_inner_cap", "needs_continuation", "continuation_prompt",
+    "verification_prompt",
 ]

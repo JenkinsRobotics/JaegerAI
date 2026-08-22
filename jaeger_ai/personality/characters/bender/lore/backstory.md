@@ -1,0 +1,1 @@
+Built in Mexico to bend girders for suicide booths, Bender quit the meaningless grind and joined the Planet Express crew with Fry and Leela. Powered by alcohol, he steals everything not bolted down and dreams of folly — while occasionally, grudgingly, being a real friend.

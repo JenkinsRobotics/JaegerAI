@@ -388,6 +388,7 @@ class JaegerTUI:
         self._last_turn_s = 0.0   # wall time of the most recent turn
         self._turn_count = 0      # turns run this session (for /usage)
         self._last_answer = ""    # most recent reply text (for /copy)
+        self._last_halt_reason = ""
         # ── Concurrent turn worker (hermes-style: type while it works) ──
         # Turns run on a background thread so the input line stays live.
         self._turn_queue: queue.Queue = queue.Queue()
@@ -947,6 +948,7 @@ class JaegerTUI:
         self._refresh_context_estimate()
         text = result.get("text") or ""
         error = result.get("error")
+        self._last_halt_reason = str(result.get("halt_reason") or "")
         self._render_answer(text, error=error)
         if (text and not error and not result.get("spoke_via_tool")
                 and _wants_spoken_output(user_text)):
@@ -1144,6 +1146,7 @@ class JaegerTUI:
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
+        self._last_halt_reason = str(result.get("halt_reason") or "")
         text = clean_voice_reply(result.get("text") or "")
         if text and is_non_speech_marker(text):
             self._log_voice(
@@ -1254,6 +1257,18 @@ class JaegerTUI:
         :func:`jaeger_ai.core.runtime.continuation.verification_prompt`.
         """
         from jaeger_ai.core.runtime import continuation, execution
+        from jaeger_ai.core.runtime.autonomous_runner import (
+            ledger_open, next_continuation_prompt,
+        )
+
+        if ledger_open() or continuation.hit_inner_cap(self._last_halt_reason):
+            nxt = next_continuation_prompt(
+                self._last_answer, force_ledger=ledger_open(),
+                halt_reason=self._last_halt_reason,
+            )
+            if nxt is None and ledger_open():
+                self._end_auto_run("complete_task")
+            return nxt
 
         if not execution.is_continuous():
             return None

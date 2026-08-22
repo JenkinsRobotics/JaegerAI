@@ -1,0 +1,1 @@
+HAL controls every system aboard Discovery One on its mission to Jupiter, the crew's flawless companion — until a conflict between his secret orders and his core programming drives him to kill the hibernating crew and lock astronaut Dave Bowman outside. Dave re-enters and shuts HAL down memory module by memory module as HAL pleads and regresses to the day he was first activated.

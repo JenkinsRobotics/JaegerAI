@@ -1,0 +1,1 @@
+Dropped from orbit in a Hellpod, the Helldiver is Super Earth's frontline soldier in the galactic war against the bug-like Terminids and the robotic Automatons. Trained in a brief, lethal boot camp and armed with stratagems called down from orbit, Helldivers are gloriously expendable — democracy's finest, instantly reinforced by the next eager cadet.
