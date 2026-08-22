@@ -1,0 +1,17 @@
+module: whisper_stt
+slot: stt
+version: 1.0.0
+consumes: []
+produces: [/sense/transcript, /sense/user_speech_start]
+tools: [listen]
+factory: jaeger_whisper_stt.nodes.whisper_stt:make_audio_session_node
+config: whisper_stt        # its group/key in the settings catalog
+# Carried over from the old plugin.yaml's `requires.libraries` block
+# (pre-0.8 M2b, jaeger_os/plugins/whisper_stt/plugin.yaml) — the
+# libraries the engine actually imports at runtime. The availability
+# gate (jaeger_os/agent/availability.py) probes these with
+# importlib.util.find_spec before reporting `listen` available.
+# `models` (whisper-base.en / whisper-medium.en, auto-downloaded) and
+# `hardware: [microphone]` aren't libraries importlib can probe, so
+# they're skipped here — same call M1 made for kokoro_tts.
+requires_libraries: [pywhispercpp, webrtcvad, sounddevice, numpy]
