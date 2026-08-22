@@ -232,3 +232,34 @@ def match_to_registry(
         if target and target in by_filename:
             matched[key] = by_filename[target]
     return matched
+
+
+def discover_local_ollama_models(base_url: str = "http://localhost:11434") -> list[DiscoveredModel]:
+    """Probe the local Ollama server for installed and runnable models.
+
+    Returns DiscoveredModel entries for each local model (e.g. qwen2.5:3b, gemma4:31b-mlx).
+    Gracefully returns an empty list if Ollama is not running.
+    """
+    import json
+    import urllib.request
+    discovered: list[DiscoveredModel] = []
+    try:
+        url = f"{base_url.rstrip('/')}/api/tags"
+        req = urllib.request.Request(url, headers={"User-Agent": "JaegerAI-Discovery"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                if not name:
+                    continue
+                size_gb = (m.get("size", 0) / 1_000_000_000)
+                discovered.append(
+                    DiscoveredModel(
+                        path=pathlib.Path(f"ollama://{name}"),
+                        size_gb=round(size_gb, 2),
+                        source="Ollama (Local)",
+                    )
+                )
+    except Exception:
+        pass
+    return discovered

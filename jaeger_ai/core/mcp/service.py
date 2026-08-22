@@ -370,3 +370,54 @@ def reload_tools(layout: Any) -> dict[str, Any]:
     result = list_tools(layout)
     result["reloaded"] = True
     return result
+
+
+def sync_ares_mcp_servers(layout: Any) -> dict[str, Any]:
+    """Sync external MCP servers from ARES into Jaeger's instance mcp.json.
+
+    Reads MCP server declarations from ARES profiles / configuration and registers
+    or updates them in Jaeger's MCP server inventory.
+    """
+    ares_home = Path(os.environ.get("ARES_HOME", Path.home() / ".ares"))
+    candidates = [
+        ares_home / "profiles" / "default" / "config.yaml",
+        ares_home / "config" / "mcp.json",
+        ares_home / "mcp.json",
+    ]
+    imported = 0
+    synced_names = []
+
+    for c_path in candidates:
+        if not c_path.exists():
+            continue
+        try:
+            if c_path.suffix in (".yaml", ".yml"):
+                import yaml
+                data = yaml.safe_load(c_path.read_text(encoding="utf-8")) or {}
+                servers = data.get("mcp_servers", {})
+                if isinstance(servers, dict):
+                    for s_name, s_cfg in servers.items():
+                        if isinstance(s_cfg, dict) and s_name not in synced_names:
+                            configure_server(layout, s_name, s_cfg)
+                            imported += 1
+                            synced_names.append(s_name)
+            elif c_path.suffix == ".json":
+                data = json.loads(c_path.read_text(encoding="utf-8")) or {}
+                servers = data.get("servers", [])
+                if isinstance(servers, list):
+                    for s_cfg in servers:
+                        if isinstance(s_cfg, dict) and s_cfg.get("name"):
+                            s_name = s_cfg["name"]
+                            if s_name not in synced_names:
+                                configure_server(layout, s_name, s_cfg)
+                                imported += 1
+                                synced_names.append(s_name)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "synced_count": imported,
+        "servers": synced_names,
+        "inventory": list_servers(layout),
+    }
