@@ -91,7 +91,17 @@ class Character:
         The rich lore (ideals/mannerisms/quotes/...) stays on the sheet for
         future use and is NOT dumped into the live prompt — keeps turns lean.
         ponytail: brief today; sheet is the in-depth store for later."""
-        return self.soul.strip()
+        text = self.soul.strip()
+        if not text:
+            return ""
+        try:
+            from jaeger_ai.core.prompt_documents import SOUL_MAX_CHARS
+            cap = int(SOUL_MAX_CHARS)
+        except Exception:  # noqa: BLE001 — a missing cap must not break compose
+            cap = 4_000
+        if len(text) > cap:
+            return text[:cap].rstrip() + "\n…(SOUL.md truncated)"
+        return text
 
     def _lore_block(self) -> str:
         """In-depth lore — Studio display + future use, never the live prompt."""
@@ -133,7 +143,7 @@ class Character:
         # the "You are X" one-liner is a last-resort fallback when there's no body
         # at all. The header already names the character, so a body never needs
         # the one-liner too — this is what kills the repeated "You are X".
-        body = [x.strip() for x in (self.soul, p.custom_instructions) if x.strip()]
+        body = [x.strip() for x in (self.soul_block(), p.custom_instructions) if x.strip()]
         parts.extend(body or [self.identity_block()])
         # compiled trait View — voice clauses (deviations only) + domain lens.
         voice: list[str] = []
@@ -184,6 +194,41 @@ class Character:
         return shared if shared.exists() else None
 
 
+def _read_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:  # noqa: BLE001 — unreadable files read as absent
+        return ""
+
+
+def _lore_lines(path: Path) -> tuple[str, ...]:
+    text = _read_text_file(path)
+    if not text:
+        return ()
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip().lstrip("-").strip()
+        if line:
+            out.append(line)
+    return tuple(out)
+
+
+def _load_soul_text(folder: Path, yaml_soul: str) -> str:
+    """Prefer ``SOUL.md`` as the live identity text; yaml is fallback."""
+    for name in ("SOUL.md", "soul.md"):
+        text = _read_text_file(folder / name)
+        if text:
+            return text
+    return (yaml_soul or "").strip()
+
+
+def _load_lore_field(folder: Path, filename: str, yaml_items: Any) -> tuple[str, ...]:
+    packed = _lore_lines(folder / "lore" / filename)
+    if packed:
+        return packed
+    return tuple(yaml_items or ())
+
+
 def load_character(folder: Path) -> Character:
     """Load ``<folder>/character.yaml`` → a :class:`Character`."""
     folder = Path(folder)
@@ -203,18 +248,20 @@ def load_character(folder: Path) -> Character:
         domains=_layer(Domains, tr.get("domains", {})),
     )
     lore = data.get("lore", {}) or {}
+    lore_dir = folder / "lore"
+    backstory = _read_text_file(lore_dir / "backstory.md") or pr.get("backstory", "")
     return Character(
         id=data.get("id", folder.name),
         personality=personality,
         role=ident.get("role", ""),
         voice_tone=ident.get("voice_tone", ""),
         voice_id=ident.get("voice_id", "af_heart"),
-        backstory=pr.get("backstory", ""),
-        soul=pr.get("soul", ""),
-        quotes=tuple(lore.get("quotes", []) or ()),
-        mannerisms=tuple(lore.get("mannerisms", []) or ()),
-        ideals=tuple(lore.get("ideals", []) or ()),
-        behaviors=tuple(lore.get("behaviors", []) or ()),
+        backstory=backstory,
+        soul=_load_soul_text(folder, pr.get("soul", "")),
+        quotes=_load_lore_field(folder, "quotes.md", lore.get("quotes", [])),
+        mannerisms=_load_lore_field(folder, "mannerisms.md", lore.get("mannerisms", [])),
+        ideals=_load_lore_field(folder, "ideals.md", lore.get("ideals", [])),
+        behaviors=_load_lore_field(folder, "behaviors.md", lore.get("behaviors", [])),
         card=assets.get("card", ""),
         avatar_dir=assets.get("avatar", "avatar"),
         assets=assets,
@@ -422,7 +469,12 @@ def save_character_profile(folder: Path, *, role: str | None = None,
     if voice_id is not None:
         ident["voice_id"] = voice_id
     if soul is not None:
-        prompt["soul"] = soul
+        soul_md = Path(folder) / "SOUL.md"
+        if soul_md.exists() or (Path(folder) / "soul.md").exists():
+            target = soul_md if soul_md.exists() else (Path(folder) / "soul.md")
+            target.write_text(soul.strip() + ("\n" if soul.strip() else ""), encoding="utf-8")
+        else:
+            prompt["soul"] = soul
     if backstory is not None:
         prompt["backstory"] = backstory
     if custom_instructions is not None:

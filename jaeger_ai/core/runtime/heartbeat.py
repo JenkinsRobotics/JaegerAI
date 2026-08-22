@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,11 +32,19 @@ On every heartbeat, in this order:
    If something important is missing from the board, add one card.
 2. Check blocked cards. If you can unblock one without the user, do
    that; otherwise leave it.
-3. If nothing needs doing, reply with exactly HEARTBEAT_OK and nothing
+3. Morning (6–11) and evening (17–21): if a briefing has not been
+   delivered today, write a short executive brief (calendar, todos,
+   blocked work, one recommended next action). Do not HEARTBEAT_OK a
+   briefing slot unless there is genuinely nothing to report.
+4. If nothing needs doing, reply with exactly HEARTBEAT_OK and nothing
    else.
 
 Do not invent work. Quality over volume — at most one card per beat.
 """
+
+# Local-hour windows. Inclusive start, exclusive end.
+MORNING_HOURS = (6, 11)
+EOD_HOURS = (17, 21)
 
 _SILENT = frozenset({
     "HEARTBEAT_OK",
@@ -136,6 +145,11 @@ def mark_beat(layout: Any, *, now: float | None = None, silent: bool = False) ->
     state = _load_state(layout)
     state["last_beat_at"] = float(time.time() if now is None else now)
     state["last_silent"] = bool(silent)
+    pending = str(state.get("pending_briefing") or "").strip().lower()
+    if pending in {"morning", "eod"} and not silent:
+        clock = datetime.fromtimestamp(state["last_beat_at"])
+        state[f"last_{pending}_date"] = clock.date().isoformat()
+    state["pending_briefing"] = None
     _save_state(layout, state)
 
 
@@ -193,6 +207,51 @@ _HEARTBEAT_PREAMBLE = (
     "one board card per beat. Do not invent work."
 )
 
+_BRIEFING_PREAMBLE = {
+    "morning": (
+        "(Heartbeat briefing — morning) Produce a concise executive "
+        "brief for the operator starting their day. Use tools "
+        "(board_view, calendar, todos) rather than guessing. Cover: "
+        "(1) overnight or today's calendar, (2) open todos and blocked "
+        "work, (3) anything that needs a decision, (4) one recommended "
+        "first action. Do not reply HEARTBEAT_OK unless there is truly "
+        "nothing to report. This reply IS shown as a chat bubble."
+    ),
+    "eod": (
+        "(Heartbeat briefing — end of day) Produce a concise wrap-up "
+        "for the operator. Use tools rather than guessing. Cover: "
+        "(1) what moved today, (2) what is still open or blocked, "
+        "(3) anything that should wait until tomorrow, (4) one "
+        "recommended close-out action. Do not reply HEARTBEAT_OK "
+        "unless there is truly nothing to report. This reply IS shown "
+        "as a chat bubble."
+    ),
+}
+
+
+def briefing_kind(*, now: datetime | None = None) -> str | None:
+    """``morning``, ``eod``, or ``None`` outside the briefing windows."""
+    hour = (now or datetime.now()).hour
+    start, end = MORNING_HOURS
+    if start <= hour < end:
+        return "morning"
+    start, end = EOD_HOURS
+    if start <= hour < end:
+        return "eod"
+    return None
+
+
+def already_briefed(
+    layout: Any,
+    kind: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """True when this briefing kind already landed today."""
+    key = f"last_{kind}_date"
+    today = (now or datetime.now()).date().isoformat()
+    return str(_load_state(layout).get(key) or "") == today
+
 
 def heartbeat_prompt(checklist: str, *, board_digest: str = "") -> str:
     """The user-role message for one standing heartbeat turn."""
@@ -206,8 +265,32 @@ def heartbeat_prompt(checklist: str, *, board_digest: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def build_prompt(layout: Any) -> str:
-    """The synthetic user-role message for one standing beat."""
+def briefing_prompt(
+    kind: str,
+    checklist: str = "",
+    *,
+    board_digest: str = "",
+) -> str:
+    """The user-role message for a morning or EOD executive brief."""
+    preamble = _BRIEFING_PREAMBLE.get(kind) or _BRIEFING_PREAMBLE["morning"]
+    body = (checklist or "").strip()
+    digest = (board_digest or "").strip()
+    parts = [preamble]
+    if body:
+        parts.append("CHECKLIST:\n" + body)
+    if digest:
+        parts.append(digest)
+    return "\n\n".join(parts)
+
+
+def build_prompt(layout: Any, *, now: datetime | None = None) -> str:
+    """The synthetic user-role message for one standing beat.
+
+    Inside a briefing window, and only if that brief has not already
+    landed today, this is a briefing prompt. Otherwise it is the
+    silent-ok standing checklist. Briefing injection is programmatic
+    so an operator's custom HEARTBEAT.md still gets morning/EOD slots.
+    """
     from jaeger_agent.background.board import board_digest
 
     digest = ""
@@ -215,12 +298,28 @@ def build_prompt(layout: Any) -> str:
         digest = board_digest(layout) or ""
     except Exception:  # noqa: BLE001
         digest = ""
+    clock = now or datetime.now()
+    kind = briefing_kind(now=clock)
+    state = _load_state(layout)
+    if kind and not already_briefed(layout, kind, now=clock):
+        state["pending_briefing"] = kind
+        _save_state(layout, state)
+        return briefing_prompt(
+            kind, load_checklist(layout), board_digest=digest,
+        )
+    state["pending_briefing"] = None
+    _save_state(layout, state)
     return heartbeat_prompt(load_checklist(layout), board_digest=digest)
 
 
 __all__ = [
     "DEFAULT_CHECKLIST",
+    "EOD_HOURS",
     "HEARTBEAT_OK",
+    "MORNING_HOURS",
+    "already_briefed",
+    "briefing_kind",
+    "briefing_prompt",
     "build_prompt",
     "heartbeat_prompt",
     "checklist_path",

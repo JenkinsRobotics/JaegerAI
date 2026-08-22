@@ -299,6 +299,7 @@ class _StallingAdapter:
 
     def __init__(self, *, returns: dict | None = None) -> None:
         self.returns = returns  # None ⇒ raise; dict ⇒ return normally
+        self.calls = 0
 
     def describe(self) -> str:
         return "stalling-adapter"
@@ -308,6 +309,7 @@ class _StallingAdapter:
 
     def call(self, formatted, interrupt_event, *,
              stale_timeout=None, on_heartbeat=None, **kwargs):  # noqa: ARG002
+        self.calls += 1
         if self.returns is None:
             raise StaleCallTimeout(
                 f"no response after {(stale_timeout or 0):.1f}s (test)"
@@ -319,6 +321,18 @@ class _StallingAdapter:
 
     def supports(self, feature):  # noqa: ARG002
         return False
+
+
+def test_stale_timeout_retries_once_then_walks_fallback():
+    """A 30s cloud think is often a blip — retry the same brain once,
+    then walk glm-4.7 (or whatever is on fallback_adapters)."""
+    primary = _StallingAdapter()
+    backup = _StallingAdapter(returns={"role": "assistant", "content": "ok"})
+    agent = JaegerAgent(adapter=primary, fallback_adapters=[backup])
+    agent.stale_call_timeout_s = 0.1
+    assert agent.run_turn("hi") == "ok"
+    assert primary.calls == 2  # initial + one retry
+    assert backup.calls == 1
 
 
 def test_stale_timeout_sets_stalled_halt_reason_when_chain_exhausted():

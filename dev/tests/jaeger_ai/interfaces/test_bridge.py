@@ -267,7 +267,8 @@ def test_integration_contract_is_versioned_and_self_describing():
     # and inbound webhooks.
     # v12 added the ``cron`` query — in-flight scheduled jobs for host
     # sidebars that otherwise treat a mid-run cron session as completed.
-    assert contract["contract_version"] == 12
+    # v13 added ``model_picker`` — the clickable /model overlay catalog.
+    assert contract["contract_version"] == 13
     assert "board" in contract["operations"]["queries"]
     assert "heartbeat" in contract["operations"]["queries"]
     assert "cron" in contract["operations"]["queries"]
@@ -297,7 +298,7 @@ def test_integration_contract_is_versioned_and_self_describing():
         "mutable": True,
     }
     assert contract["domains"]["agent_runtime"] == [
-        "chat", "sessions", "approvals", "runtime_settings",
+        "chat", "sessions", "approvals", "schedules", "runtime_settings",
         "character_persona_editing", "voice_settings",
     ]
     assert contract["domains"]["extensibility"] == [
@@ -306,7 +307,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert contract["scope"] == "runtime_provider"
     assert set(contract["domains"]) == {"agent_runtime", "extensibility"}
     assert not {
-        "kanban", "delegation", "schedules", "caldav", "deep_research",
+        "kanban", "delegation", "caldav", "deep_research",
         "model_compare", "teacher_escalation", "cookbook_model_serving",
         "youtube_ingest", "pdf_forms", "image_gallery", "image_editor",
         "visual_reports",
@@ -326,7 +327,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     assert {"list_skills", "get_skill"}.issubset(contract["operations"]["queries"])
     assert {"clone_skill", "install_skill", "enable_skill", "disable_skill", "remove_skill"}.issubset(
         contract["operations"]["commands"])
-    assert {"list_mcp_servers", "list_tools", "model_catalog"}.issubset(
+    assert {"list_mcp_servers", "list_tools", "model_catalog", "model_picker"}.issubset(
         contract["operations"]["queries"]
     )
     assert {"configure_mcp_server", "enable_mcp_server", "disable_mcp_server",
@@ -1137,13 +1138,99 @@ def test_slash_help_answers_without_an_agent_turn(monkeypatch):
 
 
 def test_slash_unsafe_command_reports_tui_only(monkeypatch):
-    """Interactive/TUI-bound commands (e.g. /model's picker) don't run over
+    """Interactive/TUI-bound commands (e.g. /reboot) don't run over
     the bridge — stdin is the protocol stream — they answer with a pointer."""
-    rc, frames, _ = _run(monkeypatch, '{"text":"/model"}\n{"op":"quit"}\n')
+    rc, frames, _ = _run(monkeypatch, '{"text":"/reboot"}\n{"op":"quit"}\n')
     assert rc == 0
     reply = next(f for f in frames if f["type"] == "reply")
     assert "needs the terminal TUI" in reply["text"]
     assert "/help" in reply["text"]          # the safe list is advertised
+
+
+def test_inner_cap_halt_re_fires_the_turn(monkeypatch):
+    """Inner-turn fuse is the next step, not a finished reply."""
+    calls: list[str] = []
+
+    def fake_run(client, text, session_key=None, **kwargs):  # noqa: ARG001
+        calls.append(text)
+        if len(calls) == 1:
+            return {
+                "text": "Here is a summary of the first batch.",
+                "error": None,
+                "halt_reason": "hit max_iterations=24 without a final answer",
+            }
+        return {"text": "the rest is done", "error": None}
+
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"process the notes"}\n{"op":"quit"}\n',
+        run_fn=fake_run,
+    )
+    assert rc == 0
+    assert len(calls) == 2
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert "the rest is done" in reply["text"]
+    assert "first batch" in reply["text"]
+
+
+def test_slash_goal_with_job_runs_as_a_turn(monkeypatch):
+    """Windowed ``/goal <job>`` must not bounce as TUI-only — it is the
+    job itself. The slash prefix is stripped before run_for_voice."""
+    seen = {}
+
+    def fake_run(client, text, session_key=None, **kwargs):  # noqa: ARG001
+        seen["text"] = text
+        return {"text": "working the notes", "error": None}
+
+    rc, frames, _ = _run(
+        monkeypatch,
+        '{"text":"/goal improve Apple Notes structure and quality"}\n{"op":"quit"}\n',
+        run_fn=fake_run,
+    )
+    assert rc == 0
+    assert seen.get("text") == "improve Apple Notes structure and quality"
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert reply["error"] is None
+    assert "working the notes" in reply["text"]
+    assert "needs the terminal TUI" not in (reply["text"] or "")
+
+
+def test_slash_auto_explains_continuation_is_on(monkeypatch):
+    def explode(client, text, session_key=None):  # noqa: ARG001
+        raise AssertionError("/auto must not reach the agent turn")
+
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"/auto"}\n{"op":"quit"}\n', run_fn=explode,
+    )
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert "already on" in reply["text"].lower()
+
+
+def test_slash_bare_goal_is_usage(monkeypatch):
+    def explode(client, text, session_key=None):  # noqa: ARG001
+        raise AssertionError("bare /goal must not reach the agent turn")
+
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"/goal"}\n{"op":"quit"}\n', run_fn=explode,
+    )
+    assert rc == 0
+    reply = next(f for f in frames if f["type"] == "reply")
+    assert "Usage: /goal" in reply["text"]
+
+
+def test_slash_model_does_not_dump_catalogue(monkeypatch):
+    """Bare /model and /models must not print the model list into chat.
+    The windowed client intercepts these and opens a clickable picker;
+    if they still arrive here we point at that overlay, never a dump."""
+    for cmd in ("/model", "/models"):
+        rc, frames, _ = _run(monkeypatch, f'{{"text":"{cmd}"}}\n{{"op":"quit"}}\n')
+        assert rc == 0
+        reply = next(f for f in frames if f["type"] == "reply")
+        text = reply["text"]
+        assert "Active brain" not in text
+        assert "download:" not in text
+        assert "clickable overlay" in text
+        assert "/model use" in text
 
 
 def test_slash_unknown_command_hints_help(monkeypatch):

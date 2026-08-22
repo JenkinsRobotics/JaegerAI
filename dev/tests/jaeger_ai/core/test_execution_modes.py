@@ -88,6 +88,24 @@ def test_budget_reads_the_env_override(monkeypatch) -> None:
     assert execution.max_steps() == execution.DEFAULT_MAX_STEPS
 
 
+def test_automation_config_exposes_the_two_budgets() -> None:
+    from jaeger_ai.core.instance.schemas import AutomationConfig
+    cfg = AutomationConfig()
+    assert cfg.inner_max_iterations == 24
+    assert cfg.job_max_steps == 100
+
+
+def test_inner_max_chat_vs_batch(monkeypatch) -> None:
+    monkeypatch.delenv("JAEGER_INNER_MAX", raising=False)
+    assert execution.inner_max() == execution.INNER_MAX_CHAT
+    assert execution.inner_max(batch=True) == execution.INNER_MAX_AUTO
+    execution.set_execution_mode("auto")
+    assert execution.inner_max() == execution.INNER_MAX_AUTO
+    monkeypatch.setenv("JAEGER_INNER_MAX", "12")
+    assert execution.inner_max() == 12
+    assert execution.inner_max(batch=True) == 12
+
+
 def test_stop_is_cooperative_and_clears_on_a_new_run() -> None:
     execution.set_execution_mode("auto")
     execution.begin_run("something long")

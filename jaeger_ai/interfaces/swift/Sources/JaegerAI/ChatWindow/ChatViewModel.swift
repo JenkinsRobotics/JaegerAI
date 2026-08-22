@@ -22,32 +22,74 @@
 import Foundation
 import SwiftUI
 
+/// The agent's active operational mode.
+enum OperatingMode: String, CaseIterable, Identifiable, Sendable {
+    case focus = "Focus"
+    case wonder = "Wonder"
+    case standby = "Standby"
+
+    var id: String { rawValue }
+
+    var badgeText: String {
+        switch self {
+        case .focus: return "🟢 Focus"
+        case .wonder: return "🟣 Wondering"
+        case .standby: return "⚪ Standby"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .focus: return "Autonomous task execution to completion"
+        case .wonder: return "Background indexing, board tasks, and self-organization"
+        case .standby: return "Low compute sensory guard (⌥Space to wake)"
+        }
+    }
+}
+
 /// One bubble in the transcript.  Carries the minimum the view needs;
 /// the timestamp is preserved so a future log/export pass has it.
 struct ChatMessage: Identifiable, Equatable {
-    /// What kind of bubble this is.  ``.toolCall`` and ``.thinking``
-    /// show up as compact inline chips, not full message bubbles —
-    /// they exist so the operator can see what the agent is doing
-    /// mid-turn (the telemetry the Terminal TUI shows by default).
+    /// What kind of bubble this is.
     enum Author: Equatable {
         case user
         case assistant
         case system     // connection notices, errors, etc.
-        case thinking   // "thinking…" trail from the agent loop
-        case toolCall   // a tool invocation in flight or just done
+        case thinking   // live legacy indicator
+        case toolCall   // live legacy tool line
+        case thought    // persistent Claude Code style "⏱ Thought process >"
+        case toolGroup  // persistent Claude Code style "Ran N commands >"
+        case interactive // Clickable decision cards / option chips
     }
 
-    let id = UUID()
+    let id: UUID
     let author: Author
     let timestamp: Date
     var text: String
-    /// True while the assistant is still streaming tokens into ``text``.
-    /// (Week 2.5 wiring — we keep the field now so the view can fade in
-    /// a cursor / spinner when the streaming pass lands.)
-    var isStreaming: Bool = false
-    /// Dimmed telemetry line under an assistant reply ("replied in 3s")
-    /// — nil when the core sent no telemetry for the turn.
-    var meta: String? = nil
+    var isStreaming: Bool
+    var meta: String?
+    var thoughtText: String
+    var toolItems: [ToolCallItem]
+
+    init(
+        id: UUID = UUID(),
+        author: Author,
+        timestamp: Date = Date(),
+        text: String = "",
+        isStreaming: Bool = false,
+        meta: String? = nil,
+        thoughtText: String = "",
+        toolItems: [ToolCallItem] = []
+    ) {
+        self.id = id
+        self.author = author
+        self.timestamp = timestamp
+        self.text = text
+        self.isStreaming = isStreaming
+        self.meta = meta
+        self.thoughtText = thoughtText
+        self.toolItems = toolItems
+    }
 }
 
 
@@ -141,6 +183,23 @@ final class ChatViewModel: ObservableObject {
     /// True while a History fetch / session switch is in flight — gates
     /// the History button/list so the operator can't double-fire.
     @Published private(set) var isSwitchingSession: Bool = false
+
+    /// Hermes-style ``/model`` overlay. Set by ``send`` when the operator
+    /// types a bare ``/model`` / ``/models``; the chat view presents the
+    /// clickable picker instead of dumping a catalogue into the transcript.
+    @Published var showModelPicker: Bool = false
+
+    /// The agent's current operating mode (Focus, Wonder, Standby).
+    @Published var operatingMode: OperatingMode = .focus
+
+    func setOperatingMode(_ mode: OperatingMode) {
+        operatingMode = mode
+        let notice = ChatMessage(
+            author: .system,
+            text: "Operational mode switched to \(mode.badgeText) — \(mode.summary)"
+        )
+        messages.append(notice)
+    }
 
     private let agent: AgentBridge
     private var eventToken: UUID?
@@ -302,69 +361,76 @@ final class ChatViewModel: ObservableObject {
             // The "we're listening now" handshake.  Don't display.
             return
         case "turn.start":
-            // Each new turn starts.  Already obvious from the user
-            // bubble — don't duplicate.
             return
         case "turn.end":
-            return
-        case "thought.start", "deep_think.start", "thinking":
-            // Respect display.activity_trace — "off" hides the live
-            // stream entirely (the reply placeholder's dots remain).
-            guard activityTrace != "off" else { return }
-            // One chip per in-flight turn — the busy `state` frames can
-            // re-fire mid-turn (tool hops), and a duplicate chip per hop
-            // reads as noise.
-            guard !messages.contains(where: { $0.author == .thinking }) else {
-                return
+            // Close any active streaming thought/tool groups
+            for i in messages.indices {
+                if messages[i].author == .thought || messages[i].author == .toolGroup {
+                    messages[i].isStreaming = false
+                }
             }
-            messages.append(ChatMessage(
-                author: .thinking,
-                timestamp: Date(),
-                text: "thinking…",
-                isStreaming: true
-            ))
+            return
+        case "thought.start", "deep_think.start", "thinking", "thought.delta", "thought":
+            guard activityTrace != "off" else { return }
+            let text = event.payload["text"]?.get(String.self)
+                ?? event.payload["thought"]?.get(String.self)
+                ?? event.payload["delta"]?.get(String.self)
+                ?? ""
+            if let i = messages.lastIndex(where: { $0.author == .thought && $0.isStreaming }) {
+                if !text.isEmpty && !messages[i].thoughtText.contains(text) {
+                    messages[i].thoughtText += (messages[i].thoughtText.isEmpty ? "" : "\n\n") + text
+                }
+            } else {
+                messages.append(ChatMessage(
+                    author: .thought,
+                    timestamp: Date(),
+                    isStreaming: true,
+                    thoughtText: text
+                ))
+            }
         case "thought.end", "deep_think.end":
-            // The chip is TRANSIENT — typing-dots semantics. It exists
-            // only while the turn is in flight; when the agent stops
-            // thinking (reply landed / turn ended) it leaves the
-            // transcript entirely instead of lingering as a stale
-            // "thinking…" line under every reply.
-            messages.removeAll { $0.author == .thinking }
+            if let i = messages.lastIndex(where: { $0.author == .thought && $0.isStreaming }) {
+                messages[i].isStreaming = false
+            }
         case "tool.call", "tool.start":
             guard activityTrace != "off" else { return }
             let name = event.payload["tool"]?.get(String.self)
                 ?? event.payload["name"]?.get(String.self)
                 ?? "tool"
-            // v1 additive: `detail` names WHICH skill loaded
-            // ("skill · view scheduling") — absent for other tools.
+            if name == "work_ledger" { return }
             let detail = event.payload["detail"]?.get(String.self) ?? ""
-            messages.append(ChatMessage(
-                author: .toolCall,
-                timestamp: Date(),
-                text: detail.isEmpty ? "🔧 \(name)" : "🔧 \(name) · \(detail)",
-                isStreaming: true
-            ))
+            let item = ToolCallItem(name: name, detail: detail, isStreaming: true)
+
+            let lastUserIdx = messages.lastIndex(where: { $0.author == .user }) ?? -1
+            if let i = messages.lastIndex(where: { $0.author == .toolGroup }), i > lastUserIdx {
+                messages[i].toolItems.append(item)
+                messages[i].isStreaming = true
+            } else {
+                messages.append(ChatMessage(
+                    author: .toolGroup,
+                    timestamp: Date(),
+                    isStreaming: true,
+                    toolItems: [item]
+                ))
+            }
         case "tool.result", "tool.end", "tool.complete":
-            // Close out the most recent in-flight tool-call chip
-            // with a ✓ or ✗ depending on whether the agent flagged
-            // an error in the payload, plus the tool's elapsed time
-            // ("🔧 write_file ✓ · 3.9s") when the bridge reported one.
-            if let i = messages.lastIndex(where: {
-                $0.author == .toolCall && $0.isStreaming
-            }) {
+            if let i = messages.lastIndex(where: { $0.author == .toolGroup }) {
                 let ok = event.payload["ok"]?.get(Bool.self) ?? true
                 let elapsed = event.payload["elapsed_s"]?.get(Double.self) ?? 0
-                messages[i].isStreaming = false
-                messages[i].text = "\(messages[i].text) \(ok ? "✓" : "✗")"
-                if elapsed > 0.05 {
-                    messages[i].text += " · " + Self.fmtSeconds(elapsed)
+                if let itemIdx = messages[i].toolItems.lastIndex(where: { $0.isStreaming }) {
+                    messages[i].toolItems[itemIdx].ok = ok
+                    messages[i].toolItems[itemIdx].elapsed_s = elapsed
+                    messages[i].toolItems[itemIdx].isStreaming = false
+                }
+                if !messages[i].toolItems.contains(where: { $0.isStreaming }) {
+                    messages[i].isStreaming = false
                 }
             }
+        case "task.progress":
+            // Owned by ``AgentBridge.taskProgress`` (the chat drawer and
+            // the ⌥Space HUD). Don't turn ledger ticks into tool chips.
+            return
         case "token", "message.delta":
-            // Streaming token — append to the most recent assistant
-            // bubble.  Useful once chat.send is split into start +
-            // streaming.  For now chat.send is synchronous so this
-            // path is dormant.
             let delta = event.payload["text"]?.get(String.self)
                 ?? event.payload["delta"]?.get(String.self)
                 ?? ""
@@ -373,47 +439,76 @@ final class ChatViewModel: ObservableObject {
                 messages[i].text += delta
             }
         default:
-            // Unknown event — keep it out of the UI; NSLog already
-            // showed it for diagnostics.
             return
         }
     }
 
-    /// Send a user turn through the agent's ``chat.send`` verb.  The
-    /// user bubble appears immediately (even while queued behind an
-    /// in-flight turn); the assistant bubble lands once the agent
-    /// replies.  Errors become inline system bubbles.
-    ///
-    /// 0.8.1 item 9: a message typed while a turn is already running
-    /// used to be silently DROPPED here (``guard !isSending else {
-    /// return }``, with the composer already cleared by the caller —
-    /// real data loss, not just a missing spinner). It now queues and
-    /// drains in order once the in-flight turn finishes.
+    /// Send a user turn through the agent's ``chat.send`` verb.
     func send(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        switch SlashRouting.action(for: trimmed) {
+        case .modelPicker:
+            showModelPicker = true
+            return
+        case .modelUse(let provider, let model):
+            await applyTypedModelUse(provider: provider, model: model)
+            return
+        case .newChat:
+            await newChat()
+            return
+        case .stop:
+            agent.cancelTurn()
+            appendSystem("stop requested")
+            return
+        case .steer(let guidance):
+            agent.steer(guidance)
+            appendSystem("steered: \(guidance)")
+            return
+        case .local(let notice):
+            appendSystem(notice)
+            return
+        case .chat(let prompt, let display):
+            await enqueueOrRun(prompt, display: display)
+        case .passThrough:
+            await enqueueOrRun(trimmed, display: trimmed)
+        }
+    }
+
+    /// Queue behind an in-flight turn, or run immediately.
+    private func enqueueOrRun(_ prompt: String, display: String) async {
         if isSending {
-            pendingSends.append(trimmed)
+            pendingSends.append(prompt)
             messages.append(ChatMessage(
-                author: .user, timestamp: Date(), text: trimmed))
+                author: .user, timestamp: Date(), text: display))
             return
         }
-
-        await runTurn(trimmed, appendUserBubble: true)
+        await runTurn(prompt, appendUserBubble: true, displayText: display)
         while !pendingSends.isEmpty {
             let next = pendingSends.removeFirst()
             await runTurn(next, appendUserBubble: false)
         }
     }
 
-    /// Runs ONE turn over the bridge. ``appendUserBubble`` is false for a
-    /// queued send — ``send`` already appended its bubble the moment it
-    /// was typed, so the transcript shows it right away instead of only
-    /// once it's finally this message's turn to run.
-    private func runTurn(_ trimmed: String, appendUserBubble: Bool) async {
-        // Late-bind the display prefs if the init-time fetch raced the
-        // transport coming up.
+    /// Direct ``/model use <provider> <name>`` — no picker, no catalogue.
+    private func applyTypedModelUse(provider: String, model: String) async {
+        appendSystem("switching brain → \(provider) · \(model)…")
+        let result = await agent.command("configure_model", args: [
+            "provider": SlashRouting.configureProvider(provider),
+            "model": model,
+        ])
+        if result.ok {
+            await agent.refreshIdentity()
+            appendSystem("✓ Brain is now \(provider) · \(model)")
+        } else {
+            appendSystem("⚠ \(result.error ?? "couldn't switch model")")
+        }
+    }
+
+    /// Runs ONE turn over the bridge.
+    private func runTurn(_ trimmed: String, appendUserBubble: Bool,
+                         displayText: String? = nil) async {
         if !displayConfigLoaded { await loadDisplayConfig() }
 
         let turnStarted = Date()
@@ -421,15 +516,10 @@ final class ChatViewModel: ObservableObject {
             messages.append(ChatMessage(
                 author: .user,
                 timestamp: turnStarted,
-                text: trimmed
+                text: displayText ?? trimmed
             ))
         }
 
-        // Placeholder assistant bubble — we'll fill in once the
-        // response lands.  Marked as streaming so the view can show a
-        // cursor / spinner if it wants to.  Tracked BY ID, not index —
-        // thinking chips come and go mid-turn (they're transient now),
-        // so a captured index could drift.
         let placeholder = ChatMessage(
             author: .assistant,
             timestamp: Date(),
@@ -441,45 +531,24 @@ final class ChatViewModel: ObservableObject {
         isSending = true
         defer {
             isSending = false
-            // Belt-and-braces: no thinking chip survives past its turn.
-            messages.removeAll { $0.author == .thinking }
+            // Close any remaining streaming states
+            for i in messages.indices {
+                if messages[i].isStreaming {
+                    messages[i].isStreaming = false
+                }
+            }
         }
 
         do {
-            // One turn over the bridge → the reply (text + optional
-            // telemetry). The session key keeps THIS window's
-            // conversation isolated on the Python side.
             let reply = try await agent.sendChat(text: trimmed,
                                                  session: sessionKey)
             let replyText = reply.text
-
-            // display.activity_trace post-turn disposition for the tool
-            // chips this turn produced ("full" keeps them; "off" never
-            // made any):
-            //   "clear"   — drop them now that the reply is here
-            //   "summary" — drop them, fold "N steps · " into the meta
-            var stepsNote = ""
-            if activityTrace == "clear" || activityTrace == "summary" {
-                let turnChips = messages.filter {
-                    $0.author == .toolCall && $0.timestamp >= turnStarted
-                }
-                if !turnChips.isEmpty {
-                    if activityTrace == "summary" {
-                        stepsNote = "\(turnChips.count) step"
-                            + (turnChips.count == 1 ? "" : "s") + " · "
-                    }
-                    let ids = Set(turnChips.map(\.id))
-                    messages.removeAll { ids.contains($0.id) }
-                }
-            }
 
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text = replyText
                 messages[i].isStreaming = false
                 if let s = reply.elapsedS {
-                    messages[i].meta = stepsNote + "replied in " + Self.fmtSeconds(s)
-                } else if !stepsNote.isEmpty {
-                    messages[i].meta = String(stepsNote.dropLast(3))   // strip " · "
+                    messages[i].meta = "replied in " + Self.fmtSeconds(s)
                 }
             }
             if let used = reply.ctxUsed, let mx = reply.ctxMax {

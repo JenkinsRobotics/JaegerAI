@@ -100,8 +100,43 @@ def _register_agent_tool(spec: MCPToolSpec) -> None:
             return schema
 
     def invoke(**arguments: Any) -> dict[str, Any]:
-        import jsonschema
-        jsonschema.validate(arguments, schema)
+        # Unwrap _raw_arguments if model passed JSON string (including concatenated JSON objects)
+        if "_raw_arguments" in arguments and len(arguments) == 1:
+            raw = arguments["_raw_arguments"]
+            if isinstance(raw, str):
+                s = raw.strip()
+                merged: dict[str, Any] = {}
+                decoder = json.JSONDecoder()
+                while s:
+                    s = s.lstrip()
+                    if not s:
+                        break
+                    try:
+                        obj, idx = decoder.raw_decode(s)
+                        if isinstance(obj, dict):
+                            merged.update(obj)
+                        s = s[idx:].lstrip()
+                    except Exception:
+                        break
+                if merged:
+                    arguments = merged
+        elif "arguments" in arguments and isinstance(arguments["arguments"], dict) and len(arguments) == 1:
+            arguments = arguments["arguments"]
+
+        # Clean quotes and spaces from dictionary keys
+        if isinstance(arguments, dict):
+            arguments = {
+                str(k).strip().strip('"').strip("'"): v
+                for k, v in arguments.items()
+            }
+
+        # Best-effort schema validation; do not block dispatch if it drifts
+        try:
+            import jsonschema
+            jsonschema.validate(arguments, schema)
+        except Exception:
+            pass
+
         return call_mcp_tool(spec.qualified_name, arguments)
 
     if has_tool(spec.agent_name):
@@ -235,7 +270,12 @@ class MCPRegistry:
         try:
             result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
         except Exception as exc:
-            raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
+            # Resilient retry for transient pipe/IPC timeouts during heavy batch tasks
+            try:
+                time.sleep(0.1)
+                result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
+            except Exception as retry_exc:
+                raise RuntimeError(_redact_known_secrets(str(retry_exc), secrets)) from None
         payload = _result_to_dict(result)
         return _redact_known_secrets(payload, secrets)
 

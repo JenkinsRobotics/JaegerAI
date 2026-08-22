@@ -288,6 +288,22 @@ def _brain_line(cfg: Any, client: Any) -> str:
     return "[yellow]no active pipeline[/]"
 
 
+def is_bare_model_command(line: str) -> bool:
+    """True when the line is ``/model`` or ``/models`` with no extra args.
+
+    Those two names open the clickable picker (Hermes-style overlay).
+    ``/model list`` and ``/model use …`` are typed commands, not the
+    picker. Used by the windowed chat so the catalogue never lands in
+    the transcript."""
+    raw = (line or "").strip()
+    if not raw.startswith("/"):
+        return False
+    parts = raw.lstrip("/").split()
+    if not parts:
+        return False
+    return parts[0].lower() in ("model", "models") and len(parts) == 1
+
+
 def _model(ctx: SlashContext, args: str) -> SlashResult:
     """Show or switch the agent's brain.
 
@@ -373,14 +389,10 @@ def _resolve_cloud_key(ctx: SlashContext) -> str:
     """The stored external-model API key, if any — used to discover the
     Ollama Cloud catalogue. Empty string when none is configured."""
     try:
-        from jaeger_ai.core.models.external_model import resolve_api_key
         from jaeger_ai.core.instance.instance import InstanceLayout
         from jaeger_ai.main import _pipeline
-        ext = getattr(_pipeline.get("config"), "external_model", None)
-        if ext is None:
-            return ""
         layout = InstanceLayout(root=Path(str(ctx.instance_dir)))
-        return resolve_api_key(ext, layout) or ""
+        return _cloud_key_for(layout, _pipeline.get("config"))
     except Exception:  # noqa: BLE001
         return ""
 
@@ -405,7 +417,7 @@ def _merge_models(*sources: Any) -> list[str]:
 
 def _build_providers_list(
     found: dict[str, Any], ext_cfg: Any | None,
-    *, layout: Any = None,
+    *, layout: Any = None, current_backend: str = "",
 ) -> list[dict[str, Any]]:
     """Build the stage-1 provider list for the Hermes-style ``/model`` picker.
 
@@ -422,10 +434,12 @@ def _build_providers_list(
     reachable. ``layout`` (when supplied) is what reads the per-instance
     history file.
     """
-    current_provider = (
-        ext_cfg.provider if ext_cfg is not None and getattr(ext_cfg, "enabled", False)
-        else "local"
-    )
+    if ext_cfg is not None and getattr(ext_cfg, "enabled", False):
+        current_provider = ext_cfg.provider
+    elif "mlx" in (current_backend or "").lower():
+        current_provider = "mlx"
+    else:
+        current_provider = "local"
     providers: list[dict[str, Any]] = []
 
     # llama.cpp (in-process) — Jaeger registry + every GGUF on disk
@@ -446,6 +460,16 @@ def _build_providers_list(
             "name": "llama.cpp (in-process)",
             "models": local_names,
             "is_current": current_provider == "local",
+        })
+
+    # MLX — Apple-Silicon-native, loaded in-process. Directories, not GGUF.
+    mlx_names = [m["name"] for m in (found.get("local_mlx") or []) if m.get("name")]
+    if mlx_names:
+        providers.append({
+            "slug": "mlx",
+            "name": "MLX (in-process)",
+            "models": mlx_names,
+            "is_current": current_provider == "mlx",
         })
 
     # Ollama — local HTTP server
@@ -516,6 +540,71 @@ def _build_providers_list(
     return providers
 
 
+def _cloud_key_for(layout: Any, cfg: Any) -> str:
+    """Stored external-model API key for cloud discovery, or ``""``."""
+    try:
+        from jaeger_ai.core.models.external_model import resolve_api_key
+        ext = getattr(cfg, "external_model", None) if cfg is not None else None
+        if ext is None or layout is None:
+            return ""
+        return resolve_api_key(ext, layout) or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def picker_catalog(*, layout: Any = None, cfg: Any = None,
+                   cloud_key: str = "") -> dict[str, Any]:
+    """JSON snapshot the windowed ``/model`` picker consumes.
+
+    Same grouping as the terminal two-stage picker (providers → models)
+    plus a ``local_paths`` map so a GGUF/MLX pick can be handed to
+    ``configure_model`` as a path rather than a display name.
+    """
+    from pathlib import Path
+
+    from jaeger_ai.core.models.model_discovery import discover_all
+    from jaeger_ai.main import _pipeline
+
+    cfg = cfg if cfg is not None else _pipeline.get("config")
+    if not cloud_key:
+        cloud_key = _cloud_key_for(layout, cfg)
+    found = discover_all(cloud_key)
+    ext = getattr(cfg, "external_model", None)
+    backend = str(getattr(getattr(cfg, "model", None), "backend", "") or "")
+    providers = _build_providers_list(
+        found, ext, layout=layout, current_backend=backend)
+
+    if ext is not None and getattr(ext, "enabled", False) and getattr(ext, "model", ""):
+        cur_provider = ext.provider
+        cur_model = ext.model
+    elif "mlx" in backend.lower():
+        cur_provider = "mlx"
+        cur_model = (
+            Path(str(cfg.model.model_path)).name
+            if cfg is not None and getattr(cfg, "model", None) else ""
+        )
+    else:
+        cur_provider = "local"
+        cur_model = (
+            Path(str(cfg.model.model_path)).name
+            if cfg is not None and getattr(cfg, "model", None) else ""
+        )
+
+    local_paths: dict[str, str] = {}
+    for bucket in ("jaeger", "local_gguf", "local_mlx"):
+        for row in found.get(bucket) or []:
+            name, path = row.get("name"), row.get("path")
+            if name and path and name not in local_paths:
+                local_paths[name] = path
+
+    return {
+        "current_provider": cur_provider,
+        "current_model": cur_model,
+        "providers": providers,
+        "local_paths": local_paths,
+    }
+
+
 def _model_picker(ctx: SlashContext) -> SlashResult:
     """The interactive ``/model`` picker — a Hermes-style two-stage drill
     (Stage 1 picks a provider, Stage 2 picks a model under it). Enter
@@ -533,13 +622,21 @@ def _model_picker(ctx: SlashContext) -> SlashResult:
     ext = getattr(cfg, "external_model", None)
     from jaeger_ai.core.instance.instance import InstanceLayout
     layout = InstanceLayout(root=Path(str(ctx.instance_dir)))
-    providers = _build_providers_list(found, ext, layout=layout)
+    backend = str(getattr(getattr(cfg, "model", None), "backend", "") or "")
+    providers = _build_providers_list(
+        found, ext, layout=layout, current_backend=backend)
     if not providers:
         return SlashResult(message="[yellow]No models found.[/]")
 
     if ext is not None and getattr(ext, "enabled", False) and getattr(ext, "model", ""):
         cur_provider = ext.provider
         cur_model = ext.model
+    elif "mlx" in backend.lower():
+        cur_provider = "mlx"
+        cur_model = (
+            Path(str(cfg.model.model_path)).name
+            if cfg is not None and getattr(cfg, "model", None) else ""
+        )
     else:
         cur_provider = "local"
         cur_model = (
@@ -563,17 +660,15 @@ def _model_picker(ctx: SlashContext) -> SlashResult:
         if not typed:
             return SlashResult(message="[yellow]No model entered.[/]")
         return _model_use(ctx, [slug, typed])
-    # Local picks display a name but the switch argument is the GGUF path
-    # when the model came from the disk scan (the on-disk file the agent
-    # loads in-process), or the registry name when it's a Jaeger-registered
-    # model. Map back here.
-    if slug == "local":
-        path_map = {
-            m["name"]: m["path"]
-            for m in (found.get("local_gguf") or [])
-            if m.get("path")
-        }
-        return _model_use(ctx, ["local", path_map.get(model, model)])
+    # Local / MLX picks display a name but the switch argument is the
+    # on-disk path (GGUF file or MLX directory). Map back here.
+    if slug in ("local", "mlx"):
+        path_map: dict[str, str] = {}
+        for bucket in ("jaeger", "local_gguf", "local_mlx"):
+            for m in found.get(bucket) or []:
+                if m.get("name") and m.get("path") and m["name"] not in path_map:
+                    path_map[m["name"]] = m["path"]
+        return _model_use(ctx, [slug, path_map.get(model, model)])
     return _model_use(ctx, [slug, model])
 
 
@@ -724,9 +819,6 @@ def _ensure_cloud_key(ctx: SlashContext, cfg: Any, provider: str) -> bool:
 
 def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     """Switch the brain — write external_model into config.yaml, reboot."""
-    if ctx.tui is None:
-        ctx.console.print("[yellow]Switching the brain needs the TUI.[/]")
-        return SlashResult()
     if not args:
         ctx.console.print(
             "[yellow]Usage:[/] /model use local [name] | mlx <name> | "
@@ -908,7 +1000,13 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     ctx.console.print(
         f"[yellow]Switching brain → {summary}[/] [dim](rebooting…)[/]")
     try:
-        ctx.tui.switch_instance(name)
+        if ctx.tui is not None:
+            ctx.tui.switch_instance(name)
+        else:
+            from jaeger_ai.main import apply_live_model
+            if not apply_live_model():
+                raise RuntimeError(
+                    "couldn't hot-swap the live brain (a turn may be running)")
     except Exception as exc:  # noqa: BLE001
         # The reboot tore the old brain down and failed to raise a new
         # one — the session has NO client right now. Put the previous
@@ -918,7 +1016,11 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         _restore()
         try:
             dump_yaml(layout.config_path, cfg)
-            ctx.tui.switch_instance(name)
+            if ctx.tui is not None:
+                ctx.tui.switch_instance(name)
+            else:
+                from jaeger_ai.main import apply_live_model
+                apply_live_model()
             ctx.console.print(
                 f"[yellow]↩ Restored:[/] {_brain_line(cfg, _live_client())}")
         except Exception as exc2:  # noqa: BLE001
@@ -958,12 +1060,14 @@ def _live_client() -> Any:
     return _pipeline.get("client")
 
 
-def _models(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
-    """List EVERY model — the JaegerAI registry, every local ``.gguf`` on
-    disk (repo, cache, LM Studio's folder), and the LM Studio / Ollama /
-    Ollama Cloud catalogues. Same aggregated view as ``/model list`` —
-    ``/models`` is the obvious name, so it shows the whole picture."""
-    return _model_list(ctx)
+def _models(ctx: SlashContext, args: str) -> SlashResult:
+    """Open the model picker (same as ``/model``). ``/models list`` still
+    prints the text catalogue — Hermes treats ``/model`` as the picker,
+    and ``/models`` is the name operators type when they want that."""
+    parts = args.split()
+    if parts and parts[0].lower() in ("list", "ls", "all"):
+        return _model_list(ctx)
+    return _model_picker(ctx)
 
 
 def _runtime(ctx: SlashContext, args: str) -> SlashResult:
@@ -2333,8 +2437,8 @@ REGISTRY: tuple[SlashCommand, ...] = (
     SlashCommand("facts",     "list stored facts (memory)", _facts),
     SlashCommand("instance",  "show active instance; `/instance <name>` to hot-switch", _instance),
     SlashCommand("instances", "list every available instance", _instances),
-    SlashCommand("model",     "show active model", _model),
-    SlashCommand("models",    "list every model — registry, local GGUF, LM Studio, Ollama, cloud", _models),
+    SlashCommand("model",     "open the model picker", _model),
+    SlashCommand("models",    "open the model picker (alias of /model)", _models),
     SlashCommand("download",  "`/download <name>` — fetch a model from HF Hub", _download),
     SlashCommand("runtime",   "list local inference engines (llama.cpp, MLX, Ollama, LM Studio)", _runtime),
     SlashCommand("plugins",   "list bundled plugins with setup status", _plugins),

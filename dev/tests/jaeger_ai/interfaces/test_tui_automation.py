@@ -21,11 +21,14 @@ def _clean_execution_state():
     """The execution mode is process-global (one resident agent per
     instance), so a test that leaves it in ``auto`` would arm the next
     one."""
+    from jaeger_ai.core.runtime import work_ledger
     execution.reset()
     autonomy.set_autonomy(autonomy.DEFAULT)
+    work_ledger.reset()
     yield
     execution.reset()
     autonomy.set_autonomy(autonomy.DEFAULT)
+    work_ledger.reset()
 
 
 @pytest.fixture()
@@ -186,6 +189,19 @@ def test_stop_request_is_honoured_at_the_turn_boundary() -> None:
     assert execution.run_active() is False
     # The flag is consumed, so the next run starts clean.
     assert execution.stop_requested() is False
+
+
+def test_an_open_ledger_keeps_going_even_in_interactive_mode() -> None:
+    """A work ledger is the count of record — settled prose must not
+    end the run while items remain."""
+    from jaeger_ai.core.runtime.work_ledger import work_ledger as ledger_tool
+
+    tui = _tui()
+    execution.set_execution_mode("interactive")
+    ledger_tool(action="create", task_name="notes", total_items=8)
+    tui._last_answer = "I processed the first batch."
+    nxt = tui._post_turn_auto_check()
+    assert nxt is not None and "Autonomous Harness" in nxt
 
 
 def test_status_bar_shows_the_step_counter() -> None:

@@ -1,0 +1,1 @@
+Cast out of the Britannian royal family with his blind sister after their mother's murder, Lelouch swore to destroy the empire. Granted the Geass by the mysterious C.C., he took the mask of Zero and led a rebellion — ultimately orchestrating his own assassination so the world's hatred would die with him and leave behind peace.

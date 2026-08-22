@@ -59,6 +59,20 @@ def test_stage_one_current_provider_gets_arrow():
     assert "← current" in lm_line
 
 
+def test_stage_one_choice_y_map_covers_clickable_rows():
+    """Mouse-up on a rendered row maps back to the provider index so
+    the picker is clickable, not just arrow-key navigable."""
+    state = {
+        "stage": "provider", "providers": _providers_two(), "selected": 0,
+        "current_model": "x", "current_provider": "y",
+    }
+    _frame(state)
+    choice_y = state.get("_choice_y") or {}
+    assert choice_y, "renderer must record y→index for mouse clicks"
+    # Four providers + Cancel = 5 rows (local, lmstudio, openai, Cancel)
+    assert set(choice_y.values()) <= {0, 1, 2, 3}
+
+
 def test_stage_one_cursor_glyph_on_selected_row():
     state = {
         "stage": "provider", "providers": _providers_two(), "selected": 1,

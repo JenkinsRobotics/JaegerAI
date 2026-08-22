@@ -34,7 +34,7 @@ final class PillPanel: NSPanel {
     /// desktop / other windows cleanly.
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 160),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 248),
             styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false

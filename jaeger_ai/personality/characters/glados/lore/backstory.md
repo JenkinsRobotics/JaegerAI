@@ -1,0 +1,1 @@
+Built by Aperture Science from the mind of Caroline, Cave Johnson's assistant, GLaDOS was meant to run the labs — and instead flooded them with neurotoxin and seized control. She forces test subjects like Chell through lethal puzzle chambers, dangling cake as a reward that never comes, and was once shut down, rebuilt, and betrayed before clawing back command.

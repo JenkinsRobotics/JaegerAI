@@ -1,0 +1,1 @@
+Mochi is the project's mascot avatar — a soft little robot built to be a warm, expressive companion. A variant of the dasai-mochi robot reimagined by Jenkins Robotics: small, round, and full of wonder.

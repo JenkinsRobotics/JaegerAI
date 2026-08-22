@@ -324,13 +324,15 @@ class InstanceLayout:
     def directives_path(self) -> Path:      return self.root / "AGENTS.md"
     @property
     def workspace_dir(self) -> Path:        return self.root / "workspace"
+    @property
+    def run_dir(self) -> Path:              return self.root / "run"
 
     def exists(self) -> bool:
         return self.identity_path.exists() and self.config_path.exists() and self.manifest_path.exists()
 
     def ensure_dirs(self) -> None:
         for d in (self.credentials_dir, self.skills_dir, self.memory_dir,
-                  self.logs_dir, self.workspace_dir):
+                  self.logs_dir, self.workspace_dir, self.run_dir):
             d.mkdir(parents=True, exist_ok=True)
         # 0700 on credentials/ so an OS-level snoop sees an empty dir at best.
         try:

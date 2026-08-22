@@ -313,30 +313,46 @@ class HeartbeatConfig(BaseModel):
 
 
 class AutomationConfig(BaseModel):
-    """Continuous-execution settings — see
-    :mod:`jaeger_ai.core.runtime.execution`.
+    """Two budgets for the agent loop.
 
-    These govern ``/auto`` and ``/plan`` runs only. In ``interactive``
-    mode (the default) nothing here has any effect."""
+    ``inner_max_iterations`` is the per-turn tool fuse (one
+    ``drive_one_turn``). Hitting it is not "the job is done" — the
+    outer loop starts the next step.
+
+    ``job_max_steps`` is how many of those outer steps a job may take
+    until ``complete_task``, a blocker, or ``/stop``.
+    """
 
     model_config = ConfigDict(extra="forbid")
-    auto_max_steps: int = Field(
-        50, ge=1, le=500,
+    inner_max_iterations: int = Field(
+        24, ge=1, le=200,
         json_schema_extra=_setting("autonomy"),
         description=(
-            "Hard cap on continuation steps in one /auto or /plan run. "
-            "The run ends with a wind-down summary when it is hit. "
-            "JAEGER_AUTO_MAX_STEPS overrides this for a single session."
+            "Tool-call fuse for one inner turn. Chat uses this value; "
+            "auto/batch uses at least 60. Hitting the fuse continues "
+            "the job; it does not stop. JAEGER_INNER_MAX overrides."
         ),
+    )
+    job_max_steps: int = Field(
+        100, ge=1, le=500,
+        json_schema_extra=_setting("autonomy"),
+        description=(
+            "Outer steps until complete_task, a blocker, or /stop. "
+            "JAEGER_AUTO_MAX_STEPS overrides this for a session."
+        ),
+    )
+    auto_max_steps: int | None = Field(
+        default=None, ge=1, le=500,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Deprecated alias for job_max_steps.",
     )
     continue_on_narration: bool = Field(
         True,
         json_schema_extra=_setting("autonomy", advanced=True),
         description=(
-            "In auto/supervised mode, re-fire the turn when the agent "
-            "narrates work it has not done ('let me start by...') instead "
-            "of handing the prompt back. Off = one turn per prompt even "
-            "in auto mode."
+            "Re-fire the turn when the agent narrates work it has not "
+            "done ('let me start by...') instead of handing the prompt "
+            "back. Off = one turn per prompt even in auto mode."
         ),
     )
 

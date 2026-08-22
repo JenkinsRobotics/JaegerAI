@@ -1308,6 +1308,12 @@ def build_hermetic_instance(source_dir: Path,
     src_dist = source_dir / "distribution.yaml"
     if src_dist.is_file():
         shutil.copy2(src_dist, layout.root / "distribution.yaml")
+    # credentials/ — copy existing API keys so cloud evaluations authenticate hermetically
+    src_creds = source_dir / "credentials"
+    if src_creds.is_dir():
+        for item in src_creds.iterdir():
+            if item.is_file():
+                shutil.copy2(item, layout.credentials_dir / item.name)
 
     # Fresh manifest, bound to lilith (persona.mode now defaults to
     # persona_first — Mode C, 2026-07-10 gate): a bound character is the

@@ -185,12 +185,18 @@ def _render_model_picker(
     _append_blank_panel_line(lines, "class:picker.border", box_width)
     _append_panel_line(lines, "class:picker.border", "class:picker.hint", hint, box_width)
     _append_blank_panel_line(lines, "class:picker.border", box_width)
+    # Chrome above the first choice row: title, blank, hint, blank.
+    choice_y: dict[int, int] = {}
+    y = 4
     for idx in range(scroll_offset, scroll_offset + visible):
         choice = choices[idx]
         style = "class:picker.selected" if idx == selected else "class:picker.choice"
         prefix = "❯ " if idx == selected else "  "
         for wrapped in _wrap_panel_text(prefix + choice, inner_text_width, subsequent_indent="  "):
+            choice_y[y] = idx
+            y += 1
             _append_panel_line(lines, "class:picker.border", style, wrapped, box_width)
+    state["_choice_y"] = choice_y
     _append_blank_panel_line(lines, "class:picker.border", box_width)
     lines.append(("class:picker.border", "╰" + ("─" * box_width) + "╯\n"))
     return lines
@@ -338,6 +344,29 @@ def pick_provider_model(
     def _cancel(event):
         event.app.exit(result=None)
 
+    def _mouse(mouse_event):
+        """Click a row to highlight it; click the highlighted row to pick."""
+        try:
+            from prompt_toolkit.mouse_events import MouseEventType
+        except Exception:  # noqa: BLE001
+            return None
+        if mouse_event.event_type != MouseEventType.MOUSE_UP:
+            return None
+        idx = (state.get("_choice_y") or {}).get(mouse_event.position.y)
+        if idx is None:
+            return None
+        if idx == state.get("selected"):
+            done, result = _handle_picker_enter(state)
+            if done:
+                event_app = getattr(mouse_event, "app", None)
+                if event_app is None:
+                    from prompt_toolkit.application import get_app
+                    event_app = get_app()
+                event_app.exit(result=result)
+        else:
+            state["selected"] = idx
+        return None
+
     # Jaeger-blue accent matching the existing picker theme.
     style = Style.from_dict({
         "picker.border":   "fg:ansibrightblue",
@@ -348,12 +377,13 @@ def pick_provider_model(
     })
     control = FormattedTextControl(
         _render, focusable=True, show_cursor=False, key_bindings=kb,
+        mouse_handler=_mouse,
     )
     layout = Layout(Window(control, wrap_lines=False, always_hide_cursor=True))
     try:
         return Application(
             layout=layout, style=style,
-            full_screen=True, mouse_support=False,
+            full_screen=True, mouse_support=True,
         ).run()
     except Exception:  # noqa: BLE001
         return None

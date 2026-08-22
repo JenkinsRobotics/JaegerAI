@@ -44,6 +44,35 @@ CREATE TABLE IF NOT EXISTS session_tombstones (
 
 SESSION_CONTRACT_VERSION = 3
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$")
+_HEX_ID_RE = re.compile(r"^[0-9a-f]+$")
+
+# Surfaces that actually talk to Jaeger. ARES maps tui/app/cli/acp into its
+# CLI tab; webui stays in WebUI. First writer wins — later turns cannot
+# re-tag a conversation started on another surface.
+KNOWN_ORIGINS = frozenset({
+    "webui", "tui", "app", "cli", "acp",
+    "telegram", "discord", "imessage", "slack", "weixin", "email", "matrix",
+    "cron", "webhook", "mcp", "voice", "kanban", "worker", "completions",
+    "probe", "deepthink", "unknown",
+})
+_PREFIX_ORIGINS = frozenset({
+    "telegram", "discord", "imessage", "slack", "weixin", "email", "matrix",
+})
+_EXACT_ORIGINS = {
+    "cli": "tui",
+    "tui": "tui",
+    "desktop-app": "app",
+    "gui": "app",
+    "webhook": "webhook",
+    "voice": "voice",
+    "mcp": "mcp",
+    "kanban": "kanban",
+    "kanban_idle": "kanban",
+    "completions": "completions",
+    "worker": "worker",
+    "default": "probe",
+    "test_probe": "probe",
+}
 
 
 def canonical_session_id(value: object) -> str:
@@ -52,6 +81,51 @@ def canonical_session_id(value: object) -> str:
     if not session_id or not _SESSION_ID_RE.fullmatch(session_id):
         raise ValueError("invalid session id")
     return session_id
+
+
+def normalize_session_origin(value: object) -> str:
+    """Return a known origin tag, or ``unknown``."""
+    origin = str(value or "").strip().lower()
+    if origin == "cli":
+        return "tui"
+    if origin in KNOWN_ORIGINS:
+        return origin
+    return "unknown"
+
+
+def infer_session_origin(session_id: str, explicit: object = None) -> str:
+    """Classify which surface minted ``session_id``.
+
+    TUI uses the stable key ``cli``. The Swift/PySide apps mint 8-char
+    hex ids (and historically ``desktop-app``). ARES WebUI mints 12-char
+    hex ids. Explicit ``source``/``origin`` from the wire wins when set.
+    """
+    if explicit not in (None, ""):
+        origin = normalize_session_origin(explicit)
+        if origin != "unknown":
+            return origin
+    key = str(session_id or "").strip().lower()
+    if not key:
+        return "unknown"
+    mapped = _EXACT_ORIGINS.get(key)
+    if mapped:
+        return mapped
+    if key.startswith("health_probe"):
+        return "probe"
+    if key.startswith("deepthink"):
+        return "deepthink"
+    if key.startswith("cron:") or key.startswith("cron_"):
+        return "cron"
+    if ":" in key:
+        prefix = key.split(":", 1)[0]
+        if prefix in _PREFIX_ORIGINS:
+            return prefix
+    if _HEX_ID_RE.fullmatch(key):
+        if len(key) == 8:
+            return "app"
+        if len(key) == 12:
+            return "webui"
+    return "unknown"
 
 
 class SessionStore:
@@ -92,11 +166,37 @@ class SessionStore:
                 "ALTER TABLE sessions ADD COLUMN execution_state TEXT "
                 "DEFAULT 'idle'"
             )
+        if "origin" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN origin TEXT")
         message_cols = {
             row[1] for row in self._conn.execute("PRAGMA table_info(messages)")
         }
         if "metadata" not in message_cols:
             self._conn.execute("ALTER TABLE messages ADD COLUMN metadata TEXT")
+        self._backfill_origins()
+
+    def _backfill_origins(self) -> None:
+        rows = self._conn.execute(
+            "SELECT id FROM sessions WHERE origin IS NULL OR origin=''"
+        ).fetchall()
+        if not rows:
+            return
+        self._conn.executemany(
+            "UPDATE sessions SET origin=? WHERE id=?",
+            [(infer_session_origin(session_id), session_id) for (session_id,) in rows],
+        )
+
+    def _stamp_origin_locked(self, session_id: str, explicit: object = None) -> str:
+        """Set origin on first write only. Returns the durable tag."""
+        origin = infer_session_origin(session_id, explicit)
+        self._conn.execute(
+            "UPDATE sessions SET origin=? WHERE id=? AND (origin IS NULL OR origin='')",
+            (origin, session_id),
+        )
+        row = self._conn.execute(
+            "SELECT origin FROM sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return str(row[0] if row and row[0] else origin)
 
     def _redact_existing_messages(self) -> None:
         """One-way migration: remove credential-shaped values from history."""
@@ -140,6 +240,7 @@ class SessionStore:
         model: str | None = None,
         provider: str | None = None,
         metadata: dict[str, Any] | None = None,
+        origin: str | None = None,
     ) -> None:
         """Append one message; upsert the session (first user line = preview)."""
         if not session_id or not text:
@@ -153,12 +254,14 @@ class SessionStore:
         text = redact_text(str(text))
         metadata = redact_value(metadata) if metadata else None
         now = time.time()
+        stamped = infer_session_origin(session_id, origin)
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):
                 return
             self._conn.execute(
-                "INSERT OR IGNORE INTO sessions(id, created_at, last_active) "
-                "VALUES(?,?,?)", (session_id, now, now))
+                "INSERT OR IGNORE INTO sessions(id, created_at, last_active, origin) "
+                "VALUES(?,?,?,?)", (session_id, now, now, stamped))
+            self._stamp_origin_locked(session_id, origin)
             self._conn.execute(
                 "INSERT INTO messages(session_id, role, text, ts, metadata) "
                 "VALUES(?,?,?,?,?)",
@@ -248,29 +351,42 @@ class SessionStore:
         cur = self._conn.execute(
             "SELECT s.id, s.title, s.preview, s.created_at, s.last_active, "
             "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), "
-            "  s.model, s.provider, s.execution_state "
+            "  s.model, s.provider, s.execution_state, s.origin "
             "FROM sessions s ORDER BY s.last_active DESC, s.rowid DESC "
             "LIMIT ?", (limit,))
-        return [{"id": i, "title": ti, "preview": p, "created_at": ca,
-                 "last_active": la, "messages": n, "model": model,
-                 "provider": provider, "execution_state": state or "idle"}
-                for i, ti, p, ca, la, n, model, provider, state in cur.fetchall()]
+        rows = []
+        for i, ti, p, ca, la, n, model, provider, state, origin in cur.fetchall():
+            tagged = origin or infer_session_origin(i)
+            rows.append({
+                "id": i, "title": ti, "preview": p, "created_at": ca,
+                "last_active": la, "messages": n, "model": model,
+                "provider": provider, "execution_state": state or "idle",
+                "origin": tagged, "source": tagged,
+            })
+        return rows
 
-    def create(self, session_id: str) -> dict[str, Any]:
+    def create(self, session_id: str, origin: str | None = None) -> dict[str, Any]:
         """Idempotently create one transcript unless its id is tombstoned."""
         session_id = canonical_session_id(session_id)
         now = time.time()
+        stamped = infer_session_origin(session_id, origin)
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):
-                return {"id": session_id, "created": False, "tombstoned": True}
+                return {"id": session_id, "created": False, "tombstoned": True,
+                        "origin": stamped}
             existed = self._conn.execute(
                 "SELECT 1 FROM sessions WHERE id=?", (session_id,)
             ).fetchone() is not None
             self._conn.execute(
-                "INSERT OR IGNORE INTO sessions(id, created_at, last_active, execution_state) "
-                "VALUES(?,?,?,'idle')", (session_id, now, now),
+                "INSERT OR IGNORE INTO sessions"
+                "(id, created_at, last_active, execution_state, origin) "
+                "VALUES(?,?,?,'idle',?)", (session_id, now, now, stamped),
             )
-        return {"id": session_id, "created": not existed, "tombstoned": False}
+            tagged = self._stamp_origin_locked(session_id, origin)
+        return {
+            "id": session_id, "created": not existed, "tombstoned": False,
+            "origin": tagged,
+        }
 
     def exists(self, session_id: str) -> bool:
         session_id = canonical_session_id(session_id)

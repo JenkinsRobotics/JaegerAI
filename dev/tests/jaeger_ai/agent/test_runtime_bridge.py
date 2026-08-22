@@ -179,8 +179,13 @@ def test_build_jaeger_agent_wires_skip_final_tools():
     assert isinstance(agent, JaegerAgent)
     assert agent.skip_final_tools == {"get_time", "recall"}
     assert agent.system_prompt == "be brief"
-    # The legacy ceiling — keeps backstop comparable across the A/B.
+    # Chat default fuse — auto/batch raises this at turn time.
     assert agent.max_iterations == 24
+
+
+def test_build_jaeger_agent_honors_explicit_max_iterations():
+    agent = build_jaeger_agent(_FakeLocalClient(), max_iterations=60)
+    assert agent.max_iterations == 60
 
 
 def test_build_jaeger_agent_picks_120s_stall_for_local_backend():

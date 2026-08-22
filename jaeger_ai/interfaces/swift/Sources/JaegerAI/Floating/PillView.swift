@@ -51,6 +51,7 @@ struct PillView: View {
     /// send button can disable instead of silently dropping into
     /// the chat model's own busy-guard.
     @EnvironmentObject private var bridge: PillBridge
+    @EnvironmentObject private var agent: AgentBridge
 
     /// Callback the controller installs so it can drive lifecycle
     /// (dismiss / open chat window / etc.) without the view having
@@ -137,24 +138,29 @@ struct PillView: View {
                 .fill(Pill.border)
                 .frame(height: 1)
 
-            // ── Bottom row: callouts + pill buttons ────────────────
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Quickly share content with Jaeger")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Pill.ink)
-                    Text("Needs additional permission")
-                        .font(.system(size: 11))
-                        .foregroundColor(Pill.inkFaint)
+            hudStatusRow
+
+            if let progress = agent.taskProgress, !progress.completed {
+                hudProgress(progress)
+            }
+
+            HStack(spacing: 8) {
+                pillButton("See Screen") {
+                    actions.submit(
+                        "Use see_screen and summarize what's on my display right now."
+                    )
                 }
-
+                pillButton("Morning Brief") {
+                    actions.submit(
+                        "Give me my morning briefing: calendar, todos, overnight items, and anything blocked."
+                    )
+                }
+                pillButton("Evening Brief") {
+                    actions.submit(
+                        "Give me my end-of-day briefing: what moved, what's still open, and one close-out action."
+                    )
+                }
                 Spacer()
-
-                // Placeholder pill buttons — Lilith PyQt6 had identical
-                // affordances (Turn on screenshots / Not now).  Wired
-                // to the same dismiss path so the operator's muscle
-                // memory transfers.
-                pillButton("Turn on screenshots") { actions.notImplemented("Screenshots") }
                 pillButton("Not now") { actions.dismiss() }
             }
         }
@@ -170,6 +176,62 @@ struct PillView: View {
                 .stroke(Pill.border, lineWidth: 1)
         )
         .frame(width: 680)   // the panel is 720; fill it (was collapsing to text width)
+    }
+
+    @ViewBuilder
+    private var hudStatusRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hudHeadline)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Pill.ink)
+                Text(hudSubhead)
+                    .font(.system(size: 11))
+                    .foregroundColor(Pill.inkFaint)
+            }
+            Spacer()
+            if agent.isBusy || bridge.isAgentBusy {
+                Circle()
+                    .fill(Pill.accent)
+                    .frame(width: 7, height: 7)
+            }
+        }
+    }
+
+    private var hudHeadline: String {
+        if let progress = agent.taskProgress, !progress.completed {
+            return "\(progress.title)  \(progress.countLabel)"
+        }
+        if agent.isBusy || bridge.isAgentBusy {
+            return "Working…"
+        }
+        return "⌥Space · chief of staff"
+    }
+
+    private var hudSubhead: String {
+        if let progress = agent.taskProgress, !progress.completed {
+            if !progress.currentItem.isEmpty {
+                return "now \(progress.currentItem)"
+            }
+            return progress.remaining > 0
+                ? "\(progress.remaining) remaining" : progress.state.lowercased()
+        }
+        if let name = agent.status?.displayName {
+            return name
+        }
+        return "Ask, glance at the screen, or pull a briefing."
+    }
+
+    private func hudProgress(_ progress: ToolProgress) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Pill.chipFill)
+                Capsule()
+                    .fill(Pill.accent)
+                    .frame(width: max(4, geo.size.width * progress.fraction))
+            }
+        }
+        .frame(height: 6)
     }
 
     @ViewBuilder
@@ -224,5 +286,4 @@ struct PillActions {
     let submit: (_ text: String) -> Void
     let dismiss: () -> Void
     let openChatWindow: () -> Void
-    let notImplemented: (_ what: String) -> Void
 }

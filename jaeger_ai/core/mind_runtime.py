@@ -115,10 +115,29 @@ class JaegerAIRuntime:
         self.boot.cleanup()
 
 
-def create_runtime(*, bus: Any, config: Mapping[str, Any] | None = None) -> JaegerAIRuntime:
-    """Factory consumed by JaegerAgent's manifest/programmatic API."""
+def create_runtime(*, bus: Any, config: Mapping[str, Any] | None = None) -> Any:
+    """Factory consumed by JaegerAgent's manifest/programmatic API.
 
-    return JaegerAIRuntime(bus=bus, config=config)
+    If another first-party process (ARES, ``jaeger bridge``) already holds
+    the instance lock and is listening on ``run/bridge.sock``, attach to
+    that brain instead of calling ``boot_for_tui`` and crashing on the flock.
+    """
+
+    cfg = dict(config or {})
+    from jaeger_ai.core.runtime.attached import try_attach_runtime
+
+    attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
+    if attached is not None:
+        return attached
+    try:
+        return JaegerAIRuntime(bus=bus, config=cfg)
+    except RuntimeError as exc:
+        if "locked by pid" not in str(exc):
+            raise
+        attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
+        if attached is not None:
+            return attached
+        raise
 
 
 __all__ = ["JaegerAIRuntime", "create_runtime"]

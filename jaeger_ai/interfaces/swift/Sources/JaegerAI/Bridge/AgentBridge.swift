@@ -84,6 +84,11 @@ final class AgentBridge: ObservableObject {
     /// in-window later; the default presenter is an NSAlert).
     @Published private(set) var pendingRequest: BridgeRequest? = nil
 
+    /// Live work-ledger snapshot for the chat progress drawer and the
+    /// ⌥Space HUD. Nil until a ``work_ledger`` frame arrives; stays
+    /// on the last completed job until a new one starts.
+    @Published private(set) var taskProgress: ToolProgress? = nil
+
     /// Listeners for inline activity chips (thinking / tool).
     private var listeners: [UUID: @MainActor (Event) -> Void] = [:]
 
@@ -133,9 +138,10 @@ final class AgentBridge: ObservableObject {
         await proc.setOnState { [weak self] busy in
             Task { @MainActor in self?.fanout(state: busy) }
         }
-        await proc.setOnTool { [weak self] name, phase, elapsed, detail in
+        await proc.setOnTool { [weak self] name, phase, elapsed, detail, progress in
             Task { @MainActor in self?.fanout(tool: name, phase: phase,
-                                              elapsed: elapsed, detail: detail) }
+                                              elapsed: elapsed, detail: detail,
+                                              progress: progress) }
         }
         await proc.setOnAgentState { [weak self] lifecycle in
             Task { @MainActor in self?.handleAgentState(lifecycle) }
@@ -206,6 +212,7 @@ final class AgentBridge: ObservableObject {
         agentState = .booting
         status = nil
         isBusy = false
+        taskProgress = nil
     }
 
     /// The Quit-from-tray path: give the core time to free the model and
@@ -218,6 +225,7 @@ final class AgentBridge: ObservableObject {
         agentState = .booting
         status = nil
         isBusy = false
+        taskProgress = nil
     }
 
     // MARK: - Queries / commands / chat
@@ -272,9 +280,31 @@ final class AgentBridge: ObservableObject {
         guard let bridge else { throw BridgeError.notRunning }
         let result = await bridge.runTurn(text, session: session)
         if let error = result.error, !error.isEmpty {
-            throw BridgeError.bootFailed(error)
+            // A stall/timeout is a recoverable turn failure, not a
+            // dead bridge. Surface it in the transcript so the
+            // operator can send the next message instead of seeing
+            // a thrown "⚠ agent error" with no way forward.
+            let shown = result.text.isEmpty
+                ? "The model stalled (\(error)). Send another message to keep going."
+                : result.text
+            return TurnResult(text: shown, error: nil,
+                              elapsedS: result.elapsedS,
+                              ctxUsed: result.ctxUsed, ctxMax: result.ctxMax)
         }
         return result
+    }
+
+    /// Cooperative cancel of the in-flight turn (``/stop``).
+    func cancelTurn() {
+        guard let bridge else { return }
+        Task { await bridge.cancelTurn() }
+    }
+
+    /// Push guidance into the active autonomous run (``/steer``).
+    func steer(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let bridge else { return }
+        Task { await bridge.steer(trimmed) }
     }
 
     // MARK: - Agent lifecycle + death detection
@@ -325,6 +355,7 @@ final class AgentBridge: ObservableObject {
         bridge = nil
         status = nil
         isBusy = false
+        taskProgress = nil
         if clean {
             state = .disconnected
         } else {
@@ -369,8 +400,27 @@ final class AgentBridge: ObservableObject {
 
     /// Map a ``tool`` frame onto the tool-chip event vocabulary
     /// ``ChatViewModel.handle`` already renders (tool.start / tool.complete).
+    /// Work-ledger frames update ``taskProgress`` and emit
+    /// ``task.progress`` instead of a chip, so a long batch doesn't
+    /// spam the transcript with 190 "tool done" rows.
     private func fanout(tool name: String, phase: String, elapsed: Double,
-                        detail: String?) {
+                        detail: String?, progress: ToolProgress?) {
+        if let progress {
+            taskProgress = progress
+            var payload: [String: AnyDecodable] = [
+                "tool": AnyDecodable(name),
+                "detail": AnyDecodable(progress.detail),
+                "done": AnyDecodable(progress.done),
+                "total": AnyDecodable(progress.total),
+                "completed": AnyDecodable(progress.completed),
+            ]
+            if !progress.taskName.isEmpty {
+                payload["task_name"] = AnyDecodable(progress.taskName)
+            }
+            let event = Event(name: "task.progress", payload: payload)
+            for cb in listeners.values { cb(event) }
+            return
+        }
         let evName = phase == "start" ? "tool.start" : "tool.complete"
         var payload: [String: AnyDecodable] = [
             "tool": AnyDecodable(name),

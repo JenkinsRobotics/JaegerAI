@@ -41,6 +41,8 @@ def test_subcommand_completion() -> None:
     after_space = _complete("/voice ")
     assert {"on", "off", "wake", "bargein"} <= set(after_space)
     assert _complete("/voice w") == ["wake"]
+    assert {"use", "list"} <= set(_complete("/model "))
+    assert _complete("/models ") == ["list"]
 
 
 def test_unknown_command_has_no_subcommands() -> None:

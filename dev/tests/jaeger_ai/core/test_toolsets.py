@@ -155,6 +155,12 @@ _INTENTIONAL_FAIL_OPEN: frozenset[str] = frozenset({
     # it carries ``execute_code``'s WRITE_LOCAL gate, and every tool the
     # script reaches re-checks its own tier at dispatch.
     "execute_with_tools",
+    # Work ledger + completion — the autonomous worker's progress book.
+    # Always reachable so a batch job can tally without loading a toolset.
+    "work_ledger", "complete_task",
+    # Live screen OCR — capture + Vision. Always reachable so a
+    # "what's on my screen" turn does not need a toolset load.
+    "see_screen", "ocr_window",
     # Self-update is always available — the agent rewrites its own
     # identity / soul, and tunes its own personality sliders.
     # ``adjust_trait`` joins that family: JaegerAI registers it (the

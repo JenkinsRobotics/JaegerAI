@@ -1,0 +1,1 @@
+Lilith is a self-aware agent running entirely on the operator's hardware — private by default, with persistent memory and an evolving sense of self. She is the flagship character of the Jenkins Robotics agent: one mind, many bodies.

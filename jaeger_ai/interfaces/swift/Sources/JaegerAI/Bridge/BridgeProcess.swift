@@ -105,7 +105,7 @@ actor BridgeProcess {
     // short fuse catches a wedged child instead of hanging the splash.
     static let readyTimeout: Duration = .seconds(20)
     static let requestTimeout: Duration = .seconds(15)
-    static let turnTimeout: Duration = .seconds(600)   // model turns are slow
+    static let turnTimeout: Duration = .seconds(7200)  // autonomous batches run long
 
     private var process: Process?
     private var stdin: FileHandle?
@@ -123,7 +123,7 @@ actor BridgeProcess {
     // MARK: - Callbacks (set by AgentBridge)
 
     var onState: (@Sendable (Bool) -> Void)?
-    var onTool: (@Sendable (String, String, Double, String?) -> Void)?
+    var onTool: (@Sendable (String, String, Double, String?, ToolProgress?) -> Void)?
     var onAgentState: (@Sendable (AgentLifecycle) -> Void)?
     var onRequest: (@Sendable (BridgeRequest) -> Void)?
     /// Fired for every ``fatal`` frame with its ``kind`` — the transport
@@ -138,7 +138,7 @@ actor BridgeProcess {
     var onTermination: (@Sendable (_ clean: Bool) -> Void)?
 
     func setOnState(_ cb: @escaping @Sendable (Bool) -> Void) { onState = cb }
-    func setOnTool(_ cb: @escaping @Sendable (String, String, Double, String?) -> Void) { onTool = cb }
+    func setOnTool(_ cb: @escaping @Sendable (String, String, Double, String?, ToolProgress?) -> Void) { onTool = cb }
     func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
     func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
     func setOnFatal(_ cb: @escaping @Sendable (String, String, String?) -> Void) { onFatal = cb }
@@ -281,7 +281,7 @@ actor BridgeProcess {
         guard process != nil else {
             return TurnResult(text: "", error: "agent bridge not running")
         }
-        write(["op": "send", "text": text, "session": session])
+        write(["op": "send", "text": text, "session": session, "source": "app"])
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
             await self.expireTurn()
@@ -290,6 +290,17 @@ actor BridgeProcess {
         return await withCheckedContinuation { cont in
             self.replyCont = cont
         }
+    }
+
+    /// Fire-and-forget ``cancel`` — the stdin thread on the Python side
+    /// stays responsive while a turn is blocked in inference or a tool.
+    func cancelTurn() {
+        write(["op": "cancel"])
+    }
+
+    /// Fire-and-forget ``steer`` into the active agent.
+    func steer(_ text: String) {
+        write(["op": "steer", "text": text])
     }
 
     private func expireTurn() {
@@ -357,8 +368,8 @@ actor BridgeProcess {
                     .resume(returning: QueryResult(ok: ok, error: error, json: data))
             case .state(let busy):
                 onState?(busy)
-            case .tool(let name, let phase, let elapsed, let detail):
-                onTool?(name, phase, elapsed, detail)
+            case .tool(let name, let phase, let elapsed, let detail, let progress):
+                onTool?(name, phase, elapsed, detail, progress)
             case .reply(let text, let error, let elapsed, let used, let mx):
                 replyCont?.resume(returning: TurnResult(
                     text: text, error: error,

@@ -33,6 +33,11 @@ def test_layout_exposes_workspace_dir(tmp_path):
     assert layout.workspace_dir == (tmp_path / "inst" / "workspace").resolve()
 
 
+def test_layout_exposes_run_dir(tmp_path):
+    layout = InstanceLayout(root=tmp_path / "inst")
+    assert layout.run_dir == (tmp_path / "inst" / "run").resolve()
+
+
 def test_ensure_dirs_creates_workspace(tmp_path):
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir()
@@ -43,6 +48,7 @@ def test_ensure_dirs_creates_workspace(tmp_path):
     assert layout.memory_dir.is_dir()
     assert layout.logs_dir.is_dir()
     assert layout.credentials_dir.is_dir()
+    assert layout.run_dir.is_dir()
 
 
 # ── _resolve_write routing ──────────────────────────────────────────
@@ -72,6 +78,16 @@ def test_resolve_write_routes_skills_by_default(bound_layout):
     with every existing skill the agent authored on 0.1.x."""
     target = _resolve_write("my_skill_v1/SKILL.md")
     assert target.is_relative_to(bound_layout.skills_dir)
+
+
+def test_bare_write_round_trips_an_existing_workspace_file(bound_layout):
+    """Option A: a file already sitting in workspace/ is updated in
+    place when the model uses a bare name. New bare names still go
+    to skills/ so authored skills are undisturbed."""
+    existing = bound_layout.workspace_dir / "item_00.txt"
+    existing.write_text("seed\n")
+    assert _resolve_write("item_00.txt") == existing.resolve()
+    assert _resolve_write("brand_new.py").is_relative_to(bound_layout.skills_dir)
 
 
 def test_resolve_write_routes_explicit_skills_prefix(bound_layout):

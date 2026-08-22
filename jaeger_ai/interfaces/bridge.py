@@ -37,6 +37,7 @@ or ``python -m jaeger_os.interfaces.bridge [instance_name]``.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import queue as _queue
@@ -265,12 +266,14 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # ``neutral`` — the single-identity projection (2026-08-19).
 # 12: ``cron`` query reports in-flight scheduled jobs so a host sidebar
 # can keep those sessions marked running until the callback returns.
-INTEGRATION_CONTRACT_VERSION = 12
+# 13: ``model_picker`` query — Hermes-style two-stage catalog for the
+# windowed ``/model`` overlay (clickable, not a transcript dump).
+INTEGRATION_CONTRACT_VERSION = 13
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
     "serving_model", "settings_catalog", "permissions", "instance_exists",
-    "setup_defaults", "model_catalog", "session_contract", "list_sessions", "load_session",
+    "setup_defaults", "model_catalog", "model_picker", "session_contract", "list_sessions", "load_session",
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
@@ -801,6 +804,22 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "providers": list(providers.values()),
         }
 
+    if what == "model_picker":
+        # Same two-stage grouping the terminal ``/model`` picker uses, so
+        # the windowed overlay is a clickable twin rather than a flat
+        # catalogue dumped into the transcript.
+        from jaeger_ai.interfaces.tui.slash_commands import picker_catalog
+        from jaeger_ai.main import _pipeline
+
+        cfg = _pipeline.get("config")
+        if cfg is None and lay is not None:
+            try:
+                from jaeger_ai.core.instance.schemas import Config, load_yaml
+                cfg = load_yaml(lay.config_path, Config)
+            except Exception:  # noqa: BLE001
+                cfg = None
+        return picker_catalog(layout=lay, cfg=cfg)
+
     if what == "settings_catalog":
         # The schema-derived settings surface — the SAME catalog `jaeger
         # settings` drives. Grouped {group: [descriptor, ...]}; the native
@@ -919,14 +938,9 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     try:
         import jaeger_ai.personality.character as ch
         if cmd == "select_character":
-            # Picking a character IS the character this instance is. A
-            # session-only override (set_active_character) survived
-            # neither restart nor the bound-character fallback, so the
-            # HUD looked like it swapped and then snapped back. Bind
-            # writes both the live file and manifest.bound_character,
-            # then the running agent rebuilds so the NEXT reply is this
-            # character — not a continuation of the previous voice.
-            ch.bind_character(root, args["id"])
+            # Live override only. Binding (manifest.bound_character) is
+            # make_default — an explicit rebind, not a side effect of the pick.
+            ch.set_active_character(root, args["id"])
             _apply_live_character(); return True, None
         if cmd == "make_default":
             ch.bind_character(root, args["id"])
@@ -1374,11 +1388,68 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 # text) — a SAFE subset of interfaces/tui/slash_commands.py: read-only /
 # reporting handlers that never call ``console.input()``. The bridge's stdin
 # is the protocol stream, so an interactive handler would eat protocol
-# frames; anything conversational (goal / deepthink dialogs, model picker)
-# and anything needing the live TUI (reboot, instance hot-switch) stays
-# TUI-only and reports as such.
+# frames; anything conversational (goal / deepthink dialogs) and anything
+# needing the live TUI (reboot, instance hot-switch) stays TUI-only.
+# ``/model`` / ``/models`` are intercepted by the windowed chat and open a
+# clickable picker; if they still arrive here we refuse a catalogue dump
+# into the transcript. ``/model use …`` is a typed switch and is allowed.
 _SLASH_SAFE = ("help", "tools", "skills", "facts", "plugins",
-               "instance", "instances", "models", "board", "config")
+               "instance", "instances", "board", "config")
+
+
+def _slash_parts(text: str) -> tuple[str, str]:
+    """``("/goal improve notes",)`` → ``("goal", "improve notes")``."""
+    raw = (text or "").strip()
+    if not raw.startswith("/"):
+        return "", ""
+    parts = raw.lstrip("/").split(None, 1)
+    name = (parts[0] if parts else "").lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    return name, rest
+
+
+def _goal_turn_text(text: str) -> str | None:
+    """Windowed ``/goal <job>`` is a real agent turn, not a TUI dialog.
+
+    The Swift palette lists /goal; without this rewrite the bridge used
+    to bounce it as "needs the terminal TUI" and the job never started.
+    """
+    name, rest = _slash_parts(text)
+    if name == "goal" and rest:
+        return rest
+    return None
+
+
+def _windowed_control_slash(text: str) -> str | None:
+    """Local replies for /auto /stop /steer /goal (bare). None → TUI dispatch."""
+    name, rest = _slash_parts(text)
+    if name in {"auto", "mode"}:
+        return (
+            "Autonomous continuation is already on. Send the task as a "
+            "normal message — the engine keeps going until the work is done."
+        )
+    if name == "stop":
+        try:
+            from jaeger_ai.main import request_turn_cancel
+            request_turn_cancel()
+        except Exception:  # noqa: BLE001 — cancel is best-effort
+            pass
+        return "Stop requested."
+    if name == "steer":
+        if not rest:
+            return "Usage: /steer <guidance for the in-flight run>"
+        try:
+            from jaeger_ai.main import steer_active_turn
+            steer_active_turn(rest)
+        except Exception:  # noqa: BLE001
+            pass
+        return f"Steered: {rest}"
+    if name == "goal" and not rest:
+        return (
+            "Usage: /goal <what to finish>. Example: /goal improve Apple "
+            "Notes structure and quality"
+        )
+    return None
 
 
 def _run_slash(text: str, ctx: "_Ctx") -> str:
@@ -1388,12 +1459,27 @@ def _run_slash(text: str, ctx: "_Ctx") -> str:
     from rich.console import Console
     from jaeger_ai.interfaces.tui import slash_commands as sc
 
-    name = (text.lstrip("/").split(None, 1) or [""])[0].lower()
+    parts = text.lstrip("/").split(None, 1)
+    name = (parts[0] if parts else "").lower()
+    rest = parts[1] if len(parts) > 1 else ""
+    rest_head = (rest.split()[:1] or [""])[0].lower()
     known = name in sc._BY_NAME  # noqa: SLF001 — same package family
-    if known and name not in _SLASH_SAFE:
+    # Bare /model and /models open a clickable overlay in the app. Never
+    # print the catalogue into the chat — that's the bug this exists to
+    # close. Typed ``/model use …`` is a direct switch and may run here.
+    if name in ("model", "models") and rest_head != "use":
+        return (
+            "The model picker is a clickable overlay — type /model with "
+            "no arguments.\nDirect switch:  /model use ollama-cloud <model>"
+            "  ·  /model use local <name>  ·  /model use ollama <name>"
+            "  ·  /model use mlx <name>"
+        )
+    if known and name not in _SLASH_SAFE and not (
+            name == "model" and rest_head == "use"):
         return (f"/{name} needs the terminal TUI — it isn't available over "
                 "the app bridge.\nAvailable here: "
-                + "  ".join("/" + n for n in _SLASH_SAFE))
+                + "  ".join("/" + n for n in _SLASH_SAFE)
+                + "  /model")
     # Capture the handler's Rich output as plain text (no ANSI, no markup).
     import io as _io
     console = Console(file=_io.StringIO(), record=True, width=88,
@@ -1588,7 +1674,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             return
         out = req.pop("_out", None) or proto
         text = (req.get("text") or "").strip()
-        session = req.get("session") or "desktop-app"
+        from jaeger_ai.core.runtime.dispatch import normalize_session_key
+        session = normalize_session_key(
+            req.get("session"), default="desktop-app",
+        )
         if session not in _SYNTHETIC_SESSIONS:
             ctx.last_user_at = time.monotonic()
             ctx.last_user_session = session
@@ -1602,16 +1691,21 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         # Slash pre-dispatch — same contract as the TUI REPL: a leading
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
-        if text.startswith("/"):
+        # Exception: ``/goal <job>`` is rewritten into a real turn so the
+        # windowed palette actually starts the autonomous loop.
+        goal_text = _goal_turn_text(text)
+        if text.startswith("/") and goal_text is None:
             _emit_state(out, ctx, True, session)
             try:
-                reply = _run_slash(text, ctx)
+                reply = _windowed_control_slash(text) or _run_slash(text, ctx)
                 _emit(out, protocol.reply_frame(reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
                 _emit(out, protocol.reply_frame("", str(exc), session))
             finally:
                 _emit_state(out, ctx, False, session)
             continue
+        if goal_text is not None:
+            text = goal_text
         ctx.booted.wait()
         if ctx.client is None:
             _emit(out, protocol.reply_frame(
@@ -1622,28 +1716,67 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
 
             store = get_store(ctx.layout)
             if store is not None:
-                store.create(session)
+                store.create(
+                    session,
+                    origin=req.get("source") or req.get("origin"),
+                )
                 store.set_execution_state(session, "running")
         except Exception:  # noqa: BLE001 — state telemetry cannot fail a turn
             pass
         _emit_state(out, ctx, True, session)
         try:
             from jaeger_ai.main import run_for_voice, stream_delta_sink
-            deltas = _DeltaStream(out, session)
-            with _turn_workspace(ctx, req.get("workspace")):
-                display_text = req.get("display_text")
-                voice_kwargs = {"session_key": session}
-                if display_text is not None:
-                    voice_kwargs["display_text"] = str(display_text)
-                # The sink is turn-scoped: it stops the moment the turn
-                # returns, so nothing streams into a client that has
-                # already been handed its reply.
-                with stream_delta_sink(deltas.feed):
-                    result = run_for_voice(ctx.client, text, **voice_kwargs)
-            deltas.flush()
+            from jaeger_ai.core.runtime import continuation, execution
+            from jaeger_ai.core.runtime.autonomous_runner import ledger_open, next_continuation_prompt
+
+            current_prompt = text
+            max_continuations = execution.max_steps()
+            step = 0
+            accumulated_text: list[str] = []
+            result: dict[str, Any] = {}
+
+            while True:
+                deltas = _DeltaStream(out, session)
+                with _turn_workspace(ctx, req.get("workspace")):
+                    display_text = req.get("display_text") if step == 0 else None
+                    voice_kwargs: dict[str, Any] = {"session_key": session}
+                    if display_text is not None:
+                        voice_kwargs["display_text"] = str(display_text)
+                    with stream_delta_sink(deltas.feed):
+                        result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
+                deltas.flush()
+
+                ans = (result.get("text") or "").strip()
+                if ans:
+                    accumulated_text.append(ans)
+
+                if result.get("error") or execution.stop_requested():
+                    break
+
+                # Inner-cap halt is "start the next step", not "stop".
+                nxt_prompt = None
+                halt = result.get("halt_reason")
+                if ledger_open() or continuation.hit_inner_cap(halt):
+                    nxt_prompt = next_continuation_prompt(
+                        ans, force_ledger=ledger_open(),
+                        halt_reason=halt,
+                    )
+                elif continuation.enabled() and step < max_continuations:
+                    verdict = continuation.classify(ans)
+                    if verdict == "continue":
+                        nxt_prompt = continuation.continuation_prompt()
+
+                if nxt_prompt and step < max_continuations:
+                    step += 1
+                    current_prompt = nxt_prompt
+                    continue
+                else:
+                    break
+
+            final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
             used, mx = _ctx_usage(session)
             _emit(out, protocol.reply_frame(
-                result.get("text") or "", result.get("error"), session,
+                final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx))
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
@@ -1753,6 +1886,7 @@ def _start_bridge_socket(
                     pass
 
     def _accept() -> None:
+        retryable = {errno.EINTR, errno.EAGAIN, errno.EWOULDBLOCK, errno.ETIMEDOUT}
         while True:
             if ctx.supervisor_stop is not None and ctx.supervisor_stop.is_set():
                 break
@@ -1760,7 +1894,11 @@ def _start_bridge_socket(
                 conn, _addr = sock.accept()
             except TimeoutError:
                 continue
-            except OSError:
+            except OSError as exc:
+                if exc.errno in retryable:
+                    continue
+                print(f"[bridge] attach accept stopped: {exc}",
+                      file=sys.stderr, flush=True)
                 break
             threading.Thread(
                 target=_client, args=(conn,), name="bridge-attach", daemon=True,
@@ -1866,6 +2004,8 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 character_id=cid,
                 name=(args.get("name") or None),
                 display_name=(args.get("display_name") or None),
+                user_name=(args.get("user_name") or None),
+                custom_prime_directive=(args.get("custom_prime_directive") or None),
                 role=(args.get("role") or None),
                 personality=(args.get("personality") or None),
                 voice_id=(args.get("voice_id") or None),
@@ -1981,7 +2121,11 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     if store is None:
                         raise RuntimeError("no Jaeger session store is available")
                     if cmd == "create_session":
-                        data = store.create(sid)
+                        data = store.create(
+                            sid,
+                            origin=command_args.get("origin")
+                            or command_args.get("source"),
+                        )
                     elif cmd == "reconcile_session_transcript":
                         messages = command_args.get("messages")
                         user_messages = command_args.get("user_messages")
@@ -2185,7 +2329,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 new_id = uuid.uuid4().hex[:8]
                 store = get_store(ctx.layout)
                 if store is not None:
-                    store.create(new_id)
+                    store.create(new_id, origin="app")
                 _emit(proto, protocol.result_frame(
                     req.get("id"), data={"id": new_id}, ok=True))
                 continue
