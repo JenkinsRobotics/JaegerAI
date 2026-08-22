@@ -1,0 +1,50 @@
+# JaegerOS — packaging config.
+#
+# The framework tier of the Jaeger ecosystem (bus, nodes, modules/slots,
+# supervisor, safety floor, wire contract, capability layer). Pinned to
+# a release by everything downstream (JaegerAI, the engine modules,
+# hardware packages); imports nothing from them (CI-enforced, see
+# dev/tests/jaeger_os/core/test_layering.py and contract's own
+# no-inward-imports test).
+#
+# Installs editable (PEP 660): `pip install -e .`. Real PyPI releases
+# are planned for 1.0 — until then downstream repos pin this repo via a
+# git dependency (`jaeger-os @ git+https://github.com/JenkinsRobotics/
+# JaegerOS@master`, moving to a tag pin at release; see their own
+# requirements.txt headers).
+#
+# Version single-sourced from jaeger_os/__init__.py; runtime deps
+# single-sourced from requirements.txt.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-os"
+description = "JaegerOS — the framework layer of the Jaeger ecosystem: bus, nodes, modules & slots, supervisor, safety floor, wire contract, capability layer."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11,<3.13"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+version = {attr = "jaeger_os.__version__"}
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["jaeger_os*"]
+
+[tool.setuptools.package-data]
+# contract/protocol_v1_fixtures.json ships with the installed package —
+# downstream vendored-client tests read it off the installed location,
+# not a monorepo-relative path (found via JaegerAI's suite during 0.9
+# step-4 staging).
+jaeger_os = ["contract/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["dev/tests"]
+markers = [
+    "slow: tests that fork real processes or do real network I/O.",
+    "subprocess: tests that spawn a real Python subprocess.",
+]
