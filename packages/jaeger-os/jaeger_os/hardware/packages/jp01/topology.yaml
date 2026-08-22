@@ -1,0 +1,122 @@
+# JP01 topology — validated by jaeger_os.hardware.package.load_package.
+# Survey truth 2026-06-12 (JP01_Firmware branch 2.0): ports, bauds, and
+# the Jetson-owns-serial relay path are real measured values; every
+# controller ships simulated:true until the operator walks it live.
+# Umbrella naming: the first segment of each capability name is the
+# tool the agent sees (motion / lights / robot_vision / telemetry).
+
+package: jp01
+requires_framework: ">=0.6"
+display_name: JP01 (desk-scale robot, 3 controllers)
+
+controllers:
+  mc01:
+    node: motor
+    adapter: jp01.adapters.mc01:Mc01MotorAdapter
+    link:
+      transport: serial
+      port: /dev/cu.usbserial-110
+      baud: 115200
+      protocol: ascii_bracket
+      relay:                     # CC01 pattern: Jetson owns the serial
+        transport: zmq_req       # port on 2.0; brackets ride a REQ
+        endpoint: tcp://192.168.2.2:5556
+        target: motion           # zmq_client.send_command("motion", …)
+    simulated: true
+    heartbeat_expect_s: 30
+
+  avc01:
+    node: light
+    adapter: jp01.adapters.avc01:Avc01LightAdapter
+    link:
+      transport: serial
+      port: /dev/cu.usbmodem85938301
+      baud: 115200               # firmware reality (the old config.json
+      protocol: ascii_bracket    # said 921600; USB-CDC is baud-agnostic)
+      relay:
+        transport: zmq_req
+        endpoint: tcp://192.168.2.2:5556
+        target: av
+    simulated: true
+    heartbeat_expect_s: 30
+
+  vcc01:
+    node: vision
+    adapter: jp01.adapters.vcc01:Vcc01VisionAdapter
+    link:
+      transport: zmq_req
+      endpoint: tcp://192.168.2.2:5556
+      protocol: json_line
+    simulated: true
+    streams:                     # high-rate surfaces — bus-native, not Link
+      telemetry: tcp://192.168.2.2:5555
+      vision_telemetry: tcp://192.168.2.2:5558
+      video_udp: [5001, 5003]
+
+capabilities:
+  # motion → MC01. HARDWARE tier: confirmation flow + e-stop fail-closed
+  # + beta gate. Schema constraints mirror the firmware clamps.
+  - name: motion.move_joints
+    controller: mc01
+    tier: HARDWARE
+    schema: jp01.capabilities:MoveJointsArgs
+    description: "Move both servo joints (MJ). Joint 1 40-150 deg, joint 2 70-105 deg, speed percent."
+  - name: motion.drive
+    controller: mc01
+    tier: HARDWARE
+    schema: jp01.capabilities:DriveArgs
+    description: "Run the drive motors (MM). Speeds -100..100 percent, duration capped at 2 s by firmware."
+  - name: motion.stop
+    controller: mc01
+    tier: HARDWARE
+    schema: jp01.capabilities:EmptyArgs
+    allow_when_latched: true
+    description: "EMERGENCY STOP: neutralize motors (MM[0,0,0]) and latch the system e-stop. Release is an operator action."
+  - name: motion.status
+    controller: mc01
+    tier: READ_ONLY
+    schema: jp01.capabilities:EmptyArgs
+    description: "Cached MC01 telemetry (last heartbeat, link health)."
+
+  # lights → AVC01. WRITE_LOCAL: confirmation, no e-stop coupling —
+  # lights stay usable during a latch (status signalling).
+  - name: lights.set_mode
+    controller: avc01
+    tier: WRITE_LOCAL
+    schema: jp01.capabilities:LightModeArgs
+    description: "Set NeoPixel (MN) or LED-matrix (MM) animation mode by number."
+  - name: lights.set_frame
+    controller: avc01
+    tier: WRITE_LOCAL
+    schema: jp01.capabilities:LightFrameArgs
+    description: "Push a raw frame: NeoPixel WRGB hex (FN, 8 chars/LED) or matrix RGB hex (FM, 6 chars/pixel)."
+  - name: lights.brightness
+    controller: avc01
+    tier: WRITE_LOCAL
+    schema: jp01.capabilities:BrightnessArgs
+    description: "Set LED-matrix brightness (BM, 0-255)."
+  - name: lights.status
+    controller: avc01
+    tier: READ_ONLY
+    schema: jp01.capabilities:EmptyArgs
+    description: "Cached AVC01 telemetry (last heartbeat, link health)."
+
+  # robot_vision → VCC01. Only the stream directory for now —
+  # snapshot/detections land when the live VCC01 path is walked.
+  - name: robot_vision.stream_info
+    controller: vcc01
+    tier: READ_ONLY
+    schema: jp01.capabilities:EmptyArgs
+    description: "VCC01 stream endpoints (telemetry PUB, video UDP) and link health."
+
+  # telemetry → whole robot.
+  - name: telemetry.read
+    controller: "*"
+    tier: READ_ONLY
+    schema: jp01.capabilities:EmptyArgs
+    description: "Cached telemetry snapshot for every controller."
+
+safety:
+  estop_scope: [mc01]
+  firmware_watchdog_required: true   # MC01 has no L0 watchdog yet —
+                                     # boot warns until the firmware ships
