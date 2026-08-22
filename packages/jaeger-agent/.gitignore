@@ -1,0 +1,70 @@
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Models and weights (never commit — too large)
+*.gguf
+*.bin
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Operator/instance state, if this repo ever runs standalone
+.jaeger_os/
+
+# Agent workspace. jaeger_agent creates <cwd>/.jaeger_agent on first use
+# — deliberately in the project rather than $HOME, so it is inspectable
+# and deletable with the code. That also means running anything from a
+# repo root mints one here: runtime state (memory db, logs, workspace
+# files), never source.
+.jaeger_agent/

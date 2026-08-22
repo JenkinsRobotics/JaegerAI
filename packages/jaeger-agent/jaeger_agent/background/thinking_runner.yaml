@@ -1,0 +1,13 @@
+name: thinking_runner
+version: 1.0.0
+description: >
+  Background chain-of-thought runner. After each user turn, a separate
+  thinking LLM call runs on the same model instance and writes its
+  analysis to thinking.jsonl. Serialized via an LLM lock so the two
+  calls never decode concurrently (llama-cpp-python isn't thread-safe
+  for that). Loaded only when --think is passed.
+author: AgenticLLM
+hooks:
+  - post_turn        # queue a background thinking job after each turn
+data_file: thinking.jsonl
+entry: thinking_runner.py
