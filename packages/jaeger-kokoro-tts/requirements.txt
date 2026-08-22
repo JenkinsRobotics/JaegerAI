@@ -1,0 +1,26 @@
+# JaegerKokoroTTS runtime dependencies.
+#
+# Engine-tier only — pins jaeger-os (framework substrate: transport,
+# nodes.base, core.audio, core.instance.setting_meta) and the Kokoro
+# engine's own third-party libraries. NEVER jaeger-ai — see
+# module.yaml's requires_libraries for the exact probe set the
+# availability gate checks.
+
+# --- framework (git dependency — JaegerOS has no PyPI releases yet).
+# PEP 508 direct reference, not `-e ../JaegerOS` — setuptools' dynamic-
+# dependencies file parser only accepts requirement specifiers, not
+# pip's `-e`/`-r` directives. Pinned to @master for 0.9; switch to a
+# tag pin (e.g. @0.9.0) once JaegerOS cuts a release tag. A dev clone
+# with a sibling ~/GITHUB/JaegerOS checkout gets an editable install
+# instead — see JaegerAI's install.sh sibling-detection step. ---
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
+
+# --- the Kokoro engine itself ---
+kokoro>=0.9.4
+sounddevice>=0.4.6
+numpy>=1.26
+huggingface_hub>=0.24
+
+# --- dev tooling (uncomment if doing JaegerKokoroTTS development) ---
+# pytest>=8.0
+# ruff>=0.4
