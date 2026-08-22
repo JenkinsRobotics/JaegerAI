@@ -18,6 +18,7 @@
 //     orderly-shutdown signal and anything else is a crash.
 //
 
+import Darwin
 import Foundation
 
 /// Ready handshake — the TRANSPORT is up. ``agent`` says whether the model
@@ -108,6 +109,7 @@ actor BridgeProcess {
     static let turnTimeout: Duration = .seconds(7200)  // autonomous batches run long
 
     private var process: Process?
+    private var watchdog: Process?
     private var stdin: FileHandle?
     private var stdout: FileHandle?
     private let framer = FrameStream()
@@ -255,6 +257,9 @@ actor BridgeProcess {
             throw BridgeError.launchFailed(error.localizedDescription)
         }
         self.process = proc
+        self.watchdog = ProcessTree.startParentDeathWatchdog(
+            parent: getpid(), root: proc.processIdentifier
+        )
         self.stdin = inPipe.fileHandleForWriting
         self.stdout = outPipe.fileHandleForReading
 
@@ -308,35 +313,46 @@ actor BridgeProcess {
         replyCont = nil
     }
 
-    /// Immediate stop: quit op + SIGTERM. Use ``quitGracefully()`` for the
-    /// tray-quit path so the core frees the model and exits with ``bye``.
-    func stop() {
+    /// Immediate stop: quit op + reap the whole process tree (bridge and
+    /// any grandchildren such as ARESNativeMCP). Use ``quitGracefully()``
+    /// for the tray-quit path so the core frees the model and exits with
+    /// ``bye`` before the SIGKILL pass.
+    func stop() async {
         write(["op": "quit"])
         stdout?.readabilityHandler = nil
-        process?.terminate()
+        await reapTree(graceSeconds: 2)
         drainAll(reason: "bridge stopped")
-        process = nil
-        stdin = nil
-        stdout = nil
     }
 
     /// Orderly shutdown for Quit-from-tray: send ``quit``, give the core up
     /// to ``grace`` to tear down (model free + bye + clean exit), then
-    /// SIGTERM as the fallback. The windows-close-freely / quit-from-tray
-    /// lifetime means this is the ONE place the core's life ends.
-    func quitGracefully(grace: Duration = .seconds(10)) async {
-        guard let proc = process else { return }
+    /// reap the remaining tree so grandchildren cannot outlive the app.
+    func quitGracefully(grace: Duration = .seconds(8)) async {
+        guard process != nil else { return }
         write(["op": "quit"])
         let deadline = ContinuousClock.now + grace
-        while proc.isRunning && ContinuousClock.now < deadline {
+        while let proc = process, proc.isRunning, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(200))
         }
-        if proc.isRunning { proc.terminate() }
         stdout?.readabilityHandler = nil
+        await reapTree(graceSeconds: 2)
         drainAll(reason: "bridge stopped")
+    }
+
+    /// Snapshot descendants while parent pointers still point at the bridge,
+    /// drop the watchdog so it cannot double-kill, then SIGTERM/SIGKILL
+    /// every pid in that snapshot.
+    private func reapTree(graceSeconds: TimeInterval) async {
+        watchdog?.terminate()
+        watchdog = nil
+        guard let proc = process else { return }
+        let root = proc.processIdentifier
+        var pids = Set(ProcessTree.descendants(of: root))
+        pids.insert(root)
         process = nil
         stdin = nil
         stdout = nil
+        await ProcessTree.terminate(pids: pids, graceSeconds: graceSeconds, rescanRoot: root)
     }
 
     // MARK: - internals
