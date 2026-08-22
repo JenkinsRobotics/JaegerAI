@@ -1,0 +1,52 @@
+schema: jros.skill/v3
+id: computer_use
+version: 1.0.0
+
+origin: human_authored
+package: code_skill
+runtime: in_process
+
+domains: [productivity, sensing]
+
+description: >
+  Universal screenshot-based computer control. Works on any host with
+  a display + mouse. Slow but portable. On macOS, prefer the
+  ``macos_computer`` skill — it uses Accessibility / AppleScript
+  directly and is 10-30× faster.
+
+embodiment:
+  platforms: [macos, linux, windows]
+  bodies: []
+  sensors: []
+  actuators: []
+
+permissions:
+  tier: 2                          # EXTERNAL_EFFECT
+  resource_scopes:
+    - display
+    - subprocess
+    - fs.workspace
+
+# 0.3.0 baseline: one capability covering the screenshot-loop surface.
+# Future revisions can split into per-tool capabilities (screenshot vs
+# click vs type vs menu) with their own scorers.
+capabilities:
+  - id: screen_control
+    signature: "computer_<screenshot|click|type|press|menu>(...) -> {ok, ...}"
+    description: >
+      Take screenshots, find visual targets, and synthesize input
+      events to drive arbitrary GUI applications.  Slow but works
+      anywhere there's a display + mouse.
+    level:
+      current: 2
+      bands: [0.4, 0.6, 0.75, 0.85, 0.92]
+      scorer: tests/smoke_test.py
+
+dependencies:
+  tools: []
+  capabilities: []
+  commands: []
+
+entrypoint:
+  module: computer_use
+  attr: register

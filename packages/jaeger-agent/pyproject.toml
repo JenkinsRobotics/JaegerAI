@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-agent"
+description = "Reusable, headless agent framework for AI applications and robots."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dynamic = ["version"]
+# llama-cpp-python is a BASE dependency, not an extra, because
+# `provider = "llama_cpp"` is the default: a robot that pip-installs
+# this module gets a brain that runs on its own hardware with no
+# server, no account and no network. Matching JaegerAI, which has
+# carried the same hard dependency since before the split — the module
+# should not be less capable out of the box than the app it came from.
+#
+# jinja2 rides along because local chat templates are Jinja.
+dependencies = [
+    "jaeger-os>=0.9.0",
+    "llama-cpp-python>=0.3",
+    "jinja2>=3.1",
+]
+
+# Everything else is a REMOTE or alternative backend, and therefore
+# genuinely optional — you only pay for the wire you use.
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+# The `openai` package is an HTTP client for a WIRE FORMAT, not a cloud
+# account: LM Studio, Ollama, llama.cpp's server and vLLM all speak it.
+openai = ["openai>=1.0"]
+# Kept as a no-op alias so `jaeger-agent[local]` still resolves for
+# anyone who pinned it before llama.cpp became the default.
+local = []
+mlx = ["mlx-lm>=0.21"]
+dev = ["pytest>=8", "pyyaml>=6", "ruff>=0.4"]
+
+[tool.setuptools.dynamic]
+version = {attr = "jaeger_agent.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["jaeger_agent*"]
+
+[tool.setuptools.package-data]
+# "**/*" and not an extension allowlist. setuptools auto-includes only
+# .py for a found package, and this package is 528 non-.py files:
+# module.yaml, the prompt .md files, thinking_runner.yaml, and — the big
+# one — every SKILL.md under skills/, which IS the 107-recipe corpus.
+#
+# The 0.11 move made this load-bearing. While the agent lived inside
+# JaegerAI it rode that project's `jaeger_ai = ["**/*"]`; the moment it
+# became its own distribution, `["module.yaml"]` meant a real
+# (non-editable) install shipped the loop and ZERO skills. Editable
+# installs read straight from the source tree and hide it completely,
+# so this only ever breaks for the people who pip-install a release.
+#
+# An allowlist would also silently miss whatever the next skill adds —
+# these already include .xsd, .sty, .tex, .bst and .sh.
+jaeger_agent = ["**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
