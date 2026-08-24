@@ -1,0 +1,23 @@
+name: JaegerAI CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  agent-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: packages/jaeger-agent/pyproject.toml
+      - run: python -m pip install -e packages/jaeger-agent pytest
+      - name: Run package tests without live attachment
+        env:
+          JAEGER_NO_ATTACH: "1"
+        run: python -m pytest packages/jaeger-agent/tests -q

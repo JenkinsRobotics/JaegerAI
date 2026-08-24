@@ -2,6 +2,14 @@
 
 Handoff for future agents. Resume here; do not restart Phase A.
 
+## 2026-08-24 completion pass
+
+- Durable turns checkpoint every finalized non-read tool transcript entry, including ordinary writes, not only external effects.
+- Intake deterministically links mentions of known person entities; it does not guess new people.
+- `TurnExecutive` records observed tool results and system responses as autobiographical claims, and its evidence-first contradiction gate asks for clarification before model/tool execution.
+- ARES enriches character summaries through Jaeger's detail bridge, projects commitments/runs read-only, exposes wake keys and explicit event delivery, and owns no runtime rows.
+- CI covers the Jaeger agent package and ARES frontend/ownership gates without models or GPU requirements.
+
 ## COMPLETED
 
 ### Phase A — baseline + modular architecture
