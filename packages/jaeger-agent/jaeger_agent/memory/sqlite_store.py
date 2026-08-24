@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DB_FILENAME = "state.db"
 
@@ -315,9 +315,56 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         kind          TEXT NOT NULL DEFAULT 'goal',
         payload_json  TEXT NOT NULL DEFAULT '{}',
         created_at    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL
+        updated_at    TEXT NOT NULL,
+        parent_id     TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_commitments_state ON commitments (state, updated_at)",
+
+    # runs — one attempt at a commitment. Owns the pid claim and the
+    # wake key; see jaeger_agent/cognition/runs.py for the state machine.
+    """CREATE TABLE IF NOT EXISTS runs (
+        id            TEXT PRIMARY KEY,
+        commitment_id TEXT NOT NULL,
+        state         TEXT NOT NULL,
+        attempt       INTEGER NOT NULL DEFAULT 1,
+        owner_pid     INTEGER,
+        heartbeat_at  TEXT,
+        wake_key      TEXT,
+        provider      TEXT,
+        reason        TEXT,
+        payload_json  TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_runs_state ON runs (state, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_commitment ON runs (commitment_id, attempt)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_wake ON runs (wake_key) WHERE wake_key IS NOT NULL",
+
+    # checkpoints — append-only resumption cursors, one row per save.
+    # PK (run_id, seq) makes a duplicate sequence number a constraint
+    # error rather than a silently lost checkpoint.
+    """CREATE TABLE IF NOT EXISTS checkpoints (
+        run_id      TEXT NOT NULL,
+        seq         INTEGER NOT NULL,
+        cursor_json TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (run_id, seq)
+    )""",
+
+    # effects — at-most-once ledger for authoritative side effects.
+    # The PK on key is the claim: a second claim of a live key is a
+    # constraint error, which is how duplicate sends are prevented
+    # even when two processes race.
+    """CREATE TABLE IF NOT EXISTS effects (
+        key          TEXT PRIMARY KEY,
+        action       TEXT NOT NULL,
+        status       TEXT NOT NULL,
+        result_json  TEXT,
+        run_id       TEXT,
+        claimed_at   TEXT NOT NULL,
+        completed_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_effects_status ON effects (status, claimed_at)",
 )
 
 
@@ -440,9 +487,80 @@ def _migrate_commitments(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_runtime(conn: sqlite3.Connection) -> None:
+    """v4 — the durable execution layer: runs, checkpoints, effects.
+
+    A v3 database has commitments (what the SI intends) but no record of
+    the attempts to discharge them, so a crash lost the attempt entirely.
+    This step adds the three tables that survive it, plus ``parent_id``
+    on commitments for goal nesting.
+
+    Additive only: no existing row is read, rewritten or dropped, so the
+    downgrade path is "ignore these tables" rather than a restore.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            id            TEXT PRIMARY KEY,
+            commitment_id TEXT NOT NULL,
+            state         TEXT NOT NULL,
+            attempt       INTEGER NOT NULL DEFAULT 1,
+            owner_pid     INTEGER,
+            heartbeat_at  TEXT,
+            wake_key      TEXT,
+            provider      TEXT,
+            reason        TEXT,
+            payload_json  TEXT NOT NULL DEFAULT '{}',
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS checkpoints (
+            run_id      TEXT NOT NULL,
+            seq         INTEGER NOT NULL,
+            cursor_json TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            PRIMARY KEY (run_id, seq)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS effects (
+            key          TEXT PRIMARY KEY,
+            action       TEXT NOT NULL,
+            status       TEXT NOT NULL,
+            result_json  TEXT,
+            run_id       TEXT,
+            claimed_at   TEXT NOT NULL,
+            completed_at TEXT
+        )
+        """
+    )
+    # ALTER TABLE ADD COLUMN has no IF NOT EXISTS before SQLite 3.35 and
+    # errors on a re-run either way, so the column is probed first. The
+    # commitments table may not exist yet on a database that reached here
+    # without ever opening v3 statements; CREATE ... IF NOT EXISTS above
+    # does not cover it, so guard on presence rather than assuming.
+    has_commitments = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='commitments'"
+    ).fetchone()
+    if has_commitments:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(commitments)").fetchall()
+        }
+        if "parent_id" not in columns:
+            conn.execute("ALTER TABLE commitments ADD COLUMN parent_id TEXT")
+
+
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
     3: ("commitments", _migrate_commitments),
+    4: ("runtime-runs-checkpoints-effects", _migrate_runtime),
 }
 
 
