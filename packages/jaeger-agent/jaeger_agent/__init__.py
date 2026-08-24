@@ -31,6 +31,7 @@ from .messages import (
 from .node import MindNode, make_mind_node
 from .parsing import schema_sanitizer
 from .schemas.message_types import Message, Role, ToolCall
+from .tool_executor import DirectToolExecutor, ToolExecutor
 from .util.retry_utils import jittered_backoff, retry_with_backoff
 from jaeger_os.core.tools.arg_coercion import coerce_args
 from jaeger_os.core.tools.tool_registry import (
@@ -99,6 +100,7 @@ __all__ = [
     "AnthropicAdapter",
     "ChatMessage",
     "ChatReply",
+    "DirectToolExecutor",
     "HermesXMLAdapter",
     "JaegerAgent",
     "KNOWN_FEATURES",
@@ -116,6 +118,7 @@ __all__ = [
     "ToolEvent",
     "ToolCall",
     "ToolDef",
+    "ToolExecutor",
     "TurnResult",
     "clear_registry",
     "coerce_args",
