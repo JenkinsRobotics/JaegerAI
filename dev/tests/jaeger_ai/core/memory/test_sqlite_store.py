@@ -92,6 +92,7 @@ def test_close_clears_state(layout):
 _EXPECTED_TABLES = {
     "facts", "episodic", "episodic_embeddings", "schedules",
     "sessions", "tool_calls", "schema_version",
+    "claims", "evidence", "beliefs", "entities", "relationships",
 }
 
 
