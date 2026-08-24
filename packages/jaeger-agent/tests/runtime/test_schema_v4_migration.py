@@ -83,7 +83,7 @@ def test_fixture_really_is_v3(v3_db):
 def test_open_upgrades_to_v4(v3_db):
     sqlite_store.bind(SimpleNamespace(memory_dir=v3_db))
     sqlite_store.close()
-    assert _version(v3_db) == sqlite_store.SCHEMA_VERSION == 4
+    assert _version(v3_db) == sqlite_store.SCHEMA_VERSION
 
 
 def test_existing_rows_survive_the_upgrade(v3_db):
@@ -136,7 +136,7 @@ def test_upgrade_is_idempotent(v3_db):
     for _ in range(3):
         sqlite_store.bind(SimpleNamespace(memory_dir=v3_db))
         sqlite_store.close()
-    assert _version(v3_db) == 4
+    assert _version(v3_db) == sqlite_store.SCHEMA_VERSION
 
     sqlite_store.bind(SimpleNamespace(memory_dir=v3_db))
     try:

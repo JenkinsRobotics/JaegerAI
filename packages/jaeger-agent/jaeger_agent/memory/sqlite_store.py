@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _DB_FILENAME = "state.db"
 
@@ -365,6 +365,88 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         completed_at TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_effects_status ON effects (status, claimed_at)",
+
+    # ── Cognitive architecture (v5) ──────────────────────────────────
+    # claims — propositions with explicit epistemic provenance
+    """CREATE TABLE IF NOT EXISTS claims (
+        id            TEXT PRIMARY KEY,
+        subject       TEXT NOT NULL,
+        predicate     TEXT NOT NULL,
+        value         TEXT NOT NULL,
+        provenance    TEXT NOT NULL,
+        source_id     TEXT NOT NULL DEFAULT 'user',
+        confidence    REAL NOT NULL DEFAULT 1.0,
+        status        TEXT NOT NULL DEFAULT 'valid',
+        valid_from    TEXT,
+        valid_until   TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_claims_subject_pred ON claims (subject, predicate, status)",
+    "CREATE INDEX IF NOT EXISTS idx_claims_provenance ON claims (provenance)",
+    "CREATE INDEX IF NOT EXISTS idx_claims_created ON claims (created_at)",
+
+    # beliefs before evidence so the belief_id FK has a table to name
+    """CREATE TABLE IF NOT EXISTS beliefs (
+        id                TEXT PRIMARY KEY,
+        subject           TEXT NOT NULL,
+        predicate         TEXT NOT NULL,
+        value             TEXT NOT NULL,
+        confidence        REAL NOT NULL DEFAULT 1.0,
+        status            TEXT NOT NULL DEFAULT 'active',
+        valid_from        TEXT,
+        valid_until       TEXT,
+        superseded_by     TEXT,
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_beliefs_subject_pred ON beliefs (subject, predicate, status)",
+    "CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs (status, updated_at)",
+
+    # evidence — links tying claims/beliefs to turns, tool executions, or documents
+    """CREATE TABLE IF NOT EXISTS evidence (
+        id           TEXT PRIMARY KEY,
+        claim_id     TEXT REFERENCES claims(id) ON DELETE CASCADE,
+        belief_id    TEXT REFERENCES beliefs(id) ON DELETE CASCADE,
+        event_id     TEXT,
+        source_type  TEXT NOT NULL DEFAULT 'turn',
+        snippet      TEXT NOT NULL DEFAULT '',
+        uri          TEXT,
+        created_at   TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_evidence_claim ON evidence (claim_id)",
+    "CREATE INDEX IF NOT EXISTS idx_evidence_belief ON evidence (belief_id)",
+
+    # entities — structured world model actors, tools, workspaces
+    """CREATE TABLE IF NOT EXISTS entities (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL,
+        kind            TEXT NOT NULL DEFAULT 'concept',
+        aliases_json    TEXT NOT NULL DEFAULT '[]',
+        attributes_json TEXT NOT NULL DEFAULT '{}',
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities (name)",
+    "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities (kind)",
+
+    # relationships — typed directed connections between entities
+    """CREATE TABLE IF NOT EXISTS relationships (
+        id             TEXT PRIMARY KEY,
+        source_entity  TEXT NOT NULL,
+        target_entity  TEXT NOT NULL,
+        relation_type  TEXT NOT NULL,
+        confidence     REAL NOT NULL DEFAULT 1.0,
+        valid_from     TEXT,
+        valid_until    TEXT,
+        metadata_json  TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_relationships_st ON relationships (source_entity, target_entity)",
+    "CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships (relation_type)",
 )
 
 
@@ -557,10 +639,143 @@ def _migrate_runtime(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE commitments ADD COLUMN parent_id TEXT")
 
 
+def _migrate_knowledge(conn: sqlite3.Connection) -> None:
+    """v5 — epistemic knowledge: claims, beliefs, evidence, entities, relationships.
+
+    v4 recorded what the SI did. v5 records what it knows, and *how* it
+    knows it. Additive only: no existing row is read, rewritten or dropped.
+    Beliefs are created before evidence so the belief_id FK names a table
+    that already exists.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS claims (
+            id            TEXT PRIMARY KEY,
+            subject       TEXT NOT NULL,
+            predicate     TEXT NOT NULL,
+            value         TEXT NOT NULL,
+            provenance    TEXT NOT NULL,
+            source_id     TEXT NOT NULL DEFAULT 'user',
+            confidence    REAL NOT NULL DEFAULT 1.0,
+            status        TEXT NOT NULL DEFAULT 'valid',
+            valid_from    TEXT,
+            valid_until   TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_subject_pred "
+        "ON claims (subject, predicate, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_provenance ON claims (provenance)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_created ON claims (created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS beliefs (
+            id                TEXT PRIMARY KEY,
+            subject           TEXT NOT NULL,
+            predicate         TEXT NOT NULL,
+            value             TEXT NOT NULL,
+            confidence        REAL NOT NULL DEFAULT 1.0,
+            status            TEXT NOT NULL DEFAULT 'active',
+            valid_from        TEXT,
+            valid_until       TEXT,
+            superseded_by     TEXT,
+            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_beliefs_subject_pred "
+        "ON beliefs (subject, predicate, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_beliefs_status "
+        "ON beliefs (status, updated_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS evidence (
+            id           TEXT PRIMARY KEY,
+            claim_id     TEXT REFERENCES claims(id) ON DELETE CASCADE,
+            belief_id    TEXT REFERENCES beliefs(id) ON DELETE CASCADE,
+            event_id     TEXT,
+            source_type  TEXT NOT NULL DEFAULT 'turn',
+            snippet      TEXT NOT NULL DEFAULT '',
+            uri          TEXT,
+            created_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_claim ON evidence (claim_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_belief ON evidence (belief_id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entities (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            kind            TEXT NOT NULL DEFAULT 'concept',
+            aliases_json    TEXT NOT NULL DEFAULT '[]',
+            attributes_json TEXT NOT NULL DEFAULT '{}',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities (name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities (kind)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS relationships (
+            id             TEXT PRIMARY KEY,
+            source_entity  TEXT NOT NULL,
+            target_entity  TEXT NOT NULL,
+            relation_type  TEXT NOT NULL,
+            confidence     REAL NOT NULL DEFAULT 1.0,
+            valid_from     TEXT,
+            valid_until    TEXT,
+            metadata_json  TEXT NOT NULL DEFAULT '{}',
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationships_st "
+        "ON relationships (source_entity, target_entity)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationships_type "
+        "ON relationships (relation_type)"
+    )
+
+
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
     3: ("commitments", _migrate_commitments),
     4: ("runtime-runs-checkpoints-effects", _migrate_runtime),
+    5: ("cognitive-knowledge-foundation", _migrate_knowledge),
 }
 
 
