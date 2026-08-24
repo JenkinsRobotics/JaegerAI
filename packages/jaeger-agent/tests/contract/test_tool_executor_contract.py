@@ -103,9 +103,65 @@ def test_ledger_executor_runs_authoritative_tools_at_most_once():
         fn=lambda to: calls.append(to) or {"sent": True, "to": to},
         side_effect="external",
     )
-    executor = LedgerToolExecutor(InMemoryEffectLedger())
+    ledger = InMemoryEffectLedger()
+    executor = LedgerToolExecutor(ledger, run_id="run-1")
     first = executor.execute(tool, {"to": "a@b.c"})
-    second = executor.execute(tool, {"to": "a@b.c"})
+    resumed = LedgerToolExecutor(ledger, run_id="run-1")
+    second = resumed.execute(tool, {"to": "a@b.c"})
     assert first == second == {"sent": True, "to": "a@b.c"}
     assert calls == ["a@b.c"]
+
+
+def test_new_run_may_repeat_the_same_external_call():
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent import LedgerToolExecutor
+
+    calls: list[str] = []
+
+    class _ExternalArgs(BaseModel):
+        to: str
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_ExternalArgs,
+        fn=lambda to: calls.append(to) or {"sent": True, "to": to},
+        side_effect="external",
+    )
+    ledger = InMemoryEffectLedger()
+    LedgerToolExecutor(ledger, run_id="run-1").execute(tool, {"to": "a@b.c"})
+    LedgerToolExecutor(ledger, run_id="run-2").execute(tool, {"to": "a@b.c"})
+    assert calls == ["a@b.c", "a@b.c"]
+
+
+def test_validation_failure_does_not_claim_the_ledger():
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent import LedgerToolExecutor
+
+    class _ExternalArgs(BaseModel):
+        to: str = Field(min_length=3)
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_ExternalArgs,
+        fn=lambda to: {"sent": True},
+        side_effect="external",
+    )
+    ledger = InMemoryEffectLedger()
+    executor = LedgerToolExecutor(ledger, run_id="run-1")
+    with pytest.raises(ValidationError):
+        executor.execute(tool, {"to": "ab"})
+    assert ledger.list() == []
+
+
+def test_agent_defaults_to_ledger_executor():
+    adapter = _ScriptedAdapter()
+    adapter.script = [{"role": "assistant", "content": "ok"}]
+    agent = JaegerAgent(adapter=adapter, tools=[])
+    from jaeger_agent.tool_executor import LedgerToolExecutor
+    assert isinstance(agent._tool_executor, LedgerToolExecutor)
+    assert agent.run_turn("hello") == "ok"
+    assert agent.run_id
+
 

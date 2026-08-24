@@ -69,6 +69,14 @@ def test_ledger_executor_routes_external_tools_through_once():
     assert "AUTHORITATIVE_SIDE_EFFECTS" in source
 
 
+def test_agent_loop_defaults_to_ledger_executor():
+    source = (
+        REPO / "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py"
+    ).read_text(encoding="utf-8")
+    assert "_default_tool_executor()" in source
+    assert "LedgerToolExecutor" in source
+
+
 def test_send_email_declares_external_side_effect():
     import jaeger_agent.tools  # noqa: F401
     from jaeger_os.core.tools.tool_registry import get_tool

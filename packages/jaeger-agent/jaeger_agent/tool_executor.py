@@ -34,10 +34,13 @@ class DirectToolExecutor:
 
 
 class LedgerToolExecutor:
-    """Wraps another executor so ``side_effect="external"`` tools go
-    through :meth:`EffectLedger.once`. Default behaviour of the loop is
-    unchanged (it still uses DirectToolExecutor); hosts that want
-    at-most-once sends inject this.
+    """Production executor: ``side_effect="external"`` tools go through
+    :meth:`EffectLedger.once`. Validation happens *before* the claim so
+    a bad argument list does not leave an indeterminate pending row.
+
+    Keys include the bound ``run_id`` so a new run may legitimately
+    repeat the same tool+args (a second user request) while a crash
+    resume of the *same* run cannot.
     """
 
     def __init__(
@@ -51,16 +54,31 @@ class LedgerToolExecutor:
         self._inner = inner or DirectToolExecutor()
         self._run_id = run_id
 
+    def bind_run(self, run_id: str | None) -> None:
+        self._run_id = run_id
+
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         args = dict(arguments)
         if getattr(tool, "side_effect", "") not in AUTHORITATIVE_SIDE_EFFECTS:
             return self._inner.execute(tool, args)
-        key = f"{tool.name}:{json.dumps(args, sort_keys=True, default=str)}"
+        self._validate(tool, args)
+        key = self._effect_key(tool.name, args)
         result, _executed = self._ledger.once(
             key, tool.name, lambda: self._inner.execute(tool, args),
             run_id=self._run_id,
         )
         return result
+
+    def _effect_key(self, tool_name: str, args: dict[str, Any]) -> str:
+        payload = json.dumps(args, sort_keys=True, default=str)
+        prefix = self._run_id or "unbound"
+        return f"{prefix}:{tool_name}:{payload}"
+
+    @staticmethod
+    def _validate(tool: ToolDef, args: dict[str, Any]) -> None:
+        from jaeger_os.core.tools.arg_coercion import coerce_args
+        coerced = coerce_args(args, tool.args_model.model_json_schema())
+        tool.args_model.model_validate(coerced)
 
 
 __all__ = [

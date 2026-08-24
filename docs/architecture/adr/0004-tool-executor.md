@@ -36,10 +36,13 @@ test forbids `JaegerAgent` from calling `.dispatch` directly.
 
 - Sandbox / remote / audited executors are additional adapters, not
   loop forks.
-- `LedgerToolExecutor` wraps `once()` for tools whose `side_effect` is
-  `external` (`send_email`, `send_message`). The loop default remains
-  `DirectToolExecutor` so hosts opt in. Silent retry of an email is
-  still forbidden once a host injects the ledger executor.
+- `LedgerToolExecutor` is the **production default** on `JaegerAgent`.
+  Tools with `side_effect="external"` (`send_email`, `send_message`) go
+  through `EffectLedger.once`. Keys include the bound `run_id` so a new
+  run may repeat the same action while crash-resume of the same run
+  cannot. Argument validation runs before the claim so a bad payload
+  does not leave a pending row. Hosts may still inject a fake or
+  sandboxed executor.
 - Bridge verbs `list_runs`, `list_commitments`, `list_effects`,
   `deliver_event`, `resolve_effect`, and `abandon_effect` expose the
   durable runtime without ARES opening `state.db`.

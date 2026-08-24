@@ -279,9 +279,22 @@ class DefaultAgentRuntime:
         if self._closed:
             return TurnResult(error="runtime is closed")
         try:
-            return TurnResult(text=self.agent_for(session_key).run_turn(text))
+            return TurnResult(text=self._run_bound_turn(session_key, text))
         except Exception as exc:  # noqa: BLE001 — one bad turn must not kill the node
             return TurnResult(error=f"{type(exc).__name__}: {exc}")
+
+    def _run_bound_turn(self, session_key: str, text: str) -> str:
+        agent = self.agent_for(session_key)
+        from jaeger_agent.memory import sqlite_store
+        if not sqlite_store.is_bound():
+            return agent.run_turn(text)
+        from jaeger_agent.cognition.executive import TurnExecutive
+        from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        return TurnExecutive(
+            agent, SqliteRunStore(), SqliteCommitmentStore(),
+            provider=getattr(self.adapter, "name", None),
+        ).run_turn(text)
 
     def steer(self, text: str) -> bool:
         """Mid-turn redirect. Only a session actually running can take one."""

@@ -1,0 +1,115 @@
+"""TurnExecutive binds a durable run around the loop."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+from jaeger_agent import JaegerAgent, Message, ProviderAdapter, ToolDef
+from jaeger_agent.cognition.commitments import InMemoryCommitmentStore
+from jaeger_agent.cognition.effects import EffectIndeterminate, InMemoryEffectLedger
+from jaeger_agent.cognition.executive import TURN_LOOP_KIND, TurnExecutive
+from jaeger_agent.cognition.runs import InMemoryRunStore
+from jaeger_agent.tool_executor import LedgerToolExecutor
+
+
+class _Scripted(ProviderAdapter):
+    name = "scripted"
+
+    def __init__(self, script: list[Message]) -> None:
+        self.script = list(script)
+
+    def format_messages(self, messages, tools, system):
+        return messages
+
+    def call(self, formatted, interrupt_event, **kwargs):
+        return self.script.pop(0)
+
+    def parse_response(self, raw):
+        return raw
+
+    def supports(self, feature: str) -> bool:
+        return False
+
+
+def test_executive_reuses_one_active_run_and_checkpoints():
+    runs = InMemoryRunStore()
+    commitments = InMemoryCommitmentStore()
+    agent = JaegerAgent(
+        adapter=_Scripted([
+            {"role": "assistant", "content": "one"},
+            {"role": "assistant", "content": "two"},
+        ]),
+        tools=[],
+    )
+    execu = TurnExecutive(agent, runs, commitments, provider="scripted")
+    assert execu.run_turn("a") == "one"
+    run_id = agent.run_id
+    assert run_id
+    assert execu.run_turn("b") == "two"
+    assert agent.run_id == run_id
+    run = runs.get(run_id)
+    assert run is not None
+    assert run.state == "active"
+    assert commitments.get(run.commitment_id).kind == TURN_LOOP_KIND
+    assert runs.latest_checkpoint(run_id) is not None
+
+
+def test_crash_after_success_does_not_duplicate_external_effect():
+    class _Args(BaseModel):
+        n: int
+
+    calls: list[int] = []
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_Args,
+        fn=lambda n: calls.append(n) or {"sent": n},
+        side_effect="external",
+    )
+    ledger = InMemoryEffectLedger()
+    first = LedgerToolExecutor(ledger, run_id="r-crash")
+    assert first.execute(tool, {"n": 1}) == {"sent": 1}
+    resumed = LedgerToolExecutor(ledger, run_id="r-crash")
+    assert resumed.execute(tool, {"n": 1}) == {"sent": 1}
+    assert calls == [1]
+
+
+def test_failure_before_claim_is_retryable():
+    class _Args(BaseModel):
+        n: int
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_Args,
+        fn=lambda n: {"sent": n},
+        side_effect="external",
+    )
+    ledger = InMemoryEffectLedger()
+    executor = LedgerToolExecutor(ledger, run_id="r-val")
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        executor.execute(tool, {})
+    assert ledger.list() == []
+    assert executor.execute(tool, {"n": 2}) == {"sent": 2}
+
+
+def test_failure_after_claim_is_indeterminate():
+    class _Args(BaseModel):
+        n: int
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_Args,
+        fn=lambda n: (_ for _ in ()).throw(RuntimeError("lost after claim")),
+        side_effect="external",
+    )
+    ledger = InMemoryEffectLedger()
+    executor = LedgerToolExecutor(ledger, run_id="r-mid")
+    import pytest
+    with pytest.raises(RuntimeError, match="lost after claim"):
+        executor.execute(tool, {"n": 3})
+    with pytest.raises(EffectIndeterminate):
+        executor.execute(tool, {"n": 3})
