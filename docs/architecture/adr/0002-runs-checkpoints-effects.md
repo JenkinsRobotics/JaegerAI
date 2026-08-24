@@ -1,6 +1,6 @@
 # ADR 0002 — Runs, checkpoints and an effect ledger under commitments
 
-Status: proposed (Agent 1 — runtime; Lead ratifies)
+Status: accepted
 Date: 2026-08-23
 Extends: ADR 0001 — ports, not frameworks
 
