@@ -138,7 +138,7 @@ def _send_via_himalaya(to: str, subject: str, body: str, cc: str | None) -> dict
     return {"sent": True, "backend": "himalaya", "to": to, "subject": subject}
 
 
-@register_tool_from_function
+@register_tool_from_function(side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="email",
                operation="send_email",
                summary="send an email")
