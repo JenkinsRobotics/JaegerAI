@@ -79,4 +79,5 @@ Handoff for future agents. Resume here; do not restart Phase A.
 
 ## Tests (last verified)
 
-- Package suite: 576 passed (re-run this slice).
+- Package suite: 576 passed.
+- Combined packages-then-dev: 3814 passed, 11 skipped.
