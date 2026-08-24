@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DB_FILENAME = "state.db"
 
@@ -318,6 +318,89 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         updated_at    TEXT NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_commitments_state ON commitments (state, updated_at)",
+
+    # ── Cognitive Architecture (v4) ──────────────────────────────────
+
+    # claims — propositions with explicit epistemic provenance
+    """CREATE TABLE IF NOT EXISTS claims (
+        id            TEXT PRIMARY KEY,
+        subject       TEXT NOT NULL,
+        predicate     TEXT NOT NULL,
+        value         TEXT NOT NULL,
+        provenance    TEXT NOT NULL,
+        source_id     TEXT NOT NULL DEFAULT 'user',
+        confidence    REAL NOT NULL DEFAULT 1.0,
+        status        TEXT NOT NULL DEFAULT 'valid',
+        valid_from    TEXT,
+        valid_until   TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_claims_subject_pred ON claims (subject, predicate, status)",
+    "CREATE INDEX IF NOT EXISTS idx_claims_provenance ON claims (provenance)",
+    "CREATE INDEX IF NOT EXISTS idx_claims_created ON claims (created_at)",
+
+    # evidence — links tying claims/beliefs to turns, tool executions, or documents
+    """CREATE TABLE IF NOT EXISTS evidence (
+        id           TEXT PRIMARY KEY,
+        claim_id     TEXT REFERENCES claims(id) ON DELETE CASCADE,
+        belief_id    TEXT REFERENCES beliefs(id) ON DELETE CASCADE,
+        event_id     TEXT,
+        source_type  TEXT NOT NULL DEFAULT 'turn',
+        snippet      TEXT NOT NULL DEFAULT '',
+        uri          TEXT,
+        created_at   TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_evidence_claim ON evidence (claim_id)",
+    "CREATE INDEX IF NOT EXISTS idx_evidence_belief ON evidence (belief_id)",
+
+    # beliefs — active synthesized cognitive projections
+    """CREATE TABLE IF NOT EXISTS beliefs (
+        id                TEXT PRIMARY KEY,
+        subject           TEXT NOT NULL,
+        predicate         TEXT NOT NULL,
+        value             TEXT NOT NULL,
+        confidence        REAL NOT NULL DEFAULT 1.0,
+        status            TEXT NOT NULL DEFAULT 'active',
+        valid_from        TEXT,
+        valid_until       TEXT,
+        superseded_by     TEXT,
+        evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_beliefs_subject_pred ON beliefs (subject, predicate, status)",
+    "CREATE INDEX IF NOT EXISTS idx_beliefs_status ON beliefs (status, updated_at)",
+
+    # entities — structured world model actors, tools, workspaces
+    """CREATE TABLE IF NOT EXISTS entities (
+        id              TEXT PRIMARY KEY,
+        name            TEXT NOT NULL,
+        kind            TEXT NOT NULL DEFAULT 'concept',
+        aliases_json    TEXT NOT NULL DEFAULT '[]',
+        attributes_json TEXT NOT NULL DEFAULT '{}',
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities (name)",
+    "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities (kind)",
+
+    # relationships — typed directed connections between entities
+    """CREATE TABLE IF NOT EXISTS relationships (
+        id             TEXT PRIMARY KEY,
+        source_entity  TEXT NOT NULL,
+        target_entity  TEXT NOT NULL,
+        relation_type  TEXT NOT NULL,
+        confidence     REAL NOT NULL DEFAULT 1.0,
+        valid_from     TEXT,
+        valid_until    TEXT,
+        metadata_json  TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_relationships_st ON relationships (source_entity, target_entity)",
+    "CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships (relation_type)",
 )
 
 
@@ -408,18 +491,6 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE _facts_v2 RENAME TO facts")
 
 
-# Ordered migrations, keyed by the version they PRODUCE. A database at
-# version N-1 reaches N by running MIGRATIONS[N] and only then recording N.
-#
-# This replaces a branch that did the opposite: an older database had its
-# version row UPDATEd straight to SCHEMA_VERSION with no transformation run,
-# so a v1 store came out labelled v2 while still holding v1 tables. Every
-# later reader then trusted a version number that described a shape the
-# database did not have — the failure mode a version stamp exists to prevent.
-#
-# The invariant, stated so it survives the next edit: THE RECORDED VERSION
-# MUST NAME THE SCHEMA THAT ACTUALLY RAN. A step with no migration is a hard
-# error, not something to paper over by advancing the number.
 def _migrate_commitments(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -440,9 +511,140 @@ def _migrate_commitments(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_knowledge_v4(conn: sqlite3.Connection) -> None:
+    """Migration v4: Create tables for claims, evidence, beliefs, entities, relationships."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS claims (
+            id            TEXT PRIMARY KEY,
+            subject       TEXT NOT NULL,
+            predicate     TEXT NOT NULL,
+            value         TEXT NOT NULL,
+            provenance    TEXT NOT NULL,
+            source_id     TEXT NOT NULL DEFAULT 'user',
+            confidence    REAL NOT NULL DEFAULT 1.0,
+            status        TEXT NOT NULL DEFAULT 'valid',
+            valid_from    TEXT,
+            valid_until   TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_subject_pred "
+        "ON claims (subject, predicate, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_provenance "
+        "ON claims (provenance)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claims_created "
+        "ON claims (created_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS evidence (
+            id           TEXT PRIMARY KEY,
+            claim_id     TEXT REFERENCES claims(id) ON DELETE CASCADE,
+            belief_id    TEXT REFERENCES beliefs(id) ON DELETE CASCADE,
+            event_id     TEXT,
+            source_type  TEXT NOT NULL DEFAULT 'turn',
+            snippet      TEXT NOT NULL DEFAULT '',
+            uri          TEXT,
+            created_at   TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_claim ON evidence (claim_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_belief ON evidence (belief_id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS beliefs (
+            id                TEXT PRIMARY KEY,
+            subject           TEXT NOT NULL,
+            predicate         TEXT NOT NULL,
+            value             TEXT NOT NULL,
+            confidence        REAL NOT NULL DEFAULT 1.0,
+            status            TEXT NOT NULL DEFAULT 'active',
+            valid_from        TEXT,
+            valid_until       TEXT,
+            superseded_by     TEXT,
+            evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_beliefs_subject_pred "
+        "ON beliefs (subject, predicate, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_beliefs_status "
+        "ON beliefs (status, updated_at)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS entities (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            kind            TEXT NOT NULL DEFAULT 'concept',
+            aliases_json    TEXT NOT NULL DEFAULT '[]',
+            attributes_json TEXT NOT NULL DEFAULT '{}',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities (name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities (kind)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS relationships (
+            id             TEXT PRIMARY KEY,
+            source_entity  TEXT NOT NULL,
+            target_entity  TEXT NOT NULL,
+            relation_type  TEXT NOT NULL,
+            confidence     REAL NOT NULL DEFAULT 1.0,
+            valid_from     TEXT,
+            valid_until    TEXT,
+            metadata_json  TEXT NOT NULL DEFAULT '{}',
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationships_st "
+        "ON relationships (source_entity, target_entity)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_relationships_type "
+        "ON relationships (relation_type)"
+    )
+
+
+# Ordered migrations, keyed by the version they PRODUCE. A database at
+# version N-1 reaches N by running MIGRATIONS[N] and only then recording N.
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
     3: ("commitments", _migrate_commitments),
+    4: ("cognitive-knowledge-foundation", _migrate_knowledge_v4),
 }
 
 
@@ -483,9 +685,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    # The version row lives in a table the schema statements create, so on a
-    # database that predates it we have to make the table before we can ask.
-    # CREATE TABLE IF NOT EXISTS is safe on every path.
     conn.execute(_SCHEMA_STATEMENTS[0])
     row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
     current = int(row["version"]) if row is not None else None
@@ -497,15 +696,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
 
     if current is None:
-        # No version row. Either a brand-new database, or one written before
-        # versioning existed. They are distinguishable: a pre-versioning store
-        # already has a `facts` table, a new one does not.
         legacy = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts'"
         ).fetchone()
         current = 1 if legacy else SCHEMA_VERSION
         if not legacy:
-            # Fresh: build the current shape and record it as such.
             conn.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
             _record_schema_version(conn, SCHEMA_VERSION, now)
             conn.commit()
@@ -523,15 +718,10 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             )
         name, apply = step
         try:
-            # Close an implicit transaction so BEGIN IMMEDIATE is legal on
-            # both production (isolation_level=None) and default-isolation
-            # connections. executescript is not used here: it COMMITs first.
             with contextlib.suppress(sqlite3.Error):
                 conn.execute("COMMIT")
             conn.execute("BEGIN IMMEDIATE")
             apply(conn)
-            # The version is recorded in the SAME transaction as the change
-            # it describes, so the two can never disagree.
             _record_schema_version(conn, version, now)
             conn.execute("COMMIT")
         except Exception as exc:
@@ -543,9 +733,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             ) from exc
         current = version
 
-    # Bring indexes and any newly added tables into being once the shape is
-    # right — v2 indexes reference columns a v1 table lacked, which is why
-    # this runs after the migrations rather than before them.
     conn.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
     _record_schema_version(conn, SCHEMA_VERSION, now)
     conn.commit()
@@ -566,13 +753,7 @@ def connection() -> sqlite3.Connection:
 def writer() -> Iterator[sqlite3.Connection]:
     """Acquire the write lock + a transaction. Used by every
     INSERT / UPDATE / DELETE site. Read-only callers use
-    ``connection()`` directly.
-
-    The lock + BEGIN IMMEDIATE pair ensures:
-      - At most one writer at a time per process.
-      - No reader-starvation (WAL lets readers continue throughout).
-      - Atomic commit on success; ROLLBACK on any exception.
-    """
+    ``connection()`` directly."""
     conn = connection()
     with _write_lock:
         try:
