@@ -104,9 +104,29 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
     return out
 
 
+_registry_snapshot: dict | None = None
+
+
 def pytest_sessionstart(session: "pytest.Session") -> None:  # noqa: ARG001
-    global _live_fingerprint_at_start
+    """Capture live-instance fingerprints AND the full tool registry.
+
+    The registry snapshot must be taken here — after collection has
+    imported tool modules, before any test calls ``clear_registry``.
+    A lazy session fixture that first runs when ``dev/tests`` starts
+    would capture whatever ``packages/jaeger-agent/tests`` left behind
+    (usually empty), then "restore" that emptiness for the rest of
+    the run.
+    """
+    global _live_fingerprint_at_start, _registry_snapshot
     _live_fingerprint_at_start = _fingerprint_live_roots()
+    import jaeger_agent.tools  # noqa: F401 — module-level registrations
+    try:
+        from jaeger_ai.main import _register_builtins
+        _register_builtins(None)
+    except Exception:  # noqa: BLE001 — package-only runs may lack jaeger_ai.main
+        pass
+    from jaeger_os.core.tools.tool_registry import snapshot_registry
+    _registry_snapshot = snapshot_registry()
 
 
 def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  # noqa: ARG001
@@ -227,32 +247,19 @@ def _reset_pipeline_config() -> None:
     _pipeline.pop("config", None)
 
 
-@_pytest.fixture(scope="session")
-def _full_tool_registry_snapshot():
-    """The COMPLETE tool registry, captured once: module-registered tools
-    (registered as an import side-effect in tools/*.py, which CANNOT be
-    re-run after a clear_registry() because the modules are import-cached)
-    PLUS the remaining main.py builtins."""
-    import jaeger_agent.tools  # noqa: F401 — module-level tool registrations
-    from jaeger_os.core.tools import tool_registry as R
-    try:
-        from jaeger_ai.main import _register_builtins
-        _register_builtins(None)   # register-only; client is unused at def time
-    except Exception:  # noqa: BLE001
-        pass
-    return dict(R._registry)
-
-
 @_pytest.fixture(autouse=True)
-def _restore_tool_registry(_full_tool_registry_snapshot):
-    """Restore the full tool registry after every test. Post
-    tool-standardization, most tools register on module import; a test that
-    calls clear_registry() would otherwise strand those module tools for the
-    whole rest of the session (imports are cached, so they can't re-fire)."""
-    from jaeger_os.core.tools import tool_registry as R
+def _restore_tool_registry():
+    """Put the session-start registry back before AND after every test.
+
+    Restoring only after a test left the first ``dev/tests`` case after a
+    ``packages/jaeger-agent/tests`` run looking at an empty map.
+    """
+    from jaeger_os.core.tools.tool_registry import restore_registry
+    if _registry_snapshot is not None:
+        restore_registry(_registry_snapshot)
     yield
-    R._registry.clear()
-    R._registry.update(_full_tool_registry_snapshot)
+    if _registry_snapshot is not None:
+        restore_registry(_registry_snapshot)
 
 
 # ── bridge-attach isolation ────────────────────────────────────────

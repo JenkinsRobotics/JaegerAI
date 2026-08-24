@@ -32,6 +32,19 @@ from jaeger_agent.cognition.runs import (
 from jaeger_agent.memory import sqlite_store
 
 
+def _effect(row: sqlite3.Row) -> Effect:
+    raw = row["result_json"]
+    return Effect(
+        key=str(row["key"]),
+        action=str(row["action"]),
+        status=str(row["status"]),
+        result=json.loads(raw) if raw is not None else None,
+        run_id=row["run_id"],
+        claimed_at=str(row["claimed_at"]),
+        completed_at=row["completed_at"],
+    )
+
+
 def _run(row: sqlite3.Row) -> Run:
     return Run(
         id=str(row["id"]),
@@ -270,44 +283,58 @@ class SqliteEffectLedger:
         row = sqlite_store.connection().execute(
             "SELECT * FROM effects WHERE key = ?", (key,)
         ).fetchone()
-        if row is None:
-            return None
-        raw = row["result_json"]
-        return Effect(
-            key=str(row["key"]),
-            action=str(row["action"]),
-            status=str(row["status"]),
-            result=json.loads(raw) if raw is not None else None,
-            run_id=row["run_id"],
-            claimed_at=str(row["claimed_at"]),
-            completed_at=row["completed_at"],
-        )
+        return _effect(row) if row else None
+
+    def list(self, *, status: str | None = None) -> list[Effect]:
+        clauses, params = [], []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = sqlite_store.connection().execute(
+            f"SELECT * FROM effects{where} ORDER BY claimed_at", params
+        ).fetchall()
+        return [_effect(r) for r in rows]
 
     def resolve(self, key: str, result: Any = None) -> Effect:
-        effect = self.get(key)
-        if effect is None:
-            raise EffectError(f"no effect {key!r}")
-        if effect.status == "done":
-            raise EffectError(f"effect {effect.key!r} is already done")
+        """Settle a pending claim. The UPDATE is conditional on
+        ``status = 'pending'`` so a concurrent abandon cannot race a
+        completed side effect back into the unclaimed pool, and a
+        concurrent resolve cannot overwrite a recorded result."""
         completed_at = _now()
+        encoded = json.dumps(result)
         with sqlite_store.writer() as conn:
-            conn.execute(
+            updated = conn.execute(
                 "UPDATE effects SET status = 'done', result_json = ?, "
-                "completed_at = ? WHERE key = ?",
-                (json.dumps(result), completed_at, key),
-            )
-        effect.status, effect.result = "done", result
-        effect.completed_at = completed_at
-        return effect
+                "completed_at = ? WHERE key = ? AND status = 'pending'",
+                (encoded, completed_at, key),
+            ).rowcount
+            row = conn.execute(
+                "SELECT * FROM effects WHERE key = ?", (key,)
+            ).fetchone()
+        if updated == 1:
+            return _effect(row)
+        if row is None:
+            raise EffectError(f"no effect {key!r}")
+        raise EffectError(f"effect {key!r} is already done")
 
     def abandon(self, key: str) -> None:
-        effect = self.get(key)
-        if effect is None:
-            raise EffectError(f"no effect {key!r}")
-        if effect.status == "done":
-            raise EffectError(f"effect {effect.key!r} is already done")
+        """Free a pending claim. DELETE is conditional on pending so a
+        stale reader that saw pending cannot delete a row another
+        process has already resolved."""
         with sqlite_store.writer() as conn:
-            conn.execute("DELETE FROM effects WHERE key = ?", (key,))
+            deleted = conn.execute(
+                "DELETE FROM effects WHERE key = ? AND status = 'pending'",
+                (key,),
+            ).rowcount
+            if deleted == 1:
+                return
+            row = conn.execute(
+                "SELECT status FROM effects WHERE key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            raise EffectError(f"no effect {key!r}")
+        raise EffectError(f"effect {key!r} is already done")
 
 
 __all__ = ["SqliteEffectLedger", "SqliteRunStore"]

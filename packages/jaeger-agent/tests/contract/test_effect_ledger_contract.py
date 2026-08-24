@@ -136,3 +136,14 @@ def test_resolve_unknown_key_is_an_error(effect_ledger):
 def test_abandon_unknown_key_is_an_error(effect_ledger):
     with pytest.raises(EffectError, match="no effect"):
         effect_ledger.abandon("never:claimed")
+
+
+def test_list_filters_pending_and_done(effect_ledger):
+    with pytest.raises(ZeroDivisionError):
+        effect_ledger.once("invoice:pending", "send_email", lambda: 1 / 0)
+    effect_ledger.once("invoice:done", "send_email", lambda: "sent")
+
+    pending = effect_ledger.list(status="pending")
+    done = effect_ledger.list(status="done")
+    assert [item.key for item in pending] == ["invoice:pending"]
+    assert [item.key for item in done] == ["invoice:done"]
