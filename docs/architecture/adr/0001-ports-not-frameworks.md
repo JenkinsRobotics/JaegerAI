@@ -11,6 +11,7 @@ JaegerAI already has the swap points the platform needs:
 - `MemoryStore` protocol (persistence)
 - `KnowledgeStore` protocol (epistemic claims / beliefs — ADR 0003)
 - `CommitmentStore` protocol (durable intentions)
+- `ToolExecutor` protocol (how a declared tool is run — ADR 0004)
 - NDJSON AF_UNIX bridge (client boundary)
 
 New work implements **contract tests** against those ports and a
