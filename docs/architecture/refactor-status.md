@@ -34,13 +34,15 @@
 
 - Agents 1–6 landed. Combined JaegerAI suite green in the polluted
   order that previously failed.
-- Bind runs/commitments remain bridge-readable; ARES projects them.
+- `LedgerToolExecutor` is the production default; `run_id` is bound on
+  every turn. `TurnExecutive` persists the run when `state.db` is bound.
+- Canonical progress: `docs/architecture/master-build-status.md`.
 
 ## NEXT
 
+- Checkpoint after each external tool, not only after the turn.
+- Wire claims/beliefs into a turn (KnowledgeStore exists).
 - GitHub Actions has not run against this tree.
-- Optional: inject `LedgerToolExecutor` as the production default once
-  a run id is always available on the loop.
 
 ## DEPRECATED
 

@@ -35,7 +35,7 @@ from jaeger_agent.loop.loop_backstop import (
     semantic_failure_signature,
 )
 from jaeger_agent.schemas.message_types import Message, ToolCall
-from jaeger_agent.tool_executor import DirectToolExecutor, ToolExecutor
+from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
 from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
@@ -48,6 +48,36 @@ from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
 # here so the answer reads as a natural sentence.
 SkipFinalFinalizer = Callable[[str, "object", str], str]
 ToolsetResolver = Callable[[set[str]], set[str]]
+
+
+def _default_tool_executor() -> ToolExecutor:
+    """Ledger-backed executor is the production composition.
+
+    SQLite when the instance store is bound; an in-memory ledger
+    otherwise so tests and embedders still get at-most-once within
+    the process without requiring a database.
+    """
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent.memory import sqlite_store
+    from jaeger_agent.tool_executor import DirectToolExecutor, LedgerToolExecutor
+
+    if sqlite_store.is_bound():
+        from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+        ledger: Any = SqliteEffectLedger()
+    else:
+        ledger = InMemoryEffectLedger()
+    return LedgerToolExecutor(ledger, DirectToolExecutor())
+
+
+def _open_or_create_run(agent: "JaegerAgent") -> str:
+    """Ephemeral run id for this agent instance.
+
+    Persistence is ``TurnExecutive``'s job: the loop must not import
+    SQLite. A host that binds a run before ``run_turn`` keeps that id
+    across turns, retries and provider swaps.
+    """
+    from jaeger_agent.cognition.runs import new_id
+    return new_id()
 ToolVisibility = Callable[[str], bool]
 TurnStartHook = Callable[[], None]
 
@@ -196,7 +226,8 @@ class JaegerAgent:
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
         self.max_iterations = int(max_iterations)
         self.callbacks = callbacks or AgentCallbacks()
-        self._tool_executor: ToolExecutor = tool_executor or DirectToolExecutor()
+        self._run_id: str | None = None
+        self._tool_executor: ToolExecutor = tool_executor or _default_tool_executor()
 
         # Skip-final: tools whose dict result IS the answer (``get_time``,
         # ``recall``, ``calculate``, …). When the turn's first model
@@ -320,6 +351,25 @@ class JaegerAgent:
 
     # ── public surface ──────────────────────────────────────────────
 
+    @property
+    def run_id(self) -> str | None:
+        """Durable id of the run this agent is currently discharging."""
+        return self._run_id
+
+    def bind_run(self, run_id: str | None) -> None:
+        """Attach this agent to an existing run (resume / host-owned)."""
+        self._run_id = run_id
+        binder = getattr(self._tool_executor, "bind_run", None)
+        if callable(binder):
+            binder(run_id)
+
+    def _bind_turn_run(self) -> None:
+        if self._run_id is None:
+            self._run_id = _open_or_create_run(self)
+        binder = getattr(self._tool_executor, "bind_run", None)
+        if callable(binder):
+            binder(self._run_id)
+
     def run_turn(self, user_message: str) -> str:
         """Run one conversational turn end-to-end.
 
@@ -382,6 +432,7 @@ class JaegerAgent:
         # without rebuilding the agent. No-op for explicit ``tools=``
         # agents.
         self._refresh_tool_catalog()
+        self._bind_turn_run()
 
         # Per-turn dedupe trackers in tool modules (file_read's
         # "unchanged since last read" suppression in particular). The
@@ -1568,6 +1619,13 @@ class JaegerAgent:
                         exc, "required_tier", None,
                     )
             except Exception:  # noqa: BLE001 — never break the loop over typing
+                pass
+            try:
+                from jaeger_agent.cognition.effects import EffectIndeterminate
+                if isinstance(exc, EffectIndeterminate):
+                    err_type = "effect_indeterminate"
+                    retryable = False
+            except Exception:  # noqa: BLE001
                 pass
             # Hardline guard refusals (run_shell catastrophic-command
             # blocklist) come back as a typed dict, not an exception;
