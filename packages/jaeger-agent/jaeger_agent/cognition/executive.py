@@ -11,6 +11,7 @@ import os
 from typing import Any, Protocol, runtime_checkable
 
 from jaeger_agent.cognition.commitments import CommitmentStore
+from jaeger_agent.cognition.intake import ClaimWriter, record_told
 from jaeger_agent.cognition.runs import Run, RunStore
 
 
@@ -41,10 +42,12 @@ class TurnExecutive:
         commitments: CommitmentStore,
         *,
         provider: str | None = None,
+        claims: ClaimWriter | None = None,
     ) -> None:
         self.agent = agent
         self.runs = runs
         self.commitments = commitments
+        self.claims = claims
         self.provider = provider or getattr(agent.primary_adapter, "name", None)
 
     def ensure_run(self) -> Run:
@@ -77,6 +80,8 @@ class TurnExecutive:
 
     def run_turn(self, text: str) -> str:
         run = self.ensure_run()
+        if self.claims is not None:
+            record_told(self.claims, text, source_id=run.id)
         try:
             result = self.agent.run_turn(text)
         except Exception:

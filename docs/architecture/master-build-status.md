@@ -21,12 +21,18 @@ Handoff for future agents. Resume here; do not restart Phase A.
 - `TurnExecutive` binds a `turn-loop` commitment + active run, heartbeats,
   checkpoints halt/iteration cursor. The model does not decide those.
 
+### Phase C (slice) — told-claim intake
+- User turn text is recorded as `ProvenanceKind.TOLD` when a claim store
+  is bound. Not last-write-wins facts. DefaultAgentRuntime uses
+  `SqliteKnowledgeStore` when `state.db` is bound.
+
 ## IN_PROGRESS
 
 - Phase B remainder: wait/blocked product surface on ARES beyond Goals effects;
   resume-after-process-death of a mid-turn loop (checkpoint is written after
   the turn, not after each tool).
-- Phase C: wire claims/beliefs into a turn (KnowledgeStore exists, unused by loop).
+- Phase C remainder: belief revision from claims; entity extraction;
+  claims are recorded, not yet reconciled into beliefs.
 
 ## NEXT
 
