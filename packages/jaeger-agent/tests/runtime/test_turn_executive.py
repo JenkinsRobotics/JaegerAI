@@ -10,7 +10,7 @@ from jaeger_agent.cognition.effects import EffectIndeterminate, InMemoryEffectLe
 from jaeger_agent.cognition.executive import TURN_LOOP_KIND, TurnExecutive
 from jaeger_agent.cognition.intake import record_told
 from jaeger_agent.memory.in_memory_knowledge import InMemoryKnowledgeStore
-from jaeger_agent.memory.models import ProvenanceKind
+from jaeger_agent.memory.models import Entity, ProvenanceKind
 from jaeger_agent.cognition.runs import InMemoryRunStore
 from jaeger_agent.tool_executor import LedgerToolExecutor
 
@@ -110,6 +110,49 @@ def test_external_tool_writes_a_checkpoint():
     point = runs.latest_checkpoint(agent.run_id)
     assert point is not None
     assert point.cursor.get("tool") == "send_email" or "halt" in point.cursor
+
+
+def test_write_tool_checkpoints_finalized_transcript_and_observation():
+    class _Args(BaseModel):
+        path: str
+    tool = ToolDef(name="write_note", description="Write", args_model=_Args,
+                   fn=lambda path: {"ok": True, "path": path}, side_effect="write")
+    agent = JaegerAgent(adapter=_Scripted([
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "w1", "name": "write_note", "arguments": {"path": "a.md"}}]},
+        {"role": "assistant", "content": "done"},
+    ]), tools=[tool])
+    runs = InMemoryRunStore()
+    cursors = []
+    checkpoint = runs.checkpoint
+    runs.checkpoint = lambda run_id, cursor: (cursors.append(cursor), checkpoint(run_id, cursor))[1]
+    store = InMemoryKnowledgeStore()
+    execu = TurnExecutive(agent, runs, InMemoryCommitmentStore(), claims=store)
+    execu.run_turn("write it")
+    tool_point = next(cursor for cursor in cursors if cursor.get("event") == "tool_result")
+    assert tool_point["message"]["tool_call_id"] == "w1"
+    assert store.list_claims(subject="agent", predicate="tool_result")[0].provenance == ProvenanceKind.OBSERVED
+
+
+def test_known_person_mention_is_linked_without_guessing_new_entities():
+    store = InMemoryKnowledgeStore()
+    person = store.save_entity(Entity.create("Ada Lovelace", kind="person", aliases=["Ada"]))
+    record_told(store, "I met Ada about the compiler", source_id="turn-1")
+    links = store.list_claims(predicate="mentioned_person")
+    assert links[0].value == person.id
+    assert store.find_entity("Ada").attributes["last_mentioned_source"] == "turn-1"
+    record_told(store, "I met Grace about the compiler", source_id="turn-2")
+    assert store.find_entity("Grace") is None
+
+
+def test_contradicted_belief_requests_evidence_before_calling_model():
+    store = InMemoryKnowledgeStore()
+    adapter = _Scripted([{"role": "assistant", "content": "should not run"}])
+    agent = JaegerAgent(adapter=adapter, tools=[])
+    execu = TurnExecutive(agent, InMemoryRunStore(), InMemoryCommitmentStore(), claims=store)
+    assert execu.run_turn("my editor is vim") == "should not run"
+    answer = execu.run_turn("my editor is neovim")
+    assert "conflicting information" in answer
+    assert len(adapter.script) == 0
 
 
 def test_record_told_skips_blank():
