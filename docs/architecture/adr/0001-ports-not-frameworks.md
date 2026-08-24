@@ -9,6 +9,7 @@ JaegerAI already has the swap points the platform needs:
 
 - `ProviderAdapter` (model backends)
 - `MemoryStore` protocol (persistence)
+- `KnowledgeStore` protocol (epistemic claims / beliefs — ADR 0003)
 - `CommitmentStore` protocol (durable intentions)
 - NDJSON AF_UNIX bridge (client boundary)
 

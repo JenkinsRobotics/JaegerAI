@@ -17,25 +17,31 @@
   `commitments.parent_id`). Package suite **522 passed**. ADR 0002 accepted.
 - Orphaned runs go to `blocked`; crashed effects stay `pending` and
   raise `EffectIndeterminate` rather than retry.
+- **Agent 2 merged as schema v5** (Lead rebase of `agent2/memory-wip`):
+  `KnowledgeStore` port, provenance models, SQLite + in-memory adapters,
+  `KnowledgeRetriever`. v4 remains runtime; knowledge did not retake it.
+  Package suite **544 passed**. ADR 0003 accepted.
+- **Agent 3 merged** (`8d32aab81` on ARES `main`): onboarding is six
+  implemented steps; Back from runtime returns to privacy; ARES is
+  experience/governance, JaegerAI is the runtime. Frontend 61 passed.
 
 ## CURRENT
 
-- Waiting on Agent 2 (memory) and Agent 3 (ARES UI) to finish.
-- Agent 2 WIP parked on `agent2/memory-wip` — it had claimed schema v4
-  for knowledge. **v4 is runtime. Knowledge is v5.**
+- Agents 1–3 landed. Agents 4–6 may be assigned.
 - Bind runs/commitments to a bridge verb and ARES projection (Lead +
   Agents 3/4). No product surface in Agent 1, by design.
 
 ## NEXT
 
-- Agent 2: rebase knowledge onto schema **v5**; do not retake v4.
 - Agent 4: fitness test that side-effecting tools use `EffectLedger.once`;
   bridge read verb for runs/commitments; `deliver_event(wake_key)`.
-- Agent 3: `EffectIndeterminate` needs a human resolve/abandon surface.
-- Agent 5: global tool-registry order dependence (33 failures when
+- Agent 3: `EffectIndeterminate` needs a human resolve/abandon surface;
+  remaining onboarding copy still says “Companion” in a few headings.
+- Agent 5: global tool-registry order dependence (32 failures when
   `packages/jaeger-agent/tests` runs before `dev/tests`);
   `test_bench_history_verb.py::test_since_filter_excludes_old_runs`.
-- Scheduler port wrapping Jaeger schedules + ARES projection.
+- Agent 6: scheduler port wrapping Jaeger schedules + ARES projection.
+  Do not start until 4–5 scopes are written.
 
 ## DEPRECATED
 
