@@ -13,42 +13,34 @@
   provider SDKs.
 - ADR 0001: ports, not frameworks.
 - **Agent 1 merged** (`b7f4f11`): `RunStore`, `EffectLedger`, shared
-  `lifecycle.py`, schema **v4** (runs / checkpoints / effects /
-  `commitments.parent_id`). Package suite **522 passed**. ADR 0002 accepted.
-- Orphaned runs go to `blocked`; crashed effects stay `pending` and
-  raise `EffectIndeterminate` rather than retry.
-- **Agent 2 merged as schema v5** (Lead rebase of `agent2/memory-wip`):
-  `KnowledgeStore` port, provenance models, SQLite + in-memory adapters,
-  `KnowledgeRetriever`. v4 remains runtime; knowledge did not retake it.
-  Package suite **544 passed**. ADR 0003 accepted.
-- **Agent 3 merged** (`8d32aab81` on ARES `main`): onboarding is six
-  implemented steps; Back from runtime returns to privacy; ARES is
-  experience/governance, JaegerAI is the runtime. Frontend 61 passed.
-- **Agent 4 first slice merged** (`cf331e4`): `ToolExecutor` port +
-  `DirectToolExecutor`; loop injects the executor; default behaviour
-  unchanged. Package suite **546 passed**. ADR 0004 accepted.
+  `lifecycle.py`, schema **v4**. ADR 0002 accepted.
+- **Agent 2 merged as schema v5** (`e40a949`): `KnowledgeStore`. ADR 0003.
+- **Agent 3 merged** (`8d32aab81` on ARES `main`): six-step onboarding.
+- **Agent 4** (`cf331e4` + remaining slice): `ToolExecutor`,
+  `LedgerToolExecutor` for `side_effect="external"`, bridge verbs
+  `list_runs` / `list_commitments` / `list_effects` / `deliver_event` /
+  `resolve_effect` / `abandon_effect`. ADR 0004.
+- **Agent 5**: tool-registry isolation (session-start snapshot, restore
+  before and after every test). Combined `packages/jaeger-agent/tests`
+  then `dev/tests`: **3792 passed**, 11 skipped, 0 registry-order
+  failures (was 32). Effect settle is CAS on `pending` so a stale
+  abandon cannot delete a completed claim.
+- **Agent 6**: `ScheduleStore` port + in-memory and SQLite adapters.
+  ADR 0005.
+- ARES Goals page: resolve/abandon for indeterminate effects (Jaeger-
+  owned rows). Onboarding copy no longer calls ARES a Companion SI.
 
 ## CURRENT
 
-- Agents 1–3 landed. Agent 4 replaceability slice landed; assigned
-  runtime/bridge work is still open.
-- Bind runs/commitments to a bridge verb and ARES projection (Lead +
-  Agents 3/4). No product surface in Agent 1, by design.
-- Agent 5 has an unmerged red-team commit (`6f8069a`, effect settlement
-  race) — review separately; do not treat as complete.
+- Agents 1–6 landed. Combined JaegerAI suite green in the polluted
+  order that previously failed.
+- Bind runs/commitments remain bridge-readable; ARES projects them.
 
 ## NEXT
 
-- Agent 4 remaining: fitness test that side-effecting tools use
-  `EffectLedger.once`; bridge read verb for runs/commitments;
-  `deliver_event(wake_key)`.
-- Agent 3: `EffectIndeterminate` needs a human resolve/abandon surface;
-  remaining onboarding copy still says “Companion” in a few headings.
-- Agent 5: global tool-registry order dependence (32 failures when
-  `packages/jaeger-agent/tests` runs before `dev/tests`);
-  `test_bench_history_verb.py::test_since_filter_excludes_old_runs`;
-  review `6f8069a`.
-- Agent 6: scheduler port wrapping Jaeger schedules + ARES projection.
+- GitHub Actions has not run against this tree.
+- Optional: inject `LedgerToolExecutor` as the production default once
+  a run id is always available on the loop.
 
 ## DEPRECATED
 
