@@ -191,18 +191,22 @@ _DELTA_MIN_CHARS = 32
 _DELTA_MAX_INTERVAL_S = 0.08
 
 
+# ``delta_frame`` moved into ``jaeger_os.contract.protocol`` beside its
+# siblings during the monorepo absorption, exactly as the note that used to
+# live here asked for once JaegerOS stopped being a tag-pinned dependency.
+# These thin wrappers keep the private names working for callers in this
+# module. ``protocol`` is imported lazily throughout this file (module-level
+# import would drag JaegerOS in at bridge-import time), so they defer too.
 def _delta_frame(text: str, session: str = "") -> dict[str, Any]:
-    """One incremental text frame.
+    from jaeger_os.contract import protocol
 
-    Lives here rather than in ``jaeger_os.contract.protocol`` beside its
-    siblings only because that package is pinned by tag; move it there at
-    the next JaegerOS bump and import it like the others. The shape is
-    the protocol's: a ``type`` and the payload.
-    """
-    frame: dict[str, Any] = {"type": "delta", "text": text}
-    if session:
-        frame["session"] = session
-    return frame
+    return protocol.delta_frame(text, session)
+
+
+def _reasoning_frame(text: str, session: str = "") -> dict[str, Any]:
+    from jaeger_os.contract import protocol
+
+    return protocol.reasoning_frame(text, session)
 
 
 class _DeltaStream:
@@ -1102,6 +1106,15 @@ class _Ctx:
         self.busy = False
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
+        # ── one instance → at most one authoritative bridge ───────────
+        # Set when this process has established it is NOT the instance's
+        # runtime owner (it lost the flock). Such a bridge has no agent and
+        # never will: it must neither linger (~75 MB each; 12 orphans were
+        # found resident) nor own the attach socket. ``inbound`` is parked
+        # here so the boot thread — which discovers the loss — can push the
+        # shutdown sentinel into the main loop it does not otherwise see.
+        self.exit_requested = threading.Event()
+        self.inbound: Any = None
         # Pending permission requests: id → (event, answer-slot). An answer
         # that arrives before the request is registered (pipelined client,
         # tests) parks in ``early`` and resolves on registration.
@@ -1138,7 +1151,21 @@ def _turn_workspace(ctx: _Ctx, requested: Any):
     with ctx.workspace_lock:
         config = _pipeline.get("config")
         configured = getattr(getattr(config, "workspace", None), "location", None)
-        jaeger_tools.bind(ctx.layout, workspace_override=candidate or configured)
+        # TWO bindings, deliberately:
+        #
+        #   workspace_override — where ``workspace/...`` writes are filed.
+        #   project_root       — the directory the agent is working IN.
+        #
+        # Only the first existed before, so an ARES workspace switch moved a
+        # value no tool consumed: run_shell still ran in a tempdir, relative
+        # reads still resolved against the launch directory, and a default
+        # search still scanned the instance's skills dir. Binding the project
+        # root is what makes the selector mean something.
+        jaeger_tools.bind(
+            ctx.layout,
+            workspace_override=candidate or configured,
+            project_root=candidate,
+        )
         try:
             yield
         finally:
@@ -1218,6 +1245,24 @@ class BridgeConfirmationProvider:
         return answer in ("once", "allow", "yes", "y", "true", "1", "approve")
 
 
+def _request_exit(ctx: _Ctx) -> None:
+    """Ask the main loop to shut down, from a thread that cannot reach it.
+
+    The boot thread starts before ``inbound`` exists, so it may discover the
+    lock loss either side of that. Setting the event covers the early case
+    (``main`` re-checks it as soon as the queue exists) and pushing the
+    sentinel covers the late one. Both are idempotent — the loop stops at the
+    first ``None`` and ignores the rest.
+    """
+    ctx.exit_requested.set()
+    queue = ctx.inbound
+    if queue is not None:
+        try:
+            queue.put(None)
+        except Exception:  # noqa: BLE001 — teardown must never raise
+            pass
+
+
 def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     """Background boot: load the model, wire tool/permission forwarding,
     then stream the ``agent_state`` transition. Never raises."""
@@ -1239,10 +1284,29 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         _emit(proto, protocol.agent_state_frame("failed", error=msg))
         _emit(proto, protocol.fatal_frame(msg, kind=kind))
         ctx.booted.set()
+        if kind == "locked":
+            # We lost the instance flock, so another process IS this
+            # instance's runtime. This one has no agent and never will.
+            #
+            # It used to stay resident anyway — the transport kept serving,
+            # so it sat at ~75 MB advertising an agent it did not have, and
+            # (worse) it had already replaced the OWNER's attach socket,
+            # since ``bsock.bind`` unlinks whatever file is in its way. Every
+            # client that attached after that reached this brain-less process,
+            # gave up, and spawned another bridge — which lost the lock and
+            # hijacked the socket in turn. That is the spawn burst and the
+            # orphan pile in one mechanism.
+            #
+            # Losing the lock is now terminal: emit the fatal frame (the
+            # client needs it to go attach to the real owner) and leave.
+            _request_exit(ctx)
         return
 
     ctx.boot = boot
     ctx.client = boot.client
+    if os.environ.get("JAEGER_TEST_LOCK_ONLY") == "1":
+        ctx.booted.set()
+        return
 
     # First boot on this machine: trigger every TCC prompt now (macOS
     # can't grant in install.sh — grants attach to THIS app identity),
@@ -1725,7 +1789,11 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             pass
         _emit_state(out, ctx, True, session)
         try:
-            from jaeger_ai.main import run_for_voice, stream_delta_sink
+            from jaeger_ai.main import (
+                run_for_voice,
+                stream_delta_sink,
+                stream_reasoning_sink,
+            )
             from jaeger_ai.core.runtime import continuation, execution
             from jaeger_ai.core.runtime.autonomous_runner import ledger_open, next_continuation_prompt
 
@@ -1742,7 +1810,15 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     voice_kwargs: dict[str, Any] = {"session_key": session}
                     if display_text is not None:
                         voice_kwargs["display_text"] = str(display_text)
-                    with stream_delta_sink(deltas.feed):
+                    def _emit_reasoning(chunk: str, _session: str = session) -> None:
+                        # Deliberation is emitted as its own frame, not folded
+                        # into the delta stream: it is NOT part of the answer,
+                        # and a client appending it to the visible text would
+                        # render the model's internal monologue as the reply.
+                        deltas.flush()
+                        _emit(out, _reasoning_frame(chunk, _session))
+
+                    with stream_delta_sink(deltas.feed), stream_reasoning_sink(_emit_reasoning):
                         result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
                 deltas.flush()
 
@@ -1840,6 +1916,24 @@ def _start_bridge_socket(
     path = bsock.socket_path(ctx.layout)
     if path is None:
         return
+    # NEVER take an attach point that is already being served. ``bsock.bind``
+    # unlinks whatever file is in its way — which is right for a STALE socket
+    # left by a crash, and catastrophic for a LIVE one: it silently moves
+    # every future client off the instance's real runtime and onto this
+    # process. Probing first is what separates the two cases, and it is the
+    # only thing that distinguishes "recovering from a crash" from "hijacking
+    # a healthy owner". A losing process exits via the lock check in
+    # ``_boot_agent``; it must not damage the winner on its way out.
+    # Reached only after this process holds the instance flock, so any file at
+    # this path belongs to a dead or dying predecessor. ``bind`` unlinks it,
+    # which is what makes crash recovery work; the ownership question is
+    # settled by the lock, not by whether the old file still answers.
+    live = bsock.try_connect(path, timeout_s=0.4)
+    if live is not None:
+        bsock.close_quietly(live)
+        print(f"[bridge] reclaiming attach socket {path} from a previous "
+              "holder — this process owns the instance lock.",
+              file=sys.stderr, flush=True)
     sock = bsock.bind(path)
     ctx.bridge_sock = sock
     print(f"[bridge] attach socket {path}", file=sys.stderr, flush=True)
@@ -2022,6 +2116,13 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
 
     owner_out = proto
     inbound: _queue.Queue[tuple[dict[str, Any], Any] | None] = _queue.Queue()
+    # Publish the queue so the boot thread can stop us (see ``_request_exit``),
+    # then immediately honour a shutdown it may already have requested — the
+    # boot thread starts earlier than this line and can lose the lock before
+    # there is a queue to push a sentinel into.
+    ctx.inbound = inbound
+    if ctx.exit_requested.is_set():
+        inbound.put(None)
 
     def _read_stdio() -> None:
         try:
@@ -2039,10 +2140,33 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             inbound.put(None)
 
     threading.Thread(target=_read_stdio, name="bridge-stdio", daemon=True).start()
-    try:
-        _start_bridge_socket(ctx, inbound, owner_out)
-    except Exception as exc:  # noqa: BLE001 — stdio still works alone
-        print(f"[bridge] attach socket skipped: {exc}", file=sys.stderr, flush=True)
+    # Publish the attach point only once THIS process is established as the
+    # instance's runtime — i.e. after boot has taken the flock.
+    #
+    # Binding eagerly (before boot) was wrong in both directions. A process
+    # that went on to lose the lock had already taken the socket, so clients
+    # attached to a bridge with no agent; and a process that DID own the lock
+    # would decline to bind if any stale holder still had the path, which is
+    # the state found on this machine: an old bridge holding the socket file
+    # open while no longer accepting, and the real lock owner sitting there
+    # with no attach point at all. "Something is listening" was never the
+    # right question — "do we own this instance" is, and the flock already
+    # answers it exactly once.
+    #
+    # Losing the lock is terminal (see ``_boot_agent``), so a process that
+    # reaches here booted is by construction the owner and may reclaim the
+    # path from a zombie holder.
+    def _publish_attach_socket() -> None:
+        ctx.booted.wait()
+        if ctx.exit_requested.is_set() or ctx.client is None:
+            return                      # no agent to attach to; stay unpublished
+        try:
+            _start_bridge_socket(ctx, inbound, owner_out)
+        except Exception as exc:  # noqa: BLE001 — stdio still works alone
+            print(f"[bridge] attach socket skipped: {exc}", file=sys.stderr, flush=True)
+
+    threading.Thread(target=_publish_attach_socket,
+                     name="bridge-attach-publish", daemon=True).start()
 
     rc = 0
     try:

@@ -37,6 +37,24 @@ def test_explicit_root_wins(tmp_path) -> None:
     assert ws.root == (tmp_path / "elsewhere").resolve()
 
 
+def test_bare_write_of_an_existing_workspace_file_stays_in_workspace(tmp_path) -> None:
+    """Option A: if the file is already in workspace/, a bare name
+    round-trips there. New bare names still land in skills/."""
+    layout = workspace.DefaultWorkspace(tmp_path / "inst").create()
+    existing = layout.workspace_dir / "item_00.txt"
+    existing.write_text("seed\n")
+    workspace.bind(layout)
+    try:
+        hit = workspace._resolve_write("item_00.txt")
+        assert hit == existing.resolve()
+        fresh = workspace._resolve_write("brand_new.py")
+        assert fresh.is_relative_to(layout.skills_dir)
+        prefixed = workspace._resolve_write("workspace/report.md")
+        assert prefixed.is_relative_to(layout.workspace_dir)
+    finally:
+        workspace._layout = None
+
+
 def test_ensure_bound_does_not_steal_a_hosts_layout(tmp_path, monkeypatch) -> None:
     """An app that bound its own instance keeps it."""
     monkeypatch.chdir(tmp_path)

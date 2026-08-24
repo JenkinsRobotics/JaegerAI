@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.core.runtime import attach_policy
 from jaeger_ai.core.runtime import bridge_socket as bsock
 from jaeger_os.contract import protocol
 
@@ -134,7 +135,19 @@ class _AttachedBoot:
 
 
 def try_attach_runtime(*, instance_name: str | None = None) -> AttachedBridgeRuntime | None:
-    """Connect to a live instance socket, or return None if nobody is listening."""
+    """Connect to a live instance socket, or return None if nobody is listening.
+
+    THE choke point for attaching. Every attach — ``create_runtime``, the
+    windowed app, anything added later — arrives here, which is why the
+    isolation policy is enforced here and not at the callers: a new caller
+    cannot reopen the hole by forgetting to ask. See
+    :mod:`jaeger_ai.core.runtime.attach_policy`.
+    """
+    if attach_policy.attach_disabled():
+        # Deliberately quiet on the common path: the test suite sets this for
+        # every test, and one line per construction would bury real output.
+        return None
+
     from jaeger_ai.core.instance.instance import (
         InstanceLayout,
         default_instance_name,

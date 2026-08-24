@@ -311,6 +311,32 @@ def test_repair_arguments_returns_unrecovered_on_total_garbage():
     assert isinstance(ok, bool)
 
 
+def test_repair_arguments_truncated_json_is_not_recovered():
+    """F1: closing a cut-off blob can produce a dict that LOOKS valid
+    (path + content present) while the content was sliced mid-string.
+    ``recovered`` must be False so the structured path stashes
+    ``_raw_arguments`` instead of dispatching the truncated write."""
+    raw = '{"path": "notes.md", "content": "hello'
+    args, ok = repair_arguments(raw)
+    assert ok is False
+    # Drift/XML may still use the reconstructed dict; the flag is the
+    # contract the structured decoder relies on.
+    assert isinstance(args, dict)
+
+    raw2 = '{"path": "notes.md", "content": "hello world"'
+    args2, ok2 = repair_arguments(raw2)
+    assert ok2 is False
+    assert args2.get("path") == "notes.md"
+
+
+def test_repair_arguments_conservative_repairs_stay_recovered():
+    """Trailing commas and single quotes are lossless — still recovered."""
+    args, ok = repair_arguments('{"path": "x",}')
+    assert ok is True and args == {"path": "x"}
+    args, ok = repair_arguments("{'path': 'x', 'content': 'y'}")
+    assert ok is True and args == {"path": "x", "content": "y"}
+
+
 # ── normalize_tool_name ────────────────────────────────────────────
 
 

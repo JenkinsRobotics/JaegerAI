@@ -76,6 +76,10 @@ PROTOCOL_VERSION = "1"
 # client MISSING one it needs degrades that feature, not the connection.
 CAPABILITIES: tuple[str, ...] = (
     "query", "command", "chat", "sessions", "permissions", "agent_state",
+    # Emits ``delta`` (answer preview) and ``reasoning`` (model deliberation)
+    # frames during a turn. A client missing this degrades to waiting for the
+    # final ``reply``, which is why both stay additive.
+    "streaming",
 )
 
 # ── agent → client frame builders (used by the bridge / any transport) ──
@@ -140,6 +144,45 @@ def tool_frame(name: str, phase: str, elapsed_s: float = 0.0,
                              "elapsed_s": float(elapsed_s), "session": session}
     if detail:
         frame["detail"] = detail
+    return frame
+
+
+def delta_frame(text: str, session: str = "") -> dict[str, Any]:
+    """One incremental chunk of the ANSWER, as it is decoded.
+
+    Moved here from ``jaeger_ai.interfaces.bridge`` in the monorepo
+    absorption. It lived there because JaegerOS used to be a tag-pinned git
+    dependency, so adding a frame meant a release; the two are now one
+    repository and frame shapes belong with their siblings.
+
+    Deltas are a live PREVIEW of the answer, never a replacement for it: the
+    turn still ends with a ``reply`` frame carrying the complete text, and a
+    client that ignores deltas entirely stays correct.
+    """
+    frame: dict[str, Any] = {"type": "delta", "text": text}
+    if session:
+        frame["session"] = session
+    return frame
+
+
+def reasoning_frame(text: str, session: str = "") -> dict[str, Any]:
+    """Model deliberation — the content of a ``<think>`` block or an
+    extended-thinking channel — surfaced as it is stripped from the answer.
+
+    v1 ADDITIVE (clients must decode frames without it; unknown ``type``
+    values are ignored). Distinct from ``delta`` because it is NOT part of the
+    answer: reasoning models emit deliberation before the visible response,
+    and the adapters strip it so the tool parser and the reader both see only
+    the conclusion. Before this frame existed that text was simply discarded,
+    which is why surfaces had a thinking indicator they could never fill.
+
+    Distinct from the loop's ``thinking`` progress annotations ("[mid-turn
+    steer injected: …]"), which describe what the AGENT did rather than what
+    the MODEL thought.
+    """
+    frame: dict[str, Any] = {"type": "reasoning", "text": text}
+    if session:
+        frame["session"] = session
     return frame
 
 

@@ -114,6 +114,29 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
     echo "→ Installing uv..."
     "$PIP" install uv --quiet || true
   fi
+  # 3a. In-repo packages FIRST. JaegerOS, jaeger-agent and the two voice
+  # engines live at packages/ and are installed from those paths before the
+  # root package resolves its own requirements. Order matters: jaeger-agent
+  # and the engines each require `jaeger-os`, and installing JaegerOS first
+  # means that requirement is already satisfied locally rather than sending
+  # pip to the network. Editable so a change under packages/ is live without
+  # a reinstall — they are this repository's own source now, not third-party
+  # pins, so the hermetic-station argument below does not apply to them.
+  echo "→ Installing in-repo packages (JaegerOS, agent, voice engines)..."
+  for pkg in jaeger-os jaeger-agent jaeger-kokoro-tts jaeger-whisper-stt; do
+    PKG_DIR="$REPO_ROOT/packages/$pkg"
+    if [[ ! -f "$PKG_DIR/pyproject.toml" ]]; then
+      echo "  ✗ packages/$pkg is missing — the checkout is incomplete" >&2
+      exit 1
+    fi
+    if [[ -x "$UV" ]]; then
+      "$UV" pip install --python "$VENV/bin/python" -e "$PKG_DIR" --quiet
+    else
+      "$PIP" install -e "$PKG_DIR" --quiet
+    fi
+    echo "  ✓ $pkg"
+  done
+
   if [[ -x "$UV" ]]; then
     echo "→ Installing JaegerAI (editable) via uv..."
     "$UV" pip install --python "$VENV/bin/python" -e "$REPO_ROOT" --quiet
@@ -122,39 +145,15 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
     "$PIP" install -e "$REPO_ROOT" --quiet
   fi
 
-  # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
-  # On a dev machine you may editable-install ~/GITHUB/{JaegerOS,
-  # jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} checkouts over the git-resolved
-  # copies so local framework/engine changes go live immediately.
-  # STATIONS MUST BE HERMETIC: a production install (incl. the 0.8.2
-  # migration) must run the OFFICIAL pinned releases inside its own
-  # venv — never code linked from someone's working trees, where a
-  # half-finished refactor would break the station live. Hence the
-  # explicit flag: nobody gets dev wiring by accident of directory
-  # layout. (Field-caught by the operator on migration day, 2026-07-12.)
-  if [[ "${JAEGER_DEV_SIBLINGS:-0}" != "1" ]]; then
-    SIBLING_ROOT=""
-  else
-    SIBLING_ROOT="${JAEGER_SIBLING_ROOT:-$HOME/GITHUB}"
-  fi
-  SIBLINGS_FOUND=()
-  [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
-    if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
-      SIBLINGS_FOUND+=("$sib")
-    fi
-  done
-  if [[ "${#SIBLINGS_FOUND[@]}" -gt 0 ]]; then
-    echo "→ dev sibling checkouts found (${SIBLINGS_FOUND[*]}) — installing editable over the git-resolved copies..."
-    for sib in "${SIBLINGS_FOUND[@]}"; do
-      if [[ -x "$UV" ]]; then
-        "$UV" pip install --python "$VENV/bin/python" -e "$SIBLING_ROOT/$sib" --quiet
-      else
-        "$PIP" install -e "$SIBLING_ROOT/$sib" --quiet
-      fi
-      echo "  ✓ $sib (editable, from $SIBLING_ROOT/$sib)"
-    done
-  fi
+  # 3b. Sibling-checkout detection: REMOVED in the monorepo absorption.
+  # It used to editable-install ~/GITHUB/{JaegerOS,jaeger-agent,
+  # JaegerKokoroTTS,JaegerWhisperSTT} over the git-resolved copies so local
+  # framework changes went live. That override now has nothing to override:
+  # those four ARE this repository, installed editable from packages/ in 3a,
+  # so edits are already live. Worse, keeping it would let a stale sibling
+  # checkout silently shadow the in-repo source — the exact ambiguity this
+  # restructure removed. Point JAEGER_SIBLING_ROOT at nothing; edit
+  # packages/ instead.
 
   # 3c. Playwright chromium — the `browser` tool needs a chromium build
   # matching the installed playwright package. Idempotent: skips the

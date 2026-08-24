@@ -1,7 +1,7 @@
 """Character library packing: SOUL.md is the live identity; lore/ stays off the prompt."""
 from pathlib import Path
 
-from jaeger_ai.personality.character import characters_root, load_character
+from jaeger_ai.personality.character import characters_root, list_characters, load_character
 
 
 def test_load_character_prefers_soul_md(tmp_path: Path):
@@ -69,3 +69,13 @@ def test_every_wearable_character_has_soul_and_lore_off_prompt():
             assert character.backstory[:48] not in block
         assert "You are " + character.name not in character.personality.custom_instructions
     assert len(wearable) >= 14
+
+
+def test_list_characters_places_neutral_assistant_first():
+    chars = list_characters()
+    assert len(chars) > 0
+    assert chars[0].id == "assistant"
+    assert chars[0].neutral is True
+    ids = [c.id for c in chars]
+    assert "anakin_skywalker" in ids
+    assert ids.index("assistant") < ids.index("anakin_skywalker")

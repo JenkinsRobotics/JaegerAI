@@ -378,11 +378,13 @@ def sync_ares_mcp_servers(layout: Any) -> dict[str, Any]:
     Reads MCP server declarations from ARES profiles / configuration and registers
     or updates them in Jaeger's MCP server inventory.
     """
-    ares_home = Path(os.environ.get("ARES_HOME", Path.home() / ".ares"))
+    from jaeger_ai.core.ares_interop import ares_shared_artifact
+
+    # Routed through ares_interop — see the note in prompt_documents.
     candidates = [
-        ares_home / "profiles" / "default" / "config.yaml",
-        ares_home / "config" / "mcp.json",
-        ares_home / "mcp.json",
+        ares_shared_artifact("profile_config"),
+        ares_shared_artifact("mcp_config"),
+        ares_shared_artifact("mcp_config_legacy"),
     ]
     imported = 0
     synced_names = []

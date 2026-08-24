@@ -99,19 +99,44 @@ def detect_reasoning(model_name: str = "", chat_template: str = "") -> bool:
     return False
 
 
+def extract_think_blocks(text: str) -> tuple[str, str]:
+    """Split model output into ``(visible_answer, deliberation)``.
+
+    The deliberation half used to be dropped on the floor. Surfaces have a
+    thinking view they could never fill because this was the only place the
+    text existed, and it was discarded here. Returning it lets the bridge emit
+    a ``reasoning`` frame without changing what the answer looks like.
+
+    Handles a dangling unterminated ``<think>`` (model cut off mid-thought) by
+    treating everything from the tag onward as deliberation.
+    """
+    if not text or "<think>" not in text:
+        return text, ""
+    thoughts = [
+        match.group(1)
+        for match in re.finditer(r"<think>(.*?)</think>", text, flags=re.DOTALL)
+    ]
+    out = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Dangling open block (no close) → the rest of the text is deliberation.
+    if "<think>" in out:
+        dangling = re.search(r"<think>(.*)$", out, flags=re.DOTALL)
+        if dangling:
+            thoughts.append(dangling.group(1))
+        out = re.sub(r"<think>.*$", "", out, flags=re.DOTALL)
+    return out.strip(), "\n".join(part.strip() for part in thoughts if part.strip())
+
+
 def strip_think_blocks(text: str) -> str:
     """Remove ``<think>…</think>`` deliberation from model output so the
     tool-call parser + the visible answer see only the post-reasoning
-    content. Handles a dangling unterminated ``<think>`` (model cut off
-    mid-thought) by dropping from the tag to end-of-text."""
-    if not text or "<think>" not in text:
-        return text
-    # Closed blocks first.
-    out = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    # Dangling open block (no close) → drop to end.
-    if "<think>" in out:
-        out = re.sub(r"<think>.*$", "", out, flags=re.DOTALL)
-    return out.strip()
+    content.
+
+    Thin wrapper over :func:`extract_think_blocks`, kept because callers and
+    tests depend on the string-returning shape. Use ``extract_think_blocks``
+    when you also want the deliberation.
+    """
+    visible, _deliberation = extract_think_blocks(text)
+    return visible
 
 
 __all__ = [
@@ -119,4 +144,5 @@ __all__ = [
     "detect_family",
     "detect_reasoning",
     "strip_think_blocks",
+    "extract_think_blocks",
 ]

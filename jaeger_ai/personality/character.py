@@ -286,7 +286,8 @@ def characters_root() -> Path:
 
 def list_characters(root: Path | None = None) -> list[Character]:
     """Every character folder under ``root`` (default: the bundled library),
-    sorted by name. Skips folders without a character.yaml."""
+    sorted with neutral/default characters first, then alphabetically by name.
+    Skips folders without a character.yaml."""
     root = Path(root) if root else characters_root()
     out: list[Character] = []
     if not root.exists():
@@ -297,7 +298,7 @@ def list_characters(root: Path | None = None) -> list[Character]:
                 out.append(load_character(d))
             except Exception:  # noqa: BLE001 — one bad sheet never breaks the library
                 continue
-    return sorted(out, key=lambda c: c.name.lower())
+    return sorted(out, key=lambda c: (not c.neutral, c.name.lower()))
 
 
 # msgspec struct -> dict, for the profile UI to iterate trait sliders.

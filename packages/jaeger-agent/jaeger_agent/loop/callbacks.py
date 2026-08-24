@@ -44,6 +44,14 @@ class AgentCallbacks:
     # streaming fire this if the callback is installed.
     stream_delta: Callable[[str], None] | None = None
 
+    # MODEL deliberation — the contents of a ``<think>`` block or an
+    # extended-thinking channel — fired once per assistant message that
+    # carried any. Distinct from ``thinking`` above, which reports what the
+    # AGENT LOOP did ("[mid-turn steer injected: …]"); this is what the model
+    # actually deliberated. The adapters strip it out of the visible answer, so
+    # without this callback the text is produced and then discarded.
+    reasoning: Callable[[str], None] | None = None
+
     # Per-turn step. ``index`` is the agent-loop iteration count,
     # ``message`` is the assistant's response that just landed.
     step: Callable[[int, Message], None] | None = None
@@ -110,6 +118,14 @@ class AgentCallbacks:
         try:
             self.thinking(state)
         except Exception:  # noqa: BLE001
+            pass
+
+    def on_reasoning(self, text: str) -> None:
+        if self.reasoning is None:
+            return
+        try:
+            self.reasoning(text)
+        except Exception:  # noqa: BLE001 — callback must never break the turn
             pass
 
     def on_stream_delta(self, token: str) -> None:

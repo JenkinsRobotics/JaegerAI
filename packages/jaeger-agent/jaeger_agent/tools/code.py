@@ -121,10 +121,17 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     guard — below even the tier prompt.
 
     Sandboxing is partial by nature (a shell command can do anything
-    the OS lets the user do): the command runs with a fresh tempdir as
-    cwd and a hard timeout, but it is NOT filesystem-confined the way
-    file_write is. Use it deliberately; prefer install_package /
-    run_in_venv / run_python when they can do the job.
+    the OS lets the user do): the command runs with a hard timeout but is
+    NOT filesystem-confined the way file_write is. Use it deliberately;
+    prefer install_package / run_in_venv / run_python when they can do the job.
+
+    cwd is the bound PROJECT ROOT when a surface has selected one, and a fresh
+    tempdir otherwise. That distinction is the whole point of the project-root
+    binding: a coding agent asked to run ``git status`` or ``npm test`` means
+    the project it was pointed at, and running those in an empty tempdir
+    produced confidently wrong answers rather than errors. The tempdir default
+    is retained for the unbound case so nothing changes for a surface that
+    never selects a project.
 
     Returns ``{ok, exit_code, stdout, stderr, elapsed_s, timed_out}``.
     """
@@ -137,7 +144,17 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     # is the tamper-evident record of what the agent was permitted to do.
     try:
         layout = _require_layout()
-        _audit("run_shell", {"command": cleaned[:500], "timeout_s": timeout})
+        from jaeger_agent.workspace import get_project_root as _audit_project_root
+
+        _audit_cwd = _audit_project_root()
+        _audit("run_shell", {
+            "command": cleaned[:500],
+            "timeout_s": timeout,
+            # Recorded because the blast radius of a shell command depends
+            # entirely on where it ran, and the audit log is the forensic
+            # record of what the agent was permitted to do.
+            "cwd": str(_audit_cwd) if _audit_cwd is not None else "(scratch tempdir)",
+        })
     except Exception:  # noqa: BLE001
         pass
 
@@ -146,11 +163,15 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     timed_out = False
     interrupted = False
     with tempfile.TemporaryDirectory(prefix="jaeger_shell_") as scratch:
+        from jaeger_agent.workspace import get_project_root
+
+        project = get_project_root()
+        run_cwd = str(project) if project is not None else scratch
         try:
             proc = run_interruptible(
                 ["/bin/sh", "-c", cleaned],
                 timeout=timeout,
-                cwd=scratch,
+                cwd=run_cwd,
             )
             stdout, stderr, exit_code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as exc:

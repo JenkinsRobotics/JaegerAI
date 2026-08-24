@@ -39,6 +39,14 @@ export LC_ALL="C.UTF-8"
 export PYTHONHASHSEED="0"
 # Headless: don't open Terminal.app / Safari windows during tests.
 export JAEGER_TEST_HEADLESS="1"
+# Never share the operator's RUNNING agent. ``create_runtime`` tries the
+# instance's ``run/bridge.sock`` BEFORE ``boot_for_tui``, so on a machine
+# where ARES is up, a test that patches ``boot_for_tui`` never reaches its
+# patch — it proxies real turns to the real brain, against real memory.
+# ``dev/tests/conftest.py`` sets this too; it is repeated here because this
+# script is the documented entry point and someone will run pytest through
+# it long before they read the conftest.
+export JAEGER_NO_ATTACH="1"
 # No accidental API calls — strip every credential-shaped env var so
 # a test that forgets to mock won't quietly hit a live endpoint.
 # Pattern sweep: anything ending in API_KEY / TOKEN / SECRET / PASSWORD

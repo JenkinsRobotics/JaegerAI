@@ -9,37 +9,22 @@
 # re-listed here. Pinned to lower bounds so a fresh clone gets the
 # latest patch releases.
 
-# --- framework + reusable mind (git dependencies — none of these have PyPI
-# releases yet). PEP 508 direct references, not
-# `-e ../X` — setuptools' dynamic-dependencies file parser only accepts
-# requirement specifiers, not pip's `-e`/`-r` directives. A dev clone
-# with sibling ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,
-# JaegerWhisperSTT} checkouts gets editable installs of those instead —
-# see install.sh's sibling-detection step. kokoro_tts + whisper_stt are
-# DEFAULT deps (not optional extras) as of 0.9: a robot needs a voice out
-# of the curl one-liner, not a follow-up install.
+# --- framework + reusable mind ---
+# NOT listed here any more. JaegerOS, jaeger-agent and the two voice engines
+# live in this repository at packages/ and are installed from those paths by
+# install.sh BEFORE this file is resolved. JaegerAI is self-contained: a clean
+# `git clone && ./install.sh` reaches a working robot with no network fetch of
+# JenkinsRobotics code, and there is exactly one copy of each package on
+# sys.path.
 #
-# ALL FOUR TRACK @master, and the 0.9.0 tag pins they replaced were
-# actively wrong rather than merely stale. 0.10 is tested against
-# jaeger-os 0.10.0, kokoro_tts 0.12.0, whisper_stt 2.0.0 and jaeger-agent
-# 1.0.0; the only tag any of those repos has published is 0.9.0. A fresh
-# clone pinned there installed engines OLDER than anything this release
-# was tested with, and that is not a theoretical hazard — kokoro's config
-# schema dropped `sample_rate` between 0.9 and 2.0, so the mismatch
-# aborted boot with a pydantic extra_forbidden error rather than
-# degrading. (jaeger-agent@v1 was worse: that branch does not exist on
-# the remote at all, so the requirement could not resolve for anyone.)
+# The old model pinned four git URLs here and re-pinned JaegerOS again inside
+# each voice engine, so a single install could resolve JaegerOS twice. That is
+# why the engines' own requirements now carry a plain `jaeger-os>=...` range
+# instead of a direct reference — see packages/jaeger-*/requirements.txt.
 #
-# The voice packages publish an exact JaegerOS @0.9.0 direct reference, so the
-# root must use that same reference for pip to resolve one framework. The tag
-# resolves to commit 149de70b4e2289e01ef49407e4ae8c37a4b23185 at this release gate;
-# the contract test locks both values. Remaining repositories use immutable
-# commit references. install.sh must never force an incoherent runtime with
-# --no-deps.
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
-jaeger-agent @ git+https://github.com/JenkinsRobotics/jaeger-agent@a592d01c4ee348c9d20cb0f19513a7e53e12c727
-jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@2dbc93425188b77307106e1f05f88b65a93ad8c1
-jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@3a95d53c704c61d9fee1f367b50e009d5ba55234
+# To move one of these forward, edit it in packages/ and commit, or pull from
+# its upstream with:
+#     git subtree pull --prefix=packages/jaeger-os <url> <ref>
 
 # --- agent core ---
 pydantic>=2.0

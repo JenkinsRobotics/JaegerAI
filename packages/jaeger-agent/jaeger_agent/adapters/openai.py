@@ -141,7 +141,16 @@ def _from_openai_tool_calls(raw_calls: Any) -> list[ToolCall]:
             try:
                 from jaeger_agent.dialects import repair_arguments
                 repaired, ok = repair_arguments(args_str)
-                if ok and isinstance(repaired, dict):
+                # Trust only lossless recovery. An empty dict from a
+                # non-empty blob, or a truncated payload we closed
+                # ourselves (recovered=False), must surface as
+                # ``_raw_arguments`` so the tool is not called with
+                # silently invented fields.
+                if (
+                    ok
+                    and isinstance(repaired, dict)
+                    and (repaired or not str(args_str).strip())
+                ):
                     arguments = repaired
                 else:
                     arguments = {"_raw_arguments": args_str}
