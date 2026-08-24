@@ -12,22 +12,30 @@
 - Architecture fitness: agent loop and memory facade must not import
   provider SDKs.
 - ADR 0001: ports, not frameworks.
+- **Agent 1 merged** (`b7f4f11`): `RunStore`, `EffectLedger`, shared
+  `lifecycle.py`, schema **v4** (runs / checkpoints / effects /
+  `commitments.parent_id`). Package suite **522 passed**. ADR 0002 accepted.
+- Orphaned runs go to `blocked`; crashed effects stay `pending` and
+  raise `EffectIndeterminate` rather than retry.
 
 ## CURRENT
 
-- ARES full pytest after isolation pins: **5628 passed, 91 skipped, 0 failed** (1165 s).
-- JaegerAI after contract slice: see TEST RESULTS in the lead report.
-- Bind commitments to a product surface (tool or query) without making
-  ARES a second runtime.
-- Lead Architect (this session) coordinates specialists in worktrees.
+- Waiting on Agent 2 (memory) and Agent 3 (ARES UI) to finish.
+- Agent 2 WIP parked on `agent2/memory-wip` — it had claimed schema v4
+  for knowledge. **v4 is runtime. Knowledge is v5.**
+- Bind runs/commitments to a bridge verb and ARES projection (Lead +
+  Agents 3/4). No product surface in Agent 1, by design.
 
 ## NEXT
 
+- Agent 2: rebase knowledge onto schema **v5**; do not retake v4.
+- Agent 4: fitness test that side-effecting tools use `EffectLedger.once`;
+  bridge read verb for runs/commitments; `deliver_event(wake_key)`.
+- Agent 3: `EffectIndeterminate` needs a human resolve/abandon surface.
+- Agent 5: global tool-registry order dependence (33 failures when
+  `packages/jaeger-agent/tests` runs before `dev/tests`);
+  `test_bench_history_verb.py::test_since_filter_excludes_old_runs`.
 - Scheduler port wrapping Jaeger schedules + ARES projection.
-- Retrieval port separate from MemoryStore writes.
-- SELF/USER/RELATIONSHIP/WORLD projections as read models over facts
-  (do not replace sqlite).
-- Exercise GitHub Actions on a stabilization-only branch.
 
 ## DEPRECATED
 
@@ -45,7 +53,6 @@
 
 ## KNOWN DEBT
 
-- Full ARES suite after last isolation pins may still be running.
 - GitHub Actions has not run against this tree.
 - ARES `core/si` still exists, flag-gated experimental — not deleted.
 - Non-English UI catalogs cleaned of Hermes; other donor strings may remain
