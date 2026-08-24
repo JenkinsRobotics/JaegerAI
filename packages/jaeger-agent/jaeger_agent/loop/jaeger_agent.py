@@ -35,6 +35,7 @@ from jaeger_agent.loop.loop_backstop import (
     semantic_failure_signature,
 )
 from jaeger_agent.schemas.message_types import Message, ToolCall
+from jaeger_agent.tool_executor import DirectToolExecutor, ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
 from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
@@ -120,6 +121,7 @@ class JaegerAgent:
         toolset_resolver: ToolsetResolver | None = None,
         tool_visibility: ToolVisibility | None = None,
         turn_start_hook: TurnStartHook | None = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         self.primary_adapter = adapter
         self.fallback_adapters: list[ProviderAdapter] = list(fallback_adapters or [])
@@ -194,6 +196,7 @@ class JaegerAgent:
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
         self.max_iterations = int(max_iterations)
         self.callbacks = callbacks or AgentCallbacks()
+        self._tool_executor: ToolExecutor = tool_executor or DirectToolExecutor()
 
         # Skip-final: tools whose dict result IS the answer (``get_time``,
         # ``recall``, ``calculate``, …). When the turn's first model
@@ -1540,7 +1543,7 @@ class JaegerAgent:
                     "retryable": False,
                 }
             else:
-                content = tool_def.dispatch(args)
+                content = self._tool_executor.execute(tool_def, args)
         except Exception as exc:  # noqa: BLE001 — surfaced to the model
             # Tag safety/permission failures distinctly so the model
             # (and the latency log) can tell "retry with different

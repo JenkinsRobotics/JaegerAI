@@ -42,6 +42,23 @@ def test_memory_facade_does_not_import_provider_sdks():
     assert offenders == [], offenders
 
 
+def test_agent_loop_routes_execution_through_tool_executor():
+    """The loop selects tools but cannot invoke concrete handlers directly."""
+    loop = REPO / "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py"
+    tree = ast.parse(loop.read_text(encoding="utf-8"))
+    direct_dispatches = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "dispatch"
+    ]
+    assert direct_dispatches == [], (
+        "JaegerAgent bypasses ToolExecutor at lines "
+        f"{direct_dispatches}"
+    )
+
+
 def test_provider_adapter_abc_is_the_swap_point():
     from jaeger_agent.adapters.base import ProviderAdapter
     from jaeger_agent.adapters.openai import OpenAIAdapter
