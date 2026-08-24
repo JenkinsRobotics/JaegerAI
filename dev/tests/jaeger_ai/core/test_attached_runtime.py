@@ -1,10 +1,15 @@
-"""Windowed jaeger attaches to a live bridge instead of taking the instance lock."""
+"""Windowed jaeger attaches to a live bridge instead of taking the instance lock.
+
+These are the tests that need attachment to actually happen, so they take the
+``allow_bridge_attach`` fixture. It lifts the suite-wide ``JAEGER_NO_ATTACH``
+gate only after pinning ``JAEGER_INSTANCE_DIR`` to a tmp root and proving that
+root is not inside a live instance tree — so re-enabling attachment here still
+cannot reach the operator's running agent. See ``dev/tests/conftest.py``.
+"""
 
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import threading
 from pathlib import Path
 
@@ -34,42 +39,36 @@ def _serve_one(path: Path, replies: list[dict], barrier: threading.Barrier) -> N
         path.unlink(missing_ok=True)
 
 
-def test_try_attach_runtime_proxies_a_turn(monkeypatch):
-    root = Path(f"/tmp/jatt{os.getpid()}")
-    root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
+def _serve_in_background(root: Path) -> tuple[list[dict], threading.Thread]:
+    """Stand up a one-shot bridge under ``root`` and wait until it is bound."""
+    replies: list[dict] = []
+    barrier = threading.Barrier(2)
+    thread = threading.Thread(
+        target=_serve_one, args=(root / "run" / "bridge.sock", replies, barrier),
+        daemon=True,
+    )
+    thread.start()
+    barrier.wait(timeout=2)
+    return replies, thread
+
+
+def test_try_attach_runtime_proxies_a_turn(monkeypatch, allow_bridge_attach):
     monkeypatch.setenv("JAEGER_INSTANCE_NAME", "jarvis")
-    path = root / "run" / "bridge.sock"
-    replies: list[dict] = []
-    barrier = threading.Barrier(2)
-    thread = threading.Thread(target=_serve_one, args=(path, replies, barrier), daemon=True)
-    thread.start()
-    barrier.wait(timeout=2)
+    replies, thread = _serve_in_background(allow_bridge_attach)
 
-    try:
-        runtime = try_attach_runtime(instance_name="jarvis")
-        assert runtime is not None
-        assert runtime.attached is True
-        assert runtime.ready["model"] == "qwen3.5:397b"
-        result = runtime.run_turn("ping", session_key="gui")
-        assert result["text"] == "pong"
-        runtime.close()
-        thread.join(timeout=2)
-        assert any(item.get("op") == "send" for item in replies)
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    runtime = try_attach_runtime(instance_name="jarvis")
+    assert runtime is not None
+    assert runtime.attached is True
+    assert runtime.ready["model"] == "qwen3.5:397b"
+    result = runtime.run_turn("ping", session_key="gui")
+    assert result["text"] == "pong"
+    runtime.close()
+    thread.join(timeout=2)
+    assert any(item.get("op") == "send" for item in replies)
 
 
-def test_create_runtime_attaches_instead_of_booting(monkeypatch):
-    root = Path(f"/tmp/jatt{os.getpid()}b")
-    root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
-    path = root / "run" / "bridge.sock"
-    replies: list[dict] = []
-    barrier = threading.Barrier(2)
-    thread = threading.Thread(target=_serve_one, args=(path, replies, barrier), daemon=True)
-    thread.start()
-    barrier.wait(timeout=2)
+def test_create_runtime_attaches_instead_of_booting(monkeypatch, allow_bridge_attach):
+    _replies, thread = _serve_in_background(allow_bridge_attach)
 
     from jaeger_ai.core.mind_runtime import create_runtime
 
@@ -80,11 +79,8 @@ def test_create_runtime_attaches_instead_of_booting(monkeypatch):
         raise AssertionError("must not boot a second in-process agent")
 
     monkeypatch.setattr("jaeger_ai.core.mind_runtime.JaegerAIRuntime", boom)
-    try:
-        runtime = create_runtime(bus=object(), config={"instance_name": "jarvis"})
-        assert getattr(runtime, "attached", False) is True
-        assert booted["called"] is False
-        runtime.close()
-        thread.join(timeout=2)
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    runtime = create_runtime(bus=object(), config={"instance_name": "jarvis"})
+    assert getattr(runtime, "attached", False) is True
+    assert booted["called"] is False
+    runtime.close()
+    thread.join(timeout=2)

@@ -472,7 +472,19 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         # "search my home for .env" prompt walk $HOME: a credential-sweep
         # attempt AND an uninterruptible DoS. Confine to the sandbox like
         # ``list_skill_dir`` does; explicit paths stay ``_resolve_read``-gated.
-        root = layout.skills_dir if path == "." else _resolve_read(path)
+        # Default (".") searches the bound PROJECT when there is one — that
+        # is what "search the codebase" means to anyone using a coding agent.
+        # With no project bound it stays the sandbox skills dir rather than
+        # ``Path.cwd()``: the old cwd default let "search my home for .env"
+        # walk $HOME, which is both a credential sweep and an uninterruptible
+        # DoS. Explicit paths remain ``_resolve_read``-gated either way.
+        if path == ".":
+            from jaeger_agent.workspace import get_project_root
+
+            project = get_project_root()
+            root = project if project is not None else layout.skills_dir
+        else:
+            root = _resolve_read(path)
     except SandboxError as exc:
         return {"searched": False, "error": str(exc)}
     # Refuse an over-broad root: the home dir or the filesystem root is the

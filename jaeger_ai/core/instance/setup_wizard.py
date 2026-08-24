@@ -183,10 +183,10 @@ def _character_rows() -> list[tuple[str, str, str, str, str]]:
     import yaml
     from jaeger_ai.personality.character import characters_root
 
-    rows: list[tuple[str, str, str, str, str]] = []
+    raw_rows: list[tuple[str, str, str, str, str, bool]] = []
     root = characters_root()
     if not root.is_dir():
-        return rows
+        return []
     for p in sorted(root.iterdir()):
         y = p / "character.yaml"
         if not y.exists():
@@ -194,11 +194,13 @@ def _character_rows() -> list[tuple[str, str, str, str, str]]:
         try:
             d = yaml.safe_load(y.read_text(encoding="utf-8")) or {}
             idy = d.get("identity") or {}
-            rows.append((p.name, d.get("name", p.name), idy.get("role", ""),
-                         idy.get("voice_id", ""), idy.get("voice_tone", "")))
+            is_neutral = bool(d.get("neutral", False)) or p.name == "assistant"
+            raw_rows.append((p.name, d.get("name", p.name), idy.get("role", ""),
+                             idy.get("voice_id", ""), idy.get("voice_tone", ""), is_neutral))
         except Exception:  # noqa: BLE001 — a broken sheet is just skipped
             continue
-    return rows
+    raw_rows.sort(key=lambda r: (not r[5], r[1].lower()))
+    return [(r[0], r[1], r[2], r[3], r[4]) for r in raw_rows]
 
 
 def _character_shim(char_id: str, rows=None):

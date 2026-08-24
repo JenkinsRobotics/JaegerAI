@@ -191,8 +191,12 @@ def load_cross_agent_memory(cap: int = CROSS_AGENT_MAX_CHARS) -> str:
     Allows JaegerAI to inherit user preferences, architectural rulings, and active
     project context distilled across Claude Code, Hermes, Codex, and ARES sessions.
     """
-    ares_home = Path(os.environ.get("ARES_HOME", Path.home() / ".ares"))
-    person_md = ares_home / "memory" / "person.md"
+    from jaeger_ai.core.ares_interop import ares_shared_artifact
+
+    # Routed through ares_interop: the single audited crossing into ARES's
+    # home. See test_source_ownership — JaegerAI may read what ARES publishes
+    # for other agents, never its private session state.
+    person_md = ares_shared_artifact("cross_agent_profile")
     if not person_md.is_file():
         return ""
     try:

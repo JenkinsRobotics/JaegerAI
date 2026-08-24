@@ -38,10 +38,22 @@ _layout: InstanceLayout | None = None
 # ``workspace.location`` field; left None when the user wants the
 # default in-instance location.
 _workspace_override: Path | None = None
+# The PROJECT the agent is currently working in — the directory a surface
+# means when it says "switch workspace". Distinct from
+# ``_workspace_override``, which only decides where ``workspace/...`` writes
+# land inside the sandbox.
+#
+# Before this existed the two were conflated, and the consequence was that a
+# workspace switch changed nothing an agent could observe: ``run_shell`` ran in
+# a throwaway tempdir, relative reads resolved against wherever the process was
+# launched, and ``grep_files(".")`` searched the instance's skills directory.
+# The selector moved a value that no tool consumed.
+_project_root: Path | None = None
 
 
 def bind(layout: InstanceLayout,
-         *, workspace_override: Path | str | None = None) -> None:
+         *, workspace_override: Path | str | None = None,
+         project_root: Path | str | None = None) -> None:
     """Wire all tool I/O to a specific instance dir. Called once at startup.
 
     ``workspace_override`` (INST-11) — when non-None, all writes to
@@ -50,9 +62,20 @@ def bind(layout: InstanceLayout,
     / Spotlight access to generated outputs (e.g.
     ``~/Documents/Jaeger Outputs/``). The override path is created
     on bind if it doesn't exist.
+
+    ``project_root`` — the directory the agent is CURRENTLY WORKING IN. This is
+    what a surface means by "the workspace": shell commands run there, relative
+    reads resolve there first, and a default-rooted search starts there. Unlike
+    ``workspace_override`` it is never created implicitly — a project directory
+    that does not exist is a caller mistake, not something to conjure.
+
+    The two are deliberately separate. ``workspace_override`` is about where
+    generated OUTPUT is filed; ``project_root`` is about which codebase the
+    agent is looking at. Passing only the former (as every caller did before
+    this parameter existed) leaves tools rooted where the process launched.
     """
     from jaeger_agent.memory import memory as mem
-    global _layout, _workspace_override
+    global _layout, _workspace_override, _project_root
     _layout = layout
     if workspace_override is not None:
         path = Path(workspace_override).expanduser().resolve()
@@ -60,7 +83,41 @@ def bind(layout: InstanceLayout,
         _workspace_override = path
     else:
         _workspace_override = None
+    if project_root is not None:
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            raise ValueError(f"project_root is not a directory: {root}")
+        _project_root = root
+    else:
+        _project_root = None
     mem.bind(layout)
+
+
+def get_project_root() -> Path | None:
+    """The directory the agent is working in, or None when unbound.
+
+    None means "no project selected" and every caller must fall back to its
+    previous behaviour, so an unbound agent behaves exactly as it did before
+    this concept existed.
+    """
+    return _project_root
+
+
+def set_project_root(path: Path | str | None) -> None:
+    """Rebind the project without re-binding the whole instance.
+
+    A surface switches project far more often than it switches instance, and
+    ``bind()`` also rebinds memory — doing that per switch would be both
+    wasteful and a wider blast radius than the change deserves.
+    """
+    global _project_root
+    if path is None:
+        _project_root = None
+        return
+    root = Path(path).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"project_root is not a directory: {root}")
+    _project_root = root
 
 
 class DefaultWorkspace:
@@ -272,6 +329,19 @@ def _resolve_write(path: str) -> Path:
         # or similar. Explicit strip keeps the routing predictable.
         rest = Path(*p.parts[1:]) if len(p.parts) > 1 else Path(".")
         return _resolve_under(get_effective_workspace_dir(), str(rest))
+    # Option A (validated): a bare path that ALREADY exists in the
+    # workspace is a workspace write. New bare names still land in
+    # skills/ so authored skills keep working. The stricter
+    # alternative — never writing a bare name to workspace, even
+    # when the file is sitting there — broke "append to the files
+    # you just listed" for batch jobs seeded in workspace/.
+    if p.parts and p.parts[0] != "skills":
+        try:
+            existing = _resolve_under(get_effective_workspace_dir(), path)
+        except SandboxError:
+            existing = None
+        if existing is not None and existing.exists():
+            return existing
     return _resolve_under(layout.skills_dir, path)
 
 
@@ -295,7 +365,18 @@ def _resolve_read(path: str) -> Path:
     if p.is_absolute():
         full = p.resolve()
     else:
-        full = (Path.cwd() / p).resolve()
+        # Project root first when one is bound. A relative read like
+        # ``src/main.py`` means "in the project I am working on"; resolving it
+        # against ``Path.cwd()`` meant "wherever this process happened to be
+        # launched", which for an app opened from Finder is the user's home.
+        # Falls through to the old cwd behaviour when nothing is bound.
+        full = None
+        if _project_root is not None:
+            candidate = (_project_root / p).resolve()
+            if candidate.exists():
+                full = candidate
+        if full is None:
+            full = (Path.cwd() / p).resolve()
         if not full.exists() and _layout is not None:
             # Fall back through the instance-relative roots a WRITE could
             # have targeted, so a bare relative name round-trips with the

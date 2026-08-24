@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -153,14 +154,24 @@ def acquire_slot_exclusive(
     def _noop() -> None:
         pass
 
-    for _ in range(5):  # bounded retries for stale-file reclaim races
+    for _ in range(20):  # bounded retries for stale-file reclaim races
         try:
             fd = os.open(pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
             # Slot file already present — live owner, or a stale leftover?
             try:
-                recorded = int(pid_file.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
+                raw = pid_file.read_text(encoding="utf-8").strip()
+            except OSError:
+                raw = ""
+            if not raw:
+                # Creator has the exclusive file but has not written
+                # its pid yet. Unlinking would let a racer O_EXCL a
+                # second owner. Retry instead.
+                time.sleep(0.01)
+                continue
+            try:
+                recorded = int(raw)
+            except ValueError:
                 recorded = -1
             if recorded == me:
                 return True, me, _make_cleanup(pid_file)

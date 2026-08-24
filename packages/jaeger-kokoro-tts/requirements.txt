@@ -9,11 +9,13 @@
 # --- framework (git dependency — JaegerOS has no PyPI releases yet).
 # PEP 508 direct reference, not `-e ../JaegerOS` — setuptools' dynamic-
 # dependencies file parser only accepts requirement specifiers, not
-# pip's `-e`/`-r` directives. Pinned to @master for 0.9; switch to a
-# tag pin (e.g. @0.9.0) once JaegerOS cuts a release tag. A dev clone
-# with a sibling ~/GITHUB/JaegerOS checkout gets an editable install
-# instead — see JaegerAI's install.sh sibling-detection step. ---
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@0.9.0
+# A PLAIN specifier, deliberately: JaegerOS is absorbed into the JaegerAI
+# monorepo at packages/jaeger-os and installed from that path before this
+# engine is. A `git+https://...` direct reference here would make pip fetch a
+# SECOND copy of JaegerOS from the network even though one is already
+# installed, putting two jaeger_os packages on sys.path with no defined
+# winner. Keep this a version range so the local package satisfies it. ---
+jaeger-os>=0.9.0
 
 # --- the Kokoro engine itself ---
 kokoro>=0.9.4

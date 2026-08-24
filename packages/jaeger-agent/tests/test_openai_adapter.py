@@ -505,6 +505,30 @@ def test_parse_response_decodes_malformed_json_to_raw_arguments_field():
     assert parsed["tool_calls"][0]["arguments"] == {"_raw_arguments": '{"x": broken'}
 
 
+def test_parse_response_truncated_json_does_not_dispatch_as_recovered():
+    """F1 live failure: a length-cut ``write_file`` payload closed its
+    own string and brace, ``recovered=True``, and the truncated
+    content was written as if complete. The structured path must
+    stash ``_raw_arguments`` so the tool is not called."""
+    cut = '{"path": "item_00.txt", "content": "hello'
+    raw = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content=None,
+            tool_calls=[SimpleNamespace(
+                id="c1",
+                type="function",
+                function=SimpleNamespace(name="write_file", arguments=cut),
+            )],
+        ))],
+        usage=None,
+    )
+    a = OpenAIAdapter(provider="openai", model="x", client=_FakeClient(_mk_response("ok")))
+    parsed = a.parse_response(raw)
+    args = parsed["tool_calls"][0]["arguments"]
+    assert args == {"_raw_arguments": cut}
+    assert "content" not in args
+
+
 def test_parse_response_handles_empty_choices():
     a = OpenAIAdapter(provider="openai", model="x", client=_FakeClient(_mk_response("ok")))
     parsed = a.parse_response(SimpleNamespace(choices=[], usage=None))

@@ -125,6 +125,18 @@ def test_acquire_release_round_trip(tmp_path):
     assert not layout.lock_path.exists()
 
 
+def test_acquire_refuses_when_holder_has_not_written_its_pid_yet(tmp_path):
+    """Unlinking an in-progress lock creates a second inode — two owners."""
+    layout = _layout(tmp_path)
+    holder_fh = _hold_flock(layout.lock_path, "")  # flock held, pid not written
+    try:
+        lock = InstanceLock(layout)
+        with pytest.raises(RuntimeError, match="has not yet recorded its pid"):
+            lock.acquire()
+    finally:
+        holder_fh.close()
+
+
 def test_acquire_breaks_stale_lock_with_dead_pid_text(tmp_path, capsys):
     """The recorded pid is dead AND something (here: our own second fd,
     standing in for the crashed process's now-orphaned flock) is

@@ -416,6 +416,17 @@ class InstanceLock:
             fh.seek(0)
             old = (fh.read() or "").strip()
             fh.close()
+            # Empty pid + EWOULDBLOCK means another process holds the
+            # flock and has not yet written its pid. Treating that as
+            # stale unlinks the path, which creates a NEW inode the
+            # waiter can lock while the original holder still owns the
+            # old one — two "owners". Refuse instead.
+            if not old:
+                raise RuntimeError(
+                    f"instance {self._path.parent.name!r} is locked "
+                    "(holder has not yet recorded its pid). "
+                    "Refusing to start a second copy."
+                ) from exc
             holder = _pid_alive(old)
             if holder is not None:
                 raise RuntimeError(

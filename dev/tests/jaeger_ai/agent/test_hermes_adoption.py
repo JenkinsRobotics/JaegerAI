@@ -380,20 +380,48 @@ def test_lone_surrogates_scrubbed_before_model_call():
 # ── argument repair upgrades ───────────────────────────────────────
 
 
-def test_repair_recovers_truncated_tool_args():
+def test_repair_reports_truncated_tool_args_as_unrecovered():
+    """Truncation must NOT be reported as a successful parse.
+
+    ``_balance_brackets`` INVENTS the closing brace and quote, so the result
+    parses cleanly while being a guess about what the model meant to say. The
+    dict is still returned — the XML drift path can use it — but ``recovered``
+    is False so the structured tool_calls path refuses to dispatch.
+
+    The lethal case this protects: a ``write_file`` whose ``content`` was cut
+    off mid-value. Reported as recovered, the write succeeds, the ledger ticks,
+    and the file on disk is silently wrong. Both of these previously asserted
+    ``ok is True``, which is the behaviour that allowed exactly that.
+    """
     from jaeger_agent.dialects import repair_arguments
     args, ok = repair_arguments('{"path": "notes.txt", "content": "abc')
-    assert ok is True
+    assert ok is False, "invented closers are a guess, not a parse"
+    # The salvaged values stay available for callers that may use a guess.
     assert args["path"] == "notes.txt"
     assert args["content"] == "abc"
 
 
-def test_repair_recovers_control_chars_with_truncation():
+def test_repair_reports_truncated_control_char_args_as_unrecovered():
+    """Same contract when truncation coincides with literal control chars."""
     from jaeger_agent.dialects import repair_arguments
     args, ok = repair_arguments('{"text": "line one\nline two", "n": 2')
-    assert ok is True
+    assert ok is False
     assert args["n"] == 2
     assert "line one" in args["text"]
+
+
+def test_repair_still_reports_wellformed_args_as_recovered():
+    """The narrowing must not swallow genuine lossless repairs.
+
+    A trailing comma or a quote swap is a faithful reading of what the model
+    emitted, not a guess — those must keep reporting True, or the structured
+    path starts refusing calls it should make.
+    """
+    from jaeger_agent.dialects import repair_arguments
+    for raw in ('{"a": 1}', '{"a": 1,}', "{'a': 1}"):
+        args, ok = repair_arguments(raw)
+        assert ok is True, f"lossless repair reported as unrecovered: {raw!r}"
+        assert args["a"] == 1
 
 
 # ── parallel dispatch (robot-hardening pass) ───────────────────────

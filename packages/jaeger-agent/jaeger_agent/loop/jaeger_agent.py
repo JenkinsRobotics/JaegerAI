@@ -461,6 +461,16 @@ class JaegerAgent:
             # final assistant message after the retry chain settles.
             assistant_msg = self._one_model_step_with_length_retry()
 
+            # MODEL deliberation, if the adapter separated any out of the
+            # visible answer. Fired here rather than inside the adapter so
+            # every adapter that records ``reasoning`` on its message gets the
+            # behaviour for free, and so a surface sees it in turn order —
+            # before the tool calls the deliberation led to.
+            if isinstance(assistant_msg, dict):
+                deliberation = assistant_msg.get("reasoning")
+                if deliberation:
+                    self.callbacks.on_reasoning(str(deliberation))
+
             # The post-tool nudge (below) is synthetic — once the model
             # has seen it, take it back off the history so the visible
             # transcript carries only real turns.
@@ -1131,6 +1141,7 @@ class JaegerAgent:
     # conservative: straight to fallback, as before.
     _RATE_LIMIT_RETRIES = 2
     _TRANSIENT_RETRIES = 1
+    _STALE_RETRIES = 1
 
     def _one_model_step(self) -> Message:
         """Format → call → parse, with classified retry + adapter
@@ -1251,13 +1262,10 @@ class JaegerAgent:
                     self.last_halt_reason = "interrupted"
                     return {"role": "assistant", "content": None}
                 except StaleCallTimeout as exc:
-                    # Model stalled past the no-progress budget. For
-                    # in-process backends the abort flag has already
-                    # stopped the decode and reset the context (see
-                    # LocalLlamaAdapter.call); an HTTP fallback (if
-                    # configured) picks up next. If this was the last
-                    # adapter, the caller sees a clean ``stalled`` halt
-                    # reason rather than a generic exception.
+                    # Model stalled past the no-progress budget. Retry
+                    # the SAME adapter once (a 30s cloud think is often
+                    # a blip), then walk the fallback chain. If this
+                    # was the last adapter, the caller sees ``stalled``.
                     last_exc = exc
                     self.last_halt_reason = "stalled"
                     self.callbacks.on_thinking(
@@ -1266,7 +1274,14 @@ class JaegerAgent:
                         f"try ``jaeger kill`` from another terminal "
                         f"if the TUI feels stuck]"
                     )
-                    break  # next adapter — the stale window was burned
+                    if attempt < self._STALE_RETRIES and not self._interrupt_event.is_set():
+                        attempt += 1
+                        self.callbacks.on_thinking(
+                            f"[adapter {adapter.describe()} stalled — "
+                            f"retry {attempt}/{self._STALE_RETRIES}]"
+                        )
+                        continue
+                    break  # next adapter
                 except Exception as exc:  # noqa: BLE001 — adapter chain absorbs
                     last_exc = exc
                     if (

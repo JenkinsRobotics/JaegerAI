@@ -65,6 +65,18 @@ final class ProtocolFixtureTests: XCTestCase {
         return frame
     }
 
+    func testUnknownAdditiveFramesDecodeToNilRatherThanCrashing() throws {
+        // delta / reasoning were added on the Python side as v1 ADDITIVE
+        // frames. A client that has not implemented them yet must ignore
+        // the type, not fail the connection.
+        for typeName in ["delta", "reasoning", "not_a_real_frame"] {
+            let data = try JSONSerialization.data(
+                withJSONObject: ["type": typeName, "text": "x"])
+            XCTAssertNil(ProtocolFrame.decode(data),
+                         "unknown type \(typeName) must be ignored")
+        }
+    }
+
     func testEveryFixtureFrameDecodes() throws {
         for (name, data) in try fixtures() {
             XCTAssertNotNil(ProtocolFrame.decode(data),
@@ -81,6 +93,10 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertEqual(r.agent, "booting")
         XCTAssertTrue(r.capabilities.contains("agent_state"))
         XCTAssertTrue(r.capabilities.contains("sessions"))
+        XCTAssertTrue(r.capabilities.contains("query"))
+        // streaming is additive. A client that does not render deltas still
+        // accepts the handshake; unknown extra names must not fail decode.
+        _ = r.capabilities.contains("streaming")
 
         guard case .ready(let warm) = try decode("ready_warm") else {
             return XCTFail("wrong case")

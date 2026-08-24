@@ -42,7 +42,8 @@ import contextlib
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 
 # Bumped on schema changes. Migration writers in
@@ -313,7 +314,15 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
     tags / note + composite PK ``(subject, key, source)``). Idempotent: a
     no-op on a fresh DB (no table yet) or one already at v2. Existing rows
     become subject='user', source='user'. Runs before the schema CREATE
-    INDEXes that reference the new columns."""
+    INDEXes that reference the new columns.
+
+    Does not begin or commit a transaction — the caller
+    (``_ensure_schema``) wraps apply + version stamp in one
+    ``BEGIN IMMEDIATE`` so a failure cannot leave v2 tables wearing a
+    v1 label, or the reverse. ``executescript`` is deliberately not used:
+    the stdlib issues a COMMIT before running the script, which would
+    split the stamp from the change.
+    """
     exists = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts'"
     ).fetchone()
@@ -329,115 +338,184 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
     src = "source" if "source" in cols else "'user'"
     tg = "tags" if "tags" in cols else "''"
     nt = "note" if "note" in cols else "''"
-    try:
-        conn.executescript(
-            f"""
-            BEGIN;
-            DROP TABLE IF EXISTS _facts_v2;
-            CREATE TABLE _facts_v2 (
-                subject    TEXT NOT NULL DEFAULT 'user',
-                key        TEXT NOT NULL,
-                value      TEXT NOT NULL,
-                category   TEXT NOT NULL DEFAULT 'general',
-                source     TEXT NOT NULL DEFAULT 'user',
-                tags       TEXT NOT NULL DEFAULT '',
-                note       TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (subject, key, source)
-            );
-            INSERT OR IGNORE INTO _facts_v2
-                (subject, key, value, category, source, tags, note, created_at, updated_at)
-                SELECT {subj}, key, value, category, {src}, {tg}, {nt},
-                       created_at, updated_at
-                FROM facts;
-            -- Seed the history log so migrated facts are traceable from day
-            -- one (recall_history must not return empty for a fact that
-            -- demonstrably existed). fact_log may not exist yet — this
-            -- migration runs BEFORE the schema statements.
-            CREATE TABLE IF NOT EXISTS fact_log (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject    TEXT NOT NULL DEFAULT 'user',
-                key        TEXT NOT NULL,
-                value      TEXT NOT NULL,
-                category   TEXT NOT NULL DEFAULT 'general',
-                source     TEXT NOT NULL DEFAULT 'user',
-                tags       TEXT NOT NULL DEFAULT '',
-                note       TEXT NOT NULL DEFAULT '',
-                ts         TEXT NOT NULL
-            );
-            INSERT INTO fact_log
-                (subject, key, value, category, source, tags, note, ts)
-                SELECT subject, key, value, category, source, tags,
-                       'migrated from schema v1', updated_at
-                FROM _facts_v2;
-            DROP TABLE facts;
-            ALTER TABLE _facts_v2 RENAME TO facts;
-            COMMIT;
-            """
+    conn.execute("DROP TABLE IF EXISTS _facts_v2")
+    conn.execute(
+        """
+        CREATE TABLE _facts_v2 (
+            subject    TEXT NOT NULL DEFAULT 'user',
+            key        TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            category   TEXT NOT NULL DEFAULT 'general',
+            source     TEXT NOT NULL DEFAULT 'user',
+            tags       TEXT NOT NULL DEFAULT '',
+            note       TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (subject, key, source)
         )
-    except sqlite3.Error:
-        # A mid-script failure leaves the transaction open on this
-        # autocommit connection — roll it back explicitly so the old
-        # table survives intact, then re-raise (refusing to run on a
-        # half-migrated DB beats limping on one).
-        with contextlib.suppress(sqlite3.Error):
-            conn.execute("ROLLBACK")
-        raise
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT OR IGNORE INTO _facts_v2
+            (subject, key, value, category, source, tags, note, created_at, updated_at)
+            SELECT {subj}, key, value, category, {src}, {tg}, {nt},
+                   created_at, updated_at
+            FROM facts
+        """
+    )
+    # Seed the history log so migrated facts are traceable from day
+    # one (recall_history must not return empty for a fact that
+    # demonstrably existed). fact_log may not exist yet — this
+    # migration runs BEFORE the schema statements.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS fact_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject    TEXT NOT NULL DEFAULT 'user',
+            key        TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            category   TEXT NOT NULL DEFAULT 'general',
+            source     TEXT NOT NULL DEFAULT 'user',
+            tags       TEXT NOT NULL DEFAULT '',
+            note       TEXT NOT NULL DEFAULT '',
+            ts         TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO fact_log
+            (subject, key, value, category, source, tags, note, ts)
+            SELECT subject, key, value, category, source, tags,
+                   'migrated from schema v1', updated_at
+            FROM _facts_v2
+        """
+    )
+    conn.execute("DROP TABLE facts")
+    conn.execute("ALTER TABLE _facts_v2 RENAME TO facts")
+
+
+# Ordered migrations, keyed by the version they PRODUCE. A database at
+# version N-1 reaches N by running MIGRATIONS[N] and only then recording N.
+#
+# This replaces a branch that did the opposite: an older database had its
+# version row UPDATEd straight to SCHEMA_VERSION with no transformation run,
+# so a v1 store came out labelled v2 while still holding v1 tables. Every
+# later reader then trusted a version number that described a shape the
+# database did not have — the failure mode a version stamp exists to prevent.
+#
+# The invariant, stated so it survives the next edit: THE RECORDED VERSION
+# MUST NAME THE SCHEMA THAT ACTUALLY RAN. A step with no migration is a hard
+# error, not something to paper over by advancing the number.
+_MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
+    2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
+}
+
+
+def _record_schema_version(conn: sqlite3.Connection, version: int, now: str) -> None:
+    """Write the version row, inserting it if this database predates it."""
+    updated = conn.execute(
+        "UPDATE schema_version SET version = ?, updated_at = ? WHERE id = 1",
+        (version, now),
+    ).rowcount
+    if not updated:
+        conn.execute(
+            "INSERT INTO schema_version (id, version, created_at, updated_at) "
+            "VALUES (1, ?, ?, ?)",
+            (version, now, now),
+        )
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create / migrate the schema to ``SCHEMA_VERSION``.
 
-    First-open: every CREATE TABLE runs cleanly (IF NOT EXISTS), the
-    schema_version row is INSERTed at the target version (v2).
+    First open: every CREATE TABLE runs cleanly (IF NOT EXISTS) and the
+    version row is written at the target — a database built from the current
+    statements IS the current schema, so there is nothing to migrate.
 
-    Same-version reopen: every CREATE TABLE no-ops; the
-    schema_version row matches and we just return.
+    Same-version reopen: the CREATE statements no-op and the version matches,
+    so this returns without touching anything. That idempotence is what makes
+    it safe on every open.
 
-    Older DB (v1 facts shape): ``_migrate_facts_table`` detects the old
-    SHAPE (columns + PK, not the version number — robust to partially
-    migrated intermediates) and rebuilds ``facts`` into the v2
-    subject/source/tags/note form BEFORE the schema statements run,
-    because the v2 indexes reference columns a v1 table lacks. The
-    version row is then bumped to v2 below.
+    Older database: each pending migration runs IN ITS OWN TRANSACTION, and
+    the new version is recorded inside that same transaction. A failure rolls
+    back the step and the stamp together, leaving the database coherent at the
+    last version that genuinely completed — so a retry resumes there instead
+    of skipping the step that failed.
+
+    Newer database: refused. Writing an old shape over a newer one is not
+    recoverable; stopping is.
     """
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    cur = conn.cursor()
-    # v1 → v2: rebuild an older `facts` table into the subject/source/tags/note
-    # shape BEFORE the schema statements — the new indexes reference columns an
-    # old table lacks. No-op on a fresh DB or one already at v2.
-    _migrate_facts_table(conn)
-    cur.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
+    # The version row lives in a table the schema statements create, so on a
+    # database that predates it we have to make the table before we can ask.
+    # CREATE TABLE IF NOT EXISTS is safe on every path.
+    conn.execute(_SCHEMA_STATEMENTS[0])
+    row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+    current = int(row["version"]) if row is not None else None
 
-    row = conn.execute(
-        "SELECT version FROM schema_version WHERE id = 1"
-    ).fetchone()
-    if row is None:
-        conn.execute(
-            "INSERT INTO schema_version (id, version, created_at, updated_at) "
-            "VALUES (1, ?, ?, ?)",
-            (SCHEMA_VERSION, now, now),
-        )
-        return
-
-    current = int(row["version"])
-    if current == SCHEMA_VERSION:
-        return
-    if current > SCHEMA_VERSION:
+    if current is not None and current > SCHEMA_VERSION:
         raise RuntimeError(
             f"state.db schema is v{current} but installed core knows "
             f"only v{SCHEMA_VERSION} — upgrade the framework."
         )
-    # Older version → future migration runner. Today there's only v1
-    # so this branch only fires on an explicit downgrade-of-downgrade
-    # test scenario.
-    conn.execute(
-        "UPDATE schema_version SET version = ?, updated_at = ? WHERE id = 1",
-        (SCHEMA_VERSION, now),
-    )
+
+    if current is None:
+        # No version row. Either a brand-new database, or one written before
+        # versioning existed. They are distinguishable: a pre-versioning store
+        # already has a `facts` table, a new one does not.
+        legacy = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts'"
+        ).fetchone()
+        current = 1 if legacy else SCHEMA_VERSION
+        if not legacy:
+            # Fresh: build the current shape and record it as such.
+            conn.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
+            _record_schema_version(conn, SCHEMA_VERSION, now)
+            conn.commit()
+            return
+        _record_schema_version(conn, current, now)
+        conn.commit()
+
+    for version in range(current + 1, SCHEMA_VERSION + 1):
+        step = _MIGRATIONS.get(version)
+        if step is None:
+            raise RuntimeError(
+                f"state.db is at v{current} and this build targets "
+                f"v{SCHEMA_VERSION}, but no migration is registered for v{version}. "
+                "Refusing to advance the recorded version without running one."
+            )
+        name, apply = step
+        try:
+            # Close an implicit transaction so BEGIN IMMEDIATE is legal on
+            # both production (isolation_level=None) and default-isolation
+            # connections. executescript is not used here: it COMMITs first.
+            with contextlib.suppress(sqlite3.Error):
+                conn.execute("COMMIT")
+            conn.execute("BEGIN IMMEDIATE")
+            apply(conn)
+            # The version is recorded in the SAME transaction as the change
+            # it describes, so the two can never disagree.
+            _record_schema_version(conn, version, now)
+            conn.execute("COMMIT")
+        except Exception as exc:
+            with contextlib.suppress(sqlite3.Error):
+                conn.execute("ROLLBACK")
+            raise RuntimeError(
+                f"state.db migration to v{version} ({name}) failed: {exc}. "
+                f"The database is unchanged at v{current}."
+            ) from exc
+        current = version
+
+    # Bring indexes and any newly added tables into being once the shape is
+    # right — v2 indexes reference columns a v1 table lacked, which is why
+    # this runs after the migrations rather than before them.
+    conn.executescript("BEGIN; " + "; ".join(_SCHEMA_STATEMENTS) + "; COMMIT;")
+    _record_schema_version(conn, SCHEMA_VERSION, now)
+    conn.commit()
 
 
 # ── connection access ─────────────────────────────────────────────

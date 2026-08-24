@@ -41,6 +41,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # Never launch the native app from a test: 0.7.1's GUI-first paths
 # (bare ``jaeger``, ``agent create``) honour this as the headless gate.
 os.environ.setdefault("JAEGER_NO_GUI", "1")
+# Never attach to the operator's RUNNING agent from a test. ``create_runtime``
+# tries ``run/bridge.sock`` before it tries ``boot_for_tui``, so on any machine
+# where ARES (or ``jaeger bridge``) is live, a test that monkeypatches
+# ``boot_for_tui`` never reaches its own patch — it proxies real turns to the
+# real brain, against real memory. CI has no live socket, so CI could not see
+# it. ``setdefault``, not assignment, so the opt-in fixture below can lift it.
+os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 
 
 # ── live-instance isolation guard ──────────────────────────────────
@@ -246,3 +253,74 @@ def _restore_tool_registry(_full_tool_registry_snapshot):
     yield
     R._registry.clear()
     R._registry.update(_full_tool_registry_snapshot)
+
+
+# ── bridge-attach isolation ────────────────────────────────────────
+#
+# AF_UNIX socket paths are capped near 104 bytes on macOS, and pytest's
+# ``tmp_path`` (/private/var/folders/<...>/pytest-of-<user>/<test>0/) blows
+# straight past that. Any fixture that needs a BINDABLE instance root has to
+# live somewhere short, which is why these use /tmp directly rather than
+# tmp_path. They still clean up after themselves.
+def _short_instance_root() -> Path:
+    import tempfile
+    root = Path(tempfile.mkdtemp(prefix="jgr", dir="/tmp"))
+    (root / "run").mkdir(parents=True, exist_ok=True)
+    for live in _LIVE_ROOTS:
+        try:
+            root.resolve().relative_to(live.resolve())
+        except (ValueError, OSError):
+            continue
+        raise AssertionError(
+            f"refusing to use {root}: it is inside the live instance root "
+            f"{live}. A test may never bind or attach to real state."
+        )
+    return root
+
+
+@_pytest.fixture
+def bindable_instance_root():
+    """A short, disposable instance root pinned as ``JAEGER_INSTANCE_DIR``.
+
+    Does NOT lift ``JAEGER_NO_ATTACH`` — this is for tests that need a real
+    socket to exist while proving nothing attaches to it.
+    """
+    import shutil
+    root = _short_instance_root()
+    previous = os.environ.get("JAEGER_INSTANCE_DIR")
+    os.environ["JAEGER_INSTANCE_DIR"] = str(root)
+    try:
+        yield root
+    finally:
+        if previous is None:
+            os.environ.pop("JAEGER_INSTANCE_DIR", None)
+        else:
+            os.environ["JAEGER_INSTANCE_DIR"] = previous
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@_pytest.fixture
+def allow_bridge_attach(bindable_instance_root):
+    """Opt a single test back into bridge attachment, safely.
+
+    Attachment is disabled suite-wide (``JAEGER_NO_ATTACH`` at the top of this
+    file). A handful of tests exist precisely to prove attachment WORKS, so
+    they need it back — but lifting the gate on its own would let them reach
+    the operator's live socket, which is the exact hazard the gate exists for.
+
+    So the fixture does not just lift the gate: it builds on
+    ``bindable_instance_root``, which has already pinned
+    ``JAEGER_INSTANCE_DIR`` to a disposable root and refused if that root
+    landed anywhere inside a live instance tree. Attachment is re-enabled and
+    production is still unreachable — the guarantee is structural, not a
+    convention the next test author has to remember.
+
+    Yields the pinned instance root, so the test can build its socket path
+    from it rather than re-deriving one.
+    """
+    previous = os.environ.pop("JAEGER_NO_ATTACH", None)
+    try:
+        yield bindable_instance_root
+    finally:
+        if previous is not None:
+            os.environ["JAEGER_NO_ATTACH"] = previous

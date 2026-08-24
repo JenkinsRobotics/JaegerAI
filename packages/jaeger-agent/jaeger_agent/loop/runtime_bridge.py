@@ -166,6 +166,52 @@ def _adapter_for_client(
     )
 
 
+def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
+    """Configured ``external_model.fallback`` → extra adapters.
+
+    Same API key / timeout as the primary client. Skips the serving
+    model so a stall actually walks to a *different* brain.
+    """
+    try:
+        from jaeger_ai.main import _pipeline
+        cfg = _pipeline.get("config")
+        rows = list(getattr(getattr(cfg, "external_model", None), "fallback", None) or [])
+    except Exception:  # noqa: BLE001 — missing config is "no fallback"
+        return []
+    if not rows:
+        return []
+    ext = getattr(client, "ext", None)
+    primary_model = str(getattr(ext, "model", "") or "")
+    primary_provider = str(getattr(ext, "provider", "") or "openai")
+    api_key = getattr(client, "_api_key", "") or ""
+    timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0) if ext else 60.0
+    num_ctx = getattr(client, "num_ctx", None)
+    primary_base = getattr(ext, "base_url", None) if ext is not None else None
+    out: list[ProviderAdapter] = []
+    for row in rows:
+        if isinstance(row, dict):
+            provider = str(row.get("provider") or primary_provider)
+            model = str(row.get("model") or "")
+            base_url = row.get("base_url") or primary_base
+        else:
+            provider = str(getattr(row, "provider", None) or primary_provider)
+            model = str(getattr(row, "model", "") or "")
+            base_url = getattr(row, "base_url", None) or primary_base
+        if not model or model == primary_model:
+            continue
+        if provider == "anthropic":
+            out.append(AnthropicAdapter(
+                api_key=api_key, model=model, timeout_s=timeout_s,
+            ))
+        else:
+            out.append(OpenAIAdapter(
+                provider=provider, model=model, api_key=api_key,
+                base_url=base_url or None, num_ctx=num_ctx,
+                timeout_s=timeout_s,
+            ))
+    return out
+
+
 def _make_fast_finalize_finalizer(client: Any) -> Any:
     """Wrap the legacy ``_fast_finalize_sync`` so it satisfies the
     :data:`SkipFinalFinalizer` callable signature.
@@ -309,6 +355,7 @@ def build_jaeger_agent(
             stale_call_timeout_s = 30.0
     agent = JaegerAgent(
         adapter=adapter,
+        fallback_adapters=_fallback_adapters_for(client),
         system_prompt=system_prompt,
         toolsets=toolsets,
         skip_final_tools=frozenset(skip_final_tools or ()),

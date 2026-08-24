@@ -23,6 +23,12 @@ import AppKit
 import SwiftUI
 
 @MainActor
+private final class OnboardingPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+@MainActor
 final class OnboardingWindowController {
     static let shared = OnboardingWindowController()
 
@@ -38,7 +44,7 @@ final class OnboardingWindowController {
         self.model = model
 
         let hosting = NSHostingView(rootView: OnboardingRootView(model: model))
-        let panel = NSWindow(
+        let panel = OnboardingPanel(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
             styleMask: [.borderless],
             backing: .buffered,
@@ -50,6 +56,7 @@ final class OnboardingWindowController {
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
         panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = false
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

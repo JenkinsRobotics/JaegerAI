@@ -31,6 +31,7 @@ from jaeger_agent.dialects import (
     extract_tool_calls,
     render_tools_for,
     strip_reasoning_channels,
+    extract_think_blocks,
     strip_think_blocks,
     textify_tool_history,
 )
@@ -779,8 +780,14 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # the visible answer isn't a wall of internal monologue. The
         # actual tool call (if any) comes after ``</think>``.
         if "<think>" in text:
-            stripped = strip_think_blocks(text)
+            stripped, deliberation = extract_think_blocks(text)
             message["content"] = stripped or None
+            # Surface the deliberation instead of dropping it. Recorded on the
+            # message so the loop can forward it to a listening surface; the
+            # visible answer is unchanged either way, so a caller that ignores
+            # this key behaves exactly as before.
+            if deliberation:
+                message["reasoning"] = deliberation
             # Thinking-budget exhaustion: the whole output allowance
             # went into deliberation and nothing surfaced after the
             # think block. Deterministic — a "continue" nudge just

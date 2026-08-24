@@ -3189,12 +3189,25 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             except Exception:  # noqa: BLE001 — a listener must never break a turn
                 pass
 
+        def _reasoning(text: str) -> None:
+            # MODEL deliberation, routed to whichever surface registered a
+            # sink for THIS turn. Same shape as _stream_delta above and the
+            # same guarantee: no sink means a dict lookup and nothing else.
+            sink = _pipeline.get("stream_reasoning_sink")
+            if sink is None:
+                return
+            try:
+                sink(str(text))
+            except Exception:  # noqa: BLE001 — a listener must never break a turn
+                pass
+
         _status_cb = AgentCallbacks(
             tool_progress=_tool_progress,
             tool_done=_tool_done,
             heartbeat=_heartbeat,
             thinking=_thinking,
             stream_delta=_stream_delta,
+            reasoning=_reasoning,
         )
         # Pipe the configured ctx window into the agent's pre-flight
         # ContextGuard so an oversized prompt is trimmed (or refused)
@@ -3750,6 +3763,22 @@ def stream_delta_sink(sink: Any):
         yield sink
     finally:
         _pipeline["stream_delta_sink"] = previous
+
+
+@contextmanager
+def stream_reasoning_sink(sink: Any):
+    """Route this turn's MODEL deliberation to ``sink`` for its duration.
+
+    Turn-scoped and previous-restoring for the same reason as
+    :func:`stream_delta_sink`: the session agent is cached and shared, so a
+    sink installed at construction would outlive the surface that wanted it.
+    """
+    previous = _pipeline.get("stream_reasoning_sink")
+    _pipeline["stream_reasoning_sink"] = sink
+    try:
+        yield sink
+    finally:
+        _pipeline["stream_reasoning_sink"] = previous
 
 
 def stream_delta_listening() -> bool:
@@ -4879,6 +4908,27 @@ def boot_for_tui(
     instance_name = instance_name or default_instance_name()
     root = resolve_instance_dir(instance_name)
     layout = InstanceLayout(root=root)
+
+    # Test seam for spawn-bound ownership tests. Production never sets this.
+    # After the instance flock is held, return a dummy client so ``jaeger
+    # bridge`` can exercise lock-loss exit without loading a model.
+    if os.environ.get("JAEGER_TEST_LOCK_ONLY") == "1":
+        if not layout.exists():
+            raise RuntimeError(
+                "JAEGER_TEST_LOCK_ONLY requires an existing instance at "
+                f"{layout.root}"
+            )
+        lock = InstanceLock(layout)
+        lock.acquire()
+        boot = TUIBootResult(
+            client=object(),
+            layout=layout,
+            cleanup=lambda: None,
+        )
+        # Keep the flock holder alive. InstanceLock releases on
+        # __del__/close; dropping this local would let every racer win.
+        boot.lock = lock
+        return boot
 
     if not layout.exists():
         layout = run_wizard(force=False, instance_name=instance_name)

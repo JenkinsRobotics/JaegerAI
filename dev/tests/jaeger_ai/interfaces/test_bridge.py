@@ -1318,16 +1318,30 @@ def test_turn_workspace_binds_and_restores_ares_path(monkeypatch, tmp_path):
     ctx = bridge._Ctx()
     ctx.layout = SimpleNamespace(root=tmp_path)
     calls = []
-    monkeypatch.setattr(jaeger_tools, "bind", lambda layout, workspace_override=None:
-                        calls.append((layout, workspace_override)))
+    monkeypatch.setattr(
+        jaeger_tools, "bind",
+        lambda layout, workspace_override=None, project_root=None:
+            calls.append((layout, workspace_override, project_root)),
+    )
     monkeypatch.setitem(
         _pipeline, "config",
         SimpleNamespace(workspace=SimpleNamespace(location=str(configured))),
     )
 
     with bridge._turn_workspace(ctx, str(requested)):
+        # BOTH bindings, and they are not the same thing:
+        #   workspace_override -> where ``workspace/...`` writes are filed
+        #   project_root       -> the directory the agent works IN
+        # Only the first existed once, which is why an ARES workspace switch
+        # used to change nothing a tool could observe.
         assert calls[-1][1] == requested.resolve()
+        assert calls[-1][2] == requested.resolve()
+
+    # On exit the project root is released — a turn's project selection must
+    # not leak into the next turn, which may carry a different workspace or
+    # none at all.
     assert calls[-1][1] == str(configured)
+    assert calls[-1][2] is None
 
     with pytest.raises(ValueError, match="absolute path"):
         with bridge._turn_workspace(ctx, "relative/path"):
