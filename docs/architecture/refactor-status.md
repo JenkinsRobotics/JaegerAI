@@ -15,9 +15,11 @@
 
 ## CURRENT
 
-- ARES full pytest rerun after isolation fixes (in flight).
+- ARES full pytest after isolation pins: **5628 passed, 91 skipped, 0 failed** (1165 s).
+- JaegerAI after contract slice: see TEST RESULTS in the lead report.
 - Bind commitments to a product surface (tool or query) without making
   ARES a second runtime.
+- Lead Architect (this session) coordinates specialists in worktrees.
 
 ## NEXT
 
