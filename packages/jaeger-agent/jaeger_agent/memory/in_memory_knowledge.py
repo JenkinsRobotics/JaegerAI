@@ -177,34 +177,18 @@ class InMemoryKnowledgeStore:
         return True
 
     def rebuild_beliefs_from_claims(self, *, subject: str | None = None) -> list[Belief]:
-        """Synthesize active beliefs from valid claims (latest valid claim per subject+predicate)."""
+        """Derived projection. Provenance rank, not last-write-wins."""
+        from jaeger_agent.cognition.revision import revise_all
+
         valid_claims = self.list_claims(subject=subject, status="valid")
-        grouped: dict[tuple[str, str], list[Claim]] = {}
-        for c in valid_claims:
-            key = (c.subject, c.predicate)
-            grouped.setdefault(key, []).append(c)
-
-        # Mark all currently active beliefs for these keys as superseded
-        for (subj, pred) in grouped:
-            for b in list(self._beliefs.values()):
-                if b.subject == subj and b.predicate == pred and b.status == BeliefStatus.ACTIVE:
-                    b.status = BeliefStatus.SUPERSEDED
-                    b.updated_at = utc_now_iso()
-
-        rebuilt: list[Belief] = []
-        for (subj, pred), claims in grouped.items():
-            latest = claims[-1]
-            belief = Belief.create(
-                subject=subj,
-                predicate=pred,
-                value=latest.value,
-                confidence=latest.confidence,
-                status=BeliefStatus.ACTIVE,
-                valid_from=latest.valid_from,
-                valid_until=latest.valid_until,
-            )
+        rebuilt = revise_all(valid_claims)
+        keys = {(b.subject, b.predicate) for b in rebuilt}
+        for b in list(self._beliefs.values()):
+            if (b.subject, b.predicate) in keys and b.status == BeliefStatus.ACTIVE:
+                b.status = BeliefStatus.SUPERSEDED
+                b.updated_at = utc_now_iso()
+        for belief in rebuilt:
             self.save_belief(belief)
-            rebuilt.append(belief)
         return rebuilt
 
     # ── EntityStore implementation ─────────────────────────────────

@@ -408,6 +408,26 @@ def _first_decision_from(messages: list[Message]) -> dict[str, Any] | None:
     return None
 
 
+def _run_turn_with_executive(agent: JaegerAgent, user_text: str) -> str:
+    """Persist the run when state.db is bound; otherwise just the loop."""
+    from jaeger_agent.memory import sqlite_store
+
+    if not sqlite_store.is_bound():
+        return agent.run_turn(user_text)
+    from jaeger_agent.cognition.executive import TurnExecutive
+    from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
+
+    return TurnExecutive(
+        agent,
+        SqliteRunStore(),
+        SqliteCommitmentStore(),
+        provider=getattr(agent.primary_adapter, "name", None),
+        claims=SqliteKnowledgeStore(),
+    ).run_turn(user_text)
+
+
 def drive_one_turn(
     agent: JaegerAgent,
     user_text: str,
@@ -431,7 +451,7 @@ def drive_one_turn(
 
     started = time.perf_counter()
     try:
-        answer = agent.run_turn(user_text)
+        answer = _run_turn_with_executive(agent, user_text)
     except ContextOverflow as overflow:
         # Pre-flight refusal — the prompt couldn't be trimmed enough to
         # fit. Surface an actionable message and end the turn cleanly

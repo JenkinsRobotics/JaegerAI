@@ -363,36 +363,22 @@ class SqliteKnowledgeStore:
         return cur.rowcount > 0
 
     def rebuild_beliefs_from_claims(self, *, subject: str | None = None) -> list[Belief]:
-        valid_claims = self.list_claims(subject=subject, status="valid")
-        grouped: dict[tuple[str, str], list[Claim]] = {}
-        for c in valid_claims:
-            key = (c.subject, c.predicate)
-            grouped.setdefault(key, []).append(c)
+        """Derived projection. Provenance rank, not last-write-wins."""
+        from jaeger_agent.cognition.revision import revise_all
 
+        valid_claims = self.list_claims(subject=subject, status="valid")
+        rebuilt = revise_all(valid_claims)
         conn = sqlite_store.connection()
         now = utc_now_iso()
-        for (subj, pred) in grouped:
+        for belief in rebuilt:
             conn.execute(
                 "UPDATE beliefs SET status = 'superseded', updated_at = ? "
                 "WHERE subject = ? AND predicate = ? AND status = 'active'",
-                (now, subj, pred),
+                (now, belief.subject, belief.predicate),
             )
-
-        rebuilt: list[Belief] = []
-        for (subj, pred), claims in grouped.items():
-            latest = claims[-1]
-            belief = Belief.create(
-                subject=subj,
-                predicate=pred,
-                value=latest.value,
-                confidence=latest.confidence,
-                status=BeliefStatus.ACTIVE,
-                valid_from=latest.valid_from,
-                valid_until=latest.valid_until,
-            )
-            self.save_belief(belief)
-            rebuilt.append(belief)
         conn.commit()
+        for belief in rebuilt:
+            self.save_belief(belief)
         return rebuilt
 
     # ── EntityStore implementation ─────────────────────────────────

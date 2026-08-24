@@ -160,6 +160,7 @@ def test_entity_and_relationship_graph(store):
 
 
 def test_projection_rebuild_from_claims(store):
+    """Observed outranks a later told claim. Not last-write-wins."""
     c1 = Claim.create("user", "shell", "bash", ProvenanceKind.OBSERVED)
     c2 = Claim.create("user", "shell", "zsh", ProvenanceKind.TOLD)
     store.add_claim(c1)
@@ -168,8 +169,17 @@ def test_projection_rebuild_from_claims(store):
     rebuilt = store.rebuild_beliefs_from_claims(subject="user")
     assert len(rebuilt) == 1
     assert rebuilt[0].predicate == "shell"
-    assert rebuilt[0].value == "zsh"
+    assert rebuilt[0].value == "bash"
     assert rebuilt[0].status == BeliefStatus.ACTIVE
+    assert store.get_active_belief("user", "shell").value == "bash"
+
+
+def test_same_rank_conflict_is_contradicted_not_last_write(store):
+    store.add_claim(Claim.create("user", "shell", "bash", ProvenanceKind.TOLD))
+    store.add_claim(Claim.create("user", "shell", "zsh", ProvenanceKind.TOLD))
+    rebuilt = store.rebuild_beliefs_from_claims(subject="user")
+    assert rebuilt[0].status == BeliefStatus.CONTRADICTED
+    assert store.get_active_belief("user", "shell") is None
 
 
 def test_retriever_contradiction_detection(store):

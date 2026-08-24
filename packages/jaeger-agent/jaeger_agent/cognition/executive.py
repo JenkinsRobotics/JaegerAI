@@ -49,6 +49,8 @@ class TurnExecutive:
         self.commitments = commitments
         self.claims = claims
         self.provider = provider or getattr(agent.primary_adapter, "name", None)
+        binder = getattr(agent, "set_effect_checkpoint", None)
+        self._bind_checkpoint = binder if callable(binder) else None
 
     def ensure_run(self) -> Run:
         if self.agent.run_id:
@@ -80,8 +82,17 @@ class TurnExecutive:
 
     def run_turn(self, text: str) -> str:
         run = self.ensure_run()
+        if self._bind_checkpoint is not None:
+            self._bind_checkpoint(
+                lambda name, args: self.runs.checkpoint(
+                    run.id, {"tool": name, "args": dict(args or {})},
+                )
+            )
         if self.claims is not None:
             record_told(self.claims, text, source_id=run.id)
+            rebuilder = getattr(self.claims, "rebuild_beliefs_from_claims", None)
+            if callable(rebuilder):
+                rebuilder(subject="user")
         try:
             result = self.agent.run_turn(text)
         except Exception:
