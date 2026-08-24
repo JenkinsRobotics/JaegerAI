@@ -567,6 +567,77 @@ def _char_detail(c: Any) -> dict[str, Any]:
             "icon": str(icon) if icon else None, "traits": traits}
 
 
+def _runtime_bound() -> bool:
+    from jaeger_agent.memory import sqlite_store
+    return sqlite_store.is_bound()
+
+
+def _runtime_query_runs(args: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _runtime_bound():
+        return []
+    from dataclasses import asdict
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    return [asdict(run) for run in SqliteRunStore().list(
+        commitment_id=args.get("commitment_id"),
+        state=args.get("state"),
+    )]
+
+
+def _runtime_query_commitments(args: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _runtime_bound():
+        return []
+    from dataclasses import asdict
+    from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+    return [asdict(item) for item in SqliteCommitmentStore().list(
+        state=args.get("state"),
+    )]
+
+
+def _runtime_query_effects(args: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _runtime_bound():
+        return []
+    from dataclasses import asdict
+    from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+    status = args.get("status", "pending")
+    return [asdict(item) for item in SqliteEffectLedger().list(status=status)]
+
+
+def _runtime_deliver_event(wake_key: str) -> tuple[bool, str | None]:
+    if not wake_key:
+        return False, "wake_key is required"
+    if not _runtime_bound():
+        return False, "runtime store is not bound"
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    woken = SqliteRunStore().deliver_event(wake_key)
+    return True, None if woken is not None else "deliver failed"
+
+
+def _runtime_resolve_effect(key: str, result: Any) -> tuple[bool, str | None]:
+    if not key:
+        return False, "key is required"
+    if not _runtime_bound():
+        return False, "runtime store is not bound"
+    from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+    try:
+        SqliteEffectLedger().resolve(key, result)
+    except Exception as exc:  # noqa: BLE001 — command reports, never crashes
+        return False, str(exc)
+    return True, None
+
+
+def _runtime_abandon_effect(key: str) -> tuple[bool, str | None]:
+    if not key:
+        return False, "key is required"
+    if not _runtime_bound():
+        return False, "runtime store is not bound"
+    from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+    try:
+        SqliteEffectLedger().abandon(key)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    return True, None
+
+
 def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
@@ -922,6 +993,12 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # (layout-keyed cache, no client needed).
         from jaeger_ai.core.version_check import cached_update_status
         return cached_update_status(lay)
+    if what == "list_runs":
+        return _runtime_query_runs(args)
+    if what == "list_commitments":
+        return _runtime_query_commitments(args)
+    if what == "list_effects":
+        return _runtime_query_effects(args)
     return None
 
 
@@ -1054,6 +1131,12 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             return bool(result.get("resumed")), (
                 None if result.get("resumed") else "schedule not found"
             )
+        if cmd == "deliver_event":
+            return _runtime_deliver_event(str(args.get("wake_key") or args.get("key") or ""))
+        if cmd == "resolve_effect":
+            return _runtime_resolve_effect(str(args.get("key") or ""), args.get("result"))
+        if cmd == "abandon_effect":
+            return _runtime_abandon_effect(str(args.get("key") or ""))
         return False, f"unknown command: {cmd}"
     except Exception as exc:  # noqa: BLE001 — a bad command reports, never crashes the bridge
         return False, str(exc)

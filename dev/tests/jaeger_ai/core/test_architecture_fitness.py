@@ -59,6 +59,24 @@ def test_agent_loop_routes_execution_through_tool_executor():
     )
 
 
+def test_ledger_executor_routes_external_tools_through_once():
+    """Authoritative side effects go through EffectLedger.once, not a
+    naked dispatch. The loop stays DirectToolExecutor by default; the
+    host that wants at-most-once sends injects LedgerToolExecutor."""
+    path = REPO / "packages/jaeger-agent/jaeger_agent/tool_executor.py"
+    source = path.read_text(encoding="utf-8")
+    assert "self._ledger.once(" in source
+    assert "AUTHORITATIVE_SIDE_EFFECTS" in source
+
+
+def test_send_email_declares_external_side_effect():
+    import jaeger_agent.tools  # noqa: F401
+    from jaeger_os.core.tools.tool_registry import get_tool
+
+    tool = get_tool("send_email")
+    assert tool.side_effect == "external"
+
+
 def test_provider_adapter_abc_is_the_swap_point():
     from jaeger_agent.adapters.base import ProviderAdapter
     from jaeger_agent.adapters.openai import OpenAIAdapter

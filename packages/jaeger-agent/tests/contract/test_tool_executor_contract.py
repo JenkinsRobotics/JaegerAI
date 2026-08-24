@@ -86,3 +86,26 @@ def test_agent_consumer_swaps_executor_without_tool_or_loop_changes():
     tool_message = next(message for message in agent.messages if message["role"] == "tool")
     assert '"executed_by": "recording"' in tool_message["content"]
 
+
+def test_ledger_executor_runs_authoritative_tools_at_most_once():
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent import LedgerToolExecutor
+
+    calls: list[int] = []
+
+    class _ExternalArgs(BaseModel):
+        to: str
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_ExternalArgs,
+        fn=lambda to: calls.append(to) or {"sent": True, "to": to},
+        side_effect="external",
+    )
+    executor = LedgerToolExecutor(InMemoryEffectLedger())
+    first = executor.execute(tool, {"to": "a@b.c"})
+    second = executor.execute(tool, {"to": "a@b.c"})
+    assert first == second == {"sent": True, "to": "a@b.c"}
+    assert calls == ["a@b.c"]
+

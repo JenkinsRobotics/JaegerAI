@@ -18,7 +18,7 @@ from jaeger_agent.workspace import get_current_session, get_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
-@register_tool_from_function
+@register_tool_from_function(side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="messaging",
                operation="send_message",
                summary="send a message on an external channel")
