@@ -8,6 +8,9 @@ from jaeger_agent import JaegerAgent, Message, ProviderAdapter, ToolDef
 from jaeger_agent.cognition.commitments import InMemoryCommitmentStore
 from jaeger_agent.cognition.effects import EffectIndeterminate, InMemoryEffectLedger
 from jaeger_agent.cognition.executive import TURN_LOOP_KIND, TurnExecutive
+from jaeger_agent.cognition.intake import record_told
+from jaeger_agent.memory.in_memory_knowledge import InMemoryKnowledgeStore
+from jaeger_agent.memory.models import ProvenanceKind
 from jaeger_agent.cognition.runs import InMemoryRunStore
 from jaeger_agent.tool_executor import LedgerToolExecutor
 
@@ -52,6 +55,27 @@ def test_executive_reuses_one_active_run_and_checkpoints():
     assert run.state == "active"
     assert commitments.get(run.commitment_id).kind == TURN_LOOP_KIND
     assert runs.latest_checkpoint(run_id) is not None
+
+
+def test_executive_records_user_text_as_told_claim():
+    store = InMemoryKnowledgeStore()
+    agent = JaegerAgent(
+        adapter=_Scripted([{"role": "assistant", "content": "noted"}]),
+        tools=[],
+    )
+    execu = TurnExecutive(
+        agent, InMemoryRunStore(), InMemoryCommitmentStore(), claims=store,
+    )
+    execu.run_turn("my editor is neovim")
+    claims = store.list_claims(predicate="said", provenance=ProvenanceKind.TOLD)
+    assert len(claims) == 1
+    assert claims[0].value == "my editor is neovim"
+
+
+def test_record_told_skips_blank():
+    store = InMemoryKnowledgeStore()
+    assert record_told(store, "  ") is None
+    assert store.list_claims() == []
 
 
 def test_crash_after_success_does_not_duplicate_external_effect():

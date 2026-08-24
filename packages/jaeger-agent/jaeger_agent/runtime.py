@@ -291,9 +291,11 @@ class DefaultAgentRuntime:
         from jaeger_agent.cognition.executive import TurnExecutive
         from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
         from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
         return TurnExecutive(
             agent, SqliteRunStore(), SqliteCommitmentStore(),
             provider=getattr(self.adapter, "name", None),
+            claims=SqliteKnowledgeStore(),
         ).run_turn(text)
 
     def steer(self, text: str) -> bool:
