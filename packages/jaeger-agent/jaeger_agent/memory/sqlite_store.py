@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DB_FILENAME = "state.db"
 
@@ -306,6 +306,18 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
     )""",
     "CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log (event, ts)",
     "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts)",
+
+    # commitments — durable SI intentions (goals/runs) that survive restart.
+    """CREATE TABLE IF NOT EXISTS commitments (
+        id            TEXT PRIMARY KEY,
+        title         TEXT NOT NULL,
+        state         TEXT NOT NULL,
+        kind          TEXT NOT NULL DEFAULT 'goal',
+        payload_json  TEXT NOT NULL DEFAULT '{}',
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_commitments_state ON commitments (state, updated_at)",
 )
 
 
@@ -408,8 +420,29 @@ def _migrate_facts_table(conn: sqlite3.Connection) -> None:
 # The invariant, stated so it survives the next edit: THE RECORDED VERSION
 # MUST NAME THE SCHEMA THAT ACTUALLY RAN. A step with no migration is a hard
 # error, not something to paper over by advancing the number.
+def _migrate_commitments(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS commitments (
+            id            TEXT PRIMARY KEY,
+            title         TEXT NOT NULL,
+            state         TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT 'goal',
+            payload_json  TEXT NOT NULL DEFAULT '{}',
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_commitments_state "
+        "ON commitments (state, updated_at)"
+    )
+
+
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
+    3: ("commitments", _migrate_commitments),
 }
 
 
