@@ -227,6 +227,7 @@ class JaegerAgent:
         self.max_iterations = int(max_iterations)
         self.callbacks = callbacks or AgentCallbacks()
         self._run_id: str | None = None
+        self._effect_checkpoint: Callable[[str, dict[str, Any]], None] | None = None
         self._tool_executor: ToolExecutor = tool_executor or _default_tool_executor()
 
         # Skip-final: tools whose dict result IS the answer (``get_time``,
@@ -362,6 +363,13 @@ class JaegerAgent:
         binder = getattr(self._tool_executor, "bind_run", None)
         if callable(binder):
             binder(run_id)
+
+    def set_effect_checkpoint(
+        self, fn: Callable[[str, dict[str, Any]], None] | None
+    ) -> None:
+        """Called after an external tool returns, so a crash mid-turn
+        still has a cursor. The executive owns the durable write."""
+        self._effect_checkpoint = fn
 
     def _bind_turn_run(self) -> None:
         if self._run_id is None:
@@ -1677,6 +1685,13 @@ class JaegerAgent:
         self.callbacks.on_tool_progress(
             name, "done", {"elapsed_s": round(elapsed, 3)},
         )
+        tool_def = prep.get("tool_def")
+        if (
+            self._effect_checkpoint is not None
+            and tool_def is not None
+            and getattr(tool_def, "side_effect", "") == "external"
+        ):
+            self._effect_checkpoint(name, args)
 
         # Passive observer for the tool_calls audit table. Determine
         # ok/error from the final content shape: dispatch-raised paths

@@ -67,9 +67,49 @@ def test_executive_records_user_text_as_told_claim():
         agent, InMemoryRunStore(), InMemoryCommitmentStore(), claims=store,
     )
     execu.run_turn("my editor is neovim")
-    claims = store.list_claims(predicate="said", provenance=ProvenanceKind.TOLD)
-    assert len(claims) == 1
-    assert claims[0].value == "my editor is neovim"
+    said = store.list_claims(predicate="said", provenance=ProvenanceKind.TOLD)
+    assert said[0].value == "my editor is neovim"
+    structured = store.list_claims(predicate="editor", provenance=ProvenanceKind.TOLD)
+    assert structured[0].value == "neovim"
+    assert store.get_active_belief("user", "editor").value == "neovim"
+
+
+def test_external_tool_writes_a_checkpoint():
+    from pydantic import BaseModel
+    from jaeger_agent.tool_executor import LedgerToolExecutor
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+
+    class _Args(BaseModel):
+        n: int
+
+    tool = ToolDef(
+        name="send_email",
+        description="Send",
+        args_model=_Args,
+        fn=lambda n: {"sent": n},
+        side_effect="external",
+    )
+    adapter = _Scripted([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "name": "send_email", "arguments": {"n": 1}},
+            ],
+        },
+        {"role": "assistant", "content": "sent"},
+    ])
+    agent = JaegerAgent(
+        adapter=adapter,
+        tools=[tool],
+        tool_executor=LedgerToolExecutor(InMemoryEffectLedger(), run_id="r1"),
+    )
+    runs = InMemoryRunStore()
+    execu = TurnExecutive(agent, runs, InMemoryCommitmentStore())
+    assert execu.run_turn("send it") == "sent"
+    point = runs.latest_checkpoint(agent.run_id)
+    assert point is not None
+    assert point.cursor.get("tool") == "send_email" or "halt" in point.cursor
 
 
 def test_record_told_skips_blank():

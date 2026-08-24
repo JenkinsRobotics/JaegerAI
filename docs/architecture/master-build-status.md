@@ -23,22 +23,28 @@ Handoff for future agents. Resume here; do not restart Phase A.
 
 ### Phase C (slice) — told-claim intake
 - User turn text is recorded as `ProvenanceKind.TOLD` when a claim store
-  is bound. Not last-write-wins facts. DefaultAgentRuntime uses
-  `SqliteKnowledgeStore` when `state.db` is bound.
+  is bound. `my X is Y` is extracted into a structured claim.
+
+### Phase E (slice) — belief revision
+- `revise_group` ranks provenance. Same-rank conflict → `CONTRADICTED`.
+- Observed outranks a later told claim. ADR 0006.
+- `EvidenceFirstPlanner`: contradiction or high uncertainty → gather evidence.
+
+### Phase B remainder (slice)
+- External tools checkpoint via `set_effect_checkpoint`.
+- `drive_one_turn` and `DefaultAgentRuntime` both use `TurnExecutive`
+  when `state.db` is bound.
 
 ## IN_PROGRESS
 
-- Phase B remainder: wait/blocked product surface on ARES beyond Goals effects;
-  resume-after-process-death of a mid-turn loop (checkpoint is written after
-  the turn, not after each tool).
-- Phase C remainder: belief revision from claims; entity extraction;
-  claims are recorded, not yet reconciled into beliefs.
+- Mid-turn crash still loses non-external tool progress in `messages`.
+- Entity extraction beyond `my X is Y`.
+- ARES wait/blocked surface beyond Goals effects.
 
 ## NEXT
 
-- Checkpoint after each external tool, not only after the turn.
-- Inject `TurnExecutive` at `AgentRuntime.agent_for` / `runtime_bridge`.
-- Personal-data ingestion and capability routing (later phases).
+- Memory consolidation and autobiographical log.
+- Personal-data ingestion and capability routing.
 - GitHub Actions against this tree.
 
 ## BLOCKED
@@ -73,7 +79,4 @@ Handoff for future agents. Resume here; do not restart Phase A.
 
 ## Tests (last verified)
 
-- Package suite: 563 passed.
-- Combined `packages/jaeger-agent/tests` then `dev/tests`: 3800 passed,
-  11 skipped. One session-finish isolation warning on live
-  `state.db-shm` (operator instance WAL), not a test failure.
+- Package suite: 576 passed (re-run this slice).

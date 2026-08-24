@@ -69,6 +69,13 @@ def test_ledger_executor_routes_external_tools_through_once():
     assert "AUTHORITATIVE_SIDE_EFFECTS" in source
 
 
+def test_cognition_revision_does_not_import_provider_sdks():
+    banned = {"openai", "anthropic", "google", "ollama", "mlx_lm"}
+    path = REPO / "packages/jaeger-agent/jaeger_agent/cognition/revision.py"
+    offenders = _imports(path) & banned
+    assert not offenders, offenders
+
+
 def test_agent_loop_defaults_to_ledger_executor():
     source = (
         REPO / "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py"
