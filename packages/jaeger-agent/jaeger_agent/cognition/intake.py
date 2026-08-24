@@ -10,13 +10,41 @@ from __future__ import annotations
 import re
 from typing import Protocol
 
-from jaeger_agent.memory.models import Claim, ProvenanceKind
+from jaeger_agent.memory.models import Claim, Entity, ProvenanceKind
 
 
 class ClaimWriter(Protocol):
     """The slice of KnowledgeStore intake needs."""
 
     def add_claim(self, claim: Claim) -> Claim: ...
+
+
+def link_known_people_mentions(store: ClaimWriter, text: str, *, source_id: str) -> list[Entity]:
+    """Record deterministic mentions of people already known to EntityStore.
+
+    This deliberately does not guess novel names. Existing contacts/entities
+    supply the ontology; word-boundary matching merely records that the person
+    appeared in this intake event.
+    """
+    list_entities = getattr(store, "list_entities", None)
+    save_entity = getattr(store, "save_entity", None)
+    if not callable(list_entities) or not callable(save_entity):
+        return []
+    value = text or ""
+    found: list[Entity] = []
+    for entity in list_entities(kind="person"):
+        names = [entity.name, *entity.aliases]
+        if not any(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", value, re.IGNORECASE) for name in names if name):
+            continue
+        entity.attributes["last_mentioned_source"] = source_id
+        save_entity(entity)
+        store.add_claim(Claim.create(
+            subject="user", predicate="mentioned_person", value=entity.id,
+            provenance=ProvenanceKind.TOLD, source_id=source_id,
+            metadata={"entity_name": entity.name},
+        ))
+        found.append(entity)
+    return found
 
 
 # Conservative, deterministic. "my editor is neovim" → (user, editor, neovim).
@@ -57,6 +85,7 @@ def record_told(
             source_id=source_id,
         )
     )
+    link_known_people_mentions(store, value, source_id=source_id)
     for subj, predicate, extracted in extract_told_propositions(value, subject=subject):
         store.add_claim(
             Claim.create(
@@ -70,4 +99,4 @@ def record_told(
     return said
 
 
-__all__ = ["ClaimWriter", "extract_told_propositions", "record_told"]
+__all__ = ["ClaimWriter", "extract_told_propositions", "link_known_people_mentions", "record_told"]

@@ -227,7 +227,7 @@ class JaegerAgent:
         self.max_iterations = int(max_iterations)
         self.callbacks = callbacks or AgentCallbacks()
         self._run_id: str | None = None
-        self._effect_checkpoint: Callable[[str, dict[str, Any]], None] | None = None
+        self._effect_checkpoint: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
         self._tool_executor: ToolExecutor = tool_executor or _default_tool_executor()
 
         # Skip-final: tools whose dict result IS the answer (``get_time``,
@@ -365,10 +365,14 @@ class JaegerAgent:
             binder(run_id)
 
     def set_effect_checkpoint(
-        self, fn: Callable[[str, dict[str, Any]], None] | None
+        self, fn: Callable[[str, dict[str, Any], dict[str, Any]], None] | None
     ) -> None:
-        """Called after an external tool returns, so a crash mid-turn
-        still has a cursor. The executive owns the durable write."""
+        """Called after each non-read tool result is appended.
+
+        The callback receives the finalized, JSON-safe transcript message so
+        a crash mid-turn does not lose evidence of a completed mutation. The
+        executive owns the durable write.
+        """
         self._effect_checkpoint = fn
 
     def _bind_turn_run(self) -> None:
@@ -1686,12 +1690,6 @@ class JaegerAgent:
             name, "done", {"elapsed_s": round(elapsed, 3)},
         )
         tool_def = prep.get("tool_def")
-        if (
-            self._effect_checkpoint is not None
-            and tool_def is not None
-            and getattr(tool_def, "side_effect", "") == "external"
-        ):
-            self._effect_checkpoint(name, args)
 
         # Passive observer for the tool_calls audit table. Determine
         # ok/error from the final content shape: dispatch-raised paths
@@ -1772,12 +1770,23 @@ class JaegerAgent:
         if warning:
             content = _merge_guidance(content, warning)
 
-        self._append_message({
+        tool_message = {
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
             "content": content if isinstance(content, str) else _stringify(content),
-        })
+        }
+        self._append_message(tool_message)
+        if (
+            self._effect_checkpoint is not None
+            and tool_def is not None
+            and getattr(tool_def, "side_effect", "") != "read"
+        ):
+            self._effect_checkpoint(
+                name,
+                dict(args) if isinstance(args, dict) else {},
+                dict(tool_message),
+            )
 
     def _finalize_skip_final(
         self,
