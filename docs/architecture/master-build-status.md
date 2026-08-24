@@ -9,6 +9,8 @@ Handoff for future agents. Resume here; do not restart Phase A.
 - `TurnExecutive` records observed tool results and system responses as autobiographical claims, and its evidence-first contradiction gate asks for clarification before model/tool execution.
 - ARES enriches character summaries through Jaeger's detail bridge, projects commitments/runs read-only, exposes wake keys and explicit event delivery, and owns no runtime rows.
 - CI covers the Jaeger agent package and ARES frontend/ownership gates without models or GPU requirements.
+- Implementation commits: JaegerAI `f7bd427`, `e8c0fd1`, `1508201`; ARES `7c30f7846`, `7a02bf5d9`, `3e6172007`.
+- Verified: Jaeger package `579 passed`; combined Jaeger `3819 passed, 11 skipped`; ARES controller `5634 passed, 91 skipped, 1 xfailed, 2 xpassed, 16 subtests`; frontend `61 passed`; ownership guard passed.
 
 ## COMPLETED
 
