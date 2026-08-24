@@ -41,6 +41,16 @@ Handoff for future agents. Resume here; do not restart Phase A.
 - Entity extraction beyond `my X is Y`.
 - ARES wait/blocked surface beyond Goals effects.
 
+### Personas (audit)
+- Four bundled `character/v1` sheets: systems_principal, research_strategist,
+  robotics_architect, reliability_auditor. ARES does not own them.
+- `~/.ares/prime_archetypes.json` and `~/.ares/memories/SOUL.md` remain
+  unregistered drafts; ARES does not read them.
+
+### ARES image ingest
+- Screenshot upload is inspected locally (size/format). Does not open
+  Jaeger `state.db`. `ARES_NO_JAEGER=1` keeps the live SI untouched.
+
 ## NEXT
 
 - Memory consolidation and autobiographical log.
