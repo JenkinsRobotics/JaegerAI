@@ -207,6 +207,19 @@ def clear_registry() -> None:
     _registry.clear()
 
 
+def snapshot_registry() -> dict[str, ToolDef]:
+    """Copy of the live map. Tests restore this after ``clear_registry``."""
+    return dict(_registry)
+
+
+def restore_registry(snapshot: dict[str, ToolDef]) -> None:
+    """Replace the live map with ``snapshot``. Used by the test suite so
+    a case that emptied the registry cannot strand later cases — module
+    tools register on import and cannot re-fire from a cached module."""
+    _registry.clear()
+    _registry.update(snapshot)
+
+
 __all__ = [
     "register_tool",
     "register_tool_from_function",
@@ -216,4 +229,6 @@ __all__ = [
     "get_tools",
     "has_tool",
     "clear_registry",
+    "snapshot_registry",
+    "restore_registry",
 ]

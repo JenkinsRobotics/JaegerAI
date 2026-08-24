@@ -34,6 +34,7 @@ Silent re-execution and silent skipping are both worse than a stop.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, runtime_checkable
 
@@ -75,6 +76,8 @@ class EffectLedger(Protocol):
 
     def get(self, key: str) -> Effect | None: ...
 
+    def list(self, *, status: str | None = None) -> list[Effect]: ...
+
     def resolve(self, key: str, result: Any = None) -> Effect: ...
 
     def abandon(self, key: str) -> None: ...
@@ -88,44 +91,58 @@ def _settled(effect: Effect) -> None:
 class InMemoryEffectLedger:
     def __init__(self) -> None:
         self._items: dict[str, Effect] = {}
+        self._lock = threading.Lock()
 
     def once(self, key: str, action: str, fn: Callable[[], Any], *,
              run_id: str | None = None) -> tuple[Any, bool]:
-        existing = self._items.get(key)
-        if existing is not None:
-            if existing.status == "done":
-                return existing.result, False
-            raise EffectIndeterminate(key, existing.claimed_at)
+        with self._lock:
+            existing = self._items.get(key)
+            if existing is not None:
+                if existing.status == "done":
+                    return existing.result, False
+                raise EffectIndeterminate(key, existing.claimed_at)
 
-        self._items[key] = Effect(
-            key=key, action=action, status="pending",
-            run_id=run_id, claimed_at=_now(),
-        )
+            self._items[key] = Effect(
+                key=key, action=action, status="pending",
+                run_id=run_id, claimed_at=_now(),
+            )
         # Anything raised here leaves the claim pending on purpose: the
         # effect may have partially landed, and that is exactly the case
-        # a retry must not silently repeat.
+        # a retry must not silently repeat. The lock is released so a
+        # concurrent resolve/abandon can race the crash case, which is
+        # the situation the ledger exists to make explicit.
         result = fn()
         return self.resolve(key, result).result, True
 
     def get(self, key: str) -> Effect | None:
-        return self._items.get(key)
+        with self._lock:
+            return self._items.get(key)
+
+    def list(self, *, status: str | None = None) -> list[Effect]:
+        with self._lock:
+            items = list(self._items.values())
+        if status is None:
+            return items
+        return [item for item in items if item.status == status]
 
     def resolve(self, key: str, result: Any = None) -> Effect:
-        effect = self._items.get(key)
-        if effect is None:
-            raise EffectError(f"no effect {key!r}")
-        _settled(effect)
-        effect.status = "done"
-        effect.result = result
-        effect.completed_at = _now()
-        return effect
+        with self._lock:
+            effect = self._items.get(key)
+            if effect is None:
+                raise EffectError(f"no effect {key!r}")
+            _settled(effect)
+            effect.status = "done"
+            effect.result = result
+            effect.completed_at = _now()
+            return effect
 
     def abandon(self, key: str) -> None:
-        effect = self._items.get(key)
-        if effect is None:
-            raise EffectError(f"no effect {key!r}")
-        _settled(effect)
-        del self._items[key]
+        with self._lock:
+            effect = self._items.get(key)
+            if effect is None:
+                raise EffectError(f"no effect {key!r}")
+            _settled(effect)
+            del self._items[key]
 
 
 __all__ = [
