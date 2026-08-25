@@ -3,6 +3,12 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.11.0` — consolidated release line
+
+All retained feature, reliability, runtime, memory, and publication branch
+histories are reachable from `main`. This release advances the product version
+after the consolidated field-hardening and clean-install qualification work.
+
 ## Unreleased — the loop pin is the source
 
 JaegerAI no longer treats a sibling `GitHub/jaeger-agent` checkout as live

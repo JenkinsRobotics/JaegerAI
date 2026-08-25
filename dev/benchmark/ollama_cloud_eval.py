@@ -97,7 +97,7 @@ def list_available_cloud_models(api_key: str | None = None) -> list[dict[str, An
 
     headers = {
         "Authorization": f"Bearer {key}",
-        "User-Agent": "JaegerAI-Evaluator/0.10.0",
+        "User-Agent": "JaegerAI-Evaluator/0.11.0",
     }
 
     # Query /api/tags
