@@ -20,6 +20,11 @@ dependencies = [
     "jaeger-os>=0.9.0",
     "llama-cpp-python>=0.3",
     "jinja2>=3.1",
+    # Scheduling is a base capability, not a backend: memory.add_schedule
+    # and the due-claim sweep both import croniter unconditionally, so a
+    # bare `pip install jaeger-agent` that lacked it shipped a scheduler
+    # that raised ModuleNotFoundError on first use.
+    "croniter>=2.0",
 ]
 
 # Everything else is a REMOTE or alternative backend, and therefore

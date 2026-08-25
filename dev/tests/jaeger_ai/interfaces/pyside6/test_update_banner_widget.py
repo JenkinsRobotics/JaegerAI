@@ -11,7 +11,10 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytest.importorskip("PySide6")
+# QtWidgets (not the bare package) is what pulls libEGL, and pytest 9.1
+# narrowed importorskip to ModuleNotFoundError by default — a failed
+# shared-library load is a plain ImportError, so both arguments matter.
+pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 
 
 @pytest.fixture(scope="module")

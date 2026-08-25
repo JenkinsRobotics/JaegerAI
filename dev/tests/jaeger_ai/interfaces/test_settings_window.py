@@ -9,16 +9,24 @@ the config).
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
 
-from jaeger_ai.core.instance.instance import InstanceLayout
+# Qt is an optional face: a headless Linux runner has the wheel but not
+# libEGL, so importing QtWidgets raises ImportError at collection. Skip
+# the module instead of failing the whole suite. exc_type=ImportError is
+# required — pytest 9.1 narrowed the default to ModuleNotFoundError, and
+# a failed shared-library load is a plain ImportError.
+pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from jaeger_ai.core.instance.instance import InstanceLayout  # noqa: E402
 from jaeger_ai.core.instance.schemas import (
     Config,
     Identity,
     ModelConfig,
     dump_yaml,
     load_yaml,
-)
+)  # noqa: E402
 
 
 @pytest.fixture(scope="module")
