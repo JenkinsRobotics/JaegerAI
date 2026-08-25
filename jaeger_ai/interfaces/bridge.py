@@ -44,9 +44,11 @@ import queue as _queue
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, TextIO
+
+from jaeger_ai.interfaces import pidfile
 
 _emit_lock = threading.Lock()
 
@@ -2116,6 +2118,27 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     except Exception:  # noqa: BLE001 — queries will report per-call
         ctx.layout = None
 
+    # PROCESS REGISTRATION: `jaeger status` reads run/jaeger.pid to decide
+    # whether a bridge is live. Nothing wrote it before, so status was
+    # structurally blind to a running bridge (field blocker #1). Registration
+    # is best-effort — an unwritable instance dir must never block boot — but
+    # a live owner is authoritative: refuse rather than run two bridges
+    # against one instance.
+    _pids = ExitStack()
+    if ctx.layout is not None:
+        try:
+            _pids.enter_context(pidfile.acquire(ctx.layout))
+        except pidfile.AlreadyRunning as exc:
+            # kind="locked" is the established contract for "another process
+            # holds this instance" — BridgeProcess.swift maps it to
+            # .locked and offers attach-or-pick. A novel kind would
+            # fall through to a generic boot error.
+            _emit(proto, protocol.fatal_frame(str(exc), kind="locked"))
+            return 1
+        except Exception as exc:  # noqa: BLE001 — visibility is not a boot gate
+            print(f"[bridge] pid registration skipped: {exc}",
+                  file=sys.stderr, flush=True)
+
     # FAST READY: the transport is usable now; the agent streams in behind.
     # Carry the agent's name (identity.yaml, on disk pre-boot) from the very
     # first frame so the tray/header never flashes the character name.
@@ -2596,6 +2619,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 req["_out"] = proto
                 turns.put(req)
     finally:
+        # Deregister before anything else: the os._exit below skips normal
+        # cleanup, so a late release would leave a stale pid file behind.
+        _pids.close()
         # Orderly shutdown: let the boot settle (can't clean up a
         # half-booted agent), stop the worker, tear down, mark the exit
         # clean, then leave through os._exit if the Metal runtime is
