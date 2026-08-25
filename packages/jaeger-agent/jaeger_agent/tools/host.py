@@ -101,7 +101,7 @@ def _t_system_status() -> dict:
     return system_status()
 
 
-@register_tool_from_function(name="open_on_host")
+@register_tool_from_function(name="open_on_host", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="host",
                operation="open_on_host",
                summary="open a URL / file / app on the host")

@@ -1,14 +1,14 @@
 ---
 name: spike
-description: "Build throwaway prototypes to validate an idea before committing to a real build — load this when the user says 'let me try this', 'spike it out', 'is this even possible?', 'quick prototype of X', or 'compare A vs B'."
-version: 1.1.0
-platforms: [macos, linux, windows]
-requires_tools: [web_search, web_extract, terminal, write_file, read_file, todo, delegate_task]
+description: Build throwaway prototypes to validate an idea before committing to a real build — load this when the user says 'let me try this', 'spike it out', 'is this even possible?', 'quick prototype of X', or 'compare A vs B'.
 metadata:
   jros:
     tags: [spike, prototype, experiment, feasibility, proof-of-concept]
     category: software-development
     related_skills: [writing-plans, subagent-driven-development]
+    version: 1.1.0
+    platforms: [macos, linux, windows]
+    requires-tools: [web_search, web_extract, terminal, write_file, read_file, todo, delegate_task]
 ---
 
 # SPIKE

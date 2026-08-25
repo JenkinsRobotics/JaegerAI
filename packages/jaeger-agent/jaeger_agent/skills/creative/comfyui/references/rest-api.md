@@ -200,7 +200,8 @@ Cloud equivalent: prepend `https://cloud.comfy.org/api` and add `-H "X-API-Key: 
 
 ```bash
 # All node types and their input specs
-curl -s "http://127.0.0.1:8188/object_info" | python3 -m json.tool
+curl -s -o /tmp/comfy-object-info.json "http://127.0.0.1:8188/object_info"
+python3 -m json.tool /tmp/comfy-object-info.json
 
 # Specific node
 curl -s "http://127.0.0.1:8188/object_info/KSampler"

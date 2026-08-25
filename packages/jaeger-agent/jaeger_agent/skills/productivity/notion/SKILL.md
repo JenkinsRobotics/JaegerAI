@@ -1,6 +1,6 @@
 ---
 name: notion
-description: "Notion API via curl: pages, databases, blocks, search."
+description: "Notion API via curl: pages, databases, blocks, search. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: community
 license: MIT

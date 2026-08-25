@@ -1,6 +1,6 @@
 ---
 name: nano-pdf
-description: "Edit PDF text/typos/titles via nano-pdf CLI (NL prompts)."
+description: "Edit PDF text/typos/titles via nano-pdf CLI (NL prompts). Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: community
 license: MIT

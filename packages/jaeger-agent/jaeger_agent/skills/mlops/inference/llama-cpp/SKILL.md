@@ -1,6 +1,6 @@
 ---
 name: llama-cpp
-description: llama.cpp local GGUF inference + HF Hub model discovery.
+description: llama.cpp local GGUF inference + HF Hub model discovery. Use when the user explicitly requests this named workflow or its specific output.
 version: 2.1.2
 author: Orchestra Research
 license: MIT

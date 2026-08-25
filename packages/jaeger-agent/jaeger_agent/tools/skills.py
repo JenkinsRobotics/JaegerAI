@@ -92,6 +92,8 @@ def skill(action: str, name: str = "", query: str = "",
       - ``stats``  — usage telemetry: which tools and skills get used.
       - ``curate`` — assess the skill library: which agent-authored
         skills have gone stale. Read-only — reports, archives nothing.
+      - ``audit``  — validate naming, routing descriptions, entrypoint size,
+        aliases, references, and required tools against the live registry.
 
     Reach for a skill when a task is non-trivial and specialized
     ("inspect a codebase", "make an ascii-art banner", "search arxiv")."""
@@ -106,6 +108,10 @@ def skill(action: str, name: str = "", query: str = "",
         # skills. Archiving is a deliberate, separate step (curator A2).
         from jaeger_agent.skill_registry.curator import run_curation
         return run_curation(apply=False)
+
+    if act in ("audit", "validate", "lint"):
+        from jaeger_agent.skill_registry.skill_audit import audit_catalog
+        return audit_catalog()
 
     if act in ("list", "all", ""):
         skills = _pb.available_playbooks()
@@ -135,7 +141,9 @@ def skill(action: str, name: str = "", query: str = "",
             "skills": [
                 {"name": s.name, "category": s.category,
                  "description": s.description, "tier": s.tier,
-                 "tools": s.requires_tools}
+                 "tools": s.requires_tools,
+                 "lifecycle": getattr(s, "lifecycle", "core"),
+                 "skill_class": getattr(s, "skill_class", "first-class")}
                 for s in page
             ],
         }
@@ -187,6 +195,8 @@ def skill(action: str, name: str = "", query: str = "",
         result = {
             "ok": True, "name": s.name, "category": s.category,
             "origin": s.origin,
+            "lifecycle": getattr(s, "lifecycle", "core"),
+            "skill_class": getattr(s, "skill_class", "first-class"),
             "instructions": content[:_MAX_SKILL_CHARS],
             "truncated": len(content) > _MAX_SKILL_CHARS,
             "folder": str(folder),
@@ -194,12 +204,28 @@ def skill(action: str, name: str = "", query: str = "",
         }
         # Advisory prerequisites — surfaced only when declared so the model
         # knows what to load (a toolset) or fall back from before following.
-        if s.platforms:
-            result["platforms"] = s.platforms
-        if s.requires_tools:
-            result["requires_tools"] = s.requires_tools
-        if s.requires_toolsets:
-            result["requires_toolsets"] = s.requires_toolsets
+        platforms = getattr(s, "platforms", ())
+        required_tools = getattr(s, "requires_tools", ())
+        optional_tools = getattr(s, "optional_tools", ())
+        required_plugins = getattr(s, "requires_plugins", ())
+        aliases = getattr(s, "aliases", ())
+        required_toolsets = getattr(s, "requires_toolsets", ())
+        if platforms:
+            result["platforms"] = platforms
+        if required_tools:
+            result["requires_tools"] = required_tools
+        if optional_tools:
+            result["optional_tools"] = optional_tools
+        if required_plugins:
+            result["requires_plugins"] = required_plugins
+            result["plugin_setup"] = (
+                "Before execution, inspect/install the required plugin(s) with "
+                "list_plugins/setup_plugin; do not guess provider tools."
+            )
+        if aliases:
+            result["aliases"] = aliases
+        if required_toolsets:
+            result["requires_toolsets"] = required_toolsets
             # POLISH-4: auto-load the toolsets the skill declares it
             # needs. Without this the model has to round-trip a
             # ``load_tools`` call after every ``skill(view)`` —
@@ -211,7 +237,7 @@ def skill(action: str, name: str = "", query: str = "",
                     active_toolset_names, enable_toolset,
                 )
                 loaded_now: list[str] = []
-                for ts in s.requires_toolsets:
+                for ts in required_toolsets:
                     if enable_toolset(ts):
                         loaded_now.append(ts)
                 if loaded_now:

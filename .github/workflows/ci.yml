@@ -1,23 +1,73 @@
 name: JaegerAI CI
-
 on: [push, pull_request]
-
 permissions:
   contents: read
-
+env:
+  JAEGER_NO_ATTACH: "1"
+  JAEGER_TEST_HEADLESS: "1"
+  PYTHONHASHSEED: "0"
 jobs:
-  agent-package:
+  python:
+    name: Python ${{ matrix.python }} / ${{ matrix.suite }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+        suite: [root, agent, os, kokoro, whisper]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install suite
+        run: |
+          python -m pip install --upgrade pip
+          case "${{ matrix.suite }}" in
+            root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e . pytest ;;
+            agent) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent pytest ;;
+            os) python -m pip install -e packages/jaeger-os pytest ;;
+            kokoro) python -m pip install -e packages/jaeger-os -e packages/jaeger-kokoro-tts pytest ;;
+            whisper) python -m pip install -e packages/jaeger-os -e packages/jaeger-whisper-stt pytest ;;
+          esac
+      - name: Test suite
+        run: |
+          case "${{ matrix.suite }}" in
+            root) python -m pytest dev/tests -q ;;
+            agent) python -m pytest packages/jaeger-agent/tests -q ;;
+            os) cd packages/jaeger-os && python -m pytest dev/tests -q ;;
+            kokoro) cd packages/jaeger-kokoro-tts && python -m pytest -q ;;
+            whisper) cd packages/jaeger-whisper-stt && python -m pytest -q ;;
+          esac
+  swift:
+    name: Native Swift
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test native app
+        working-directory: jaeger_ai/interfaces/swift
+        run: swift test
+  release-artifacts:
+    name: Build and inspect distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: packages/jaeger-agent/pyproject.toml
-      - run: python -m pip install -e packages/jaeger-agent pytest
-      - name: Run package tests without live attachment
-        env:
-          JAEGER_NO_ATTACH: "1"
-        run: python -m pytest packages/jaeger-agent/tests -q
+      - run: python -m pip install build
+      - name: Build distributions from clean checkout
+        run: |
+          mkdir -p dist/all
+          for project in packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .; do
+            python -m build "$project" --outdir "$PWD/dist/all"
+          done
+      - name: Reject unsafe artifact contents
+        run: python dev/scripts/inspect_release_artifacts.py dist/all
+      - name: Installer and test-runner syntax
+        run: bash -n install.sh scripts/*.sh dev/scripts/*.sh

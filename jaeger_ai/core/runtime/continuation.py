@@ -68,6 +68,19 @@ _BLOCKED = re.compile(
     re.IGNORECASE,
 )
 
+# Inner-loop backstop already fired, or the model is narrating the same
+# timeout / identical-call stall. Re-firing a new turn resets the
+# per-turn counters and is how a Mail AppleScript hang became 60 tools.
+_LOOP_BREAKER_TEXT = re.compile(
+    r"timed out after \d+|"
+    r"do not repeat without narrowing|"
+    r"hit the same \S+ failure \d+ times|"
+    r"called \S+ with identical arguments|"
+    r"made \d+ tool calls in a single turn|"
+    r"appleevents?.*timeout",
+    re.IGNORECASE,
+)
+
 # Completion claims. Kept tight and result-shaped — "I've finished",
 # "all 14 folders processed", "here is the summary" — so that a mid-run
 # "I finished the first folder" cannot end a run that has 13 to go
@@ -153,7 +166,7 @@ def classify(text: str) -> str:
         return "empty"
     if _QUESTION.search(body):
         return "question"
-    if _BLOCKED.search(body):
+    if _BLOCKED.search(body) or _LOOP_BREAKER_TEXT.search(body):
         return "blocked"
     if _COMPLETE.search(body) and not _PARTIAL_COMPLETE.search(body):
         return "complete"
@@ -172,6 +185,25 @@ def hit_inner_cap(halt_reason: str | None) -> bool:
     """
     reason = (halt_reason or "").lower()
     return "max_iterations" in reason
+
+
+def is_loop_breaker(halt_reason: str | None) -> bool:
+    """True when the inner backstop halted a repeating failure.
+
+    Unlike ``hit_inner_cap`` (budget spent, keep going), a loop-breaker
+    halt is terminal: the next turn would reset the counters and spam
+    the same failing tool.
+    """
+    reason = (halt_reason or "").lower()
+    if not reason or "max_iterations" in reason:
+        return False
+    if "identical arguments" in reason:
+        return True
+    if "failure" in reason and ("same" in reason or "times" in reason):
+        return True
+    if "tool calls in a single turn" in reason:
+        return True
+    return False
 
 
 def needs_continuation(text: str) -> bool:
@@ -212,6 +244,6 @@ def verification_prompt(objective: str = "") -> str:
 
 __all__ = [
     "CONTINUE_NUDGE", "VERIFY_NUDGE", "enabled", "classify",
-    "hit_inner_cap", "needs_continuation", "continuation_prompt",
-    "verification_prompt",
+    "hit_inner_cap", "is_loop_breaker", "needs_continuation",
+    "continuation_prompt", "verification_prompt",
 ]

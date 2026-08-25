@@ -1,6 +1,6 @@
 ---
 name: baoyu-comic
-description: "Knowledge comics (知识漫画): educational, biography, tutorial."
+description: "Knowledge comics (知识漫画): educational, biography, tutorial. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.56.1
 author: 宝玉 (JimLiu)
 license: MIT

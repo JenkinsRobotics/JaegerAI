@@ -1,14 +1,34 @@
 ---
 name: self-improvement
-description: "Audit and curate your OWN skill library: find stale or unused skills worth retiring, spot skills that keep underperforming, and queue fixes. Load this for 'check / curate / clean up / retire skills', 'which skills are unused or stale', or reviewing how your skills are doing."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [list_skills, skill_notes, request_skill_review, record_skill_revision, skill_note]
+description: 'Audit and curate your OWN skill library: find stale or unused skills
+  worth retiring, spot skills that keep underperforming, and queue fixes. Load this
+  for ''check / curate / clean up / retire skills'', ''which skills are unused or
+  stale'', or reviewing how your skills are doing.'
 metadata:
   jros:
-    tags: [self-improvement, curation, skills, maintenance, retire, review]
+    tags:
+    - self-improvement
+    - curation
+    - skills
+    - maintenance
+    - retire
+    - review
     category: software-development
-    related_skills: [skill-builder, deep-think]
+    related_skills:
+    - skill-builder
+    - hermes-agent-skill-authoring
+    - deep-think
+    version: 1.1.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - list_skills
+    - skill_notes
+    - request_skill_review
+    - record_skill_revision
+    - skill_note
 ---
 
 # SELF-IMPROVEMENT — CURATE + IMPROVE YOUR OWN SKILL LIBRARY
@@ -49,6 +69,24 @@ record_skill_revision(skill="name", version="…", summary="…")   log a kept c
 ## ERROR HATCH
 - `list_skills(action="curate")` returns nothing stale -> say so; a clean library
   is a valid result. Don't invent skills to retire.
+
+## FIRST-CLASS vs IMPORTED
+
+First-class JROS skills (8-point SOP, exact tools, error hatch, done-when,
+≤ ~130 lines): `skill-builder`, `self-improvement`, `macos-computer-use`,
+`mac-native`, `macos-mail-organizer`, `email-triage`, `scheduling`,
+`memory-keeping`, `kanban`, `web-research`, `writing-plans`.
+
+Imported dumps (comfyui, wandb, dspy, claude-code, …) are domain
+reference. Do not follow them as the authoring bar. To bring one up to
+prime quality, `use_skill(name="skill-builder")` Flow C: keep facts,
+move bulk to `references/`, add hatch + done-when, verify every tool
+name.
+
+When two skills overlap, use the first-class one:
+- authoring → `skill-builder` (not a second process)
+- drive the Mac → `macos-computer-use`
+- Apple Mail → `macos-mail-organizer`
 
 ## DONE WHEN
 You've reported the stale/unused skills and any underperformers, and queued a

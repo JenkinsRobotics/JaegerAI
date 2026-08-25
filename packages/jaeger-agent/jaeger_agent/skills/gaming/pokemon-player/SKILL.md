@@ -1,6 +1,6 @@
 ---
 name: pokemon-player
-description: "Play Pokemon via headless emulator + RAM reads."
+description: "Play Pokemon via headless emulator + RAM reads. Use when the user explicitly requests this named workflow or its specific output."
 tags: [gaming, pokemon, emulator, pyboy, gameplay, gameboy]
 platforms: [linux, macos, windows]
 requires_tools: [terminal, vision_analyze, memory]

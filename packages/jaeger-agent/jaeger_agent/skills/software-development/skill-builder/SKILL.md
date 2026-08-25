@@ -1,22 +1,26 @@
 ---
 name: skill-builder
-description: "Create, review, or improve a JROS skill (a SKILL.md playbook). Load this whenever the task is to author a new skill, fix/tighten an existing one, or audit the skill library — it hands you the standard, the exact authoring tools, and the review + benchmark loop."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [write_file, patch, read_file, list_skill_dir, search_files, list_skills, use_skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
+description: Create, review, or improve a JROS skill (a SKILL.md playbook). Load this whenever the task is to author a new skill, fix/tighten an existing one, or audit the skill library — it hands you the standard, the exact authoring tools, and the review + benchmark loop.
 metadata:
   jros:
     tags: [skill, authoring, meta, review, standard, playbook]
     category: software-development
-    related_skills: [hermes-agent-skill-authoring, requesting-code-review, writing-plans]
+    lifecycle: core
+    skill-class: first-class
+    aliases: [hermes-agent-skill-authoring]
+    related_skills: [self-improvement, requesting-code-review, plan]
+    version: 2.0.0
+    platforms: [linux, macos, windows]
+    requires-tools: [write_file, patch, read_file, list_skill_dir, search_files, list_skills, use_skill, benchmark_skill, record_skill_revision, request_skill_review, skill_note, package_skill]
 ---
 
 # SKILL BUILDER — author, review, and improve JROS skills
 
-A skill is a CHEAT SHEET: it hands a small (4B) local model the knowledge, the
-EXACT tool names, and a tight SOP for a task it would otherwise fumble. A skill
-is a folder under `jaeger_os/agent/skills/<category>/<name>/` with a `SKILL.md`
-(the recipe) and optional `references/`, `templates/`, `scripts/`, `tests/`.
+A skill is a CHEAT SHEET: it hands a small local model the knowledge, exact tool
+names, and a tight SOP for a task it would otherwise fumble. Bundled skills live
+under `packages/jaeger-agent/jaeger_agent/skills/<category>/<name>/`; instance
+and user skills live in the active instance's `skills/` directory. Both use a
+`SKILL.md` plus optional `references/`, `templates/`, `scripts/`, and `tests/`.
 
 ## THE AUTHORING TOOLS (exact names — call with named args)
 ```
@@ -53,7 +57,8 @@ references/, fetched with read_file — never inline).
   those are shell/library calls run via `terminal`/`execute_code`, not JROS tools.
 - Restructure, don't redesign: keep the skill's domain facts and steps correct.
 - Plain-terminal formatting: UPPERCASE headers, no nested tables, minimal bold.
-  Target 50–130 lines for SKILL.md; overflow → references/.
+  Target 50–130 lines; >130 warns, >250 needs review, and a first-class skill
+  over 500 lines must migrate bulk material to references/.
 
 ## FLOW A — CREATE a new skill
 1. STUDY: `list_skills(action="search", query=…)` for near-duplicates (don't rebuild an
@@ -76,6 +81,12 @@ references/, fetched with read_file — never inline).
    error hatch + done-when present? heavy content lazy-loaded not inline?
 4. Report findings ranked by severity (wrong tool names first). Fix in Flow C.
 
+Imported knowledge packs (comfyui, weights-and-biases, dspy, claude-code, …)
+preserve useful facts but are not the authoring bar. First-class JROS skills
+match scheduling / web-research / macos-mail-organizer: exact tools, hatch,
+done-when, and a concise router. To lift a knowledge pack, use Flow C without
+discarding its domain material: move that material to references/.
+
 ## FLOW C — IMPROVE a skill
 1. Small fix (wrong tool name, tightened trigger, added hatch): `patch(path=…,
    old=…, new=…)`. Big rewrite: `write_file` the whole SKILL.md.
@@ -93,6 +104,6 @@ references/, fetched with read_file — never inline).
   skill shows next session. Check the frontmatter parses (`---` fences, valid YAML).
 
 ## DONE WHEN
-The SKILL.md meets all 8 points, every tool it names is real, it's ≤ ~130 lines
-(overflow in references/), and — if it ships a benchmark — `benchmark_skill`
-shows no regression. Then `record_skill_revision` logs the change.
+The SKILL.md meets all 8 points, every tool it names is real, its size tier is
+appropriate, and — if it ships a benchmark — `benchmark_skill` shows no
+regression. Then `record_skill_revision` logs the change.

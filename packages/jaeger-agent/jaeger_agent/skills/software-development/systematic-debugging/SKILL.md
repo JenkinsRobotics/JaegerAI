@@ -1,14 +1,32 @@
 ---
 name: systematic-debugging
-description: "Find the root cause of a bug BEFORE touching a fix — a 4-phase investigate → analyze → hypothesize → fix flow. Load this for test failures, crashes, unexpected behavior, perf/build/integration issues, or any 'just one quick fix' urge."
-version: 2.0.0
-platforms: [macos, linux, windows]
-requires_tools: [read_file, search_files, terminal, web_search, append_file, todo]
+description: Find the root cause of a bug BEFORE touching a fix — a 4-phase investigate
+  → analyze → hypothesize → fix flow. Load this for test failures, crashes, unexpected
+  behavior, perf/build/integration issues, or any 'just one quick fix' urge.
 metadata:
   jros:
-    tags: [debugging, troubleshooting, root-cause, investigation, testing]
+    tags:
+    - debugging
+    - troubleshooting
+    - root-cause
+    - investigation
+    - testing
     category: software-development
-    related_skills: [test-driven-development, node-inspect-debugger]
+    related_skills:
+    - test-driven-development
+    - node-inspect-debugger
+    version: 2.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - read_file
+    - search_files
+    - terminal
+    - web_search
+    - append_file
+    - todo
 ---
 
 # SYSTEMATIC DEBUGGING

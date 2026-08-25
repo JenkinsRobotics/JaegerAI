@@ -1,14 +1,31 @@
 ---
 name: plan
-description: "Load this for plan-only turns: research the repo read-only and save a concrete markdown plan, without editing project code or running mutating commands."
-version: 2.0.0
-platforms: [macos, linux, windows]
-requires_tools: [read_file, search_files, execute_code]
+description: 'Load this for plan-only turns: research the repo read-only and save
+  a concrete markdown plan, without editing project code or running mutating commands.'
 metadata:
   jros:
-    tags: [planning, plan-mode, read-only, workflow]
+    tags:
+    - planning
+    - plan-mode
+    - read-only
+    - workflow
     category: software-development
-    related_skills: [writing-plans, subagent-driven-development]
+    lifecycle: core
+    skill-class: first-class
+    aliases:
+    - writing-plans
+    related_skills:
+    - writing-plans
+    - subagent-driven-development
+    version: 2.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - read_file
+    - search_files
+    - execute_code
 ---
 
 # PLAN MODE

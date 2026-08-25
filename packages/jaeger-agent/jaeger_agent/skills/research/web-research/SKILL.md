@@ -1,15 +1,30 @@
 ---
 name: web-research
-description: "Answer a question that needs current or external information — 'what's the latest on X', 'find the docs for Y', 'is Z true', 'compare A and B'. Load this whenever the answer isn't in your own knowledge/memory or could be stale, before reaching for web_search/web_extract raw."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [web_search, web_extract]
-requires_toolsets: [web]
+description: Answer a question that needs current or external information — 'what's
+  the latest on X', 'find the docs for Y', 'is Z true', 'compare A and B'. Load this
+  whenever the answer isn't in your own knowledge/memory or could be stale, before
+  reaching for web_search/web_extract raw.
 metadata:
   jros:
-    tags: [research, web, search, citations, fact-checking]
+    tags:
+    - research
+    - web
+    - search
+    - citations
+    - fact-checking
     category: research
-    related_skills: [log-calculations]
+    related_skills:
+    - log-calculations
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - web_search
+    - web_extract
+    requires-toolsets:
+    - web
 ---
 
 # WEB RESEARCH — SEARCH -> EXTRACT -> CITE

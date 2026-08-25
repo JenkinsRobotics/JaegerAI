@@ -16,6 +16,7 @@
 //    * Slim status bar showing agent state + model
 //
 
+import AppKit
 import SwiftUI
 
 struct ChatView: View {
@@ -30,6 +31,7 @@ struct ChatView: View {
     /// Live task drawer starts open so a long batch is visible without
     /// a click; the operator can collapse it.
     @State private var progressExpanded = true
+    @State private var attachedURLs: [URL] = []
 
     init(agent: AgentBridge) {
         _chat = StateObject(wrappedValue: ChatViewModel(agent: agent))
@@ -309,12 +311,25 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            if !attachedURLs.isEmpty {
+                attachmentChips
+            }
+            HStack(alignment: .bottom, spacing: 8) {
             Text("❯")
                 .font(Term.mono.weight(.bold))
                 .foregroundColor(Term.accent)
                 .padding(.leading, 4)
                 .padding(.bottom, 8)
+
+            Button(action: pickAttachments) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Term.inkDim)
+            }
+            .buttonStyle(.plain)
+            .help("Attach files")
+            .disabled(!agent.isConnected)
 
             // Explicit prompt Text: the default placeholder renders in the
             // system's label colour, which collapses to near-black on the
@@ -377,6 +392,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .disabled(!canSend)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -389,6 +405,44 @@ struct ChatView: View {
                     .frame(height: 2)
                     .padding(.horizontal, 14)
             }
+        }
+    }
+
+    private var attachmentChips: some View {
+        HStack(spacing: 6) {
+            ForEach(attachedURLs, id: \.path) { url in
+                HStack(spacing: 4) {
+                    Image(systemName: "doc")
+                        .font(.system(size: 10))
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(1)
+                    Button {
+                        attachedURLs.removeAll { $0 == url }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .foregroundColor(Term.inkDim)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(Term.panel))
+            }
+        }
+        .padding(.leading, 28)
+    }
+
+    private func pickAttachments() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.prompt = "Attach"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !attachedURLs.contains(url) {
+            attachedURLs.append(url)
         }
     }
 
@@ -451,7 +505,7 @@ struct ChatView: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
             }
-            // Operating Mode switcher pill (Focus, Wonder, Standby)
+            // Composer execution mode (Ask / Plan / Agent → /mode)
             Menu {
                 ForEach(OperatingMode.allCases) { mode in
                     Button(action: { chat.setOperatingMode(mode) }) {
@@ -513,11 +567,18 @@ struct ChatView: View {
         // flight or an empty composer blocks it.
         agent.isConnected
             && !chat.isTranscribing
-            && !chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !attachedURLs.isEmpty)
     }
 
     private func sendCurrent() {
-        let text = chat.composerText
+        var text = chat.composerText
+        if !attachedURLs.isEmpty {
+            let listing = attachedURLs.map { "- \($0.path)" }.joined(separator: "\n")
+            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            text = "Attached files:\n\(listing)" + (body.isEmpty ? "" : "\n\n\(body)")
+            attachedURLs = []
+        }
         chat.composerText = ""
         Task { await chat.send(text) }
     }

@@ -385,6 +385,27 @@ class ExternalModelClient:
         ) and detected:
             self.num_ctx = detected
 
+    def refresh_active_context(self) -> int | None:
+        """Adopt Ollama's loaded window when the model is resident.
+
+        This is deliberately separate from model-card discovery: the active
+        scheduler allocation is the only value that can safely budget a turn.
+        """
+        if self.provider != "ollama":
+            return None
+        from jaeger_ai.core.models.ollama_context import query_ollama_active_context
+
+        active = query_ollama_active_context(
+            self.model_name, self.ext.base_url, self._api_key,
+        )
+        if active:
+            self.loaded_ctx = active
+            try:
+                self.ext.ctx = active
+            except Exception:  # noqa: BLE001
+                pass
+        return active
+
     def _chat_anthropic(self, messages, max_tokens, temperature, top_p) -> str:
         from anthropic import Anthropic
 
@@ -470,7 +491,11 @@ class ExternalModelClient:
                     except Exception:
                         raise probe_err from None
 
-                return {"ok": True, "detail": "endpoint reachable",
+                active = self.refresh_active_context()
+                detail = "endpoint reachable"
+                if active:
+                    detail += f"; active context {active:,}"
+                return {"ok": True, "detail": detail,
                         "latency_s": round(time.perf_counter() - started, 2)}
             # Anthropic — a small generation probe (no /models list).
             result = self.chat(

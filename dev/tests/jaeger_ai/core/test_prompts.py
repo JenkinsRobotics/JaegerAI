@@ -135,21 +135,14 @@ def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:
     assert 'memory(action="remember"' in sp
 
 
-def test_prompt_defaults_to_unscoped_tool_surface(tmp_path, monkeypatch) -> None:
-    """Default is UNSCOPED — full tool surface visible to the model.
-
-    History: we briefly flipped this to SCOPED-by-default after adding
-    ``describe_tool`` + the catalog, but a/b benching against v5 showed
-    Gemma 4 26B-A4B routing accuracy dropped from 100% to 67.6% under
-    the new default. Reverted to unscoped (opt-in via env) until
-    auto-load-on-intent lands. See docs/lean_surface.md and the
-    code_review_2026_05_24 disposition doc for context."""
+def test_prompt_defaults_to_automatic_scoped_surface(tmp_path, monkeypatch) -> None:
+    """Automatic intent routing makes the Hermes-style surface default."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "full built-in tool surface is visible" in sp
-    assert "small CORE set of tools" not in sp
-    assert "TOOL CATALOG" not in sp
+    assert "small CORE set of tools" in sp
+    assert "TOOL CATALOG" in sp
+    assert "describe_tool" in sp
 
 
 def test_prompt_scoped_when_explicit_env(tmp_path, monkeypatch) -> None:

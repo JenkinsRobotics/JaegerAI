@@ -1,6 +1,6 @@
 ---
 name: airtable
-description: Airtable REST API via curl. Records CRUD, filters, upserts.
+description: Airtable REST API via curl. Records CRUD, filters, upserts. Use when the user explicitly requests this named workflow or its specific output.
 version: 1.1.0
 author: community
 license: MIT
@@ -9,6 +9,7 @@ prerequisites:
   env_vars: [AIRTABLE_API_KEY]
   commands: [curl]
 requires_tools: [terminal]
+requires_plugins: [airtable]
 metadata:
   hermes:
     tags: [Airtable, Productivity, Database, API]
@@ -197,16 +198,18 @@ OFFSET=""
 while :; do
   URL="https://api.airtable.com/v0/$BASE_ID/$TABLE?pageSize=100"
   [ -n "$OFFSET" ] && URL="$URL&offset=$OFFSET"
-  RESP=$(curl -s "$URL" -H "Authorization: Bearer $AIRTABLE_API_KEY")
-  echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(r["id"], r["fields"].get("Name","")) for r in d["records"]]'
-  OFFSET=$(echo "$RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("offset",""))')
+  RESP=$(curl -s --config "$AIRTABLE_CURL_CONFIG" "$URL")
+  jq -r '.records[] | [.id, (.fields.Name // "")] | @tsv' <<<"$RESP"
+  OFFSET=$(jq -r '.offset // ""' <<<"$RESP")
   [ -z "$OFFSET" ] && break
 done
 ```
 
 ## Typical Hermes Workflow
 
-1. **Confirm auth.** `curl -s -o /dev/null -w "%{http_code}\n" https://api.airtable.com/v0/meta/bases -H "Authorization: Bearer $AIRTABLE_API_KEY"` — expect `200`.
+1. **Confirm auth.** Use the installed Airtable plugin. For legacy curl-only
+   setups, the user must provide a preconfigured curl config file and the agent
+   calls `curl --config "$AIRTABLE_CURL_CONFIG"`; never put tokens in commands.
 2. **Find the base.** List bases (step above) OR ask the user for the `app...` ID directly if the token lacks `schema.bases:read`.
 3. **Inspect the schema.** `GET /v0/meta/bases/$BASE_ID/tables` — cache the exact field names and primary-field name locally in the session before mutating anything.
 4. **Read before you write.** For "update X where Y", `filterByFormula` first to resolve the `rec...` ID, then `PATCH /v0/$BASE_ID/$TABLE/$RECORD_ID`. Never guess record IDs.

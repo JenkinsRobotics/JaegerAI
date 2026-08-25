@@ -33,8 +33,13 @@ jaeger_whisper_stt = "jaeger_whisper_stt.module_roots:roots"
 version = {attr = "jaeger_whisper_stt.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["jaeger_whisper_stt*"]
+exclude = ["jaeger_whisper_stt.__pycache__", "jaeger_whisper_stt.*.__pycache__"]
+namespaces = false
 
 [tool.setuptools.package-data]
 # Non-.py assets under the package (module.yaml at minimum) — setuptools
@@ -46,7 +51,7 @@ include = ["jaeger_whisper_stt*"]
 # accident. "**/*" is deliberately broad (redundant with .py, harmless)
 # rather than an extension allowlist that silently misses the next
 # asset type this module grows.
-jaeger_whisper_stt = ["**/*"]
+jaeger_whisper_stt = ["**/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["jaeger_whisper_stt/nodes/whisper_stt/tests"]

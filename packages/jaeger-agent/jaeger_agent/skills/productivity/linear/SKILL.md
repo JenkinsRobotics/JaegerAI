@@ -1,6 +1,6 @@
 ---
 name: linear
-description: "Linear: manage issues, projects, teams via GraphQL + curl."
+description: "Linear: manage issues, projects, teams via GraphQL + curl. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: Hermes Agent
 license: MIT
@@ -9,6 +9,7 @@ prerequisites:
   env_vars: [LINEAR_API_KEY]
   commands: [curl]
 requires_tools: [terminal]
+requires_plugins: [linear]
 metadata:
   hermes:
     tags: [Linear, Project Management, Issues, GraphQL, API, Productivity]

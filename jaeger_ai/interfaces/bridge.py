@@ -342,6 +342,9 @@ def _integration_contract() -> dict[str, Any]:
     """Return the authoritative feature contract for external surfaces."""
     from jaeger_ai import __version__
     from jaeger_os.contract import protocol
+    from jaeger_ai.interfaces.surface_contract import (
+        SWIFT_COMMAND_SUPPORT, SWIFT_QUERY_SUPPORT,
+    )
 
     return {
         "contract": "ares-jaeger",
@@ -353,6 +356,12 @@ def _integration_contract() -> dict[str, Any]:
             "queries": list(BRIDGE_QUERIES),
             "commands": list(BRIDGE_COMMANDS),
             "controls": ["cancel", "steer", "respond"],
+        },
+        "surface_support": {
+            "swift": {
+                "queries": dict(SWIFT_QUERY_SUPPORT),
+                "commands": dict(SWIFT_COMMAND_SUPPORT),
+            },
         },
         "domains": {
             "agent_runtime": [
@@ -1469,7 +1478,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                 text = result.get("text") or ""
                 _emit(proto, protocol.reply_frame(
                     text, result.get("error"), session,
-                    elapsed_s=result.get("elapsed_s")))
+                    elapsed_s=result.get("elapsed_s"),
+                    halt_reason=result.get("halt_reason")))
                 try:
                     from jaeger_ai.core.runtime.cron_delivery import deliver_text
                     sent = deliver_text(ctx.layout, job_name, text)
@@ -1543,7 +1553,8 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 # clickable picker; if they still arrive here we refuse a catalogue dump
 # into the transcript. ``/model use …`` is a typed switch and is allowed.
 _SLASH_SAFE = ("help", "tools", "skills", "facts", "plugins",
-               "instance", "instances", "board", "config")
+               "instance", "instances", "board", "config",
+               "auto", "mode")
 
 
 def _slash_parts(text: str) -> tuple[str, str]:
@@ -1570,13 +1581,12 @@ def _goal_turn_text(text: str) -> str | None:
 
 
 def _windowed_control_slash(text: str) -> str | None:
-    """Local replies for /auto /stop /steer /goal (bare). None → TUI dispatch."""
+    """Local replies for /stop /steer /goal (bare). None → TUI dispatch.
+
+    ``/auto`` and ``/mode`` dispatch through the TUI slash registry so
+    the windowed composer actually switches execution mode.
+    """
     name, rest = _slash_parts(text)
-    if name in {"auto", "mode"}:
-        return (
-            "Autonomous continuation is already on. Send the task as a "
-            "normal message — the engine keeps going until the work is done."
-        )
     if name == "stop":
         try:
             from jaeger_ai.main import request_turn_cancel
@@ -1786,7 +1796,8 @@ def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
             if silent and not error:
                 return
         _emit(proto, protocol.reply_frame(
-            text, error, session, elapsed_s=result.get("elapsed_s")))
+            text, error, session, elapsed_s=result.get("elapsed_s"),
+            halt_reason=result.get("halt_reason")))
     finally:
         _emit_state(proto, ctx, False, session)
 
@@ -1915,8 +1926,11 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     break
 
                 # Inner-cap halt is "start the next step", not "stop".
+                # Loop-breaker halt (identical/timeout spam) IS a stop.
                 nxt_prompt = None
                 halt = result.get("halt_reason")
+                if continuation.is_loop_breaker(halt):
+                    break
                 if ledger_open() or continuation.hit_inner_cap(halt):
                     nxt_prompt = next_continuation_prompt(
                         ans, force_ledger=ledger_open(),
@@ -1939,7 +1953,8 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             _emit(out, protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
-                ctx_used=used, ctx_max=mx))
+                ctx_used=used, ctx_max=mx,
+                halt_reason=result.get("halt_reason")))
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(out, protocol.reply_frame("", str(exc), session))
         finally:

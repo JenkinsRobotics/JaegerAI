@@ -1,0 +1,31 @@
+"""Product classification for Config leaves outside the generic catalog."""
+
+NONCATALOG_EXPOSURE = {
+    "instance_name": "dedicated_ui",
+    "model.backend": "dedicated_ui", "model.model_path": "dedicated_ui",
+    "model.gpu_layers": "advanced_cli", "model.n_batch": "advanced_cli",
+    "model.n_ubatch": "advanced_cli", "model.flash_attn": "advanced_cli",
+    "model.threads": "advanced_cli", "model.extra_gguf_dirs": "advanced_cli",
+    "model.stall_timeout_s": "advanced_cli", "runtime.gguf_engine": "internal",
+    "runtime.mlx_engine": "internal", "skills.enabled_base_skills": "advanced_cli",
+    "skills.disabled_playbooks": "advanced_cli", "skills.hot_reload": "advanced_cli",
+    "skills.run_smoke_tests": "advanced_cli",
+    "skills.include_self_improvement_contract": "advanced_cli",
+    "heartbeat.session": "advanced_cli", "avatar.enabled": "dedicated_ui",
+    "avatar.bridge_host": "advanced_cli", "avatar.bridge_port": "advanced_cli",
+    "avatar.default_emotion": "dedicated_ui", "external_model.enabled": "dedicated_ui",
+    "external_model.provider": "dedicated_ui", "external_model.base_url": "dedicated_ui",
+    "external_model.model": "dedicated_ui",
+    "external_model.api_key_credential": "secret_reference",
+    "external_model.api_key_env": "secret_reference",
+    "external_model.max_tokens": "advanced_cli", "external_model.timeout_s": "advanced_cli",
+    "external_model.fallback": "advanced_cli", "webhooks.host": "advanced_cli",
+    "webhooks.port": "advanced_cli", "webhooks.secret": "secret",
+    "warmup.tts": "advanced_cli", "warmup.stt": "advanced_cli",
+    "warmup.vision": "advanced_cli", "plugins.autostart": "advanced_cli",
+    "workspace.location": "dedicated_ui", "hardware.enabled": "advanced_cli",
+    "hardware.package": "advanced_cli", "persona.output_filter": "advanced_cli",
+    "persona.max_chars": "advanced_cli",
+}
+
+__all__ = ["NONCATALOG_EXPOSURE"]

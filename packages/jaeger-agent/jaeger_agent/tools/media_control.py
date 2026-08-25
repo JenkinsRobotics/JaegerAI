@@ -114,7 +114,7 @@ def now_playing() -> dict[str, Any]:
 # ── Agent-facing tool wrappers ────────────────────────────────────────
 
 
-@register_tool_from_function(name="media_control")
+@register_tool_from_function(name="media_control", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="media_control",
                operation="media_control", summary="control music playback")
 def _t_media_control(action: str) -> dict:

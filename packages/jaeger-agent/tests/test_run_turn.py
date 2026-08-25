@@ -20,7 +20,7 @@ from jaeger_agent import (
     clear_registry,
     register_tool,
 )
-from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
+from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS, MAX_TOOL_CALLS
 
 
 # ── stub adapter ───────────────────────────────────────────────────
@@ -151,6 +151,35 @@ def test_parallel_tool_calls_dispatched_in_one_assistant_turn():
     tool_rows = [m for m in agent.messages if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in tool_rows] == ["c1", "c2", "c3"]
     assert all('"pong"' in m["content"] for m in tool_rows)
+
+
+def test_parallel_batch_never_executes_past_hard_tool_budget():
+    executed: list[str] = []
+
+    @register_tool("bounded_read", "Read.", _SmallArgs, side_effect="read")
+    def _bounded(value: str = "x") -> dict:
+        executed.append(value)
+        return {"ok": True, "value": value}
+
+    requested = MAX_TOOL_CALLS + 6
+    adapter = _ScriptedAdapter([{
+        "role": "assistant",
+        "content": "reading",
+        "tool_calls": [
+            {"id": f"c{i}", "name": "bounded_read", "arguments": {"value": str(i)}}
+            for i in range(requested)
+        ],
+    }])
+    agent = JaegerAgent(adapter=adapter)
+    agent.run_turn("read a bounded batch")
+
+    assert len(executed) == MAX_TOOL_CALLS
+    rows = [m for m in agent.messages if m["role"] == "tool"]
+    assert len(rows) == requested
+    assert sum("tool_budget_exhausted" in row["content"] for row in rows) == 6
+    assert agent.last_halt_reason == (
+        f"made {MAX_TOOL_CALLS} tool calls in a single turn"
+    )
 
 
 # ── tool error paths ───────────────────────────────────────────────

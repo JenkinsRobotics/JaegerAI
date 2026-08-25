@@ -57,12 +57,17 @@ jaeger = "jaeger_ai.cli.entry:main"
 # jaeger_ai; it only knows the group.
 jaeger_ai = "jaeger_ai.module_roots:roots"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.dynamic]
 version = {attr = "jaeger_ai.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
+exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
+namespaces = false
 
 [tool.setuptools.package-data]
 # Non-.py assets under the package (module.yaml/plugin.yaml, character
@@ -74,9 +79,17 @@ include = ["jaeger_ai*"]
 # non-editable install (a future PyPI release, or jaeger-ai pulled in
 # as someone else's dependency) needs it too — found via the sibling
 # engine repos hitting this for real under a git-dependency install.
-# "**/*" is deliberately broad rather than an extension allowlist that
-# silently misses the next asset type a character/skill adds.
-jaeger_ai = ["**/*"]
+jaeger_ai = [
+    "nodes/**/*.yaml",
+    "plugins/**/*.yaml", "plugins/**/*.json", "plugins/**/*.md",
+    "personality/**/*.yaml", "personality/**/*.md",
+    "personality/**/*.png", "personality/**/*.jpg", "personality/**/*.jpeg",
+    "assets/**/*", "docs/**/*.md", "contract/**/*.json",
+    "interfaces/swift/Package.swift", "interfaces/swift/Sources/**/*.swift",
+    "interfaces/swift/Resources/**/*", "interfaces/swift/Scripts/*.sh",
+    "interfaces/avatar/Package.swift", "interfaces/avatar/Sources/**/*.swift",
+    "interfaces/avatar/Resources/**/*",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -22,6 +22,7 @@ sibling modules under `jaeger_os/`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -674,16 +675,36 @@ def print_latency(report: LatencyReport) -> None:
 def write_log(entry: dict[str, Any]) -> None:
     layout: InstanceLayout = _pipeline["layout"]
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
-    entry = {
+    memory_entry = dict(entry)
+    if _pipeline["with_memory"]:
+        _record_episodic(memory_entry)
+    user = str(entry.get("user") or "")
+    answer = str(entry.get("answer") or "")
+    session = str(entry.get("session_key") or "")
+    safe_entry = {
         "framework": "jaeger_os",
         "schema_version": SCHEMA_VERSION,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        **entry,
+        "user_chars": len(user),
+        "answer_chars": len(answer),
+        "session_hash": hashlib.sha256(session.encode()).hexdigest()[:16] if session else "",
+        "tool_calls": int(entry.get("tool_calls") or 0),
+        "tool_names": sorted({
+            str(item).split("(", 1)[0].strip()
+            for item in (entry.get("tool_activity") or [])
+            if str(item).strip()
+        }),
+        "decision_present": entry.get("decision") is not None,
+        "skipped_final": bool(entry.get("skipped_final", False)),
+        "latency": entry.get("latency"),
+        "iterations": entry.get("iterations"),
+        "halt_reason": entry.get("halt_reason"),
+        "framework_path": entry.get("framework_path"),
+        "error_present": bool(entry.get("error")),
     }
     with layout.latency_log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry, ensure_ascii=True, default=str) + "\n")
-    if _pipeline["with_memory"]:
-        _record_episodic(entry)
+        fh.write(json.dumps(safe_entry, ensure_ascii=True, default=str) + "\n")
+    os.chmod(layout.latency_log_path, 0o600)
 
 
 def _record_episodic(entry: dict[str, Any]) -> None:

@@ -39,8 +39,12 @@ def test_board_beats_heartbeat_when_the_window_has_elapsed():
     ) is Action.BOARD
 
 
-def test_heartbeat_fires_even_when_the_board_is_empty():
-    assert decide(heartbeat_due=True) is Action.HEARTBEAT
+def test_heartbeat_waits_for_the_idle_window():
+    assert decide(heartbeat_due=True, idle_ready=False) is Action.IDLE
+
+
+def test_heartbeat_fires_when_idle_and_the_board_is_empty():
+    assert decide(idle_ready=True, heartbeat_due=True) is Action.HEARTBEAT
 
 
 def test_nothing_due_is_idle():

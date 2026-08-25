@@ -1,6 +1,6 @@
 ---
 name: minecraft-modpack-server
-description: "Host modded Minecraft servers (CurseForge, Modrinth)."
+description: "Host modded Minecraft servers (CurseForge, Modrinth). Use when the user explicitly requests this named workflow or its specific output."
 tags: [minecraft, gaming, server, neoforge, forge, modpack]
 platforms: [linux, macos]
 requires_tools: [terminal]

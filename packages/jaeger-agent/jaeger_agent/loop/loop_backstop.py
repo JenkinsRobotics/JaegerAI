@@ -29,7 +29,15 @@ from typing import Any
 # iteration tuner — bump them if real workloads need it, but don't lower.
 MAX_TOOL_CALLS = 24
 MAX_IDENTICAL_CALLS = 4
-MAX_SEMANTIC_FAILURES = 2
+MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
+
+# Mail.app tools whose mailbox-name retries must collapse to one
+# signature. Variant `Trash` / `[Gmail]/Trash` / `Deleted Messages`
+# errors are the same resolve failure, not a new attempt.
+MAIL_TOOLS = frozenset({
+    "list_mail", "list_mailboxes", "read_mail", "plan_mail_triage",
+    "move_mail", "batch_move", "sweep_mail",
+})
 
 # Warn-before-halt thresholds (Hermes ``tool_guardrails`` pattern).
 # A warning never blocks execution — it rides on the tool result so the
@@ -55,7 +63,12 @@ def semantic_failure_signature(
     irrelevant args while hitting the same underlying error. This
     normalizes the action to ``tool | target | first error line``.
     """
-    if not isinstance(content, dict) or content.get("ok") is True:
+    if not isinstance(content, dict):
+        return None
+    # ``success: False`` is a failure even when ``ok`` is True — Mail.app
+    # tools (and anything else using the structured envelope) share that
+    # bit with the evaluation gate.
+    if content.get("ok") is True and content.get("success") is not False:
         return None
     error = (
         content.get("stderr")
@@ -64,16 +77,31 @@ def semantic_failure_signature(
         or content.get("reason")
         or ""
     )
+    timed_out = bool(content.get("timed_out")) or (
+        "timed out" in str(error).lower() or "timeout" in str(error).lower()
+    )
+    if timed_out:
+        # Variant AppleScript / shell payloads all hang the same way.
+        # Hashing the code body let the 60-tool mail loop dodge this
+        # backstop — every timeout is the same failure class.
+        return f"{tool_name}|timeout|timed out"
     if not error:
         return None
     first_line = str(error).strip().splitlines()[0][:160]
+    if tool_name in MAIL_TOOLS:
+        account = str(args.get("account") or "") if isinstance(args, dict) else ""
+        err_l = first_line.lower()
+        if any(s in err_l for s in ("mailbox", "can't get", "can’t get", "not found")):
+            return f"{tool_name}|{account}|mailbox-resolve"
+        return f"{tool_name}|{account}|{first_line}"
     if isinstance(args, dict):
         target = (
             args.get("path") or args.get("file") or args.get("name")
+            or args.get("account")
             or content.get("path") or content.get("file") or ""
         )
-        if not target and tool_name in ("execute_code", "run_python"):
-            code = str(args.get("code") or "")
+        if not target and tool_name in ("execute_code", "run_python", "run_shell", "terminal"):
+            code = str(args.get("code") or args.get("command") or "")
             target = f"code:{hash(code) & 0xffff:x}" if code else ""
     else:
         target = ""
@@ -144,7 +172,7 @@ def loop_halt_reason(
                 f"called {sig.split('|', 1)[0]} with identical "
                 f"arguments {n} times"
             )
-    if tool_calls_made > MAX_TOOL_CALLS:
+    if tool_calls_made >= MAX_TOOL_CALLS:
         return f"made {tool_calls_made} tool calls in a single turn"
     return None
 
@@ -153,6 +181,7 @@ __all__ = [
     "MAX_TOOL_CALLS",
     "MAX_IDENTICAL_CALLS",
     "MAX_SEMANTIC_FAILURES",
+    "MAIL_TOOLS",
     "WARN_IDENTICAL_CALLS",
     "WARN_SEMANTIC_FAILURES",
     "call_signature",

@@ -1,14 +1,32 @@
 ---
 name: deep-think
-description: "Hand a task that's too big for right now to the Deep Think model instead of botching it in this turn. Load this when the user says 'note it for later / fix it properly later / that's too big to do now', or when you hit a job that needs the strong coder model, deep research, or hours of work — you queue it and note it, you don't attempt it live."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [propose_deep_think_task, board_add, todo]
+description: Hand a task that's too big for right now to the Deep Think model instead
+  of botching it in this turn. Load this when the user says 'note it for later / fix
+  it properly later / that's too big to do now', or when you hit a job that needs
+  the strong coder model, deep research, or hours of work — you queue it and note
+  it, you don't attempt it live.
 metadata:
   jros:
-    tags: [deep-think, escalation, defer, planning, background]
+    tags:
+    - deep-think
+    - escalation
+    - defer
+    - planning
+    - background
     category: autonomous-ai-agents
-    related_skills: [self-improvement, subagent-driven-development, writing-plans]
+    related_skills:
+    - self-improvement
+    - subagent-driven-development
+    - writing-plans
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - propose_deep_think_task
+    - board_add
+    - todo
 ---
 
 # DEEP THINK — DEFER THE BIG STUFF, DON'T BOTCH IT LIVE

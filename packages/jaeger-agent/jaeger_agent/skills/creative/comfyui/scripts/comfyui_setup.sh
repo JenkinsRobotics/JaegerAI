@@ -114,8 +114,8 @@ if [ -z "$GPU_FLAG" ]; then
         fi
         echo "$HW_JSON" | tee -a "$LOG_FILE" >&2
 
-        VERDICT="$(echo "$HW_JSON" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("verdict",""))')"
-        FLAG="$(echo "$HW_JSON"   | python3 -c 'import sys,json; print(json.load(sys.stdin).get("comfy_cli_flag") or "")')"
+        VERDICT="$(python3 -c 'import sys,json; print(json.loads(sys.argv[1]).get("verdict",""))' "$HW_JSON")"
+        FLAG="$(python3 -c 'import sys,json; print(json.loads(sys.argv[1]).get("comfy_cli_flag") or "")' "$HW_JSON")"
 
         if [ "$VERDICT" = "cloud" ] && [ "$FORCE_CLOUD_OVERRIDE" -ne 1 ]; then
             log ""
@@ -235,7 +235,8 @@ fi
 if curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
     log "Server already running on port $PORT — skipping launch."
     log "Stop with \`$COMFY_BIN stop\` if you want a fresh start."
-    curl -fsS "http://127.0.0.1:$PORT/system_stats" | python3 -m json.tool 2>/dev/null || true
+    curl -fsS -o /tmp/comfy-system-stats.json "http://127.0.0.1:$PORT/system_stats"
+    python3 -m json.tool /tmp/comfy-system-stats.json 2>/dev/null || true
     log "Done."
     exit 0
 fi
@@ -257,7 +258,8 @@ ELAPSED=0
 while [ $ELAPSED -lt $MAX_WAIT ]; do
     if curl -fsS "http://127.0.0.1:$PORT/system_stats" >/dev/null 2>&1; then
         log "Server is running!"
-        curl -fsS "http://127.0.0.1:$PORT/system_stats" | python3 -m json.tool 2>/dev/null || true
+        curl -fsS -o /tmp/comfy-system-stats.json "http://127.0.0.1:$PORT/system_stats"
+        python3 -m json.tool /tmp/comfy-system-stats.json 2>/dev/null || true
         break
     fi
     sleep 2

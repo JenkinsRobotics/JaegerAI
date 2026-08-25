@@ -108,8 +108,13 @@ def ssh_exec(host: str, command: str, timeout_s: float = 60.0) -> dict[str, Any]
             "command": cleaned[:500],
             "timeout_s": timeout,
         })
-    except Exception:  # noqa: BLE001 — audit failure must not block the call
-        pass
+    except Exception:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error": "audit log unavailable",
+            "host": dest,
+            "command": cleaned,
+        }
 
     # Build argv. -o flags pin behaviour so the tool's contract doesn't
     # silently change based on the user's ssh_config:
@@ -184,7 +189,7 @@ def ssh_exec(host: str, command: str, timeout_s: float = 60.0) -> dict[str, Any]
     }
 
 
-@register_tool_from_function(name="remote_terminal")
+@register_tool_from_function(name="remote_terminal", side_effect="external")
 def _t_remote_terminal(host: str, command: str, timeout_s: float = 60.0) -> dict:
     """Run one command on a REMOTE host over SSH. ``terminal`` runs
     locally; this runs the same shape of command on another machine.

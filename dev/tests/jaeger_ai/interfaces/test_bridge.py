@@ -1194,7 +1194,7 @@ def test_slash_goal_with_job_runs_as_a_turn(monkeypatch):
     assert "needs the terminal TUI" not in (reply["text"] or "")
 
 
-def test_slash_auto_explains_continuation_is_on(monkeypatch):
+def test_slash_auto_dispatches_execution_mode_not_a_turn(monkeypatch):
     def explode(client, text, session_key=None):  # noqa: ARG001
         raise AssertionError("/auto must not reach the agent turn")
 
@@ -1203,7 +1203,9 @@ def test_slash_auto_explains_continuation_is_on(monkeypatch):
     )
     assert rc == 0
     reply = next(f for f in frames if f["type"] == "reply")
-    assert "already on" in reply["text"].lower()
+    text = (reply["text"] or "").lower()
+    assert "execution mode" in text or "interactive" in text or "auto" in text
+    assert "needs the terminal tui" not in text
 
 
 def test_slash_bare_goal_is_usage(monkeypatch):

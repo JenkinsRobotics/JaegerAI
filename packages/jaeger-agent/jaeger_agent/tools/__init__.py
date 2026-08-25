@@ -163,7 +163,17 @@ from .shortcuts import list_shortcuts, run_shortcut
 from .spotlight import spotlight_search
 from .calendar import create_event, get_events
 from .contacts import lookup_contact
-from .email import send_email
+from .email import (
+    batch_move,
+    list_mail,
+    list_mailboxes,
+    move_mail,
+    plan_mail_triage,
+    read_mail,
+    schedule_inbox_sweeper,
+    send_email,
+    sweep_mail,
+)
 from .clipboard import clipboard_read, clipboard_write
 from .notify import notify
 from .system_control import system_control
@@ -235,7 +245,9 @@ __all__ = [
     "spotlight_search",
     "get_events", "create_event",
     "lookup_contact",
-    "send_email",
+    "send_email", "list_mailboxes", "list_mail", "read_mail",
+    "plan_mail_triage", "move_mail",
+    "batch_move", "sweep_mail", "schedule_inbox_sweeper",
     "clipboard_read", "clipboard_write",
     "notify",
     "system_control",

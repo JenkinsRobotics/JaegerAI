@@ -143,6 +143,12 @@ final class AgentBridge: ObservableObject {
                                               elapsed: elapsed, detail: detail,
                                               progress: progress) }
         }
+        await proc.setOnDelta { [weak self] text in
+            Task { @MainActor in self?.fanoutText(name: "message.delta", text: text) }
+        }
+        await proc.setOnReasoning { [weak self] text in
+            Task { @MainActor in self?.fanoutText(name: "thought.delta", text: text) }
+        }
         await proc.setOnAgentState { [weak self] lifecycle in
             Task { @MainActor in self?.handleAgentState(lifecycle) }
         }
@@ -389,6 +395,12 @@ final class AgentBridge: ObservableObject {
     }
 
     // MARK: - Activity events
+
+    private func fanoutText(name: String, text: String) {
+        guard !text.isEmpty else { return }
+        let event = Event(name: name, payload: ["text": AnyDecodable(text)])
+        for cb in listeners.values { cb(event) }
+    }
 
     /// Map a ``state`` frame onto the thinking-chip event vocabulary the
     /// chat view already understands.

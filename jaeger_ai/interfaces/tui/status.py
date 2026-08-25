@@ -72,8 +72,8 @@ def _visible_tool_groups() -> tuple[dict[str, list[str]], int, int]:
     """Return the tool groups the model ACTUALLY sees this boot,
     plus (visible_count, total_count) for a header annotation.
 
-    With ``JAEGER_TOOLSET_SCOPING`` off (the 0.1.0 default), every
-    group renders in full — same as before. With scoping on, each
+    With ``JAEGER_TOOLSET_SCOPING=0`` or ``JAEGER_FULL_TOOLS=1``, every
+    group renders in full. With automatic scoping (the default), each
     group is filtered to its CORE intersection (umbrella tools
     only); empty groups drop out. The hidden bulk is still
     REGISTERED and reachable via ``load_tools``; the panel just

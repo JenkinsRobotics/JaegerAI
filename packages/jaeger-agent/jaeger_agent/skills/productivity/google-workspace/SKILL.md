@@ -1,6 +1,6 @@
 ---
 name: google-workspace
-description: "Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python."
+description: "Gmail, Calendar, Drive, Docs, Sheets via gws CLI or Python. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.1.0
 author: Nous Research
 license: MIT
@@ -11,6 +11,7 @@ required_credential_files:
   - path: google_client_secret.json
     description: Google OAuth2 client credentials (downloaded from Google Cloud Console)
 requires_tools: [terminal]
+requires_plugins: [google-workspace]
 metadata:
   hermes:
     tags: [Google, Gmail, Calendar, Drive, Sheets, Docs, Contacts, Email, OAuth]

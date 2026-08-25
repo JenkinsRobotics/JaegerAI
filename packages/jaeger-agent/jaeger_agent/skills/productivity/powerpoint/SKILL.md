@@ -1,6 +1,6 @@
 ---
 name: powerpoint
-description: "Create, read, edit .pptx decks, slides, notes, templates."
+description: "Create, read, edit .pptx decks, slides, notes, templates. Use when the user explicitly requests this named workflow or its specific output."
 license: Proprietary. LICENSE.txt has complete terms
 platforms: [linux, macos, windows]
 tags: [powerpoint, slides, presentation, office, pptx]

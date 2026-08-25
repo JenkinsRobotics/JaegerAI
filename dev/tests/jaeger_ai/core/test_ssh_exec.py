@@ -32,6 +32,13 @@ from jaeger_agent.tools import remote as remote_tool
 from jaeger_agent.tools.remote import ssh_exec
 
 
+@pytest.fixture(autouse=True)
+def _bound_audit_workspace(tmp_path):
+    from jaeger_agent.workspace import DefaultWorkspace, bind
+
+    bind(DefaultWorkspace(tmp_path / "agent").create())
+
+
 # ── host validation (no SSH binary needed) ─────────────────────────
 
 

@@ -1,15 +1,35 @@
 ---
 name: scheduling
-description: "Set reminders, timers, and recurring automations with the built-in scheduler: 'remind me in 10 minutes', 'wake me at 7am', 'every Friday check the news'. Load this whenever the user wants ANYTHING to happen later — a one-off reminder, a repeating task, or a scheduled message — instead of saying you can't do timed actions. You can."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [schedule_prompt, list_schedules, cancel_schedule, get_time]
-requires_toolsets: [scheduling]
+description: 'Set reminders, timers, and recurring automations with the built-in scheduler:
+  ''remind me in 10 minutes'', ''wake me at 7am'', ''every Friday check the news''.
+  Load this whenever the user wants ANYTHING to happen later — a one-off reminder,
+  a repeating task, or a scheduled message — instead of saying you can''t do timed
+  actions. You can.'
 metadata:
   jros:
-    tags: [scheduling, reminders, timers, cron, automation, alarms, recurring]
+    tags:
+    - scheduling
+    - reminders
+    - timers
+    - cron
+    - automation
+    - alarms
+    - recurring
     category: productivity
-    related_skills: [memory-keeping]
+    related_skills:
+    - memory-keeping
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - schedule_prompt
+    - list_schedules
+    - cancel_schedule
+    - get_time
+    requires-toolsets:
+    - scheduling
 ---
 
 # SCHEDULING — REMINDERS, TIMERS, AND RECURRING TASKS

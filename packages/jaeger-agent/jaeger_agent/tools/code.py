@@ -156,7 +156,7 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
             "cwd": str(_audit_cwd) if _audit_cwd is not None else "(scratch tempdir)",
         })
     except Exception:  # noqa: BLE001
-        pass
+        return {"ok": False, "error": "audit log unavailable", "command": cleaned}
 
     MAX = 200_000
     started = time.perf_counter()
@@ -225,7 +225,7 @@ def _t_execute_code(code: str, timeout_s: float = 10.0) -> dict:
     return run_python(code=code, timeout_s=timeout_s)
 
 
-@register_tool_from_function(name="terminal")
+@register_tool_from_function(name="terminal", side_effect="external")
 def _t_terminal(command: str, timeout_s: float = 60.0) -> dict:
     """Run a non-Python command-line program — git, npm, brew,
     ffmpeg. For Python code use execute_code; for files use

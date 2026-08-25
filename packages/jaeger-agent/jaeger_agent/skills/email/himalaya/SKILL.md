@@ -1,14 +1,28 @@
 ---
 name: himalaya
-description: "Read, search, send, and manage email from the terminal via the Himalaya CLI (IMAP/SMTP). Load this when the user wants to check, reply to, compose, forward, move, or flag email without a GUI mail client."
-version: 1.2.0
-platforms: [macos, linux, windows]
-requires_tools: [terminal, read_file, write_file]
+description: Read, search, send, and manage email from the terminal via the Himalaya
+  CLI (IMAP/SMTP). Load this when the user wants to check, reply to, compose, forward,
+  move, or flag email without a GUI mail client.
 metadata:
   jros:
-    tags: [email, imap, smtp, cli, communication]
+    tags:
+    - email
+    - imap
+    - smtp
+    - cli
+    - communication
     category: email
-    related_skills: [hermes-agent]
+    related_skills:
+    - hermes-agent
+    version: 1.2.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - terminal
+    - read_file
+    - write_file
 ---
 
 # HIMALAYA EMAIL CLI

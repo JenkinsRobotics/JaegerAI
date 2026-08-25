@@ -1,101 +1,73 @@
 ---
 name: apple-reminders
-description: "Apple Reminders via remindctl: add, list, complete."
-version: 1.0.0
-author: Hermes Agent
-license: MIT
-platforms: [macos]
-requires_tools: [terminal]
+description: Add, list, or complete Apple Reminders (Reminders.app, iCloud) via remindctl.
+  Load this for 'add a reminder that syncs to my iPhone', 'what's due today in Reminders'.
+  Agent alerts ('nudge me in 10 minutes') use scheduling / schedule_prompt instead.
 metadata:
-  hermes:
-    tags: [Reminders, tasks, todo, macOS, Apple]
   jros:
-    related_skills: [apple-notes, imessage, findmy]
-prerequisites:
-  commands: [remindctl]
+    tags:
+    - reminders
+    - apple
+    - macos
+    - icloud
+    - todo
+    category: desktop
+    related_skills:
+    - scheduling
+    - apple-notes
+    - mac-native
+    - calendar
+    version: 1.1.0
+    platforms:
+    - macos
+    requires-tools:
+    - terminal
 ---
 
-# Apple Reminders
+# APPLE REMINDERS — remindctl
 
-Use `remindctl` to manage Apple Reminders directly from the terminal. Tasks sync across all Apple devices via iCloud.
+Reminders.app via `remindctl`. Syncs to iPhone/iPad. Call through
+`terminal`. This is NOT the agent scheduler.
 
-## Prerequisites
+## WHEN NOT
 
-- **macOS** with Reminders.app
-- Install: `brew install steipete/tap/remindctl`
-- Grant Reminders permission when prompted
-- Check: `remindctl status` / Request: `remindctl authorize`
+- "Remind me in 10 minutes" (agent speaks later) → `scheduling` /
+  `schedule_prompt`.
+- Calendar events → `mac-native` `create_event`.
+- Project boards → `kanban`.
 
-## When to Use
+## PREREQUISITES
 
-- User mentions "reminder" or "Reminders app"
-- Creating personal to-dos with due dates that sync to iOS
-- Managing Apple Reminders lists
-- User wants tasks to appear on their iPhone/iPad
+- `brew install steipete/tap/remindctl`
+- `terminal(command="remindctl status")` then `remindctl authorize` if needed
 
-## When NOT to Use
+## TOOLS (exact)
 
-- Scheduling agent alerts → use the cronjob tool instead
-- Calendar events → use Apple Calendar or Google Calendar
-- Project task management → use GitHub Issues, Notion, etc.
-- If user says "remind me" but means an agent alert → clarify first
-
-## Quick Reference
-
-### View Reminders
-
-```bash
-remindctl                    # Today's reminders
-remindctl today              # Today
-remindctl tomorrow           # Tomorrow
-remindctl week               # This week
-remindctl overdue            # Past due
-remindctl all                # Everything
-remindctl 2026-01-04         # Specific date
+```
+terminal(command="remindctl today --json")
+terminal(command="remindctl overdue --json")
+terminal(command="remindctl list")
+terminal(command="remindctl add --title \"Call mom\" --list Personal --due tomorrow")
+terminal(command="remindctl complete <id>")
 ```
 
-### Manage Lists
+`--due` accepts `today`, `tomorrow`, `YYYY-MM-DD`, `YYYY-MM-DD HH:mm`.
 
-```bash
-remindctl list               # List all lists
-remindctl list Work          # Show specific list
-remindctl list Projects --create    # Create list
-remindctl list Work --delete        # Delete list
-```
+## SOP
 
-### Create Reminders
+1. Clarify Apple Reminders (syncs to phone) vs agent `schedule_prompt`.
+2. `remindctl today --json` / `remindctl list` before adding a duplicate.
+3. Confirm title + due date, then `remindctl add ...`.
+4. Complete by id from the JSON list — never guess ids.
 
-```bash
-remindctl add "Buy milk"
-remindctl add --title "Call mom" --list Personal --due tomorrow
-remindctl add --title "Meeting prep" --due "2026-02-15 09:00"
-```
+## ERROR HATCH
 
-### Complete / Delete
+- command not found → brew install; stop.
+- not authorized → `remindctl authorize`; do not retry add.
+- "remind me" was an agent alert → switch to `schedule_prompt`, do not
+  create a Reminders.app item.
 
-```bash
-remindctl complete 1 2 3          # Complete by ID
-remindctl delete 4A83 --force     # Delete by ID
-```
+## DONE WHEN
 
-### Output Formats
-
-```bash
-remindctl today --json       # JSON for scripting
-remindctl today --plain      # TSV format
-remindctl today --quiet      # Counts only
-```
-
-## Date Formats
-
-Accepted by `--due` and date filters:
-- `today`, `tomorrow`, `yesterday`
-- `YYYY-MM-DD`
-- `YYYY-MM-DD HH:mm`
-- ISO 8601 (`2026-01-04T12:34:56Z`)
-
-## Rules
-
-1. When user says "remind me", clarify: Apple Reminders (syncs to phone) vs agent cronjob alert
-2. Always confirm reminder content and due date before creating
-3. Use `--json` for programmatic parsing
+`remindctl --json` shows the item (or the completion). Never claim a
+reminder is on the iPhone without that result.

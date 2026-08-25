@@ -171,7 +171,7 @@ def system_control(action: str, value: Any = None) -> dict[str, Any]:
 # ── Agent-facing tool wrapper ────────────────────────────────────────
 
 
-@register_tool_from_function(name="system_control")
+@register_tool_from_function(name="system_control", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="system_control",
                operation="system_control",
                summary="change a live system setting")

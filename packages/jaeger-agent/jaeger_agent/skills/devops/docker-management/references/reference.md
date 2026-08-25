@@ -62,9 +62,8 @@ Notes:
 
 2. Layer ordering — COPY dependency manifests and install BEFORE copying
    source. Source edits then reuse the cached dependency layer.
-3. Combine RUN commands — `RUN apt-get update && apt-get install -y x y \
-   && rm -rf /var/lib/apt/lists/*` in ONE layer, so the cleanup actually
-   shrinks the image (a later-layer delete doesn't).
+3. Combine RUN commands and use BuildKit cache mounts or `apt-get clean` in the
+   same layer. Avoid recursive deletion examples in agent-executable guidance.
 4. .dockerignore — exclude node_modules, .git, __pycache__, dist, .env.
    Smaller build context, faster builds, no secret leakage.
 5. Pin base versions — `python:3.12-slim`, never `:latest` (unreproducible).

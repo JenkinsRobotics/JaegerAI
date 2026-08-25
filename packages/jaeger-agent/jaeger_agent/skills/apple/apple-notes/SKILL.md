@@ -1,93 +1,67 @@
 ---
 name: apple-notes
-description: "Manage Apple Notes via memo CLI: create, search, edit."
-version: 1.0.0
-author: Hermes Agent
-license: MIT
-platforms: [macos]
-requires_tools: [terminal]
+description: Create, search, edit, or export Apple Notes on macOS via the memo CLI.
+  Load this for 'put this in Notes', 'find my note about X', 'list my Notes folders'.
+  Not for agent-internal memory (use memory) or Obsidian vaults.
 metadata:
-  hermes:
-    tags: [Notes, Apple, macOS, note-taking]
-    related_skills: [obsidian]
   jros:
-    related_skills: [obsidian, apple-reminders, imessage]
-prerequisites:
-  commands: [memo]
+    tags:
+    - notes
+    - apple
+    - macos
+    - icloud
+    category: desktop
+    related_skills:
+    - obsidian
+    - memory-keeping
+    - apple-reminders
+    - mac-native
+    version: 1.1.0
+    platforms:
+    - macos
+    requires-tools:
+    - terminal
 ---
 
-# Apple Notes
+# APPLE NOTES — memo CLI
 
-Use `memo` to manage Apple Notes directly from the terminal. Notes sync across all Apple devices via iCloud.
+Notes.app via `memo`. Syncs over iCloud. Call it through `terminal`,
+never raw osascript.
 
-## Prerequisites
+## PREREQUISITES
 
-- **macOS** with Notes.app
-- Install: `brew tap antoniorodr/memo && brew install antoniorodr/memo/memo`
-- Grant Automation access to Notes.app when prompted (System Settings → Privacy → Automation)
+- macOS + Notes.app
+- `brew tap antoniorodr/memo && brew install antoniorodr/memo/memo`
+- Automation access for Notes.app when prompted
 
-## When to Use
+## TOOLS (exact)
 
-- User asks to create, view, or search Apple Notes
-- Saving information to Notes.app for cross-device access
-- Organizing notes into folders
-- Exporting notes to Markdown/HTML
-
-## When NOT to Use
-
-- Obsidian vault management → use the `obsidian` skill
-- Bear Notes → separate app (not supported here)
-- Quick agent-only notes → use the `memory` tool instead
-
-## Quick Reference
-
-### View Notes
-
-```bash
-memo notes                        # List all notes
-memo notes -f "Folder Name"       # Filter by folder
-memo notes -s "query"             # Search notes (fuzzy)
+```
+terminal(command="memo notes")
+terminal(command="memo notes -s \"query\"")
+terminal(command="memo notes -f \"Folder Name\"")
+terminal(command="memo notes -a \"Title\"")
+terminal(command="memo notes --json")
 ```
 
-### Create Notes
+## SOP
 
-```bash
-memo notes -a                     # Interactive editor
-memo notes -a "Note Title"        # Quick add with title
-```
+1. If `memo` is missing → `terminal(command="which memo")`. Not found:
+   tell the user the brew install line. Do not invent notes.
+2. Search/list with `-s` / `-f` before creating a duplicate.
+3. Create with `memo notes -a "Title"` after confirming the title.
+   Interactive `-a` / `-e` / `-d` needs a real TTY — prefer flagged
+   non-interactive forms from this skill.
+4. Agent-only scratch → `memory(action="remember", ...)`, not Notes.
+   Markdown vault → `obsidian`.
 
-### Edit Notes
+## ERROR HATCH
 
-```bash
-memo notes -e                     # Interactive selection to edit
-```
+- `memo: command not found` → brew install; stop.
+- Automation denied → System Settings → Privacy → Automation; stop.
+- Note has images/attachments → memo cannot edit it; say so.
 
-### Delete Notes
+## DONE WHEN
 
-```bash
-memo notes -d                     # Interactive selection to delete
-```
-
-### Move Notes
-
-```bash
-memo notes -m                     # Move note to folder (interactive)
-```
-
-### Export Notes
-
-```bash
-memo notes -ex                    # Export to HTML/Markdown
-```
-
-## Limitations
-
-- Cannot edit notes containing images or attachments
-- Interactive prompts require terminal access (use pty=true if needed)
-- macOS only — requires Apple Notes.app
-
-## Rules
-
-1. Prefer Apple Notes when user wants cross-device sync (iPhone/iPad/Mac)
-2. Use the `memory` tool for agent-internal notes that don't need to sync
-3. Use the `obsidian` skill for Markdown-native knowledge management
+A real `memo` command returned the list, the search hit, or the create
+result. Never fabricate a Notes.app note.

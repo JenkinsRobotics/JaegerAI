@@ -147,7 +147,7 @@ def build_runtime_tail() -> str:
         scoped = _scoping_enabled()
     except Exception:  # noqa: BLE001
         scoped = False
-    # Unscoped (default) tool-surface framing now lives in the merged
+    # Unscoped override tool-surface framing lives in the merged
     # capabilities block (build_skill_index) alongside the skills menu, so
     # tools + skills read as one "pick in this order" section. Only the
     # scoped-mode mechanics (load_tools / describe_tool) remain here, and

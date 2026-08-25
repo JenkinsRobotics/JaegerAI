@@ -10,13 +10,20 @@ name: <folder-name, kebab-case, accurate — no cute codenames>
 description: "<ONE sentence: what it does + the WHEN-to-pick-this trigger. This is
   the single biggest factor in whether the agent SELECTS the skill. Name the tasks
   that should load it, e.g. 'Load this for X / Y / Z'.>"
-version: <semver, e.g. 1.0.0 — bump on every kept revision>
-platforms: [linux, macos, windows]         # drop any it genuinely can't run on
-requires_tools: [<real JROS tool names this recipe CALLS>]   # for integration/hints
+compatibility: <portable description of OS, CLI, or service requirements>
 metadata:
   jros:
+    version: <semver, e.g. 1.0.0 — bump on every kept revision>
     tags: [<3-6 keywords — feed list_skills(action="search"); the loader reads jros.tags>]
     category: <the folder's category>
+    lifecycle: core | optional | plugin | explicit | deprecated | archived
+    skill-class: first-class | knowledge-pack
+    platforms: [linux, macos, windows]
+    requires-tools: [<hard dependencies: real registered JROS tool names>]
+    optional-tools: [<tools that improve but do not gate the skill>]
+    requires-toolsets: [<toolsets to activate before execution>]
+    requires-plugins: [<plugins whose setup path explicit lookup should show>]
+    aliases: [<legacy names that resolve here but never compete in discovery>]
     related_skills: [<skills a user might chain — best-effort>]
 ---
 ```
@@ -24,7 +31,14 @@ Notes:
 - The loader reads `metadata.jros.tags` (then `metadata.hermes.tags`, then top-level
   `tags:`). Prefer the jros namespace for new skills.
 - `category` is also derived from the folder path; keep them consistent.
-- `requires_tools` documents integration; it does not currently hide the skill.
+- Missing `requires-tools` hides automatic activation. Explicit lookup still
+  resolves the skill and must explain the missing setup/dependency.
+- Missing `optional-tools` never hides a skill; follow its reduced path.
+- `requires-toolsets` are activated when the skill is loaded.
+- `requires-plugins` must produce an installation/setup path, never a guessed tool.
+- Legacy top-level `version`, `platforms`, `requires_tools`, and
+  `requires_toolsets` remain readable during migration, but new skills put Jaeger
+  extensions under `metadata.jros` for Agent Skills portability.
 
 ## The 8 points
 1. NAMING — an explicit, accurate name. No vague "helper" titles, no codenames that
@@ -53,7 +67,16 @@ Notes:
 8. LAZY LOADING — SKILL.md is a lightweight router. Heavy templates, big tables,
    long examples, taxonomies live in SEPARATE files under `references/` /
    `templates/`, fetched on demand with `read_file("references/…")`. Don't drag a
-   40-line template through every turn. Target SKILL.md ≤ ~130 lines.
+ 40-line template through every turn. Target 50–130 lines; >130 warns, >250 needs
+ review, and >500 requires migration before a skill can be first-class.
+
+## First-class skills vs knowledge packs
+
+`first-class` means the entrypoint itself is optimized for reliable routing and
+execution by the local model. `knowledge-pack` means imported domain material is
+preserved and explicitly invoked, but is not an authoring exemplar. Promote a
+knowledge pack only through Flow C: extract a concise router, preserve bulk facts
+under references/, validate tools/security, then benchmark.
 
 ## Verify tool names BEFORE writing them
 The single most common bug is documenting a tool that isn't registered under that

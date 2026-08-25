@@ -167,6 +167,49 @@ def query_ollama_show(
     return data
 
 
+def query_ollama_active_context(
+    model: str,
+    base_url: str,
+    api_key: str = "",
+    *,
+    timeout_s: float = _SHOW_TIMEOUT_S,
+) -> int | None:
+    """Return the context Ollama has *actually loaded* from ``/api/ps``.
+
+    ``/api/show`` describes a model and its Modelfile. It cannot prove the
+    scheduler honoured that window: Ollama may fit a smaller KV cache to the
+    available GPU memory. ``/api/ps`` is therefore the authoritative runtime
+    check once the model is resident. ``None`` means the model is not loaded
+    (or the best-effort probe failed).
+    """
+    name = (model or "").strip()
+    if not name:
+        return None
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        import requests
+
+        resp = requests.get(
+            f"{native_ollama_root(base_url)}/api/ps",
+            headers=headers,
+            timeout=timeout_s,
+        )
+        if resp.status_code != 200:
+            return None
+        rows = resp.json().get("models") or []
+    except Exception:  # noqa: BLE001 — diagnostics must not break boot
+        return None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        loaded_name = str(row.get("name") or row.get("model") or "")
+        if loaded_name == name:
+            return _positive(row.get("context_length"))
+    return None
+
+
 def probe_ollama_context(
     model: str,
     base_url: str,
@@ -194,16 +237,16 @@ def should_inject_num_ctx(
     Local Ollama defaults to a small window on ``/v1/chat/completions``
     unless the request says otherwise. Cloud (and ``:cloud`` tags
     routed through a local server) already load at the model max —
-    sending a leftover local number would shrink them. Even locally
-    we only inject a value ``/api/show`` reported as Modelfile
-    ``num_ctx``: the GGUF training max can be 128K+ and would blow
-    VRAM on a laptop if we asked for it blindly.
+    sending a leftover local number would shrink them. Locally we inject
+    either the Modelfile runtime value or an explicit operator setting.
+    We deliberately do not inject a training maximum inferred from model
+    metadata: that could allocate an unsafe KV cache on a laptop.
     """
     if is_hosted_ollama(provider, base_url, model):
         return False
     if (provider or "").lower() != "ollama":
         return False
-    return source == "num_ctx"
+    return source in {"num_ctx", "configured"}
 
 
 def resolve_serving_context(
@@ -300,6 +343,7 @@ __all__ = [
     "parse_show_context",
     "probe_ollama_context",
     "query_ollama_show",
+    "query_ollama_active_context",
     "resolve_serving_context",
     "should_inject_num_ctx",
 ]

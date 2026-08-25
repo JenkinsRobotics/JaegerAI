@@ -73,17 +73,15 @@ final class SlashRoutingTests: XCTestCase {
         )
     }
 
-    func testBareGoalAndAutoAreLocalNotices() {
+    func testBareGoalIsLocalNoticeAndAutoPassesThrough() {
         if case .local(let text) = SlashRouting.action(for: "/goal") {
             XCTAssertTrue(text.contains("/goal"))
         } else {
             XCTFail("bare /goal should be a local usage notice")
         }
-        if case .local(let text) = SlashRouting.action(for: "/auto") {
-            XCTAssertTrue(text.lowercased().contains("already"))
-        } else {
-            XCTFail("/auto should explain continuation is already on")
-        }
+        XCTAssertEqual(SlashRouting.action(for: "/auto"), .passThrough)
+        XCTAssertEqual(SlashRouting.action(for: "/mode auto"), .passThrough)
+        XCTAssertEqual(SlashRouting.action(for: "/mode interactive"), .passThrough)
     }
 
     func testStopAndSteerRouteToControlOps() {

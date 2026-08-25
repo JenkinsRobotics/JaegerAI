@@ -3,6 +3,7 @@ and the real bus -> recorder -> file delivery path."""
 
 import tempfile
 import time
+import os
 from pathlib import Path
 
 from jaeger_agent import trace
@@ -51,6 +52,21 @@ def test_bus_delivery():
     bus.close()
     rows = trace.read_steps(path)
     assert rows and rows[0]["turn_id"] == 9 and rows[0]["kind"] == "input", rows
+
+
+def test_trace_persists_no_content_and_uses_private_permissions():
+    d = Path(tempfile.mkdtemp())
+    path = d / "trace.jsonl"
+    rec = trace.TraceRecorder(path)
+    rec.on_step(topics.TraceStep(
+        turn_id=1, step_seq=1, kind="input",
+        detail="secret prompt", session="private-session",
+    ))
+    raw = path.read_text(encoding="utf-8")
+    assert "secret prompt" not in raw
+    assert "private-session" not in raw
+    assert "sha256=" in raw
+    assert os.stat(path).st_mode & 0o777 == 0o600
 
 
 if __name__ == "__main__":

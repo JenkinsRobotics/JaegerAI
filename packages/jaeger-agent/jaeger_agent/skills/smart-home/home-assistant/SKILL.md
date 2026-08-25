@@ -4,6 +4,7 @@ description: "Read and control smart-home devices through a Home Assistant insta
 version: 1.0.0
 platforms: [macos, linux, windows]
 requires_tools: [ha_list_entities, ha_get_state, ha_list_services, ha_call_service]
+requires_plugins: [home-assistant]
 metadata:
   jros:
     tags: [Smart-Home, Home-Assistant, IoT, Lights, Climate, Locks, Automation]

@@ -62,6 +62,23 @@ def test_semantic_failure_signature_normalizes_irrelevant_arg_drift():
     assert "write_file" in sig1
 
 
+def test_semantic_failure_signature_collapses_timeout_variants():
+    """Different AppleScript bodies that all time out are ONE failure."""
+    sig_a = semantic_failure_signature(
+        "run_python",
+        {"code": 'osascript -e "every message of inbox"'},
+        {"ok": False, "timed_out": True, "stderr": ""},
+    )
+    sig_b = semantic_failure_signature(
+        "run_python",
+        {"code": 'osascript -e "tell application Mail to get mailbox INBOX"'},
+        {"ok": False, "timed_out": True, "error": "timed out after 15s"},
+    )
+    assert sig_a is not None and sig_b is not None
+    assert sig_a == sig_b
+    assert "timeout" in sig_a
+
+
 def test_semantic_failure_signature_uses_code_hash_when_no_path():
     """Repeated ``run_python`` failures with the same code body collide
     to one signature; different code yields different signatures."""
@@ -100,10 +117,14 @@ def test_loop_halt_reason_fires_on_identical_calls():
 
 
 def test_loop_halt_reason_fires_on_runaway_total():
-    counts = {f"t{i}|{{}}": 1 for i in range(MAX_TOOL_CALLS + 1)}
-    reason = loop_halt_reason(MAX_TOOL_CALLS + 1, counts, {})
+    counts = {f"t{i}|{{}}": 1 for i in range(MAX_TOOL_CALLS)}
+    reason = loop_halt_reason(MAX_TOOL_CALLS, counts, {})
     assert reason is not None
-    assert str(MAX_TOOL_CALLS + 1) in reason
+    assert str(MAX_TOOL_CALLS) in reason
+
+
+def test_loop_halt_reason_allows_one_below_hard_cap():
+    assert loop_halt_reason(MAX_TOOL_CALLS - 1, {}, {}) is None
 
 
 def test_loop_halt_reason_fires_on_semantic_failures():
@@ -121,4 +142,43 @@ def test_loop_halt_reason_prefers_failure_message_over_identical():
     failures = {"foo||boom": MAX_SEMANTIC_FAILURES}
     reason = loop_halt_reason(MAX_IDENTICAL_CALLS, counts, failures)
     assert reason is not None
+    assert "failure" in reason
+
+
+def test_semantic_failure_signature_treats_success_false_as_failure():
+    assert semantic_failure_signature(
+        "batch_move",
+        {"account": "Google"},
+        {"ok": True, "success": False, "error": "Can't get mailbox Trash"},
+    ) is not None
+    assert semantic_failure_signature(
+        "batch_move",
+        {"account": "Google"},
+        {"ok": True, "success": True, "error": None},
+    ) is None
+
+
+def test_semantic_failure_signature_collapses_mail_mailbox_aliases():
+    """Trash vs [Gmail]/Trash vs Deleted Messages is one resolve miss,
+    not three strikes the 2-strike breaker can't see."""
+    sig_a = semantic_failure_signature(
+        "batch_move",
+        {"account": "Google", "target_mailbox": "Trash"},
+        {"ok": False, "success": False, "error": "Can't get mailbox Trash of account Google"},
+    )
+    sig_b = semantic_failure_signature(
+        "batch_move",
+        {"account": "Google", "target_mailbox": "[Gmail]/Trash"},
+        {"ok": False, "success": False,
+         "error": "Can't get mailbox [Gmail]/Trash of account Google"},
+    )
+    assert sig_a is not None and sig_a == sig_b
+    assert "mailbox-resolve" in sig_a
+
+
+def test_two_mail_resolve_failures_halt():
+    sig = "batch_move|Google|mailbox-resolve"
+    reason = loop_halt_reason(2, {}, {sig: MAX_SEMANTIC_FAILURES})
+    assert reason is not None
+    assert "batch_move" in reason
     assert "failure" in reason

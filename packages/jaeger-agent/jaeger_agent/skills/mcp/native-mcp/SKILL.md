@@ -1,14 +1,31 @@
 ---
 name: native-mcp
-description: "Wire external MCP servers (stdio or HTTP) into Hermes so their tools auto-load every session. Load this when the user wants to add MCP-provided capabilities (filesystem, GitHub, databases, remote APIs) as first-class agent tools, or is debugging why MCP tools don't appear."
-version: 1.1.0
-platforms: [macos, linux, windows]
-requires_tools: [read_file, write_file, patch, terminal]
+description: Wire external MCP servers (stdio or HTTP) into Hermes so their tools
+  auto-load every session. Load this when the user wants to add MCP-provided capabilities
+  (filesystem, GitHub, databases, remote APIs) as first-class agent tools, or is debugging
+  why MCP tools don't appear.
 metadata:
   jros:
-    tags: [mcp, tools, integrations, config, stdio, http]
+    tags:
+    - mcp
+    - tools
+    - integrations
+    - config
+    - stdio
+    - http
     category: mcp
-    related_skills: [hermes-agent]
+    related_skills:
+    - hermes-agent
+    version: 1.1.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - read_file
+    - write_file
+    - patch
+    - terminal
 ---
 
 # NATIVE MCP CLIENT

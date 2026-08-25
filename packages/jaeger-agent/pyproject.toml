@@ -38,8 +38,13 @@ dev = ["pytest>=8", "pyyaml>=6", "ruff>=0.4"]
 [tool.setuptools.dynamic]
 version = {attr = "jaeger_agent.__version__"}
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["jaeger_agent*"]
+exclude = ["jaeger_agent.__pycache__", "jaeger_agent.*.__pycache__"]
+namespaces = false
 
 [tool.setuptools.package-data]
 # "**/*" and not an extension allowlist. setuptools auto-includes only
@@ -56,7 +61,14 @@ include = ["jaeger_agent*"]
 #
 # An allowlist would also silently miss whatever the next skill adds —
 # these already include .xsd, .sty, .tex, .bst and .sh.
-jaeger_agent = ["**/*"]
+jaeger_agent = [
+    "skills/**/*.md", "skills/**/*.yaml", "skills/**/*.yml",
+    "skills/**/*.json", "skills/**/*.xsd", "skills/**/*.sty",
+    "skills/**/*.tex", "skills/**/*.bst", "skills/**/*.bib",
+    "skills/**/*.pdf", "skills/**/*.html", "skills/**/*.txt",
+    "skills/**/*.js", "skills/**/*.ini", "skills/**/*.sh",
+    "skills/**/LICENSE", "skills/**/Makefile",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

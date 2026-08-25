@@ -1,6 +1,6 @@
 ---
 name: manim-video
-description: "Manim CE animations: 3Blue1Brown math/algo videos."
+description: "Manim CE animations: 3Blue1Brown math/algo videos. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 platforms: [linux, macos, windows]
 tags: [manim, video, animation, math, visualization]

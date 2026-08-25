@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.workspace import SandboxError, _require_layout, _resolve_under, _resolve_read
 from jaeger_agent.util.tool_interrupt import is_interrupted
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
@@ -174,7 +174,7 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
         return {"saw": False, "error": "empty image path"}
     layout = _require_layout()
     try:
-        target = _resolve_under(layout.skills_dir, clean_path)
+        target = _resolve_read(clean_path)
     except SandboxError as exc:
         return {"saw": False, "error": str(exc)}
     if not target.exists():

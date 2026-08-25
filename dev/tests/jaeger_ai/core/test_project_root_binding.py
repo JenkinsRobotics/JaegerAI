@@ -53,8 +53,9 @@ def project(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _restore_binding():
+def _restore_binding(tmp_path):
     before = ws.get_project_root()
+    ws.bind(ws.DefaultWorkspace(tmp_path / "agent").create())
     yield
     ws.set_project_root(before)
 

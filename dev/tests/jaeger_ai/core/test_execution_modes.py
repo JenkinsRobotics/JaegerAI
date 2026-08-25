@@ -31,8 +31,9 @@ def test_default_is_interactive_and_not_continuous() -> None:
 
 @pytest.mark.parametrize(
     "typed,expected",
-    [("auto", "auto"), ("full-auto", "auto"), ("ON", "auto"),
-     ("step", "supervised"), ("chat", "interactive"), ("coder", "deepthink"),
+    [("auto", "auto"), ("full-auto", "auto"), ("ON", "auto"), ("agent", "auto"),
+     ("step", "supervised"), ("plan", "supervised"),
+     ("chat", "interactive"), ("ask", "interactive"), ("coder", "deepthink"),
      ("nonsense", None), ("", None),
      # ``normal`` belongs to the brain presets, not here — /mode routes it
      # to a model swap, so this module must not claim it.

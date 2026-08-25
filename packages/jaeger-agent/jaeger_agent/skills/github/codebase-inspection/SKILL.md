@@ -1,14 +1,27 @@
 ---
 name: codebase-inspection
-description: "Count lines of code, language breakdown, and code-vs-comment ratios of a repo with pygount — load this when the user asks how big a codebase is, wants a LOC count, language ratios, or repo composition."
-version: 1.1.0
-platforms: [macos, linux, windows]
-requires_tools: [terminal]
+description: Count lines of code, language breakdown, and code-vs-comment ratios of
+  a repo with pygount — load this when the user asks how big a codebase is, wants
+  a LOC count, language ratios, or repo composition.
 metadata:
   jros:
-    tags: [loc, code-analysis, pygount, codebase, metrics, repository]
+    tags:
+    - loc
+    - code-analysis
+    - pygount
+    - codebase
+    - metrics
+    - repository
     category: github
-    related_skills: [github-repo-management]
+    related_skills:
+    - github-repo-management
+    version: 1.1.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - terminal
 ---
 
 # CODEBASE INSPECTION (pygount)

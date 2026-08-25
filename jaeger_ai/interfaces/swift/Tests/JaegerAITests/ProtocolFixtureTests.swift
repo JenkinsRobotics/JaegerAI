@@ -22,6 +22,11 @@ final class ProtocolFixtureTests: XCTestCase {
         }
         let here = URL(fileURLWithPath: #filePath)
         let repository = (0..<6).reduce(here) { url, _ in url.deletingLastPathComponent() }
+        let sourceFixture = repository
+            .appendingPathComponent("packages/jaeger-os/jaeger_os/contract/protocol_v1_fixtures.json")
+        if FileManager.default.fileExists(atPath: sourceFixture.path) {
+            return sourceFixture
+        }
         let library = repository.appendingPathComponent(".venv/lib")
         let versions = (try? FileManager.default.contentsOfDirectory(
             at: library, includingPropertiesForKeys: nil
@@ -66,10 +71,7 @@ final class ProtocolFixtureTests: XCTestCase {
     }
 
     func testUnknownAdditiveFramesDecodeToNilRatherThanCrashing() throws {
-        // delta / reasoning were added on the Python side as v1 ADDITIVE
-        // frames. A client that has not implemented them yet must ignore
-        // the type, not fail the connection.
-        for typeName in ["delta", "reasoning", "not_a_real_frame"] {
+        for typeName in ["not_a_real_frame"] {
             let data = try JSONSerialization.data(
                 withJSONObject: ["type": typeName, "text": "x"])
             XCTAssertNil(ProtocolFrame.decode(data),
@@ -82,6 +84,17 @@ final class ProtocolFixtureTests: XCTestCase {
             XCTAssertNotNil(ProtocolFrame.decode(data),
                             "fixture frame \(name) failed to decode")
         }
+    }
+
+    func testStreamingFramesDecodeWithText() throws {
+        guard case .delta(let delta) = try decode("delta") else {
+            return XCTFail("delta fixture did not decode as delta")
+        }
+        guard case .reasoning(let reasoning) = try decode("reasoning") else {
+            return XCTFail("reasoning fixture did not decode as reasoning")
+        }
+        XCTAssertFalse(delta.isEmpty)
+        XCTAssertFalse(reasoning.isEmpty)
     }
 
     func testReadyCarriesVersionCapabilitiesAndAgentState() throws {

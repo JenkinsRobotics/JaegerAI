@@ -1,14 +1,39 @@
 ---
 name: ai-image-gen
-description: "Generate AI images or short video clips from text prompts — routes between the local image_generate (SDXL-Turbo, free, offline) and the fal.ai cloud tools generate_image_fal / generate_video_fal (paid, higher quality, needs FAL_KEY). Load this when the user asks for a picture, artwork, illustration, or a short generated video."
-version: 1.0.0
-platforms: [macos, linux, windows]
-requires_tools: [image_generate, generate_image_fal, generate_video_fal, set_credential]
+description: Generate AI images or short video clips from text prompts — routes between
+  the local image_generate (SDXL-Turbo, free, offline) and the fal.ai cloud tools
+  generate_image_fal / generate_video_fal (paid, higher quality, needs FAL_KEY). Load
+  this when the user asks for a picture, artwork, illustration, or a short generated
+  video.
 metadata:
   jros:
-    tags: [image, video, generation, fal, flux, sdxl, ai-art, text-to-image, text-to-video]
+    tags:
+    - image
+    - video
+    - generation
+    - fal
+    - flux
+    - sdxl
+    - ai-art
+    - text-to-image
+    - text-to-video
     category: creative
-    related_skills: [comfyui, pixel-art]
+    optional-tools:
+    - generate_image_fal
+    - generate_video_fal
+    requires-plugins:
+    - ai-gen
+    related_skills:
+    - comfyui
+    - pixel-art
+    version: 1.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - image_generate
+    - set_credential
 ---
 
 # AI IMAGE + VIDEO GENERATION

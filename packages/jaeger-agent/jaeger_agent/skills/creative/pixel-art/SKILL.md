@@ -1,6 +1,6 @@
 ---
 name: pixel-art
-description: "Pixel art w/ era palettes (NES, Game Boy, PICO-8)."
+description: "Pixel art w/ era palettes (NES, Game Boy, PICO-8). Use when the user explicitly requests this named workflow or its specific output."
 version: 2.0.0
 author: dodo-reach
 license: MIT

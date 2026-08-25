@@ -1,6 +1,6 @@
 ---
 name: obsidian
-description: Read, search, create, and edit notes in the Obsidian vault.
+description: Read, search, create, and edit notes in the Obsidian vault. Use when the user explicitly requests this named workflow or its specific output.
 platforms: [linux, macos, windows]
 tags: [notes, obsidian, markdown, knowledge-base, pkm]
 requires_tools: [read_file, write_file, search_files, patch, terminal]

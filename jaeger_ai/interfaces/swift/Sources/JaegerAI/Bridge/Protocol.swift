@@ -227,6 +227,8 @@ enum ProtocolFrame {
     /// on older cores that omit ``args``.
     case tool(name: String, phase: String, elapsed: Double, detail: String?,
               progress: ToolProgress?)
+    case delta(text: String)
+    case reasoning(text: String)
     /// ``telemetry`` fields are v1 ADDITIVE optionals — a core that
     /// doesn't send them (or an older fixture) decodes to nils.
     case reply(text: String, error: String?,
@@ -290,6 +292,12 @@ enum ProtocolFrame {
                           elapsedS: (obj["elapsed_s"] as? NSNumber)?.doubleValue,
                           ctxUsed: (obj["ctx_used"] as? NSNumber)?.intValue,
                           ctxMax: (obj["ctx_max"] as? NSNumber)?.intValue)
+        case "delta":
+            guard let text = obj["text"] as? String else { return nil }
+            return .delta(text: text)
+        case "reasoning":
+            guard let text = obj["text"] as? String else { return nil }
+            return .reasoning(text: text)
         case "result":
             var payload: Data? = nil
             if let d = obj["data"], !(d is NSNull) {

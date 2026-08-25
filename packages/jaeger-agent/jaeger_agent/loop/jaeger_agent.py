@@ -29,6 +29,7 @@ from jaeger_agent.loop.callbacks import AgentCallbacks
 from jaeger_agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
 from jaeger_agent.loop import verify_gate
 from jaeger_agent.loop.loop_backstop import (
+    MAX_TOOL_CALLS,
     call_signature,
     loop_halt_reason,
     loop_warning,
@@ -221,6 +222,10 @@ class JaegerAgent:
         self._dispatch_by_name: dict[str, ToolDef] = {
             t.name: t for t in self._all_tools
         }
+        # Per-agent, monotonically growing intent-selected surface. Unlike
+        # the legacy module-level active set, this cannot leak one session's
+        # privileged tool choices into another concurrent agent.
+        self._intent_tool_names: set[str] = set()
         # Record the originally-requested toolset names for diagnostics
         # (the ``/runtime`` panel surfaces this); not used by the loop.
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
@@ -341,7 +346,10 @@ class JaegerAgent:
             return list(self._all_tools)
         if self._tool_visibility is None:
             return list(self._all_tools)
-        return [t for t in self._all_tools if self._tool_visibility(t.name)]
+        return [
+            t for t in self._all_tools
+            if t.name in self._intent_tool_names or self._tool_visibility(t.name)
+        ]
 
     @property
     def all_tools(self) -> list[ToolDef]:
@@ -419,6 +427,23 @@ class JaegerAgent:
             appends a ``[turn failed: …]`` assistant note, then
             re-raises for the caller to surface.
         """
+        # Hermes-style focus profile: widen this agent's visible surface for
+        # obvious intent before the first model call. The set only grows for
+        # the session, preserving prompt-prefix/KV stability.
+        if not self._tools_filter_locked and self._toolset_resolver is not None:
+            try:
+                from jaeger_agent.skill_registry.toolset_scoping import (
+                    _scoping_enabled, infer_toolsets,
+                )
+                if _scoping_enabled():
+                    selected = infer_toolsets(user_message)
+                    if selected:
+                        self._intent_tool_names.update(
+                            self._toolset_resolver(selected)
+                        )
+            except Exception:  # noqa: BLE001 — routing hints must fail open
+                pass
+
         # Fresh per-turn state. Counters from a previous turn would
         # falsely trip the backstop on the second message of a session.
         self._call_signature_counts.clear()
@@ -674,8 +699,13 @@ class JaegerAgent:
             # to the provably safe subset). Anything else stays
             # sequential.
             if self._batch_is_parallel_safe(tool_calls):
-                tool_calls_made += len(tool_calls)
-                self._dispatch_parallel(tool_calls)
+                remaining = max(0, MAX_TOOL_CALLS - tool_calls_made)
+                allowed, refused = tool_calls[:remaining], tool_calls[remaining:]
+                if allowed:
+                    tool_calls_made += len(allowed)
+                    self._dispatch_parallel(allowed)
+                for tc in refused:
+                    self._append_budget_refusal(tc)
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
                     return self._halt_turn()
@@ -691,6 +721,12 @@ class JaegerAgent:
 
             seen_in_batch: dict[str, str] = {}
             for tc in tool_calls:
+                if tool_calls_made >= MAX_TOOL_CALLS:
+                    self._append_budget_refusal(tc)
+                    self.last_halt_reason = (
+                        f"made {tool_calls_made} tool calls in a single turn"
+                    )
+                    continue
                 tool_calls_made += 1
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
@@ -735,6 +771,9 @@ class JaegerAgent:
                 if halt:
                     self.last_halt_reason = halt
                     return self._halt_turn()
+
+            if self.last_halt_reason:
+                return self._halt_turn()
 
         # Fell out of the for-loop: max_iterations exhausted with the
         # model still trying to use tools. Spend ONE toolless grace
@@ -924,6 +963,22 @@ class JaegerAgent:
             self.last_halt_reason or "turn halted"
         )
         return self._final_text_or_halt()
+
+    def _append_budget_refusal(self, tc: ToolCall) -> None:
+        """Close a model-emitted call without executing past the hard cap."""
+        self._append_message({
+            "role": "tool",
+            "tool_call_id": tc.get("id") or "",
+            "name": tc.get("name") or "",
+            "content": _stringify({
+                "ok": False,
+                "success": False,
+                "executed": False,
+                "error_code": "tool_budget_exhausted",
+                "error": f"hard limit of {MAX_TOOL_CALLS} tool calls reached",
+                "retryable": False,
+            }),
+        })
 
     def _discard_pending_nudge(self) -> None:
         """Remove the synthetic nudge (post-tool OR verify-gate) from
@@ -1697,7 +1752,9 @@ class JaegerAgent:
         # returning a successful payload won't carry ``"ok": False``.
         _ok = True
         _err: str | None = None
-        if isinstance(content, dict) and content.get("ok") is False:
+        if isinstance(content, dict) and (
+            content.get("ok") is False or content.get("success") is False
+        ):
             _ok = False
             _err = str(content.get("error") or "") or None
         if _ok:

@@ -149,6 +149,8 @@ def _worker_next(
         return None
     if steps_left <= 0:
         return None
+    if continuation.is_loop_breaker(halt_reason):
+        return None
     verdict = continuation.classify(answer)
     if verdict in {"question", "blocked"}:
         return None
@@ -202,6 +204,10 @@ def next_continuation_prompt(
         return None
     if _tool_named(tool_activity, "complete_task") and not ledger_open():
         _end("complete_task")
+        return None
+
+    if continuation.is_loop_breaker(halt_reason):
+        _end("loop_breaker")
         return None
 
     use_ledger = ledger_open() if force_ledger is None else force_ledger

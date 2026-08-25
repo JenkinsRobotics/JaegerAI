@@ -19,18 +19,20 @@ Upgrade to a per-turn handle if concurrent multi-session turns land.
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-_MAX_DETAIL = 200  # cap the input/output preview kept per step
-
-
-def _clip(s: Any, n: int = _MAX_DETAIL) -> str:
-    t = "" if s is None else str(s)
-    t = " ".join(t.split())  # collapse newlines / runs of whitespace
-    return t if len(t) <= n else t[: n - 1] + "…"
+def _safe_detail(value: Any) -> str:
+    """Record shape and correlation only; never persist prompt/tool content."""
+    text = "" if value is None else str(value)
+    if not text:
+        return ""
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+    return f"chars={len(text)} sha256={digest}"
 
 
 # ── emit side: the live Tracer ──────────────────────────────────────
@@ -72,7 +74,7 @@ class Tracer:
                 turn_id=self._turn_id, step_seq=self._seq, kind=kind,
                 name=name or "", t_offset_s=round(t_offset_s, 4),
                 dur_s=round(dur_s, 4), ok=bool(ok),
-                detail=_clip(detail), session=self._session,
+                detail=_safe_detail(detail), session=self._session,
             ))
         except Exception:  # noqa: BLE001 — tracing never breaks a turn
             pass
@@ -113,14 +115,17 @@ class TraceRecorder:
             "t_offset_s": getattr(msg, "t_offset_s", 0.0),
             "dur_s": getattr(msg, "dur_s", 0.0),
             "ok": getattr(msg, "ok", True),
-            "detail": getattr(msg, "detail", ""),
-            "session": getattr(msg, "session", ""),
+            "detail": _safe_detail(getattr(msg, "detail", "")),
+            "session_hash": hashlib.sha256(
+                str(getattr(msg, "session", "")).encode()
+            ).hexdigest()[:16] if getattr(msg, "session", "") else "",
             "ts_ns": getattr(msg, "t_emit_ns", 0),
         }
         line = json.dumps(row, ensure_ascii=False, default=str)
         try:
             with self._lock, self.path.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
+            os.chmod(self.path, 0o600)
         except Exception:  # noqa: BLE001
             pass
 
