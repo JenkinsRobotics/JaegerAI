@@ -102,7 +102,10 @@ def test_spotlight_search_respects_limit_and_flags_truncated(monkeypatch):
     assert result["truncated"] is True
 
 
-def test_spotlight_search_empty_query_is_rejected():
+def test_spotlight_search_empty_query_is_rejected(monkeypatch):
+    # The macOS gate fires before the empty-query check, so on a Linux runner
+    # this saw the platform error instead. Pin the platform like its siblings.
+    monkeypatch.setattr(spotlight.platform, "system", lambda: "Darwin")
     result = spotlight.spotlight_search()
     assert result["searched"] is False
     assert "empty search" in result["error"]
