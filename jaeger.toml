@@ -180,3 +180,18 @@ enabled = false   # JROS owns the TUI loop; chassis can't host it
 id = "tray"
 factory = "jaeger_ai.interfaces.pyside6.tray.macos:run_surface"
 enabled = false   # tray runs as its own subprocess
+
+
+# ── settings ─────────────────────────────────────────────────────
+# One table per node's `config_key`. The framework hands each block
+# to that node's factory; nothing else reads it. Ported from Mochi's
+# jaeger.toml (0.11.0) — the app manifest is where an engine's policy
+# belongs, not in a call the mind makes on the app's behalf.
+
+[config.tts]
+# ~8 s of weight loading happens either at boot or inside the first
+# reply. The MODULE warms itself in the background when this is true,
+# so nothing has to reach through jaeger-agent to trigger it and boot
+# is not held waiting. This is the difference between a voice that
+# answers and one that looks broken the first time you use it.
+warm = true
