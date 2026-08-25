@@ -52,12 +52,35 @@ def main(argv: list[str] | None = None) -> int:
 
     from jaeger_ai import __version__
 
+    # The subcommands below are argparse subparsers. A SECOND set of
+    # commands is dispatched earlier, by ``cli.entry._route``, which
+    # re-execs a different module for each — so argparse never sees them
+    # and they cannot be registered here without breaking that routing.
+    # They were therefore invisible in --help: `jaeger doctor` worked, and
+    # the release checklist told operators to run it, but nothing short of
+    # reading entry.py revealed it existed (field blocker #7). List them in
+    # the epilog so every routable command is discoverable from one place.
+    # ``test_help_discoverability`` fails if a route is added without a
+    # line here.
+    epilog = (
+        "other commands (dispatched before this console):\n"
+        "  setup       run first-run onboarding (GUI; `setup tui` forces terminal)\n"
+        "  doctor      check dependencies, permissions, and install health\n"
+        "  update      update JaegerAI in place\n"
+        "  bridge      run the NDJSON stdio bridge the desktop app speaks\n"
+        "  mcp         run the MCP server\n"
+        "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"
+        "\nrun `jaeger <command> --help` for a command's own options."
+    )
+
     parser = argparse.ArgumentParser(
         prog="jaeger",
         description=(
             "JaegerAI operator console.  Every subcommand here is also "
             "reachable from the GUI — terminal-first by design."
         ),
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", action="version", version=f"jaeger-ai {__version__}",
