@@ -4,7 +4,18 @@
       "name": "web",
       "enabled": true,
       "command": "python",
-      "args": ["-m", "mcp_server_fetch"]
+      "args": [
+        "-m",
+        "mcp_server_fetch"
+      ]
+    },
+    {
+      "name": "apple_mail_mcp",
+      "enabled": true,
+      "command": "uvx",
+      "args": [
+        "mcp-apple-mail"
+      ]
     }
   ]
 }
