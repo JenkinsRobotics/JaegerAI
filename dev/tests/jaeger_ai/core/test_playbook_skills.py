@@ -8,8 +8,19 @@ into the prompt, so the library can't bloat context.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 from jaeger_agent.skill_registry import playbook_skills as pb
 from jaeger_agent.tools import skill
+
+# Skills that declare ``platforms: [macos]`` are deliberately hidden by
+# _platform_ok() on other hosts, so assertions about them only hold on a Mac.
+macos_only = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="asserts on macos-only playbooks, which discovery correctly hides off-Darwin",
+)
 
 
 # ── discovery ────────────────────────────────────────────────────────
@@ -21,6 +32,7 @@ def test_playbooks_are_discovered() -> None:
     assert all(s.name and s.path.name == "SKILL.md" for s in skills)
 
 
+@macos_only
 def test_a_skill_can_be_both_module_and_recipe() -> None:
     # Presence-based unification: a folder that ships a module (registers tools)
     # AND a SKILL.md is BOTH — its recipe is indexed too. No "code_skill vs
@@ -35,6 +47,7 @@ def test_a_skill_can_be_both_module_and_recipe() -> None:
     assert pb.find_playbook("macos_computer").name == "macos-computer-use"
 
 
+@macos_only
 def test_macos_mail_organizer_is_a_playbook() -> None:
     s = pb.find_playbook("macos-mail-organizer")
     assert s is not None
