@@ -125,3 +125,10 @@ sandbox/
 # repo root mints one here: runtime state (memory db, logs, workspace
 # files), never source.
 .jaeger_agent/
+
+# Claude Code agent worktrees — real git worktrees checked out inside the
+# repo (122MB / 2800+ files here). Untracked AND unignored, they would be
+# swept into a release by `git add -A` as a duplicate copy of the source.
+# Scoped to worktrees/ rather than all of .claude/, which legitimately
+# carries project settings and skills that SHOULD stay tracked.
+.claude/worktrees/
