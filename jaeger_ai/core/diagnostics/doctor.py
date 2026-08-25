@@ -87,7 +87,8 @@ def _fda_check() -> Any | None:
         detail = "granted"
     else:
         detail = "could not determine"
-    return Check(name="full_disk_access", category="system", ok=True, detail=detail)
+    return Check(name="full_disk_access", category="system", ok=True,
+                 unknown=granted is None, detail=detail)
 
 
 def _tcc_checks() -> list[Any]:
@@ -117,7 +118,8 @@ def _tcc_checks() -> list[Any]:
                       "Terminal are separate).")
         else:
             detail = "could not determine (PyObjC not installed)"
-        checks.append(Check(name=name, category="system", ok=True, detail=detail))
+        checks.append(Check(name=name, category="system", ok=True,
+                            unknown=granted is None, detail=detail))
     return checks
 
 

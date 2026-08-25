@@ -37,6 +37,17 @@ class Check:
     detail: str = ""
     fix: str = ""                       # human-readable fix
     fix_cmd: list[str] = field(default_factory=list)  # runnable argv, when auto-fixable
+    # A probe has THREE outcomes, not two: pass, fail, and "could not
+    # tell". Without this flag an undetermined probe had to pick a side
+    # and picked ``ok=True``, so doctor rendered ✓ and claimed full health
+    # for something it had not established (field blocker #8). ``unknown``
+    # rows are still not FAILURES — ``missing()`` ignores them, so they
+    # never produce a bogus fix instruction — they just stop counting as
+    # evidence of health.
+    #
+    # Declared LAST on purpose: call sites construct Check positionally,
+    # so inserting this any earlier shifts every later argument along.
+    unknown: bool = False
 
 
 # Optional Python deps: (import-name, pip-name, category, pip-extra).
@@ -575,12 +586,19 @@ def format_report(checks: list[Check]) -> str:
             continue
         lines.append(f"  {category}")
         for c in group:
-            mark = "✓" if c.ok else "✗"
+            mark = "?" if c.unknown else ("✓" if c.ok else "✗")
             lines.append(f"    {mark} {c.name:<22}{c.detail}")
         lines.append("")
     bad = missing(checks)
-    if not bad:
+    unsure = [c for c in checks if c.unknown]
+    if not bad and not unsure:
         lines.append("  All dependencies present — the Jaeger is fully operational.")
+    elif not bad:
+        # Nothing is known-broken, but we cannot claim full health either.
+        names = ", ".join(c.name for c in unsure)
+        lines.append("  No failures detected, but "
+                     f"{len(unsure)} check(s) could not be determined: {names}.")
+        lines.append("  Verify these by hand before relying on them.")
     else:
         lines.append(f"  {len(bad)} item(s) need attention:")
         for cmd in sorted({c.fix for c in bad if c.fix}):
