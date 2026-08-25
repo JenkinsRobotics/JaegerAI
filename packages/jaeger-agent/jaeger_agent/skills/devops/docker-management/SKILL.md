@@ -1,14 +1,14 @@
 ---
 name: docker-management
-description: "Manage Docker containers, images, volumes, networks, and Compose stacks — run/stop/debug containers, build images, free disk space, review Dockerfiles. Load this for 'start a postgres container', 'why is my container crashing', 'docker is eating my disk', or any docker/compose CLI work."
-version: 1.1.0
-platforms: [linux, macos, windows]
-requires_tools: [terminal, read_file, write_file]
+description: Manage Docker containers, images, volumes, networks, and Compose stacks — run/stop/debug containers, build images, free disk space, review Dockerfiles. Load this for 'start a postgres container', 'why is my container crashing', 'docker is eating my disk', or any docker/compose CLI work.
 metadata:
   jros:
     tags: [docker, containers, devops, compose, images, volumes, networks, debugging]
     category: devops
     related_skills: [opencode, spike]
+    version: 1.1.0
+    platforms: [linux, macos, windows]
+    requires-tools: [terminal, read_file, write_file]
 ---
 
 # DOCKER MANAGEMENT

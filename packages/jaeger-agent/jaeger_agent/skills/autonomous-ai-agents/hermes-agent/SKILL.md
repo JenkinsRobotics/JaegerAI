@@ -48,7 +48,10 @@ of it with a few JROS tools — you do NOT have Hermes-native tools here.
 ## QUICK START
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+# Download the official installer, inspect it, then run the reviewed local file.
+curl -fsSLo /tmp/hermes-install.sh https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh
+less /tmp/hermes-install.sh
+bash /tmp/hermes-install.sh
 hermes                                  # interactive chat (default)
 hermes chat -q "What is the capital of France?"   # one-shot
 hermes setup                            # setup wizard

@@ -1,6 +1,6 @@
 ---
 name: heartmula
-description: "HeartMuLa: Suno-like song generation from lyrics + tags."
+description: "HeartMuLa: Suno-like song generation from lyrics + tags. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 platforms: [linux, macos, windows]
 requires_tools: [terminal]

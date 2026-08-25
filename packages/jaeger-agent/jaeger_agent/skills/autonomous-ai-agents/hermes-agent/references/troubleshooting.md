@@ -35,7 +35,8 @@ Run all commands below through the JROS `terminal` tool.
 ```bash
 grep -i "failed to send\|error" ~/.hermes/logs/gateway.log | tail -20
 ```
-- Dies on SSH logout → `sudo loginctl enable-linger $USER`
+- Dies on SSH logout → ask the system administrator to enable user lingering;
+  do not elevate privileges from the agent session.
 - Dies on WSL2 close → needs `systemd=true` in `/etc/wsl.conf`
 - Crash loop → `systemctl --user reset-failed hermes-gateway`
 

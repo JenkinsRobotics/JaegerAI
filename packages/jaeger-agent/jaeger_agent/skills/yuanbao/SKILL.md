@@ -1,6 +1,6 @@
 ---
 name: yuanbao
-description: "Yuanbao (元宝) groups: @mention users, query info/members."
+description: "Yuanbao (元宝) groups: @mention users, query info/members. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 platforms: [linux, macos, windows]
 requires_tools: []

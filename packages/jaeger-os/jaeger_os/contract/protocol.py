@@ -190,7 +190,9 @@ def reply_frame(text: str, error: str | None = None,
                 session: str = "", *,
                 elapsed_s: float | None = None,
                 ctx_used: int | None = None,
-                ctx_max: int | None = None) -> dict[str, Any]:
+                ctx_max: int | None = None,
+                halt_reason: str | None = None,
+                halt_code: str | None = None) -> dict[str, Any]:
     """One finished turn. v1 ADDITIVE telemetry (optional — the keys are
     OMITTED when unknown, and clients must decode frames without them):
 
@@ -206,7 +208,30 @@ def reply_frame(text: str, error: str | None = None,
         frame["ctx_used"] = int(ctx_used)
     if ctx_max is not None:
         frame["ctx_max"] = int(ctx_max)
+    if halt_reason:
+        frame["halt_reason"] = str(halt_reason)
+        frame["halt_code"] = halt_code or classify_halt_reason(halt_reason)
     return frame
+
+
+def classify_halt_reason(reason: str | None) -> str | None:
+    """Stable machine code for an operator-facing loop halt reason."""
+    value = str(reason or "").lower()
+    if not value:
+        return None
+    if "tool calls in a single turn" in value:
+        return "tool_budget_exhausted"
+    if "identical arguments" in value or "same " in value and " failure" in value:
+        return "repeated_tool_failure"
+    if "max_iterations" in value:
+        return "iteration_budget_exhausted"
+    if "context_overflow" in value:
+        return "context_overflow"
+    if "interrupt" in value:
+        return "interrupted"
+    if "timeout" in value or "timed out" in value:
+        return "timeout"
+    return "agent_halted"
 
 
 def request_frame(id: str, kind: str, prompt: str,

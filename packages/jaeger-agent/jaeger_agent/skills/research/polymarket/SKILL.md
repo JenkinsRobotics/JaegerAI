@@ -1,6 +1,6 @@
 ---
 name: polymarket
-description: "Query Polymarket: markets, prices, orderbooks, history."
+description: "Query Polymarket: markets, prices, orderbooks, history. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: Hermes Agent + Teknium
 tags: [polymarket, prediction-markets, market-data, trading]

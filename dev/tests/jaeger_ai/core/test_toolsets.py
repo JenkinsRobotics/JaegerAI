@@ -24,18 +24,28 @@ def _clean_toolset_state(monkeypatch):
     ts._SKILL_SUMMARY.clear()
 
 
-def test_scoping_off_by_default_shows_everything(monkeypatch) -> None:
-    """With scoping disabled (the default — reverted after Gemma 4
-    routing regressed from 100% to 67.6% under naive scoping), every
-    tool is visible. Opt into the lean surface via
-    ``JAEGER_TOOLSET_SCOPING=1`` when context is tight."""
+def test_scoping_on_by_default_hides_categorised_tools(monkeypatch) -> None:
+    """Automatic Hermes-style scoping is the shipped default."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     ts.reset_toolsets()
     assert ts.tool_visible("get_time")
-    assert ts.tool_visible("execute_code")       # would be hidden if scoped
-    assert ts.tool_visible("schedule_prompt")
+    assert ts.tool_visible("execute_code")       # CORE
+    assert not ts.tool_visible("schedule_prompt")
     assert ts.tool_visible("anything_at_all")
+
+
+def test_scoping_can_be_disabled_explicitly(monkeypatch) -> None:
+    monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "0")
+    monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
+    assert ts.tool_visible("terminal")
+    assert ts.tool_visible("schedule_prompt")
+
+
+def test_intent_router_selects_relevant_toolsets_only() -> None:
+    assert ts.infer_toolsets("debug the Python test suite") == {"code"}
+    assert ts.infer_toolsets("check my email and calendar") == {"email", "calendar"}
+    assert ts.infer_toolsets("hello, how are you?") == set()
 
 
 def test_scoping_on_via_env_hides_categorised_tools(monkeypatch) -> None:

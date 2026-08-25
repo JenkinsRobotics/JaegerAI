@@ -38,8 +38,8 @@ enum SlashRouting {
     /// Commands the composer palette lists when the operator types ``/``.
     static let palette: [Item] = [
         Item(name: "goal",      summary: "run this job until it is genuinely done"),
-        Item(name: "auto",      summary: "already on — send the task, it keeps going"),
-        Item(name: "plan",      summary: "plan, then execute the objective"),
+        Item(name: "auto",      summary: "Agent mode — keep going until the job is done"),
+        Item(name: "plan",      summary: "Plan mode — architect first, then execute"),
         Item(name: "deepthink", summary: "deep reasoning pass on a hard task"),
         Item(name: "compact",   summary: "compact conversation context"),
         Item(name: "board",     summary: "view task board and active cards"),
@@ -47,7 +47,7 @@ enum SlashRouting {
         Item(name: "skills",    summary: "list available recipe skills"),
         Item(name: "facts",     summary: "inspect persistent memory facts"),
         Item(name: "model",     summary: "switch the agent's brain (picker overlay)"),
-        Item(name: "mode",      summary: "this app already keeps going until done"),
+        Item(name: "mode",      summary: "Ask / Plan / Agent (interactive · supervised · auto)"),
         Item(name: "steer",     summary: "guide an in-flight autonomous run"),
         Item(name: "stop",      summary: "cancel active turn or autonomous loop"),
         Item(name: "copy",      summary: "copy the last reply to clipboard"),
@@ -148,7 +148,8 @@ enum SlashRouting {
             }
             return .chat(prompt: parts.rest, display: trimmed)
         case "auto", "mode":
-            return .local("Autonomous continuation is already on. Send the task as a normal message — the engine keeps going until the work is done.")
+            // Real execution-mode switch — the bridge slash registry owns it.
+            return .passThrough
         case "stop":
             return .stop
         case "steer":

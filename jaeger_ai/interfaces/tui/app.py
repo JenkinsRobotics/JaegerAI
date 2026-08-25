@@ -1261,6 +1261,10 @@ class JaegerTUI:
             ledger_open, next_continuation_prompt,
         )
 
+        if continuation.is_loop_breaker(self._last_halt_reason):
+            self._end_auto_run(self._last_halt_reason or "loop_breaker")
+            return None
+
         if ledger_open() or continuation.hit_inner_cap(self._last_halt_reason):
             nxt = next_continuation_prompt(
                 self._last_answer, force_ledger=ledger_open(),

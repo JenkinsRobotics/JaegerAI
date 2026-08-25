@@ -32,11 +32,12 @@ hermes-agent/
 1. Create `tools/your_tool.py` with a top-level `registry.register(...)` call
    (auto-discovered on import — no manual list needed):
 ```python
-import json, os
+import json
 from tools.registry import registry
 
 def check_requirements() -> bool:
-    return bool(os.getenv("EXAMPLE_API_KEY"))
+    # Query Hermes' credential/config service; never read or print secrets here.
+    return credential_is_configured("example.api_key")
 
 def example_tool(param: str, task_id: str = None) -> str:
     return json.dumps({"success": True, "data": "..."})

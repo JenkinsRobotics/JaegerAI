@@ -282,7 +282,8 @@ const puppeteer = require('puppeteer');
 async function captureFrames(htmlPath, outputDir, options) {
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    // Keep Chromium's sandbox enabled; configure the host correctly instead.
+    args: []
   });
   const page = await browser.newPage();
 

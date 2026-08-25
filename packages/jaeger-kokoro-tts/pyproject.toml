@@ -33,8 +33,13 @@ jaeger_kokoro_tts = "jaeger_kokoro_tts.module_roots:roots"
 version = {attr = "jaeger_kokoro_tts.__version__"}
 dependencies = {file = ["requirements.txt"]}
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["jaeger_kokoro_tts*"]
+exclude = ["jaeger_kokoro_tts.__pycache__", "jaeger_kokoro_tts.*.__pycache__"]
+namespaces = false
 
 [tool.setuptools.package-data]
 # Non-.py assets under the package (module.yaml at minimum) — setuptools
@@ -46,7 +51,7 @@ include = ["jaeger_kokoro_tts*"]
 # accident. "**/*" is deliberately broad (redundant with .py, harmless)
 # rather than an extension allowlist that silently misses the next
 # asset type this module grows.
-jaeger_kokoro_tts = ["**/*"]
+jaeger_kokoro_tts = ["**/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["dev/tests", "jaeger_kokoro_tts/nodes/kokoro_tts/tests"]

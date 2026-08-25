@@ -1,0 +1,157 @@
+# Jaeger distribution policy. SKILL.md packages stay portable; this file decides
+# which shipped capabilities compete for automatic selection in ordinary turns.
+# Explicit lookup still resolves optional/plugin/explicit skills.
+
+core:
+  - apple-notes
+  - apple-reminders
+  - findmy
+  - imessage
+  - mac-native
+  - macos-computer-use
+  - deep-think
+  - ai-image-gen
+  - architecture-diagram
+  - web-app-qa
+  - docker-management
+  - process-monitoring
+  - webhook-subscriptions
+  - email-triage
+  - himalaya
+  - macos-mail-organizer
+  - codebase-inspection
+  - github-auth
+  - github-code-review
+  - github-issues
+  - github-pr-workflow
+  - github-repo-management
+  - messaging-setup
+  - native-mcp
+  - file-organization
+  - kanban
+  - memory-keeping
+  - ocr-and-documents
+  - scheduling
+  - arxiv
+  - research-paper-writing
+  - web-research
+  - plan
+  - requesting-code-review
+  - self-improvement
+  - skill-builder
+  - spike
+  - systematic-debugging
+  - test-driven-development
+
+plugin:
+  - airtable
+  - google-workspace
+  - home-assistant
+  - linear
+  - openhue
+  - spotify
+  - xurl
+
+explicit:
+  - kanban-orchestrator
+  - kanban-worker
+
+optional:
+  - claude-code
+  - codex
+  - hermes-agent
+  - opencode
+  - ascii-art
+  - ascii-video
+  - baoyu-comic
+  - baoyu-infographic
+  - claude-design
+  - comfyui
+  - design-md
+  - excalidraw
+  - humanizer
+  - ideation
+  - manim-video
+  - meme-generation
+  - p5js
+  - pixel-art
+  - popular-web-designs
+  - pretext
+  - sketch
+  - songwriting-and-ai-music
+  - touchdesigner-mcp
+  - jupyter-live-kernel
+  - log-calculations
+  - minecraft-modpack-server
+  - pokemon-player
+  - gif-search
+  - heartmula
+  - songsee
+  - youtube-content
+  - audiocraft-audio-generation
+  - dspy
+  - evaluating-llms-harness
+  - huggingface-hub
+  - llama-cpp
+  - obliteratus
+  - segment-anything-model
+  - serving-llms-vllm
+  - weights-and-biases
+  - obsidian
+  - excel-author
+  - maps
+  - nano-pdf
+  - notion
+  - powerpoint
+  - teams-meeting-pipeline
+  - blogwatcher
+  - llm-wiki
+  - polymarket
+  - debugging-hermes-tui-commands
+  - node-inspect-debugger
+  - python-debugpy
+  - subagent-driven-development
+  - yuanbao
+
+archived:
+  - computer_use
+  - godmode
+  - hermes-agent-skill-authoring
+  - macos_computer
+  - writing-plans
+
+# These imports preserve useful domain facts but are not authoring exemplars.
+knowledge-packs:
+  - airtable
+  - ascii-video
+  - baoyu-comic
+  - baoyu-infographic
+  - blogwatcher
+  - codex
+  - debugging-hermes-tui-commands
+  - design-md
+  - excalidraw
+  - google-workspace
+  - heartmula
+  - ideation
+  - jupyter-live-kernel
+  - kanban-orchestrator
+  - kanban-worker
+  - linear
+  - llama-cpp
+  - manim-video
+  - maps
+  - minecraft-modpack-server
+  - notion
+  - obliteratus
+  - pixel-art
+  - pokemon-player
+  - popular-web-designs
+  - powerpoint
+  - pretext
+  - python-debugpy
+  - serving-llms-vllm
+  - sketch
+  - songwriting-and-ai-music
+  - spotify
+  - touchdesigner-mcp

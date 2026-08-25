@@ -1,6 +1,6 @@
 ---
 name: ascii-video
-description: "ASCII video: convert video/audio to colored ASCII MP4/GIF."
+description: "ASCII video: convert video/audio to colored ASCII MP4/GIF. Use when the user explicitly requests this named workflow or its specific output."
 platforms: [linux, macos, windows]
 tags: [ascii, video, animation, terminal, creative]
 requires_tools: [execute_code, terminal]

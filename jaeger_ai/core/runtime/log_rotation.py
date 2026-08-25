@@ -33,7 +33,7 @@ from typing import Any
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
-ROTATE_TARGETS = ("audit.log", "latency.jsonl")
+ROTATE_TARGETS = ("audit.log", "latency.jsonl", "trace.jsonl")
 
 
 def _first_line_date(path: Path) -> date | None:

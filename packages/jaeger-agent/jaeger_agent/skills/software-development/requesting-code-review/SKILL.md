@@ -1,14 +1,33 @@
 ---
 name: requesting-code-review
-description: "Load this before you commit/push/ship code: a pre-commit gate that runs a security scan, baseline-aware tests/lint, an independent fresh-eyes review pass, and a bounded auto-fix loop."
-version: 3.0.0
-platforms: [macos, linux, windows]
-requires_tools: [terminal, execute_code, write_file, read_file, use_skill, delegate_task]
+description: 'Load this before you commit/push/ship code: a pre-commit gate that runs
+  a security scan, baseline-aware tests/lint, an independent fresh-eyes review pass,
+  and a bounded auto-fix loop.'
 metadata:
   jros:
-    tags: [code-review, security, pre-commit, verification, quality]
+    tags:
+    - code-review
+    - security
+    - pre-commit
+    - verification
+    - quality
     category: software-development
-    related_skills: [subagent-driven-development, writing-plans, test-driven-development]
+    related_skills:
+    - subagent-driven-development
+    - writing-plans
+    - test-driven-development
+    version: 3.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - terminal
+    - execute_code
+    - write_file
+    - read_file
+    - use_skill
+    - delegate_task
 ---
 
 # PRE-COMMIT CODE VERIFICATION

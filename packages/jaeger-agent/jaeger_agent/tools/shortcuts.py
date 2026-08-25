@@ -138,7 +138,7 @@ def _t_list_shortcuts() -> dict:
     return list_shortcuts()
 
 
-@register_tool_from_function(name="run_shortcut")
+@register_tool_from_function(name="run_shortcut", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="shortcuts",
                operation="run_shortcut",
                summary="run a Shortcuts.app automation")

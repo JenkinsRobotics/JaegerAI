@@ -12,7 +12,10 @@ from jaeger_os.core.tools.tool_registry import get_tools
 
 EXPECTED = {
     # 0.9.3 everyday-agency additions (the class that regressed)
-    "send_email", "move_file", "copy_file",
+    "send_email", "list_mailboxes", "list_mail", "read_mail",
+    "plan_mail_triage", "move_mail",
+    "batch_move", "sweep_mail", "schedule_inbox_sweeper",
+    "move_file", "copy_file",
     "run_shortcut", "list_shortcuts", "spotlight_search",
     "get_events", "create_event", "lookup_contact",
     "clipboard_read", "clipboard_write", "notify",

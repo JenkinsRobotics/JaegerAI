@@ -1,14 +1,29 @@
 ---
 name: arxiv
-description: "Search and fetch academic papers from arXiv (free REST API) plus citation/related-work data from Semantic Scholar. Load this for finding papers by keyword/author/category/ID, reading abstracts or full PDFs, generating BibTeX, or tracing citations."
-version: 1.1.0
-platforms: [macos, linux, windows]
-requires_tools: [terminal, web_extract]
+description: Search and fetch academic papers from arXiv (free REST API) plus citation/related-work
+  data from Semantic Scholar. Load this for finding papers by keyword/author/category/ID,
+  reading abstracts or full PDFs, generating BibTeX, or tracing citations.
 metadata:
   jros:
-    tags: [arxiv, papers, research, citations, semantic-scholar, bibtex]
+    tags:
+    - arxiv
+    - papers
+    - research
+    - citations
+    - semantic-scholar
+    - bibtex
     category: research
-    related_skills: [ocr-and-documents, research-paper-writing]
+    related_skills:
+    - ocr-and-documents
+    - research-paper-writing
+    version: 1.1.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - terminal
+    - web_extract
 ---
 
 # ARXIV RESEARCH

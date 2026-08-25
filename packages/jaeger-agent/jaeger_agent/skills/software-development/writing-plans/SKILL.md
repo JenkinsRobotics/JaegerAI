@@ -1,5 +1,6 @@
 ---
 name: writing-plans
+archived: true
 description: "Load this to turn a spec or feature request into a step-by-step implementation plan file (exact paths, copy-pasteable code, verify commands) before any code gets written."
 version: 2.0.0
 platforms: [macos, linux, windows]

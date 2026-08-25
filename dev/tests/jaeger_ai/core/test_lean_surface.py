@@ -34,14 +34,13 @@ from jaeger_agent.skill_registry.toolset_scoping import (
 # ── tool_visible — the live gate ──────────────────────────────────
 
 
-def test_default_is_fail_open(monkeypatch) -> None:
-    """With ``JAEGER_TOOLSET_SCOPING`` unset (the shipped default),
-    every tool is visible. A model that gets too many tools is a
-    routing concern, not a hard refusal."""
+def test_default_is_hermes_scoped(monkeypatch) -> None:
+    """With the setting unset, CORE is visible and unloaded groups hide."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     reset_toolsets()
     assert tool_visible("get_time") is True
     assert tool_visible("execute_code") is True
+    assert tool_visible("terminal") is False
     assert tool_visible("anything_unregistered") is True
 
 

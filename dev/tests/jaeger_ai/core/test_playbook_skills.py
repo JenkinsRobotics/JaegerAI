@@ -26,8 +26,24 @@ def test_a_skill_can_be_both_module_and_recipe() -> None:
     # AND a SKILL.md is BOTH — its recipe is indexed too. No "code_skill vs
     # playbook" mutual exclusion. See dev/docs/history/skill_unification.md.
     names = {s.name for s in pb.discover_playbooks()}
-    assert "computer_use" in names       # a module-providing skill's recipe...
-    assert "macos_computer" in names     # ...is now surfaced via use_skill too
+    assert "macos-computer-use" in names
+    # Legacy implementation names resolve as aliases without competing in
+    # automatic discovery.
+    assert "computer_use" not in names
+    assert "macos_computer" not in names
+    assert pb.find_playbook("computer_use").name == "macos-computer-use"
+    assert pb.find_playbook("macos_computer").name == "macos-computer-use"
+
+
+def test_macos_mail_organizer_is_a_playbook() -> None:
+    s = pb.find_playbook("macos-mail-organizer")
+    assert s is not None
+    assert s.name == "macos-mail-organizer"
+    text = s.path.read_text(encoding="utf-8")
+    assert "list_mail" in text
+    assert "batch_move" in text
+    assert "plan_mail_triage" in text
+    assert "after_move_offset" in text or "offset=0" in text
 
 
 def test_find_playbook_is_fuzzy() -> None:
@@ -41,10 +57,10 @@ def test_find_playbook_is_fuzzy() -> None:
 def test_skill_list() -> None:
     """``list`` returns the FULL active catalog by default (limit=0) — the
     coordinator doesn't gate scope; the agent is the routing intelligence.
-    ``total`` carries the full corpus count (≥50 for the bundled library)."""
+    ``total`` carries the intentionally lean active catalog."""
     r = skill(action="list")
     assert r["ok"] is True
-    assert r["total"] >= 50
+    assert 25 <= r["total"] <= 45
     # Default is the complete list (no cap): every active skill returned.
     assert r["limit"] == 0
     assert len(r["skills"]) == r["total"]
@@ -52,6 +68,21 @@ def test_skill_list() -> None:
     # category before drilling in.
     assert isinstance(r["category_counts"], dict)
     assert r["category_counts"]
+
+
+def test_optional_skill_is_explicitly_resolvable_but_not_auto_listed() -> None:
+    active = {s.name for s in pb.available_playbooks()}
+    assert "comfyui" not in active
+    skill = pb.find_playbook("comfyui")
+    assert skill is not None
+    assert skill.lifecycle == "optional"
+
+
+def test_loader_level_alias_does_not_create_second_candidate() -> None:
+    active = {s.name for s in pb.available_playbooks()}
+    assert "skill-builder" in active
+    assert "hermes-agent-skill-authoring" not in active
+    assert pb.find_playbook("hermes-agent-skill-authoring").name == "skill-builder"
 
 
 def test_skill_search_finds_by_keyword() -> None:

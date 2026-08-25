@@ -1,6 +1,6 @@
 ---
 name: obliteratus
-description: "OBLITERATUS: abliterate LLM refusals (diff-in-means)."
+description: "OBLITERATUS: abliterate LLM refusals (diff-in-means). Use when the user explicitly requests this named workflow or its specific output."
 version: 2.0.0
 author: Hermes Agent
 license: MIT

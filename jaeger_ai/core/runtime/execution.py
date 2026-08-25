@@ -65,14 +65,17 @@ DEFAULT = ExecutionMode.INTERACTIVE.value
 # two different things depending on which surface you typed it on.
 _ALIASES: dict[str, str] = {
     "chat": "interactive",
+    "ask": "interactive",
     "standard": "interactive",
     "off": "interactive",
     "full-auto": "auto",
     "fullauto": "auto",
     "autonomous": "auto",
+    "agent": "auto",
     "on": "auto",
     "step": "supervised",
     "stepwise": "supervised",
+    "plan": "supervised",
     "deep-think": "deepthink",
     "coder": "deepthink",
 }

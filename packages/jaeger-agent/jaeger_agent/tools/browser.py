@@ -264,7 +264,7 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
 # ── Agent-tool wrapper (migrated from main.py::_register_builtins) ──
 
 
-@register_tool_from_function(name="browser")
+@register_tool_from_function(name="browser", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="browser",
                operation="browser",
                summary="drive a real web browser")

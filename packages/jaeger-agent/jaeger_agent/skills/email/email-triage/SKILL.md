@@ -1,29 +1,47 @@
 ---
 name: email-triage
-description: "Check, summarize, draft, or send email — 'check my email', 'any new messages', 'draft a reply to X', 'send an email to Y saying Z', 'email John about the meeting'. Load this for ANY email task; it hands you the exact read (himalaya) and send (send_email) paths and the draft-before-send rule."
-version: 1.0.0
-platforms: [macos, linux, windows]
-requires_tools: [send_email]
-requires_toolsets: [email]
+description: Check, summarize, draft, or send email — 'check my email', 'any new messages',
+  'draft a reply to X', 'send an email to Y saying Z', 'email John about the meeting'.
+  Load this for ANY email task; it hands you the exact read (himalaya) and send (send_email)
+  paths and the draft-before-send rule.
 metadata:
   jros:
-    tags: [email, triage, inbox, drafting, himalaya, send_email]
+    tags:
+    - email
+    - triage
+    - inbox
+    - drafting
+    - himalaya
+    - send_email
     category: email
-    related_skills: [himalaya, web-research]
+    related_skills:
+    - macos-mail-organizer
+    - himalaya
+    - web-research
+    version: 1.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - send_email
+    requires-toolsets:
+    - email
 ---
 
 # EMAIL TRIAGE — CHECK / SUMMARIZE / DRAFT / SEND
 
-Two separate surfaces, one rule that bridges them:
+Three surfaces, pick the cheapest that fits:
 
-- **Reading/checking** the inbox uses the `himalaya` CLI skill (via
-  `terminal`) where it's installed — `himalaya envelope list`, `himalaya
-  message read <id>`. NOT every station has himalaya configured; if it
-  isn't, say so plainly rather than pretending you checked.
-- **Sending** uses the dedicated `send_email(to, subject, body, cc=None)`
-  tool — Mail.app (AppleScript) first, himalaya CLI as its own fallback
-  backend, automatically. Tier-2 (external effect): every send goes
-  through the confirmation flow.
+- **macOS Apple Mail organize/triage/deep-clean** — `use_skill(name="macos-mail-organizer")`
+  then `plan_mail_triage` (deep clean) or `list_mailboxes` / `list_mail` /
+  `batch_move`. NEVER raw `osascript` / `execute_code` guessing AppleScript
+  (unbounded `every message` locks Mail.app for 120s). Keep receipts;
+  never trash uncertain mail.
+- **Reading via IMAP CLI** — the `himalaya` skill (`terminal`) where it's
+  installed. If it isn't, say so; don't fabricate an inbox.
+- **Sending** — `send_email(to, subject, body, cc=None)`. Mail.app first,
+  himalaya fallback. Tier-2: every send confirms.
 
 ## THE RULE THAT MATTERS MOST
 

@@ -70,6 +70,25 @@ def test_inner_cap_halt_is_not_a_finished_job() -> None:
     assert not continuation.hit_inner_cap("")
 
 
+def test_loop_breaker_halt_is_terminal() -> None:
+    assert continuation.is_loop_breaker(
+        "called execute_code with identical arguments 4 times")
+    assert continuation.is_loop_breaker(
+        "hit the same execute_code failure 2 times")
+    assert continuation.is_loop_breaker("made 25 tool calls in a single turn")
+    assert not continuation.is_loop_breaker(
+        "hit max_iterations=24 without a final answer")
+    assert not continuation.is_loop_breaker(None)
+
+
+def test_timeout_narration_is_blocked_not_continued() -> None:
+    text = (
+        "AppleScript timed out after 15s. Do not repeat without narrowing "
+        "the query. Let me try a different script."
+    )
+    assert continuation.classify(text) == "blocked"
+
+
 def test_prompts_restate_the_objective() -> None:
     prompt = continuation.continuation_prompt("distil every note")
     assert continuation.CONTINUE_NUDGE in prompt

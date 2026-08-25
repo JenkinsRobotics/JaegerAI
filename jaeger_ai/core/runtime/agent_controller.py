@@ -151,6 +151,8 @@ class JaegerAgentController:
         ledger = active_ledger()
         if ledger is not None and ledger.completed:
             return True
+        if continuation.is_loop_breaker(last.get("halt_reason")):
+            return True
         # Inner-turn fuse is not a job terminal. The next _step runs.
         if continuation.hit_inner_cap(last.get("halt_reason")):
             return False
@@ -160,6 +162,9 @@ class JaegerAgentController:
     def _terminal_state(self, last: dict[str, Any]) -> AgentState:
         if last.get("error"):
             self.reason = "error"
+            return AgentState.FAILED
+        if continuation.is_loop_breaker(last.get("halt_reason")):
+            self.reason = str(last.get("halt_reason") or "loop_breaker")
             return AgentState.FAILED
         if execution.stop_requested():
             self.reason = "stopped"

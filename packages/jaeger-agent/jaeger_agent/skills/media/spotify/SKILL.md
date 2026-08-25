@@ -1,6 +1,6 @@
 ---
 name: spotify
-description: "Spotify: play, search, queue, manage playlists and devices."
+description: "Spotify: play, search, queue, manage playlists and devices. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: Hermes Agent
 license: MIT
@@ -8,6 +8,7 @@ platforms: [linux, macos, windows]
 prerequisites:
   tools: [spotify_playback, spotify_devices, spotify_queue, spotify_search, spotify_playlists, spotify_albums, spotify_library]
 requires_tools: [terminal]
+requires_plugins: [spotify]
 metadata:
   hermes:
     tags: [spotify, music, playback, playlists, media]

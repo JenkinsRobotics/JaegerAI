@@ -1,6 +1,6 @@
 ---
 name: maps
-description: "Geocode, POIs, routes, timezones via OpenStreetMap/OSRM."
+description: "Geocode, POIs, routes, timezones via OpenStreetMap/OSRM. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.2.0
 author: Mibayy
 license: MIT

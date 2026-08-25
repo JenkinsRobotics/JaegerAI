@@ -47,4 +47,5 @@ testpaths = ["dev/tests"]
 markers = [
     "slow: tests that fork real processes or do real network I/O.",
     "subprocess: tests that spawn a real Python subprocess.",
+    "integration: tests that exercise multiple runtime components.",
 ]

@@ -194,7 +194,7 @@ def _t_get_events(day: str | None = None, start: str | None = None, end: str | N
     return get_events(day=day, start=start, end=end)
 
 
-@register_tool_from_function(name="create_event")
+@register_tool_from_function(name="create_event", side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="calendar", operation="create_event",
                summary="create a Calendar.app event")
 def _t_create_event(title: str, start: str, end: str, notes: str | None = None) -> dict:

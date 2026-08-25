@@ -22,10 +22,21 @@ def test_bind_creates_a_restricted_socket(tmp_path):
     sock = bs.bind(path)
     try:
         assert path.exists()
-        threading.Thread(target=lambda: sock.accept(), daemon=True).start()
+        accepted = threading.Event()
+
+        def accept_once():
+            conn, _ = sock.accept()
+            bs.close_quietly(conn)
+            accepted.set()
+
+        worker = threading.Thread(target=accept_once)
+        worker.start()
         live = bs.try_connect(path, timeout_s=1.0)
         assert live is not None
         bs.close_quietly(live)
+        assert accepted.wait(1.0)
+        worker.join(timeout=1.0)
+        assert not worker.is_alive()
     finally:
         bs.close_quietly(sock)
         path.unlink(missing_ok=True)

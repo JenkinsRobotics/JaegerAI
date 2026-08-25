@@ -1,14 +1,32 @@
 ---
 name: memory-keeping
-description: "Keep rich, traceable long-term memory: record facts with WHO/WHAT/WHEN context, track how they change over time, and recall them precisely. Load this when storing or answering about people's details, preferences, or anything the user will expect you to remember across sessions."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [memory, recall, remember, search_memory]
+description: 'Keep rich, traceable long-term memory: record facts with WHO/WHAT/WHEN
+  context, track how they change over time, and recall them precisely. Load this when
+  storing or answering about people''s details, preferences, or anything the user
+  will expect you to remember across sessions.'
 metadata:
   jros:
-    tags: [memory, facts, recall, preferences, people, long-term]
+    tags:
+    - memory
+    - facts
+    - recall
+    - preferences
+    - people
+    - long-term
     category: productivity
-    related_skills: [self-improvement, deep-think]
+    related_skills:
+    - self-improvement
+    - deep-think
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - memory
+    - recall
+    - remember
+    - search_memory
 ---
 
 # MEMORY-KEEPING — RICH, TRACEABLE LONG-TERM MEMORY

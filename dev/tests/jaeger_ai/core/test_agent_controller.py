@@ -191,6 +191,25 @@ def test_inner_cap_halt_continues_instead_of_settling():
     assert packed["status"] == AgentState.COMPLETED
 
 
+def test_loop_breaker_halt_does_not_continue():
+    """Identical/timeout backstop is terminal — unlike max_iterations."""
+    calls = {"n": 0}
+
+    def _turn(client, text, *, session_key, allow_persona=True):
+        calls["n"] += 1
+        return {
+            "text": "Let me try a different AppleScript.",
+            "error": None, "tool_activity": [],
+            "halt_reason": "hit the same execute_code failure 2 times",
+        }
+
+    packed = JaegerAgentController(
+        object(), max_steps=8, turn_fn=_turn, isolated=True, batch=False,
+    ).run_to_completion("organize my mail", "delegate")
+    assert calls["n"] == 1
+    assert packed["status"] == AgentState.FAILED
+
+
 def test_controller_does_not_flip_main_execution_mode():
     assert execution.current_mode() == "interactive"
     JaegerAgentController(

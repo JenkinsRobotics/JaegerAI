@@ -1,6 +1,6 @@
 ---
 name: sketch
-description: "Throwaway HTML mockups: 2-3 design variants to compare."
+description: "Throwaway HTML mockups: 2-3 design variants to compare. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: Hermes Agent (adapted from gsd-build/get-shit-done)
 license: MIT

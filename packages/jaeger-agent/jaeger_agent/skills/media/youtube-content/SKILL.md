@@ -1,6 +1,6 @@
 ---
 name: youtube-content
-description: "YouTube transcripts to summaries, threads, blogs."
+description: "YouTube transcripts to summaries, threads, blogs. Use when the user explicitly requests this named workflow or its specific output."
 platforms: [linux, macos, windows]
 tags: [youtube, video, transcript, content, captions]
 requires_tools: [terminal]

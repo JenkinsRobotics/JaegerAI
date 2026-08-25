@@ -130,32 +130,24 @@ Most list endpoints support:
 ## Rate Limits
 
 - Authenticated: 5,000 requests/hour
-- Check remaining: `curl -s -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit`
+- Check remaining: `gh api rate_limit --jq '.rate'`
 
-## Common curl Patterns
+## Common GitHub CLI API Patterns
 
 ```bash
-# GET
-curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO
+# GET (gh supplies authentication without exposing tokens in commands)
+gh api "repos/$GH_OWNER/$GH_REPO"
 
-# POST with JSON body
-curl -s -X POST \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/issues \
-  -d '{"title": "...", "body": "..."}'
+# POST
+gh api --method POST "repos/$GH_OWNER/$GH_REPO/issues" \
+  -f title='...' -f body='...'
 
 # PATCH (update)
-curl -s -X PATCH \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/issues/42 \
-  -d '{"state": "closed"}'
+gh api --method PATCH "repos/$GH_OWNER/$GH_REPO/issues/42" -f state=closed
 
 # DELETE
-curl -s -X DELETE \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/$GH_OWNER/$GH_REPO/issues/42/labels/bug
+gh api --method DELETE "repos/$GH_OWNER/$GH_REPO/issues/42/labels/bug"
 
-# Parse JSON response with python3
-curl -s ... | python3 -c "import sys,json; data=json.load(sys.stdin); print(data['field'])"
+# Select a JSON field
+gh api "repos/$GH_OWNER/$GH_REPO" --jq '.name'
 ```

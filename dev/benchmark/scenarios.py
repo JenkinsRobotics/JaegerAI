@@ -294,7 +294,8 @@ def _drive_turn_front_door(client: Any, session_key: str, prompt: str,
 
 
 def _run_scenario(client: Any, case: Any, layout: Any,
-                  *, dump: bool = False, worker_path: bool = False) -> ScenarioResult:
+                  *, dump: bool = False, worker_path: bool = False,
+                  timeout_override_s: float | None = None) -> ScenarioResult:
     from jaeger_ai.core.bench.scenarios import Transcript
 
     workspace = _workspace_dir(layout)
@@ -307,11 +308,12 @@ def _run_scenario(client: Any, case: Any, layout: Any,
 
     transcript = Transcript()
     total_elapsed = 0.0
+    timeout_s = min(case.timeout_s, timeout_override_s) if timeout_override_s else case.timeout_s
     if worker_path:
         # DEBUG ONLY — see module docstring / --worker-path help.
         agent = _build_agent(client)
         for prompt in case.turns:
-            turn, elapsed = _drive_turn_worker(agent, prompt, case.timeout_s)
+            turn, elapsed = _drive_turn_worker(agent, prompt, timeout_s)
             total_elapsed += elapsed
             transcript.turns.append(turn)
             if turn.timed_out:
@@ -327,7 +329,7 @@ def _run_scenario(client: Any, case: Any, layout: Any,
         try:
             for prompt in case.turns:
                 turn, elapsed = _drive_turn_front_door(client, session_key, prompt,
-                                                       case.timeout_s)
+                                                       timeout_s)
                 total_elapsed += elapsed
                 transcript.turns.append(turn)
                 if turn.timed_out:
@@ -475,6 +477,16 @@ def _run(args: argparse.Namespace) -> int:
                              args.model_path)
         print(f"[scenario] model override:            {args.model_path}",
               flush=True)
+    elif args.provider:
+        _override_provider(
+            hermetic.instance_dir / "config.yaml",
+            provider=args.provider,
+            model=args.provider_model,
+            base_url=args.base_url,
+            ctx=args.context_length,
+        )
+        print(f"[scenario] provider override:         {args.provider} / "
+              f"{args.provider_model}", flush=True)
     print(f"[scenario] hermetic temp instance:   {hermetic.instance_dir}",
           flush=True)
     os.environ["JAEGER_INSTANCE_DIR"] = str(hermetic.instance_dir)
@@ -505,7 +517,8 @@ def _run(args: argparse.Namespace) -> int:
             print(f"\n[{i}/{len(selected)}] {case.id} ({case.lane}) …",
                   flush=True)
             res = _run_scenario(boot.client, case, boot.layout, dump=args.dump,
-                               worker_path=args.worker_path)
+                               worker_path=args.worker_path,
+                               timeout_override_s=args.case_timeout)
             results.append(res)
             print(f"    -> {res.status.upper()}  ({res.elapsed_s:.1f}s)  "
                   f"{res.detail}", flush=True)
@@ -559,10 +572,49 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def _override_model_path(cfg_path: pathlib.Path, model_path: str) -> None:
-    """Rewrite model.model_path in the (already-copied, hermetic) config."""
+    """Force the already-copied hermetic config onto a local model.
+
+    A path override must also disable the external provider; otherwise a live
+    instance configured for cloud fallback can silently keep routing the
+    supposedly-local release gate to that endpoint.
+    """
     import yaml
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-    data.setdefault("model", {})["model_path"] = model_path
+    model = data.setdefault("model", {})
+    path = pathlib.Path(model_path).expanduser()
+    model["model_path"] = str(path)
+    # Direct MLX checkpoints are directories; GGUF models are files.  Do not
+    # silently route an MLX release test through the llama.cpp loader.
+    model["backend"] = "mlx_lm" if path.is_dir() else "llama_cpp_python"
+    data.setdefault("external_model", {})["enabled"] = False
+    cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _override_provider(
+    cfg_path: pathlib.Path,
+    *,
+    provider: str,
+    model: str,
+    base_url: str | None,
+    ctx: int,
+) -> None:
+    """Select a local-server or cloud provider in the hermetic config only."""
+    import yaml
+
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    external = data.setdefault("external_model", {})
+    external.update({
+        "enabled": True,
+        "provider": provider,
+        "model": model,
+        "ctx": ctx,
+    })
+    if base_url:
+        external["base_url"] = base_url
+    elif provider == "ollama":
+        external["base_url"] = "http://localhost:11434/v1"
+    elif provider == "lmstudio":
+        external["base_url"] = "http://localhost:1234/v1"
     cfg_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
 
@@ -583,10 +635,21 @@ def main() -> int:
     p.add_argument("--dump", action="store_true",
                    help="Print each scenario's full transcript (answer + tool "
                         "calls with args) — for debugging a gate verdict.")
-    p.add_argument("--model-path", default=None,
+    model_source = p.add_mutually_exclusive_group()
+    model_source.add_argument("--model-path", default=None,
                    help="Override model.model_path in the hermetic config "
                         "(e.g. the 26B gguf for a final validation run). "
                         "The live config is never touched.")
+    model_source.add_argument("--provider", choices=[
+        "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic",
+        "gemini", "xai",
+    ], help="Override the hermetic run onto a local-server or cloud provider.")
+    p.add_argument("--provider-model", default="",
+                   help="Provider model id; required with --provider.")
+    p.add_argument("--base-url", default=None,
+                   help="Optional provider endpoint override (hermetic config only).")
+    p.add_argument("--context-length", type=int, default=0,
+                   help="Provider context window. 0 asks Jaeger to discover it.")
     p.add_argument("--worker-path", action="store_true",
                    help="DEBUG ONLY, NOT the release gate: drive turns "
                         "directly through drive_one_turn (the old wiring), "
@@ -594,7 +657,12 @@ def main() -> int:
                         "entirely. Use only to isolate a worker-loop bug "
                         "from a persona-lane bug; the release gate is the "
                         "default (front-door) mode.")
+    p.add_argument("--case-timeout", type=float, default=120.0,
+                   help="Maximum seconds per turn (default: 120; a scenario's "
+                        "lower timeout still wins).")
     args = p.parse_args()
+    if args.provider and not args.provider_model:
+        p.error("--provider-model is required with --provider")
     return _run(args)
 
 

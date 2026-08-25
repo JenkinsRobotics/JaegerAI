@@ -65,7 +65,11 @@ def decide(
         return Action.DEEP_THINK
     if idle_ready and has_board:
         return Action.BOARD
-    if heartbeat_due:
+    # Heartbeat is Layer-3 downtime work. Firing it while the user is
+    # still in the idle window (typing, reading, between turns) is the
+    # "wondering ate my CPU" bug. Completions above still run — those
+    # are results the user is waiting on, not background rumination.
+    if idle_ready and heartbeat_due:
         return Action.HEARTBEAT
     return Action.IDLE
 

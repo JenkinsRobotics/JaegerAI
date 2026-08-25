@@ -1,6 +1,6 @@
 ---
 name: songwriting-and-ai-music
-description: "Songwriting craft and Suno AI music prompts."
+description: "Songwriting craft and Suno AI music prompts. Use when the user explicitly requests this named workflow or its specific output."
 tags: [songwriting, music, suno, parody, lyrics, creative]
 platforms: [linux, macos, windows]
 requires_tools: [write_file]

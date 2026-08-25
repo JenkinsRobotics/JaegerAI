@@ -26,10 +26,11 @@ visible by default (fail-open): a new tool is never silently hidden.
 from __future__ import annotations
 
 import os
+import re
 
 
 def _scoping_enabled() -> bool:
-    """Toolset scoping is OPT-IN (off by default).
+    """Toolset scoping is automatic by default.
 
     History: we flipped it ON in May 2026 after adding ``describe_tool``
     and the catalog, hoping the new pattern would offset the routing
@@ -42,15 +43,60 @@ def _scoping_enabled() -> bool:
     auto-load-on-intent (a follow-up that picks toolsets without an
     explicit meta-step) lands and re-bench shows no regression.
 
-    ``JAEGER_TOOLSET_SCOPING=1`` enables it for context-tight runs
-    (small ctx windows, tight budgets); ``JAEGER_FULL_TOOLS=1`` is
-    redundant in the OFF default but still honoured as a kill-switch."""
+    ``JAEGER_TOOLSET_SCOPING=0`` disables it for compatibility tests;
+    ``JAEGER_FULL_TOOLS=1`` is the explicit operator kill-switch."""
     if os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in (
         "1", "true", "yes", "on",
     ):
         return False
-    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "0").strip().lower()
-    return val in ("1", "true", "yes", "on")
+    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "auto").strip().lower()
+    return val not in ("0", "false", "no", "off", "full")
+
+
+# Deterministic first-pass routing, equivalent to Hermes focus/toolset
+# profiles.  The model still has list_tools/describe_tool/load_tools in CORE
+# for ambiguous requests; these hints avoid spending an extra meta-tool turn
+# for clear intent.  Matching is intentionally conservative and additive.
+_INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
+    "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move)\b",),
+    "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package)\b",),
+    "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
+    "web": (r"\b(weather|forecast)\b",),
+    "sessions": (r"\b(conversation|session|chat history)\b",),
+    "board": (r"\b(board|kanban|card)\b",),
+    "scheduling": (r"\b(schedule|cron|remind|recurring)\b",),
+    "background": (r"\b(background|long[- ]running|process|job)\b",),
+    "identity": (r"\b(your name|identity|soul|persona)\b",),
+    "skills": (r"\b(skill|deep think|reflection)\b",),
+    "computer_use": (r"\b(click|screen|browser|website|open app|computer)\b",),
+    "credentials": (r"\b(credential|api key|secret|password)\b",),
+    "plugins": (r"\b(plugin|discord|telegram|slack|message)\b",),
+    "email": (r"\b(e-?mail|inbox|mailbox)\b",),
+    "smart_home": (r"\b(home assistant|smart home|light|thermostat)\b",),
+    "people": (r"\b(person|people|profile|contact notes)\b",),
+    "models": (r"\b(model|ollama|lm studio|context window|autonomy mode)\b",),
+    "bench": (r"\b(benchmark|eval|evaluation)\b",),
+    "diagnostics": (r"\b(diagnostic|self[- ]check|system health|cpu|disk|uptime)\b",),
+    "shortcuts": (r"\b(shortcut|shortcuts\.app)\b",),
+    "spotlight": (r"\b(spotlight|find .* on (?:my |the )?mac)\b",),
+    "calendar": (r"\b(calendar|event|appointment|meeting)\b",),
+    "contacts": (r"\b(contacts?\.app|phone number|contact details)\b",),
+    "clipboard": (r"\b(clipboard|pasteboard|copy this)\b",),
+    "notifications": (r"\b(notification|notify me|banner)\b",),
+    "system_control": (r"\b(volume|brightness|dark mode|do not disturb|prevent sleep)\b",),
+    "media_control": (r"\b(now playing|playback|pause music|spotify|music\.app)\b",),
+    "ocr": (r"\b(ocr|extract text from|read this (?:image|pdf))\b",),
+}
+
+
+def infer_toolsets(text: str) -> set[str]:
+    """Return task-relevant toolsets without an LLM routing call."""
+    clean = (text or "").lower()
+    return {
+        toolset
+        for toolset, patterns in _INTENT_PATTERNS.items()
+        if any(re.search(pattern, clean) for pattern in patterns)
+    }
 
 
 # CORE — always visible when scoping is on. Umbrellas where they route
@@ -89,6 +135,9 @@ CORE: frozenset[str] = frozenset({
     # can FIND any tool (list_tools) and bring it in (load_tools) without
     # ever force-fitting a visible tool for one it hasn't looked up.
     "list_tools", "load_tools", "describe_tool",
+    # Mail.app reads — CORE so "organize my inbox" hits list_mail instead
+    # of execute_code + guessed AppleScript (the 60-tool hang).
+    "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage",
     # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
     # toolset, not CORE — loaded on demand like ``run_benchmark``. The
     # old ``system_health`` was kept out entirely because "do a self
@@ -202,7 +251,10 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "computer_use": frozenset({"computer_use", "browser"}),
     "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
-    "email": frozenset({"send_email"}),
+    "email": frozenset({
+        "send_email", "move_mail", "batch_move",
+        "sweep_mail", "schedule_inbox_sweeper",
+    }),
     "smart_home": frozenset({
         # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
         # registered on import like send_message; loaded on intent.
@@ -247,7 +299,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
-    "email": "send an email (Mail.app AppleScript, or himalaya CLI when installed)",
+    "email": "Mail.app writes: move_mail / batch_move / sweep_mail + send_email",
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "

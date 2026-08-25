@@ -22,27 +22,36 @@
 import Foundation
 import SwiftUI
 
-/// The agent's active operational mode.
+/// Composer execution mode — maps onto Jaeger's live execution axis.
 enum OperatingMode: String, CaseIterable, Identifiable, Sendable {
-    case focus = "Focus"
-    case wonder = "Wonder"
-    case standby = "Standby"
+    case ask = "Ask"
+    case plan = "Plan"
+    case agent = "Agent"
 
     var id: String { rawValue }
 
+    /// Value sent to `/mode` on the bridge.
+    var executionMode: String {
+        switch self {
+        case .ask: return "interactive"
+        case .plan: return "supervised"
+        case .agent: return "auto"
+        }
+    }
+
     var badgeText: String {
         switch self {
-        case .focus: return "🟢 Focus"
-        case .wonder: return "🟣 Wondering"
-        case .standby: return "⚪ Standby"
+        case .ask: return "💬 Ask"
+        case .plan: return "📋 Plan"
+        case .agent: return "⚡ Agent"
         }
     }
 
     var summary: String {
         switch self {
-        case .focus: return "Autonomous task execution to completion"
-        case .wonder: return "Background indexing, board tasks, and self-organization"
-        case .standby: return "Low compute sensory guard (⌥Space to wake)"
+        case .ask: return "Read-only Q&A — one turn, then the prompt comes back"
+        case .plan: return "Architect first; every mutation pauses for approval"
+        case .agent: return "Keeps executing until the job is done or you /stop"
         }
     }
 }
@@ -189,16 +198,31 @@ final class ChatViewModel: ObservableObject {
     /// clickable picker instead of dumping a catalogue into the transcript.
     @Published var showModelPicker: Bool = false
 
-    /// The agent's current operating mode (Focus, Wonder, Standby).
-    @Published var operatingMode: OperatingMode = .focus
+    /// The agent's current operating mode (Ask, Plan, Agent).
+    @Published var operatingMode: OperatingMode = .ask
+    @Published private(set) var isSwitchingOperatingMode: Bool = false
 
     func setOperatingMode(_ mode: OperatingMode) {
-        operatingMode = mode
-        let notice = ChatMessage(
-            author: .system,
-            text: "Operational mode switched to \(mode.badgeText) — \(mode.summary)"
+        Task { await dispatchExecutionMode(mode) }
+    }
+
+    /// `/mode <execution>` hits the bridge slash registry so this is a
+    /// real process-global switch, not a local transcript bubble.
+    private func dispatchExecutionMode(_ mode: OperatingMode) async {
+        guard !isSwitchingOperatingMode else { return }
+        isSwitchingOperatingMode = true
+        defer { isSwitchingOperatingMode = false }
+        let acknowledged = await runTurn(
+            "/mode \(mode.executionMode)",
+            appendUserBubble: false,
+            displayText: nil
         )
-        messages.append(notice)
+        if acknowledged {
+            operatingMode = mode
+            appendSystem("\(mode.badgeText) — \(mode.summary)")
+        } else {
+            appendSystem("⚠ Mode change was not acknowledged; still \(operatingMode.badgeText).")
+        }
     }
 
     private let agent: AgentBridge
@@ -484,10 +508,10 @@ final class ChatViewModel: ObservableObject {
                 author: .user, timestamp: Date(), text: display))
             return
         }
-        await runTurn(prompt, appendUserBubble: true, displayText: display)
+        _ = await runTurn(prompt, appendUserBubble: true, displayText: display)
         while !pendingSends.isEmpty {
             let next = pendingSends.removeFirst()
-            await runTurn(next, appendUserBubble: false)
+            _ = await runTurn(next, appendUserBubble: false)
         }
     }
 
@@ -508,7 +532,7 @@ final class ChatViewModel: ObservableObject {
 
     /// Runs ONE turn over the bridge.
     private func runTurn(_ trimmed: String, appendUserBubble: Bool,
-                         displayText: String? = nil) async {
+                         displayText: String? = nil) async -> Bool {
         if !displayConfigLoaded { await loadDisplayConfig() }
 
         let turnStarted = Date()
@@ -567,12 +591,14 @@ final class ChatViewModel: ObservableObject {
             } else {
                 NSLog("[ChatViewModel] TTS skipped — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) empty=\(replyText.isEmpty)")
             }
+            return true
         } catch {
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text =
                     "⚠ agent error: \(error.localizedDescription)"
                 messages[i].isStreaming = false
             }
+            return false
         }
     }
 

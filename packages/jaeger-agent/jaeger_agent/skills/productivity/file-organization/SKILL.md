@@ -1,15 +1,33 @@
 ---
 name: file-organization
-description: "Organize, move, copy, rename, or clean up files — 'move my screenshots to a folder', 'copy this to backups', 'clean up my downloads', 'rename these files', 'find and organize X'. Load this for any file-tidying task; it hands you the safe list -> confirm -> move pattern and the exact sandbox boundaries."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [move_file, copy_file, search_files, list_skill_dir]
-requires_toolsets: [files]
+description: Organize, move, copy, rename, or clean up files — 'move my screenshots
+  to a folder', 'copy this to backups', 'clean up my downloads', 'rename these files',
+  'find and organize X'. Load this for any file-tidying task; it hands you the safe
+  list, confirm, then move pattern and the exact sandbox boundaries.
 metadata:
   jros:
-    tags: [files, organization, move, copy, cleanup, sandbox]
+    tags:
+    - files
+    - organization
+    - move
+    - copy
+    - cleanup
+    - sandbox
     category: productivity
-    related_skills: [process-monitoring]
+    related_skills:
+    - process-monitoring
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - move_file
+    - copy_file
+    - search_files
+    - list_skill_dir
+    requires-toolsets:
+    - files
 ---
 
 # FILE ORGANIZATION — MOVE / COPY / CLEAN UP

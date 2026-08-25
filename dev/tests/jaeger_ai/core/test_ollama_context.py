@@ -16,6 +16,7 @@ from jaeger_ai.core.models.ollama_context import (
     is_hosted_ollama,
     native_ollama_root,
     parse_show_context,
+    query_ollama_active_context,
     resolve_serving_context,
     should_inject_num_ctx,
 )
@@ -29,6 +30,28 @@ def test_native_root_strips_v1_suffix():
     assert native_ollama_root("https://ollama.com/v1") == "https://ollama.com"
     assert native_ollama_root("http://localhost:11434/v1") == "http://localhost:11434"
     assert native_ollama_root("http://localhost:11434") == "http://localhost:11434"
+
+
+def test_active_context_reads_loaded_runtime(monkeypatch):
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"models": [
+                {"name": "other:latest", "context_length": 8192},
+                {"name": "qwen3.6:35b-mlx", "context_length": 65536},
+            ]}
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Response())
+    assert query_ollama_active_context(
+        "qwen3.6:35b-mlx", "http://localhost:11434/v1",
+    ) == 65536
+    assert query_ollama_active_context(
+        "missing", "http://localhost:11434/v1",
+    ) is None
 
 
 def test_hosted_detection_covers_provider_url_and_cloud_tag():
@@ -127,7 +150,7 @@ def test_cloud_never_injects_num_ctx():
     ) is False
 
 
-def test_local_injects_only_modelfile_num_ctx():
+def test_local_injects_modelfile_or_explicit_num_ctx():
     assert should_inject_num_ctx(
         provider="ollama", base_url="http://localhost:11434/v1",
         model="llama3.2", source="num_ctx",
@@ -136,6 +159,43 @@ def test_local_injects_only_modelfile_num_ctx():
         provider="ollama", base_url="http://localhost:11434/v1",
         model="llama3.2", source="model_info",
     ) is False
+    assert should_inject_num_ctx(
+        provider="ollama", base_url="http://localhost:11434/v1",
+        model="llama3.2", source="configured",
+    ) is True
+
+
+def test_local_client_injects_explicit_context(monkeypatch):
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models.external_model import ExternalModelClient
+
+    ext = ExternalModelConfig(
+        enabled=True,
+        provider="ollama",
+        base_url="http://localhost:11434/v1",
+        model="qwen3.6:35b-mlx",
+        ctx=65_536,
+    )
+    client = ExternalModelClient(ext, layout=None)
+    assert client.loaded_ctx == 65_536
+    assert client.num_ctx == 65_536
+
+
+def test_local_client_refreshes_from_active_runtime(monkeypatch):
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models import ollama_context as oc
+    from jaeger_ai.core.models.external_model import ExternalModelClient
+
+    ext = ExternalModelConfig(
+        enabled=True, provider="ollama",
+        base_url="http://localhost:11434/v1",
+        model="qwen3.6:35b-mlx", ctx=65_536,
+    )
+    client = ExternalModelClient(ext, layout=None)
+    monkeypatch.setattr(oc, "query_ollama_active_context", lambda *a, **k: 32_768)
+    assert client.refresh_active_context() == 32_768
+    assert client.loaded_ctx == 32_768
+    assert client.ext.ctx == 32_768
 
 
 def test_external_cloud_client_records_loaded_ctx_and_skips_num_ctx(monkeypatch):

@@ -126,6 +126,8 @@ actor BridgeProcess {
 
     var onState: (@Sendable (Bool) -> Void)?
     var onTool: (@Sendable (String, String, Double, String?, ToolProgress?) -> Void)?
+    var onDelta: (@Sendable (String) -> Void)?
+    var onReasoning: (@Sendable (String) -> Void)?
     var onAgentState: (@Sendable (AgentLifecycle) -> Void)?
     var onRequest: (@Sendable (BridgeRequest) -> Void)?
     /// Fired for every ``fatal`` frame with its ``kind`` — the transport
@@ -141,6 +143,8 @@ actor BridgeProcess {
 
     func setOnState(_ cb: @escaping @Sendable (Bool) -> Void) { onState = cb }
     func setOnTool(_ cb: @escaping @Sendable (String, String, Double, String?, ToolProgress?) -> Void) { onTool = cb }
+    func setOnDelta(_ cb: @escaping @Sendable (String) -> Void) { onDelta = cb }
+    func setOnReasoning(_ cb: @escaping @Sendable (String) -> Void) { onReasoning = cb }
     func setOnAgentState(_ cb: @escaping @Sendable (AgentLifecycle) -> Void) { onAgentState = cb }
     func setOnRequest(_ cb: @escaping @Sendable (BridgeRequest) -> Void) { onRequest = cb }
     func setOnFatal(_ cb: @escaping @Sendable (String, String, String?) -> Void) { onFatal = cb }
@@ -386,6 +390,10 @@ actor BridgeProcess {
                 onState?(busy)
             case .tool(let name, let phase, let elapsed, let detail, let progress):
                 onTool?(name, phase, elapsed, detail, progress)
+            case .delta(let text):
+                onDelta?(text)
+            case .reasoning(let text):
+                onReasoning?(text)
             case .reply(let text, let error, let elapsed, let used, let mx):
                 replyCont?.resume(returning: TurnResult(
                     text: text, error: error,

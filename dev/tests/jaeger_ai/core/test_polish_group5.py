@@ -23,19 +23,26 @@ REPO = Path(__file__).resolve().parents[4]
 # ── POLISH-2: boot panel respects JAEGER_TOOLSET_SCOPING ────────────
 
 
-def test_visible_tool_groups_returns_full_set_when_scoping_off(monkeypatch):
-    """With ``JAEGER_TOOLSET_SCOPING`` unset/0, the panel renders the
-    full categorised catalog — same shape as 0.1.0."""
+def test_visible_tool_groups_defaults_to_core(monkeypatch):
+    """An unset flag uses the automatic Hermes-scoped surface."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
 
-    from jaeger_ai.interfaces.tui.status import (
-        TOOL_GROUPS, _visible_tool_groups,
-    )
+    from jaeger_ai.interfaces.tui.status import TOOL_GROUPS, _visible_tool_groups
+    from jaeger_agent.skill_registry.toolset_scoping import CORE
+    groups, visible, total = _visible_tool_groups()
+    assert all(tool in CORE for tools in groups.values() for tool in tools)
+    assert visible < total
+    assert total == sum(len(v) for v in TOOL_GROUPS.values())
+
+
+def test_visible_tool_groups_returns_full_set_when_explicitly_off(monkeypatch):
+    monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "0")
+    monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
+    from jaeger_ai.interfaces.tui.status import TOOL_GROUPS, _visible_tool_groups
     groups, visible, total = _visible_tool_groups()
     assert groups == TOOL_GROUPS
     assert visible == total
-    assert visible == sum(len(v) for v in TOOL_GROUPS.values())
 
 
 def test_visible_tool_groups_filters_to_CORE_when_scoping_on(monkeypatch):

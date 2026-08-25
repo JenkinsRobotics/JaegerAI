@@ -1,14 +1,30 @@
 ---
 name: test-driven-development
-description: "Enforce strict RED-GREEN-REFACTOR: write a failing test, watch it fail, then write minimal code to pass. Load this before implementing ANY feature, bug fix, refactor, or behavior change."
-version: 2.0.0
-platforms: [macos, linux, windows]
-requires_tools: [terminal, execute_code, read_file, append_file]
+description: 'Enforce strict RED-GREEN-REFACTOR: write a failing test, watch it fail,
+  then write minimal code to pass. Load this before implementing ANY feature, bug
+  fix, refactor, or behavior change.'
 metadata:
   jros:
-    tags: [testing, tdd, red-green-refactor, quality, development]
+    tags:
+    - testing
+    - tdd
+    - red-green-refactor
+    - quality
+    - development
     category: software-development
-    related_skills: [systematic-debugging, node-inspect-debugger]
+    related_skills:
+    - systematic-debugging
+    - node-inspect-debugger
+    version: 2.0.0
+    platforms:
+    - macos
+    - linux
+    - windows
+    requires-tools:
+    - terminal
+    - execute_code
+    - read_file
+    - append_file
 ---
 
 # TEST-DRIVEN DEVELOPMENT

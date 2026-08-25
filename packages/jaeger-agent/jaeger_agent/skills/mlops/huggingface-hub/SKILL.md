@@ -1,6 +1,6 @@
 ---
 name: huggingface-hub
-description: "HuggingFace hf CLI: search/download/upload models, datasets."
+description: "HuggingFace hf CLI: search/download/upload models, datasets. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: Hugging Face
 license: MIT
@@ -19,7 +19,8 @@ The `hf` command is the modern command-line interface for interacting with the H
 > **IMPORTANT:** The `hf` command replaces the now deprecated `huggingface-cli` command.
 
 ## Quick Start
-*   **Installation:** `curl -LsSf https://hf.co/cli/install.sh | bash -s`
+*   **Installation:** `uv tool install huggingface_hub` or
+    `pipx install huggingface_hub`; do not pipe remote installers to a shell.
 *   **Help:** Use `hf --help` to view all available functions and real-world examples.
 *   **Authentication:** Recommended via `HF_TOKEN` environment variable or the `--token` flag.
 

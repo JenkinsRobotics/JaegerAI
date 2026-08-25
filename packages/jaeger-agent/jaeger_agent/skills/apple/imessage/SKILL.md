@@ -1,105 +1,67 @@
 ---
 name: imessage
-description: Send and receive iMessages/SMS via the imsg CLI on macOS.
-version: 1.0.0
-author: Hermes Agent
-license: MIT
-platforms: [macos]
-requires_tools: [terminal]
+description: Send or read iMessage/SMS on this Mac via the imsg CLI. Load this for
+  'text Mom I'll be late', 'what did I last message X'. Telegram/Discord/Slack use
+  send_message; email uses send_email.
 metadata:
-  hermes:
-    tags: [iMessage, SMS, messaging, macOS, Apple]
   jros:
-    related_skills: [apple-notes, apple-reminders, findmy]
-prerequisites:
-  commands: [imsg]
+    tags:
+    - imessage
+    - sms
+    - messages
+    - macos
+    - apple
+    category: desktop
+    related_skills:
+    - mac-native
+    - email-triage
+    - messaging-setup
+    version: 1.1.0
+    platforms:
+    - macos
+    requires-tools:
+    - terminal
+    - lookup_contact
 ---
 
-# iMessage
+# iMESSAGE — imsg CLI
 
-Use `imsg` to read and send iMessage/SMS via macOS Messages.app.
+Messages.app via `imsg`. Always confirm recipient + exact text before
+send. Resolve people with `lookup_contact` first — never guess a number.
 
-## Prerequisites
+## PREREQUISITES
 
-- **macOS** with Messages.app signed in
-- Install: `brew install steipete/tap/imsg`
-- Grant Full Disk Access for terminal (System Settings → Privacy → Full Disk Access)
-- Grant Automation permission for Messages.app when prompted
+- Messages.app signed in
+- `brew install steipete/tap/imsg`
+- Full Disk Access + Automation for Messages
 
-## When to Use
+## TOOLS (exact)
 
-- User asks to send an iMessage or text message
-- Reading iMessage conversation history
-- Checking recent Messages.app chats
-- Sending to phone numbers or Apple IDs
-
-## When NOT to Use
-
-- Telegram/Discord/Slack/WhatsApp messages → use the appropriate gateway channel
-- Group chat management (adding/removing members) → not supported
-- Bulk/mass messaging → always confirm with user first
-
-## Quick Reference
-
-### List Chats
-
-```bash
-imsg chats --limit 10 --json
+```
+lookup_contact(name="Mom")
+terminal(command="imsg chats --limit 10 --json")
+terminal(command="imsg history --chat-id 1 --limit 20 --json")
+terminal(command="imsg send --to \"+14155551212\" --text \"I'll be late\"")
 ```
 
-### View History
+## SOP
 
-```bash
-# By chat ID
-imsg history --chat-id 1 --limit 20 --json
+1. Named person → `lookup_contact(name=...)`. Multiple matches → ask
+   which. `found: False` → say so; do not invent a number.
+2. Optional: `imsg chats --limit 20 --json` to confirm the thread.
+3. Show the user: to, service (iMessage/SMS), exact body. Wait for
+   go-ahead unless they dictated a short literal ("text X I'll be late").
+4. `imsg send --to "..." --text "..."`. Report only from the command
+   result.
 
-# With attachments info
-imsg history --chat-id 1 --limit 20 --attachments --json
-```
+## ERROR HATCH
 
-### Send Messages
+- `imsg: command not found` → brew install; stop.
+- Permission / not authorized → Full Disk Access + Automation; stop.
+- Send failed → do not retry (duplicates the text). Show the error.
+- Telegram/Discord/Slack → `send_message`, not imsg.
 
-```bash
-# Text only
-imsg send --to "+14155551212" --text "Hello!"
+## DONE WHEN
 
-# With attachment
-imsg send --to "+14155551212" --text "Check this out" --file /path/to/image.jpg
-
-# Force iMessage or SMS
-imsg send --to "+14155551212" --text "Hi" --service imessage
-imsg send --to "+14155551212" --text "Hi" --service sms
-```
-
-### Watch for New Messages
-
-```bash
-imsg watch --chat-id 1 --attachments
-```
-
-## Service Options
-
-- `--service imessage` — Force iMessage (requires recipient has iMessage)
-- `--service sms` — Force SMS (green bubble)
-- `--service auto` — Let Messages.app decide (default)
-
-## Rules
-
-1. **Always confirm recipient and message content** before sending
-2. **Never send to unknown numbers** without explicit user approval
-3. **Verify file paths** exist before attaching
-4. **Don't spam** — rate-limit yourself
-
-## Example Workflow
-
-User: "Text mom that I'll be late"
-
-```bash
-# 1. Find mom's chat
-imsg chats --limit 20 --json | jq '.[] | select(.displayName | contains("Mom"))'
-
-# 2. Confirm with user: "Found Mom at +1555123456. Send 'I'll be late' via iMessage?"
-
-# 3. Send after confirmation
-imsg send --to "+1555123456" --text "I'll be late"
-```
+A real `imsg send` succeeded, or a real history/chats list was returned.
+Never claim a text sent without the CLI saying so.

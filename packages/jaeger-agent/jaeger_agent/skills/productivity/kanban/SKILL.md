@@ -1,14 +1,34 @@
 ---
 name: kanban
-description: "Run your kanban task board — file work, track multi-step jobs, triage urgent-vs-later. Load this whenever the user flags work for 'later / no rush / when you get a chance', hands you a multi-step task to track, or asks what's on the board."
-version: 1.0.0
-platforms: [linux, macos, windows]
-requires_tools: [board_add, board_view, board_move, board_update, board_delete, propose_deep_think_task]
+description: Run your kanban task board — file work, track multi-step jobs, triage
+  urgent-vs-later. Load this whenever the user flags work for 'later / no rush / when
+  you get a chance', hands you a multi-step task to track, or asks what's on the board.
 metadata:
   jros:
-    tags: [kanban, board, tasks, planning, triage, deferral]
+    tags:
+    - kanban
+    - board
+    - tasks
+    - planning
+    - triage
+    - deferral
     category: productivity
-    related_skills: [deep-think, writing-plans, subagent-driven-development]
+    related_skills:
+    - deep-think
+    - writing-plans
+    - subagent-driven-development
+    version: 1.0.0
+    platforms:
+    - linux
+    - macos
+    - windows
+    requires-tools:
+    - board_add
+    - board_view
+    - board_move
+    - board_update
+    - board_delete
+    - propose_deep_think_task
 ---
 
 # KANBAN — YOUR STANDING TASK BOARD

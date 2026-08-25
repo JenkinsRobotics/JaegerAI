@@ -1,11 +1,12 @@
 ---
 name: openhue
-description: "Control Philips Hue lights, scenes, rooms via OpenHue CLI."
+description: "Control Philips Hue lights, scenes, rooms via OpenHue CLI. Use when the user explicitly requests this named workflow or its specific output."
 version: 1.0.0
 author: community
 license: MIT
 platforms: [linux, macos, windows]
 requires_tools: [terminal]
+requires_plugins: [openhue]
 metadata:
   hermes:
     tags: [Smart-Home, Hue, Lights, IoT, Automation]
