@@ -47,6 +47,11 @@ dynamic = ["version", "dependencies"]
 # 'jaeger-ai[aec]'` works without the operator needing to know it's
 # actually a jaeger-os extra.
 aec = ["speexdsp>=0.1.1"]
+# Standalone wake-word engine. An extra, not a base dependency: it pulls
+# tflite-runtime, which ships no cp312 wheel, and nothing in the tree
+# imports it today (the shipped wake-word path is the STT layer's
+# ``require_wake_word``). Install with `pip install 'jaeger-ai[wakeword]'`.
+wakeword = ["openwakeword>=0.6"]
 
 [project.scripts]
 jaeger = "jaeger_ai.cli.entry:main"

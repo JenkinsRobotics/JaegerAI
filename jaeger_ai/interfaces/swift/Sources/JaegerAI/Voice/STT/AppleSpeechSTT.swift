@@ -20,7 +20,13 @@
 //      doesn't bite us
 //
 
-import AVFoundation
+// @preconcurrency: AVFAudio predates Sendable annotation, so Swift 6
+// treats AVAudioFormat as non-Sendable and rejects capturing `format`
+// in the @Sendable authorization callback below. The capture is safe —
+// AVAudioFormat is immutable once constructed (every property is
+// get-only), so handing one across a concurrency domain races nothing.
+// Drop this when Apple annotates the framework.
+@preconcurrency import AVFoundation
 import Foundation
 import Speech
 import os
