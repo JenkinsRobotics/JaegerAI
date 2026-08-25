@@ -38,7 +38,16 @@ def is_real_jaeger_command(cmdline: str) -> bool:
         return False
     if " -m jaeger_os" in cmdline:
         return True
-    if " -m jaeger_ai.interfaces.bridge" in cmdline:
+    # Any jaeger_ai module entry point, not just the bridge. cli/entry.py
+    # os.execv's the ordinary terminal agent into `-m jaeger_ai.cli.run`,
+    # and that process TAKES THE INSTANCE LOCK (main.py boot paths). While
+    # only the bridge was listed here, the lock checker did not believe a
+    # live terminal agent was jaeger, declared its lock stale and broke it —
+    # handing two processes the same instance, which is the exact outcome
+    # the stale-lock logic exists to prevent. Matching the whole module
+    # namespace keeps this correct as entry points move; the `-m ` prefix
+    # and the shell check below are what keep it precise.
+    if " -m jaeger_ai" in cmdline:
         return True
     if "/jaeger_os/__main__.py" in cmdline:
         return True
