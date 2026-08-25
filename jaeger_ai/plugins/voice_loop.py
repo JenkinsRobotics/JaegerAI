@@ -252,8 +252,13 @@ def main() -> int:
     )
 
     # ── Warm TTS (and wire the reference buffer if barge-in is on) ───
-    from jaeger_agent.tools.speak import _get_tts
-    tts = _get_tts()
+    from jaeger_ai.modules import jaeger_kokoro_tts as _tts_slot
+    tts = _tts_slot.synth()
+    if tts is None:
+        raise RuntimeError(
+            "no module is filling the 'tts' slot — install one "
+            "(e.g. jaeger-kokoro-tts) or disable the voice loop"
+        )
     if reference_buffer is not None:
         tts.reference_buffer = reference_buffer
     # 0.3.0: tell the TTS pipeline which audio backend BEFORE warm() —
@@ -266,12 +271,12 @@ def main() -> int:
     if hasattr(tts, "audio_backend"):
         tts.audio_backend = args.audio_backend
         print(f"[voice] audio backend = {args.audio_backend}", flush=True)
-    print("[voice] warming Kokoro TTS...", flush=True)
+    print("[voice] warming TTS...", flush=True)
     warm_result = tts.warm()
     if warm_result.get("warmed"):
-        print(f"[voice] Kokoro ready ({warm_result.get('seconds')}s)", flush=True)
+        print(f"[voice] TTS ready ({warm_result.get('seconds')}s)", flush=True)
     else:
-        print(f"[voice] Kokoro warm failed: {warm_result.get('reason')} "
+        print(f"[voice] TTS warm failed: {warm_result.get('reason')} "
               f"— continuing; first speak() will pay the cost", flush=True)
 
     # ── Build STT in the requested mode ──────────────────────────────
