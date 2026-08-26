@@ -31,6 +31,7 @@ from jaeger_agent.loop import verify_gate
 from jaeger_agent.loop.loop_backstop import (
     MAX_TOOL_CALLS,
     call_signature,
+    collapse_generated_repetition,
     loop_halt_reason,
     loop_warning,
     semantic_failure_signature,
@@ -580,6 +581,15 @@ class JaegerAgent:
             # always append before deciding next steps.
             tool_calls = assistant_msg.get("tool_calls") or []
             final_text = assistant_msg.get("content") or ""
+            if not tool_calls and final_text:
+                guarded_text, repetitions = collapse_generated_repetition(final_text)
+                if repetitions > 1:
+                    final_text = guarded_text
+                    assistant_msg = {**assistant_msg, "content": guarded_text}
+                    self.last_halt_reason = "repetitive_generated_response"
+                    self.callbacks.on_thinking(
+                        f"[repetition guard — collapsed {repetitions} identical response blocks]"
+                    )
             if not tool_calls and not final_text.strip():
                 # Reasoning budget exhausted: the model spent its whole
                 # output allowance inside <think> and never surfaced an

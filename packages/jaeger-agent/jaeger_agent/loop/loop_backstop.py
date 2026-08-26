@@ -23,6 +23,7 @@ trivially unit-testable.
 from __future__ import annotations
 
 from typing import Any
+import re
 
 # Observed legitimate multi-step work tops out near ~16 tool calls and
 # varies its arguments. These limits are a safety net, not a fine-grained
@@ -45,6 +46,41 @@ MAIL_TOOLS = frozenset({
 # model sees the pattern while it can still change course.
 WARN_IDENTICAL_CALLS = 2      # halt at 4 — warn from the 2nd repeat
 WARN_SEMANTIC_FAILURES = 1    # halt at 2 — warn on the 1st repeat
+
+
+def collapse_generated_repetition(text: str) -> tuple[str, int]:
+    """Collapse a high-confidence repeated response block.
+
+    Some providers occasionally emit the same paragraph sequence until the
+    output limit.  Only exact, consecutive repetition of a meaningful block
+    (at least 80 characters) three or more times is changed. Ordinary repeated
+    headings, short acknowledgements, and non-consecutive references remain
+    untouched.
+    """
+    raw = str(text or "")
+    if len(raw) < 240:
+        return raw, 1
+    blocks = [part.strip() for part in re.split(r"\n\s*\n", raw) if part.strip()]
+    if len(blocks) < 3:
+        # Providers that lose paragraph separators often repeat whole lines.
+        blocks = [part.strip() for part in raw.splitlines() if part.strip()]
+    count = len(blocks)
+    for unit_size in range(1, count // 3 + 1):
+        if count % unit_size:
+            continue
+        repeats = count // unit_size
+        if repeats < 3:
+            continue
+        unit = blocks[:unit_size]
+        if len("\n\n".join(unit)) < 80:
+            continue
+        if all(blocks[index:index + unit_size] == unit for index in range(0, count, unit_size)):
+            collapsed = "\n\n".join(unit)
+            return (
+                f"{collapsed}\n\n[repetition guard: collapsed {repeats} identical generated blocks]",
+                repeats,
+            )
+    return raw, 1
 
 
 def call_signature(tool_name: str, args: Any) -> str:
@@ -207,6 +243,7 @@ __all__ = [
     "WARN_SEMANTIC_FAILURES",
     "call_signature",
     "semantic_failure_signature",
+    "collapse_generated_repetition",
     "tool_budget_warning",
     "loop_halt_reason",
     "loop_warning",
