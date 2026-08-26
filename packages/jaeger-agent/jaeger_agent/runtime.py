@@ -39,6 +39,7 @@ from .config import AgentConfig
 from .contracts import TurnResult
 from .loop.callbacks import AgentCallbacks
 from .loop.jaeger_agent import JaegerAgent
+from .loop.turn_budget import TurnBudgetLimits
 
 
 #: Conventional environment variable per provider, used when the config
@@ -268,6 +269,12 @@ class DefaultAgentRuntime:
                 adapter=self.adapter,
                 system_prompt=self.config.system_prompt,
                 max_iterations=self.config.max_iterations,
+                turn_budget_limits=TurnBudgetLimits(
+                    max_iterations=self.config.max_iterations,
+                    max_elapsed_s=self.config.turn_max_elapsed_s or None,
+                    max_tokens=self.config.turn_max_tokens or None,
+                    max_tool_cost=self.config.turn_max_tool_cost or None,
+                ),
                 callbacks=self._callbacks(),
             )
             self._sessions[session_key] = agent

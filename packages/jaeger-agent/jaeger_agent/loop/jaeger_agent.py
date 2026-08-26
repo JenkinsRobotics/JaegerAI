@@ -38,6 +38,7 @@ from jaeger_agent.loop.loop_backstop import (
     tool_budget_warning,
 )
 from jaeger_agent.loop.tool_result_safety import protect_tool_result
+from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
@@ -156,6 +157,7 @@ class JaegerAgent:
         tool_visibility: ToolVisibility | None = None,
         turn_start_hook: TurnStartHook | None = None,
         tool_executor: ToolExecutor | None = None,
+        turn_budget_limits: TurnBudgetLimits | None = None,
     ) -> None:
         self.primary_adapter = adapter
         self.fallback_adapters: list[ProviderAdapter] = list(fallback_adapters or [])
@@ -233,6 +235,10 @@ class JaegerAgent:
         # (the ``/runtime`` panel surfaces this); not used by the loop.
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
         self.max_iterations = int(max_iterations)
+        self.turn_budget = TurnBudget(turn_budget_limits or TurnBudgetLimits(
+            max_tool_calls=MAX_TOOL_CALLS,
+            max_iterations=self.max_iterations,
+        ))
         self.callbacks = callbacks or AgentCallbacks()
         self._run_id: str | None = None
         self._effect_checkpoint: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
@@ -468,6 +474,7 @@ class JaegerAgent:
         self.last_prompt_tokens = 0
         self.last_completion_tokens = 0
         self.last_ttft_s = None
+        self.turn_budget.reset()
 
         # Pick up tools registered since construction (a skill
         # activated mid-session) so they're visible AND dispatchable
@@ -541,6 +548,11 @@ class JaegerAgent:
         tool_calls_made = 0
         for iteration in range(1, self.max_iterations + 1):
             self.last_iteration_count = iteration
+            self.turn_budget.observe_iteration(iteration)
+            boundary_halt = self.turn_budget.halt_reason()
+            if boundary_halt and "max_iterations" not in boundary_halt:
+                self.last_halt_reason = boundary_halt
+                return self._budget_halt_or_stop(boundary_halt)
 
             if self._interrupt_event.is_set():
                 self.last_halt_reason = "interrupted"
@@ -690,6 +702,7 @@ class JaegerAgent:
             ):
                 tc = tool_calls[0]
                 tool_calls_made += 1
+                self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
                 self._dispatch_one_tool(tc)
                 # The result lives on the just-appended tool message.
                 tool_msg = self.messages[-1]
@@ -717,6 +730,7 @@ class JaegerAgent:
                 allowed, refused = tool_calls[:remaining], tool_calls[remaining:]
                 if allowed:
                     tool_calls_made += len(allowed)
+                    self.turn_budget.consume_tool(count=len(allowed), cost=float(len(allowed)))
                     self._dispatch_parallel(allowed)
                 for tc in refused:
                     self._append_budget_refusal(tc)
@@ -743,6 +757,7 @@ class JaegerAgent:
                     )
                     continue
                 tool_calls_made += 1
+                self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
                     return self._halt_turn()
@@ -991,7 +1006,10 @@ class JaegerAgent:
         """Merge the one-shot remaining-budget notice into the latest result."""
         if self._tool_budget_warning_used:
             return
-        warning = tool_budget_warning(tool_calls_made)
+        warnings = [item for item in (
+            tool_budget_warning(tool_calls_made), self.turn_budget.warning(),
+        ) if item]
+        warning = "\n".join(dict.fromkeys(warnings))
         if not warning:
             return
         for message in reversed(self._turn_messages):
@@ -1004,6 +1022,18 @@ class JaegerAgent:
                     f"[tool budget warning — {MAX_TOOL_CALLS - tool_calls_made} calls remain]"
                 )
                 return
+
+    def _normalized_tool_cost(self, tc: ToolCall) -> float:
+        """Return deterministic cost units when a tool has no price metadata.
+
+        Read-only work costs 1, local writes 2, and externally visible or
+        hardware actions 3. This is not a currency claim; hosts may supply a
+        tighter ``max_tool_cost`` policy while every run gets comparable
+        telemetry today.
+        """
+        tdef = self._dispatch_by_name.get(tc.get("name") or "")
+        side_effect = getattr(tdef, "side_effect", "") if tdef else ""
+        return {"read": 1.0, "write": 2.0, "external": 3.0, "hardware": 3.0}.get(side_effect, 2.0)
 
     def _append_budget_refusal(self, tc: ToolCall) -> None:
         """Close a model-emitted call without executing past the hard cap."""
@@ -1298,6 +1328,10 @@ class JaegerAgent:
                 self.last_prompt_tokens += per_call_prompt
             if c is not None:
                 self.last_completion_tokens += int(c)
+            self.turn_budget.observe_usage(
+                prompt_tokens=per_call_prompt,
+                completion_tokens=int(c) if c is not None else 0,
+            )
         except (TypeError, ValueError):
             return 0
         return per_call_prompt

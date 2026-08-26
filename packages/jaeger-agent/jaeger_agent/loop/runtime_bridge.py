@@ -36,6 +36,8 @@ from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
 from jaeger_agent.schemas.message_types import Message
+from jaeger_agent.loop.loop_backstop import MAX_TOOL_CALLS
+from jaeger_agent.loop.turn_budget import TurnBudgetLimits
 
 
 def _resolve_local_max_tokens() -> int:
@@ -255,6 +257,9 @@ def build_jaeger_agent(
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
     context_summarizer: Any = None,
+    turn_max_elapsed_s: float | None = None,
+    turn_max_tokens: int | None = None,
+    turn_max_tool_cost: float | None = None,
 ) -> JaegerAgent:
     """Construct a :class:`JaegerAgent` wired against the provided
     JROS client. The skip-final finalizer is the legacy bounded-chat
@@ -366,6 +371,13 @@ def build_jaeger_agent(
         toolset_resolver=resolve_toolsets,
         tool_visibility=tool_visible,
         turn_start_hook=_reset_turn_state,
+        turn_budget_limits=TurnBudgetLimits(
+            max_tool_calls=MAX_TOOL_CALLS,
+            max_iterations=max_iterations,
+            max_elapsed_s=turn_max_elapsed_s,
+            max_tokens=turn_max_tokens,
+            max_tool_cost=turn_max_tool_cost,
+        ),
     )
     agent.stale_call_timeout_s = stale_call_timeout_s
     return agent
@@ -499,6 +511,7 @@ def drive_one_turn(
         # Real time-to-first-token of the turn's first model call —
         # None when no adapter reported one (test stubs, plain create).
         "ttft_s": agent.last_ttft_s,
+        "turn_budget": agent.turn_budget.snapshot(),
     }
 
 
