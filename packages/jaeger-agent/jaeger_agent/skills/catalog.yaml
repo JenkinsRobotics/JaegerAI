@@ -28,6 +28,7 @@ core:
   - messaging-setup
   - native-mcp
   - file-organization
+  - safari-bookmarks
   - kanban
   - memory-keeping
   - ocr-and-documents
