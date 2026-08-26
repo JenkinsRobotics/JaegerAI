@@ -23,16 +23,15 @@ REPO = Path(__file__).resolve().parents[4]
 # ── POLISH-2: boot panel respects JAEGER_TOOLSET_SCOPING ────────────
 
 
-def test_visible_tool_groups_defaults_to_core(monkeypatch):
-    """An unset flag uses the automatic Hermes-scoped surface."""
+def test_visible_tool_groups_defaults_to_full_set(monkeypatch):
+    """Unset flag: the panel lists every registered group."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
 
     from jaeger_ai.interfaces.tui.status import TOOL_GROUPS, _visible_tool_groups
-    from jaeger_agent.skill_registry.toolset_scoping import CORE
     groups, visible, total = _visible_tool_groups()
-    assert all(tool in CORE for tools in groups.values() for tool in tools)
-    assert visible < total
+    assert groups == TOOL_GROUPS
+    assert visible == total
     assert total == sum(len(v) for v in TOOL_GROUPS.values())
 
 

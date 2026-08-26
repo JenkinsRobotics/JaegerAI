@@ -135,14 +135,13 @@ def test_no_soul_md_still_builds_a_prompt(tmp_path) -> None:
     assert 'memory(action="remember"' in sp
 
 
-def test_prompt_defaults_to_automatic_scoped_surface(tmp_path, monkeypatch) -> None:
-    """Automatic intent routing makes the Hermes-style surface default."""
+def test_prompt_defaults_to_full_tool_surface(tmp_path, monkeypatch) -> None:
+    """Unset flag: the prompt says the full surface is visible."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     sp = build_system_prompt(InstanceLayout(root=tmp_path))
-    assert "small CORE set of tools" in sp
-    assert "TOOL CATALOG" in sp
-    assert "describe_tool" in sp
+    assert "full built-in tool surface is visible" in sp
+    assert "TOOL CATALOG" not in sp
 
 
 def test_prompt_scoped_when_explicit_env(tmp_path, monkeypatch) -> None:

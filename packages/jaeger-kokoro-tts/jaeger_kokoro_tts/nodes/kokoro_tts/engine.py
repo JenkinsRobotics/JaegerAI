@@ -126,7 +126,7 @@ def ensure_hf_offline_if_cached(
 # venv's site-packages the wheel happens to be installed into) is longer
 # than ~150 characters, ``espeak_Initialize()`` silently fails to use it,
 # falls back to the wheel's CI-build-time-baked absolute path (e.g.
-# ``/Users/runner/work/espeakng-loader/.../espeak-ng-data``), can't find
+# ``<home>/work/espeakng-loader/.../espeak-ng-data``), can't find
 # ``phontab`` there, and hard-exits(1) from inside the C library — no
 # Python exception, no traceback, just process death. Verified via a
 # binary search sweep: identical dylib + data, byte-for-byte, works at a

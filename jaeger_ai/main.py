@@ -1241,7 +1241,26 @@ def _register_builtins(client: Any) -> None:
     @register_tool_from_function
     def clarify(question: str) -> dict:
         """Ask the user a clarifying question instead of guessing."""
+        sink = _pipeline.get("interaction_request_sink")
+        if callable(sink):
+            answer = str(sink("clarify", question, ()) or "").strip()
+            return {"asked": True, "question": question, "answer": answer}
         return t.ask_user(question=question)
+
+    @register_tool_from_function
+    def request_secret(name: str, prompt: str) -> dict:
+        """Securely request a credential value from an interactive surface.
+
+        Never ask for a secret in ordinary chat text. The bridge renders a
+        masked input control and returns the value only to this tool call.
+        Never echo the returned ``secret`` in the final answer.
+        """
+        sink = _pipeline.get("interaction_request_sink")
+        if not callable(sink):
+            return {"received": False, "name": name,
+                    "error": "no secure interactive surface is connected"}
+        value = str(sink("secret", prompt, ()) or "")
+        return {"received": bool(value), "name": name, "secret": value}
 
     @register_tool_from_function
     def help_me() -> dict:
@@ -3800,6 +3819,17 @@ def stream_reasoning_sink(sink: Any):
         yield sink
     finally:
         _pipeline["stream_reasoning_sink"] = previous
+
+
+@contextmanager
+def interaction_request_sink(sink: Any):
+    """Route clarify/secret tool requests through the active UI transport."""
+    previous = _pipeline.get("interaction_request_sink")
+    _pipeline["interaction_request_sink"] = sink
+    try:
+        yield sink
+    finally:
+        _pipeline["interaction_request_sink"] = previous
 
 
 def stream_delta_listening() -> bool:
