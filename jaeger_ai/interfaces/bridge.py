@@ -976,13 +976,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             str(args.get("query") or ""), limit=int(args.get("limit") or 50)
         )
     if what == "load_session":
-        # Runway item 4: the operator picked a conversation out of
-        # History. Returns its full turn list for the client to rebuild
-        # a transcript with, AND (when the agent has booted) replays it
-        # into that session's live JaegerAgent.messages so a follow-up
-        # turn on this id continues WITH context — see
-        # ``main.resume_session_from_store`` for why this is a full
-        # replay, not the usual clean-slate / lossy-digest resume.
+        # resume False: display/search only — do not swap the live agent.
+        # resume omitted/True: replay into JaegerAgent.messages so the next
+        # send on this id continues with those turns.
         from jaeger_ai.core.sessions import canonical_session_id
         from jaeger_ai.main import resume_session_from_store
         raw_sid = str(args.get("id") or "").strip()
@@ -1309,11 +1305,23 @@ class BridgeConfirmationProvider:
         root = getattr(getattr(ctx, "layout", None), "root", None)
         self._grants = PermissionGrants.load(root)
 
-    def confirm(self, request: object) -> bool:
+    def bind_output(self, proto: TextIO) -> None:
+        """Route the next turn's prompts to the client that sent the turn.
+
+        The bridge has one turn worker but can have several transports: its
+        owner stdio pipe and any number of attached Unix-socket clients.  A
+        provider permanently bound at boot sends an attached client's
+        approval request to the owner, leaving the initiating client blocked
+        forever.  Turns are serialized, so rebinding at the turn boundary is
+        sufficient and cannot cross-talk between simultaneous tool calls.
+        """
+        self._proto = proto
+
+    def request(self, kind: str, prompt: str,
+                options: tuple[str, ...] = ()) -> str:
+        """Emit one interactive request and block for its matching answer."""
         from jaeger_os.contract import protocol
-        skill = getattr(request, "skill", "") or ""
-        if self._grants.is_granted(skill):
-            return True  # already approved (console "always", or ours) — no frame
+
         self._ctx.req_counter += 1
         rid = f"perm{self._ctx.req_counter}"
         evt: threading.Event = threading.Event()
@@ -1323,16 +1331,25 @@ class BridgeConfirmationProvider:
         if early is not None:
             slot.append(early)
             evt.set()
-        op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
         _emit(self._proto, protocol.request_frame(
-            rid, "approval", f"Allow {op}?",
-            options=("once", "always", "deny")))
+            rid, kind, prompt, options=options,
+            session=str(getattr(self, "current_session", "") or "")))
         try:
             if not evt.wait(self.TIMEOUT_S):
-                return False
-            answer = (slot[0] if slot else "").strip().lower()
+                return ""
+            return (slot[0] if slot else "").strip()
         finally:
             self._ctx.pending.pop(rid, None)
+
+    def confirm(self, request: object) -> bool:
+        from jaeger_os.contract import protocol
+        skill = getattr(request, "skill", "") or ""
+        if self._grants.is_granted(skill):
+            return True  # already approved (console "always", or ours) — no frame
+        op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
+        answer = self.request(
+            "approval", f"Allow {op}?", ("once", "always", "deny"),
+        ).lower()
         if answer == "always":
             self._grants.grant_persistent(skill)
             return True
@@ -1871,6 +1888,17 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             _emit(out, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
+        # Approval requests must return on the same transport that originated
+        # this turn.  The provider is installed during boot on owner stdio,
+        # while ``out`` may be an attached Unix-socket client.
+        try:
+            from jaeger_os.core.safety.permissions import current_policy
+
+            confirmation = current_policy().confirmation
+            if isinstance(confirmation, BridgeConfirmationProvider):
+                confirmation.bind_output(out)
+        except Exception:  # noqa: BLE001 — routing must not block a turn
+            pass
         try:
             from jaeger_ai.core.sessions import get_store
 
@@ -1886,6 +1914,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         _emit_state(out, ctx, True, session)
         try:
             from jaeger_ai.main import (
+                interaction_request_sink,
                 run_for_voice,
                 stream_delta_sink,
                 stream_reasoning_sink,
@@ -1914,7 +1943,21 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                         deltas.flush()
                         _emit(out, _reasoning_frame(chunk, _session))
 
-                    with stream_delta_sink(deltas.feed), stream_reasoning_sink(_emit_reasoning):
+                    def _request_interaction(
+                        kind: str, prompt: str, options: tuple[str, ...],
+                    ) -> str:
+                        from jaeger_os.core.safety.permissions import current_policy
+
+                        provider = current_policy().confirmation
+                        if isinstance(provider, BridgeConfirmationProvider):
+                            return provider.request(kind, prompt, options)
+                        return ""
+
+                    with (
+                        stream_delta_sink(deltas.feed),
+                        stream_reasoning_sink(_emit_reasoning),
+                        interaction_request_sink(_request_interaction),
+                    ):
                         result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
                 deltas.flush()
 

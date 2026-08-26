@@ -24,14 +24,15 @@ def _clean_toolset_state(monkeypatch):
     ts._SKILL_SUMMARY.clear()
 
 
-def test_scoping_on_by_default_hides_categorised_tools(monkeypatch) -> None:
-    """Automatic Hermes-style scoping is the shipped default."""
+def test_scoping_off_by_default_shows_registered_tools(monkeypatch) -> None:
+    """Unset flag: every registered tool is visible, including MCP."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     ts.reset_toolsets()
     assert ts.tool_visible("get_time")
-    assert ts.tool_visible("execute_code")       # CORE
-    assert not ts.tool_visible("schedule_prompt")
+    assert ts.tool_visible("execute_code")
+    assert ts.tool_visible("schedule_prompt")
+    assert ts.tool_visible("terminal")
     assert ts.tool_visible("anything_at_all")
 
 

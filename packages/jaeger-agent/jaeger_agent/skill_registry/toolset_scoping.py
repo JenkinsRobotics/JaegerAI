@@ -30,27 +30,19 @@ import re
 
 
 def _scoping_enabled() -> bool:
-    """Toolset scoping is automatic by default.
+    """Lean tool surface. Opt-in.
 
-    History: we flipped it ON in May 2026 after adding ``describe_tool``
-    and the catalog, hoping the new pattern would offset the routing
-    regression seen with naive scoping. Direct A/B against the v5
-    historical baseline showed Gemma 4 26B-A4B routing dropped from
-    **100% → 67.6%** under the new lean default; Qwen3.6-35B-A3B was
-    largely unaffected. Conclusion: the lean surface is a real win for
-    context budget but a real loss for routing on some models, and we
-    can't commit to it as a global default. It stays OPT-IN until
-    auto-load-on-intent (a follow-up that picks toolsets without an
-    explicit meta-step) lands and re-bench shows no regression.
-
-    ``JAEGER_TOOLSET_SCOPING=0`` disables it for compatibility tests;
-    ``JAEGER_FULL_TOOLS=1`` is the explicit operator kill-switch."""
+    Default OFF: every registered tool is visible, including MCP tools
+    loaded at boot. A/B on Gemma 4 showed scoping dropped routing
+    100% → 67.6%. ``JAEGER_TOOLSET_SCOPING=1`` enables CORE + load_tools.
+    ``JAEGER_FULL_TOOLS=1`` forces the full surface even when scoping is on.
+    """
     if os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in (
         "1", "true", "yes", "on",
     ):
         return False
-    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "auto").strip().lower()
-    return val not in ("0", "false", "no", "off", "full")
+    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
 
 
 # Deterministic first-pass routing, equivalent to Hermes focus/toolset
@@ -249,7 +241,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "reflect",
     }),
     "computer_use": frozenset({"computer_use", "browser"}),
-    "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
+    "credentials": frozenset({
+        "get_credential", "list_credentials", "set_credential", "request_secret",
+    }),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
     "email": frozenset({
         "send_email", "move_mail", "batch_move",

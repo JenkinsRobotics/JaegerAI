@@ -893,6 +893,72 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     assert proto2.getvalue() == ""                    # NO frame — already granted
 
 
+def test_bridge_confirmation_provider_follows_attached_turn_output(_instance_on_disk):
+    """An attached client's approval must not be emitted on owner stdio."""
+    import types as _types
+
+    from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
+
+    ctx = _Ctx()
+    ctx.layout = _types.SimpleNamespace(root=_instance_on_disk)
+    owner = io.StringIO()
+    attached = io.StringIO()
+    provider = BridgeConfirmationProvider(owner, ctx)
+    provider.bind_output(attached)
+
+    request = type("Req", (), {
+        "skill": "ungranted-attached-skill",
+        "operation": "harmless-check",
+    })()
+
+    def _deny() -> None:
+        for _ in range(200):
+            if attached.getvalue():
+                frame = json.loads(attached.getvalue().splitlines()[-1])
+                event, slot = ctx.pending[frame["id"]]
+                slot.append("deny")
+                event.set()
+                return
+            time.sleep(0.01)
+
+    responder = threading.Thread(target=_deny)
+    responder.start()
+    assert provider.confirm(request) is False
+    responder.join(timeout=5)
+
+    assert owner.getvalue() == ""
+    assert json.loads(attached.getvalue().splitlines()[-1])["kind"] == "approval"
+
+
+def test_clarify_and_secret_tools_use_turn_scoped_interaction_sink():
+    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_ai.main import _register_builtins, interaction_request_sink
+
+    _register_builtins(None)
+    calls = []
+
+    def request(kind, prompt, options):
+        calls.append((kind, prompt, options))
+        return "chosen-value" if kind == "clarify" else "secret-canary"
+
+    with interaction_request_sink(request):
+        clarified = get_tool("clarify").fn(question="Which item?")
+        secret = get_tool("request_secret").fn(
+            name="API_KEY", prompt="Enter the API key",
+        )
+
+    assert calls == [
+        ("clarify", "Which item?", ()),
+        ("secret", "Enter the API key", ()),
+    ]
+    assert clarified == {
+        "asked": True, "question": "Which item?", "answer": "chosen-value",
+    }
+    assert secret == {
+        "received": True, "name": "API_KEY", "secret": "secret-canary",
+    }
+
+
 def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
     """``{"op":"query","what":"identity"}`` answers with a result frame
     carrying agent_name/character/icon/model — the additive read the Swift
@@ -1376,6 +1442,38 @@ def test_load_session_query_returns_history_and_replays(monkeypatch):
                               {"role": "assistant", "text": "hello", "ts": 2.0}]
     assert seen["session_id"] == "picked"
     assert seen["client"] is boot.client          # the booted client, not None
+
+
+def test_load_session_resume_false_skips_live_replay(monkeypatch):
+    """Display/search loads must not hydrate JaegerAgent.messages."""
+    seen = {}
+
+    def fake_resume(client, session_id, layout=None):
+        seen["called"] = True
+        return [{"role": "user", "text": "should not replay", "ts": 1.0}]
+
+    def fake_history(session_id):
+        return [{"role": "user", "text": "display only", "ts": 1.0}]
+
+    monkeypatch.setattr("jaeger_ai.main.resume_session_from_store",
+                        fake_resume, raising=False)
+
+    class Store:
+        def history(self, session_id):
+            seen["history_id"] = session_id
+            return fake_history(session_id)
+
+    monkeypatch.setattr("jaeger_ai.core.sessions.get_store", lambda _lay: Store())
+
+    stdin = ('{"op":"query","what":"load_session",'
+             '"args":{"id":"picked","resume":false},"id":"r1"}\n'
+             '{"op":"quit"}\n')
+    _, frames, _ = _run(monkeypatch, stdin, stdin_delay=0.25)
+    result = next(f for f in frames if f["type"] == "result")
+    assert result["ok"] is True
+    assert result["data"] == [{"role": "user", "text": "display only", "ts": 1.0}]
+    assert "called" not in seen
+    assert seen["history_id"] == "picked"
 
 
 def test_load_session_query_without_id_returns_empty(monkeypatch):
