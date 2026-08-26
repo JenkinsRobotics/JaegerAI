@@ -206,8 +206,8 @@ class VoiceController:
             self._chimes = None
 
         try:
-            from jaeger_agent.tools.speak import warm_kokoro
-            warm_kokoro()  # idempotent — usually already warm from boot
+            from jaeger_ai.modules import jaeger_kokoro_tts as tts
+            tts.warm()  # idempotent — usually already warm from boot
         except Exception:  # noqa: BLE001
             pass
 
