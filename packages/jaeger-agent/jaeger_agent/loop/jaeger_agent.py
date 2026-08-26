@@ -34,6 +34,7 @@ from jaeger_agent.loop.loop_backstop import (
     loop_halt_reason,
     loop_warning,
     semantic_failure_signature,
+    tool_budget_warning,
 )
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
@@ -294,6 +295,7 @@ class JaegerAgent:
         # removal (post-tool or verify — they share the lifecycle).
         self._turn_tool_successes: set[str] = set()
         self._verify_nudge_used = False
+        self._tool_budget_warning_used = False
         self._pending_nudge_text: str | None = None
 
         # Diagnostic surface — populated by the most recent ``run_turn``.
@@ -456,6 +458,7 @@ class JaegerAgent:
         self._pending_nudge_text = None
         self._turn_tool_successes.clear()
         self._verify_nudge_used = False
+        self._tool_budget_warning_used = False
         self._failed_mutations.clear()
         self.last_halt_reason = None
         self.last_iteration_count = 0
@@ -706,6 +709,7 @@ class JaegerAgent:
                     self._dispatch_parallel(allowed)
                 for tc in refused:
                     self._append_budget_refusal(tc)
+                self._attach_tool_budget_warning(tool_calls_made)
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
                     return self._halt_turn()
@@ -716,7 +720,7 @@ class JaegerAgent:
                 )
                 if halt:
                     self.last_halt_reason = halt
-                    return self._halt_turn()
+                    return self._budget_halt_or_stop(halt)
                 continue
 
             seen_in_batch: dict[str, str] = {}
@@ -770,10 +774,12 @@ class JaegerAgent:
                 )
                 if halt:
                     self.last_halt_reason = halt
-                    return self._halt_turn()
+                    return self._budget_halt_or_stop(halt)
+
+                self._attach_tool_budget_warning(tool_calls_made)
 
             if self.last_halt_reason:
-                return self._halt_turn()
+                return self._budget_halt_or_stop(self.last_halt_reason)
 
         # Fell out of the for-loop: max_iterations exhausted with the
         # model still trying to use tools. Spend ONE toolless grace
@@ -963,6 +969,30 @@ class JaegerAgent:
             self.last_halt_reason or "turn halted"
         )
         return self._final_text_or_halt()
+
+    def _budget_halt_or_stop(self, reason: str) -> str:
+        """Total budget gets a tool-free final answer; loops still stop cold."""
+        if "tool calls in a single turn" in reason:
+            return self._wind_down_summary()
+        return self._halt_turn()
+
+    def _attach_tool_budget_warning(self, tool_calls_made: int) -> None:
+        """Merge the one-shot remaining-budget notice into the latest result."""
+        if self._tool_budget_warning_used:
+            return
+        warning = tool_budget_warning(tool_calls_made)
+        if not warning:
+            return
+        for message in reversed(self._turn_messages):
+            if message.get("role") == "tool":
+                message["content"] = _merge_guidance(
+                    message.get("content") or "", warning,
+                )
+                self._tool_budget_warning_used = True
+                self.callbacks.on_thinking(
+                    f"[tool budget warning — {MAX_TOOL_CALLS - tool_calls_made} calls remain]"
+                )
+                return
 
     def _append_budget_refusal(self, tc: ToolCall) -> None:
         """Close a model-emitted call without executing past the hard cap."""
