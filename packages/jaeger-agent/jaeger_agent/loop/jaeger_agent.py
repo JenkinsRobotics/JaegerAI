@@ -36,6 +36,7 @@ from jaeger_agent.loop.loop_backstop import (
     semantic_failure_signature,
     tool_budget_warning,
 )
+from jaeger_agent.loop.tool_result_safety import protect_tool_result
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
@@ -1042,10 +1043,24 @@ class JaegerAgent:
         prev_tools = self._all_tools
         self._tools_filter_locked = True
         self._all_tools = []
+        msg = None
         try:
-            msg = self._one_model_step()
-        except Exception:  # noqa: BLE001 — grace call is best-effort
-            msg = None
+            # Hermes' bounded finalizer retries once because an empty or
+            # transiently failed synthesis should not turn a safely stopped
+            # tool loop into a raw internal halt. Tools remain unavailable on
+            # both attempts, so this cannot reopen execution.
+            for attempt in range(2):
+                try:
+                    candidate = self._one_model_step()
+                except Exception:  # noqa: BLE001 — grace call is best-effort
+                    candidate = None
+                if ((candidate or {}).get("content") or "").strip():
+                    msg = candidate
+                    break
+                if attempt == 0:
+                    self.callbacks.on_thinking(
+                        "[wind-down response empty — retrying once without tools]"
+                    )
         finally:
             self._tools_filter_locked = prev_locked
             self._all_tools = prev_tools
@@ -1857,11 +1872,15 @@ class JaegerAgent:
         if warning:
             content = _merge_guidance(content, warning)
 
+        rendered_content = (
+            content if isinstance(content, str) else _stringify(content)
+        )
+        rendered_content = protect_tool_result(name, rendered_content)
         tool_message = {
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
-            "content": content if isinstance(content, str) else _stringify(content),
+            "content": rendered_content,
         }
         self._append_message(tool_message)
         if (
