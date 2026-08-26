@@ -32,6 +32,10 @@ review private details locally with:
 ares bookmarks review PROPOSAL_ID
 ```
 
+The review command displays duplicate groups only. It does **not** display
+empty-folder paths or malformed URL details. Never claim otherwise, and never
+read or recommend reading the raw proposal JSON to compensate.
+
 If the command reports a permission boundary, quote that observed error. Do
 not infer Full Disk Access from a generic file-tool refusal and do not retry by
 opening Safari, using GUI automation, or reading the plist directly.
@@ -52,6 +56,15 @@ bookmark count. Rollback remains a local human command:
 ```text
 ares bookmarks rollback PROPOSAL_ID --approve-token TOKEN
 ```
+
+Verify an apply or rollback with the aggregate, privacy-safe command:
+
+```text
+ares bookmarks verify PROPOSAL_ID
+```
+
+Do not invent `ares bookmarks validate`, and do not create a new `summary` as
+proof of an older proposal's outcome: `summary` creates a separate proposal.
 
 ## Done when
 
