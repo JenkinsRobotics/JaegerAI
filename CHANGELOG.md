@@ -3,6 +3,41 @@
 JROS follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## `0.11.0` — the app owns the wiring
+
+0.10.0 moved the brain out. This release stops reaching back into it.
+
+Warming the voice was `jaeger_agent.tools.speak.warm_kokoro()` — the app
+asking the *mind* to preload an engine the mind should not know exists.
+The body of that function was already engine-neutral (`ensure_tts_node`
+plus the `Synthesizer` protocol); only its name and its address were
+wrong. It now lives in `jaeger_ai/modules/jaeger_kokoro_tts.py` as
+`warm()`, beside `say()` and `stop()`, which is where this repo already
+kept its half of the TTS bus contract.
+
+`plugins/voice_loop.py` took the synthesizer from `speak._get_tts()` for
+echo-cancellation and audio-backend setup; it now asks the binding via
+`synth()`. Same object, one less hop through the agent, and the dead
+`KokoroTTS(...)` fallback that `_get_tts()` carried — permanently `None`
+since the module left the OS tree, so a `TypeError` wearing a safety
+net's clothes — is gone with it.
+
+Both manifests gain a `[config.tts]` block with `warm = true`, ported
+from Mochi. A module that warms itself needs no app-side call at all;
+the `warm()` above is for the TUI boot path, which still has no chassis
+Supervisor (see `jaeger.toml`'s header) and starts its nodes lazily.
+Neither manifest had any `[config.*]` table before this.
+
+Nothing about how it behaves changed — same warm, same synthesizer, same
+timings. What changed is who asks. `jaeger-agent` is a `slot: mind`
+module; which module fills `tts` is this application's business.
+
+Still outstanding: STT. `jaeger_agent/tools/listen.py` loads
+`pywhispercpp` in-process rather than going through the `stt` node, and
+imports `jaeger_ai.main` to do it — 30 unguarded `jaeger_ai` imports
+remain inside the agent. The TTS path took the 0.4 bus rewire; the
+hearing path never did.
+
 ## `0.10.0` — the agent is a module
 
 The brain moved out. `jaeger_ai/agent/` is gone: its tools, skills,

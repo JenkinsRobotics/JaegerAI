@@ -3973,6 +3973,17 @@ def boot_for_tui(
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
             pass
+        try:
+            # 0.11.0: the agent counts its own tool/skill usage in memory.
+            # Registering this sink is what makes those counters PERSIST to
+            # <instance>/logs/usage.json across restarts. Previously the
+            # module imported this module directly from four places, which
+            # left any host that is not JaegerAI with no usage data at all.
+            from jaeger_agent import usage as _agent_usage
+            from jaeger_ai.core.runtime import usage_stats as _usage_stats
+            _agent_usage.set_sink(_usage_stats)
+        except Exception:  # noqa: BLE001 — telemetry is best-effort
+            pass
         _pipeline["config"] = config
         _pipeline["show_latency"] = config.display.show_latency
         _pipeline["show_tool_activity"] = config.display.show_tool_activity
@@ -4622,6 +4633,17 @@ def _main_dispatch() -> int:
             from jaeger_agent.trace import start_trace_recorder
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
+            pass
+        try:
+            # 0.11.0: the agent counts its own tool/skill usage in memory.
+            # Registering this sink is what makes those counters PERSIST to
+            # <instance>/logs/usage.json across restarts. Previously the
+            # module imported this module directly from four places, which
+            # left any host that is not JaegerAI with no usage data at all.
+            from jaeger_agent import usage as _agent_usage
+            from jaeger_ai.core.runtime import usage_stats as _usage_stats
+            _agent_usage.set_sink(_usage_stats)
+        except Exception:  # noqa: BLE001 — telemetry is best-effort
             pass
         _pipeline["config"] = config
         _pipeline["show_latency"] = config.display.show_latency
