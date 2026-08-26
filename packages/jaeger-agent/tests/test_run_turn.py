@@ -162,16 +162,19 @@ def test_parallel_batch_never_executes_past_hard_tool_budget():
         return {"ok": True, "value": value}
 
     requested = MAX_TOOL_CALLS + 6
-    adapter = _ScriptedAdapter([{
-        "role": "assistant",
-        "content": "reading",
-        "tool_calls": [
-            {"id": f"c{i}", "name": "bounded_read", "arguments": {"value": str(i)}}
-            for i in range(requested)
-        ],
-    }])
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": "reading",
+            "tool_calls": [
+                {"id": f"c{i}", "name": "bounded_read", "arguments": {"value": str(i)}}
+                for i in range(requested)
+            ],
+        },
+        {"role": "assistant", "content": "I inspected the allowed items; six remained unread."},
+    ])
     agent = JaegerAgent(adapter=adapter)
-    agent.run_turn("read a bounded batch")
+    result = agent.run_turn("read a bounded batch")
 
     assert len(executed) == MAX_TOOL_CALLS
     rows = [m for m in agent.messages if m["role"] == "tool"]
@@ -180,6 +183,9 @@ def test_parallel_batch_never_executes_past_hard_tool_budget():
     assert agent.last_halt_reason == (
         f"made {MAX_TOOL_CALLS} tool calls in a single turn"
     )
+    assert result == "I inspected the allowed items; six remained unread."
+    assert adapter.call_count == 2
+    assert adapter.last_tools_count == 0
 
 
 # ── tool error paths ───────────────────────────────────────────────
@@ -279,7 +285,7 @@ def test_identical_tool_call_loop_trips_backstop():
 
 def test_max_iterations_caps_runaway_loop():
     """When the model never stops calling tools, ``max_iterations`` is
-    the hard ceiling — no model call beyond it."""
+    the hard tool-loop ceiling, followed by one tool-free grace call."""
     @register_tool("nibble", "Varies args each time.", _SmallArgs)
     def _impl(value: str = "x") -> dict:
         return {"ok": True}
@@ -294,13 +300,18 @@ def test_max_iterations_caps_runaway_loop():
                 {"id": f"id{i}", "name": "nibble", "arguments": {"value": f"v{i}"}},
             ],
         }
-        for i in range(20)
+        for i in range(3)
     ]
-    agent = JaegerAgent(adapter=_ScriptedAdapter(script), max_iterations=3)
-    agent.run_turn("never stop")
+    script.append({"role": "assistant", "content": "I stopped after three checks."})
+    adapter = _ScriptedAdapter(script)
+    agent = JaegerAgent(adapter=adapter, max_iterations=3)
+    result = agent.run_turn("never stop")
     assert agent.last_iteration_count == 3
     assert agent.last_halt_reason is not None
     assert "max_iterations" in agent.last_halt_reason
+    assert result == "I stopped after three checks."
+    assert adapter.call_count == 4
+    assert adapter.last_tools_count == 0
 
 
 # ── cancel + interrupt ─────────────────────────────────────────────

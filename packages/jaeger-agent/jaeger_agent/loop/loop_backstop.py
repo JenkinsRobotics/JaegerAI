@@ -28,6 +28,7 @@ from typing import Any
 # varies its arguments. These limits are a safety net, not a fine-grained
 # iteration tuner — bump them if real workloads need it, but don't lower.
 MAX_TOOL_CALLS = 24
+WARN_TOOL_CALLS = 20
 MAX_IDENTICAL_CALLS = 4
 MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
 
@@ -177,8 +178,28 @@ def loop_halt_reason(
     return None
 
 
+def tool_budget_warning(tool_calls_made: int) -> str | None:
+    """Tell the model to synthesize before the total-call fuse fires.
+
+    Repetition warnings are signature-specific and live in
+    :func:`loop_warning`.  The total budget is different: varied calls may
+    all be legitimate, but the model still needs advance notice that it must
+    stop investigating and turn the accumulated results into an answer.
+    """
+    if WARN_TOOL_CALLS <= tool_calls_made < MAX_TOOL_CALLS:
+        remaining = MAX_TOOL_CALLS - tool_calls_made
+        return (
+            f"[tool budget: {remaining} call(s) remain this turn. "
+            "Stop broadening the investigation. Use the results already "
+            "collected and produce the best final answer now; call another "
+            "tool only if it is essential.]"
+        )
+    return None
+
+
 __all__ = [
     "MAX_TOOL_CALLS",
+    "WARN_TOOL_CALLS",
     "MAX_IDENTICAL_CALLS",
     "MAX_SEMANTIC_FAILURES",
     "MAIL_TOOLS",
@@ -186,6 +207,7 @@ __all__ = [
     "WARN_SEMANTIC_FAILURES",
     "call_signature",
     "semantic_failure_signature",
+    "tool_budget_warning",
     "loop_halt_reason",
     "loop_warning",
 ]
