@@ -3466,6 +3466,7 @@ def _run_turn_via_jaeger_agent(
 
     key = session_key
     jaeger_agent = _ensure_session_agent(client, key)
+    turn_message_start = len(jaeger_agent.messages)
     try:
         from jaeger_ai.core.runtime.autonomous_runner import (
             ledger_open, looks_like_batch,
@@ -3593,7 +3594,15 @@ def _run_turn_via_jaeger_agent(
             answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
     elif result.get("reasoning_content"):
         thought_text = str(result.get("reasoning_content")).strip()
-    if not thought_text:
+    turn_reasoning = [
+        str(message.get("reasoning") or message.get("reasoning_content") or "").strip()
+        for message in jaeger_agent.messages[turn_message_start:]
+        if message.get("role") == "assistant"
+        and str(message.get("reasoning") or message.get("reasoning_content") or "").strip()
+    ]
+    if turn_reasoning:
+        thought_text = "\n\n".join(turn_reasoning)
+    elif not thought_text:
         # Provider adapters preserve deliberation on the assistant message.
         # Carry it across JaegerAI's product/runtime boundary so durable
         # session storage does not lose a trace the bridge already streamed.
