@@ -3593,6 +3593,18 @@ def _run_turn_via_jaeger_agent(
             answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
     elif result.get("reasoning_content"):
         thought_text = str(result.get("reasoning_content")).strip()
+    if not thought_text:
+        # Provider adapters preserve deliberation on the assistant message.
+        # Carry it across JaegerAI's product/runtime boundary so durable
+        # session storage does not lose a trace the bridge already streamed.
+        for message in reversed(jaeger_agent.messages):
+            if message.get("role") != "assistant":
+                continue
+            thought_text = str(
+                message.get("reasoning") or message.get("reasoning_content") or ""
+            ).strip()
+            if thought_text:
+                break
 
     if thought_text:
         bus = _pipeline.get("event_bus")
@@ -3695,6 +3707,7 @@ def _run_turn_via_jaeger_agent(
         "spoke_via_tool": spoke_via_tool,
         "elapsed_s": elapsed, "report": report,
         "halt_reason": result.get("halt_reason"),
+        "reasoning": thought_text,
     }
 
 
@@ -4042,11 +4055,14 @@ def run_for_voice(
         if store is not None:
             store.record(session, "user", display_text if display_text is not None else user_text)
             if out.get("text"):
+                metadata = {"tool_calls": list(out.get("tool_activity") or [])}
+                if out.get("reasoning"):
+                    metadata["reasoning"] = str(out["reasoning"])
                 store.record(
                     session,
                     "assistant",
                     out["text"],
-                    metadata={"tool_calls": list(out.get("tool_activity") or [])},
+                    metadata=metadata,
                 )
             try:
                 from jaeger_ai.core.runtime.modes import serving_brain
