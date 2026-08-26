@@ -314,6 +314,31 @@ def test_max_iterations_caps_runaway_loop():
     assert adapter.last_tools_count == 0
 
 
+def test_wind_down_retries_once_when_first_summary_is_empty():
+    @register_tool("nibble", "One bounded check.", _SmallArgs)
+    def _impl(value: str = "x") -> dict:
+        return {"ok": True, "value": value}
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "id1", "name": "nibble", "arguments": {"value": "v1"}},
+            ],
+        },
+        {"role": "assistant", "content": ""},
+        {"role": "assistant", "content": "I completed one check before stopping."},
+    ])
+    agent = JaegerAgent(adapter=adapter, max_iterations=1)
+
+    result = agent.run_turn("check until the turn budget stops you")
+
+    assert result == "I completed one check before stopping."
+    assert adapter.call_count == 3
+    assert adapter.last_tools_count == 0
+
+
 # ── cancel + interrupt ─────────────────────────────────────────────
 
 
