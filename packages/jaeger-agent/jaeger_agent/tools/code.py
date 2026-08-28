@@ -103,7 +103,12 @@ def _sandboxed_python_command(
         # becoming an exfiltration or process-control channel.
         return [
             bwrap,
-            "--die-with-parent", "--new-session", "--unshare-net", "--unshare-ipc",
+            # Be explicit even though non-setuid bubblewrap normally implies a
+            # user namespace. Some distributions retain a privileged launcher;
+            # without this, the new network namespace may not grant bubblewrap
+            # CAP_NET_ADMIN long enough to configure its isolated loopback.
+            "--die-with-parent", "--new-session", "--unshare-user",
+            "--unshare-net", "--unshare-ipc",
             "--ro-bind", "/", "/",
             "--bind", workspace, workspace,
             "--bind", scratch, scratch,
