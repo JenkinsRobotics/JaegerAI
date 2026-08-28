@@ -279,7 +279,9 @@ def test_identical_read_calls_in_one_batch_dispatch_once():
     ])
     agent = JaegerAgent(adapter=adapter)
     agent.run_turn("look twice")
-    assert hits == ["same", "other"]
+    # Independent reads execute concurrently, so only membership and
+    # deduplication are ordered guarantees—not completion order.
+    assert sorted(hits) == ["other", "same"]
     tool_msgs = [m for m in agent.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 3  # every call id still gets a result
     assert "duplicate" in tool_msgs[1]["content"]
