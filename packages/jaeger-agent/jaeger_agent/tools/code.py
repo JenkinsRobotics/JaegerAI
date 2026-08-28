@@ -28,6 +28,33 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
 
 
+def _linux_runtime_mount_args() -> list[str]:
+    """Minimal host runtime needed to start CPython inside Bubblewrap.
+
+    Never bind ``/``: a read-only root still exposes credentials, user files,
+    and process data. Ubuntu's merged-/usr symlinks are recreated explicitly;
+    older layouts get their real runtime directories mounted read-only.
+    """
+    args: list[str] = []
+    if os.path.isdir("/usr"):
+        args.extend(("--ro-bind", "/usr", "/usr"))
+    for path in ("/bin", "/sbin", "/lib", "/lib64"):
+        if os.path.islink(path):
+            args.extend(("--symlink", os.readlink(path), path))
+        elif os.path.exists(path):
+            args.extend(("--ro-bind", path, path))
+    for path in (
+        "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d",
+        "/etc/localtime",
+    ):
+        if os.path.exists(path):
+            args.extend(("--ro-bind", path, path))
+    # Bubblewrap creates a private, minimal device tree (null, zero, random,
+    # urandom, tty) rather than exposing the host's /dev.
+    args.extend(("--dev", "/dev"))
+    return args
+
+
 @functools.lru_cache(maxsize=4)
 def _probe_linux_bwrap(bwrap: str) -> tuple[bool, str]:
     """Prove the configured Bubblewrap can create every required namespace.
@@ -41,8 +68,9 @@ def _probe_linux_bwrap(bwrap: str) -> tuple[bool, str]:
             [
                 bwrap,
                 "--die-with-parent", "--new-session", "--unshare-user",
-                "--unshare-net", "--unshare-ipc", "--ro-bind", "/", "/",
-                "/bin/true",
+                "--unshare-net", "--unshare-ipc",
+                *_linux_runtime_mount_args(),
+                os.path.realpath(shutil.which("true") or "/usr/bin/true"),
             ],
             capture_output=True,
             text=True,
@@ -131,10 +159,10 @@ def _sandboxed_python_command(
         usable, reason = _probe_linux_bwrap(bwrap)
         if not usable:
             return None, f"linux-bwrap-unavailable: {reason}"
-        # Bind the host read-only, then shadow only the explicitly writable
-        # roots. Network and IPC namespaces prevent a calculation helper from
-        # becoming an exfiltration or process-control channel.
-        return [
+        # Start with Bubblewrap's empty root and mount only runtime files plus
+        # explicit work roots. Network and IPC namespaces prevent a calculation
+        # helper from becoming an exfiltration or process-control channel.
+        command = [
             bwrap,
             # Be explicit even though non-setuid bubblewrap normally implies a
             # user namespace. Some distributions retain a privileged launcher;
@@ -142,12 +170,25 @@ def _sandboxed_python_command(
             # CAP_NET_ADMIN long enough to configure its isolated loopback.
             "--die-with-parent", "--new-session", "--unshare-user",
             "--unshare-net", "--unshare-ipc",
-            "--ro-bind", "/", "/",
+            *_linux_runtime_mount_args(),
+        ]
+        runtime_roots = tuple(dict.fromkeys((
+            os.path.dirname(executable), sys.base_prefix, sys.prefix,
+            *extra_python_paths,
+        )))
+        for path in runtime_roots:
+            resolved = os.path.realpath(path)
+            if not os.path.exists(resolved) or resolved == "/usr" \
+                    or resolved.startswith("/usr/"):
+                continue
+            command.extend(("--ro-bind", resolved, resolved))
+        command.extend((
             "--bind", workspace, workspace,
             "--bind", scratch, scratch,
             "--chdir", workspace,
             executable, "-I", "-c", launcher,
-        ], "linux-bwrap"
+        ))
+        return command, "linux-bwrap"
 
     return None, "unavailable"
 

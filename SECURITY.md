@@ -36,6 +36,10 @@ probes Bubblewrap's user, network, and IPC namespace support before executing
 untrusted code and fails closed when the host policy blocks any boundary. It
 never silently falls back to an unsandboxed Python process.
 
+The Linux mount namespace begins empty. Jaeger mounts only the Python/system
+runtime read-only and the selected workspace and private scratch directory
+writable; it does not bind the host root or `/proc` into the sandbox.
+
 Ubuntu hosts with AppArmor's unprivileged-user-namespace restriction enabled
 need a targeted policy that permits the system Bubblewrap binary to create its
 namespaces while stripping capabilities from the child. The upstream
