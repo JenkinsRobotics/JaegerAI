@@ -29,6 +29,13 @@ def test_linux_bwrap_owns_network_namespace(monkeypatch, tmp_path: Path) -> None
     # bubblewrap owns it and can configure the isolated loopback device.
     assert command.index("--unshare-user") < command.index("--unshare-net")
     assert "--unshare-ipc" in command
+    assert not any(
+        command[index:index + 3] == ["--ro-bind", "/", "/"]
+        for index in range(len(command) - 2)
+    )
+    assert ["--bind", str(workspace), str(workspace)] == command[
+        command.index("--bind"):command.index("--bind") + 3
+    ]
 
 
 def test_linux_bwrap_policy_failure_is_fail_closed(monkeypatch, tmp_path: Path) -> None:
