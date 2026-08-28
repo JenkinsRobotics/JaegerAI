@@ -12,6 +12,9 @@
 from __future__ import annotations
 
 import os
+import json
+import functools
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,12 +28,185 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
 
 
+def _linux_runtime_mount_args() -> list[str]:
+    """Minimal host runtime needed to start CPython inside Bubblewrap.
+
+    Never bind ``/``: a read-only root still exposes credentials, user files,
+    and process data. Ubuntu's merged-/usr symlinks are recreated explicitly;
+    older layouts get their real runtime directories mounted read-only.
+    """
+    args: list[str] = []
+    if os.path.isdir("/usr"):
+        args.extend(("--ro-bind", "/usr", "/usr"))
+    for path in ("/bin", "/sbin", "/lib", "/lib64"):
+        if os.path.islink(path):
+            args.extend(("--symlink", os.readlink(path), path))
+        elif os.path.exists(path):
+            args.extend(("--ro-bind", path, path))
+    for path in (
+        "/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d",
+        "/etc/localtime",
+    ):
+        if os.path.exists(path):
+            args.extend(("--ro-bind", path, path))
+    # Bubblewrap creates a private, minimal device tree (null, zero, random,
+    # urandom, tty) rather than exposing the host's /dev.
+    args.extend(("--dev", "/dev"))
+    return args
+
+
+@functools.lru_cache(maxsize=4)
+def _probe_linux_bwrap(bwrap: str) -> tuple[bool, str]:
+    """Prove the configured Bubblewrap can create every required namespace.
+
+    Merely finding ``bwrap`` is insufficient on AppArmor-restricted Linux:
+    the binary can exist but fail before the child starts. Cache per binary
+    path because host namespace policy is stable for the process lifetime.
+    """
+    try:
+        probe = subprocess.run(  # noqa: S603 — resolved executable, fixed argv
+            [
+                bwrap,
+                "--die-with-parent", "--new-session", "--unshare-user",
+                "--unshare-net", "--unshare-ipc",
+                *_linux_runtime_mount_args(),
+                "--remount-ro", "/",
+                os.path.realpath(shutil.which("true") or "/usr/bin/true"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if probe.returncode == 0:
+        return True, ""
+    detail = (probe.stderr or probe.stdout or f"exit {probe.returncode}").strip()
+    return False, detail[:300]
+
+
+def _sandbox_literal(path: str) -> str:
+    """Quote a filesystem path for a macOS sandbox profile."""
+    return json.dumps(os.path.realpath(path))
+
+
+def _sandboxed_python_command(
+    script: str,
+    *,
+    workspace: str,
+    scratch: str,
+    extra_python_paths: tuple[str, ...] = (),
+    unix_socket: str | None = None,
+) -> tuple[list[str] | None, str]:
+    """Return an OS-confined Python command and its backend label.
+
+    ``-I`` is interpreter isolation, not a filesystem sandbox.  This helper
+    adds the missing operating-system boundary.  It intentionally fails
+    closed on platforms without a supported backend; an operator can still
+    use the separately permissioned ``terminal`` tool for arbitrary code.
+    """
+    executable = os.path.realpath(sys.executable)
+    python_paths = tuple(dict.fromkeys((workspace, *extra_python_paths)))
+    path_setup = "".join(
+        f"sys.path.insert(0,{os.path.realpath(path)!r});" for path in reversed(python_paths)
+    )
+    launcher = f"import runpy,sys;{path_setup}runpy.run_path({script!r},run_name='__main__')"
+
+    if sys.platform == "darwin" and os.path.isfile("/usr/bin/sandbox-exec"):
+        read_roots = {
+            workspace,
+            scratch,
+            os.path.dirname(executable),
+            sys.base_prefix,
+            sys.prefix,
+            *extra_python_paths,
+            "/System",
+            "/usr/lib",
+            "/Library/Apple",
+            "/Library/Frameworks",
+        }
+        readable = " ".join(
+            f"(subpath {_sandbox_literal(path)})" for path in sorted(read_roots)
+            if os.path.exists(path)
+        )
+        rules = [
+            "(version 1)",
+            "(deny default)",
+            # Apple's baseline permits the runtime services needed to start a
+            # normal process without granting user-document access.
+            '(import "system.sb")',
+            "(allow process*)",
+            "(allow sysctl-read)",
+            "(allow mach-lookup)",
+            "(allow file-read-metadata)",
+            f"(allow file-read* {readable} "
+            '(literal "/dev/null") (literal "/dev/urandom"))',
+            f"(allow file-write* (subpath {_sandbox_literal(workspace)}) "
+            f"(subpath {_sandbox_literal(scratch)}) (literal \"/dev/null\"))",
+        ]
+        if unix_socket:
+            rules.append(
+                f"(allow network-outbound (literal {_sandbox_literal(unix_socket)}))"
+            )
+        profile = "\n".join(rules)
+        return [
+            "/usr/bin/sandbox-exec", "-p", profile,
+            executable, "-I", "-c", launcher,
+        ], "macos-seatbelt"
+
+    bwrap = shutil.which("bwrap")
+    if sys.platform.startswith("linux") and bwrap:
+        usable, reason = _probe_linux_bwrap(bwrap)
+        if not usable:
+            return None, f"linux-bwrap-unavailable: {reason}"
+        # Start with Bubblewrap's empty root and mount only runtime files plus
+        # explicit work roots. Network and IPC namespaces prevent a calculation
+        # helper from becoming an exfiltration or process-control channel.
+        command = [
+            bwrap,
+            # Be explicit even though non-setuid bubblewrap normally implies a
+            # user namespace. Some distributions retain a privileged launcher;
+            # without this, the new network namespace may not grant bubblewrap
+            # CAP_NET_ADMIN long enough to configure its isolated loopback.
+            "--die-with-parent", "--new-session", "--unshare-user",
+            "--unshare-net", "--unshare-ipc",
+            *_linux_runtime_mount_args(),
+        ]
+        runtime_roots = tuple(dict.fromkeys((
+            os.path.dirname(executable), sys.base_prefix, sys.prefix,
+            *extra_python_paths,
+        )))
+        for path in runtime_roots:
+            resolved = os.path.realpath(path)
+            if not os.path.exists(resolved) or resolved == "/usr" \
+                    or resolved.startswith("/usr/"):
+                continue
+            command.extend(("--ro-bind", resolved, resolved))
+        command.extend((
+            "--bind", workspace, workspace,
+            "--bind", scratch, scratch,
+            # Bubblewrap's otherwise-empty root is a tmpfs. Freeze that mount
+            # after creating the approved nested writable mounts so code cannot
+            # create files in an unmapped parent directory such as /tmp.
+            "--remount-ro", "/",
+            "--chdir", workspace,
+            executable, "-I", "-c", launcher,
+        ))
+        return command, "linux-bwrap"
+
+    return None, "unavailable"
+
+
 def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     """Execute Python code in a fresh, isolated subprocess.
 
     Runtime rules — enforced by the subprocess boundary:
-      - Fresh subprocess (`python -s -E`): no user site-packages, no
-        inherited environment.
+      - Fresh subprocess (``python -I``): no user site-packages or inherited
+        Python environment.
+      - OS filesystem confinement: macOS Seatbelt or Linux bubblewrap. Reads
+        are limited to runtime files plus the workspace; writes are limited
+        to the workspace and private scratch directory; network is denied.
       - cwd AND sys.path[0] are the instance ``skills/`` workspace, so
         code can both ``open()`` and ``import`` the files ``write_file``
         just created. "Write a file then run it" is the core code
@@ -58,7 +234,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     except Exception:
         workdir = None
     with tempfile.TemporaryDirectory(prefix="jaeger_run_") as scratch:
-        run_dir = str(workdir) if workdir is not None else scratch
+        run_dir = os.path.realpath(str(workdir) if workdir is not None else scratch)
         # Execute as a real script file inside the workspace: that puts
         # the workspace on sys.path[0] (so `import sibling` works even
         # under `-I` isolation) and gives tracebacks true line numbers.
@@ -66,11 +242,32 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
         try:
             with open(script, "w", encoding="utf-8") as fh:
                 fh.write(cleaned)
+            command, sandbox_backend = _sandboxed_python_command(
+                script, workspace=run_dir, scratch=os.path.realpath(scratch),
+            )
+            if command is None:
+                return {
+                    "ok": False,
+                    "error": (
+                        "secure Python sandbox unavailable on this host; "
+                        "install/configure bubblewrap on Linux (including "
+                        "user-namespace permission) or use the privileged "
+                        f"terminal tool with explicit approval; {sandbox_backend}"
+                    ),
+                    "error_type": "sandbox_unavailable",
+                    "retryable": False,
+                    "sandbox_backend": sandbox_backend,
+                }
             proc = run_interruptible(
-                [sys.executable, "-s", "-E", script],
+                command,
                 timeout=timeout_s,
                 cwd=run_dir,
-                env={"PATH": os.environ.get("PATH", ""), "HOME": scratch},
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "HOME": scratch,
+                    "TMPDIR": scratch,
+                    "LANG": os.environ.get("LANG", "C.UTF-8"),
+                },
             )
             stdout, stderr, exit_code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as exc:
@@ -98,6 +295,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
         "elapsed_s": round(elapsed, 3),
         "timed_out": timed_out,
         "interrupted": interrupted,
+        "sandbox_backend": sandbox_backend,
     }
 
 

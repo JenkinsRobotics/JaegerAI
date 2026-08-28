@@ -25,6 +25,25 @@ import jaeger_ai.core.context as _common
 from jaeger_agent.tools import files as file_tools
 
 
+@pytest.fixture(autouse=True)
+def _restore_workspace_binding():
+    """Keep bind/project overrides from leaking across randomized tests."""
+    before = (
+        _common._layout,
+        _common._workspace_override,
+        _common._project_root_var.get(),
+        _common._project_root_global_fallback,
+    )
+    yield
+    (
+        _common._layout,
+        _common._workspace_override,
+        project_root,
+        _common._project_root_global_fallback,
+    ) = before
+    _common._project_root_var.set(project_root)
+
+
 # ── layout / ensure_dirs ────────────────────────────────────────────
 
 

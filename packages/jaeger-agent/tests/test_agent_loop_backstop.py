@@ -11,10 +11,31 @@ from jaeger_agent.loop.loop_backstop import (
     MAX_IDENTICAL_CALLS,
     MAX_SEMANTIC_FAILURES,
     MAX_TOOL_CALLS,
+    WARN_TOOL_CALLS,
     call_signature,
+    collapse_generated_repetition,
     loop_halt_reason,
     semantic_failure_signature,
+    tool_budget_warning,
 )
+
+
+def test_generated_response_repetition_collapses_long_exact_blocks():
+    block = "This is a meaningful generated paragraph with enough detail to exceed the guard minimum safely. " * 2
+    collapsed, repeats = collapse_generated_repetition("\n\n".join([block] * 4))
+    assert repeats == 4
+    assert collapsed.count(block.strip()) == 1
+    assert "repetition guard" in collapsed
+
+
+def test_generated_response_repetition_preserves_normal_references():
+    text = "Summary\n\nA detailed first observation.\n\nSummary\n\nA different conclusion."
+    assert collapse_generated_repetition(text) == (text, 1)
+
+
+def test_generated_response_repetition_ignores_short_chorus_like_text():
+    text = "yes\n\nyes\n\nyes\n\nyes"
+    assert collapse_generated_repetition(text) == (text, 1)
 
 
 # ── call_signature ─────────────────────────────────────────────────
@@ -126,6 +147,15 @@ def test_loop_halt_reason_fires_on_runaway_total():
 
 def test_loop_halt_reason_allows_one_below_hard_cap():
     assert loop_halt_reason(MAX_TOOL_CALLS - 1, {}, {}) is None
+
+
+def test_total_budget_warning_arrives_before_hard_cap():
+    assert tool_budget_warning(WARN_TOOL_CALLS - 1) is None
+    warning = tool_budget_warning(WARN_TOOL_CALLS)
+    assert warning is not None
+    assert str(MAX_TOOL_CALLS - WARN_TOOL_CALLS) in warning
+    assert "produce the best final answer" in warning
+    assert tool_budget_warning(MAX_TOOL_CALLS) is None
 
 
 def test_loop_halt_reason_fires_on_semantic_failures():

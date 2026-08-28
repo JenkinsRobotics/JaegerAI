@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _DB_FILENAME = "state.db"
 
@@ -126,6 +126,14 @@ def _open(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
+
+    # Initialize FTS5 full-text search schema adapted from Hermes
+    try:
+        from jaeger_agent.memory.sqlite_search import ensure_fts5_schema
+        ensure_fts5_schema(conn)
+    except Exception:
+        pass
+
     return conn
 
 
@@ -335,10 +343,15 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         payload_json  TEXT NOT NULL DEFAULT '{}',
         created_at    TEXT NOT NULL,
         updated_at    TEXT NOT NULL
+        ,parent_run_id TEXT
+        ,root_run_id   TEXT
+        ,relation      TEXT NOT NULL DEFAULT 'root'
     )""",
     "CREATE INDEX IF NOT EXISTS idx_runs_state ON runs (state, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_runs_commitment ON runs (commitment_id, attempt)",
     "CREATE INDEX IF NOT EXISTS idx_runs_wake ON runs (wake_key) WHERE wake_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs (parent_run_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_runs_root ON runs (root_run_id, created_at)",
 
     # checkpoints — append-only resumption cursors, one row per save.
     # PK (run_id, seq) makes a duplicate sequence number a constraint
@@ -771,11 +784,25 @@ def _migrate_knowledge(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_run_lineage(conn: sqlite3.Connection) -> None:
+    """v6 — durable parent/root ancestry for delegated/background runs."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    if "parent_run_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN parent_run_id TEXT")
+    if "root_run_id" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN root_run_id TEXT")
+    if "relation" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN relation TEXT NOT NULL DEFAULT 'root'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs (parent_run_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_root ON runs (root_run_id, created_at)")
+
+
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
     3: ("commitments", _migrate_commitments),
     4: ("runtime-runs-checkpoints-effects", _migrate_runtime),
     5: ("cognitive-knowledge-foundation", _migrate_knowledge),
+    6: ("durable-run-lineage", _migrate_run_lineage),
 }
 
 

@@ -22,9 +22,28 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+      - name: Install Linux sandbox backend
+        if: matrix.suite == 'root'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap
+          # Ubuntu 24.04's hosted-runner AppArmor policy blocks the user and
+          # network namespaces that Bubblewrap needs. This VM is disposable;
+          # production hosts should use a targeted AppArmor profile instead.
+          for key in \
+            kernel.apparmor_restrict_unprivileged_unconfined \
+            kernel.apparmor_restrict_unprivileged_userns
+          do
+            if sysctl "$key" >/dev/null 2>&1; then
+              sudo sysctl -w "$key=0"
+            fi
+          done
       - name: Install suite
         run: |
-          python -m pip install --upgrade pip
+          # Keep the packaging toolchain on a patched release. setuptools is
+          # installed in the runner environment and is therefore audited even
+          # though it is only a build dependency of Jaeger.
+          python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
             root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e . pytest ;;
             agent) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent pytest ;;
@@ -41,6 +60,14 @@ jobs:
             kokoro) cd packages/jaeger-kokoro-tts && python -m pytest -q ;;
             whisper) cd packages/jaeger-whisper-stt && python -m pytest -q ;;
           esac
+      - name: Critical static and dependency security gates
+        if: matrix.suite == 'root' && matrix.python == '3.11'
+        run: |
+          python -m pip install ruff pip-audit
+          ruff check --select E9,F63,F7,F82 .
+          # PYSEC-2026-2447 has no patched release. Jaeger does not create
+          # llama_cpp.LlamaDiskCache; see SECURITY.md for the threat model.
+          pip-audit --local --skip-editable --ignore-vuln PYSEC-2026-2447
   swift:
     name: Native Swift
     runs-on: macos-15

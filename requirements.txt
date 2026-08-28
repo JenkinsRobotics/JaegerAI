@@ -39,12 +39,14 @@ croniter>=2.0
 ddgs>=9.0
 
 # --- voice-adjacent, product-owned (not engine-specific) ---
-# openwakeword's call site wasn't disambiguated from the whisper_stt
-# engine module during this pass (0.9 step 4 staging) — kept here
-# rather than dropped; a false-positive product dependency is cheap, a
-# missing one breaks wake-word at runtime. Re-verify at the next real
-# engine swap.
-openwakeword>=0.6
+# openwakeword moved to the `wakeword` EXTRA in pyproject.toml. The
+# re-verification this comment asked for has now happened: nothing in
+# the tree imports it — wake-word runs through the STT layer's
+# ``require_wake_word`` path (jaeger_ai/plugins/voice_loop.py), not
+# through this package. It was also unshippable as a base dependency,
+# because it pulls tflite-runtime, which publishes no cp312 wheel and
+# so broke every Python 3.12 install. Kept available as
+# `pip install 'jaeger-ai[wakeword]'` rather than dropped.
 
 # --- animation/media faces (nodes/animation, nodes/media — product-shipped
 # modules, one consumer each per THREE_TIER_STRUCTURE.md's split triggers) ---
@@ -76,7 +78,8 @@ sentence-transformers>=3.0
 openai>=1.0
 anthropic>=0.40
 
-# --- messaging bridges (Discord / Telegram) ---
+# --- messaging bridges (Discord / Telegram / Slack Socket Mode) ---
+aiohttp>=3.9
 discord.py>=2.4
 python-telegram-bot>=21.0
 

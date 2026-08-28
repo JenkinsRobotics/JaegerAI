@@ -1,0 +1,2 @@
+{"instance_id": "pytest_dev_001", "repo": "pytest-dev/pytest", "problem_statement": "Fix AssertionError in node comparison during test collection.", "hints_text": "Check node id hashing."}
+{"instance_id": "django_001", "repo": "django/django", "problem_statement": "Fix QuerySet.select_related() when filtering across nullable foreign keys.", "hints_text": "Check join generation."}

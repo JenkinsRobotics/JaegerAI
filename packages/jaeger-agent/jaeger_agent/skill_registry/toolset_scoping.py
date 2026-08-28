@@ -27,30 +27,25 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
 
 
 def _scoping_enabled() -> bool:
-    """Toolset scoping is automatic by default.
+    """Lean tool surface. Opt-in.
 
-    History: we flipped it ON in May 2026 after adding ``describe_tool``
-    and the catalog, hoping the new pattern would offset the routing
-    regression seen with naive scoping. Direct A/B against the v5
-    historical baseline showed Gemma 4 26B-A4B routing dropped from
-    **100% → 67.6%** under the new lean default; Qwen3.6-35B-A3B was
-    largely unaffected. Conclusion: the lean surface is a real win for
-    context budget but a real loss for routing on some models, and we
-    can't commit to it as a global default. It stays OPT-IN until
-    auto-load-on-intent (a follow-up that picks toolsets without an
-    explicit meta-step) lands and re-bench shows no regression.
-
-    ``JAEGER_TOOLSET_SCOPING=0`` disables it for compatibility tests;
-    ``JAEGER_FULL_TOOLS=1`` is the explicit operator kill-switch."""
+    Default OFF: every registered tool is visible, including MCP tools
+    loaded at boot. A/B on Gemma 4 showed scoping dropped routing
+    100% → 67.6%. ``JAEGER_TOOLSET_SCOPING=1`` enables CORE + load_tools.
+    ``JAEGER_FULL_TOOLS=1`` forces the full surface even when scoping is on.
+    """
     if os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in (
         "1", "true", "yes", "on",
     ):
         return False
-    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "auto").strip().lower()
-    return val not in ("0", "false", "no", "off", "full")
+    val = os.environ.get("JAEGER_TOOLSET_SCOPING", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
 
 
 # Deterministic first-pass routing, equivalent to Hermes focus/toolset
@@ -223,6 +218,19 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # board_add / board_view are CORE; the rest load on intent.
         "board_move", "board_update", "board_delete",
     }),
+    # Multi-agent coordination (ported from hermes-agent). Deliberately a
+    # SEPARATE toolset from ``board``: the board verbs are single-agent task
+    # planning that any turn may reach for, while these are the worker /
+    # orchestrator handoff protocol and stay off a normal chat turn's schema
+    # entirely. They are additionally gated by ``kanban._kanban_mode``, so
+    # loading the toolset is necessary but not sufficient.
+    "kanban": frozenset({
+        "kanban_show", "kanban_list", "kanban_create", "kanban_complete",
+        "kanban_block", "kanban_unblock", "kanban_heartbeat",
+        "kanban_comment", "kanban_link", "kanban_request_review",
+        "kanban_request_changes", "kanban_attach", "kanban_attach_url",
+        "kanban_attachments",
+    }),
     "scheduling": frozenset({
         "schedule_prompt", "list_schedules", "cancel_schedule",
     }),
@@ -249,7 +257,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "reflect",
     }),
     "computer_use": frozenset({"computer_use", "browser"}),
-    "credentials": frozenset({"get_credential", "list_credentials", "set_credential"}),
+    "credentials": frozenset({
+        "get_credential", "list_credentials", "set_credential", "request_secret",
+    }),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
     "email": frozenset({
         "send_email", "move_mail", "batch_move",
@@ -292,6 +302,8 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "sessions": "search and inspect canonical conversation history",
     "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
+    "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "
+              "block, review, link and attach on shared board cards",
     "scheduling": "schedule, list, cancel cron prompts",
     "background": "long-running background processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",
@@ -316,6 +328,94 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "media_control": "control + read Music.app/Spotify playback",
     "ocr": "extract text from an image or PDF (Vision framework)",
 }
+
+# ── Untrusted-content surface (ported from hermes-agent) ─────────────
+#
+# Ported from hermes-agent ``toolsets.py`` (``_HERMES_WEBHOOK_SAFE_TOOLS``,
+# the ``hermes-webhook`` profile). hermes-agent is MIT licensed:
+#
+#   Copyright (c) 2025 Nous Research
+#   Permission is hereby granted, free of charge, to any person obtaining
+#   a copy of this software and associated documentation files (the
+#   "Software"), to deal in the Software without restriction, including
+#   without limitation the rights to use, copy, modify, merge, publish,
+#   distribute, sublicense, and/or sell copies of the Software.
+#
+# Donor rationale, verbatim from that file: "Webhook events may originate
+# from untrusted third-party content (for example, public PR titles/
+# comments). Keep the default webhook toolset intentionally constrained
+# to avoid local file/system execution by prompt injection."
+#
+# ADAPTATION. hermes-agent gates this by resolving a per-platform
+# *profile* at schema-build time, because every entry point there picks a
+# named toolset. Jaeger has no per-surface profile layer — visibility runs
+# through :func:`tool_visible` — so the gate lives there instead, and it
+# must hold under two Jaeger-specific conditions the donor never faced:
+#
+#   1. Toolset scoping is OFF by default here (``_scoping_enabled()``
+#      returns False unless JAEGER_TOOLSET_SCOPING is set). A gate that
+#      lived behind that flag would be inert in the default configuration,
+#      which is precisely the configuration a webhook runs in.
+#   2. Jaeger's scoping fails OPEN — an unclassified tool is visible. That
+#      is the right default for a new built-in and the wrong one for
+#      attacker-controlled input.
+#
+# So this gate is checked FIRST in ``tool_visible`` and fails CLOSED: in
+# untrusted mode the answer is membership in UNTRUSTED_SAFE and nothing
+# else. ``JAEGER_FULL_TOOLS`` does not lift it either — that switch exists
+# for debugging a local session, not for re-opening an injection path.
+UNTRUSTED_SAFE: frozenset[str] = frozenset({
+    "web_search", "web_extract", "vision_analyze", "clarify",
+})
+
+# Deliberately NOT registered in TOOLSETS/TOOLSET_SUMMARY: membership
+# there would make it reachable from ``load_tools``/``enable_toolset``,
+# and a surface the model can name is a surface prompt injection can ask
+# for. The meta-tools themselves (``load_tools``, ``describe_tool``,
+# ``list_tools``) are CORE but not in UNTRUSTED_SAFE, so an untrusted turn
+# cannot even enumerate what it is missing, let alone widen into it.
+_untrusted: ContextVar[bool] = ContextVar("jaeger_untrusted_content", default=False)
+
+
+def is_untrusted_content() -> bool:
+    """True when this turn is processing attacker-controlled input."""
+    return _untrusted.get()
+
+
+def set_untrusted_content(value: bool) -> Token[bool]:
+    """Mark the current context trusted/untrusted. Returns the reset token.
+
+    Prefer :func:`untrusted_content` — this exists for callers that cross
+    an async boundary and cannot hold a ``with`` block open.
+    """
+    return _untrusted.set(bool(value))
+
+
+def reset_untrusted_content(token: Token[bool]) -> None:
+    """Undo a :func:`set_untrusted_content` call."""
+    _untrusted.reset(token)
+
+
+@contextmanager
+def untrusted_content() -> Iterator[None]:
+    """Run a turn against the constrained surface.
+
+    Wrap any ingress carrying third-party text — webhook payloads, PR
+    titles and comments, scraped pages replayed into a turn::
+
+        with untrusted_content():
+            result = agent.run_turn(webhook_body)
+
+    Nesting is safe, and the flag is a ContextVar, so a delegated child
+    running in another task inherits it rather than silently escaping to
+    the full surface.
+    """
+    token = _untrusted.set(True)
+    try:
+        yield
+    finally:
+        _untrusted.reset(token)
+
 
 # Skill toolsets — populated at runtime by the skill loader. A skill is
 # its own toolset; the loader records exactly what tools it registered.
@@ -353,7 +453,16 @@ def reset_toolsets() -> None:
 
 
 def enable_toolset(name: str) -> bool:
-    """Make a toolset (built-in class or skill) visible. False if unknown."""
+    """Make a toolset (built-in class or skill) visible. False if unknown.
+
+    Refuses outright in untrusted-content mode: ``load_tools`` is the
+    model-facing caller, so honouring a widening request there would let
+    injected text talk its way back to the full surface one toolset at a
+    time. The refusal is silent-by-return (False), matching the unknown-
+    toolset case, so the model learns nothing about what it cannot reach.
+    """
+    if _untrusted.get():
+        return False
     name = (name or "").strip().lower()
     if name in TOOLSETS or name in _SKILL_TOOLSETS:
         _active.add(name)
@@ -377,7 +486,17 @@ def _members(toolset: str) -> frozenset[str]:
 
 def tool_visible(name: str) -> bool:
     """Whether tool ``name`` is currently exposed to the model. With
-    scoping OFF (the default), every tool is visible."""
+    scoping OFF (the default), every tool is visible.
+
+    The one exception is untrusted-content mode, which is checked before
+    everything else and fails closed — see :data:`UNTRUSTED_SAFE`. It is
+    deliberately ahead of the ``_scoping_enabled()`` early return and of
+    the ``JAEGER_FULL_TOOLS`` escape hatch inside it: a webhook turn runs
+    in the default configuration, where scoping is off, so a gate placed
+    after that check would never fire on the path that needs it.
+    """
+    if _untrusted.get():
+        return name in UNTRUSTED_SAFE
     if not _scoping_enabled():
         return True
     if name in CORE:

@@ -8,7 +8,8 @@ cross-process transport milestone.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Dict
 
 CHAT_INPUT_TOPIC = "/act/chat"
 CHAT_REPLY_TOPIC = "/sense/chat"
@@ -25,6 +26,7 @@ class ChatMessage:
     text: str = ""
     source: str = "gui"
     session: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
     topic: str = CHAT_INPUT_TOPIC
 
 
@@ -32,6 +34,7 @@ class ChatMessage:
 class ChatReply:
     text: str = ""
     session: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
     topic: str = CHAT_REPLY_TOPIC
 
 

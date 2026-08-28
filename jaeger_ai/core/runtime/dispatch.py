@@ -56,6 +56,17 @@ def prepare_turn_text(
     """
     compact_agent(agent)
     parts: list[str] = []
+    if ledger:
+        try:
+            from jaeger_ai.core.runtime.autonomous_runner import (
+                ACCEPTANCE_GUIDANCE,
+                ensure_autonomous_ledger,
+            )
+            opened = ensure_autonomous_ledger(user_text)
+            if opened is not None:
+                parts.append(ACCEPTANCE_GUIDANCE)
+        except Exception:  # noqa: BLE001 — setup must never lose the request
+            pass
     if domain and is_primary_session(session_key):
         extra = domain_block(user_text, session_key=session_key)
         if extra:

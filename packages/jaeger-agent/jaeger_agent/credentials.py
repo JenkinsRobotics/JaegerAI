@@ -79,16 +79,21 @@ def _check_mode(path: Path) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 def get_credential(layout: InstanceLayout, name: str) -> str:
-    """Return the secret stored under <instance>/credentials/<name>.
+    """Return the secret stored under <instance>/credentials/<name> or os.environ (Hermes pattern).
 
-    Raises CredentialError if the file is missing, unreadable, or has
-    permissions looser than 0600. The trailing newline is stripped so
-    callers get the bare token string."""
+    Raises CredentialError if the file is missing/unreadable and environment fallback is absent."""
     target = _credential_path(layout, name)
-    if not target.exists() or not target.is_file():
-        raise CredentialError(f"no credential named {name!r} in {layout.credentials_dir}")
-    _check_mode(target)
-    return target.read_text(encoding="utf-8").rstrip("\n")
+    if target.exists() and target.is_file():
+        _check_mode(target)
+        return target.read_text(encoding="utf-8").rstrip("\n")
+
+    # Hermes environment variable fallback pattern
+    clean_name = (name or "").strip()
+    env_val = os.environ.get(clean_name) or os.environ.get(clean_name.upper())
+    if env_val:
+        return env_val
+
+    raise CredentialError(f"no credential named {name!r} in {layout.credentials_dir} or environment variables")
 
 
 def set_credential(layout: InstanceLayout, name: str, value: str) -> Path:

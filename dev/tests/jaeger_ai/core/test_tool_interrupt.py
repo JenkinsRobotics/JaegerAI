@@ -139,7 +139,15 @@ def test_run_python_uninterrupted_still_works() -> None:
     assert "42" in result["stdout"]
 
 
-def test_run_shell_honors_interrupt() -> None:
+def test_run_shell_honors_interrupt(bindable_instance_root, monkeypatch) -> None:
+    # Privileged shell execution fails closed unless an instance audit log is
+    # bound. Request the shared fixture explicitly instead of relying on a
+    # preceding test to leave global workspace state behind.
+    from jaeger_agent import workspace
+
+    bound_instance = workspace.DefaultWorkspace(bindable_instance_root).create()
+    monkeypatch.setattr(workspace, "_layout", bound_instance)
+    assert bound_instance.audit_log_path.parent.is_dir()
     from jaeger_os.core.safety.permissions import (
         AllowAllProvider,
         PermissionPolicy,

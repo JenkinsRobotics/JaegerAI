@@ -182,6 +182,7 @@ class AgentBridge:
                     reply = f"(turn failed: {self._last_error})"
                 finally:
                     self._turn_active.clear()
+                    self._events.current_session = ""
                 self._publish(ChatReply(text=reply, session=session))
                 self._publish_state("idle", session, self._context_detail(session))
         finally:

@@ -48,34 +48,22 @@ _workspace_override: Path | None = None
 # a throwaway tempdir, relative reads resolved against wherever the process was
 # launched, and ``grep_files(".")`` searched the instance's skills directory.
 # The selector moved a value that no tool consumed.
-_project_root: Path | None = None
+from contextvars import ContextVar
+
+# The PROJECT the agent is currently working in — thread-safe ContextVar (Hermes pattern)
+_PROJECT_ROOT_UNSET = object()
+_project_root_var: ContextVar[Path | None | object] = ContextVar(
+    "project_root", default=_PROJECT_ROOT_UNSET
+)
+_project_root_global_fallback: Path | None = None
 
 
 def bind(layout: InstanceLayout,
          *, workspace_override: Path | str | None = None,
          project_root: Path | str | None = None) -> None:
-    """Wire all tool I/O to a specific instance dir. Called once at startup.
-
-    ``workspace_override`` (INST-11) — when non-None, all writes to
-    ``workspace/...`` land at this absolute path instead of
-    ``<instance>/workspace/``. Useful when the user wants easy Finder
-    / Spotlight access to generated outputs (e.g.
-    ``~/Documents/Jaeger Outputs/``). The override path is created
-    on bind if it doesn't exist.
-
-    ``project_root`` — the directory the agent is CURRENTLY WORKING IN. This is
-    what a surface means by "the workspace": shell commands run there, relative
-    reads resolve there first, and a default-rooted search starts there. Unlike
-    ``workspace_override`` it is never created implicitly — a project directory
-    that does not exist is a caller mistake, not something to conjure.
-
-    The two are deliberately separate. ``workspace_override`` is about where
-    generated OUTPUT is filed; ``project_root`` is about which codebase the
-    agent is looking at. Passing only the former (as every caller did before
-    this parameter existed) leaves tools rooted where the process launched.
-    """
+    """Wire all tool I/O to a specific instance dir. Called once at startup."""
     from jaeger_agent.memory import memory as mem
-    global _layout, _workspace_override, _project_root
+    global _layout, _workspace_override, _project_root_global_fallback
     _layout = layout
     if workspace_override is not None:
         path = Path(workspace_override).expanduser().resolve()
@@ -87,37 +75,31 @@ def bind(layout: InstanceLayout,
         root = Path(project_root).expanduser().resolve()
         if not root.is_dir():
             raise ValueError(f"project_root is not a directory: {root}")
-        _project_root = root
+        _project_root_var.set(root)
+        _project_root_global_fallback = root
     else:
-        _project_root = None
+        _project_root_var.set(None)
+        _project_root_global_fallback = None
     mem.bind(layout)
 
 
 def get_project_root() -> Path | None:
-    """The directory the agent is working in, or None when unbound.
-
-    None means "no project selected" and every caller must fall back to its
-    previous behaviour, so an unbound agent behaves exactly as it did before
-    this concept existed.
-    """
-    return _project_root
+    """The directory the agent is working in, or None when unbound (thread-safe ContextVar)."""
+    val = _project_root_var.get()
+    if val is _PROJECT_ROOT_UNSET:
+        return _project_root_global_fallback
+    return val  # type: ignore[return-value]
 
 
 def set_project_root(path: Path | str | None) -> None:
-    """Rebind the project without re-binding the whole instance.
-
-    A surface switches project far more often than it switches instance, and
-    ``bind()`` also rebinds memory — doing that per switch would be both
-    wasteful and a wider blast radius than the change deserves.
-    """
-    global _project_root
+    """Rebind the project for the current session/thread without re-binding the whole instance."""
     if path is None:
-        _project_root = None
+        _project_root_var.set(None)
         return
     root = Path(path).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"project_root is not a directory: {root}")
-    _project_root = root
+    _project_root_var.set(root)
 
 
 class DefaultWorkspace:
@@ -371,8 +353,9 @@ def _resolve_read(path: str) -> Path:
         # launched", which for an app opened from Finder is the user's home.
         # Falls through to the old cwd behaviour when nothing is bound.
         full = None
-        if _project_root is not None:
-            candidate = (_project_root / p).resolve()
+        project_root = get_project_root()
+        if project_root is not None:
+            candidate = (project_root / p).resolve()
             if candidate.exists():
                 full = candidate
         if full is None:
