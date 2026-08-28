@@ -343,7 +343,8 @@ def run_bridged_script(
         if command is None:
             server.stop()
             raise BridgeRefused(
-                "secure Python sandbox unavailable for execute_with_tools"
+                "secure Python sandbox unavailable for execute_with_tools; "
+                f"{sandbox_backend}"
             )
         env = {
             "PATH": os.environ.get("PATH", ""),
