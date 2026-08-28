@@ -28,3 +28,16 @@ References:
 
 - https://github.com/advisories/GHSA-w8v5-vhqr-4h9v
 - https://pypi.org/project/diskcache/
+
+## Linux code-sandbox prerequisite
+
+`run_python` and `execute_with_tools` require Bubblewrap on Linux. Jaeger
+probes Bubblewrap's user, network, and IPC namespace support before executing
+untrusted code and fails closed when the host policy blocks any boundary. It
+never silently falls back to an unsandboxed Python process.
+
+Ubuntu hosts with AppArmor's unprivileged-user-namespace restriction enabled
+need a targeted policy that permits the system Bubblewrap binary to create its
+namespaces while stripping capabilities from the child. The upstream
+`bwrap-userns-restrict` profile is designed for that purpose. Prefer such a
+targeted policy over globally disabling AppArmor namespace mediation.

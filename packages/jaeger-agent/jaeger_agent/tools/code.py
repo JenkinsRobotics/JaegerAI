@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import json
+import functools
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,35 @@ from jaeger_agent.workspace import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
+
+
+@functools.lru_cache(maxsize=4)
+def _probe_linux_bwrap(bwrap: str) -> tuple[bool, str]:
+    """Prove the configured Bubblewrap can create every required namespace.
+
+    Merely finding ``bwrap`` is insufficient on AppArmor-restricted Linux:
+    the binary can exist but fail before the child starts. Cache per binary
+    path because host namespace policy is stable for the process lifetime.
+    """
+    try:
+        probe = subprocess.run(  # noqa: S603 — resolved executable, fixed argv
+            [
+                bwrap,
+                "--die-with-parent", "--new-session", "--unshare-user",
+                "--unshare-net", "--unshare-ipc", "--ro-bind", "/", "/",
+                "/bin/true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if probe.returncode == 0:
+        return True, ""
+    detail = (probe.stderr or probe.stdout or f"exit {probe.returncode}").strip()
+    return False, detail[:300]
 
 
 def _sandbox_literal(path: str) -> str:
@@ -98,6 +128,9 @@ def _sandboxed_python_command(
 
     bwrap = shutil.which("bwrap")
     if sys.platform.startswith("linux") and bwrap:
+        usable, reason = _probe_linux_bwrap(bwrap)
+        if not usable:
+            return None, f"linux-bwrap-unavailable: {reason}"
         # Bind the host read-only, then shadow only the explicitly writable
         # roots. Network and IPC namespaces prevent a calculation helper from
         # becoming an exfiltration or process-control channel.
@@ -171,8 +204,9 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
                     "ok": False,
                     "error": (
                         "secure Python sandbox unavailable on this host; "
-                        "install bubblewrap on Linux or use the privileged "
-                        "terminal tool with explicit approval"
+                        "install/configure bubblewrap on Linux (including "
+                        "user-namespace permission) or use the privileged "
+                        f"terminal tool with explicit approval; {sandbox_backend}"
                     ),
                     "error_type": "sandbox_unavailable",
                     "retryable": False,
