@@ -70,6 +70,7 @@ def _probe_linux_bwrap(bwrap: str) -> tuple[bool, str]:
                 "--die-with-parent", "--new-session", "--unshare-user",
                 "--unshare-net", "--unshare-ipc",
                 *_linux_runtime_mount_args(),
+                "--remount-ro", "/",
                 os.path.realpath(shutil.which("true") or "/usr/bin/true"),
             ],
             capture_output=True,
@@ -185,6 +186,10 @@ def _sandboxed_python_command(
         command.extend((
             "--bind", workspace, workspace,
             "--bind", scratch, scratch,
+            # Bubblewrap's otherwise-empty root is a tmpfs. Freeze that mount
+            # after creating the approved nested writable mounts so code cannot
+            # create files in an unmapped parent directory such as /tmp.
+            "--remount-ro", "/",
             "--chdir", workspace,
             executable, "-I", "-c", launcher,
         ))
