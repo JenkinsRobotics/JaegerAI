@@ -43,7 +43,7 @@ def _load() -> dict[str, dict[str, Any]]:
     global _stats
     if _stats is not None:
         return _stats
-    _stats = {"tools": {}, "skills": {}}
+    _stats = {"tools": {}, "skills": {}, "skill_routing": {}}
     path = _path()
     if path is not None and path.exists():
         try:
@@ -51,6 +51,7 @@ def _load() -> dict[str, dict[str, Any]]:
             if isinstance(data, dict):
                 _stats["tools"] = data.get("tools", {}) or {}
                 _stats["skills"] = data.get("skills", {}) or {}
+                _stats["skill_routing"] = data.get("skill_routing", {}) or {}
         except Exception:  # noqa: BLE001
             pass
     return _stats
@@ -99,10 +100,50 @@ def record_skill(name: str) -> None:
         pass
 
 
+def record_skill_route(name: str | None, *, reason: str = "") -> None:
+    """Record orchestrator routing, including high-signal no-match cases."""
+    try:
+        stats = _load()
+        key = name or "(no_match)"
+        row = stats["skill_routing"].setdefault(
+            key, {"count": 0, "last_reason": "", "last_used": ""},
+        )
+        row["count"] += 1
+        row["last_reason"] = str(reason or "")[:240]
+        row["last_used"] = _now()
+        _flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def record_skill_outcome(name: str, *, outcome: str, halt_reason: str = "") -> None:
+    """Derive skill quality from the runner instead of model self-report."""
+    if not name:
+        return
+    try:
+        stats = _load()
+        row = stats["skills"].setdefault(name, {"views": 0, "last_used": ""})
+        outcomes = row.setdefault("outcomes", {})
+        label = outcome if outcome in {"smooth", "issues", "failed"} else "issues"
+        outcomes[label] = int(outcomes.get(label, 0)) + 1
+        row["last_halt_reason"] = str(halt_reason or "")[:240]
+        row["last_used"] = _now()
+        _flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def snapshot() -> dict[str, dict[str, Any]]:
     """The current counters — ``{"tools": {...}, "skills": {...}}``."""
     stats = _load()
+    # Preserve the long-standing public shape. Routing diagnostics have a
+    # separate accessor so older callers comparing this dictionary exactly do
+    # not break when the telemetry implementation grows.
     return {"tools": dict(stats["tools"]), "skills": dict(stats["skills"])}
+
+
+def skill_routing_snapshot() -> dict[str, Any]:
+    return dict(_load()["skill_routing"])
 
 
 def top_tools(limit: int = 10) -> list[dict[str, Any]]:
@@ -122,5 +163,5 @@ def top_skills(limit: int = 10) -> list[dict[str, Any]]:
 def reset() -> None:
     """Clear all counters (used by tests and a fresh session)."""
     global _stats
-    _stats = {"tools": {}, "skills": {}}
+    _stats = {"tools": {}, "skills": {}, "skill_routing": {}}
     _flush()

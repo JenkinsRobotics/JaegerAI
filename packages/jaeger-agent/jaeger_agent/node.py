@@ -83,6 +83,13 @@ class MindNode(Node):
                 self.bridge.close()
             except Exception as exc:  # noqa: BLE001 - teardown is best effort
                 self._error = exc
+        if self.runtime is not None:
+            try:
+                close_fn = getattr(self.runtime, "close", None)
+                if callable(close_fn):
+                    close_fn()
+            except Exception:
+                pass
 
     def health(self) -> dict[str, Any]:
         result = super().health()

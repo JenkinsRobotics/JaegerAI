@@ -126,6 +126,14 @@ def _open(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
+
+    # Initialize FTS5 full-text search schema adapted from Hermes
+    try:
+        from jaeger_agent.memory.sqlite_search import ensure_fts5_schema
+        ensure_fts5_schema(conn)
+    except Exception:
+        pass
+
     return conn
 
 

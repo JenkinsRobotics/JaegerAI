@@ -312,6 +312,97 @@ class HeartbeatConfig(BaseModel):
     )
 
 
+class TirithConfig(BaseModel):
+    """Content-level pre-exec scanning via the external ``tirith`` binary
+    (ported from hermes-agent). Off by default and inert unless the binary
+    is installed — this port deliberately does not auto-download it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        False,
+        json_schema_extra=_setting("security", advanced=True),
+        description="Scan commands for homograph URLs, pipe-to-interpreter "
+                    "and terminal injection before executing them.",
+    )
+    fail_open: bool = Field(
+        True,
+        json_schema_extra=_setting("security", advanced=True),
+        description="Allow the command when the scanner is unavailable. Set "
+                    "false to require a working scanner.",
+    )
+    path: str = Field(
+        "", max_length=512,
+        description="Explicit path to the tirith binary. Empty = search PATH.",
+    )
+    timeout_s: int = Field(5, ge=1, le=60)
+
+
+class CheckpointsConfig(BaseModel):
+    """Transparent filesystem snapshots with rollback (ported from
+    hermes-agent). Off by default — snapshotting a working tree on every
+    mutating turn is real disk and real git process time, and an operator
+    should opt into that rather than discover it.
+
+    Distinct from the durable *run* checkpoints in ``cognition/runs.py``,
+    which recover agent progress rather than file contents.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        False,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Snapshot the working tree before file-mutating tools.",
+    )
+    max_snapshots: int = Field(
+        20, ge=1, le=200,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Snapshots kept per project before the oldest are dropped.",
+    )
+
+
+class HooksConfig(BaseModel):
+    """Operator-defined shell hooks (ported from hermes-agent).
+
+    Each event holds a list of commands. An entry is either a bare string
+    (the command) or a mapping with ``command`` plus optional ``timeout``
+    (seconds) and ``tools`` (only fire for these tool names)::
+
+        hooks:
+          enabled: true
+          pre_tool_call:
+            - command: ~/bin/deploy-freeze-guard
+              tools: [write_file, patch, terminal]
+              timeout: 5
+          post_tool_call:
+            - ~/bin/audit-forward
+
+    ``pre_tool_call`` is the only event that can veto a call — it exits 2 (or
+    prints ``{"decision": "block"}``) to refuse. Configuring a hook is not
+    enough to run it: each ``(event, command)`` pair also needs one-time
+    consent recorded in ``<instance>/shell-hooks-allowlist.json``, so a config
+    that was synced, restored, or written by the agent cannot by itself cause
+    a new program to execute.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        False,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Run operator-defined shell hooks around tool calls.",
+    )
+    pre_tool_call: list[Any] = Field(
+        default_factory=list,
+        description="Hooks run BEFORE a tool call. Exit 2 blocks the call.",
+    )
+    post_tool_call: list[Any] = Field(
+        default_factory=list,
+        description="Hooks run AFTER a tool call. Cannot block.",
+    )
+    on_session_start: list[Any] = Field(default_factory=list)
+    on_session_end: list[Any] = Field(default_factory=list)
+
+
 class AutomationConfig(BaseModel):
     """Two budgets for the agent loop.
 
@@ -523,6 +614,7 @@ class FallbackModel(BaseModel):
     provider: Literal[
         "local", "lmstudio", "ollama", "ollama-cloud",
         "openai", "anthropic", "gemini", "xai",
+        "openrouter", "groq", "deepseek", "vllm", "together",
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
@@ -559,11 +651,16 @@ class ExternalModelConfig(BaseModel):
       • ``anthropic``    — Claude via the Anthropic API
       • ``gemini``       — Google Gemini via its OpenAI-compatible endpoint
       • ``xai``          — xAI Grok via its OpenAI-compatible endpoint
+      • ``openrouter``   — OpenRouter multi-model gateway
+      • ``groq``         — Groq LPU fast inference engine
+      • ``deepseek``     — DeepSeek R1 / V3 API
+      • ``vllm``         — High-throughput vLLM server
 
     ``lmstudio`` and ``ollama`` are both still on-device — a separate
     local server, used to A/B against the in-process model when
     troubleshooting whether the local llama-cpp model is at fault.
-    ``ollama-cloud``, ``openai``, ``anthropic``, ``gemini`` and ``xai`` are true
+    ``ollama-cloud``, ``openai``, ``anthropic``, ``gemini``, ``xai``,
+    ``openrouter``, ``groq``, and ``deepseek`` are true
     cloud brains (the agent phones out) — off by default, like the rest
     of this block.
 
@@ -577,6 +674,7 @@ class ExternalModelConfig(BaseModel):
     enabled: bool = False
     provider: Literal[
         "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
+        "openrouter", "groq", "deepseek", "vllm", "together",
     ] = "lmstudio"
     base_url: str = Field(
         "http://localhost:1234/v1",
@@ -957,6 +1055,9 @@ class Config(BaseModel):
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     deep_think: DeepThinkConfig = Field(default_factory=DeepThinkConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    hooks: HooksConfig = Field(default_factory=HooksConfig)
+    checkpoints: CheckpointsConfig = Field(default_factory=CheckpointsConfig)
+    tirith: TirithConfig = Field(default_factory=TirithConfig)
     automation: AutomationConfig = Field(default_factory=AutomationConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     avatar: AvatarConfig = Field(default_factory=lambda: AvatarConfig())

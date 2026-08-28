@@ -6,7 +6,9 @@ import pytest
 
 from jaeger_ai.core.runtime import execution, work_ledger
 from jaeger_ai.core.runtime.autonomous_runner import (
+    ACCEPTANCE_GUIDANCE,
     HARNESS_PREFIX,
+    ensure_autonomous_ledger,
     looks_like_batch,
     next_continuation_prompt,
     run_worker_goal,
@@ -37,6 +39,8 @@ def test_batch_phrasing_is_detected():
         "batch-process the export",
         "/goal finish the notes",
         "go through all 14 folders",
+        "sync my Safari and Chrome bookmarks with no duplicates",
+        "audit and restructure the bookmarks into folders",
     ]
     for text in positives:
         assert looks_like_batch(text), text
@@ -59,9 +63,28 @@ def test_batch_phrasing_rejects_casual_chat():
         "finish this sentence for me",
         "handle the exception in main.py",
         "go through the options with me",
+        "audit this function",
+        "sync the clock",
     ]
     for text in negatives:
         assert not looks_like_batch(text), text
+
+
+def test_durable_request_opens_counted_ledger_automatically():
+    ledger = ensure_autonomous_ledger("process these 436 records")
+    assert ledger is not None
+    assert ledger.total() == 436
+    assert ledger.remaining() == 436
+
+
+def test_uncounted_durable_request_uses_acceptance_phases():
+    ledger = ensure_autonomous_ledger(
+        "sync my Safari and Chrome bookmarks with no duplicates"
+    )
+    assert ledger is not None
+    assert ledger.remaining_ids == ["inspect", "execute", "verify"]
+    assert ledger.remaining() == 3
+    assert "prose claim" in ACCEPTANCE_GUIDANCE
 
 
 def test_inner_cap_forces_continuation_on_settled_prose():
@@ -79,6 +102,19 @@ def test_inner_cap_forces_continuation_on_settled_prose():
         isolated=True,
         steps_left=5,
     ) is None
+
+
+@pytest.mark.parametrize("halt", [
+    "made 24 tool calls in a single turn",
+    "empty_response",
+])
+def test_recoverable_halt_forces_outer_continuation(halt):
+    nxt = next_continuation_prompt(
+        "Here is the progress so far.", isolated=True,
+        halt_reason=halt, steps_left=5, objective="finish the audit",
+    )
+    assert nxt is not None
+    assert "finish the audit" in nxt
 
 
 def test_short_worker_task_exits_after_one_settled_turn():

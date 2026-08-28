@@ -177,14 +177,18 @@ def classify(text: str) -> str:
 
 
 def hit_inner_cap(halt_reason: str | None) -> bool:
-    """True when the inner tool fuse tripped — not a finished job.
+    """True when a recoverable inner-turn boundary tripped.
 
     ``drive_one_turn`` winds down with a summary when it hits
     ``max_iterations``. That prose often looks settled. The outer loop
     must start the next step anyway.
     """
     reason = (halt_reason or "").lower()
-    return "max_iterations" in reason
+    return (
+        "max_iterations" in reason
+        or "tool calls in a single turn" in reason
+        or reason == "empty_response"
+    )
 
 
 def is_loop_breaker(halt_reason: str | None) -> bool:
@@ -195,13 +199,11 @@ def is_loop_breaker(halt_reason: str | None) -> bool:
     the same failing tool.
     """
     reason = (halt_reason or "").lower()
-    if not reason or "max_iterations" in reason:
+    if not reason or hit_inner_cap(reason):
         return False
     if "identical arguments" in reason:
         return True
     if "failure" in reason and ("same" in reason or "times" in reason):
-        return True
-    if "tool calls in a single turn" in reason:
         return True
     return False
 

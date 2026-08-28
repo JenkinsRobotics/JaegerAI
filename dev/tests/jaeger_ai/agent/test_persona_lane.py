@@ -517,6 +517,15 @@ def _reset_self_model_cache_around_tests():
 
 
 def test_self_model_block_is_injected_into_the_system_prompt():
+    from jaeger_ai.core.prompt_identity import (
+        SELF_MODEL_HEADER,
+        register_agent_identity,
+    )
+
+    # Product boot replaces the reusable agent package's framework-named
+    # header with JaegerAI's single-identity wording. Make that product seam
+    # explicit so this test is independent of collection/execution order.
+    register_agent_identity()
     client = _Client([_reply("hi there")])
     run_persona_turn(
         client, "hello",
@@ -525,7 +534,8 @@ def test_self_model_block_is_injected_into_the_system_prompt():
     )
     system_msg = client.calls[0]["messages"][0]
     assert self_model_block() in system_msg["content"]
-    assert "You are a Jaeger agent running locally" in system_msg["content"]
+    assert SELF_MODEL_HEADER in system_msg["content"]
+    assert "You are a Jaeger agent" not in system_msg["content"]
 
 
 def test_self_model_block_is_cached_per_boot(monkeypatch):

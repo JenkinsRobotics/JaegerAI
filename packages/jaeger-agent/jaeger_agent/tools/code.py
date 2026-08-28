@@ -12,6 +12,8 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,12 +27,102 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
 
 
+def _sandbox_literal(path: str) -> str:
+    """Quote a filesystem path for a macOS sandbox profile."""
+    return json.dumps(os.path.realpath(path))
+
+
+def _sandboxed_python_command(
+    script: str,
+    *,
+    workspace: str,
+    scratch: str,
+    extra_python_paths: tuple[str, ...] = (),
+    unix_socket: str | None = None,
+) -> tuple[list[str] | None, str]:
+    """Return an OS-confined Python command and its backend label.
+
+    ``-I`` is interpreter isolation, not a filesystem sandbox.  This helper
+    adds the missing operating-system boundary.  It intentionally fails
+    closed on platforms without a supported backend; an operator can still
+    use the separately permissioned ``terminal`` tool for arbitrary code.
+    """
+    executable = os.path.realpath(sys.executable)
+    python_paths = tuple(dict.fromkeys((workspace, *extra_python_paths)))
+    path_setup = "".join(
+        f"sys.path.insert(0,{os.path.realpath(path)!r});" for path in reversed(python_paths)
+    )
+    launcher = f"import runpy,sys;{path_setup}runpy.run_path({script!r},run_name='__main__')"
+
+    if sys.platform == "darwin" and os.path.isfile("/usr/bin/sandbox-exec"):
+        read_roots = {
+            workspace,
+            scratch,
+            os.path.dirname(executable),
+            sys.base_prefix,
+            sys.prefix,
+            *extra_python_paths,
+            "/System",
+            "/usr/lib",
+            "/Library/Apple",
+            "/Library/Frameworks",
+        }
+        readable = " ".join(
+            f"(subpath {_sandbox_literal(path)})" for path in sorted(read_roots)
+            if os.path.exists(path)
+        )
+        rules = [
+            "(version 1)",
+            "(deny default)",
+            # Apple's baseline permits the runtime services needed to start a
+            # normal process without granting user-document access.
+            '(import "system.sb")',
+            "(allow process*)",
+            "(allow sysctl-read)",
+            "(allow mach-lookup)",
+            "(allow file-read-metadata)",
+            f"(allow file-read* {readable} "
+            '(literal "/dev/null") (literal "/dev/urandom"))',
+            f"(allow file-write* (subpath {_sandbox_literal(workspace)}) "
+            f"(subpath {_sandbox_literal(scratch)}) (literal \"/dev/null\"))",
+        ]
+        if unix_socket:
+            rules.append(
+                f"(allow network-outbound (literal {_sandbox_literal(unix_socket)}))"
+            )
+        profile = "\n".join(rules)
+        return [
+            "/usr/bin/sandbox-exec", "-p", profile,
+            executable, "-I", "-c", launcher,
+        ], "macos-seatbelt"
+
+    bwrap = shutil.which("bwrap")
+    if sys.platform.startswith("linux") and bwrap:
+        # Bind the host read-only, then shadow only the explicitly writable
+        # roots. Network and IPC namespaces prevent a calculation helper from
+        # becoming an exfiltration or process-control channel.
+        return [
+            bwrap,
+            "--die-with-parent", "--new-session", "--unshare-net", "--unshare-ipc",
+            "--ro-bind", "/", "/",
+            "--bind", workspace, workspace,
+            "--bind", scratch, scratch,
+            "--chdir", workspace,
+            executable, "-I", "-c", launcher,
+        ], "linux-bwrap"
+
+    return None, "unavailable"
+
+
 def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     """Execute Python code in a fresh, isolated subprocess.
 
     Runtime rules — enforced by the subprocess boundary:
-      - Fresh subprocess (`python -s -E`): no user site-packages, no
-        inherited environment.
+      - Fresh subprocess (``python -I``): no user site-packages or inherited
+        Python environment.
+      - OS filesystem confinement: macOS Seatbelt or Linux bubblewrap. Reads
+        are limited to runtime files plus the workspace; writes are limited
+        to the workspace and private scratch directory; network is denied.
       - cwd AND sys.path[0] are the instance ``skills/`` workspace, so
         code can both ``open()`` and ``import`` the files ``write_file``
         just created. "Write a file then run it" is the core code
@@ -58,7 +150,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     except Exception:
         workdir = None
     with tempfile.TemporaryDirectory(prefix="jaeger_run_") as scratch:
-        run_dir = str(workdir) if workdir is not None else scratch
+        run_dir = os.path.realpath(str(workdir) if workdir is not None else scratch)
         # Execute as a real script file inside the workspace: that puts
         # the workspace on sys.path[0] (so `import sibling` works even
         # under `-I` isolation) and gives tracebacks true line numbers.
@@ -66,11 +158,31 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
         try:
             with open(script, "w", encoding="utf-8") as fh:
                 fh.write(cleaned)
+            command, sandbox_backend = _sandboxed_python_command(
+                script, workspace=run_dir, scratch=os.path.realpath(scratch),
+            )
+            if command is None:
+                return {
+                    "ok": False,
+                    "error": (
+                        "secure Python sandbox unavailable on this host; "
+                        "install bubblewrap on Linux or use the privileged "
+                        "terminal tool with explicit approval"
+                    ),
+                    "error_type": "sandbox_unavailable",
+                    "retryable": False,
+                    "sandbox_backend": sandbox_backend,
+                }
             proc = run_interruptible(
-                [sys.executable, "-s", "-E", script],
+                command,
                 timeout=timeout_s,
                 cwd=run_dir,
-                env={"PATH": os.environ.get("PATH", ""), "HOME": scratch},
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "HOME": scratch,
+                    "TMPDIR": scratch,
+                    "LANG": os.environ.get("LANG", "C.UTF-8"),
+                },
             )
             stdout, stderr, exit_code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as exc:
@@ -98,6 +210,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
         "elapsed_s": round(elapsed, 3),
         "timed_out": timed_out,
         "interrupted": interrupted,
+        "sandbox_backend": sandbox_backend,
     }
 
 

@@ -79,6 +79,16 @@ class AgentConfig(BaseModel):
             "(ANTHROPIC_API_KEY / OPENAI_API_KEY). Local servers need none."
         ),
     )
+    organization: str = Field(
+        "",
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Optional OpenAI/Azure organization or tenant ID.",
+    )
+    api_mode: str = Field(
+        "",
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Optional provider API mode override (e.g. 'azure', 'openrouter', 'direct').",
+    )
     system_prompt: str = Field(
         "",
         json_schema_extra=_setting("agent"),

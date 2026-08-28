@@ -93,7 +93,9 @@ class TurnBudget:
         return (
             f"[turn budget warning: {labels} reached at least "
             f"{round(self.limits.warning_fraction * 100):d}% of the configured limit. "
-            "Use existing results, avoid broadening the task, and finish safely.]"
+            "Use existing results, avoid broadening the task, and finish safely. "
+            "For the same operation over many items, batch it with "
+            "execute_with_tools instead of issuing one model-level call per item.]"
         )
 
     def snapshot(self) -> dict[str, object]:

@@ -47,12 +47,18 @@ from jaeger_ai.core.instance.schemas import ExternalModelConfig
 # ollama, but a real API key is required. ``gemini`` is Google's
 # OpenAI-compatible endpoint (generativelanguage.googleapis.com/v1beta/
 # openai/) — so it rides the same path as openai, no native adapter.
-_OPENAI_COMPATIBLE = {"lmstudio", "ollama", "ollama-cloud", "openai", "gemini", "xai"}
+_OPENAI_COMPATIBLE = {
+    "lmstudio", "ollama", "ollama-cloud", "openai", "gemini", "xai",
+    "openrouter", "groq", "deepseek", "vllm", "together",
+}
 
 # Providers whose endpoint is off-box. A failure here is an auth or
 # network problem the operator can fix; a failure on a LOCAL server
 # (lmstudio / ollama) usually just means the server isn't running.
-_CLOUD_PROVIDERS = {"ollama-cloud", "openai", "anthropic", "gemini", "xai"}
+_CLOUD_PROVIDERS = {
+    "ollama-cloud", "openai", "anthropic", "gemini", "xai",
+    "openrouter", "groq", "deepseek", "together",
+}
 
 # The conventional environment variable each provider's key lives in,
 # checked by :func:`resolve_api_key`. Supports multiple fallback aliases.
@@ -64,6 +70,11 @@ _CONVENTIONAL_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "vllm": ("VLLM_API_KEY",),
+    "together": ("TOGETHER_API_KEY",),
 }
 
 # Standard credential names per provider
@@ -75,6 +86,11 @@ _PROVIDER_CREDENTIAL_ALIASES: dict[str, tuple[str, ...]] = {
     "anthropic": ("anthropic_api_key", "external_model_api_key"),
     "gemini": ("gemini_api_key", "google_api_key", "external_model_api_key"),
     "xai": ("xai_api_key", "grok_api_key", "external_model_api_key"),
+    "openrouter": ("openrouter_api_key", "external_model_api_key"),
+    "groq": ("groq_api_key", "external_model_api_key"),
+    "deepseek": ("deepseek_api_key", "external_model_api_key"),
+    "vllm": ("vllm_api_key", "external_model_api_key"),
+    "together": ("together_api_key", "external_model_api_key"),
 }
 
 
@@ -229,7 +245,7 @@ def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:
     ``gemini`` / ``xai``) genuinely require a real key.
     """
     if ext.provider in _OPENAI_COMPATIBLE:
-        _placeholder = {"lmstudio": "lm-studio", "ollama": "ollama"}
+        _placeholder = {"lmstudio": "lm-studio", "ollama": "ollama", "vllm": "vllm"}
         key = api_key or _placeholder.get(ext.provider, "")
         if not key:
             # ``_CONVENTIONAL_ENV`` holds a TUPLE of aliases per provider;

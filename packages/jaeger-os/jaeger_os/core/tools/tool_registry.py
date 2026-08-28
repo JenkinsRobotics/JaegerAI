@@ -38,7 +38,13 @@ def register_tool(
     interactive: bool = False,
     dangerous: bool = False,
     beta: bool = False,
+    toolset: str = "",
+    permission_tier: str = "",
     side_effect: str = "",
+    max_result_chars: int = 0,
+    check_fn: Callable[[], bool] | None = None,
+    requires_env: tuple[str, ...] = (),
+    examples: tuple[str, ...] = (),
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator: bind ``fn`` as the handler for tool ``name``.
 
@@ -67,7 +73,13 @@ def register_tool(
             interactive=interactive,
             dangerous=dangerous,
             beta=beta,
+            toolset=toolset,
+            permission_tier=permission_tier,
             side_effect=side_effect,
+            max_result_chars=max_result_chars,
+            check_fn=check_fn,
+            requires_env=requires_env,
+            examples=examples,
         ))
         return fn
 
@@ -82,7 +94,13 @@ def register_tool_from_function(
     interactive: bool = False,
     dangerous: bool = False,
     beta: bool = False,
+    toolset: str = "",
+    permission_tier: str = "",
     side_effect: str = "",
+    max_result_chars: int = 0,
+    check_fn: Callable[[], bool] | None = None,
+    requires_env: tuple[str, ...] = (),
+    examples: tuple[str, ...] = (),
 ) -> Any:
     """Decorator that registers ``fn`` by introspecting its signature.
 
@@ -122,7 +140,13 @@ def register_tool_from_function(
             interactive=interactive,
             dangerous=dangerous,
             beta=beta,
+            toolset=toolset,
+            permission_tier=permission_tier,
             side_effect=side_effect,
+            max_result_chars=max_result_chars,
+            check_fn=check_fn,
+            requires_env=requires_env,
+            examples=examples,
         ))
         return target
 

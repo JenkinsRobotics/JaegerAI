@@ -1356,6 +1356,14 @@ def _register_builtins(client: Any) -> None:
     # not a client closure, so they belong in tools/ like every other tool).
     from jaeger_agent.tools import messaging as _messaging  # noqa: F401
 
+    # Kanban worker/orchestrator protocol (ported from hermes-agent) —
+    # importing registers the 14 kanban_* tools. They carry a check_fn that
+    # keeps them off a normal chat turn's schema, so always-on registration
+    # costs an ordinary session nothing; a dispatched worker
+    # (JAEGER_KANBAN_TASK) or an explicitly loaded ``kanban`` toolset sees
+    # them. Same import-registers pattern as messaging/email above.
+    from jaeger_agent.tools import kanban as _kanban  # noqa: F401
+
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See
     # :mod:`jaeger_ai.core.runtime.code_bridge`.
@@ -1469,6 +1477,22 @@ _delegate_role = threading.local()
 _llm_lock_held = threading.local()
 
 
+def _wt_result(info: dict[str, Any] | None) -> dict[str, Any]:
+    """Surface a child's worktree outcome to the parent, or nothing.
+
+    Returns ``{}`` when isolation was off or unavailable, so the delegate
+    result shape is unchanged on the default path. When a worktree WAS used
+    the parent needs the payload verbatim — it carries ``inspection_failed``
+    and ``note`` in the case where git could not be probed, and the parent
+    agent only ever sees this dict, so dropping it would turn "we could not
+    tell whether the child produced work" into a silent "it produced none".
+    """
+    if not info:
+        return {}
+    result = info.get("result")
+    return {"worktree": result} if result else {}
+
+
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     """Run a subtask through the same agent loop with a fresh history.
 
@@ -1504,7 +1528,39 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
         else leaf_child_depth(_DELEGATE_MAX_DEPTH)
     )
     started = time.perf_counter()
+
+    # Opt-in git worktree isolation (ported from hermes-agent). Off unless
+    # JAEGER_SUBAGENT_WORKTREE is set, and a no-op outside a git repo, so
+    # the default path below is byte-for-byte what it was before.
+    #
+    # The context manager owns the whole child turn: it rebinds
+    # ``workspace.get_project_root`` to the worktree for the duration (which
+    # is what file/code tools resolve against), restores the parent's root on
+    # the way out, and finalizes — pruning only a provably empty, clean tree.
+    import uuid as _uuid
+
+    # Mark this turn as a delegated child's. The kanban tools refuse board
+    # mutations from children: a child shares the parent's process, so an
+    # inherited JAEGER_KANBAN_TASK is not proof that IT owns the card.
+    # ContextVar, so anything the child spawns inherits the mark too.
+    from jaeger_agent.delegation_context import delegated_child as _child_ctx
+    _child_stack = _child_ctx()
+    from jaeger_agent import subagent_worktree as _wt
+    _wt_stack = _wt.isolated_child(f"d{depth + 1}-{_uuid.uuid4().hex[:6]}")
+    _child_entered = False
+    _worktree_entered = False
+    _wt_info: dict[str, Any] | None = None
+    _delegate_out: dict[str, Any] | None = None
+    iter_out: dict[str, Any] | None = None
     try:
+        _child_stack.__enter__()
+        _child_entered = True
+        _wt_info = _wt_stack.__enter__()
+        _worktree_entered = True
+        if _wt_info is not None:
+            # The child cannot infer it is sandboxed, so say so in its prompt.
+            clean = f"{clean}{_wt_info['context_note']}"
+
         # Phase-6.2 cutover: delegate now drives the new JaegerAgent
         # loop. A fresh ``JaegerAgent`` per subtask keeps history scoped
         # to the delegate's work (a child agent doesn't inherit the
@@ -1579,7 +1635,7 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
             worker = packed["output"]
             answer = worker.get("summary") or worker.get("text") or ""
             elapsed = time.perf_counter() - started
-            return {
+            _delegate_out = {
                 "delegated": True,
                 "subtask": clean,
                 "answer": str(answer).strip(),
@@ -1591,13 +1647,32 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
                 "halt_reason": worker.get("halt_reason") or packed.get("reason") or "",
                 "state": packed.get("status"),
             }
-
-        iter_out = _drive(clean)
+        else:
+            iter_out = _drive(clean)
     except Exception as exc:
-        _delegate_depth.value = depth
-        return {"delegated": False, "error": f"{type(exc).__name__}: {exc}"}
+        _delegate_out = {
+            "delegated": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     finally:
         _delegate_depth.value = depth
+        # Restores the parent's project root and finalizes the worktree.
+        if _worktree_entered:
+            try:
+                _wt_stack.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001 — isolation teardown is best-effort
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "delegate: worktree teardown failed", exc_info=True)
+        if _child_entered:
+            _child_stack.__exit__(None, None, None)
+
+    # A context-manager ``__exit__`` runs after a return expression is
+    # evaluated. Build the final payload only now so worktree finalization's
+    # ``result`` entry is present for success, batch, and failure paths.
+    if _delegate_out is not None:
+        _delegate_out.update(_wt_result(_wt_info))
+        return _delegate_out
 
     elapsed = time.perf_counter() - started
     # ``drive_one_turn`` returns a shape that includes ``answer``,
@@ -1606,6 +1681,7 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
     # ``drive_one_turn`` already populates ``answer`` for both the
     # skip-final shortcut and the full loop path — no separate result
     # object to interrogate.
+    assert iter_out is not None
     answer = iter_out.get("answer") or ""
     return {
         "delegated": True,
@@ -1613,6 +1689,7 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
         "answer": str(answer).strip(),
         "depth": depth + 1,
         "elapsed_s": round(elapsed, 3),
+        **_wt_result(_wt_info),
     }
 
 
@@ -3292,6 +3369,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             stale_call_timeout_s=_stall_s,
             context_summarizer=_summarizer,
             max_iterations=_inner_max(),
+            max_tool_calls=_inner_max(),
         )
         # Cross-restart continuity: seed the brand-new agent with a
         # digest of this session's pre-restart turns (orientation, not
@@ -3472,8 +3550,18 @@ def _run_turn_via_jaeger_agent(
             ledger_open, looks_like_batch,
         )
         from jaeger_ai.core.runtime.execution import inner_max as _inner_max
-        jaeger_agent.max_iterations = _inner_max(
+        _turn_inner_max = _inner_max(
             batch=bool(ledger_open() or looks_like_batch(user_text)),
+        )
+        jaeger_agent.max_iterations = _turn_inner_max
+        # TurnBudgetLimits is immutable so replace the snapshot atomically;
+        # otherwise the loop keeps the construction-time 24-call fuse even
+        # after autonomous mode raises max_iterations to 60.
+        from dataclasses import replace as _replace
+        jaeger_agent.turn_budget.limits = _replace(
+            jaeger_agent.turn_budget.limits,
+            max_iterations=_turn_inner_max,
+            max_tool_calls=_turn_inner_max,
         )
     except Exception:  # noqa: BLE001 — never block a turn on budget plumbing
         pass
@@ -5595,6 +5683,44 @@ def _main_dispatch() -> int:
         # Fall through into the --voice path below.
         if "--voice" not in sys.argv[1:]:
             sys.argv.append("--voice")
+    # --daemon: headless unattended operation. Peeled here, before
+    # argparse, for the same reason as --stream/--voice/--tui — those
+    # surfaces own their own entry point and never reach ``parse_args``.
+    #
+    # This routes to :func:`run_daemon`, which was already complete but
+    # unreachable: nothing in the CLI referenced it, so its own docstring
+    # ("Intended to run under launchd") described a path that could not be
+    # taken. ``jaeger autostart enable --daemon`` is now that path.
+    #
+    # run_daemon boots through ``boot_for_tui``, which also fires
+    # ``autostart_plugins`` — so the messaging bridges named in
+    # ``config.plugins.autostart`` come up here too, and the daemon serves
+    # Telegram/Discord/Slack as well as the heartbeat, cron, board pickup
+    # and Deep Think loops. There is no TUI and no stdin: output goes to
+    # stdout for launchd to capture.
+    if "--daemon" in sys.argv[1:]:
+        sys.argv.remove("--daemon")
+        _poll = 60
+        if "--poll-seconds" in sys.argv[1:]:
+            _pi = sys.argv.index("--poll-seconds")
+            try:
+                _poll = max(5, int(sys.argv[_pi + 1]))
+            except (IndexError, ValueError):
+                print("[jaeger] --poll-seconds needs an integer; using 60",
+                      file=sys.stderr, flush=True)
+            else:
+                del sys.argv[_pi:_pi + 2]
+        _inst = None
+        if "--instance" in sys.argv[1:]:
+            _ii = sys.argv.index("--instance")
+            try:
+                _inst = sys.argv[_ii + 1]
+            except IndexError:
+                print("[jaeger] --instance needs a name", file=sys.stderr,
+                      flush=True)
+                return 2
+            del sys.argv[_ii:_ii + 2]
+        return run_daemon(instance_name=_inst, poll_seconds=_poll)
     # If --voice is present, peel it off and delegate to the voice_loop
     # daemon. Voice_loop has its own argparse for STT mode, barge-in, AEC,
     # wake-word, chimes, model names, etc. — every flag the user types

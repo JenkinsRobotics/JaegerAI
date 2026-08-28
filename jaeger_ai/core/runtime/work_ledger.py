@@ -20,6 +20,7 @@ raw tool JSON that produced it.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import threading
@@ -69,6 +70,7 @@ class WorkLedger:
     completed: bool = False
     summary: str = ""
     evidence: str = ""
+    verification_receipts: list[dict[str, Any]] = field(default_factory=list)
     # Fail-closed verification attached at create. ``None`` means
     # count-only. ``{"kind": "paths_exist", "paths": [...]}`` checks
     # those files are on disk before complete_task can succeed.
@@ -384,6 +386,10 @@ def _load(task_id: str) -> WorkLedger | None:
         completed=bool(raw.get("completed")),
         summary=str(raw.get("summary") or ""),
         evidence=str(raw.get("evidence") or ""),
+        verification_receipts=[
+            dict(item) for item in (raw.get("verification_receipts") or [])
+            if isinstance(item, dict)
+        ],
         verify=raw.get("verify") if isinstance(raw.get("verify"), dict) else None,
     )
     with _lock:
@@ -480,6 +486,32 @@ def _run_verification(ledger: WorkLedger) -> str | None:
         if extra:
             return str(extra)
     return None
+
+
+def _verification_receipts(ledger: WorkLedger) -> list[dict[str, Any]]:
+    """Create machine-derived completion receipts after checks pass."""
+    receipts: list[dict[str, Any]] = [{
+        "kind": "ledger_count",
+        "done": ledger.done_count(),
+        "total": ledger.total(),
+        "remaining": ledger.remaining(),
+    }]
+    spec = ledger.verify if isinstance(ledger.verify, dict) else None
+    if spec and str(spec.get("kind") or "").strip().lower() == "paths_exist":
+        for raw in [str(p) for p in (spec.get("paths") or []) if str(p).strip()]:
+            resolved = _resolve_verify_path(raw)
+            if resolved is None or not resolved.is_file():
+                receipts.append({"kind": "path_exists", "path": raw, "exists": bool(resolved and resolved.exists())})
+                continue
+            try:
+                digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
+                receipts.append({
+                    "kind": "file_sha256", "path": raw,
+                    "bytes": resolved.stat().st_size, "sha256": digest,
+                })
+            except OSError:
+                receipts.append({"kind": "path_exists", "path": raw, "exists": True})
+    return receipts
 
 
 def work_ledger(
@@ -625,6 +657,7 @@ def complete_task(
     current.completed = True
     current.summary = (summary or "").strip()
     current.evidence = proof
+    current.verification_receipts = _verification_receipts(current)
     current.updated_at = time.time()
     _persist(current)
     payload = {
@@ -633,6 +666,7 @@ def complete_task(
         "task_id": current.task_id,
         "summary": current.summary,
         "evidence": proof,
+        "verification_receipts": list(current.verification_receipts),
         "ledger": current.as_dict(),
     }
     _set_tls_completion(payload)

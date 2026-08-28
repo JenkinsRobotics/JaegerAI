@@ -190,6 +190,8 @@ def loop_halt_reason(
     tool_calls_made: int,
     call_signatures: dict[str, int],
     failure_signatures: dict[str, int] | None = None,
+    *,
+    max_tool_calls: int = MAX_TOOL_CALLS,
 ) -> str | None:
     """Return a halt reason when the turn is spinning, else ``None``.
 
@@ -209,12 +211,17 @@ def loop_halt_reason(
                 f"called {sig.split('|', 1)[0]} with identical "
                 f"arguments {n} times"
             )
-    if tool_calls_made >= MAX_TOOL_CALLS:
+    if tool_calls_made >= max_tool_calls:
         return f"made {tool_calls_made} tool calls in a single turn"
     return None
 
 
-def tool_budget_warning(tool_calls_made: int) -> str | None:
+def tool_budget_warning(
+    tool_calls_made: int,
+    *,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    warning_fraction: float = WARN_TOOL_CALLS / MAX_TOOL_CALLS,
+) -> str | None:
     """Tell the model to synthesize before the total-call fuse fires.
 
     Repetition warnings are signature-specific and live in
@@ -222,13 +229,15 @@ def tool_budget_warning(tool_calls_made: int) -> str | None:
     all be legitimate, but the model still needs advance notice that it must
     stop investigating and turn the accumulated results into an answer.
     """
-    if WARN_TOOL_CALLS <= tool_calls_made < MAX_TOOL_CALLS:
-        remaining = MAX_TOOL_CALLS - tool_calls_made
+    warn_at = max(1, int(max_tool_calls * min(0.99, max(0.01, warning_fraction))))
+    if warn_at <= tool_calls_made < max_tool_calls:
+        remaining = max_tool_calls - tool_calls_made
         return (
             f"[tool budget: {remaining} call(s) remain this turn. "
             "Stop broadening the investigation. Use the results already "
-            "collected and produce the best final answer now; call another "
-            "tool only if it is essential.]"
+            "collected and produce the best final answer now. If the remaining "
+            "work repeats one operation over many items, use execute_with_tools "
+            "for the batch; otherwise call another tool only if essential.]"
         )
     return None
 

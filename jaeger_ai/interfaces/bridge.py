@@ -139,6 +139,7 @@ def _effective_icon(boot: Any, character: Any) -> str | None:
 # frame this size is fine, a multi-megabyte one would stall the stdio
 # transport every surface shares.
 _CARD_MAX_BYTES = 4 * 1024 * 1024
+_PROMPT_FILE_MAX_BYTES = 2 * 1024 * 1024
 
 _CARD_MIME = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -174,6 +175,35 @@ def _card_art(path: str | None, character_id: str) -> dict[str, Any] | None:
         "filename": p.name,
         "data": b64encode(data).decode("ascii"),
     }
+
+
+def _request_text(req: dict[str, Any]) -> tuple[str, str | None]:
+    """Resolve inline text plus an optional file-backed prompt.
+
+    ``prompt_path`` keeps large prompts out of terminal canonical-line
+    buffers while preserving NDJSON framing. Reading a file is explicit in
+    the request, bounded, UTF-8 only, and errors are returned on the normal
+    reply rail instead of silently turning into an empty prompt.
+    """
+    inline = str(req.get("text") or "").strip()
+    raw_path = str(req.get("prompt_path") or "").strip()
+    if not raw_path:
+        return inline, None
+    path = Path(raw_path).expanduser()
+    try:
+        size = path.stat().st_size
+        if not path.is_file():
+            return "", f"prompt_path is not a file: {path}"
+        if size > _PROMPT_FILE_MAX_BYTES:
+            return "", (
+                f"prompt_path exceeds {_PROMPT_FILE_MAX_BYTES} bytes: {path}"
+            )
+        body = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        return "", f"could not read prompt_path {path}: {exc}"
+    if not body:
+        return "", f"prompt_path is empty: {path}"
+    return (f"{inline}\n\n{body}" if inline else body), None
 
 
 # ── text deltas ──────────────────────────────────────────────────────
@@ -1850,11 +1880,14 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         if req is None:
             return
         out = req.pop("_out", None) or proto
-        text = (req.get("text") or "").strip()
+        text, prompt_error = _request_text(req)
         from jaeger_ai.core.runtime.dispatch import normalize_session_key
         session = normalize_session_key(
             req.get("session"), default="desktop-app",
         )
+        if prompt_error:
+            _emit(out, protocol.reply_frame("", prompt_error, session))
+            continue
         if session not in _SYNTHETIC_SESSIONS:
             ctx.last_user_at = time.monotonic()
             ctx.last_user_session = session

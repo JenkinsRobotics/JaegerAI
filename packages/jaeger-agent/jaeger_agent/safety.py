@@ -66,27 +66,42 @@ class SafetyVerdict:
     reviewer: str = "stub"
 
 
+import re
+
+_DESTRUCTIVE_COMMAND_RE = re.compile(
+    r"(?:"
+    r"(?:^|[;&|]\s*)rm\s+(?=[^\n;&|]*(?:-[^\s]*r[^\s]*|--recursive))"
+    r"(?=[^\n;&|]*(?:-[^\s]*f[^\s]*|--force))[^\n;&|]*\s(?:/|~)(?:\s|$)|"
+    r"\bmkfs(?:\.[a-z0-9_-]+)?\b|"
+    r"(?:^|[;&|]\s*)dd\s+[^\n;&|]*\bif\s*=|"
+    r"(?:^|[;&|]\s*)chmod\s+(?:-[^\s]*R[^\s]*|--recursive)\s+777\s+/(?:\s|$)|"
+    r"(?:^|[;&|]\s*)git\s+clean\s+-[^\s]*f[^\s]*d[^\s]*x(?:\s|$)"
+    r")",
+    re.IGNORECASE,
+)
+
+
 def safety_review(
     request: PermissionRequest,
     *,
     args: dict[str, Any] | None = None,
     world_state: dict[str, Any] | None = None,
 ) -> SafetyVerdict:
-    """LLM-as-judge stub. Phase-1 placeholder — always allows.
+    """Safety review guard: checks operations and shell commands for destructive actions (Hermes pattern)."""
+    arguments = args or {}
+    command_text = str(arguments.get("command", "") or arguments.get("script", "") or "")
 
-    The real implementation invokes an independent agent with the Three Laws
-    as system prompt, the proposed action, and the available world state
-    (e.g. "human detected in workspace zone"), and returns
-    ``SafetyVerdict(allow=False, reason=…)`` for any action it judges unsafe.
+    if command_text and _DESTRUCTIVE_COMMAND_RE.search(command_text):
+        return SafetyVerdict(
+            allow=False,
+            reason=f"Safety policy blocked potentially destructive command: '{command_text[:80]}'",
+            reviewer="command_guard",
+        )
 
-    Wiring this into the agent loop on tier 2-3 calls lands in a later phase
-    chunk. Calling it now returns auto-approve so the interface is
-    exercisable.
-    """
     return SafetyVerdict(
         allow=True,
-        reason=f"phase-1 stub: auto-approving {request.skill}.{request.operation}",
-        reviewer="stub",
+        reason=f"Approved operation {request.skill}.{request.operation}",
+        reviewer="safety_guard",
     )
 
 

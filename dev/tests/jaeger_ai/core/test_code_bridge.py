@@ -215,6 +215,34 @@ def test_an_interactive_tool_is_refused_rather_than_hanging(tool_registry):
     assert result["stdout"].strip() == "refused: True"
 
 
+def test_script_cannot_bypass_tools_to_read_outside_workspace(tool_registry, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("must-not-leak", encoding="utf-8")
+    result = run_bridged_script(
+        f"print(open({str(secret)!r}).read())\n",
+        workspace=workspace,
+        timeout_s=30,
+    )
+    assert result["ok"] is False
+    assert "must-not-leak" not in result["stdout"]
+    assert result["sandbox_backend"] in {"macos-seatbelt", "linux-bwrap"}
+
+
+def test_script_cannot_bypass_tools_to_write_outside_workspace(tool_registry, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    escaped = tmp_path / "escaped.txt"
+    result = run_bridged_script(
+        f"open({str(escaped)!r}, 'w').write('escaped')\n",
+        workspace=workspace,
+        timeout_s=30,
+    )
+    assert result["ok"] is False
+    assert not escaped.exists()
+
+
 def test_the_call_ceiling_stops_a_runaway_loop(tool_registry):
     """A `while True:` costs one error, not the whole timeout."""
     def tick() -> dict:

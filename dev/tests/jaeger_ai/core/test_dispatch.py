@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 
 import pytest
 
@@ -126,3 +127,39 @@ def test_main_session_can_inspect_worker_ledger_by_id():
     task_id = created["ledger"]["task_id"]
     probed = ledger_tool(action="status", task_id=task_id)
     assert probed["ledger"]["total_items"] == 20
+
+
+def test_delegate_failure_surfaces_worktree_result_after_teardown(monkeypatch):
+    """A failed child must still tell its parent where preserved work lives."""
+    from jaeger_agent import subagent_worktree
+    from jaeger_agent.loop import runtime_bridge
+
+    info = {"context_note": "\n[isolated]"}
+
+    @contextmanager
+    def _isolated_child(_child_id):
+        try:
+            yield info
+        finally:
+            info["result"] = {
+                "path": "/tmp/child",
+                "branch": "jaeger-subagent/child",
+                "commits": 0,
+                "dirty": True,
+                "pruned": False,
+            }
+
+    monkeypatch.setattr(subagent_worktree, "isolated_child", _isolated_child)
+    monkeypatch.setattr(main, "_context_budget_for", lambda _cfg: (8192, 1024))
+    monkeypatch.setitem(main._pipeline, "system_prompt", "test")
+    monkeypatch.setattr(
+        runtime_bridge,
+        "build_jaeger_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("child failed")),
+    )
+
+    result = main._delegate_internal(object(), "do work")
+
+    assert result["delegated"] is False
+    assert result["error"] == "RuntimeError: child failed"
+    assert result["worktree"] == info["result"]

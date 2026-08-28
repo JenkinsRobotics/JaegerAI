@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from jaeger_agent.skill_registry import skill_ledger as _ledger
 from jaeger_agent.skill_registry.playbook_skills import PlaybookSkill, discover_playbooks
 
 _PINNED_MARKER = ".pinned"
@@ -181,7 +182,16 @@ def archive_skill(folder: Path, *, archive_dir: Path | None = None) -> Path:
     dest_parent = archive_dir / stamp
     dest_parent.mkdir(parents=True, exist_ok=True)
     dest = dest_parent / folder.name
+    # Ledger the pre-move contents BEFORE the move — afterwards the source
+    # path is gone and the before-state is unrecoverable. Best-effort by
+    # contract: ``capture_before`` swallows its own failures and returns
+    # None, so a broken ledger can never block the archive.
+    _led_before = _ledger.capture_before(folder)
     shutil.move(str(folder), str(dest))
+    _ledger.record_mutation(
+        "archive", folder.name, before=_led_before, after_root=dest,
+        evidence={"original": str(folder), "archived_to": str(dest)},
+    )
     try:
         (dest / _ARCHIVED_FROM).write_text(
             json.dumps({
@@ -237,11 +247,16 @@ def restore_skill(
                                           "refusing to overwrite"}
         src = Path(entry["archived_path"])
         original.parent.mkdir(parents=True, exist_ok=True)
+        _led_before = _ledger.capture_before(src)
         shutil.move(str(src), str(original))
         try:
             (original / _ARCHIVED_FROM).unlink()
         except OSError:
             pass
+        _ledger.record_mutation(
+            "restore", name, before=_led_before, after_root=original,
+            evidence={"archived_path": str(src), "restored_to": str(original)},
+        )
         return {"ok": True, "name": name, "restored_to": str(original)}
     return {"ok": False, "error": f"no archived skill named {name!r}"}
 

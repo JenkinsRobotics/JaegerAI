@@ -44,3 +44,19 @@ def test_run_python_still_works_with_no_file(bound_instance):
     result = tools.run_python("print(2 + 2)")
     assert result["ok"] is True, result
     assert "4" in result["stdout"]
+
+
+def test_run_python_cannot_read_outside_workspace(bound_instance):
+    secret = bound_instance.root.parent / "outside-secret.txt"
+    secret.write_text("must-not-leak", encoding="utf-8")
+    result = tools.run_python(f"print(open({str(secret)!r}).read())")
+    assert result["ok"] is False
+    assert "must-not-leak" not in result["stdout"]
+    assert result["sandbox_backend"] in {"macos-seatbelt", "linux-bwrap"}
+
+
+def test_run_python_cannot_write_outside_workspace(bound_instance):
+    escaped = bound_instance.root.parent / "escaped.txt"
+    result = tools.run_python(f"open({str(escaped)!r}, 'w').write('escaped')")
+    assert result["ok"] is False
+    assert not escaped.exists()

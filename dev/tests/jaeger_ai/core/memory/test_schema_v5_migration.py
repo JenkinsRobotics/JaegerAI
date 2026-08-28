@@ -211,7 +211,7 @@ def test_v1_to_v5_full_upgrade(tmp_path):
         store._ensure_schema(conn)
         assert int(conn.execute(
             "SELECT version FROM schema_version WHERE id = 1"
-        ).fetchone()["version"]) == 5
+        ).fetchone()["version"]) == store.SCHEMA_VERSION
 
         facts = conn.execute(
             "SELECT subject, key, value, source FROM facts ORDER BY key"
@@ -276,7 +276,7 @@ def test_v4_to_v5_preserves_runtime_rows(tmp_path):
         conn = store.connection()
         assert int(conn.execute(
             "SELECT version FROM schema_version WHERE id = 1"
-        ).fetchone()["version"]) == store.SCHEMA_VERSION == 5
+        ).fetchone()["version"]) == store.SCHEMA_VERSION
 
         run = conn.execute(
             "SELECT state, reason FROM runs WHERE id = 'run-1'"

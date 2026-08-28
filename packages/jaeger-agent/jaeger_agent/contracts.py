@@ -8,10 +8,12 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 
 @dataclass(slots=True)
 class TurnResult:
-    """Normalized result of one user turn."""
+    """Normalized result of one user turn (Hermes telemetry pattern)."""
 
     text: str = ""
     error: str | None = None
+    tokens_used: int = 0
+    elapsed_s: float = 0.0
 
 
 @runtime_checkable
@@ -58,6 +60,8 @@ def normalize_turn_result(value: TurnResult | Mapping[str, Any] | str | None) ->
     return TurnResult(
         text=str(value.get("text") or ""),
         error=str(value["error"]) if value.get("error") else None,
+        tokens_used=int(value.get("tokens_used", 0)),
+        elapsed_s=float(value.get("elapsed_s", 0.0)),
     )
 
 

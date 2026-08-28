@@ -37,6 +37,13 @@ CLAIM_NUDGE = (
     "or state plainly that the action was NOT done."
 )
 
+VERIFY_NUDGE = (
+    "SYSTEM NUDGE: You declared the task complete, but the transcript does "
+    "not contain a successful action matching that claim. Do not grade your "
+    "own prose. Execute the required action and inspect the resulting state; "
+    "if it cannot be verified, report it as incomplete."
+)
+
 
 def gate_enabled() -> bool:
     """The gate is on by default; ``JAEGER_VERIFY_GATE=0`` kills it."""
@@ -115,14 +122,54 @@ _CLAIM_FAMILIES: tuple[tuple[re.Pattern[str], frozenset[str]], ...] = (
                 "cancel_schedule", "terminal", "execute_code"})),
 )
 
+_ACTION_REQUEST = re.compile(
+    r"\b(?:apply|change|correct|create|delete|deduplicat(?:e|ing)|edit|fix|"
+    r"move|organi[sz]e|restructur(?:e|ing)|save|sync|update|write)\b",
+    re.IGNORECASE,
+)
+_DECLARATIVE_COMPLETE = re.compile(
+    r"(?:^|\n)\s*(?:revision|task|work|corrections?|changes?)\s+complete\b|"
+    r"\b(?:all|every(?:thing)?)\b.{0,50}\b(?:applied|corrected|done|finished|"
+    r"moved|pass(?:es|ed)?|saved|synced|updated|verified)\b|"
+    r"\b(?:successfully|fully)\s+(?:applied|completed|corrected|moved|saved|"
+    r"synced|updated)\b",
+    re.IGNORECASE,
+)
+_ACTION_TOOLS = frozenset().union(*(family for _, family in _CLAIM_FAMILIES)) | frozenset({
+    "computer_do", "computer_use", "execute_with_tools", "move_file",
+    "copy_file", "rename_file", "work_ledger", "complete_task",
+})
 
-def _is_false_claim(text: str, tool_successes: Iterable[str]) -> bool:
+
+def _is_false_claim(
+    text: str,
+    tool_successes: Iterable[str],
+    user_prompt: str = "",
+) -> bool:
     """True when the text makes a first-person completed-action claim whose
     tool family saw NO successful call this turn."""
     ok = set(tool_successes)
     for pattern, family in _CLAIM_FAMILIES:
         if pattern.search(text) and not (ok & family):
             return True
+    return False
+
+
+def _is_declarative_false_claim(
+    text: str,
+    tool_successes: Iterable[str],
+    user_prompt: str = "",
+) -> bool:
+    ok = set(tool_successes)
+    # Models often avoid first-person wording and emit status-banner prose
+    # ("REVISION COMPLETE", "all corrections pass"). If the user requested
+    # a mutation, that is still an action claim and needs an observed action.
+    if (
+        _ACTION_REQUEST.search(user_prompt or "")
+        and _DECLARATIVE_COMPLETE.search(text)
+        and not (ok & _ACTION_TOOLS)
+    ):
+        return True
     return False
 
 
@@ -150,9 +197,14 @@ def verify_final(
         return None
     if _is_plan_halt(clean, tool_names, user_prompt):
         return PLAN_NUDGE
-    if _is_false_claim(clean, tool_successes):
+    if _is_false_claim(clean, tool_successes, user_prompt):
         return CLAIM_NUDGE
+    if _is_declarative_false_claim(clean, tool_successes, user_prompt):
+        return VERIFY_NUDGE
     return None
 
 
-__all__ = ["verify_final", "gate_enabled", "PLAN_NUDGE", "CLAIM_NUDGE"]
+__all__ = [
+    "verify_final", "gate_enabled", "PLAN_NUDGE", "CLAIM_NUDGE",
+    "VERIFY_NUDGE",
+]

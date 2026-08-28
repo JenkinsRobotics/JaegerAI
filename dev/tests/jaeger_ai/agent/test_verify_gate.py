@@ -12,6 +12,7 @@ from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.loop.verify_gate import (
     CLAIM_NUDGE,
     PLAN_NUDGE,
+    VERIFY_NUDGE,
     gate_enabled,
     verify_final,
 )
@@ -88,6 +89,29 @@ def test_claimed_save_without_write_is_nudged():
 def test_claimed_save_with_write_success_passes():
     text = "Done — I've saved the summary to notes.txt."
     assert verify_final(text, {"write_file"}, TOOLS) is None
+
+
+def test_declarative_completion_without_action_is_nudged():
+    for text in ("REVISION COMPLETE", "All corrections pass.",
+                 "Everything was successfully applied."):
+        assert verify_final(
+            text, {"web_search"}, TOOLS,
+            user_prompt="fix and apply all corrections",
+        ) == VERIFY_NUDGE
+
+
+def test_declarative_completion_with_observed_action_passes():
+    assert verify_final(
+        "REVISION COMPLETE", {"write_file"}, TOOLS,
+        user_prompt="fix and apply all corrections",
+    ) is None
+
+
+def test_declarative_status_for_read_only_request_passes():
+    assert verify_final(
+        "All checks pass.", set(), TOOLS,
+        user_prompt="explain what this code does",
+    ) is None
 
 
 def test_claimed_schedule_and_memory_families():

@@ -162,6 +162,23 @@ class _LineDelayStdin:
         return line
 
 
+def test_request_text_loads_large_prompt_from_file(tmp_path):
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("do the detailed audit\n", encoding="utf-8")
+    text, error = bridge._request_text({
+        "text": "Follow these instructions:",
+        "prompt_path": str(prompt),
+    })
+    assert error is None
+    assert text == "Follow these instructions:\n\ndo the detailed audit"
+
+
+def test_request_text_reports_missing_prompt_file(tmp_path):
+    text, error = bridge._request_text({"prompt_path": str(tmp_path / "missing.md")})
+    assert text == ""
+    assert "could not read prompt_path" in (error or "")
+
+
 def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
          boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
          default_name="test-inst", stdin_obj=None):

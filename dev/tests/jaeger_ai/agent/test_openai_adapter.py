@@ -101,8 +101,11 @@ def _mk_tool() -> ToolDef:
 # ── construction + provider variants ───────────────────────────────
 
 
-def test_known_providers_includes_the_five_supported_backends():
-    assert {"openai", "lmstudio", "ollama", "ollama-cloud", "gemini"} == KNOWN_PROVIDERS
+def test_known_providers_includes_supported_backends():
+    assert {
+        "openai", "lmstudio", "ollama", "ollama-cloud", "gemini",
+        "openrouter", "groq", "deepseek", "vllm", "together",
+    } == KNOWN_PROVIDERS
 
 
 def test_local_servers_get_placeholder_key_when_none_supplied():

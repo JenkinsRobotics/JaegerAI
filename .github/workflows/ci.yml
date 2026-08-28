@@ -41,6 +41,14 @@ jobs:
             kokoro) cd packages/jaeger-kokoro-tts && python -m pytest -q ;;
             whisper) cd packages/jaeger-whisper-stt && python -m pytest -q ;;
           esac
+      - name: Critical static and dependency security gates
+        if: matrix.suite == 'root' && matrix.python == '3.11'
+        run: |
+          python -m pip install ruff pip-audit
+          ruff check --select E9,F63,F7,F82 .
+          # PYSEC-2026-2447 has no patched release. Jaeger does not create
+          # llama_cpp.LlamaDiskCache; see SECURITY.md for the threat model.
+          pip-audit --local --skip-editable --ignore-vuln PYSEC-2026-2447
   swift:
     name: Native Swift
     runs-on: macos-15

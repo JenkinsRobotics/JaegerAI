@@ -18,10 +18,6 @@ from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_agent.skill_registry import playbook_skills as _pb
 from jaeger_agent.workspace import get_layout
 
-# Cap a single skill's instructions so one huge SKILL.md can't blow the
-# context window. Skills run long but rarely past this.
-_MAX_SKILL_CHARS = 16_000
-
 # Recognised linked-file categories inside a skill folder.
 _FILE_CATEGORIES = ("scripts", "references", "templates", "assets")
 
@@ -63,9 +59,7 @@ def _read_skill_file(folder: pathlib.Path, relpath: str) -> dict[str, Any]:
         text = target.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return {"ok": False, "error": f"couldn't read {relpath}: {exc}"}
-    return {"ok": True, "file": relpath,
-            "content": text[:_MAX_SKILL_CHARS],
-            "truncated": len(text) > _MAX_SKILL_CHARS}
+    return {"ok": True, "file": relpath, "content": text, "truncated": False}
 
 
 def skill(action: str, name: str = "", query: str = "",
@@ -197,8 +191,8 @@ def skill(action: str, name: str = "", query: str = "",
             "origin": s.origin,
             "lifecycle": getattr(s, "lifecycle", "core"),
             "skill_class": getattr(s, "skill_class", "first-class"),
-            "instructions": content[:_MAX_SKILL_CHARS],
-            "truncated": len(content) > _MAX_SKILL_CHARS,
+            "instructions": content,
+            "truncated": False,
             "folder": str(folder),
             "files": _bucket_skill_files(folder),
         }

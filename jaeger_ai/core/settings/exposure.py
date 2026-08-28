@@ -26,6 +26,12 @@ NONCATALOG_EXPOSURE = {
     "workspace.location": "dedicated_ui", "hardware.enabled": "advanced_cli",
     "hardware.package": "advanced_cli", "persona.output_filter": "advanced_cli",
     "persona.max_chars": "advanced_cli",
+    "hooks.pre_tool_call": "advanced_cli",
+    "hooks.post_tool_call": "advanced_cli",
+    "hooks.on_session_start": "advanced_cli",
+    "hooks.on_session_end": "advanced_cli",
+    "tirith.path": "advanced_cli",
+    "tirith.timeout_s": "advanced_cli",
 }
 
 __all__ = ["NONCATALOG_EXPOSURE"]

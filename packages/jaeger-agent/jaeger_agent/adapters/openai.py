@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 # consistent between the legacy code path and the new adapter.
 KNOWN_PROVIDERS: frozenset[str] = frozenset({
     "openai", "lmstudio", "ollama", "ollama-cloud", "gemini",
+    "openrouter", "groq", "deepseek", "vllm", "together",
 })
 
 # Local servers accept any non-empty key — supply a placeholder so the
@@ -59,6 +60,7 @@ KNOWN_PROVIDERS: frozenset[str] = frozenset({
 _LOCAL_PLACEHOLDER_KEYS: dict[str, str] = {
     "lmstudio": "lm-studio",
     "ollama": "ollama",
+    "vllm": "vllm",
 }
 
 
