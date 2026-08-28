@@ -156,11 +156,26 @@ def test_validation_failure_does_not_claim_the_ledger():
 
 
 def test_agent_defaults_to_ledger_executor():
+    """At-most-once is on by default, with hooks composed OUTSIDE it.
+
+    The ordering is the load-bearing part, not just the membership: a
+    ``pre_tool_call`` veto has to stop the call before ``EffectLedger.once``
+    claims its key. Hooks inside the ledger would let a block burn the key,
+    so the retry after the operator fixes their hook would come back as a
+    duplicate instead of running.
+    """
     adapter = _ScriptedAdapter()
     adapter.script = [{"role": "assistant", "content": "ok"}]
     agent = JaegerAgent(adapter=adapter, tools=[])
-    from jaeger_agent.tool_executor import LedgerToolExecutor
-    assert isinstance(agent._tool_executor, LedgerToolExecutor)
+    from jaeger_agent.tool_executor import (
+        CheckpointingToolExecutor, HookedToolExecutor, LedgerToolExecutor,
+    )
+    # hooks → checkpoints → ledger. Walk the chain rather than asserting one
+    # type, so a future layer inserted in the wrong place fails here.
+    outer = agent._tool_executor
+    assert isinstance(outer, HookedToolExecutor)
+    assert isinstance(outer._inner, CheckpointingToolExecutor)
+    assert isinstance(outer._inner._inner, LedgerToolExecutor)
     assert agent.run_turn("hello") == "ok"
     assert agent.run_id
 

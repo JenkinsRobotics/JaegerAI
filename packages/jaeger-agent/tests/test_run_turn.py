@@ -188,6 +188,39 @@ def test_parallel_batch_never_executes_past_hard_tool_budget():
     assert adapter.last_tools_count == 0
 
 
+def test_configured_tool_budget_replaces_legacy_global_limit():
+    executed: list[str] = []
+
+    @register_tool("adaptive_read", "Read.", _SmallArgs, side_effect="read")
+    def _adaptive(value: str = "x") -> dict:
+        executed.append(value)
+        return {"ok": True, "value": value}
+
+    configured = MAX_TOOL_CALLS + 6
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": "reading",
+            "tool_calls": [
+                {"id": f"c{i}", "name": "adaptive_read", "arguments": {"value": str(i)}}
+                for i in range(configured)
+            ],
+        },
+        {"role": "assistant", "content": "all inspected"},
+    ])
+    from jaeger_agent.loop.turn_budget import TurnBudgetLimits
+
+    agent = JaegerAgent(
+        adapter=adapter,
+        turn_budget_limits=TurnBudgetLimits(
+            max_tool_calls=configured, max_iterations=50,
+        ),
+    )
+    assert agent.run_turn("read the complete batch") == "all inspected"
+    assert len(executed) == configured
+    assert agent.last_halt_reason == f"made {configured} tool calls in a single turn"
+
+
 # ── tool error paths ───────────────────────────────────────────────
 
 
@@ -209,6 +242,30 @@ def test_unknown_tool_becomes_tool_error_result_loop_continues():
     assert result == "ok, I'll skip that"
     tool_row = next(m for m in agent.messages if m["role"] == "tool")
     assert "unknown tool" in tool_row["content"]
+
+
+def test_identical_static_read_is_cached_across_iterations():
+    executed = 0
+
+    @register_tool("read_file", "Read.", _SmallArgs, side_effect="read")
+    def _read(value: str = "x") -> dict:
+        nonlocal executed
+        executed += 1
+        return {"ok": True, "content": "stable"}
+
+    adapter = _ScriptedAdapter([
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "name": "read_file", "arguments": {"value": "same"}},
+        ]},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c2", "name": "read_file", "arguments": {"value": "same"}},
+        ]},
+        {"role": "assistant", "content": "done"},
+    ])
+    agent = JaegerAgent(adapter=adapter)
+    assert agent.run_turn("read the same file twice") == "done"
+    assert executed == 1
+    assert agent.turn_budget.tool_calls == 2  # model calls remain observable
 
 
 def test_bad_args_validation_error_becomes_tool_result_not_crash():

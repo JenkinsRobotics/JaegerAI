@@ -85,6 +85,7 @@ class JaegerClient:
 
     # ── turns ─────────────────────────────────────────────────────
     def turn(self, text: str, session: str = "", *,
+             prompt_path: str | None = None,
              on_event: Callable[[dict], None] | None = None,
              on_request: Callable[[dict], str] | None = None) -> dict[str, Any]:
         """Run one turn; return ``{"text": ..., "error": ...}``.
@@ -94,7 +95,10 @@ class JaegerClient:
         "deny")."""
         if self._proc is None:
             raise JaegerError("not started")
-        self._write(protocol.send_op(text, session))
+        frame = protocol.send_op(text, session)
+        if prompt_path:
+            frame["prompt_path"] = str(prompt_path)
+        self._write(frame)
         for line in self._proc.stdout:        # type: ignore[union-attr]
             frame = protocol.parse(line)
             if frame is None:

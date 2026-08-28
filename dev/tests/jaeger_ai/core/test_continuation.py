@@ -65,6 +65,8 @@ def test_inner_cap_halt_is_not_a_finished_job() -> None:
     assert continuation.hit_inner_cap(
         "hit max_iterations=24 without a final answer")
     assert continuation.hit_inner_cap("hit max_iterations=60 without a final answer")
+    assert continuation.hit_inner_cap("made 60 tool calls in a single turn")
+    assert continuation.hit_inner_cap("empty_response")
     assert not continuation.hit_inner_cap("stalled")
     assert not continuation.hit_inner_cap(None)
     assert not continuation.hit_inner_cap("")
@@ -75,7 +77,8 @@ def test_loop_breaker_halt_is_terminal() -> None:
         "called execute_code with identical arguments 4 times")
     assert continuation.is_loop_breaker(
         "hit the same execute_code failure 2 times")
-    assert continuation.is_loop_breaker("made 25 tool calls in a single turn")
+    assert not continuation.is_loop_breaker("made 25 tool calls in a single turn")
+    assert not continuation.is_loop_breaker("empty_response")
     assert not continuation.is_loop_breaker(
         "hit max_iterations=24 without a final answer")
     assert not continuation.is_loop_breaker(None)

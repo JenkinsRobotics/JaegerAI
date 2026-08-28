@@ -1,0 +1,3 @@
+{"task_id": "coding_001", "instruction": "Write a python function to compute the fibonacci sequence.", "expected_output": "def fibonacci(n):"}
+{"task_id": "coding_002", "instruction": "Write a python script that parses JSON from a file and returns key count.", "expected_output": "import json"}
+{"task_id": "coding_003", "instruction": "Refactor a function to use list comprehension.", "expected_output": "["}

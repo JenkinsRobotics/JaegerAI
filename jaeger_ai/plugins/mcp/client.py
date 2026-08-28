@@ -29,6 +29,7 @@ from typing import Any
 
 # Quiet down the mcp SDK's own logging unless something goes wrong.
 logging.getLogger("mcp").setLevel(logging.WARNING)
+logger = logging.getLogger(__name__)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -64,6 +65,11 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    # "oauth" turns on the ported OAuth flow for an HTTP server (see
+    # jaeger_ai/plugins/mcp/oauth.py). Empty = static headers only, which
+    # is the pre-existing behaviour.
+    auth: str = ""
+    scope: str = ""
 
 
 @dataclass
@@ -165,10 +171,27 @@ class _MCPClient:
 
             # Redirects are deliberately disabled so credentials cannot be
             # forwarded to a different origin by a configured endpoint.
+            # OAuth (ported from hermes-agent). The SDK's OAuthClientProvider
+            # is an httpx auth flow, so it attaches here and transparently
+            # handles the 401 → refresh → retry cycle. None when the server
+            # is configured with static headers, leaving that path untouched.
+            auth_flow = None
+            if self.config.url:
+                try:
+                    from jaeger_ai.plugins.mcp import oauth as _oauth
+                    if _oauth.server_uses_oauth(self.config):
+                        auth_flow = _oauth.get_manager().provider(
+                            self.config.name, self.config.url,
+                            scope=self.config.scope)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "mcp: OAuth setup failed for %r (%s) — connecting "
+                        "without it", self.config.name, exc)
             http_client = await self._exit_stack.enter_async_context(httpx.AsyncClient(
                 headers=self.config.headers,
                 follow_redirects=False,
                 timeout=httpx.Timeout(30.0, read=300.0),
+                auth=auth_flow,
             ))
             transport = await self._exit_stack.enter_async_context(
                 streamable_http_client(self.config.url, http_client=http_client))
@@ -357,6 +380,8 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
                 env=env,
                 url=entry.get("url"),
                 headers=headers,
+                auth=str(entry.get("auth", "") or ""),
+                scope=str(entry.get("scope", "") or ""),
             )
             registry.add_server(config)
         except Exception as exc:

@@ -30,6 +30,15 @@
 # Version is single-sourced from jaeger_ai/__init__.py; runtime deps
 # are single-sourced from requirements.txt.
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+jaeger-agent = { workspace = true }
+jaeger-os = { workspace = true }
+jaeger-kokoro-tts = { workspace = true }
+jaeger-whisper-stt = { workspace = true }
+
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
@@ -97,7 +106,7 @@ jaeger_ai = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent", "jaeger_ai"]
 testpaths = ["dev/tests"]
 addopts = ["--import-mode=importlib"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration

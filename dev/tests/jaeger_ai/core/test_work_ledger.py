@@ -102,6 +102,13 @@ def test_complete_task_paths_exist_spec_passes_when_files_are_there(tmp_path):
     work_ledger(action="update", completed_ids=["1"], remaining_count=0)
     out = complete_task(evidence="item_00.txt written")
     assert out["ok"] is True
+    receipts = out["verification_receipts"]
+    assert receipts[0] == {
+        "kind": "ledger_count", "done": 1, "total": 1, "remaining": 0,
+    }
+    assert receipts[1]["kind"] == "file_sha256"
+    assert receipts[1]["bytes"] == 3
+    assert len(receipts[1]["sha256"]) == 64
 
 
 def test_complete_task_callable_verifier_can_refuse():
@@ -132,6 +139,7 @@ def test_complete_task_succeeds_when_every_item_is_done():
         task_id=task_id, summary="all done", evidence="a and b written",
     )
     assert out["ok"] is True and out["completed"] is True
+    assert out["verification_receipts"][0]["remaining"] == 0
     assert consume_completion()["task_id"] == task_id
     assert consume_completion() is None
 

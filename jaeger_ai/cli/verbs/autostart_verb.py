@@ -12,6 +12,15 @@ deployed unit that should come back after a reboot or power loss. **Opt-in**
 ``enable`` forwards any extra args to ``jaeger`` (e.g.
 ``jaeger autostart enable --tui``); the default is a bare ``jaeger`` — the same
 surface you'd launch by hand.
+
+For unattended 24/7 operation use ``jaeger autostart enable --daemon``. That
+is the combination you almost certainly want: a bare ``jaeger`` boots the
+interactive TUI, and a TUI started by launchd has no terminal attached, so it
+comes up with nowhere to read input from and nowhere useful to draw. The
+``--daemon`` surface (:func:`jaeger_ai.main.run_daemon`) is the headless one —
+heartbeat, cron, board pickup, Deep Think and the ``config.plugins.autostart``
+messaging bridges, no TUI and no stdin, logging to stdout where launchd's
+``StandardOutPath`` captures it.
 """
 
 from __future__ import annotations
@@ -29,6 +38,9 @@ _USAGE = (
     "\n"
     "  enable [args]  install + load a per-user boot/login service that runs\n"
     "                 `jaeger` (args, if any, are forwarded). Opt-in.\n"
+    "                 For 24/7 unattended use: `enable --daemon` (headless;\n"
+    "                 a bare `jaeger` starts the TUI, which has no terminal\n"
+    "                 when launchd starts it).\n"
     "  disable        unload + remove the service.\n"
     "  status         is autostart installed + running?\n"
     "\n"

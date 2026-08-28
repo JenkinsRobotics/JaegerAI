@@ -391,6 +391,62 @@ def available_playbooks(
                              available_tools)
 
 
+_ROUTE_WORD = re.compile(r"[a-z0-9]+")
+_ROUTE_STOP = frozenset({
+    "a", "an", "and", "are", "for", "from", "in", "into", "is", "it",
+    "my", "of", "on", "or", "the", "this", "to", "use", "with", "you",
+})
+
+
+def _route_tokens(text: str) -> set[str]:
+    return {
+        token for token in _ROUTE_WORD.findall((text or "").lower())
+        if len(token) > 2 and token not in _ROUTE_STOP
+    }
+
+
+def match_playbook(
+    query: str,
+    *,
+    available_tools: set[str] | None = None,
+) -> tuple[PlaybookSkill | None, float, str]:
+    """Conservatively select one high-confidence playbook for a request.
+
+    Exact names/aliases win. Lexical matches need multiple weighted signals
+    and a clear margin over the runner-up, preventing a generic word such as
+    ``file`` from silently loading an unrelated long recipe.
+    """
+    clean = " ".join(_ROUTE_WORD.findall((query or "").lower()))
+    qtokens = _route_tokens(clean)
+    if not clean or not qtokens:
+        return None, 0.0, "empty"
+    scored: list[tuple[float, PlaybookSkill, str]] = []
+    for skill in available_playbooks(available_tools):
+        if skill.origin == "marketplace":
+            continue
+        names = [skill.name, *skill.aliases]
+        normalized_names = [" ".join(_ROUTE_WORD.findall(name.lower())) for name in names]
+        exact = next((name for name in normalized_names if name and name in clean), "")
+        if exact:
+            scored.append((100.0 + len(exact.split()), skill, f"exact phrase {exact!r}"))
+            continue
+        name_tokens = set().union(*(_route_tokens(name) for name in names))
+        desc_tokens = _route_tokens(f"{skill.description} {' '.join(skill.tags)} {skill.category}")
+        name_overlap = qtokens & name_tokens
+        desc_overlap = qtokens & desc_tokens
+        score = 6.0 * len(name_overlap) + 2.0 * len(desc_overlap)
+        if len(name_overlap | desc_overlap) >= 2 and score >= 8.0:
+            scored.append((score, skill, f"matched {sorted(name_overlap | desc_overlap)}"))
+    if not scored:
+        return None, 0.0, "no high-confidence match"
+    scored.sort(key=lambda row: (-row[0], row[1].name))
+    best = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    if best[0] < 100.0 and best[0] - runner_up < 2.0:
+        return None, best[0], "ambiguous match"
+    return best[1], best[0], best[2]
+
+
 
 def _short_function(desc: str) -> str:
     """A 3-8 word 'what it does' for the always-on skill menu — first

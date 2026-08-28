@@ -52,6 +52,34 @@ class Card:
     result: str = ""
     attempts: int = 0
 
+    # ── multi-agent coordination state ──────────────────────────────
+    #
+    # Ported from hermes-agent's kanban schema (``tools/kanban_tools.py``,
+    # MIT — Copyright (c) 2025 Nous Research). The donor keeps these in a
+    # SQLite DB at ``~/.hermes/kanban.db``; Jaeger's board is a small JSON
+    # document per instance, so they live on the card instead. That choice
+    # is deliberate rather than lazy: the donor's own rationale for a DB is
+    # cross-process worker access, and Jaeger's workers run in-process
+    # against one instance, so a second storage engine would buy nothing.
+    #
+    # Every field defaults to empty, and ``from_dict`` drops unknown keys,
+    # so a board.json written before this change loads unchanged.
+    assignee: str = ""
+    heartbeat_at: float | None = None
+    # Why a card is parked. ``block_kind`` distinguishes a dependency wait
+    # from a hard failure so an orchestrator can tell "waiting on card X"
+    # from "this needs a human".
+    block_reason: str = ""
+    block_kind: str = ""
+    blocked_by: list[str] = field(default_factory=list)
+    # Review handshake: "" | "requested" | "changes_requested" | "approved".
+    review_state: str = ""
+    review_summary: str = ""
+    review_feedback: str = ""
+    reviewer: str = ""
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -172,6 +200,12 @@ class Board:
             "title", "description", "tags", "priority", "parent", "notes",
             "result", "attempts", "started_at", "finished_at",
             "created_by", "source",
+            # Coordination scalars. The list/append-only fields (comments,
+            # attachments, blocked_by) are deliberately NOT here — they have
+            # dedicated methods that preserve their append-only semantics,
+            # and allowing a blind overwrite through update() would let one
+            # caller silently drop another agent's handoff history.
+            "assignee", "reviewer",
         }
         clean = {k: v for k, v in fields.items() if k in allowed}
         return self._mutate(card_id, lambda c: [setattr(c, k, v) for k, v in clean.items()])
@@ -192,6 +226,155 @@ class Board:
             out[c.column] = out.get(c.column, 0) + 1
         out["total"] = len(cards)
         return out
+
+    # ── multi-agent coordination ────────────────────────────────────
+    #
+    # Ported from hermes-agent's kanban tool surface. Each method is the
+    # store half of one ``kanban_*`` verb; the tool half lives in
+    # ``jaeger_agent/tools/kanban.py``. Splitting them this way keeps the
+    # data layer import-clean (this module must not reach into main.py)
+    # and lets the semantics be tested without a live agent.
+
+    def heartbeat(self, card_id: str, note: str = "") -> Card | None:
+        """Record worker liveness. A long-running worker calls this so an
+        orchestrator can distinguish "still working" from "died holding the
+        card" — without it, an in_progress card is indistinguishable from
+        an abandoned one."""
+        def _apply(c: Card) -> None:
+            c.heartbeat_at = time.time()
+            if note:
+                c.notes = note
+        return self._mutate(card_id, _apply)
+
+    def complete(self, card_id: str, summary: str = "") -> Card | None:
+        """Worker finished. Moves to ``done`` and records the summary."""
+        def _apply(c: Card) -> None:
+            self._apply_move(c, "done")
+            if summary:
+                c.result = summary
+            # Completing clears any parked state so a re-opened card does
+            # not carry a stale block reason.
+            c.block_reason = ""
+            c.block_kind = ""
+        return self._mutate(card_id, _apply)
+
+    def block(self, card_id: str, reason: str, kind: str = "") -> Card | None:
+        """Park a card with a reason."""
+        def _apply(c: Card) -> None:
+            self._apply_move(c, "blocked")
+            c.block_reason = reason
+            c.block_kind = kind
+        return self._mutate(card_id, _apply)
+
+    def unblock(self, card_id: str, column: str = "ready") -> Card | None:
+        """Return a parked card to the flow."""
+        if column not in COLUMNS:
+            column = "ready"
+
+        def _apply(c: Card) -> None:
+            self._apply_move(c, column)
+            c.block_reason = ""
+            c.block_kind = ""
+        return self._mutate(card_id, _apply)
+
+    def request_review(
+        self, card_id: str, summary: str = "", reviewer: str = "",
+    ) -> Card | None:
+        """Worker hands the card back for review rather than closing it."""
+        def _apply(c: Card) -> None:
+            c.review_state = "requested"
+            c.review_summary = summary
+            c.reviewer = reviewer
+            c.review_feedback = ""
+        return self._mutate(card_id, _apply)
+
+    def request_changes(self, card_id: str, reason: str) -> Card | None:
+        """Reviewer bounces the card back to the worker."""
+        def _apply(c: Card) -> None:
+            c.review_state = "changes_requested"
+            c.review_feedback = reason
+            # Back into the flow — a card awaiting rework is not done.
+            self._apply_move(c, "in_progress")
+            c.finished_at = None
+        return self._mutate(card_id, _apply)
+
+    def comment(self, card_id: str, body: str, author: str = "agent") -> Card | None:
+        """Append a comment. Comments are append-only by design — the
+        board is an audit surface for multi-agent handoffs, so editing
+        history would defeat the point."""
+        def _apply(c: Card) -> None:
+            c.comments.append(
+                {"ts": time.time(), "author": author, "body": body})
+        return self._mutate(card_id, _apply)
+
+    def link(self, parent_id: str, child_id: str) -> bool:
+        """Record that ``child_id`` depends on ``parent_id``.
+
+        Refuses self-links and links to unknown cards, and refuses a link
+        that would close a dependency cycle — an orchestrator that follows
+        ``blocked_by`` would otherwise spin forever waiting on a card that
+        is transitively waiting on the one it is trying to unblock.
+        """
+        if parent_id == child_id:
+            return False
+        cards = {c.id: c for c in self._load()}
+        if parent_id not in cards or child_id not in cards:
+            return False
+        if self._would_cycle(cards, parent_id, child_id):
+            return False
+
+        def _apply(c: Card) -> None:
+            if parent_id not in c.blocked_by:
+                c.blocked_by.append(parent_id)
+        return self._mutate(child_id, _apply) is not None
+
+    @staticmethod
+    def _would_cycle(
+        cards: dict[str, Card], parent_id: str, child_id: str,
+    ) -> bool:
+        """True when making *child* depend on *parent* closes a cycle —
+        i.e. *parent* already depends on *child*, directly or through a
+        chain. Walks with an explicit seen-set so an already-corrupt board
+        cannot hang the walk."""
+        seen: set[str] = set()
+        stack = [parent_id]
+        while stack:
+            node = stack.pop()
+            if node == child_id:
+                return True
+            if node in seen:
+                continue
+            seen.add(node)
+            card = cards.get(node)
+            if card:
+                stack.extend(card.blocked_by)
+        return False
+
+    def attach(
+        self,
+        card_id: str,
+        *,
+        kind: str,
+        ref: str,
+        filename: str = "",
+        content_type: str = "",
+    ) -> Card | None:
+        """Attach a file path or URL to a card.
+
+        The donor stores uploaded bytes as base64 blobs in its DB. Jaeger
+        stores a *reference* instead — the board is a JSON document that is
+        rewritten whole on every mutation, so inlining artifact bytes would
+        make each unrelated card update rewrite them too.
+        """
+        def _apply(c: Card) -> None:
+            c.attachments.append({
+                "kind": kind,
+                "ref": ref,
+                "filename": filename or (ref.rsplit("/", 1)[-1] if ref else ""),
+                "content_type": content_type,
+                "added_at": time.time(),
+            })
+        return self._mutate(card_id, _apply)
 
     # ── internals ───────────────────────────────────────────────────
 
