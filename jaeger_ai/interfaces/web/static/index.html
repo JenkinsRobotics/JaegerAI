@@ -3,22 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
   <title>JaegerAI</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <aside>
-    <div class="brand"><span class="mark">J</span><div><strong id="agentName">JaegerAI</strong><small>autonomous agent</small></div></div>
-    <button id="newChat">＋ New conversation</button>
-    <div class="section-label">Conversations</div>
-    <div id="sessions" class="sessions"></div>
+    <div class="brand"><span class="mark">J</span><div><strong id="agentName">JaegerAI</strong><small>native autonomous agent</small></div></div>
+    <button id="newChat" class="wide">＋ New conversation</button>
+    <nav><button class="nav active" data-panel="chat">Chat</button><button class="nav" data-panel="tools">Tools</button><button class="nav" data-panel="automation">Automation</button></nav>
+    <div class="section-label">Conversations</div><div id="sessions" class="sessions"></div>
     <div class="runtime"><span id="healthDot"></span><div><strong id="runtimeState">Connecting</strong><small id="modelName">Checking runtime…</small></div></div>
   </aside>
   <main>
-    <header><div><strong id="title">New conversation</strong><small>Jaeger-owned session · ARES-derived interface</small></div><div class="pill">Mac Ollama</div></header>
-    <section id="messages" class="messages"><div class="welcome"><div class="orb">J</div><h1>JaegerAI</h1><p>Your independent autonomous agent. Sessions, tools, memory, and schedules remain owned by Jaeger.</p></div></section>
-    <form id="composer"><textarea id="prompt" rows="1" placeholder="Message Jaeger…"></textarea><button type="submit" aria-label="Send">↑</button></form>
+    <header><div><strong id="title">New conversation</strong><small>Jaeger-owned state · Hermes-WebUI-derived interface</small></div><div class="head-actions"><button id="modelButton" class="pill">Mac Ollama</button><a class="pill" href="http://127.0.0.1:8788">ARES</a></div></header>
+    <section id="chatPanel" class="panel active"><div id="messages" class="messages"><div class="welcome"><div class="orb">J</div><h1>JaegerAI</h1><p>Native reasoning, memory, tools and schedules—owned by Jaeger and connected independently to Mac Ollama.</p></div></div><form id="composer"><textarea id="prompt" rows="1" placeholder="Message Jaeger…"></textarea><button type="submit" aria-label="Send">↑</button></form></section>
+    <section id="toolsPanel" class="panel inspector"><div class="panel-title"><div><span class="eyebrow">CAPABILITIES</span><h1>Jaeger tools</h1></div><button id="refreshTools">Refresh</button></div><div id="tools" class="cards"></div></section>
+    <section id="automationPanel" class="panel inspector"><div class="panel-title"><div><span class="eyebrow">AUTONOMY</span><h1>Heartbeat and schedules</h1></div><button id="refreshAutomation">Refresh</button></div><div id="heartbeat" class="summary"></div><form id="scheduleForm" class="schedule-form"><input id="scheduleName" placeholder="Schedule name" required><input id="scheduleCron" placeholder="Cron, e.g. 0 9 * * *" required><input id="schedulePrompt" placeholder="Prompt to run" required><button type="submit">Create schedule</button></form><div id="schedules" class="cards"></div></section>
   </main>
+  <dialog id="approvalDialog"><h2>Jaeger requests approval</h2><pre id="approvalText"></pre><div class="dialog-actions"><button data-answer="deny">Deny</button><button data-answer="once" class="primary">Allow once</button><button data-answer="always">Always allow</button></div></dialog>
+  <dialog id="modelDialog"><h2>Serving model</h2><div id="models" class="cards compact"></div><button onclick="this.closest('dialog').close()">Close</button></dialog>
   <script src="/app.js"></script>
 </body>
 </html>
