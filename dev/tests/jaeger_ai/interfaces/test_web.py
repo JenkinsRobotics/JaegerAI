@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import threading
 import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+import pytest
 
 from jaeger_ai.cli.entry import _route
 from jaeger_ai.interfaces.web.server import JaegerWebServer
@@ -38,8 +41,8 @@ def test_cli_routes_web_surface():
     ]
 
 
-def test_health_endpoint_uses_bridge_contract():
-    server = JaegerWebServer(("127.0.0.1", 0), "test")
+def test_health_endpoint_uses_bridge_contract(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     server.bridge = _Bridge()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -58,8 +61,8 @@ def _post(url, body):
         return json.load(response)
 
 
-def test_streamed_chat_and_commands_use_versioned_bridge_contract():
-    server = JaegerWebServer(("127.0.0.1", 0), "test")
+def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _Bridge()
     server.bridge = bridge
     server.chats.bridge = bridge
@@ -67,21 +70,33 @@ def test_streamed_chat_and_commands_use_versioned_bridge_contract():
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
     try:
-        started = _post(f"{base}/api/chat/start", {"message": "world", "session_id": "s1"})
-        with urlopen(f"{base}/api/chat/stream?id={started['stream_id']}") as response:
-            stream = response.read().decode()
-        assert '\"type\": \"delta\"' in stream
-        assert '\"type\": \"reasoning\"' in stream
-        assert '\"type\": \"reply\"' in stream
-        assert "event: done" in stream
+        started = _post(f"{base}/v1/runs", {
+            "message": "world",
+            "session_id": "s1",
+            "provider": "ollama",
+            "model": "qwen:latest",
+        })
+        run_id = started["run_id"]
+        deadline = time.time() + 2
+        observed = {"events": []}
+        while time.time() < deadline:
+            with urlopen(f"{base}/v1/runs/{run_id}/events") as response:
+                observed = json.load(response)
+            if any(row["event"] == "done" for row in observed["events"]):
+                break
+            time.sleep(0.01)
 
-        _post(f"{base}/api/models/select", {"provider": "ollama", "model": "qwen:latest"})
-        _post(f"{base}/api/schedules", {"name": "daily", "schedule": "0 9 * * *", "prompt": "brief"})
-        _post(f"{base}/api/schedules/pause", {"id": "daily"})
+        assert [row["event"] for row in observed["events"]] == [
+            "token", "reasoning", "done",
+        ]
+        assert observed["events"][0]["payload"] == {"text": "hello "}
+        assert observed["events"][-1]["payload"]["session"]["session_id"] == "s1"
+        with urlopen(f"{base}/v1/runs/{run_id}") as response:
+            status = json.load(response)
+        assert status["status"] == "completed"
+        assert status["terminal_state"] == "completed"
         assert bridge.commands == [
             ("configure_model", {"provider": "ollama", "model": "qwen:latest"}),
-            ("create_schedule", {"name": "daily", "schedule": "0 9 * * *", "prompt": "brief"}),
-            ("pause_schedule", {"id": "daily"}),
         ]
     finally:
         server.shutdown()
@@ -89,8 +104,41 @@ def test_streamed_chat_and_commands_use_versioned_bridge_contract():
         thread.join(timeout=2)
 
 
-def test_approval_broker_is_fail_closed_and_resolvable():
-    server = JaegerWebServer(("127.0.0.1", 0), "test")
+def test_runner_service_does_not_serve_the_retired_custom_ui(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server.bridge = _Bridge()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(HTTPError) as exc:
+            urlopen(f"http://127.0.0.1:{server.server_port}/")
+        assert exc.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+
+    class CatalogBridge(_Bridge):
+        def query(self, what, args=None):
+            if what == "model_catalog":
+                return {"models": [
+                    {"id": "gemma-4-26b:latest", "provider": "ollama"},
+                    {"id": "glm-5.2:cloud", "provider": "ollama-cloud"},
+                ]}
+            return super().query(what, args)
+
+    server.runner.bridge = CatalogBridge()
+    assert server.runner._jaeger_provider("openai-api", "gemma-4-26b:latest") == "ollama"
+    assert server.runner._jaeger_provider("openai-api", "glm-5.2:cloud") == "ollama-cloud"
+    server.server_close()
+
+
+def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     answer = []
     waiter = threading.Thread(target=lambda: answer.append(server.approvals.request({"id": "req-1", "prompt": "Run tool?"})))
     waiter.start()

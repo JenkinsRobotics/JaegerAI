@@ -45,6 +45,14 @@ class BridgeClient:
     def command(self, command: str, args: dict[str, Any] | None = None) -> Any:
         return self._request({"op": "command", "cmd": command, "args": args or {}})
 
+    def control(self, operation: str, **payload: Any) -> None:
+        """Send a fire-and-forget bridge control such as cancel or steer."""
+        if operation not in {"cancel", "steer"}:
+            raise ValueError(f"unsupported bridge control: {operation}")
+        with self._connection() as (_sock, rx):
+            self._ready(rx)
+            self._write(rx, {"op": operation, **payload})
+
     def turn(self, text: str, session: str,
              on_event: Callable[[dict[str, Any]], None] | None = None,
              on_request: Callable[[dict[str, Any]], str] | None = None) -> dict[str, Any]:
