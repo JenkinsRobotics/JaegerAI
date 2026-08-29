@@ -132,21 +132,29 @@ deployed AI that plays one, with its own memory + config:
 
 ### Hermes WebUI adapter
 
-Jaeger exposes a loopback runner adapter for an unmodified Hermes WebUI
-instance. Start the adapter separately from the WebUI:
+Jaeger pins its attributed Hermes WebUI fork at `vendor/hermes-webui`. Clone
+JaegerAI with `--recurse-submodules` (or run `git submodule update --init`) and
+start the loopback adapter separately from the browser server:
 
 ```bash
 ./jaeger web --host 127.0.0.1 --port 8791 --instance <agent-name>
 ```
 
-Configure Hermes WebUI with `HERMES_WEBUI_RUNTIME_ADAPTER=runner-local` and
+Configure the pinned WebUI with `HERMES_WEBUI_RUNTIME_ADAPTER=runner-local` and
 `HERMES_WEBUI_RUNNER_BASE_URL=http://127.0.0.1:8791`. Hermes WebUI can then
 serve the browser on port `8790`, while Jaeger remains the runtime owner for
-sessions, streamed chat and reasoning, model selection, tools, and approvals
-through its versioned bridge. This adapter does not run or import Hermes Agent,
-does not serve a custom frontend, and stores no state under `~/.hermes`.
+sessions, streamed chat and reasoning, model selection, tools, approvals,
+heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
+launch path runs `vendor/hermes-webui/server.py` directly: it does not discover,
+run, or import Hermes Agent and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
 `jaeger_ai/interfaces/web/THIRD_PARTY_NOTICES.md`.
+
+For the standard native development layout, start the browser process with:
+
+```bash
+./scripts/run-jaeger-webui.sh
+```
 
 The optional `jaeger_ai/assets/jaeger_webui_branding.js` extension replaces
 the browser favicon and Apple touch icon with Jaeger's existing Mac app icon.

@@ -79,6 +79,106 @@ def _post(url, body):
         return json.load(response)
 
 
+class _ScheduleBridge(_Bridge):
+    def __init__(self):
+        super().__init__()
+        self.jobs = [{
+            "name": "morning",
+            "cron": "0 9 * * *",
+            "prompt": "Prepare my morning brief",
+            "created_at": "2026-08-29T09:00:00+00:00",
+            "next_run_at": "2026-08-30T16:00:00+00:00",
+            "last_run_at": None,
+            "cancelled": False,
+            "status": "active",
+            "paused": False,
+        }]
+
+    def query(self, what, args=None):
+        if what == "list_schedules":
+            return {"count": len(self.jobs), "schedules": list(self.jobs)}
+        if what == "cron":
+            return {
+                "scheduler": "jaeger",
+                "count": len(self.jobs),
+                "jobs": list(self.jobs),
+                "running": {},
+            }
+        if what == "heartbeat":
+            return {"enabled": True, "interval_minutes": 30}
+        return super().query(what, args)
+
+
+def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    bridge = _ScheduleBridge()
+    server.bridge = bridge
+    server.runner.bridge = bridge
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urlopen(f"{base}/v1/scheduler/status") as response:
+            status = json.load(response)
+        assert status == {
+            "configured": True,
+            "running": True,
+            "owner": "jaeger",
+            "scheduler": "jaeger",
+            "heartbeat": {"enabled": True, "interval_minutes": 30},
+        }
+
+        with urlopen(f"{base}/v1/schedules") as response:
+            payload = json.load(response)
+        assert payload["jobs"] == [{
+            "id": "morning",
+            "name": "morning",
+            "prompt": "Prepare my morning brief",
+            "schedule": {"kind": "cron", "expression": "0 9 * * *"},
+            "schedule_display": "0 9 * * *",
+            "enabled": True,
+            "state": "active",
+            "created_at": "2026-08-29T09:00:00+00:00",
+            "next_run_at": "2026-08-30T16:00:00+00:00",
+            "last_run_at": None,
+            "last_status": None,
+            "deliver": "local",
+            "skills": [],
+            "profile": None,
+            "provider": None,
+            "model": None,
+            "no_agent": False,
+            "toast_notifications": True,
+        }]
+
+        created = _post(f"{base}/v1/schedules/create", {
+            "name": "evening",
+            "schedule": "0 18 * * *",
+            "prompt": "Summarize today",
+        })
+        assert created["ok"] is True
+        assert bridge.commands[-1] == (
+            "create_schedule",
+            {
+                "name": "evening",
+                "schedule": "0 18 * * *",
+                "prompt": "Summarize today",
+                "deliver": "local",
+            },
+        )
+
+        assert _post(f"{base}/v1/schedules/morning/pause", {})["ok"] is True
+        assert _post(f"{base}/v1/schedules/morning/resume", {})["ok"] is True
+        assert _post(f"{base}/v1/schedules/morning/cancel", {})["ok"] is True
+        assert [name for name, _args in bridge.commands[-3:]] == [
+            "pause_schedule", "resume_schedule", "cancel_schedule",
+        ]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
     server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _Bridge()

@@ -1,11 +1,13 @@
 # Third-party notices
 
-JaegerAI's runner adapter is designed to interoperate with a separately
-installed Hermes WebUI, copyright 2025 Hermes Web UI Contributors, licensed
-under the MIT License. The full license text is available in the upstream
-project: https://github.com/nesquena/hermes-webui/blob/main/LICENSE
+JaegerAI pins the `JenkinsRobotics/hermes-webui` fork under
+`vendor/hermes-webui`. Hermes WebUI is copyright 2025 Hermes Web UI
+Contributors and licensed under the MIT License. The complete license text is
+included at `vendor/hermes-webui/LICENSE`; upstream is
+https://github.com/nesquena/hermes-webui.
 
-No Hermes WebUI frontend source is copied into JaegerAI. JaegerAI does not
-include, import, or execute Hermes Agent. Hermes WebUI communicates with this
-adapter over its `runner-local` contract; the adapter communicates only with
-JaegerAI's versioned bridge protocol.
+The fork supplies the browser workbench and translates its runner-local chat
+and scheduler interfaces onto JaegerAI's versioned bridge. Jaeger owns the
+agent runtime, sessions, tools, approvals, heartbeat, schedules, and all state
+under `~/.jaeger_ai`. Hermes Agent is not included or imported by the Jaeger
+runtime or its WebUI launch path.
