@@ -155,6 +155,15 @@ def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path)
     server.server_close()
 
 
+def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    try:
+        assert server.runner._jaeger_provider("ollama-local", "gemma-4-26b:latest") == "ollama"
+        assert server.runner._jaeger_provider("ollama-cloud", "glm-5.2:cloud") == "ollama"
+    finally:
+        server.server_close()
+
+
 def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
     server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     answer = []

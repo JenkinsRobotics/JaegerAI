@@ -269,6 +269,12 @@ class RunnerBroker:
     def _jaeger_provider(self, requested: str, model: str) -> str:
         """Translate a WebUI transport provider into Jaeger's model owner."""
         requested = requested.strip().lower()
+        if requested in {"ollama-local", "ollama-cloud"}:
+            # The genuine Hermes WebUI splits the Mac Ollama daemon's catalog
+            # into user-facing local/cloud lanes.  Both lanes still execute
+            # through that one local daemon; cloud tags are Ollama-authenticated
+            # proxies, not a second direct https://ollama.com connection.
+            return "ollama"
         if requested in {
             "local", "ollama", "ollama-cloud", "lmstudio",
             "openai", "anthropic", "gemini", "xai",
