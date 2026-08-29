@@ -53,6 +53,8 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":
         return [py, "-m", "jaeger_ai.interfaces.mcp_server", *rest]
+    if cmd in ("web", "webui"):
+        return [py, "-m", "jaeger_ai.interfaces.web", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
     if cmd == "update":
