@@ -57,17 +57,21 @@ def _update_check() -> Any:
 
 def _probe_fda() -> bool | None:
     """True/False if we can determine Full Disk Access for this process, None
-    if undeterminable. Probes a TCC-gated path (`TCC.db`) — readable only with
-    FDA granted."""
+    if undeterminable. Probes TCC-gated paths — readable only with FDA granted."""
     from pathlib import Path
-    probe = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
-    try:
-        with open(probe, "rb"):
-            return True
-    except PermissionError:
-        return False
-    except OSError:
-        return None
+    probes = [
+        Path("/Library/Application Support/com.apple.TCC/TCC.db"),
+        Path.home() / "Library/Safari/Bookmarks.plist",
+    ]
+    for probe in probes:
+        try:
+            with open(probe, "rb"):
+                return True
+        except PermissionError:
+            return False
+        except OSError:
+            continue
+    return None
 
 
 def _fda_check() -> Any | None:
