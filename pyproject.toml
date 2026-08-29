@@ -30,8 +30,17 @@
 # Version is single-sourced from jaeger_ai/__init__.py; runtime deps
 # are single-sourced from requirements.txt.
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+jaeger-agent = { workspace = true }
+jaeger-os = { workspace = true }
+jaeger-kokoro-tts = { workspace = true }
+jaeger-whisper-stt = { workspace = true }
+
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=83"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -47,6 +56,11 @@ dynamic = ["version", "dependencies"]
 # 'jaeger-ai[aec]'` works without the operator needing to know it's
 # actually a jaeger-os extra.
 aec = ["speexdsp>=0.1.1"]
+# Standalone wake-word engine. An extra, not a base dependency: it pulls
+# tflite-runtime, which ships no cp312 wheel, and nothing in the tree
+# imports it today (the shipped wake-word path is the STT layer's
+# ``require_wake_word``). Install with `pip install 'jaeger-ai[wakeword]'`.
+wakeword = ["openwakeword>=0.6"]
 
 [project.scripts]
 jaeger = "jaeger_ai.cli.entry:main"
@@ -89,10 +103,11 @@ jaeger_ai = [
     "interfaces/swift/Resources/**/*", "interfaces/swift/Scripts/*.sh",
     "interfaces/avatar/Package.swift", "interfaces/avatar/Sources/**/*.swift",
     "interfaces/avatar/Resources/**/*",
+    "interfaces/web/static/**/*",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent", "jaeger_ai"]
 testpaths = ["dev/tests"]
 addopts = ["--import-mode=importlib"]
 # Marker tiers — the bench, daemon, model-load, UI, and integration

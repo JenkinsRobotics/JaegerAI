@@ -102,7 +102,12 @@ def test_spotlight_search_respects_limit_and_flags_truncated(monkeypatch):
     assert result["truncated"] is True
 
 
-def test_spotlight_search_empty_query_is_rejected():
+def test_spotlight_search_empty_query_is_rejected(monkeypatch):
+    # Both the macOS gate and the mdfind-on-PATH check fire before the
+    # empty-query check, so on a Linux runner this saw those errors instead.
+    # Pin both, like its siblings.
+    monkeypatch.setattr(spotlight.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(spotlight.shutil, "which", lambda name: "/usr/bin/mdfind")
     result = spotlight.spotlight_search()
     assert result["searched"] is False
     assert "empty search" in result["error"]

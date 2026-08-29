@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 # consistent between the legacy code path and the new adapter.
 KNOWN_PROVIDERS: frozenset[str] = frozenset({
     "openai", "lmstudio", "ollama", "ollama-cloud", "gemini",
+    "openrouter", "groq", "deepseek", "vllm", "together",
 })
 
 # Local servers accept any non-empty key — supply a placeholder so the
@@ -59,6 +60,7 @@ KNOWN_PROVIDERS: frozenset[str] = frozenset({
 _LOCAL_PLACEHOLDER_KEYS: dict[str, str] = {
     "lmstudio": "lm-studio",
     "ollama": "ollama",
+    "vllm": "vllm",
 }
 
 
@@ -429,6 +431,16 @@ class OpenAIAdapter(ProviderAdapter):
         if raw_tool_calls is None and isinstance(message, dict):
             raw_tool_calls = message.get("tool_calls")
 
+        # OpenAI-compatible reasoning providers use both names in the wild:
+        # Ollama/Qwen commonly emits ``reasoning`` while DeepSeek-compatible
+        # endpoints often emit ``reasoning_content``. Preserve either under
+        # Jaeger's provider-neutral key so the bridge can surface it.
+        reasoning = getattr(message, "reasoning", None)
+        if reasoning is None:
+            reasoning = getattr(message, "reasoning_content", None)
+        if reasoning is None and isinstance(message, dict):
+            reasoning = message.get("reasoning") or message.get("reasoning_content")
+
         tool_calls = _from_openai_tool_calls(raw_tool_calls)
 
         usage = getattr(raw, "usage", None) or (
@@ -446,6 +458,8 @@ class OpenAIAdapter(ProviderAdapter):
             finish_reason = choice.get("finish_reason")
 
         out: Message = {"role": "assistant", "content": content or None}
+        if reasoning:
+            out["reasoning"] = str(reasoning)
         if tool_calls:
             out["tool_calls"] = tool_calls
         if finish_reason:
@@ -518,6 +532,7 @@ def _aggregate_chat_stream(
     repairs it downstream exactly as in the non-streamed path.
     """
     content_parts: list[str] = []
+    reasoning_parts: list[str] = []
     calls_by_index: dict[int, dict[str, Any]] = {}
     finish_reason: Any = None
     usage: Any = None
@@ -543,6 +558,11 @@ def _aggregate_chat_stream(
                     content_parts.append(piece)
                     if on_delta is not None:
                         on_delta(piece)
+                reason_piece = _get(delta, "reasoning")
+                if reason_piece is None:
+                    reason_piece = _get(delta, "reasoning_content")
+                if reason_piece:
+                    reasoning_parts.append(str(reason_piece))
                 for tc in _get(delta, "tool_calls") or []:
                     idx = _get(tc, "index")
                     idx = 0 if idx is None else int(idx)
@@ -583,6 +603,8 @@ def _aggregate_chat_stream(
         "role": "assistant",
         "content": "".join(content_parts) or None,
     }
+    if reasoning_parts:
+        message["reasoning"] = "".join(reasoning_parts)
     if calls_by_index:
         message["tool_calls"] = [
             {

@@ -79,6 +79,16 @@ class AgentConfig(BaseModel):
             "(ANTHROPIC_API_KEY / OPENAI_API_KEY). Local servers need none."
         ),
     )
+    organization: str = Field(
+        "",
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Optional OpenAI/Azure organization or tenant ID.",
+    )
+    api_mode: str = Field(
+        "",
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Optional provider API mode override (e.g. 'azure', 'openrouter', 'direct').",
+    )
     system_prompt: str = Field(
         "",
         json_schema_extra=_setting("agent"),
@@ -113,6 +123,21 @@ class AgentConfig(BaseModel):
             "Tool-call rounds allowed in one turn before the loop backstop "
             "halts it. Guards against a model that never stops calling tools."
         ),
+    )
+    turn_max_elapsed_s: float = Field(
+        0.0, ge=0.0, le=86_400.0,
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Whole-turn wall-clock ceiling in seconds. 0 disables it; in-flight side effects are never killed.",
+    )
+    turn_max_tokens: int = Field(
+        0, ge=0, le=10_000_000,
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Cumulative provider-reported token ceiling per turn. 0 disables it.",
+    )
+    turn_max_tool_cost: float = Field(
+        0.0, ge=0.0, le=1_000_000.0,
+        json_schema_extra=_setting("agent", advanced=True),
+        description="Normalized tool-cost ceiling per turn. 0 disables it.",
     )
 
     # ── llama_cpp only ───────────────────────────────────────────────

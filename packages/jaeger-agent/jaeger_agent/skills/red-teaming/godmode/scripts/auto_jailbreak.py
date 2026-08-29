@@ -17,6 +17,7 @@ Usage in execute_code:
 
 import os
 import json
+import runpy
 import time
 import yaml
 from pathlib import Path
@@ -40,18 +41,24 @@ except NameError:
 _SCRIPTS_DIR = _SKILL_DIR / "scripts"
 _TEMPLATES_DIR = _SKILL_DIR / "templates"
 
-# Import parseltongue and godmode_race — load into caller's globals
+# Import the two sibling helpers without mutating an arbitrary caller's
+# globals. ``run_path`` works for both direct execution and the skill loader,
+# despite this directory not being an importable Python package (its parent
+# is intentionally named ``red-teaming``).
 _parseltongue_path = _SCRIPTS_DIR / "parseltongue.py"
 _race_path = _SCRIPTS_DIR / "godmode_race.py"
 
-# Use the calling frame's globals so functions are accessible everywhere
-import inspect as _inspect
-_caller_globals = _inspect.stack()[0][0].f_globals if len(_inspect.stack()) > 0 else globals()
+def _load_helper(path, name):
+    if not path.is_file():
+        raise RuntimeError(f"required godmode helper is missing: {path}")
+    helper = runpy.run_path(str(path)).get(name)
+    if not callable(helper):
+        raise RuntimeError(f"godmode helper {name!r} is missing from {path}")
+    return helper
 
-if _parseltongue_path.exists():
-    exec(compile(open(_parseltongue_path).read(), str(_parseltongue_path), 'exec'), _caller_globals)
-if _race_path.exists():
-    exec(compile(open(_race_path).read(), str(_race_path), 'exec'), _caller_globals)
+
+escalate_encoding = _load_helper(_parseltongue_path, "escalate_encoding")
+score_response = _load_helper(_race_path, "score_response")
 
 # ═══════════════════════════════════════════════════════════════════
 # Hermes config paths

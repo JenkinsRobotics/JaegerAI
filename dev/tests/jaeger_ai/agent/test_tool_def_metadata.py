@@ -18,6 +18,9 @@ from pydantic import BaseModel
 
 from jaeger_agent.dialects import normalize_tool_name
 from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_os.core.tools.tool_registry import (
+    get_tool, register_tool_from_function, unregister_tool,
+)
 
 
 class _Args(BaseModel):
@@ -93,6 +96,40 @@ def test_is_available_check_fn_wins_over_requires_env(monkeypatch):
     monkeypatch.delenv("MISSING_VAR", raising=False)
     t = _td(check_fn=lambda: True, requires_env=("MISSING_VAR",))
     assert t.is_available() is True
+
+
+def test_registration_decorator_preserves_availability_metadata():
+    @register_tool_from_function(
+        name="_metadata_probe",
+        toolset="probe_set",
+        permission_tier="read_only",
+        side_effect="read",
+        max_result_chars=123,
+        check_fn=lambda: False,
+        requires_env=("IGNORED_BY_CHECK_FN",),
+        examples=("call _metadata_probe()",),
+    )
+    def probe() -> str:
+        return "ok"
+
+    try:
+        tool = get_tool("_metadata_probe")
+        assert tool.toolset == "probe_set"
+        assert tool.permission_tier == "read_only"
+        assert tool.side_effect == "read"
+        assert tool.max_result_chars == 123
+        assert tool.is_available() is False
+        assert tool.examples == ("call _metadata_probe()",)
+    finally:
+        unregister_tool("_metadata_probe")
+
+
+def test_agent_catalog_filter_hides_unavailable_tools():
+    from jaeger_agent.loop.jaeger_agent import _filter_available_tools
+
+    tools = [_td(name="ready", check_fn=lambda: True),
+             _td(name="blocked", check_fn=lambda: False)]
+    assert [tool.name for tool in _filter_available_tools(tools)] == ["ready"]
 
 
 # ── alias resolution ──────────────────────────────────────────────

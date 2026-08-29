@@ -36,12 +36,16 @@
   order that previously failed.
 - `LedgerToolExecutor` is the production default; `run_id` is bound on
   every turn. `TurnExecutive` persists the run when `state.db` is bound.
+- External tool results checkpoint through `set_effect_checkpoint`.
+- `TurnExecutive` is constructed with `SqliteKnowledgeStore`, so claims and
+  belief revision participate in production turns.
 - Canonical progress: `docs/architecture/master-build-status.md`.
 
 ## NEXT
 
-- Checkpoint after each external tool, not only after the turn.
-- Wire claims/beliefs into a turn (KnowledgeStore exists).
+- Implement the multi-dimensional/adaptive budget work prioritized in
+  `prime-framework-gap-audit-2026-08-25.md`.
+- Add first-class halted-turn resume controls to the ARES Dispatcher surface.
 - GitHub Actions has not run against this tree.
 
 ## DEPRECATED

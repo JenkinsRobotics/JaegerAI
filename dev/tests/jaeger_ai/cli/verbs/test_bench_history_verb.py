@@ -25,6 +25,16 @@ def fake_repo(tmp_path, monkeypatch):
     (bench / "sweep").mkdir(parents=True)
     (bench / "results").mkdir()
     monkeypatch.setattr(bhv, "_repo_root", lambda: tmp_path)
+    # The archived-runs section is gated on which models are actually on
+    # disk, and _installed_model_stems() reads the REAL repo, not this
+    # fake one — so without pinning it these tests read the developer's
+    # machine. Worse, the gate is `not installed or model in installed`:
+    # on a machine with no models (any CI runner) it degrades to "show
+    # every archived row", which is the opposite of the local result.
+    # Pin a fixed non-empty set that contains none of the synthetic model
+    # names below, so the section renders identically everywhere.
+    monkeypatch.setattr(bhv, "_installed_model_stems",
+                        lambda **_kw: {"pinned-installed-model"})
     return tmp_path
 
 

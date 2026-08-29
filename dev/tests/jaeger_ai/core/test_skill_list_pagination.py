@@ -118,3 +118,21 @@ def test_list_unknown_category_returns_empty_with_counts(fake_playbooks):
     assert out["skills"] == []
     # Category counts still surface so the model can correct.
     assert "code" in out["category_counts"]
+
+
+def test_skill_view_returns_complete_instructions(tmp_path, monkeypatch):
+    body = "# Long skill\n" + ("follow every instruction\n" * 1000)
+    skill_file = tmp_path / "SKILL.md"
+    skill_file.write_text(body, encoding="utf-8")
+    playbook = SimpleNamespace(
+        name="long-skill", category="testing", description="",
+        tags=[], path=skill_file, tier="standard", requires_tools=[],
+        origin="test",
+    )
+    monkeypatch.setattr(skill_tool._pb, "find_playbook", lambda _name: playbook)
+
+    result = skill_tool.skill(action="view", name="long-skill")
+
+    assert result["ok"] is True
+    assert result["instructions"] == body
+    assert result["truncated"] is False

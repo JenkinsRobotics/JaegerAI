@@ -52,8 +52,25 @@ _BATCH_HINT = re.compile(
     r"handle|finish)\b.{0,80}?\b(?:all |every |these )?\d{2,}\s+"
     r"(?:items?|files?|rows?|entries|notes?|folders?|records)\b|"
     r"\bbatch[- ](?:process|job|operation|run)\b|"
+    r"(?:audit|organi[sz]e|sync|deduplicat(?:e|ing)|merge|restructur(?:e|ing))"
+    r"\b.{0,120}?\b(?:bookmarks?|files|folders|records|entries|notes|"
+    r"libraries|collections)\b|"
     r"^/goal\b"
 )
+
+_COUNTED_SCOPE = re.compile(
+    r"(?i)\b(\d{1,7})\s+(?:items?|files?|rows?|entries|notes?|folders?|records|bookmarks?)\b"
+)
+_PATH_TOKEN = re.compile(
+    r"(?<!https:)(?<!http:)(?:`([^`]+)`|\b([\w./~-]+\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf)))"
+)
+
+ACCEPTANCE_GUIDANCE = """[Acceptance Contract]
+This is durable multi-step work. A work ledger has been opened automatically.
+Update it from actual inventory/tool results, not estimates. A prose claim such
+as "done" or "all pass" cannot finish the run. Inspect the produced state,
+record verification evidence, and call complete_task only after every ledger
+item or required phase is complete and its machine checks pass."""
 
 TurnFn = Callable[..., dict[str, Any]]
 ProgressFn = Callable[[dict[str, Any]], None]
@@ -96,6 +113,61 @@ def should_run_autonomous(text: str = "") -> bool:
     if _goal_active():
         return True
     return looks_like_batch(text)
+
+
+def _batch_total(text: str) -> int | None:
+    match = _COUNTED_SCOPE.search(text or "")
+    if match is None:
+        return None
+    return max(1, int(match.group(1)))
+
+
+def _required_paths(text: str) -> list[str]:
+    paths: list[str] = []
+    for match in _PATH_TOKEN.finditer(text or ""):
+        raw = (match.group(1) or match.group(2) or "").strip()
+        if (
+            not raw or "://" in raw or raw in paths
+            or not re.search(r"[/\\]|\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf)$", raw, re.I)
+            or "\n" in raw
+        ):
+            continue
+        paths.append(raw)
+    return paths[:24]
+
+
+def ensure_autonomous_ledger(text: str) -> Any:
+    """Open a fail-closed ledger for a high-confidence durable request.
+
+    Counted requests use the stated inventory total. Uncounted but clearly
+    durable requests use three observable phases so the run cannot terminate
+    before inspection, execution, and verification have each been recorded.
+    Existing ledgers are never replaced.
+    """
+    existing = active_ledger()
+    if existing is not None:
+        return existing
+    if not should_run_autonomous(text):
+        return None
+    from jaeger_ai.core.runtime.work_ledger import work_ledger
+
+    total = _batch_total(text)
+    paths = _required_paths(text)
+    verify = {"kind": "paths_exist", "paths": paths} if paths else None
+    task_name = " ".join((text or "").strip().split())[:160] or "autonomous task"
+    if total is not None:
+        result = work_ledger(
+            action="create", task_name=task_name,
+            total_items=total, remaining_count=total, verify=verify,
+        )
+    else:
+        phases = ["inspect", "execute", "verify"]
+        result = work_ledger(
+            action="create", task_name=task_name,
+            total_items=len(phases), remaining_ids=phases,
+            remaining_count=len(phases), verify=verify,
+        )
+    return active_ledger() if result.get("ok") else None
 
 
 def _tool_named(tool_activity: list[Any] | None, name: str) -> bool:
@@ -402,10 +474,12 @@ def run_worker_goal(
 
 __all__ = [
     "HARNESS_PREFIX",
+    "ACCEPTANCE_GUIDANCE",
     "WORKER_PREAMBLE",
     "AutonomousGoalRunner",
     "looks_like_batch",
     "should_run_autonomous",
+    "ensure_autonomous_ledger",
     "ledger_open",
     "harness_prompt",
     "next_continuation_prompt",

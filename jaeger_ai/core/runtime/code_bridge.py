@@ -48,7 +48,6 @@ import json
 import os
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -319,8 +318,6 @@ def run_bridged_script(
             "use run_python and the ordinary tools on this platform"
         )
 
-    cwd = Path(workspace) if workspace is not None else Path.cwd()
-
     # 0700 so the socket is reachable only by this user, and torn down
     # with the directory when the call ends.
     with tempfile.TemporaryDirectory(prefix="jaeger-bridge-") as tmp:
@@ -330,23 +327,39 @@ def run_bridged_script(
         (tmpdir / "jaeger_tools.py").write_text(_STUB_SOURCE, encoding="utf-8")
         script_path = tmpdir / "script.py"
         script_path.write_text(code, encoding="utf-8")
+        cwd = Path(workspace).resolve() if workspace is not None else tmpdir
 
         server = _BridgeServer(socket_path, max_calls=max_calls)
         server.start()
 
-        env = dict(os.environ)
-        env["JAEGER_TOOL_SOCKET"] = str(socket_path)
-        # The child needs the stub importable and the workspace usable.
-        # ``-s`` keeps user site-packages out; PYTHONPATH carries only
-        # the bridge dir, so the stub cannot be shadowed.
-        env["PYTHONPATH"] = str(tmpdir)
-        env["PYTHONUNBUFFERED"] = "1"
+        from jaeger_agent.tools.code import _sandboxed_python_command
+        command, sandbox_backend = _sandboxed_python_command(
+            str(script_path),
+            workspace=str(cwd),
+            scratch=str(tmpdir),
+            extra_python_paths=(str(tmpdir),),
+            unix_socket=str(socket_path),
+        )
+        if command is None:
+            server.stop()
+            raise BridgeRefused(
+                "secure Python sandbox unavailable for execute_with_tools; "
+                f"{sandbox_backend}"
+            )
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmpdir),
+            "TMPDIR": str(tmpdir),
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "JAEGER_TOOL_SOCKET": str(socket_path),
+            "PYTHONUNBUFFERED": "1",
+        }
 
         started = time.perf_counter()
         timed_out = False
         try:
-            proc = subprocess.run(  # noqa: S603 — argv is fixed
-                [sys.executable, "-s", str(script_path)],
+            proc = subprocess.run(  # noqa: S603 — sandbox argv is fixed
+                command,
                 cwd=str(cwd),
                 env=env,
                 capture_output=True,
@@ -380,6 +393,7 @@ def run_bridged_script(
         "tool_call_count": len(server.calls),
         "tool_errors": list(server.errors),
         "elapsed_s": round(elapsed, 3),
+        "sandbox_backend": sandbox_backend,
     }
 
 

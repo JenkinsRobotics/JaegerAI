@@ -34,13 +34,13 @@ from jaeger_agent.skill_registry.toolset_scoping import (
 # ── tool_visible — the live gate ──────────────────────────────────
 
 
-def test_default_is_hermes_scoped(monkeypatch) -> None:
-    """With the setting unset, CORE is visible and unloaded groups hide."""
+def test_default_shows_registered_tools(monkeypatch) -> None:
+    """Unset flag: registered tools are visible. Scoping is opt-in."""
     monkeypatch.delenv("JAEGER_TOOLSET_SCOPING", raising=False)
     reset_toolsets()
     assert tool_visible("get_time") is True
     assert tool_visible("execute_code") is True
-    assert tool_visible("terminal") is False
+    assert tool_visible("terminal") is True
     assert tool_visible("anything_unregistered") is True
 
 

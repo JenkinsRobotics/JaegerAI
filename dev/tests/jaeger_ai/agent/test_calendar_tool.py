@@ -75,7 +75,13 @@ def test_get_events_explicit_start_end(monkeypatch):
     assert "07/16/2026" in seen_scripts[-1]
 
 
-def test_get_events_bad_date_is_actionable():
+def test_get_events_bad_date_is_actionable(monkeypatch):
+    # Two gates fire before the date parse — the macOS check and the
+    # osascript-on-PATH check — so on a Linux runner this asserted against
+    # those errors instead of the parse error. Pin both, the way every other
+    # test in this module does.
+    monkeypatch.setattr(calendar.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(calendar.shutil, "which", lambda name: "/usr/bin/osascript")
     result = calendar.get_events(day="not-a-date")
     assert result["listed"] is False
     assert "could not parse" in result["error"]
@@ -125,7 +131,9 @@ def test_create_event_requires_title():
     assert "empty title" in result["error"]
 
 
-def test_create_event_bad_dates_actionable():
+def test_create_event_bad_dates_actionable(monkeypatch):
+    monkeypatch.setattr(calendar.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(calendar.shutil, "which", lambda name: "/usr/bin/osascript")
     result = calendar.create_event("Review", "nonsense", "also-nonsense")
     assert result["created"] is False
     assert "could not parse" in result["error"]

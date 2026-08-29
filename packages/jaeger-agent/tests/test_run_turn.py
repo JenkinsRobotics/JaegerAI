@@ -162,16 +162,19 @@ def test_parallel_batch_never_executes_past_hard_tool_budget():
         return {"ok": True, "value": value}
 
     requested = MAX_TOOL_CALLS + 6
-    adapter = _ScriptedAdapter([{
-        "role": "assistant",
-        "content": "reading",
-        "tool_calls": [
-            {"id": f"c{i}", "name": "bounded_read", "arguments": {"value": str(i)}}
-            for i in range(requested)
-        ],
-    }])
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": "reading",
+            "tool_calls": [
+                {"id": f"c{i}", "name": "bounded_read", "arguments": {"value": str(i)}}
+                for i in range(requested)
+            ],
+        },
+        {"role": "assistant", "content": "I inspected the allowed items; six remained unread."},
+    ])
     agent = JaegerAgent(adapter=adapter)
-    agent.run_turn("read a bounded batch")
+    result = agent.run_turn("read a bounded batch")
 
     assert len(executed) == MAX_TOOL_CALLS
     rows = [m for m in agent.messages if m["role"] == "tool"]
@@ -180,6 +183,42 @@ def test_parallel_batch_never_executes_past_hard_tool_budget():
     assert agent.last_halt_reason == (
         f"made {MAX_TOOL_CALLS} tool calls in a single turn"
     )
+    assert result == "I inspected the allowed items; six remained unread."
+    assert adapter.call_count == 2
+    assert adapter.last_tools_count == 0
+
+
+def test_configured_tool_budget_replaces_legacy_global_limit():
+    executed: list[str] = []
+
+    @register_tool("adaptive_read", "Read.", _SmallArgs, side_effect="read")
+    def _adaptive(value: str = "x") -> dict:
+        executed.append(value)
+        return {"ok": True, "value": value}
+
+    configured = MAX_TOOL_CALLS + 6
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": "reading",
+            "tool_calls": [
+                {"id": f"c{i}", "name": "adaptive_read", "arguments": {"value": str(i)}}
+                for i in range(configured)
+            ],
+        },
+        {"role": "assistant", "content": "all inspected"},
+    ])
+    from jaeger_agent.loop.turn_budget import TurnBudgetLimits
+
+    agent = JaegerAgent(
+        adapter=adapter,
+        turn_budget_limits=TurnBudgetLimits(
+            max_tool_calls=configured, max_iterations=50,
+        ),
+    )
+    assert agent.run_turn("read the complete batch") == "all inspected"
+    assert len(executed) == configured
+    assert agent.last_halt_reason == f"made {configured} tool calls in a single turn"
 
 
 # ── tool error paths ───────────────────────────────────────────────
@@ -203,6 +242,30 @@ def test_unknown_tool_becomes_tool_error_result_loop_continues():
     assert result == "ok, I'll skip that"
     tool_row = next(m for m in agent.messages if m["role"] == "tool")
     assert "unknown tool" in tool_row["content"]
+
+
+def test_identical_static_read_is_cached_across_iterations():
+    executed = 0
+
+    @register_tool("read_file", "Read.", _SmallArgs, side_effect="read")
+    def _read(value: str = "x") -> dict:
+        nonlocal executed
+        executed += 1
+        return {"ok": True, "content": "stable"}
+
+    adapter = _ScriptedAdapter([
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "name": "read_file", "arguments": {"value": "same"}},
+        ]},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c2", "name": "read_file", "arguments": {"value": "same"}},
+        ]},
+        {"role": "assistant", "content": "done"},
+    ])
+    agent = JaegerAgent(adapter=adapter)
+    assert agent.run_turn("read the same file twice") == "done"
+    assert executed == 1
+    assert agent.turn_budget.tool_calls == 2  # model calls remain observable
 
 
 def test_bad_args_validation_error_becomes_tool_result_not_crash():
@@ -279,7 +342,7 @@ def test_identical_tool_call_loop_trips_backstop():
 
 def test_max_iterations_caps_runaway_loop():
     """When the model never stops calling tools, ``max_iterations`` is
-    the hard ceiling — no model call beyond it."""
+    the hard tool-loop ceiling, followed by one tool-free grace call."""
     @register_tool("nibble", "Varies args each time.", _SmallArgs)
     def _impl(value: str = "x") -> dict:
         return {"ok": True}
@@ -294,13 +357,43 @@ def test_max_iterations_caps_runaway_loop():
                 {"id": f"id{i}", "name": "nibble", "arguments": {"value": f"v{i}"}},
             ],
         }
-        for i in range(20)
+        for i in range(3)
     ]
-    agent = JaegerAgent(adapter=_ScriptedAdapter(script), max_iterations=3)
-    agent.run_turn("never stop")
+    script.append({"role": "assistant", "content": "I stopped after three checks."})
+    adapter = _ScriptedAdapter(script)
+    agent = JaegerAgent(adapter=adapter, max_iterations=3)
+    result = agent.run_turn("never stop")
     assert agent.last_iteration_count == 3
     assert agent.last_halt_reason is not None
     assert "max_iterations" in agent.last_halt_reason
+    assert result == "I stopped after three checks."
+    assert adapter.call_count == 4
+    assert adapter.last_tools_count == 0
+
+
+def test_wind_down_retries_once_when_first_summary_is_empty():
+    @register_tool("nibble", "One bounded check.", _SmallArgs)
+    def _impl(value: str = "x") -> dict:
+        return {"ok": True, "value": value}
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "id1", "name": "nibble", "arguments": {"value": "v1"}},
+            ],
+        },
+        {"role": "assistant", "content": ""},
+        {"role": "assistant", "content": "I completed one check before stopping."},
+    ])
+    agent = JaegerAgent(adapter=adapter, max_iterations=1)
+
+    result = agent.run_turn("check until the turn budget stops you")
+
+    assert result == "I completed one check before stopping."
+    assert adapter.call_count == 3
+    assert adapter.last_tools_count == 0
 
 
 # ── cancel + interrupt ─────────────────────────────────────────────

@@ -100,8 +100,11 @@ def _mk_tool() -> ToolDef:
 # ── construction + provider variants ───────────────────────────────
 
 
-def test_known_providers_includes_the_five_supported_backends():
-    assert {"openai", "lmstudio", "ollama", "ollama-cloud", "gemini"} == KNOWN_PROVIDERS
+def test_known_providers_includes_supported_backends():
+    assert {
+        "openai", "lmstudio", "ollama", "ollama-cloud", "gemini",
+        "openrouter", "groq", "deepseek", "vllm", "together",
+    } == KNOWN_PROVIDERS
 
 
 def test_local_servers_get_placeholder_key_when_none_supplied():
@@ -316,6 +319,7 @@ def test_call_dispatches_to_chat_completions_with_merged_kwargs():
 
 def _mk_chunk(
     content: str | None = None,
+    reasoning: str | None = None,
     tool_call: dict[str, Any] | None = None,
     finish_reason: str | None = None,
     usage: dict[str, int] | None = None,
@@ -331,7 +335,7 @@ def _mk_chunk(
                 arguments=tool_call.get("arguments"),
             ),
         )]
-    delta = SimpleNamespace(content=content, tool_calls=tcs)
+    delta = SimpleNamespace(content=content, reasoning=reasoning, tool_calls=tcs)
     choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
     return SimpleNamespace(
         choices=[choice],
@@ -393,6 +397,27 @@ def test_call_streams_transport_by_default_and_aggregates():
     assert parsed["tool_calls"][0]["arguments"] == {"x": 5}
     assert parsed["finish_reason"] == "tool_calls"
     assert raw["usage"]["total_tokens"] == 10
+
+
+def test_call_preserves_streamed_reasoning_separately_from_answer():
+    stream = _FakeStream([
+        _mk_chunk(reasoning="check evidence "),
+        _mk_chunk(reasoning="then act"),
+        _mk_chunk(content="done", finish_reason="stop"),
+    ])
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=lambda **_kwargs: stream),
+        ),
+    )
+    a = OpenAIAdapter(provider="ollama-cloud", model="qwen", client=client)
+
+    parsed = a.parse_response(
+        a.call({"model": "qwen", "messages": []}, threading.Event()),
+    )
+
+    assert parsed["content"] == "done"
+    assert parsed["reasoning"] == "check evidence then act"
 
 
 def test_call_compat_providers_do_not_send_stream_options():
@@ -469,6 +494,20 @@ def test_parse_response_returns_assistant_text_only():
     assert parsed["role"] == "assistant"
     assert parsed["content"] == "hello"
     assert "tool_calls" not in parsed
+
+
+def test_parse_response_preserves_reasoning_content_alias():
+    a = OpenAIAdapter(provider="ollama-cloud", model="qwen")
+    message = SimpleNamespace(
+        content="answer", tool_calls=None, reasoning_content="private trace",
+    )
+    raw = SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason="stop")], usage=None,
+    )
+
+    parsed = a.parse_response(raw)
+
+    assert parsed["reasoning"] == "private trace"
 
 
 def test_parse_response_lifts_tool_calls_with_json_decoded_arguments():

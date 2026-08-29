@@ -39,6 +39,7 @@ from .config import AgentConfig
 from .contracts import TurnResult
 from .loop.callbacks import AgentCallbacks
 from .loop.jaeger_agent import JaegerAgent
+from .loop.turn_budget import TurnBudgetLimits
 
 
 #: Conventional environment variable per provider, used when the config
@@ -47,6 +48,10 @@ _DEFAULT_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "vllm": "VLLM_API_KEY",
 }
 
 #: Providers that load weights from disk rather than dialling an
@@ -268,6 +273,12 @@ class DefaultAgentRuntime:
                 adapter=self.adapter,
                 system_prompt=self.config.system_prompt,
                 max_iterations=self.config.max_iterations,
+                turn_budget_limits=TurnBudgetLimits(
+                    max_iterations=self.config.max_iterations,
+                    max_elapsed_s=self.config.turn_max_elapsed_s or None,
+                    max_tokens=self.config.turn_max_tokens or None,
+                    max_tool_cost=self.config.turn_max_tool_cost or None,
+                ),
                 callbacks=self._callbacks(),
             )
             self._sessions[session_key] = agent
@@ -298,8 +309,12 @@ class DefaultAgentRuntime:
             claims=SqliteKnowledgeStore(),
         ).run_turn(text)
 
-    def steer(self, text: str) -> bool:
-        """Mid-turn redirect. Only a session actually running can take one."""
+    def steer(self, text: str, *, session_key: str | None = None) -> bool:
+        """Mid-turn redirect. Targets session_key if specified; otherwise all active sessions."""
+        if session_key is not None and session_key in self._sessions:
+            return self._sessions[session_key].steer(text)
+        if session_key is not None:
+            return False
         return any(agent.steer(text) for agent in self._sessions.values())
 
     def health(self) -> dict[str, Any]:

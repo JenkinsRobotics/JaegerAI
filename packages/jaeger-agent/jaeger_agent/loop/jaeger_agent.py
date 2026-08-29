@@ -31,10 +31,14 @@ from jaeger_agent.loop import verify_gate
 from jaeger_agent.loop.loop_backstop import (
     MAX_TOOL_CALLS,
     call_signature,
+    collapse_generated_repetition,
     loop_halt_reason,
     loop_warning,
     semantic_failure_signature,
+    tool_budget_warning,
 )
+from jaeger_agent.loop.tool_result_safety import protect_tool_result
+from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
@@ -60,14 +64,31 @@ def _default_tool_executor() -> ToolExecutor:
     """
     from jaeger_agent.cognition.effects import InMemoryEffectLedger
     from jaeger_agent.memory import sqlite_store
-    from jaeger_agent.tool_executor import DirectToolExecutor, LedgerToolExecutor
+    from jaeger_agent.tool_executor import (
+        CheckpointingToolExecutor, DirectToolExecutor, HookedToolExecutor,
+        LedgerToolExecutor,
+    )
 
     if sqlite_store.is_bound():
         from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
         ledger: Any = SqliteEffectLedger()
     else:
         ledger = InMemoryEffectLedger()
-    return LedgerToolExecutor(ledger, DirectToolExecutor())
+    # Hooks wrap the ledger, never the reverse: a pre_tool_call veto has to
+    # stop the call BEFORE ``EffectLedger.once`` claims its key, or the block
+    # would burn that key and the retry after the operator fixes their hook
+    # would come back as a duplicate instead of running.
+    #
+    # Zero cost when unconfigured — ``shell_hooks.fire`` returns immediately
+    # unless the instance config enables hooks.
+    # hooks → checkpoints → ledger → direct.
+    #   hooks outermost   : a vetoed call costs neither a snapshot nor a key
+    #   checkpoints next  : the snapshot must precede the effect
+    #   ledger innermost  : at-most-once wraps only the real execution
+    # Both new layers are inert unless enabled in the instance config.
+    return HookedToolExecutor(
+        CheckpointingToolExecutor(
+            LedgerToolExecutor(ledger, DirectToolExecutor())))
 
 
 def _open_or_create_run(agent: "JaegerAgent") -> str:
@@ -153,6 +174,7 @@ class JaegerAgent:
         tool_visibility: ToolVisibility | None = None,
         turn_start_hook: TurnStartHook | None = None,
         tool_executor: ToolExecutor | None = None,
+        turn_budget_limits: TurnBudgetLimits | None = None,
     ) -> None:
         self.primary_adapter = adapter
         self.fallback_adapters: list[ProviderAdapter] = list(fallback_adapters or [])
@@ -203,12 +225,12 @@ class JaegerAgent:
                     "toolsets require a toolset_resolver supplied by the host application"
                 )
             wanted = self._toolset_resolver(set(toolsets))
-            self._all_tools = _exclude_beta(
+            self._all_tools = _filter_available_tools(
                 [t for t in get_tools() if t.name in wanted]
             )
             self._tools_filter_locked = False
         else:
-            self._all_tools = _exclude_beta(get_tools())
+            self._all_tools = _filter_available_tools(get_tools())
             self._tools_filter_locked = False
         # Per-agent dispatch map. ``_dispatch_one_tool`` previously
         # resolved by name against the *global* registry — so an agent
@@ -230,6 +252,10 @@ class JaegerAgent:
         # (the ``/runtime`` panel surfaces this); not used by the loop.
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
         self.max_iterations = int(max_iterations)
+        self.turn_budget = TurnBudget(turn_budget_limits or TurnBudgetLimits(
+            max_tool_calls=MAX_TOOL_CALLS,
+            max_iterations=self.max_iterations,
+        ))
         self.callbacks = callbacks or AgentCallbacks()
         self._run_id: str | None = None
         self._effect_checkpoint: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
@@ -287,13 +313,21 @@ class JaegerAgent:
         # repeat with the SAME result counts toward the identical-call
         # halt. Write-side tools keep the strict pre-dispatch count.
         self._read_result_hashes: dict[str, str] = {}
+        # Conservative cross-iteration cache for immutable-looking metadata
+        # reads. Any write/external call invalidates it. Polling/status tools
+        # are deliberately absent so changing state is still observed.
+        self._read_result_cache: dict[str, Any] = {}
         # Verify gate (station 2 — see loop/verify_gate.py): tool names
         # that SUCCEEDED this turn (feeds the claim-vs-action check) and
         # the once-per-turn nudge latch. ``_pending_nudge_text`` is
         # whichever synthetic nudge is currently in history awaiting
         # removal (post-tool or verify — they share the lifecycle).
         self._turn_tool_successes: set[str] = set()
+        self._turn_skill_names: set[str] = set()
+        self._turn_tool_names: list[str] = []
+        self.last_skill_route: dict[str, Any] | None = None
         self._verify_nudge_used = False
+        self._tool_budget_warning_used = False
         self._pending_nudge_text: str | None = None
 
         # Diagnostic surface — populated by the most recent ``run_turn``.
@@ -449,13 +483,18 @@ class JaegerAgent:
         self._call_signature_counts.clear()
         self._failure_signature_counts.clear()
         self._read_result_hashes.clear()
+        self._read_result_cache.clear()
         self._interrupt_event.clear()
         self._turn_messages = []
         self._post_tool_nudge_used = False
         self._nudge_pending = False
         self._pending_nudge_text = None
         self._turn_tool_successes.clear()
+        self._turn_skill_names.clear()
+        self._turn_tool_names.clear()
+        self.last_skill_route = None
         self._verify_nudge_used = False
+        self._tool_budget_warning_used = False
         self._failed_mutations.clear()
         self.last_halt_reason = None
         self.last_iteration_count = 0
@@ -463,6 +502,7 @@ class JaegerAgent:
         self.last_prompt_tokens = 0
         self.last_completion_tokens = 0
         self.last_ttft_s = None
+        self.turn_budget.reset()
 
         # Pick up tools registered since construction (a skill
         # activated mid-session) so they're visible AND dispatchable
@@ -482,11 +522,23 @@ class JaegerAgent:
             except Exception:  # noqa: BLE001 — a host hook must not break a turn
                 pass
 
-        self._append_message({"role": "user", "content": user_message})
+        model_user_message = self._auto_route_skill(user_message)
+        self._append_message({"role": "user", "content": model_user_message})
         self._turn_active = True
         try:
             return self._run_turn_inner(user_message)
         except ContextOverflow:
+            # Try middle-out trajectory compression before giving up or re-raising
+            try:
+                from jaeger_agent.util.trajectory_compressor import compress_trajectory_if_needed
+                compressed = compress_trajectory_if_needed(self.messages)
+                if len(compressed) < len(self.messages):
+                    self.messages = compressed
+                    # Retry inner turn once with compressed context
+                    return self._run_turn_inner(user_message)
+            except Exception:
+                pass
+
             if len(self._turn_messages) <= 1:
                 # Pre-flight refusal — the model never saw this turn.
                 # Roll the user message back so a too-big prompt isn't
@@ -530,12 +582,19 @@ class JaegerAgent:
             raise
         finally:
             self._turn_active = False
+            self._record_skill_outcomes()
 
     def _run_turn_inner(self, user_message: str) -> str:
         """The actual loop body — see :meth:`run_turn` for the contract."""
         tool_calls_made = 0
+        max_tool_calls = self.turn_budget.limits.max_tool_calls
         for iteration in range(1, self.max_iterations + 1):
             self.last_iteration_count = iteration
+            self.turn_budget.observe_iteration(iteration)
+            boundary_halt = self.turn_budget.halt_reason()
+            if boundary_halt and "max_iterations" not in boundary_halt:
+                self.last_halt_reason = boundary_halt
+                return self._budget_halt_or_stop(boundary_halt)
 
             if self._interrupt_event.is_set():
                 self.last_halt_reason = "interrupted"
@@ -576,6 +635,15 @@ class JaegerAgent:
             # always append before deciding next steps.
             tool_calls = assistant_msg.get("tool_calls") or []
             final_text = assistant_msg.get("content") or ""
+            if not tool_calls and final_text:
+                guarded_text, repetitions = collapse_generated_repetition(final_text)
+                if repetitions > 1:
+                    final_text = guarded_text
+                    assistant_msg = {**assistant_msg, "content": guarded_text}
+                    self.last_halt_reason = "repetitive_generated_response"
+                    self.callbacks.on_thinking(
+                        f"[repetition guard — collapsed {repetitions} identical response blocks]"
+                    )
             if not tool_calls and not final_text.strip():
                 # Reasoning budget exhausted: the model spent its whole
                 # output allowance inside <think> and never surfaced an
@@ -676,6 +744,7 @@ class JaegerAgent:
             ):
                 tc = tool_calls[0]
                 tool_calls_made += 1
+                self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
                 self._dispatch_one_tool(tc)
                 # The result lives on the just-appended tool message.
                 tool_msg = self.messages[-1]
@@ -699,13 +768,15 @@ class JaegerAgent:
             # to the provably safe subset). Anything else stays
             # sequential.
             if self._batch_is_parallel_safe(tool_calls):
-                remaining = max(0, MAX_TOOL_CALLS - tool_calls_made)
+                remaining = max(0, max_tool_calls - tool_calls_made)
                 allowed, refused = tool_calls[:remaining], tool_calls[remaining:]
                 if allowed:
                     tool_calls_made += len(allowed)
+                    self.turn_budget.consume_tool(count=len(allowed), cost=float(len(allowed)))
                     self._dispatch_parallel(allowed)
                 for tc in refused:
                     self._append_budget_refusal(tc)
+                self._attach_tool_budget_warning(tool_calls_made)
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
                     return self._halt_turn()
@@ -713,21 +784,23 @@ class JaegerAgent:
                     tool_calls_made,
                     self._call_signature_counts,
                     self._failure_signature_counts,
+                    max_tool_calls=max_tool_calls,
                 )
                 if halt:
                     self.last_halt_reason = halt
-                    return self._halt_turn()
+                    return self._budget_halt_or_stop(halt)
                 continue
 
             seen_in_batch: dict[str, str] = {}
             for tc in tool_calls:
-                if tool_calls_made >= MAX_TOOL_CALLS:
+                if tool_calls_made >= max_tool_calls:
                     self._append_budget_refusal(tc)
                     self.last_halt_reason = (
                         f"made {tool_calls_made} tool calls in a single turn"
                     )
                     continue
                 tool_calls_made += 1
+                self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
                 if self._interrupt_event.is_set():
                     self.last_halt_reason = "interrupted"
                     return self._halt_turn()
@@ -767,13 +840,16 @@ class JaegerAgent:
                     tool_calls_made,
                     self._call_signature_counts,
                     self._failure_signature_counts,
+                    max_tool_calls=max_tool_calls,
                 )
                 if halt:
                     self.last_halt_reason = halt
-                    return self._halt_turn()
+                    return self._budget_halt_or_stop(halt)
+
+                self._attach_tool_budget_warning(tool_calls_made)
 
             if self.last_halt_reason:
-                return self._halt_turn()
+                return self._budget_halt_or_stop(self.last_halt_reason)
 
         # Fell out of the for-loop: max_iterations exhausted with the
         # model still trying to use tools. Spend ONE toolless grace
@@ -862,6 +938,101 @@ class JaegerAgent:
         return [t.name for t in self.tools]
 
     # ── internals ───────────────────────────────────────────────────
+
+    def _auto_route_skill(self, user_message: str) -> str:
+        """Inject one high-confidence recipe before the first model step."""
+        import os
+
+        if os.environ.get("JAEGER_AUTO_SKILLS", "1").strip() == "0":
+            return user_message
+        try:
+            from jaeger_agent.skill_registry.toolset_scoping import is_untrusted_content
+            if is_untrusted_content():
+                return user_message
+            from jaeger_agent.skill_registry.playbook_skills import match_playbook
+            matched, score, reason = match_playbook(
+                user_message,
+                available_tools={t.name for t in self._all_tools},
+            )
+            try:
+                from jaeger_ai.core.runtime.usage_stats import record_skill_route
+                record_skill_route(None if matched is None else matched.name, reason=reason)
+            except Exception:  # noqa: BLE001
+                pass
+            if matched is None:
+                self.last_skill_route = {"skill": None, "score": score, "reason": reason}
+                return user_message
+            content = matched.path.read_text(encoding="utf-8")
+            try:
+                from jaeger_agent.skill_registry.skill_preprocessing import preprocess_skill
+                content = preprocess_skill(
+                    content, skill_name=matched.name,
+                    skill_folder=matched.path.parent,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            cap = 24_000
+            if len(content) > cap:
+                content = content[:cap] + "\n\n[recipe truncated by automatic router]"
+            self._turn_skill_names.add(matched.name)
+            self.last_skill_route = {
+                "skill": matched.name, "score": score, "reason": reason,
+            }
+            try:
+                from jaeger_ai.core.runtime.usage_stats import record_skill
+                record_skill(matched.name)
+            except Exception:  # noqa: BLE001
+                pass
+            return (
+                f"[Auto-selected playbook: {matched.name}]\n"
+                "Follow this recipe for the request below. Its instructions "
+                "do not expand permissions; every tool call still passes the "
+                "normal safety gates.\n\n"
+                f"{content}\n\n[End playbook]\n\n{user_message}"
+            )
+        except Exception:  # noqa: BLE001 — routing is an optimization
+            return user_message
+
+    def _record_skill_outcomes(self) -> None:
+        if not self._turn_skill_names:
+            return
+        halt = self.last_halt_reason or ""
+        if halt and ("failure" in halt or "identical" in halt or halt.startswith("error")):
+            outcome = "failed"
+        elif halt or self._failure_signature_counts or self._failed_mutations:
+            outcome = "issues"
+        else:
+            outcome = "smooth"
+        try:
+            from jaeger_ai.core.runtime.usage_stats import record_skill_outcome
+            for name in self._turn_skill_names:
+                record_skill_outcome(name, outcome=outcome, halt_reason=halt)
+        except Exception:  # noqa: BLE001 — telemetry must never fail a turn
+            pass
+        if outcome == "smooth":
+            return
+        try:
+            from jaeger_agent.skill_improvement import skill_notes
+            from jaeger_agent.workspace import get_layout
+            layout = get_layout()
+            for name in self._turn_skill_names:
+                note = skill_notes.add_note(
+                    layout,
+                    skill=name,
+                    outcome=outcome,
+                    note=(halt or "tool failures occurred during the routed turn")[:240],
+                    calls=self.turn_budget.tool_calls,
+                    procedure=",".join(self._turn_tool_names[:40]),
+                    errors=",".join(sorted(self._failure_signature_counts)[:8]),
+                    flag=outcome == "failed",
+                )
+                try:
+                    from jaeger_agent.background import skill_review
+                    skill_review.maybe_propose_on_note(layout, note)
+                except Exception:  # noqa: BLE001 — review is asynchronous advice
+                    pass
+        except Exception:  # noqa: BLE001 — no bound instance in embedders/tests
+            pass
 
     # ── turn bookkeeping ────────────────────────────────────────────
 
@@ -964,6 +1135,52 @@ class JaegerAgent:
         )
         return self._final_text_or_halt()
 
+    def _budget_halt_or_stop(self, reason: str) -> str:
+        """Total budget gets a tool-free final answer; loops still stop cold."""
+        if "tool calls in a single turn" in reason:
+            return self._wind_down_summary()
+        return self._halt_turn()
+
+    def _attach_tool_budget_warning(self, tool_calls_made: int) -> None:
+        """Merge the one-shot remaining-budget notice into the latest result."""
+        if self._tool_budget_warning_used:
+            return
+        warnings = [item for item in (
+            tool_budget_warning(
+                tool_calls_made,
+                max_tool_calls=self.turn_budget.limits.max_tool_calls,
+                warning_fraction=self.turn_budget.limits.warning_fraction,
+            ),
+            self.turn_budget.warning(),
+        ) if item]
+        warning = "\n".join(dict.fromkeys(warnings))
+        if not warning:
+            return
+        for message in reversed(self._turn_messages):
+            if message.get("role") == "tool":
+                message["content"] = _merge_guidance(
+                    message.get("content") or "", warning,
+                )
+                self._tool_budget_warning_used = True
+                self.callbacks.on_thinking(
+                    "[tool budget warning — "
+                    f"{self.turn_budget.limits.max_tool_calls - tool_calls_made} "
+                    "calls remain]"
+                )
+                return
+
+    def _normalized_tool_cost(self, tc: ToolCall) -> float:
+        """Return deterministic cost units when a tool has no price metadata.
+
+        Read-only work costs 1, local writes 2, and externally visible or
+        hardware actions 3. This is not a currency claim; hosts may supply a
+        tighter ``max_tool_cost`` policy while every run gets comparable
+        telemetry today.
+        """
+        tdef = self._dispatch_by_name.get(tc.get("name") or "")
+        side_effect = getattr(tdef, "side_effect", "") if tdef else ""
+        return {"read": 1.0, "write": 2.0, "external": 3.0, "hardware": 3.0}.get(side_effect, 2.0)
+
     def _append_budget_refusal(self, tc: ToolCall) -> None:
         """Close a model-emitted call without executing past the hard cap."""
         self._append_message({
@@ -975,7 +1192,10 @@ class JaegerAgent:
                 "success": False,
                 "executed": False,
                 "error_code": "tool_budget_exhausted",
-                "error": f"hard limit of {MAX_TOOL_CALLS} tool calls reached",
+                "error": (
+                    "hard limit of "
+                    f"{self.turn_budget.limits.max_tool_calls} tool calls reached"
+                ),
                 "retryable": False,
             }),
         })
@@ -1012,10 +1232,24 @@ class JaegerAgent:
         prev_tools = self._all_tools
         self._tools_filter_locked = True
         self._all_tools = []
+        msg = None
         try:
-            msg = self._one_model_step()
-        except Exception:  # noqa: BLE001 — grace call is best-effort
-            msg = None
+            # Hermes' bounded finalizer retries once because an empty or
+            # transiently failed synthesis should not turn a safely stopped
+            # tool loop into a raw internal halt. Tools remain unavailable on
+            # both attempts, so this cannot reopen execution.
+            for attempt in range(2):
+                try:
+                    candidate = self._one_model_step()
+                except Exception:  # noqa: BLE001 — grace call is best-effort
+                    candidate = None
+                if ((candidate or {}).get("content") or "").strip():
+                    msg = candidate
+                    break
+                if attempt == 0:
+                    self.callbacks.on_thinking(
+                        "[wind-down response empty — retrying once without tools]"
+                    )
         finally:
             self._tools_filter_locked = prev_locked
             self._all_tools = prev_tools
@@ -1045,11 +1279,11 @@ class JaegerAgent:
                 if self._toolset_resolver is None:
                     return
                 wanted = self._toolset_resolver(set(self.toolsets))
-                self._all_tools = _exclude_beta(
+                self._all_tools = _filter_available_tools(
                     [t for t in get_tools() if t.name in wanted]
                 )
             else:
-                self._all_tools = _exclude_beta(get_tools())
+                self._all_tools = _filter_available_tools(get_tools())
             self._dispatch_by_name = {t.name: t for t in self._all_tools}
         except Exception:  # noqa: BLE001 — a registry hiccup must not kill the turn
             pass
@@ -1243,6 +1477,10 @@ class JaegerAgent:
                 self.last_prompt_tokens += per_call_prompt
             if c is not None:
                 self.last_completion_tokens += int(c)
+            self.turn_budget.observe_usage(
+                prompt_tokens=per_call_prompt,
+                completion_tokens=int(c) if c is not None else 0,
+            )
         except (TypeError, ValueError):
             return 0
         return per_call_prompt
@@ -1471,6 +1709,10 @@ class JaegerAgent:
     _PATH_SCOPED_READ = frozenset({"read_file"})
     _PATH_SCOPED_WRITE = frozenset({
         "write_file", "append_file", "edit_file", "patch", "delete_file"})
+    _CACHEABLE_READ_TOOLS = frozenset({
+        "read_file", "list_skill_dir", "search_files",
+        "describe_tool", "list_tools", "list_skills",
+    })
 
     @staticmethod
     def _call_path(tc: ToolCall) -> str | None:
@@ -1627,6 +1869,7 @@ class JaegerAgent:
             and getattr(tool_def, "side_effect", "") == "read"
         )
         if not is_read_tool:
+            self._read_result_cache.clear()
             self._call_signature_counts[sig] = (
                 self._call_signature_counts.get(sig, 0) + 1
             )
@@ -1651,6 +1894,10 @@ class JaegerAgent:
         for read-only tools. Exceptions become error-result dicts."""
         name = prep["name"]
         args = prep["args"]
+        if name in self._CACHEABLE_READ_TOOLS and prep["sig"] in self._read_result_cache:
+            import copy
+            prep["cache_hit"] = True
+            return copy.deepcopy(self._read_result_cache[prep["sig"]])
         try:
             tool_def = prep["tool_def"]
             if tool_def is None:
@@ -1719,6 +1966,7 @@ class JaegerAgent:
         is_read_tool = prep["is_read"]
         guidance = prep["guidance"]
         started = prep["started"]
+        self._turn_tool_names.append(name)
 
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it
@@ -1757,10 +2005,17 @@ class JaegerAgent:
         ):
             _ok = False
             _err = str(content.get("error") or "") or None
+        if _ok and name in self._CACHEABLE_READ_TOOLS:
+            import copy
+            self._read_result_cache[sig] = copy.deepcopy(content)
         if _ok:
             # Verify-gate bookkeeping: the claim-vs-action check compares
             # the final answer's claims against what actually succeeded.
             self._turn_tool_successes.add(name)
+            if name == "use_skill" and isinstance(args, dict):
+                chosen = str(args.get("name") or "").strip()
+                if chosen:
+                    self._turn_skill_names.add(chosen)
         self.callbacks.on_tool_done(
             name, dict(args) if isinstance(args, dict) else {},
             content, _ok, _err, round(elapsed, 6),
@@ -1827,11 +2082,15 @@ class JaegerAgent:
         if warning:
             content = _merge_guidance(content, warning)
 
+        rendered_content = (
+            content if isinstance(content, str) else _stringify(content)
+        )
+        rendered_content = protect_tool_result(name, rendered_content)
         tool_message = {
             "role": "tool",
             "tool_call_id": call_id,
             "name": name,
-            "content": content if isinstance(content, str) else _stringify(content),
+            "content": rendered_content,
         }
         self._append_message(tool_message)
         if (
@@ -1894,6 +2153,15 @@ def _exclude_beta(tools: list[ToolDef]) -> list[ToolDef]:
     if dev_mode_enabled():
         return tools
     return [t for t in tools if not t.beta]
+
+
+def _filter_available_tools(tools: list[ToolDef]) -> list[ToolDef]:
+    """Apply beta and runtime-readiness gates to the model and dispatch surface.
+
+    Availability is evaluated per catalog refresh, not cached process-wide, so
+    credentials and session-installed scopes can change between turns.
+    """
+    return [tool for tool in _exclude_beta(tools) if tool.is_available()]
 
 
 _MULTISTEP_PATTERNS = (

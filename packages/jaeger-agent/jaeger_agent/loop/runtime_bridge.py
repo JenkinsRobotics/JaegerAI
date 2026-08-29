@@ -36,6 +36,8 @@ from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
 from jaeger_agent.schemas.message_types import Message
+from jaeger_agent.loop.loop_backstop import MAX_TOOL_CALLS
+from jaeger_agent.loop.turn_budget import TurnBudgetLimits
 
 
 def _resolve_local_max_tokens() -> int:
@@ -250,19 +252,23 @@ def build_jaeger_agent(
     skip_final_tools: set[str] | frozenset[str] | None = None,
     callbacks: AgentCallbacks | None = None,
     max_iterations: int = 24,
+    max_tool_calls: int | None = None,
     ctx_window: int | None = None,
     completion_reserve: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
     context_summarizer: Any = None,
+    turn_max_elapsed_s: float | None = None,
+    turn_max_tokens: int | None = None,
+    turn_max_tool_cost: float | None = None,
 ) -> JaegerAgent:
     """Construct a :class:`JaegerAgent` wired against the provided
     JROS client. The skip-final finalizer is the legacy bounded-chat
     paraphraser so phrasing stays identical to the pre-refactor path.
 
-    ``max_iterations=24`` matches the legacy ``_MAX_TOOL_CALLS`` ceiling
-    so the loop backstop trips at the same point and the benchmark
-    measures the same boundary.
+    ``max_tool_calls`` defaults to ``max_iterations`` for compatibility.
+    Hosts may raise both for autonomous work without changing the global
+    safety defaults used by embedded callers.
 
     ``toolsets`` (Phase 7): when provided, the agent's tool catalogue
     is filtered to just those Hermes-style groups. When ``None``
@@ -338,11 +344,10 @@ def build_jaeger_agent(
         # call — callers wire it ONLY for latency-free contexts
         # (deep think), never the voice path.
         guard = ContextGuard(budget, summarizer=context_summarizer)
-    # Default stall timeout depends on the backend. HTTP adapters do
-    # well with 30s (the SDK is usually streaming or about to error
-    # out). In-process llama.cpp on Metal can sit in a long prefill
-    # for 60-90s on a cold load of a big model, so the default for
-    # the local backend is more generous. The caller can override.
+    # A reasoning model may legitimately spend well over 30 seconds before
+    # emitting its first streamed token. Use the same generous floor for HTTP
+    # and local adapters; network connect/read timeouts still catch dead peers.
+    # The caller can override this for latency-sensitive surfaces.
     if stale_call_timeout_s is None:
         if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
             # Cold prefill on a 30B Q4 can take ~60s; allow headroom
@@ -352,7 +357,7 @@ def build_jaeger_agent(
             # catches it cleanly while letting normal work finish.
             stale_call_timeout_s = 120.0
         else:
-            stale_call_timeout_s = 30.0
+            stale_call_timeout_s = 120.0
     agent = JaegerAgent(
         adapter=adapter,
         fallback_adapters=_fallback_adapters_for(client),
@@ -366,6 +371,13 @@ def build_jaeger_agent(
         toolset_resolver=resolve_toolsets,
         tool_visibility=tool_visible,
         turn_start_hook=_reset_turn_state,
+        turn_budget_limits=TurnBudgetLimits(
+            max_tool_calls=max(1, int(max_tool_calls or max_iterations)),
+            max_iterations=max_iterations,
+            max_elapsed_s=turn_max_elapsed_s,
+            max_tokens=turn_max_tokens,
+            max_tool_cost=turn_max_tool_cost,
+        ),
     )
     agent.stale_call_timeout_s = stale_call_timeout_s
     return agent
@@ -499,6 +511,7 @@ def drive_one_turn(
         # Real time-to-first-token of the turn's first model call —
         # None when no adapter reported one (test stubs, plain create).
         "ttft_s": agent.last_ttft_s,
+        "turn_budget": agent.turn_budget.snapshot(),
     }
 
 

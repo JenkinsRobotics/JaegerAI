@@ -151,6 +151,38 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
                     "hardline_blocked": True,
                     "command": str(cmd),
                 }
+
+            # Content-level scan (tirith, ported from hermes-agent). The
+            # hardline patterns above match command *shape*; tirith reads
+            # its *content* — homograph URLs, pipe-to-interpreter, terminal
+            # escape injection — which is the class regexes keep missing.
+            #
+            # Lazy + best-effort import: this module lives in jaeger_os and
+            # must not hard-depend on the agent package, same reasoning as
+            # the resolve_mind_module hop above. Off unless configured, so
+            # an install without it behaves exactly as before.
+            try:
+                from jaeger_agent import tirith as _tirith
+                verdict = _tirith.scan_command(str(cmd or ""))
+            except Exception:  # noqa: BLE001 — a scanner must not break exec
+                verdict = None
+            if verdict is not None and verdict.blocked:
+                try:
+                    from jaeger_os.core.modules import resolve_mind_module
+                    resolve_mind_module("core.context")._audit(
+                        "tirith_block",
+                        {"command": str(cmd)[:500],
+                         "summary": verdict.summary})
+                except Exception:  # noqa: BLE001 — audit is best-effort
+                    pass
+                detail = verdict.summary or "content-level threat detected"
+                return {
+                    "ok": False,
+                    "error": f"refused — security scan: {detail}",
+                    "tirith_blocked": True,
+                    "findings": verdict.findings,
+                    "command": str(cmd),
+                }
             return fn(*args, **kwargs)
         return wrap
     return decorate

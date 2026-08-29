@@ -262,6 +262,16 @@ def _restore_tool_registry():
         restore_registry(_registry_snapshot)
 
 
+@_pytest.fixture(autouse=True)
+def _reset_self_model_cache():
+    """The per-boot persona digest must not inherit another test's identity."""
+    from jaeger_agent.prompts.persona_lane import reset_self_model_cache
+
+    reset_self_model_cache()
+    yield
+    reset_self_model_cache()
+
+
 # ── bridge-attach isolation ────────────────────────────────────────
 #
 # AF_UNIX socket paths are capped near 104 bytes on macOS, and pytest's

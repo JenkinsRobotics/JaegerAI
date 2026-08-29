@@ -45,7 +45,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from typing import Iterator
+from typing import Any, Iterator
 
 
 def _repo_root() -> pathlib.Path:

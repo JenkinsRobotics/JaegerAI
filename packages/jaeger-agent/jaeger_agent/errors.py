@@ -96,8 +96,10 @@ def classify_exception(exc: BaseException) -> str:
         k in name for k in (
             "timeout", "connection", "apiconnection", "serviceunavailable",
             "overloaded", "internalserver", "badgateway",
+            "chunkedencodingerror", "remoteprotocolerror", "incompleteread",
+            "streamerrored", "streamclosed",
         )
-    ):
+    ) or any(k in _message_of(exc) for k in ("stream disconnected", "chunk decode")):
         return TRANSIENT
     return UNKNOWN
 

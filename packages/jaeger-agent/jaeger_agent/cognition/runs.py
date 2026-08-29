@@ -67,6 +67,9 @@ class Run:
     payload: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
+    parent_run_id: str | None = None
+    root_run_id: str | None = None
+    relation: str = "root"
 
 
 @dataclass(slots=True)
@@ -94,12 +97,18 @@ class RunStore(Protocol):
 
     def create(self, commitment_id: str, *, provider: str | None = None,
                owner_pid: int | None = None,
-               payload: dict[str, Any] | None = None) -> Run: ...
+               payload: dict[str, Any] | None = None,
+               parent_run_id: str | None = None,
+               relation: str = "root") -> Run: ...
 
     def get(self, run_id: str) -> Run | None: ...
 
     def list(self, *, commitment_id: str | None = None,
              state: str | None = None) -> list[Run]: ...
+
+    def children(self, run_id: str) -> list[Run]: ...
+
+    def lineage(self, run_id: str) -> list[Run]: ...
 
     def transition(self, run_id: str, new_state: str, *,
                    reason: str | None = None,
@@ -152,8 +161,15 @@ class InMemoryRunStore:
 
     def create(self, commitment_id: str, *, provider: str | None = None,
                owner_pid: int | None = None,
-               payload: dict[str, Any] | None = None) -> Run:
+               payload: dict[str, Any] | None = None,
+               parent_run_id: str | None = None,
+               relation: str = "root") -> Run:
         now = _now()
+        parent = self._runs.get(parent_run_id) if parent_run_id else None
+        if parent_run_id and parent is None:
+            raise RunError(f"no parent run {parent_run_id!r}")
+        if parent_run_id and not str(relation or "").strip():
+            raise RunError("child run requires a relation")
         attempt = len(self.list(commitment_id=commitment_id)) + 1
         run = Run(
             id=new_id(),
@@ -166,6 +182,9 @@ class InMemoryRunStore:
             payload=dict(payload or {}),
             created_at=now,
             updated_at=now,
+            parent_run_id=parent_run_id,
+            root_run_id=(parent.root_run_id or parent.id) if parent else None,
+            relation=str(relation or "root"),
         )
         self._runs[run.id] = run
         self._checkpoints[run.id] = []
@@ -182,6 +201,15 @@ class InMemoryRunStore:
         if state is not None:
             rows = [r for r in rows if r.state == state]
         return sorted(rows, key=lambda r: (r.created_at, r.attempt))
+
+    def children(self, run_id: str) -> list[Run]:
+        self._require(run_id)
+        return sorted((r for r in self._runs.values() if r.parent_run_id == run_id), key=lambda r: r.created_at)
+
+    def lineage(self, run_id: str) -> list[Run]:
+        run = self._require(run_id)
+        root_id = run.root_run_id or run.id
+        return sorted((r for r in self._runs.values() if r.id == root_id or r.root_run_id == root_id), key=lambda r: r.created_at)
 
     def _require(self, run_id: str) -> Run:
         run = self._runs.get(run_id)

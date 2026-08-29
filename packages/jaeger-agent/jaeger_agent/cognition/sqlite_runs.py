@@ -59,6 +59,9 @@ def _run(row: sqlite3.Row) -> Run:
         payload=json.loads(row["payload_json"] or "{}"),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        parent_run_id=row["parent_run_id"],
+        root_run_id=row["root_run_id"],
+        relation=str(row["relation"] or "root"),
     )
 
 
@@ -74,9 +77,17 @@ def _checkpoint(row: sqlite3.Row) -> Checkpoint:
 class SqliteRunStore:
     def create(self, commitment_id: str, *, provider: str | None = None,
                owner_pid: int | None = None,
-               payload: dict[str, Any] | None = None) -> Run:
+               payload: dict[str, Any] | None = None,
+               parent_run_id: str | None = None,
+               relation: str = "root") -> Run:
         now = _now()
         with sqlite_store.writer() as conn:
+            parent_row = conn.execute("SELECT * FROM runs WHERE id = ?", (parent_run_id,)).fetchone() if parent_run_id else None
+            if parent_run_id and parent_row is None:
+                raise RunError(f"no parent run {parent_run_id!r}")
+            if parent_run_id and not str(relation or "").strip():
+                raise RunError("child run requires a relation")
+            parent = _run(parent_row) if parent_row else None
             attempt = int(conn.execute(
                 "SELECT COALESCE(MAX(attempt), 0) + 1 AS n FROM runs "
                 "WHERE commitment_id = ?", (commitment_id,),
@@ -92,14 +103,18 @@ class SqliteRunStore:
                 payload=dict(payload or {}),
                 created_at=now,
                 updated_at=now,
+                parent_run_id=parent_run_id,
+                root_run_id=(parent.root_run_id or parent.id) if parent else None,
+                relation=str(relation or "root"),
             )
             conn.execute(
                 "INSERT INTO runs (id, commitment_id, state, attempt, owner_pid, "
                 "heartbeat_at, wake_key, provider, reason, payload_json, "
-                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_at, updated_at, parent_run_id, root_run_id, relation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (run.id, run.commitment_id, run.state, run.attempt, run.owner_pid,
                  run.heartbeat_at, None, run.provider, None,
-                 json.dumps(run.payload), run.created_at, run.updated_at),
+                 json.dumps(run.payload), run.created_at, run.updated_at,
+                 run.parent_run_id, run.root_run_id, run.relation),
             )
         return run
 
@@ -123,6 +138,21 @@ class SqliteRunStore:
             f"SELECT * FROM runs{where} ORDER BY created_at, attempt", params
         ).fetchall()
         return [_run(r) for r in rows]
+
+    def children(self, run_id: str) -> list[Run]:
+        self._require(run_id)
+        rows = sqlite_store.connection().execute(
+            "SELECT * FROM runs WHERE parent_run_id = ? ORDER BY created_at", (run_id,),
+        ).fetchall()
+        return [_run(row) for row in rows]
+
+    def lineage(self, run_id: str) -> list[Run]:
+        run = self._require(run_id)
+        root_id = run.root_run_id or run.id
+        rows = sqlite_store.connection().execute(
+            "SELECT * FROM runs WHERE id = ? OR root_run_id = ? ORDER BY created_at", (root_id, root_id),
+        ).fetchall()
+        return [_run(row) for row in rows]
 
     def _require(self, run_id: str) -> Run:
         run = self.get(run_id)

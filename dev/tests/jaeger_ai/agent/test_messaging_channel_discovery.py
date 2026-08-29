@@ -16,6 +16,7 @@ names instead of erroring "manifest missing or invalid".
 from __future__ import annotations
 
 import pathlib
+import sys
 import tempfile
 
 from jaeger_agent import tools as agent_tools
@@ -58,7 +59,14 @@ def test_setup_plugin_channel_path_returns_real_steps_not_manifest_error() -> No
         res = setup_plugin(channel)
         assert "error" not in res, res
         assert res["kind"] == "channel"
-        assert res.get("blocked") in (False, None) or channel != "imessage"
+        # imessage is platform-gated to Darwin, so off-Darwin it legitimately
+        # comes back blocked. The previous guard read `channel != "imessage"`,
+        # which inverted the intent: it exempted the two channels that can
+        # never be blocked and enforced the check only on the one that can.
+        if channel == "imessage" and sys.platform != "darwin":
+            assert res["blocked"] is True
+        else:
+            assert res.get("blocked") in (False, None)
         assert res["steps"], f"{channel}: no steps produced"
 
 
@@ -74,9 +82,15 @@ def test_setup_plugin_channel_path_names_the_right_credential() -> None:
     assert res["env_status"] == {"TELEGRAM_BOT_TOKEN": "missing"}
 
     # imessage has no auth token (platform + AppleScript only) — no
-    # required credential, so nothing missing.
+    # required credential, so nothing missing. Off-Darwin the platform gate
+    # short-circuits before credentials are ever considered, so the blocked
+    # payload carries no env_status at all.
     res = setup_plugin("imessage")
-    assert res["env_status"] == {}
+    if sys.platform == "darwin":
+        assert res["env_status"] == {}
+    else:
+        assert res["blocked"] is True
+        assert "env_status" not in res
 
 
 def test_setup_plugin_channel_path_stores_the_right_credential_names() -> None:

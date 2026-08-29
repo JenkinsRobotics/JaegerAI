@@ -51,15 +51,19 @@ def test_group_output_is_page_ordered(layout):
     # sort alphabetically after it, per GROUP_ORDER's own "eight spec
     # groups, then any spill-over" contract.
     assert order.index("model") < order.index("display") < order.index("voice")
-    spillover = {"kokoro_tts", "whisper_stt", "persona"}
+    spillover = {"kokoro_tts", "whisper_stt", "persona", "security"}
     named_order = [g for g in order if g not in spillover]
     assert named_order.index("interaction") == len(named_order) - 1
     assert "kokoro_tts" in order
     assert "whisper_stt" in order
+    assert "security" in order
     assert order.index("kokoro_tts") > order.index("interaction")
     assert order.index("whisper_stt") > order.index("interaction")
     # alphabetical among the spill-over groups themselves
-    assert order.index("kokoro_tts") < order.index("persona") < order.index("whisper_stt")
+    assert (
+        order.index("kokoro_tts") < order.index("persona")
+        < order.index("security") < order.index("whisper_stt")
+    )
 
 
 def test_kokoro_tts_engine_module_group_is_live(layout):

@@ -18,7 +18,14 @@ from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
-pytest.importorskip("PySide6")
+# Two things are load-bearing here:
+#   * the SUBMODULE, not the top-level package — importing `PySide6`
+#     alone succeeds on a headless box; the shared libraries (libEGL)
+#     only load once QtCore/QtGui/QtWidgets are pulled in below.
+#   * exc_type=ImportError — pytest 9.1 narrowed importorskip's default
+#     to ModuleNotFoundError, and a missing libEGL is a plain
+#     ImportError, which the default would let through uncaught.
+pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 pytestmark = pytest.mark.ui
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402

@@ -48,3 +48,53 @@ def test_find_live_socket_skips_dead_files(tmp_path, monkeypatch):
     dead.write_text("not a socket", encoding="utf-8")
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path))
     assert bs.find_live_socket(home=tmp_path, instance="x") is None
+
+
+# ── Which instance a client with no explicit selector looks under ─────────
+#
+# candidate_paths() is the attach contract this module exists to serve: the
+# process holding the 1:1 instance lock listens on the socket, and "every
+# other client connects instead of spawning a second `jaeger bridge`". A
+# client that looks under the wrong instance does not merely miss the attach
+# — it falls through to spawning, and that spawn then collides with the very
+# lock the socket was added to route around. ARES mirrors this function, so
+# whatever it resolves here is what ARES resolves too.
+
+
+def _home_with_sticky_default(tmp_path, name: str) -> Path:
+    home = tmp_path / "install"
+    (home / ".jaeger_ai").mkdir(parents=True)
+    (home / ".jaeger_ai" / "active_instance").write_text(name + "\n", encoding="utf-8")
+    return home
+
+
+def test_candidate_paths_use_an_explicit_instance_verbatim(tmp_path):
+    home = _home_with_sticky_default(tmp_path, "ares")
+
+    paths = bs.candidate_paths(home=home, instance="jarvis")
+
+    assert home / ".jaeger_ai" / "instances" / "jarvis" / "run" / bs.SOCKET_NAME in paths
+
+
+def test_candidate_paths_fall_back_to_default_without_a_sticky_file(tmp_path):
+    home = tmp_path / "install"
+    (home / ".jaeger_ai").mkdir(parents=True)
+
+    paths = bs.candidate_paths(home=home, instance=None)
+
+    assert home / ".jaeger_ai" / "instances" / "default" / "run" / bs.SOCKET_NAME in paths
+
+
+def test_candidate_paths_follow_the_sticky_default_instance(tmp_path):
+    """An unset instance must resolve the way Jaeger itself resolves one.
+
+    ``default_instance_name()`` documents the order as ``JAEGER_INSTANCE_NAME``
+    → ``active_instance`` → literal ``"default"``. This function implements the
+    first and last steps and omits the middle one, which is the only step that
+    differs once an operator has picked an instance.
+    """
+    home = _home_with_sticky_default(tmp_path, "ares")
+
+    paths = bs.candidate_paths(home=home, instance=None)
+
+    assert home / ".jaeger_ai" / "instances" / "ares" / "run" / bs.SOCKET_NAME in paths

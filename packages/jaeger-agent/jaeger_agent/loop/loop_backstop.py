@@ -23,11 +23,13 @@ trivially unit-testable.
 from __future__ import annotations
 
 from typing import Any
+import re
 
 # Observed legitimate multi-step work tops out near ~16 tool calls and
 # varies its arguments. These limits are a safety net, not a fine-grained
 # iteration tuner — bump them if real workloads need it, but don't lower.
 MAX_TOOL_CALLS = 24
+WARN_TOOL_CALLS = 20
 MAX_IDENTICAL_CALLS = 4
 MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
 
@@ -44,6 +46,41 @@ MAIL_TOOLS = frozenset({
 # model sees the pattern while it can still change course.
 WARN_IDENTICAL_CALLS = 2      # halt at 4 — warn from the 2nd repeat
 WARN_SEMANTIC_FAILURES = 1    # halt at 2 — warn on the 1st repeat
+
+
+def collapse_generated_repetition(text: str) -> tuple[str, int]:
+    """Collapse a high-confidence repeated response block.
+
+    Some providers occasionally emit the same paragraph sequence until the
+    output limit.  Only exact, consecutive repetition of a meaningful block
+    (at least 80 characters) three or more times is changed. Ordinary repeated
+    headings, short acknowledgements, and non-consecutive references remain
+    untouched.
+    """
+    raw = str(text or "")
+    if len(raw) < 240:
+        return raw, 1
+    blocks = [part.strip() for part in re.split(r"\n\s*\n", raw) if part.strip()]
+    if len(blocks) < 3:
+        # Providers that lose paragraph separators often repeat whole lines.
+        blocks = [part.strip() for part in raw.splitlines() if part.strip()]
+    count = len(blocks)
+    for unit_size in range(1, count // 3 + 1):
+        if count % unit_size:
+            continue
+        repeats = count // unit_size
+        if repeats < 3:
+            continue
+        unit = blocks[:unit_size]
+        if len("\n\n".join(unit)) < 80:
+            continue
+        if all(blocks[index:index + unit_size] == unit for index in range(0, count, unit_size)):
+            collapsed = "\n\n".join(unit)
+            return (
+                f"{collapsed}\n\n[repetition guard: collapsed {repeats} identical generated blocks]",
+                repeats,
+            )
+    return raw, 1
 
 
 def call_signature(tool_name: str, args: Any) -> str:
@@ -153,6 +190,8 @@ def loop_halt_reason(
     tool_calls_made: int,
     call_signatures: dict[str, int],
     failure_signatures: dict[str, int] | None = None,
+    *,
+    max_tool_calls: int = MAX_TOOL_CALLS,
 ) -> str | None:
     """Return a halt reason when the turn is spinning, else ``None``.
 
@@ -172,13 +211,40 @@ def loop_halt_reason(
                 f"called {sig.split('|', 1)[0]} with identical "
                 f"arguments {n} times"
             )
-    if tool_calls_made >= MAX_TOOL_CALLS:
+    if tool_calls_made >= max_tool_calls:
         return f"made {tool_calls_made} tool calls in a single turn"
+    return None
+
+
+def tool_budget_warning(
+    tool_calls_made: int,
+    *,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    warning_fraction: float = WARN_TOOL_CALLS / MAX_TOOL_CALLS,
+) -> str | None:
+    """Tell the model to synthesize before the total-call fuse fires.
+
+    Repetition warnings are signature-specific and live in
+    :func:`loop_warning`.  The total budget is different: varied calls may
+    all be legitimate, but the model still needs advance notice that it must
+    stop investigating and turn the accumulated results into an answer.
+    """
+    warn_at = max(1, int(max_tool_calls * min(0.99, max(0.01, warning_fraction))))
+    if warn_at <= tool_calls_made < max_tool_calls:
+        remaining = max_tool_calls - tool_calls_made
+        return (
+            f"[tool budget: {remaining} call(s) remain this turn. "
+            "Stop broadening the investigation. Use the results already "
+            "collected and produce the best final answer now. If the remaining "
+            "work repeats one operation over many items, use execute_with_tools "
+            "for the batch; otherwise call another tool only if essential.]"
+        )
     return None
 
 
 __all__ = [
     "MAX_TOOL_CALLS",
+    "WARN_TOOL_CALLS",
     "MAX_IDENTICAL_CALLS",
     "MAX_SEMANTIC_FAILURES",
     "MAIL_TOOLS",
@@ -186,6 +252,8 @@ __all__ = [
     "WARN_SEMANTIC_FAILURES",
     "call_signature",
     "semantic_failure_signature",
+    "collapse_generated_repetition",
+    "tool_budget_warning",
     "loop_halt_reason",
     "loop_warning",
 ]
