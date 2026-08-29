@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -10,6 +11,9 @@ import pytest
 
 from jaeger_ai.cli.entry import _route
 from jaeger_ai.interfaces.web.server import JaegerWebServer
+
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class _Bridge:
@@ -39,6 +43,20 @@ def test_cli_routes_web_surface():
     assert _route(["web", "--port", "9999"], "/python") == [
         "/python", "-m", "jaeger_ai.interfaces.web", "--port", "9999"
     ]
+
+
+def test_webui_branding_extension_reuses_mac_app_icons():
+    assets = REPO_ROOT / "jaeger_ai" / "assets"
+    script = (assets / "jaeger_webui_branding.js").read_text(encoding="utf-8")
+
+    for name in (
+        "jaeger_app_icon_16.png",
+        "jaeger_app_icon_32.png",
+        "jaeger_app_icon_256.png",
+    ):
+        assert name in script
+        assert (assets / name).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert "apple-touch-icon" in script
 
 
 def test_health_endpoint_uses_bridge_contract(tmp_path):
