@@ -46,7 +46,8 @@ class BridgeClient:
         return self._request({"op": "command", "cmd": command, "args": args or {}})
 
     def turn(self, text: str, session: str,
-             on_event: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+             on_event: Callable[[dict[str, Any]], None] | None = None,
+             on_request: Callable[[dict[str, Any]], str] | None = None) -> dict[str, Any]:
         with self._connection() as (_sock, rx):
             self._ready(rx)
             self._write(rx, {"op": "send", "text": text, "session": session})
@@ -58,9 +59,10 @@ class BridgeClient:
                 if kind == "reply":
                     return {"text": frame.get("text") or "", "error": frame.get("error")}
                 if kind == "request":
-                    self._write(rx, {"op": "respond", "id": str(frame.get("id") or ""), "answer": "deny"})
-                    frame = {**frame, "answer": "deny", "policy": "web-default-deny"}
-                if on_event is not None and kind in {"delta", "tool", "state", "queued", "request"}:
+                    answer = on_request(frame) if on_request is not None else "deny"
+                    self._write(rx, {"op": "respond", "id": str(frame.get("id") or ""), "answer": answer or "deny"})
+                    frame = {**frame, "answer": answer or "deny", "policy": "interactive-web" if on_request else "web-default-deny"}
+                if on_event is not None and kind in {"delta", "reasoning", "tool", "state", "queued", "request"}:
                     on_event(frame)
                 if kind == "fatal":
                     raise WebBridgeError(str(frame.get("error") or "bridge failed"))
