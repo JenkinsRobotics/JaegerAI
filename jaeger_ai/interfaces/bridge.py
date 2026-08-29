@@ -55,10 +55,20 @@ _emit_lock = threading.Lock()
 
 def _emit(out: TextIO, obj: dict[str, Any]) -> None:
     """Write one protocol line and flush — the client reads line-by-line.
-    Locked: the turn worker and the stdin thread share one stream."""
+    Locked: the turn worker and the stdin thread share one stream.
+
+    A detached Unix-socket client must not kill the instance-wide turn worker.
+    Owner stdio failures still propagate because they mean the bridge itself
+    has lost its controlling transport.
+    """
     with _emit_lock:
-        out.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        out.flush()
+        try:
+            out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            out.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError):
+            if getattr(out, "_jaeger_attach_stream", False):
+                return
+            raise
 
 
 def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
@@ -2119,6 +2129,7 @@ def _start_bridge_socket(
         try:
             f = conn.makefile("rwb", buffering=0)
             text = conn.makefile("rw", buffering=1, encoding="utf-8", newline="\n")
+            text._jaeger_attach_stream = True
             _emit(text, protocol.ready_frame(
                 getattr(getattr(ctx.layout, "root", None), "name", None) or "default",
                 _model_name(ctx.boot) if ctx.boot is not None else None,

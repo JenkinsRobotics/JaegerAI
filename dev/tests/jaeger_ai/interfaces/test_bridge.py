@@ -32,6 +32,23 @@ class _FakeBoot:
         self.cleaned = True
 
 
+class _BrokenOutput:
+    def __init__(self, *, attached: bool):
+        self._jaeger_attach_stream = attached
+
+    def write(self, _value):
+        raise BrokenPipeError("client disconnected")
+
+    def flush(self):
+        raise AssertionError("write already failed")
+
+
+def test_detached_socket_output_cannot_kill_shared_turn_worker():
+    bridge._emit(_BrokenOutput(attached=True), {"type": "state", "busy": False})
+    with pytest.raises(BrokenPipeError):
+        bridge._emit(_BrokenOutput(attached=False), {"type": "state", "busy": False})
+
+
 @pytest.fixture(autouse=True)
 def _instance_on_disk(tmp_path, monkeypatch):
     """``bridge.main`` refuses to boot when the resolved instance doesn't
