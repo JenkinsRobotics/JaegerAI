@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         "  update      update JaegerAI in place\n"
         "  bridge      run the NDJSON stdio bridge the desktop app speaks\n"
         "  mcp         run the MCP server\n"
+        "  web         run the Jaeger-owned browser UI\n"
         "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"
         "\nrun `jaeger <command> --help` for a command's own options."
     )
