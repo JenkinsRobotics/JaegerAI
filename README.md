@@ -130,6 +130,21 @@ deployed AI that plays one, with its own memory + config:
 `jaeger` is the one operator command — installed on `PATH` after
 `install.sh`, or run as `./jaeger` from the clone.
 
+### Native browser interface
+
+Jaeger also owns a loopback browser interface derived from the stable Hermes
+WebUI interaction patterns:
+
+```bash
+./jaeger web --host 127.0.0.1 --port 8790 --instance <agent-name>
+```
+
+The interface supports sessions, streamed chat and reasoning, model selection,
+tools and approvals, heartbeat, schedules, runtime health and identity through
+Jaeger's versioned bridge. It does not run or import Hermes Agent and stores no
+state under `~/.hermes`. Third-party attribution is recorded in
+`jaeger_ai/interfaces/web/THIRD_PARTY_NOTICES.md`.
+
 ## Architecture
 
 JaegerAI is the **Mind** tier — the second layer in the Jaeger ecosystem's
