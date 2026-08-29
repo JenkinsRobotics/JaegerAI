@@ -349,6 +349,14 @@
       (<code class="inline">kokoro_tts</code>, <code class="inline">whisper_stt</code>)
       are optional extras, each its own repo, pinning JaegerAI only.
     </p>
+
+    <p class="sub" style="margin-top: 18px;">
+      The native Mac runtime now includes a loopback browser interface on
+      <code class="inline">127.0.0.1:8790</code>. Its Hermes-WebUI-derived
+      frontend talks only to Jaeger’s versioned bridge for sessions, streamed
+      reasoning, tools, approvals, models, heartbeat, and schedules; Hermes
+      Agent is not part of the Jaeger process.
+    </p>
   </div>
 </section>
 
