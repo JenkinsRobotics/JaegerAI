@@ -1,4 +1,4 @@
-"""Jaeger-owned browser surface derived from the ARES visual shell."""
+"""Jaeger runner adapter for a separately hosted genuine Hermes WebUI."""
 
 from .server import main
 

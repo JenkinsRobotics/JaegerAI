@@ -130,19 +130,22 @@ deployed AI that plays one, with its own memory + config:
 `jaeger` is the one operator command — installed on `PATH` after
 `install.sh`, or run as `./jaeger` from the clone.
 
-### Native browser interface
+### Hermes WebUI adapter
 
-Jaeger also owns a loopback browser interface derived from the stable Hermes
-WebUI interaction patterns:
+Jaeger exposes a loopback runner adapter for an unmodified Hermes WebUI
+instance. Start the adapter separately from the WebUI:
 
 ```bash
-./jaeger web --host 127.0.0.1 --port 8790 --instance <agent-name>
+./jaeger web --host 127.0.0.1 --port 8791 --instance <agent-name>
 ```
 
-The interface supports sessions, streamed chat and reasoning, model selection,
-tools and approvals, heartbeat, schedules, runtime health and identity through
-Jaeger's versioned bridge. It does not run or import Hermes Agent and stores no
-state under `~/.hermes`. Third-party attribution is recorded in
+Configure Hermes WebUI with `HERMES_WEBUI_RUNTIME_ADAPTER=runner-local` and
+`HERMES_WEBUI_RUNNER_BASE_URL=http://127.0.0.1:8791`. Hermes WebUI can then
+serve the browser on port `8790`, while Jaeger remains the runtime owner for
+sessions, streamed chat and reasoning, model selection, tools, and approvals
+through its versioned bridge. This adapter does not run or import Hermes Agent,
+does not serve a custom frontend, and stores no state under `~/.hermes`.
+Third-party attribution is recorded in
 `jaeger_ai/interfaces/web/THIRD_PARTY_NOTICES.md`.
 
 ## Architecture
