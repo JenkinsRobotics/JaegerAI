@@ -148,6 +148,15 @@ does not serve a custom frontend, and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
 `jaeger_ai/interfaces/web/THIRD_PARTY_NOTICES.md`.
 
+The optional `jaeger_ai/assets/jaeger_webui_branding.js` extension replaces
+the browser favicon and Apple touch icon with Jaeger's existing Mac app icon.
+Enable it through Hermes WebUI's supported extension variables:
+
+```bash
+export HERMES_WEBUI_EXTENSION_DIR="$PWD/jaeger_ai/assets"
+export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
+```
+
 ## Architecture
 
 JaegerAI is the **Mind** tier — the second layer in the Jaeger ecosystem's
