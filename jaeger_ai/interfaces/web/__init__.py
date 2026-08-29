@@ -1,4 +1,4 @@
-"""Jaeger runner adapter for a separately hosted genuine Hermes WebUI."""
+"""Jaeger runner and scheduler adapter for the pinned Hermes WebUI fork."""
 
 from .server import main
 
