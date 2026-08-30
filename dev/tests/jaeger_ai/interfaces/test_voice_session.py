@@ -40,7 +40,7 @@ def test_voice_config_defaults_match_voicellm_proven_pattern() -> None:
                           removed 2026-06-16; wake word replaces it)
       - barge_in  OFF   — mic-pause during TTS (VoiceLLM's reference
                           self-speech rejection strategy)
-      - follow_up ON, follow_up_seconds=10.0 (reference value)
+      - follow_up ON, follow_up_seconds=15.0 (sequential reference value)
       - self_speech_filter ON, threshold=0.75
     """
     vc = VoiceConfig()
@@ -48,7 +48,7 @@ def test_voice_config_defaults_match_voicellm_proven_pattern() -> None:
     assert vc.wake_word is True
     assert vc.barge_in is False
     assert vc.follow_up is True
-    assert vc.follow_up_seconds == 10.0
+    assert vc.follow_up_seconds == 15.0
     assert vc.self_speech_filter is True
     assert vc.self_speech_threshold == 0.75
 
@@ -174,20 +174,24 @@ class _FakeSpeechBus:
 class _FakeSTT:
     def __init__(self):
         self.paused = []
+        self.events = []
         self.on_speech_detected = None
         self.drained = False
 
     def set_paused(self, value):
         self.paused.append(value)
+        self.events.append(("paused", value))
 
     def set_on_speech_detected(self, callback):
         self.on_speech_detected = callback
 
     def drain_pending(self):
         self.drained = True
+        self.events.append(("drained", None))
 
     def remember_reply(self, text):
         self.last_reply = text
+        self.events.append(("remembered", text))
 
 
 def test_voice_controller_speaks_through_tts_node_bus() -> None:
@@ -200,13 +204,52 @@ def test_voice_controller_speaks_through_tts_node_bus() -> None:
     assert interrupted is False
     request, ack_topic, timeout_s = c._bus.requests[0]
     assert isinstance(request, topics.SpeechCommand)
-    assert request.topic == topics.ACT_SPEECH
+    assert request.topic == topics.ACT_SPEECH_SAY
     assert request.text == "hello from the bus"
     assert request.node_id == "tui_voice"
     assert request.correlation_id
-    assert ack_topic == topics.SENSE_SPOKEN
+    assert ack_topic == topics.ACT_SPEECH_SPOKEN
     assert timeout_s == 180.0
     assert c._audio_session.paused == [True, False]
+    assert c.last_speech_succeeded is True
+    assert c._audio_session.drained is True
+    assert c._audio_session.events == [
+        ("paused", True),
+        ("drained", None),
+        ("paused", False),
+        ("remembered", "hello from the bus"),
+    ]
+
+
+def test_half_duplex_turn_drops_input_until_reply_boundary() -> None:
+    c = VoiceController(Console(file=open("/dev/null", "w")))
+    c._audio_session = _FakeSTT()
+    handler = c._make_transcript_handler()
+
+    handler(SimpleNamespace(text="first command"))
+    assert c._transcripts.qsize() == 1
+
+    c.begin_turn()
+    assert c.accepting_input is False
+    assert c._transcripts.empty()
+    handler(SimpleNamespace(text="speech while the agent is busy"))
+    assert c._transcripts.empty()
+
+    c.end_turn()
+    assert c.accepting_input is True
+    handler(SimpleNamespace(text="real follow up"))
+    assert c.poll(timeout=0.01) == "real follow up"
+
+
+def test_half_duplex_does_not_arm_turn_interruption() -> None:
+    import threading
+
+    c = VoiceController(Console(file=open("/dev/null", "w")))
+    stt = _FakeSTT()
+    c._audio_session = stt
+    c.arm_interrupt(threading.Event())
+
+    assert stt.on_speech_detected is None
 
 
 def test_voice_controller_does_not_speak_non_speech_marker_reply() -> None:
