@@ -367,20 +367,19 @@ class VoiceConfig(BaseModel):
         False,
         json_schema_extra=_setting("voice"),
         description=(
-            "Allow interrupting the agent mid-sentence by speaking. Uses "
-            "echo cancellation (speexdsp) so the open mic doesn't hear the "
-            "agent itself; falls back to mic-pause when speexdsp is absent.  "
-            "Off (default) = mic-paused-during-TTS — matches the proven "
-            "VoiceLLM reference's self-speech rejection strategy."
+            "Allow interrupting the agent mid-sentence by speaking. Requires "
+            "live echo control (native AVAudio voice processing or AEC); "
+            "otherwise the runtime safely falls back to sequential "
+            "half-duplex. Off (default) matches the reference pipeline."
         ),
     )
     follow_up_seconds: float = Field(
-        10.0, ge=2.0, le=120.0,
+        15.0, ge=2.0, le=120.0,
         json_schema_extra=_setting("voice"),
         description=(
-            "Length of the no-wake-word follow-up window.  Reduced from "
-            "15s to 10s in 0.4.x to match the proven reference (shorter "
-            "window = less time for stale noise between turns)."
+            "Length of the no-wake-word follow-up window. The sequential "
+            "half-duplex reference uses 15 seconds, beginning only after "
+            "speech and the follow-up chime have fully completed."
         ),
     )
     speech_engine: Literal["kokoro", "apple"] = Field(
