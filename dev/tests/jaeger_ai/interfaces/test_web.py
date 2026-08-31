@@ -12,7 +12,6 @@ import pytest
 from jaeger_ai.cli.entry import _route
 from jaeger_ai.interfaces.web.server import JaegerWebServer
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -253,6 +252,26 @@ def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path)
     assert server.runner._jaeger_provider("openai-api", "gemma-4-26b:latest") == "ollama"
     assert server.runner._jaeger_provider("openai-api", "glm-5.2:cloud") == "ollama-cloud"
     server.server_close()
+
+
+def test_runner_uses_catalog_route_instead_of_product_lane(tmp_path):
+    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+
+    class CatalogBridge(_Bridge):
+        def query(self, what, args=None):
+            if what == "model_catalog":
+                return {"models": [{
+                    "id": "gemma4:latest",
+                    "provider": "ollama-local",
+                    "route_provider": "ollama",
+                }]}
+            return super().query(what, args)
+
+    server.runner.bridge = CatalogBridge()
+    try:
+        assert server.runner._jaeger_provider("", "gemma4:latest") == "ollama"
+    finally:
+        server.server_close()
 
 
 def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):

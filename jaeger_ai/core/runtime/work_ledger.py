@@ -19,19 +19,19 @@ raw tool JSON that produced it.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-
 
 LEDGER_TAG = "[Work Ledger]"
 
@@ -46,7 +46,7 @@ _by_id: dict[str, WorkLedger] = {}
 # Optional process-wide verifier. Tests and hosts can register a
 # callable ``(WorkLedger) -> error|None``. The ledger-attached
 # ``verify`` spec is the normal path; this is the escape hatch.
-_completion_verifier: Callable[["WorkLedger"], str | None] | None = None
+_completion_verifier: Callable[[WorkLedger], str | None] | None = None
 # Live UI progress. The boot path installs a publisher that forwards
 # ``tool.progress`` frames; tests capture the same dict. ``reset()``
 # does not clear this — /new must not silence the drawer.
@@ -677,7 +677,6 @@ def complete_task(
 # Importing this module registers the two tools — same pattern as
 # ``code_bridge_tool``. ``_register_builtins`` pulls the import so a
 # boot that never otherwise touches the ledger still has the tools.
-@register_tool_from_function(name="work_ledger", side_effect="write")
 def _reject_raw(kwargs: dict[str, Any]) -> dict[str, Any] | None:
     if "_raw_arguments" in kwargs:
         return {
@@ -688,6 +687,7 @@ def _reject_raw(kwargs: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+@register_tool_from_function(name="work_ledger", side_effect="write")
 def _t_work_ledger(
     action: str = "status",
     task_name: str = "",
@@ -745,14 +745,14 @@ __all__ = [
     "WorkLedger",
     "active_ledger",
     "all_ledgers",
-    "get_ledger",
-    "last_completion",
+    "complete_task",
     "consume_completion",
     "context_block",
+    "get_ledger",
+    "last_completion",
+    "progress_event",
     "reset",
     "set_completion_verifier",
     "set_progress_publisher",
-    "progress_event",
     "work_ledger",
-    "complete_task",
 ]

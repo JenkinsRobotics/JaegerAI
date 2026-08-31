@@ -71,7 +71,7 @@ def _emit(out: TextIO, obj: dict[str, Any]) -> None:
             raise
 
 
-def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
+def _emit_state(out: TextIO, ctx: _Ctx, busy: bool, session: str = "") -> None:
     """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
     turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
     guard and the wire frame never drift apart."""
@@ -380,10 +380,12 @@ def _session_contract() -> dict[str, Any]:
 
 def _integration_contract() -> dict[str, Any]:
     """Return the authoritative feature contract for external surfaces."""
-    from jaeger_ai import __version__
     from jaeger_os.contract import protocol
+
+    from jaeger_ai import __version__
     from jaeger_ai.interfaces.surface_contract import (
-        SWIFT_COMMAND_SUPPORT, SWIFT_QUERY_SUPPORT,
+        SWIFT_COMMAND_SUPPORT,
+        SWIFT_QUERY_SUPPORT,
     )
 
     return {
@@ -552,7 +554,8 @@ def _display_name(boot: Any) -> str | None:
     falls back to ``agent_name``."""
     try:
         from jaeger_ai.personality.character import (
-            active_character, persona_display_name,
+            active_character,
+            persona_display_name,
         )
         root = _instance_root(boot)
         character = active_character(root) if root is not None else None
@@ -627,6 +630,7 @@ def _runtime_query_runs(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     return [asdict(run) for run in SqliteRunStore().list(
         commitment_id=args.get("commitment_id"),
@@ -638,6 +642,7 @@ def _runtime_query_commitments(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
     return [asdict(item) for item in SqliteCommitmentStore().list(
         state=args.get("state"),
@@ -648,6 +653,7 @@ def _runtime_query_effects(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
     status = args.get("status", "pending")
     return [asdict(item) for item in SqliteEffectLedger().list(status=status)]
@@ -693,7 +699,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
     from jaeger_ai.personality.character import (
-        active_character, active_character_id, bound_character_id, list_characters,
+        active_character,
+        active_character_id,
+        bound_character_id,
+        list_characters,
     )
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
@@ -775,7 +784,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return _card_art(_effective_icon(boot, c), c.id)
     if what == "board":
         from jaeger_agent.background.board import (
-            board_digest, board_for_layout, has_actionable_work,
+            board_digest,
+            board_for_layout,
+            has_actionable_work,
         )
         if lay is None:
             return {"cards": [], "digest": "", "has_actionable": False}
@@ -876,7 +887,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
 
     if what == "model_catalog":
         """Canonical model inventory for external product surfaces."""
-        from jaeger_ai.core.models.model_resolver import list_registered_models, serving_model
+        from jaeger_ai.core.models.model_resolver import (
+            list_registered_models,
+            serving_model,
+        )
 
         raw_models = list_registered_models()
         models: list[dict[str, Any]] = []
@@ -887,8 +901,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             model_id = str(row.get("name") or row.get("filename") or "").strip()
             if not model_id:
                 continue
-            provider = str(row.get("provider") or "").strip() or None
+            route_provider = str(row.get("provider") or "").strip() or None
             location = str(row.get("location") or row.get("kind") or "unknown")
+            # The signed-in host Ollama daemon is the transport for both
+            # on-device and hosted models.  Keep that routing fact internal:
+            # product surfaces need the user-facing provider boundary, not
+            # the socket used to reach it.
+            provider = route_provider
+            if route_provider == "ollama":
+                provider = "ollama-cloud" if location == "cloud" else "ollama-local"
             # Same model id can exist on Ollama Cloud AND local Ollama.
             # The label has to say which, or a picker keyed by id alone
             # will start the local daemon for a cloud pick.
@@ -896,7 +917,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             if provider and provider not in label:
                 where = {
                     "ollama-cloud": "Ollama Cloud",
-                    "ollama": "Ollama (local)",
+                    "ollama-local": "Ollama Local",
                     "local": "on-device",
                     "mlx": "on-device",
                     "in-process": "on-device",
@@ -908,6 +929,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 "label": label,
                 "location": location,
                 "provider": provider,
+                "route_provider": route_provider,
                 "in_use": bool(row.get("serving")),
                 "source": str(row.get("source") or "jaeger"),
                 "notes": str(row.get("description") or row.get("status") or ""),
@@ -919,11 +941,17 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                     "status": "configured", "source": "jaeger",
                 })
         active = serving_model() or {}
+        active_provider = str(active.get("provider") or "").strip() or None
+        if active_provider == "ollama":
+            active_provider = (
+                "ollama-cloud" if active.get("location") == "cloud" else "ollama-local"
+            )
         return {
             "instance": getattr(boot, "instance_name", None),
             "serving": {
                 "model": active.get("name"),
-                "provider": active.get("provider"),
+                "provider": active_provider,
+                "route_provider": active.get("provider"),
                 "context_length": active.get("context_length"),
             } if active else {},
             "models": models,
@@ -979,8 +1007,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "top_tools": usage_stats.top_tools(10),
         }
     if what == "permissions":
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
+
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
         cfg = load_yaml(lay.config_path, Config)
         return {"mode": cfg.permissions.mode,
                 "granted": sorted(PermissionGrants.load(root).persistent)}
@@ -1095,8 +1124,8 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             # (never the character). An avatar source path is copied INTO the
             # instance dir so the picture travels with the instance; a
             # falsy/empty avatar clears it (→ fall back to the character card).
-            from pathlib import Path
             import shutil
+            from pathlib import Path
 
             from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
             data = load_yaml(lay.identity_path, Identity).model_dump()
@@ -1267,6 +1296,7 @@ class _Ctx:
 def _turn_workspace(ctx: _Ctx, requested: Any):
     """Temporarily bind file tools to the validated ARES session workspace."""
     from jaeger_agent import tools as jaeger_tools
+
     from jaeger_ai.main import _pipeline
 
     raw = str(requested or "").strip()
@@ -1382,7 +1412,6 @@ class BridgeConfirmationProvider:
             self._ctx.pending.pop(rid, None)
 
     def confirm(self, request: object) -> bool:
-        from jaeger_os.contract import protocol
         skill = getattr(request, "skill", "") or ""
         if self._grants.is_granted(skill):
             return True  # already approved (console "always", or ours) — no frame
@@ -1490,8 +1519,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     # Interactive permission approval over the wire (deny on timeout).
     try:
-        from jaeger_os.core.safety.permissions import (
-            AllowAllProvider, current_policy)
+        from jaeger_os.core.safety.permissions import AllowAllProvider, current_policy
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
             policy.confirmation = BridgeConfirmationProvider(proto, ctx)
@@ -1581,7 +1609,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
               file=sys.stderr, flush=True)
 
     try:
-        from jaeger_ai.main import autostart_plugins, _pipeline
+        from jaeger_ai.main import _pipeline, autostart_plugins
         autostart_plugins(_pipeline.get("config"))
     except Exception as exc:  # noqa: BLE001
         print(f"[bridge] plugin autostart skipped: {exc}",
@@ -1668,18 +1696,19 @@ def _windowed_control_slash(text: str) -> str | None:
     return None
 
 
-def _run_slash(text: str, ctx: "_Ctx") -> str:
+def _run_slash(text: str, ctx: _Ctx) -> str:
     """Dispatch one slash line through the TUI's registry and return the
     rendered output as plain text. Python stays the single source of truth
     for slash behaviour — the client just displays what comes back."""
     from rich.console import Console
+
     from jaeger_ai.interfaces.tui import slash_commands as sc
 
     parts = text.lstrip("/").split(None, 1)
     name = (parts[0] if parts else "").lower()
     rest = parts[1] if len(parts) > 1 else ""
     rest_head = (rest.split()[:1] or [""])[0].lower()
-    known = name in sc._BY_NAME  # noqa: SLF001 — same package family
+    known = name in sc._BY_NAME
     # Bare /model and /models open a clickable overlay in the app. Never
     # print the catalogue into the chat — that's the bug this exists to
     # close. Typed ``/model use …`` is a direct switch and may run here.
@@ -1761,14 +1790,15 @@ def _heartbeat_config(ctx: _Ctx) -> tuple[bool, int, str]:
 
 def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
     """One supervisor tick. Never raises into the poll loop."""
-    from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
-    from jaeger_ai.core.runtime import heartbeat as hb
-    from jaeger_ai.core.runtime.completions import pending_count, next_completion_turn
-    from jaeger_ai.core.runtime.task_liveness import reclaim_stale
     from jaeger_agent.background.board import has_actionable_work
     from jaeger_agent.prompts import AUTO_BOARD_PROMPT
-    from jaeger_ai.main import _pipeline, run_for_voice, _run_turn
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.runtime import heartbeat as hb
+    from jaeger_ai.core.runtime.completions import next_completion_turn, pending_count
+    from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
+    from jaeger_ai.core.runtime.task_liveness import reclaim_stale
+    from jaeger_ai.main import _pipeline, _run_turn, run_for_voice
 
     layout = ctx.layout
     if layout is None or ctx.client is None or ctx.busy:
@@ -1880,7 +1910,7 @@ def _start_idle_supervisor(proto: TextIO, ctx: _Ctx) -> None:
 
 
 def _turn_worker(proto: TextIO, ctx: _Ctx,
-                 turns: "_queue.Queue[dict[str, Any] | None]") -> None:
+                 turns: _queue.Queue[dict[str, Any] | None]) -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
     completion — old clients that chat right after ``ready`` just wait,
     exactly as they did when ``ready`` meant model-loaded."""
@@ -1956,14 +1986,17 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             pass
         _emit_state(out, ctx, True, session)
         try:
+            from jaeger_ai.core.runtime import continuation, execution
+            from jaeger_ai.core.runtime.autonomous_runner import (
+                ledger_open,
+                next_continuation_prompt,
+            )
             from jaeger_ai.main import (
                 interaction_request_sink,
                 run_for_voice,
                 stream_delta_sink,
                 stream_reasoning_sink,
             )
-            from jaeger_ai.core.runtime import continuation, execution
-            from jaeger_ai.core.runtime.autonomous_runner import ledger_open, next_continuation_prompt
 
             current_prompt = text
             max_continuations = execution.max_steps()
@@ -2092,12 +2125,13 @@ def _start_webhooks(ctx: _Ctx) -> None:
 
 def _start_bridge_socket(
     ctx: _Ctx,
-    inbound: "_queue.Queue[tuple[dict[str, Any], Any] | None]",
+    inbound: _queue.Queue[tuple[dict[str, Any], Any] | None],
     owner_out: TextIO,
 ) -> None:
     """Listen on the instance Unix socket so a second UI can attach."""
-    from jaeger_ai.core.runtime import bridge_socket as bsock
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.runtime import bridge_socket as bsock
 
     path = bsock.socket_path(ctx.layout)
     if path is None:
@@ -2201,15 +2235,26 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     """
     argv = sys.argv[1:] if argv is None else argv
 
+    # This module is also probed by installers and integration inventories.
+    # Treat help flags as flags, not as instance names; the old behavior
+    # silently created an on-disk instance literally named ``--help``.
+    if argv and argv[0] in {"-h", "--help"}:
+        print("usage: python -m jaeger_ai.interfaces.bridge [INSTANCE]")
+        return 0
+
     # The protocol stream is the REAL stdout.  Repoint sys.stdout at
     # stderr for the rest of the process so boot logs / stray prints land
     # on stderr and never corrupt the NDJSON the client is parsing.
     proto = sys.stdout
     sys.stdout = sys.stderr
 
-    from jaeger_ai.core.instance.instance import (
-        InstanceLayout, default_instance_name, resolve_instance_dir)
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.instance.instance import (
+        InstanceLayout,
+        default_instance_name,
+        resolve_instance_dir,
+    )
 
     instance = (argv[0] if argv else None) or default_instance_name()
 
@@ -2270,7 +2315,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             name="bridge-boot", daemon=True)
         booter.start()
 
-    turns: "_queue.Queue[dict[str, Any] | None]" = _queue.Queue()
+    turns: _queue.Queue[dict[str, Any] | None] = _queue.Queue()
     worker = threading.Thread(
         target=_turn_worker, args=(proto, ctx, turns),
         name="bridge-turns", daemon=True)
@@ -2573,7 +2618,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 continue
             if op == "command" and (req.get("cmd") or "") == "configure_fallback_chain":
                 try:
-                    from jaeger_ai.core.models.configuration import configure_fallback_chain
+                    from jaeger_ai.core.models.configuration import (
+                        configure_fallback_chain,
+                    )
 
                     if ctx.layout is None:
                         raise RuntimeError("no Jaeger instance is selected")
@@ -2648,6 +2695,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # regardless, so a failure here would only leak state,
                 # never break the new session.
                 import uuid
+
                 from jaeger_ai.main import evict_session
                 a = req.get("args") or {}
                 old_id = str(a.get("old_id") or "").strip()

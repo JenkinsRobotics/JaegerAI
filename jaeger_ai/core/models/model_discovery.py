@@ -214,11 +214,19 @@ def discover_ollama(base: str = OLLAMA_URL) -> dict[str, Any]:
     for m in (data.get("models") or []):
         if isinstance(m, dict) and m.get("name"):
             size = m.get("size")
-            models.append({
+            row = {
                 "name": m["name"],
                 "size_gb": (round(size / 1e9, 1)
                             if isinstance(size, (int, float)) else None),
-            })
+                "capabilities": list(m.get("capabilities") or []),
+            }
+            # A signed-in Ollama daemon advertises local weights and hosted
+            # cloud stubs through the same owner endpoint. Preserve its
+            # provenance so model_resolver can present two honest lanes.
+            if m.get("remote_host") or m.get("remote_model"):
+                row["remote_host"] = m.get("remote_host")
+                row["remote_model"] = m.get("remote_model")
+            models.append(row)
     return {"online": True, "models": models, "endpoint": base}
 
 

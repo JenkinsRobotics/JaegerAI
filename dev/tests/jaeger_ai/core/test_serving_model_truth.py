@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import jaeger_ai.main as main
+from jaeger_ai import main
 from jaeger_ai.core.models import model_resolver
 
 
@@ -81,6 +81,25 @@ def test_serving_model_reports_the_live_client(pipeline):
     assert row["context_length"] == 262_144
     assert row["serving"] is True
     assert row["fallback_active"] is False
+
+
+def test_cloud_tag_through_signed_in_local_ollama_is_location_cloud(pipeline):
+    pipeline["client"] = _client(
+        provider="ollama", model="glm-5.2:cloud", ctx=1_048_576)
+    pipeline["config"] = SimpleNamespace(
+        model=SimpleNamespace(ctx=8192, max_tokens=1024),
+        external_model=SimpleNamespace(
+            enabled=True,
+            provider="ollama",
+            model="glm-5.2:cloud",
+            ctx=1_048_576,
+            max_tokens=4096,
+            base_url="http://localhost:11434/v1",
+        ),
+    )
+    row = model_resolver.serving_model()
+    assert row["provider"] == "ollama"  # the real transport owner
+    assert row["location"] == "cloud"
 
 
 def test_a_cloud_lane_that_is_not_answering_is_reported_as_fallback(pipeline):
@@ -142,6 +161,50 @@ def test_cloud_catalog_omits_local_ollama_rows(pipeline, monkeypatch):
     rows = model_resolver.list_registered_models()
     assert all(r.get("provider") != "ollama" for r in rows)
     assert all(r.get("location") != "local" for r in rows)
+
+
+def test_hybrid_ollama_catalog_separates_local_and_cloud_rows(pipeline, monkeypatch):
+    pipeline["client"] = _client(
+        provider="ollama", model="gemma4:latest", ctx=65_536)
+    pipeline["config"] = SimpleNamespace(
+        model=SimpleNamespace(ctx=8192, max_tokens=1024),
+        external_model=SimpleNamespace(
+            enabled=True,
+            provider="ollama",
+            model="gemma4:latest",
+            ctx=65_536,
+            max_tokens=4096,
+            base_url="http://localhost:11434/v1",
+        ),
+    )
+    monkeypatch.setattr(
+        "jaeger_ai.core.models.model_discovery.discover_ollama",
+        lambda: {
+            "online": True,
+            "models": [
+                {"name": "local", "capabilities": ["completion", "tools"]},
+                {
+                    "name": "cloud:cloud",
+                    "remote_host": "https://ollama.com",
+                    "capabilities": ["completion", "tools"],
+                },
+                {"name": "embed", "capabilities": ["embedding"]},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "jaeger_ai.core.models.ollama_context.probe_ollama_context",
+        lambda *_args, **_kwargs: (65_536, "model_info"),
+    )
+    rows = model_resolver.list_registered_models()
+    assert any(row.get("provider") == "ollama" and row.get("name") == "local" for row in rows)
+    assert any(
+        row.get("provider") == "ollama-cloud"
+        and row.get("location") == "cloud"
+        and row.get("name") == "cloud:cloud"
+        for row in rows
+    )
+    assert all(row.get("name") != "embed" for row in rows)
 
 
 def test_listing_leads_with_the_serving_model(pipeline):

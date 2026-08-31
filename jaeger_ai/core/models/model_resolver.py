@@ -39,7 +39,6 @@ import sys
 import urllib.request
 from typing import Any
 
-
 # ── Registry ────────────────────────────────────────────────────────
 
 
@@ -482,7 +481,7 @@ def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
                                                time.monotonic() - start))
         sys.stderr.flush()
 
-    urllib.request.urlretrieve(url, tmp, reporthook=_hook)  # noqa: S310
+    urllib.request.urlretrieve(url, tmp, reporthook=_hook)
     if progress:
         sys.stderr.write("\n")
         sys.stderr.flush()
@@ -530,14 +529,19 @@ def serving_model() -> dict[str, Any] | None:
         # enforces are the same figure — a self-description that disagrees
         # with the trimmer is worse than no number.
         try:
-            from jaeger_ai.main import _context_budget_for, _pipeline as _p
+            from jaeger_ai.main import _context_budget_for
+            from jaeger_ai.main import _pipeline as _p
 
             budgeted, _reserve = _context_budget_for(_p.get("config"))
             window = int(budgeted or 0)
         except Exception:  # noqa: BLE001
             window = 0
 
-    if kind == "external" and "cloud" in provider:
+    cloud_via_local_ollama = (
+        provider == "ollama"
+        and (name.endswith(":cloud") or name.endswith("-cloud"))
+    )
+    if kind == "external" and ("cloud" in provider or cloud_via_local_ollama):
         location = "cloud"
     elif kind == "external":
         # Local Ollama / LM Studio — on this machine, not a hosted API.
@@ -669,16 +673,31 @@ def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
                 name = str(entry.get("name") or "")
                 if not name:
                     continue
+                capabilities = {
+                    str(value).strip().lower()
+                    for value in entry.get("capabilities") or []
+                }
+                # Jaeger is an agent runtime, so embedding-only or
+                # completion-without-tools artifacts are not selectable.
+                if capabilities and not {"completion", "tools"}.issubset(capabilities):
+                    continue
+                remote = bool(entry.get("remote_host") or entry.get("remote_model")) \
+                    or name.endswith(":cloud") or name.endswith("-cloud")
+                logical_provider = "ollama-cloud" if remote else "ollama"
                 rows.append({
                     "name": name,
-                    "source": "ollama",
+                    "source": logical_provider,
                     "serving": False,
                     "kind": "external",
-                    "provider": "ollama",
-                    "location": "local",
+                    "provider": logical_provider,
+                    "route_provider": "ollama",
+                    "location": "cloud" if remote else "local",
                     "context_length": _window(
-                        name, model_discovery.OLLAMA_URL, "ollama"),
-                    "status": "available on the local Ollama server",
+                        name, model_discovery.OLLAMA_URL, logical_provider),
+                    "status": (
+                        "available on Ollama Cloud through the signed-in local daemon"
+                        if remote else "available on the local Ollama server"
+                    ),
                     "description": "",
                 })
     except Exception:  # noqa: BLE001
