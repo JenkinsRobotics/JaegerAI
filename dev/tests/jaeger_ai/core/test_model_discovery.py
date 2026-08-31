@@ -8,6 +8,7 @@ provider that rides the OpenAI-compatible path.
 
 from __future__ import annotations
 
+from jaeger_ai.core.instance.schemas import ExternalModelConfig
 from jaeger_ai.core.models.external_model import _OPENAI_COMPATIBLE
 from jaeger_ai.core.models.model_discovery import (
     discover_all,
@@ -15,8 +16,6 @@ from jaeger_ai.core.models.model_discovery import (
     discover_lmstudio,
     discover_ollama,
 )
-from jaeger_ai.core.instance.schemas import ExternalModelConfig
-
 
 # ── Ollama provider ──────────────────────────────────────────────────
 
@@ -47,6 +46,32 @@ def test_offline_server_probe_is_graceful() -> None:
     assert r["online"] is False and r["models"] == []
     r2 = discover_lmstudio("http://localhost:9")
     assert r2["online"] is False and r2["models"] == []
+
+
+def test_ollama_discovery_preserves_cloud_provenance(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "jaeger_ai.core.models.model_discovery._get_json",
+        lambda _url: {
+            "models": [
+                {
+                    "name": "local-model",
+                    "size": 1000,
+                    "capabilities": ["completion", "tools"],
+                },
+                {
+                    "name": "cloud-model:cloud",
+                    "size": 100,
+                    "remote_host": "https://ollama.com",
+                    "remote_model": "cloud-model",
+                    "capabilities": ["completion", "tools"],
+                },
+            ]
+        },
+    )
+    rows = discover_ollama()["models"]
+    assert rows[0].get("remote_host") is None
+    assert rows[1]["remote_host"] == "https://ollama.com"
+    assert rows[1]["remote_model"] == "cloud-model"
 
 
 def test_discover_all_covers_every_source() -> None:

@@ -298,7 +298,15 @@ class RunnerBroker:
             if not isinstance(row, dict):
                 continue
             if model in {str(row.get("id") or ""), str(row.get("model") or ""), str(row.get("name") or "")}:
-                owner = str(row.get("provider") or "").strip().lower()
+                # Product surfaces expose friendly lanes such as
+                # ``ollama-local`` and ``ollama-cloud`` while the catalog's
+                # route_provider names the provider Jaeger's runtime accepts.
+                # Prefer the execution route when it is available; feeding
+                # the display lane back into configure_model makes headless
+                # ARES runs fail with "unsupported Jaeger provider".
+                owner = str(
+                    row.get("route_provider") or row.get("provider") or ""
+                ).strip().lower()
                 if owner:
                     return owner
         # Hermes custom OpenAI-compatible providers commonly arrive as
@@ -598,7 +606,7 @@ class WebHandler(BaseHTTPRequestHandler):
     def schedules(self) -> ScheduleBroker:
         return self.server.schedules  # type: ignore[attr-defined]
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         try:
             if parsed.path in {"/health", "/api/health"}:
@@ -642,7 +650,7 @@ class WebHandler(BaseHTTPRequestHandler):
         except (WebBridgeError, ValueError) as exc:
             return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
             body = self._body()
