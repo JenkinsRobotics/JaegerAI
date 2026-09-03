@@ -26,6 +26,9 @@ parity; each row below points to executable Jaeger code.
 | Rollback, backup, update, crash recovery | CLI backup/update modules + durable run recovery | Existing parity |
 | Native macOS menu app and MCP | PySide/Swift interfaces + MCP plugin | Existing parity |
 | Hermes WebUI | `interfaces/hermes_webui_adapter` | Implemented and explicitly named |
+| Agentgateway (MCP :8811, A2A :8812) | `jaeger_ai/features/gateway` | Implemented; Jaeger-owned binary+config, ARES gateway is archive |
+| A2A host (official a2a-sdk) | `jaeger_ai/interfaces/a2a_server.py` | Implemented; executor drives live BridgeClient |
+| MCP host (stdio + HTTP :8792) | `jaeger_ai/interfaces/mcp_server.py` | Implemented; HTTP attaches to the live bridge |
 | OIDC and passkeys | `jaeger_ai/features/oidc`, `features/passkeys` | Implemented as separate features and exposed by the Hermes WebUI adapter |
 | Insta360 hardware | `jaeger_ai/features/insta360` | Implemented with AVFoundation media and native IOKit PTZ |
 | ARES state migration and retirement rehearsal | `jaeger_ai/features/ares_migration` | Implemented; deliberately non-destructive and operator-triggered |

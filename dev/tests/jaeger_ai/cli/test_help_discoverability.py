@@ -27,6 +27,8 @@ DISPATCHER_COMMANDS = (
     "setup",
     "bridge",
     "mcp",
+    "a2a",
+    "gateway",
     "hermes-webui-adapter",
     "doctor",
     "update",

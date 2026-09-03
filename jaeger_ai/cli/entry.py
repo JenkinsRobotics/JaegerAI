@@ -53,6 +53,10 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":
         return [py, "-m", "jaeger_ai.interfaces.mcp_server", *rest]
+    if cmd == "a2a":
+        return [py, "-m", "jaeger_ai.interfaces.a2a_server", *rest]
+    if cmd == "gateway":
+        return [py, "-m", "jaeger_ai.features.gateway", *rest]
     if cmd == "hermes-webui-adapter":
         return [py, "-m", "jaeger_ai.interfaces.hermes_webui_adapter", *rest]
     if cmd == "doctor":
