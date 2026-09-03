@@ -5,15 +5,21 @@ from __future__ import annotations
 import json
 import socket
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from jaeger_ai.core.instance.instance import InstanceLayout, default_instance_name, resolve_instance_dir
-from jaeger_ai.core.runtime import bridge_socket
 from jaeger_os.contract import protocol
 
+from jaeger_ai.core.instance.instance import (
+    InstanceLayout,
+    default_instance_name,
+    resolve_instance_dir,
+)
+from jaeger_ai.core.runtime import bridge_socket
 
-class WebBridgeError(RuntimeError):
+
+class HermesWebUIAdapterBridgeError(RuntimeError):
     pass
 
 
@@ -28,7 +34,7 @@ class BridgeClient:
     def socket_path(self) -> Path:
         path = bridge_socket.socket_path(self.layout)
         if path is None:
-            raise WebBridgeError("Jaeger instance has no bridge socket path")
+            raise HermesWebUIAdapterBridgeError("Jaeger instance has no bridge socket path")
         return path
 
     def health(self) -> dict[str, Any]:
@@ -73,8 +79,8 @@ class BridgeClient:
                 if on_event is not None and kind in {"delta", "reasoning", "tool", "state", "queued", "request"}:
                     on_event(frame)
                 if kind == "fatal":
-                    raise WebBridgeError(str(frame.get("error") or "bridge failed"))
-        raise WebBridgeError("bridge closed before replying")
+                    raise HermesWebUIAdapterBridgeError(str(frame.get("error") or "bridge failed"))
+        raise HermesWebUIAdapterBridgeError("bridge closed before replying")
 
     def _request(self, payload: dict[str, Any]) -> Any:
         request_id = uuid.uuid4().hex
@@ -87,16 +93,20 @@ class BridgeClient:
                     continue
                 if frame.get("type") == "result" and str(frame.get("id") or "") == request_id:
                     if frame.get("ok", True) is False:
-                        raise WebBridgeError(str(frame.get("error") or "bridge request failed"))
+                        raise HermesWebUIAdapterBridgeError(
+                            str(frame.get("error") or "bridge request failed")
+                        )
                     return frame.get("data")
                 if frame.get("type") == "fatal":
-                    raise WebBridgeError(str(frame.get("error") or "bridge failed"))
-        raise WebBridgeError("bridge closed before returning a result")
+                    raise HermesWebUIAdapterBridgeError(str(frame.get("error") or "bridge failed"))
+        raise HermesWebUIAdapterBridgeError("bridge closed before returning a result")
 
     def _connection(self):
         sock = bridge_socket.try_connect(self.socket_path, timeout_s=2.0)
         if sock is None:
-            raise WebBridgeError(f"Jaeger bridge is not listening at {self.socket_path}")
+            raise HermesWebUIAdapterBridgeError(
+                f"Jaeger bridge is not listening at {self.socket_path}"
+            )
         return _SocketConnection(sock)
 
     @staticmethod
@@ -108,8 +118,10 @@ class BridgeClient:
             if frame.get("type") == "ready":
                 return frame
             if frame.get("type") == "fatal":
-                raise WebBridgeError(str(frame.get("error") or "bridge handshake failed"))
-        raise WebBridgeError("bridge closed during handshake")
+                raise HermesWebUIAdapterBridgeError(
+                    str(frame.get("error") or "bridge handshake failed")
+                )
+        raise HermesWebUIAdapterBridgeError("bridge closed during handshake")
 
     @staticmethod
     def _write(rx: Any, frame: dict[str, Any]) -> None:

@@ -103,7 +103,7 @@ jaeger_ai = [
     "interfaces/swift/Resources/**/*", "interfaces/swift/Scripts/*.sh",
     "interfaces/avatar/Package.swift", "interfaces/avatar/Sources/**/*.swift",
     "interfaces/avatar/Resources/**/*",
-    "interfaces/web/static/**/*",
+    "interfaces/hermes_webui_adapter/static/**/*",
 ]
 
 [tool.pytest.ini_options]

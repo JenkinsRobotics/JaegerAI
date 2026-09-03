@@ -20,7 +20,35 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from .bridge_client import BridgeClient, WebBridgeError
+from jaeger_ai.features.oidc import (
+    OIDCAuthError,
+    OIDCConfigError,
+    build_authorization_redirect,
+    complete_authorization_code_flow,
+    is_oidc_enabled,
+)
+from jaeger_ai.features.passkeys import (
+    PasskeyError,
+    authentication_options,
+    passkeys_available,
+    registered_credentials,
+    registration_options,
+)
+from jaeger_ai.features.passkeys import (
+    bind_state_dir as bind_passkey_state_dir,
+)
+from jaeger_ai.features.passkeys import (
+    delete_credential as delete_passkey,
+)
+from jaeger_ai.features.passkeys import (
+    finish_login as finish_passkey_login,
+)
+from jaeger_ai.features.passkeys import (
+    finish_registration as finish_passkey_registration,
+)
+from jaeger_ai.features.remote_access import RemoteAccessPolicy
+
+from .bridge_client import BridgeClient, HermesWebUIAdapterBridgeError
 
 MAX_BODY = 1_000_000
 _RUN_ROUTE = re.compile(r"^/v1/runs/([^/]+)(?:/(events|cancel|approval|messages))?$")
@@ -478,7 +506,7 @@ class ScheduleBroker:
             match = next((row for row in listed if row.get("id") == name), None)
             if match is not None:
                 job = match
-        except WebBridgeError:
+        except HermesWebUIAdapterBridgeError:
             pass
         return {"ok": True, "id": job["id"], "job": job}
 
@@ -587,8 +615,8 @@ class ScheduleBroker:
         }
 
 
-class WebHandler(BaseHTTPRequestHandler):
-    server_version = "JaegerRunner/1"
+class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
+    server_version = "JaegerHermesWebUIAdapter/1"
 
     @property
     def bridge(self) -> BridgeClient:
@@ -608,6 +636,39 @@ class WebHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/auth/status":
+            if not self._authorize_auth_entry():
+                return
+            return self._json({
+                "oidc_enabled": is_oidc_enabled(),
+                "passkeys_enabled": passkeys_available(),
+                "passkeys_count": len(registered_credentials()),
+            })
+        if parsed.path == "/api/auth/oidc/start":
+            if not self._authorize_auth_entry():
+                return
+            try:
+                next_path = str(parse_qs(parsed.query).get("next", ["/"])[0])
+                return self._redirect(build_authorization_redirect(self._public_base_url(), next_path))
+            except (OIDCAuthError, OIDCConfigError, ValueError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        if parsed.path == "/api/auth/oidc/callback":
+            if not self._authorize_auth_entry():
+                return
+            query = parse_qs(parsed.query)
+            try:
+                result = complete_authorization_code_flow(
+                    self._public_base_url(),
+                    str(query.get("state", [""])[0]),
+                    str(query.get("code", [""])[0]),
+                )
+                return self._login_redirect(result["next_path"], result["subject"])
+            except OIDCAuthError as exc:
+                return self._json({"error": str(exc)}, HTTPStatus(exc.status_code))
+            except (OIDCConfigError, ValueError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        if not self._authorize():
+            return
         try:
             if parsed.path in {"/health", "/api/health"}:
                 return self._json(self.bridge.health())
@@ -647,13 +708,35 @@ class WebHandler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except KeyError as exc:
             return self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
-        except (WebBridgeError, ValueError) as exc:
+        except (HermesWebUIAdapterBridgeError, ValueError) as exc:
             return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path in {"/api/auth/passkey/options", "/api/auth/passkey/login"}:
+            if not self._authorize_auth_entry():
+                return
+            try:
+                body = self._body()
+                if parsed.path.endswith("/options"):
+                    return self._json(authentication_options(self))
+                result = finish_passkey_login(body, self)
+                return self._json(
+                    result,
+                    headers={"Set-Cookie": self._session_cookie(result["credential_id"])},
+                )
+            except (PasskeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                return self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        if not self._authorize():
+            return
         try:
             body = self._body()
+            if parsed.path == "/api/auth/passkey/register/options":
+                return self._json(registration_options(self))
+            if parsed.path == "/api/auth/passkey/register":
+                return self._json(finish_passkey_registration(body, self), HTTPStatus.CREATED)
+            if parsed.path == "/api/auth/passkey/delete":
+                return self._json(delete_passkey(str(body.get("id") or "")))
             if parsed.path == "/v1/runs":
                 return self._json(self.runner.start(body), HTTPStatus.CREATED)
             if parsed.path == "/v1/schedules/create":
@@ -708,7 +791,7 @@ class WebHandler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except KeyError as exc:
             return self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
-        except (WebBridgeError, ValueError, json.JSONDecodeError) as exc:
+        except (HermesWebUIAdapterBridgeError, TypeError, ValueError, json.JSONDecodeError) as exc:
             return self._json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def _body(self) -> dict[str, Any]:
@@ -717,10 +800,65 @@ class WebHandler(BaseHTTPRequestHandler):
             raise ValueError("request body is too large")
         value = json.loads(self.rfile.read(length) or b"{}")
         if not isinstance(value, dict):
-            raise ValueError("JSON body must be an object")
+            raise TypeError("JSON body must be an object")
         return value
 
-    def _json(self, value: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def _authorize(self) -> bool:
+        policy = self.server.access_policy  # type: ignore[attr-defined]
+        decision = policy.authorize(str(self.client_address[0]), self.headers)
+        if decision.allowed:
+            return True
+        self._json(
+            {"error": "access denied", "reason": decision.reason},
+            HTTPStatus(decision.status),
+        )
+        return False
+
+    def _authorize_auth_entry(self) -> bool:
+        policy = self.server.access_policy  # type: ignore[attr-defined]
+        decision = policy.authorize_network(str(self.client_address[0]))
+        if decision.allowed:
+            return True
+        self._json(
+            {"error": "access denied", "reason": decision.reason},
+            HTTPStatus(decision.status),
+        )
+        return False
+
+    def _public_base_url(self) -> str:
+        configured = str(getattr(self.server, "public_base_url", "") or "").strip()  # type: ignore[attr-defined]
+        if configured:
+            return configured.rstrip("/")
+        host = self.headers.get("Host", "")
+        if not re.fullmatch(r"[A-Za-z0-9.\-\[\]:]+", host):
+            raise ValueError("invalid Host header")
+        return f"https://{host}"
+
+    def _session_cookie(self, subject: str) -> str:
+        policy = self.server.access_policy  # type: ignore[attr-defined]
+        value = policy.issue_session(subject)
+        return f"jaeger_session={value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=28800"
+
+    def _login_redirect(self, location: str, subject: str) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Set-Cookie", self._session_cookie(subject))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def _json(
+        self,
+        value: Any,
+        status: HTTPStatus = HTTPStatus.OK,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -728,6 +866,8 @@ class WebHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
+        for name, header_value in (headers or {}).items():
+            self.send_header(name, header_value)
         self.end_headers()
         try:
             self.wfile.write(raw)
@@ -735,10 +875,10 @@ class WebHandler(BaseHTTPRequestHandler):
             pass
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"[jaeger-runner] {self.address_string()} {fmt % args}", flush=True)
+        print(f"[hermes-webui-adapter] {self.address_string()} {fmt % args}", flush=True)
 
 
-class JaegerWebServer(ThreadingHTTPServer):
+class HermesWebUIAdapterServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(
@@ -747,9 +887,14 @@ class JaegerWebServer(ThreadingHTTPServer):
         instance: str | None = None,
         *,
         run_dir: Path | None = None,
+        access_policy: RemoteAccessPolicy | None = None,
+        public_base_url: str = "",
     ) -> None:
-        super().__init__(address, WebHandler)
+        super().__init__(address, HermesWebUIAdapterHandler)
+        self.access_policy = access_policy or RemoteAccessPolicy.from_environment()
+        self.public_base_url = public_base_url
         self.bridge = BridgeClient(instance)
+        bind_passkey_state_dir(self.bridge.layout.memory_dir / "passkeys")
         self.approvals = ApprovalBroker()
         state_root = Path(run_dir) if run_dir is not None else self.bridge.layout.root / "run" / "hermes-webui-adapter"
         self.store = RunStore(state_root)
@@ -759,15 +904,48 @@ class JaegerWebServer(ThreadingHTTPServer):
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the Jaeger Hermes-WebUI runner adapter")
-    parser.add_argument("--host", default=os.environ.get("JAEGER_WEB_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("JAEGER_WEB_PORT", "8791")))
+    parser = argparse.ArgumentParser(
+        prog="jaeger hermes-webui-adapter",
+        description="Run Jaeger's loopback runtime adapter for the Hermes WebUI",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("JAEGER_HERMES_WEBUI_ADAPTER_HOST", "127.0.0.1"),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("JAEGER_HERMES_WEBUI_ADAPTER_PORT", "8791")),
+    )
     parser.add_argument("--instance", default=os.environ.get("JAEGER_INSTANCE_NAME") or None)
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="accept authenticated clients from configured trusted networks",
+    )
+    parser.add_argument(
+        "--public-base-url",
+        default=os.environ.get("JAEGER_PUBLIC_BASE_URL", ""),
+        help="external HTTPS URL used for OIDC callbacks and passkey origins",
+    )
     args = parser.parse_args(argv)
-    if args.host not in {"127.0.0.1", "localhost", "::1"}:
-        parser.error("Jaeger runner binds to loopback only")
-    server = JaegerWebServer((args.host, args.port), args.instance)
-    print(f"[jaeger-runner] http://{args.host}:{args.port} · instance={server.bridge.instance}", flush=True)
+    loopback_host = args.host in {"127.0.0.1", "localhost", "::1"}
+    if not loopback_host and not args.allow_remote:
+        parser.error("non-loopback binding requires --allow-remote")
+    access_policy = RemoteAccessPolicy.from_environment(remote_enabled=args.allow_remote)
+    if not loopback_host and not access_policy.configured:
+        parser.error("JAEGER_REMOTE_ACCESS_TOKEN is required for remote binding")
+    server = HermesWebUIAdapterServer(
+        (args.host, args.port),
+        args.instance,
+        access_policy=access_policy,
+        public_base_url=args.public_base_url,
+    )
+    print(
+        f"[hermes-webui-adapter] http://{args.host}:{args.port} "
+        f"· instance={server.bridge.instance}",
+        flush=True,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

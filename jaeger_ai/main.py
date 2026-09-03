@@ -1064,6 +1064,13 @@ def _register_builtins(client: Any) -> None:
     """
     t = jaeger_tools
 
+    # External agent runtimes are feature packages under
+    # jaeger_agent.delegates/<runtime>/. Registration is idempotent so a
+    # process-level tool refresh cannot duplicate or stale an adapter.
+    from jaeger_agent.delegates import register_builtin_delegates
+
+    register_builtin_delegates()
+
 
 
 
@@ -1301,6 +1308,39 @@ def _register_builtins(client: Any) -> None:
 
 
     @register_tool_from_function
+    def list_delegate_runtimes() -> dict:
+        """List Claude, Codex, Grok, Gemini, Hermes, OpenClaw and other
+        external agent delegates, including live availability, locality and
+        capability information used by Jaeger's routing guard."""
+        from jaeger_agent.delegates import get_delegate_registry
+        from jaeger_agent.delegates.health import (
+            DelegateHealthService,
+            get_delegate_health_store,
+        )
+
+        async def _probe_all() -> list[dict[str, Any]]:
+            registry = get_delegate_registry()
+            health = get_delegate_health_store()
+            rows: list[dict[str, Any]] = []
+            probes = await DelegateHealthService(registry, health).check_all()
+            for probe in probes:
+                effectiveness = health.effectiveness(probe.runtime_id)
+                rows.append({
+                    "runtime": probe.runtime_id,
+                    "available": probe.status.available,
+                    "detail": probe.status.detail,
+                    "local": probe.status.local,
+                    "capabilities": sorted(probe.status.capabilities),
+                    "probe_latency_ms": probe.latency_ms,
+                    "effectiveness": asdict(effectiveness),
+                })
+            return rows
+
+        from dataclasses import asdict
+
+        return {"runtimes": _run_delegate_coroutine(_probe_all())}
+
+    @register_tool_from_function
     def delegate_task(
         subtasks: list[str] | None = None,
         background: bool = False,
@@ -1308,6 +1348,10 @@ def _register_builtins(client: Any) -> None:
         tasks: list | None = None,
         role: str = "leaf",
         context: str | None = None,
+        runtime: str | None = None,
+        required_capabilities: list[str] | None = None,
+        sensitivity: str = "personal",
+        estimated_cost_usd: float = 0.0,
     ) -> dict:
         """Hand focused subtasks to fresh sub-agents. Hermes-compatible.
 
@@ -1343,6 +1387,25 @@ def _register_builtins(client: Any) -> None:
         )
         if not clean:
             return {"delegated": False, "error": "no subtasks given"}
+        runtime_id = str(runtime or "").strip()
+        if runtime_id:
+            if background:
+                return {
+                    "delegated": False,
+                    "error": "external delegate background mode is not available yet",
+                }
+            if len(clean) != 1:
+                return {
+                    "delegated": False,
+                    "error": "external delegates currently accept exactly one task",
+                }
+            return _delegate_external(
+                runtime_id,
+                clean[0],
+                required_capabilities=required_capabilities,
+                sensitivity=sensitivity,
+                estimated_cost_usd=estimated_cost_usd,
+            )
         role_name = normalize_role(role)
         _delegate_role.value = role_name
         if background:
@@ -1363,6 +1426,22 @@ def _register_builtins(client: Any) -> None:
     # (JAEGER_KANBAN_TASK) or an explicitly loaded ``kanban`` toolset sees
     # them. Same import-registers pattern as messaging/email above.
     from jaeger_agent.tools import kanban as _kanban  # noqa: F401
+
+    # Durable mission/goal/plan facade over the cognitive commitment store.
+    from jaeger_ai.features.missions import tools as _mission_tools  # noqa: F401
+
+    # Idempotent import into the one canonical searchable session store.
+    from jaeger_ai.features.history_import import tools as _history_import_tools  # noqa: F401
+
+    from jaeger_ai.features.cost_tracking import tools as _cost_tools  # noqa: F401
+
+    from jaeger_ai.features.knowledge_library import tools as _library_tools  # noqa: F401
+
+    from jaeger_ai.features.caldav import tools as _caldav_tools  # noqa: F401
+
+    from jaeger_ai.features.insta360 import tools as _insta360_tools  # noqa: F401
+
+    from jaeger_ai.features.ares_migration import tools as _ares_migration_tools  # noqa: F401
 
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See
@@ -1475,6 +1554,178 @@ _delegate_role = threading.local()
 # Background workers run on a fresh thread and MUST acquire per turn so
 # the main session can keep talking between worker batches.
 _llm_lock_held = threading.local()
+
+
+def _run_delegate_coroutine(coroutine: Any) -> Any:
+    """Run an async delegate lifecycle from Jaeger's synchronous tool lane."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    # Tool calls normally run outside an event loop. Keep this safe for an
+    # embedding host that invokes Jaeger from one: a private thread owns the
+    # temporary loop instead of attempting nested ``run_until_complete``.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="delegate-runtime") as pool:
+        return pool.submit(asyncio.run, coroutine).result()
+
+
+def _delegate_external(
+    runtime_id: str,
+    task: str,
+    *,
+    required_capabilities: list[str] | None = None,
+    sensitivity: str = "personal",
+    estimated_cost_usd: float = 0.0,
+) -> dict[str, Any]:
+    """Dispatch one task through a registered external runtime.
+
+    Registration is plugin-owned. This function supplies durable Jaeger
+    commitment/run records and deliberately does not promote worker-proposed
+    memory candidates.
+    """
+    import os
+    import uuid
+    from dataclasses import asdict
+    from pathlib import Path
+
+    from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    from jaeger_agent.delegates import (
+        DelegateExecutor,
+        DelegateRequest,
+        get_delegate_registry,
+    )
+    from jaeger_agent.delegates.routing import DelegateRouter
+
+    registry = get_delegate_registry()
+    try:
+        estimated_cost = float(estimated_cost_usd)
+        if estimated_cost < 0:
+            raise ValueError("estimated_cost_usd cannot be negative")
+    except (TypeError, ValueError) as exc:
+        return {"delegated": False, "runtime": runtime_id, "error": str(exc)}
+    if sensitivity not in {"public", "personal", "sensitive", "private", "secret"}:
+        return {
+            "delegated": False,
+            "runtime": runtime_id,
+            "error": f"unknown delegate sensitivity: {sensitivity}",
+        }
+    if runtime_id == "auto":
+        try:
+            route = _run_delegate_coroutine(
+                DelegateRouter(registry).choose(
+                    required_capabilities=frozenset(required_capabilities or ()),
+                    sensitivity=sensitivity,
+                )
+            )
+            runtime_id = route.runtime_id
+        except Exception as exc:  # noqa: BLE001 - tool boundary
+            return {
+                "delegated": False,
+                "runtime": "auto",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    elif registry.get(runtime_id) is None:
+        return {
+            "delegated": False,
+            "error": f"unknown external delegate runtime: {runtime_id}",
+            "available_runtimes": [item.runtime_id for item in registry.list()],
+        }
+
+    try:
+        from jaeger_agent import workspace
+
+        root = workspace.get_project_root()
+        workspace_path = Path(root).resolve() if root else None
+    except Exception:  # noqa: BLE001 - workspace is optional for delegates
+        workspace_path = None
+
+    cost_store = None
+    layout = _pipeline.get("layout")
+    if layout is not None:
+        from jaeger_ai.features.cost_tracking import CostStore
+
+        cost_store = CostStore(layout.memory_dir / "costs.db")
+        decision = cost_store.authorize(runtime_id, estimated_cost)
+        if not decision.allowed:
+            cost_store.close()
+            return {
+                "delegated": False,
+                "runtime": runtime_id,
+                "error": decision.reason,
+                "budget": asdict(decision),
+            }
+
+    commitments = SqliteCommitmentStore()
+    runs = SqliteRunStore()
+    commitment = commitments.create(
+        task,
+        kind="delegation",
+        payload={"runtime_id": runtime_id, "source": "delegate_task"},
+    )
+    commitments.transition(commitment.id, "active")
+    run = runs.create(
+        commitment.id,
+        provider=runtime_id,
+        owner_pid=os.getpid(),
+        payload={"runtime_id": runtime_id, "prompt": task},
+        relation="delegate",
+    )
+
+    request = DelegateRequest(
+        task_id=run.id,
+        prompt=task,
+        workspace=workspace_path,
+        required_capabilities=frozenset(required_capabilities or ()),
+        sensitivity=sensitivity,  # validated by DelegateRequest
+        idempotency_key=f"delegate:{commitment.id}:{uuid.uuid4().hex}",
+    )
+    try:
+        result = _run_delegate_coroutine(
+            DelegateExecutor(registry, runs).execute(runtime_id, request)
+        )
+    except Exception as exc:  # noqa: BLE001 - tool boundary returns structured failure
+        if cost_store is not None:
+            cost_store.close()
+        try:
+            commitments.transition(commitment.id, "blocked")
+        except Exception:  # noqa: BLE001 - preserve the originating failure
+            pass
+        return {
+            "delegated": False,
+            "runtime": runtime_id,
+            "task_id": run.id,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if cost_store is not None:
+        actual_cost = result.metadata.get("cost_usd", estimated_cost)
+        if isinstance(actual_cost, (int, float)) and actual_cost > 0:
+            cost_store.record(
+                runtime_id=runtime_id,
+                cost_usd=float(actual_cost),
+                task_id=run.id,
+            )
+        cost_store.close()
+
+    commitments.transition(
+        commitment.id,
+        "completed" if result.status == "completed" else "blocked",
+    )
+    payload = asdict(result)
+    payload.update({
+        "delegated": result.status == "completed",
+        "runtime": runtime_id,
+        "task_id": run.id,
+        "commitment_id": commitment.id,
+        "memory_candidates_trusted": False,
+    })
+    return payload
 
 
 def _wt_result(info: dict[str, Any] | None) -> dict[str, Any]:

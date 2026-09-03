@@ -53,7 +53,8 @@ KNOWN_ORIGINS = frozenset({
     "webui", "tui", "app", "cli", "acp",
     "telegram", "discord", "imessage", "slack", "weixin", "email", "matrix",
     "cron", "webhook", "mcp", "voice", "kanban", "worker", "completions",
-    "probe", "deepthink", "unknown",
+    "probe", "deepthink", "claude", "codex", "grok", "gemini", "hermes",
+    "openclaw", "ares", "unknown",
 })
 _PREFIX_ORIGINS = frozenset({
     "telegram", "discord", "imessage", "slack", "weixin", "email", "matrix",
@@ -288,6 +289,83 @@ class SessionStore:
                     "provider=COALESCE(?, provider) WHERE id=?",
                     (model or None, provider or None, session_id),
                 )
+
+    def import_transcript(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        title: str = "",
+        model: str = "",
+        provider: str = "",
+        origin: str = "unknown",
+    ) -> dict[str, Any]:
+        """Atomically import one external transcript exactly once.
+
+        Unlike repeated calls to :meth:`record`, this preserves source
+        timestamps and cannot leave a half-imported session after a failure.
+        Existing sessions and tombstones are never overwritten.
+        """
+        session_id = canonical_session_id(session_id)
+        from jaeger_ai.core.redaction import redact_text, redact_value
+
+        clean: list[tuple[str, str, float, str | None]] = []
+        for row in messages:
+            role = str(row.get("role") or "").strip().lower()
+            if role not in {"user", "assistant", "system", "tool", "reasoning"}:
+                continue
+            text = redact_text(str(row.get("text") or row.get("content") or ""))
+            if not text:
+                continue
+            try:
+                ts = float(row.get("ts") or row.get("timestamp") or time.time())
+            except (TypeError, ValueError):
+                ts = time.time()
+            metadata = redact_value(row.get("metadata") or {})
+            clean.append((
+                role,
+                text,
+                ts,
+                json.dumps(metadata, ensure_ascii=False) if metadata else None,
+            ))
+        if not clean:
+            raise ValueError("transcript has no importable messages")
+        created_at = min(row[2] for row in clean)
+        last_active = max(row[2] for row in clean)
+        stamped = normalize_session_origin(origin)
+        with self._lock, self._conn:
+            if self._is_tombstoned_locked(session_id):
+                return {"id": session_id, "created": False, "tombstoned": True}
+            if self._conn.execute(
+                "SELECT 1 FROM sessions WHERE id=?", (session_id,)
+            ).fetchone() is not None:
+                return {"id": session_id, "created": False, "tombstoned": False}
+            first_user = next((row[1] for row in clean if row[0] == "user"), clean[0][1])
+            self._conn.execute(
+                "INSERT INTO sessions"
+                "(id,title,preview,created_at,last_active,model,provider,execution_state,origin) "
+                "VALUES(?,?,?,?,?,?,?,'idle',?)",
+                (
+                    session_id,
+                    redact_text(title)[:500] or first_user[:100],
+                    first_user[:100],
+                    created_at,
+                    last_active,
+                    model or None,
+                    provider or None,
+                    stamped,
+                ),
+            )
+            self._conn.executemany(
+                "INSERT INTO messages(session_id,role,text,ts,metadata) VALUES(?,?,?,?,?)",
+                [(session_id, *row) for row in clean],
+            )
+        return {
+            "id": session_id,
+            "created": True,
+            "tombstoned": False,
+            "messages": len(clean),
+        }
 
     def stamp_brain(
         self,

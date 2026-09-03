@@ -40,6 +40,10 @@ class _Layout:
     root: Path
 
     @property
+    def memory_dir(self) -> Path:
+        return self.root / "memory"
+
+    @property
     def config_path(self) -> Path:
         return self.root / "config.yaml"
 
@@ -224,7 +228,21 @@ def test_fragments_land_around_the_dependency_anchors() -> None:
     assert names.index("identity_name") < names.index("soul_identity")
     assert names.index("soul_identity") < names.index("framework")
     assert names.index("framework") < names.index("agent_directives")
-    assert names.index("agent_directives") < names.index("ares_surfaces")
+    assert names.index("agent_directives") < names.index("instance_facts")
+    assert names.index("instance_facts") < names.index("ares_surfaces")
+
+
+def test_instance_facts_injected_into_prompt(tmp_path: Path) -> None:
+    """Facts recorded in instance memory appear in the assembled prompt."""
+    from jaeger_agent.memory import memory as mem
+    from jaeger_ai.core.prompt_documents import load_instance_facts
+
+    layout = _Layout(root=tmp_path)
+    mem.bind(layout)
+    mem.remember("container_engine", "Apple container", category="environment")
+    rendered = load_instance_facts(layout)
+    assert "[LEARNED INSTANCE FACTS]" in rendered
+    assert "container_engine: Apple container" in rendered
 
 
 def test_a_renamed_anchor_degrades_ordering_rather_than_dropping_a_document():

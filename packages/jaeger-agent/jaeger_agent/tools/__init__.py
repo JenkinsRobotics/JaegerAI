@@ -67,6 +67,9 @@ from .web import get_weather, web_fetch, web_search
 # Code execution
 from .code import run_python, run_shell
 
+# Container management
+from .container import container
+
 # Remote execution — ssh wrapper for the agent to run on other hosts
 from .remote import ssh_exec
 
@@ -198,6 +201,8 @@ __all__ = [
     "web_search", "web_fetch", "get_weather",
     # code
     "run_python", "run_shell",
+    # container management
+    "container",
     # remote execution
     "ssh_exec",
     # speak

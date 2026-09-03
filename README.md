@@ -137,7 +137,7 @@ JaegerAI with `--recurse-submodules` (or run `git submodule update --init`) and
 start the loopback adapter separately from the browser server:
 
 ```bash
-./jaeger web --host 127.0.0.1 --port 8791 --instance <agent-name>
+./jaeger hermes-webui-adapter --host 127.0.0.1 --port 8791 --instance <agent-name>
 ```
 
 Configure the pinned WebUI with `HERMES_WEBUI_RUNTIME_ADAPTER=runner-local` and
@@ -148,7 +148,82 @@ heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
 launch path runs `vendor/hermes-webui/server.py` directly: it does not discover,
 run, or import Hermes Agent and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
-`jaeger_ai/interfaces/web/THIRD_PARTY_NOTICES.md`.
+`jaeger_ai/interfaces/hermes_webui_adapter/THIRD_PARTY_NOTICES.md`.
+
+#### Temporary WebUI via Apple container (settings toggle)
+
+To use the existing Hermes WebUI Apple container as Jaeger's temporary browser
+UI (plugin-style settings surface on the existing catalog — not a second
+system):
+
+```bash
+./jaeger settings set containers.use_hermes_webui true
+./jaeger webui start
+open "$(./jaeger webui url)"   # http://127.0.0.1:8787/
+```
+
+Port map (defaults chosen to avoid clashes):
+
+| Surface | Default | Notes |
+| --- | ---: | --- |
+| Hermes WebUI container (browser) | **8787** | Apple container `hermes-webui-hermes-webui` |
+| Jaeger-branded vendor WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
+| Hermes WebUI adapter | **8791** | `jaeger hermes-webui-adapter` / runner-local |
+| Instance webhooks | **8793** | Moved off 8791 so adapter and webhooks do not collide |
+
+`jaeger webui status` shows toggle state, container/adapter health, and URLs.
+
+Remote access stays disabled by default. For previous-style browser access,
+keep both services on loopback and publish only Hermes WebUI through Tailscale
+Serve:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8790
+```
+
+Hermes WebUI continues to call the Jaeger adapter on loopback, so the adapter
+is not exposed to the tailnet. To expose the adapter API itself, set a strong
+bearer token and explicitly opt in:
+
+```bash
+export JAEGER_REMOTE_ACCESS_TOKEN="$(openssl rand -hex 32)"
+./jaeger hermes-webui-adapter --host 0.0.0.0 --port 8791 --allow-remote
+```
+
+Remote requests must originate from Tailscale's `100.64.0.0/10` or
+`fd7a:115c:a1e0::/48` ranges and send `Authorization: Bearer
+$JAEGER_REMOTE_ACCESS_TOKEN` or hold a signed login session. Override the
+accepted ranges with `JAEGER_REMOTE_TRUSTED_NETWORKS`; forwarded-IP headers are
+ignored so an untrusted client cannot spoof a tailnet address.
+
+OIDC Authorization Code + PKCE is enabled only when all required allow-list
+settings are present: `JAEGER_OIDC_ISSUER`, `JAEGER_OIDC_CLIENT_ID`,
+`JAEGER_OIDC_ALLOW_CLAIM`, and `JAEGER_OIDC_ALLOW_VALUES`. Set
+`JAEGER_PUBLIC_BASE_URL` to the external HTTPS URL. Passkeys are instance
+scoped, use WebAuthn origin/RP validation, and are bootstrapped from an already
+authenticated session. The authentication implementation lives in separate
+`features/oidc`, `features/passkeys`, and `features/remote_access` folders.
+
+### External agent delegates
+
+Jaeger can delegate a task to `claude`, `codex`, `grok`, `gemini`, `hermes`,
+`openclaw`, `ollama`, `opencode`, or `cursor`. Each adapter lives in its own
+feature folder under `jaeger_agent/delegates/`. Ask Jaeger to call
+`list_delegate_runtimes` for live health/capabilities, then use
+`delegate_task(runtime="codex", goal="...")` or `runtime="auto"` for ranked
+routing. Set `JAEGER_OLLAMA_DELEGATE_MODEL` to enable the local Ollama delegate.
+Private and secret tasks are rejected unless the selected runtime is explicitly
+local.
+
+### ARES absorption and migration
+
+Imported product capabilities are split by feature under `jaeger_ai/features/`;
+delegate implementations are split by runtime under
+`packages/jaeger-agent/jaeger_agent/delegates/`. The `ares_migration` feature
+provides a read-only audit, idempotent state import, restricted backup, and a
+retirement rehearsal. It imports ARES sessions, documents, schedules, worker
+health observations, passkeys, and Kanban state without modifying ARES. ARES
+must remain installed until the rehearsal reports no blockers.
 
 For the standard native development layout, start the browser process with:
 
