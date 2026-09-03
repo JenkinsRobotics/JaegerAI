@@ -170,8 +170,24 @@ Port map (defaults chosen to avoid clashes):
 | Jaeger-branded vendor WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
 | Hermes WebUI adapter | **8791** | `jaeger hermes-webui-adapter` / runner-local |
 | Instance webhooks | **8793** | Moved off 8791 so adapter and webhooks do not collide |
+| Jaeger MCP HTTP | **8792** | `jaeger mcp --http` (Agentgateway target) |
+| Jaeger A2A backend | **8796** | `jaeger a2a` (Agentgateway proxies :8812 here) |
+| Agentgateway MCP | **8811** | Jaeger-owned `jaeger gateway`; Hermes is a client |
+| Agentgateway A2A | **8812** | Jaeger-owned public A2A card/JSON-RPC
 
 `jaeger webui status` shows toggle state, container/adapter health, and URLs.
+
+Jaeger owns Agentgateway. Install the public v1.5.0 binary with `jaeger gateway install`
+(into `~/.jaeger/bin`), write `~/.jaeger/gateway/config.yaml`, then start MCP HTTP,
+A2A, and the proxy:
+
+```bash
+jaeger mcp --http          # 127.0.0.1:8792/mcp, attaches to the live bridge
+jaeger a2a                 # 127.0.0.1:8796 official a2a-sdk JSON-RPC
+jaeger gateway start       # 8811 MCP + 8812 A2A, targeting those Jaeger backends
+```
+
+The ARES Agentgateway plist and `~/.ares/gateway` config are archive. Do not start them.
 
 Remote access stays disabled by default. For previous-style browser access,
 keep both services on loopback and publish only Hermes WebUI through Tailscale

@@ -28,7 +28,7 @@
 # framework-only CLI subset, so cli/ moved to JaegerAI entirely).
 #
 # Version is single-sourced from jaeger_ai/__init__.py; runtime deps
-# are single-sourced from requirements.txt.
+# are single-sourced from requirements.txt (includes a2a-sdk[http-server]==1.1.2).
 
 [tool.uv.workspace]
 members = ["packages/*"]

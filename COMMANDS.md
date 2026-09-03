@@ -67,7 +67,10 @@ instance, one word now.)
 | `jaeger dev --health` / `--status` / `--stop` | Dev toolbox verbs |
 | `jaeger bench …` | Benchmarks (`run` / `timing` / `compare` / `history`) |
 | `jaeger bridge` | Run the app bridge protocol on stdio |
-| `jaeger mcp` | Run the MCP server |
+| `jaeger mcp` | Run the MCP server (stdio)|
+| `jaeger mcp --http` | Streamable HTTP MCP on :8792 attached to the live bridge|
+| `jaeger a2a` | Official a2a-sdk JSON-RPC host on :8796|
+| `jaeger gateway {install,start,stop,status}` | Jaeger-owned Agentgateway (MCP :8811, A2A :8812) |
 | `jaeger launcher …` | Launcher plumbing |
 
 There is ONE app bundle: `JaegerAI.app`. Dev is a launch state
