@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from jaeger_ai.cli.entry import _route
-from jaeger_ai.interfaces.web.server import JaegerWebServer
+from jaeger_ai.interfaces.hermes_webui_adapter.server import HermesWebUIAdapterServer
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -38,9 +38,9 @@ class _Bridge:
         return {"text": f"hello {text}"}
 
 
-def test_cli_routes_web_surface():
-    assert _route(["web", "--port", "9999"], "/python") == [
-        "/python", "-m", "jaeger_ai.interfaces.web", "--port", "9999"
+def test_cli_routes_hermes_webui_adapter():
+    assert _route(["hermes-webui-adapter", "--port", "9999"], "/python") == [
+        "/python", "-m", "jaeger_ai.interfaces.hermes_webui_adapter", "--port", "9999"
     ]
 
 
@@ -59,7 +59,7 @@ def test_webui_branding_extension_reuses_mac_app_icons():
 
 
 def test_health_endpoint_uses_bridge_contract(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     server.bridge = _Bridge()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -109,7 +109,7 @@ class _ScheduleBridge(_Bridge):
 
 
 def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _ScheduleBridge()
     server.bridge = bridge
     server.runner.bridge = bridge
@@ -179,7 +179,7 @@ def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path)
 
 
 def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _Bridge()
     server.bridge = bridge
     server.chats.bridge = bridge
@@ -222,7 +222,7 @@ def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
 
 
 def test_runner_service_does_not_serve_the_retired_custom_ui(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     server.bridge = _Bridge()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -237,7 +237,7 @@ def test_runner_service_does_not_serve_the_retired_custom_ui(tmp_path):
 
 
 def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
 
     class CatalogBridge(_Bridge):
         def query(self, what, args=None):
@@ -255,7 +255,7 @@ def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path)
 
 
 def test_runner_uses_catalog_route_instead_of_product_lane(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
 
     class CatalogBridge(_Bridge):
         def query(self, what, args=None):
@@ -275,7 +275,7 @@ def test_runner_uses_catalog_route_instead_of_product_lane(tmp_path):
 
 
 def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     try:
         assert server.runner._jaeger_provider("ollama-local", "gemma-4-26b:latest") == "ollama"
         assert server.runner._jaeger_provider("ollama-cloud", "glm-5.2:cloud") == "ollama"
@@ -284,7 +284,7 @@ def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):
 
 
 def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
-    server = JaegerWebServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     answer = []
     waiter = threading.Thread(target=lambda: answer.append(server.approvals.request({"id": "req-1", "prompt": "Run tool?"})))
     waiter.start()

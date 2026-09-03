@@ -22,9 +22,10 @@ code. A guard that fails on correct code gets ignored, and then it is not
 guarding anything. Routing both through here means there is exactly one place to
 audit, and the guard can stay strict everywhere else.
 
-What must NEVER be read from here: session transcripts, the session store, the
-controller port, or ARES's HTTP API. Those are private state. If you find
-yourself wanting one, the answer is a bridge frame, not a file read.
+Normal runtime code must never read session transcripts, the session store,
+the controller port, or ARES's HTTP API. The only exception is the explicit,
+operator-triggered ``features.ares_migration`` importer. Its source-root access
+is declared here, is read-only, and is covered by migration/retirement tests.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["ares_home", "ares_shared_artifact"]
+__all__ = ["ares_home", "ares_migration_source", "ares_shared_artifact"]
 
 _ARES_HOME_ENV = "ARES_HOME"
 _DEFAULT_DIRNAME = ".ares"
@@ -59,6 +60,16 @@ def ares_home() -> Path:
     if raw:
         return Path(raw).expanduser()
     return Path.home() / _DEFAULT_DIRNAME
+
+
+def ares_migration_source() -> Path:
+    """Return the explicitly governed source root for operator-triggered migration.
+
+    Unlike shared artifacts, this grants no background read access. It is used
+    only by the bounded, auditable migration feature after an explicit tool or
+    CLI request, and that feature never writes to the returned path.
+    """
+    return ares_home()
 
 
 def ares_shared_artifact(name: str) -> Path:

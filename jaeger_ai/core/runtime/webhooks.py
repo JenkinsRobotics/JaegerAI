@@ -18,7 +18,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8791
+DEFAULT_PORT = 8793
 
 
 def _summarise_github(payload: dict[str, Any]) -> tuple[str, str]:

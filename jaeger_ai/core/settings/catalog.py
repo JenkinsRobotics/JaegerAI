@@ -26,7 +26,7 @@ from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
 # Page order for grouped output — the eight spec groups, then any spill-over.
 GROUP_ORDER = [
-    "model", "display", "voice", "tts", "autonomy",
+    "model", "display", "voice", "tts", "autonomy", "containers",
     "permissions", "retention", "interaction", "general",
 ]
 

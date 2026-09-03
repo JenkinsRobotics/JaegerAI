@@ -71,6 +71,14 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "people": (r"\b(person|people|profile|contact notes)\b",),
     "models": (r"\b(model|ollama|lm studio|context window|autonomy mode)\b",),
     "bench": (r"\b(benchmark|eval|evaluation)\b",),
+    "delegates": (r"\b(delegate|delegation|external agent|agent runtime)\b",),
+    "missions": (r"\b(mission|goal|plan steps?)\b",),
+    "history_import": (r"\b(import|migrate).*(?:history|sessions?|transcripts?)\b",),
+    "cost_tracking": (r"\b(budget|usage cost|spending limit)\b",),
+    "knowledge_library": (r"\b(knowledge library|document library|index documents?)\b",),
+    "caldav": (r"\b(caldav|remote calendar)\b",),
+    "insta360": (r"\b(insta360|camera gimbal|deskview)\b",),
+    "ares_migration": (r"\b(ares).*(?:migrate|migration|backup|retire|retirement)\b",),
     "diagnostics": (r"\b(diagnostic|self[- ]check|system health|cpu|disk|uptime)\b",),
     "shortcuts": (r"\b(shortcut|shortcuts\.app)\b",),
     "spotlight": (r"\b(spotlight|find .* on (?:my |the )?mac)\b",),
@@ -290,6 +298,25 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
+    "delegates": frozenset({"list_delegate_runtimes"}),
+    "missions": frozenset({
+        "mission_create", "mission_list", "mission_status", "mission_transition",
+    }),
+    "history_import": frozenset({"history_import_scan", "history_import"}),
+    "cost_tracking": frozenset({"budget_set", "budget_status"}),
+    "knowledge_library": frozenset({
+        "library_add", "library_index", "library_search", "library_read",
+    }),
+    "caldav": frozenset({
+        "caldav_configure", "caldav_sync", "caldav_events",
+        "caldav_put_event", "caldav_delete_event",
+    }),
+    "insta360": frozenset({
+        "insta360_status", "insta360_capture", "insta360_record_audio", "insta360_aim",
+    }),
+    "ares_migration": frozenset({
+        "ares_migration_audit", "ares_migrate", "ares_backup", "ares_retirement_rehearsal",
+    }),
 }
 
 # One-line description per built-in class — for the load_tools catalog.
@@ -327,6 +354,14 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "system_control": "volume, brightness, dark mode, do-not-disturb, prevent-sleep",
     "media_control": "control + read Music.app/Spotify playback",
     "ocr": "extract text from an image or PDF (Vision framework)",
+    "delegates": "inspect external Claude, Codex, Grok, Hermes, OpenClaw, and local runtimes",
+    "missions": "create and track durable missions, goals, and plan steps",
+    "history_import": "scan and import ARES and external-agent transcripts",
+    "cost_tracking": "configure and inspect runtime usage and cost budgets",
+    "knowledge_library": "register, index, search, and read local document collections",
+    "caldav": "configure, synchronize, and update generic CalDAV calendars",
+    "insta360": "inspect and control Insta360 camera, microphone, and gimbal hardware",
+    "ares_migration": "audit, import, back up, and rehearse retirement of ARES state",
 }
 
 # ── Untrusted-content surface (ported from hermes-agent) ─────────────
