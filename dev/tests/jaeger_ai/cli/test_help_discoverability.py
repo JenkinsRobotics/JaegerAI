@@ -23,7 +23,17 @@ from jaeger_ai.cli import entry
 # Routed by entry._route to something other than the console parser.
 # Machine-facing surfaces (bridge, mcp) count too: an operator debugging a
 # stuck app needs to know they can run them by hand.
-DISPATCHER_COMMANDS = ("setup", "bridge", "mcp", "doctor", "update", "dev")
+DISPATCHER_COMMANDS = (
+    "setup",
+    "bridge",
+    "mcp",
+    "a2a",
+    "gateway",
+    "hermes-webui-adapter",
+    "doctor",
+    "update",
+    "dev",
+)
 
 
 def _help_text() -> str:

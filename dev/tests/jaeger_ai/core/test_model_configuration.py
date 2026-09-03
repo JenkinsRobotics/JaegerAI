@@ -49,3 +49,30 @@ def test_keyless_local_server_clears_stale_secret_references(tmp_path):
     assert config.external_model.provider == "ollama"
     assert config.external_model.api_key_credential == ""
     assert config.external_model.api_key_env == ""
+
+
+def test_cli_backend_is_a_selectable_jaeger_brain(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jaeger_ai.features.cli_backends.discovery.shutil.which",
+        lambda name, path=None: f"/opt/homebrew/bin/{name}" if name == "claude" else None,
+    )
+    layout = _layout(tmp_path)
+    result = configure_model(layout, provider="cli", model="claude")
+    config = load_yaml(layout.config_path, Config)
+    assert result["provider"] == "cli"
+    assert result["model"] == "claude"
+    assert config.external_model.enabled is True
+    assert config.external_model.provider == "cli"
+    assert config.external_model.model == "claude"
+    assert config.external_model.api_key_credential == ""
+
+
+def test_cli_catalog_name_normalizes_to_cli_provider(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jaeger_ai.features.cli_backends.discovery.shutil.which",
+        lambda name, path=None: "/bin/true",
+    )
+    layout = _layout(tmp_path)
+    result = configure_model(layout, provider="claude-cli", model="cli:claude")
+    assert result["provider"] == "cli"
+    assert result["model"] == "claude"

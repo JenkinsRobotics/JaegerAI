@@ -14,6 +14,7 @@ Subcommands:
   prompt        inspect the system prompt the LLM receives (per fragment)
   config        view effective settings + defaults + descriptions
   runtime       inspect + select inference engines (the Runtime panel)
+  backends      list installed agent CLI backends (models, not delegates)
 
 Each subcommand has:
   - A ``register(subparsers)`` function that adds argparse args
@@ -41,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from . import (
         avatar_cmd,
+        backends_cmd,
         config_cmd,
         personality_cmd,
         prompt_cmd,
@@ -68,8 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         "  doctor      check dependencies, permissions, and install health\n"
         "  update      update JaegerAI in place\n"
         "  bridge      run the NDJSON stdio bridge the desktop app speaks\n"
-        "  mcp         run the MCP server\n"
-        "  web         run the Jaeger-owned browser UI\n"
+        "  mcp         run the MCP server (`mcp --http` attaches to the live bridge)\n"
+        "  a2a         run the A2A JSON-RPC server (loopback :8796)\n"
+        "  gateway     install/start/stop Agentgateway (MCP :8811, A2A :8812)\n"
+        "  hermes-webui-adapter\n"
+        "              run the loopback adapter for the Hermes WebUI\n"
         "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"
         "\nrun `jaeger <command> --help` for a command's own options."
     )
@@ -98,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     prompt_cmd.register(subparsers)
     config_cmd.register(subparsers)
     runtime_cmd.register(subparsers)
+    backends_cmd.register(subparsers)
 
     args = parser.parse_args(argv)
     if args.subcommand is None:

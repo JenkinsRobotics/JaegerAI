@@ -492,6 +492,20 @@ def _build_providers_list(
             "is_current": current_provider == "lmstudio",
         })
 
+    # Installed agent CLIs as first-class models (not delegates).
+    try:
+        from jaeger_ai.features.cli_backends.service import installed_ids
+        cli_ids = installed_ids()
+    except Exception:  # noqa: BLE001
+        cli_ids = []
+    if cli_ids:
+        providers.append({
+            "slug": "cli",
+            "name": "Installed agent CLIs",
+            "models": cli_ids,
+            "is_current": current_provider == "cli",
+        })
+
     # Lazy imports keep the module load cheap when no picker is opened.
     try:
         from jaeger_ai.core.models.external_model_history import recent_models
@@ -756,10 +770,31 @@ def _model_list(ctx: SlashContext) -> SlashResult:
             "  [dim]switch:  /model use ollama-cloud <model>   "
             "(e.g. qwen3.5:397b — prompts for an API key, once)[/]")
 
+    try:
+        from jaeger_ai.features.cli_backends.service import list_all
+        cli_rows = list_all()
+    except Exception:  # noqa: BLE001
+        cli_rows = []
+    if cli_rows:
+        ctx.console.print(
+            "\n[bold]Installed agent CLIs[/] [dim]· models, not delegates[/]")
+        for item in cli_rows:
+            if not item.spec.catalog:
+                continue
+            if item.installed:
+                ctx.console.print(
+                    f"  [green]●[/] cli:{item.spec.id:12s}  "
+                    f"[dim]{item.executable}[/]")
+            else:
+                ctx.console.print(
+                    f"  [dim]○[/] cli:{item.spec.id:12s}  not on PATH")
+        ctx.console.print("  [dim]switch:  /model use cli claude[/]")
+
     ctx.console.print(
         "\n[dim]switch · on-device:[/]  /model use local  ·  "
         "/model use mlx <name>"
         "  ·  /model use ollama <name>  ·  /model use lmstudio <name>"
+        "\n[dim]switch · CLI backends:[/]  /model use cli claude"
         "\n[dim]switch · cloud API:[/]  /model use ollama-cloud <model>"
         "  ·  /model use openai <model>  ·  /model use anthropic <model>"
         "  ·  /model use gemini <model>  ·  /model use xai <model>"
@@ -822,7 +857,8 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     if not args:
         ctx.console.print(
             "[yellow]Usage:[/] /model use local [name] | mlx <name> | "
-            "ollama <name> | lmstudio <name> | ollama-cloud <model> | "
+            "ollama <name> | lmstudio <name> | cli <claude|codex|grok|gemini|hermes> | "
+            "ollama-cloud <model> | "
             "openai <model> | anthropic <model> | gemini <model> | xai <model>")
         return SlashResult()
 
@@ -934,6 +970,36 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         summary = f"external · {provider} · {wanted}"
         if provider == "ollama":
             _autowrite_ollama_ctx(cfg)
+    elif target in ("cli", "local-cli") or target.endswith("-cli"):
+        from jaeger_ai.features.cli_backends.service import (
+            list_installed,
+            normalize_cli_selection,
+        )
+        pair = normalize_cli_selection(target, wanted)
+        if pair is None:
+            avail = [item.id for item in list_installed() if item.spec.catalog]
+            if not wanted:
+                ctx.console.print(
+                    "[yellow]Pick a CLI backend:[/] /model use cli <id>")
+                for name in avail:
+                    ctx.console.print(f"  - cli:{name}")
+                if not avail:
+                    ctx.console.print(
+                        "  [dim]none installed — `jaeger backends`[/]")
+                return SlashResult()
+            ctx.console.print(
+                f"[yellow]Unknown CLI backend {wanted!r}[/] — "
+                f"installed: {', '.join('cli:' + n for n in avail) or '(none)'}"
+            )
+            return SlashResult()
+        _prov, backend_id = pair
+        cfg.external_model.enabled = True
+        cfg.external_model.provider = "cli"
+        cfg.external_model.model = backend_id
+        cfg.external_model.base_url = ""
+        cfg.external_model.api_key_credential = ""
+        cfg.external_model.api_key_env = ""
+        summary = f"external · cli · {backend_id}"
     elif _CLOUD_ALIASES.get(target, target) in _CLOUD_PROVIDERS:
         provider = _CLOUD_ALIASES.get(target, target)
         if not wanted:
@@ -960,7 +1026,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
     else:
         ctx.console.print(
             f"[yellow]Unknown target {target!r}[/] — use local / mlx / "
-            "ollama / lmstudio / ollama-cloud / openai / anthropic / "
+            "ollama / lmstudio / cli / ollama-cloud / openai / anthropic / "
             "gemini / xai.")
         return SlashResult()
 

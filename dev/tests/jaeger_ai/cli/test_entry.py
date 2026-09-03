@@ -15,7 +15,8 @@ def route(argv):
 
 def test_console_subcommands_go_to_cli():
     for sub in ("skills", "personality", "status",
-                "roadmap", "avatar", "prompt", "config"):
+                "roadmap", "avatar", "prompt", "config",
+                "runtime", "backends"):
         assert route([sub, "x"]) == [PY, "-m", "jaeger_ai.cli", sub, "x"]
 
 
@@ -44,6 +45,9 @@ def test_doctor_routes_to_runner_with_flag():
 def test_bridge_and_mcp():
     assert route(["bridge"]) == [PY, "-m", "jaeger_ai.interfaces.bridge"]
     assert route(["mcp", "--x"]) == [PY, "-m", "jaeger_ai.interfaces.mcp_server", "--x"]
+    assert route(["mcp", "--http"]) == [PY, "-m", "jaeger_ai.interfaces.mcp_server", "--http"]
+    assert route(["a2a"]) == [PY, "-m", "jaeger_ai.interfaces.a2a_server"]
+    assert route(["gateway", "start"]) == [PY, "-m", "jaeger_ai.features.gateway", "start"]
 
 
 def test_dev_defaults_to_tui_and_passes_flags():

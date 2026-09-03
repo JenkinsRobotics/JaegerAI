@@ -210,3 +210,24 @@ def test_history_pre_populates_cloud_provider_with_recent_models(tmp_path):
     assert openai["models"][0] == "gpt-5"        # newest first
     assert openai["models"][1] == "gpt-4o"
     assert openai["models"][-1] == _TYPE_A_MODEL_LABEL
+
+
+
+def test_picker_includes_installed_cli_backends(monkeypatch):
+    monkeypatch.setattr(
+        "jaeger_ai.features.cli_backends.service.installed_ids",
+        lambda: ["claude", "codex"],
+    )
+    providers = _build_providers_list(_all_runtimes(), _ext())
+    cli = _by_slug(providers, "cli")
+    assert cli["models"] == ["claude", "codex"]
+    assert cli["is_current"] is False
+
+
+def test_picker_marks_cli_current_when_selected(monkeypatch):
+    monkeypatch.setattr(
+        "jaeger_ai.features.cli_backends.service.installed_ids",
+        lambda: ["claude"],
+    )
+    providers = _build_providers_list(_all_runtimes(), _ext(provider="cli", model="claude"))
+    assert _by_slug(providers, "cli")["is_current"] is True

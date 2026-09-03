@@ -35,6 +35,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "backup", "restore", "update", "reinstall", "uninstall",
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
+    "container", "webui",
 })
 
 
@@ -98,6 +99,12 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "kill":
         from jaeger_ai.cli.verbs.kill_verb import _cmd_kill_argv
         return _cmd_kill_argv(list(argv[1:]))
+    if argv[0] == "container":
+        from jaeger_ai.cli.verbs.container_verb import _cmd_container_argv
+        return _cmd_container_argv(list(argv[1:]))
+    if argv[0] == "webui":
+        from jaeger_ai.cli.verbs.webui_verb import _cmd_webui_argv
+        return _cmd_webui_argv(list(argv[1:]))
     # ``health`` was folded into ``jaeger doctor`` (one doctor — deps +
     # runtime probe). Removed 2026-06-20.
     _print_usage()

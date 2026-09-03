@@ -614,7 +614,7 @@ class FallbackModel(BaseModel):
     provider: Literal[
         "local", "lmstudio", "ollama", "ollama-cloud",
         "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
@@ -630,7 +630,7 @@ class WebhookConfig(BaseModel):
         description="Listen on loopback for POST /hook and POST /github.",
     )
     host: str = Field("127.0.0.1", max_length=64)
-    port: int = Field(8791, ge=1, le=65535)
+    port: int = Field(8793, ge=1, le=65535)
     secret: str = Field(
         "",
         description="Optional bearer/shared secret. Empty = loopback is enough.",
@@ -655,6 +655,10 @@ class ExternalModelConfig(BaseModel):
       • ``groq``         — Groq LPU fast inference engine
       • ``deepseek``     — DeepSeek R1 / V3 API
       • ``vllm``         — High-throughput vLLM server
+      • ``cli``          — an installed agent CLI (claude/codex/grok/gemini/hermes)
+                           on PATH, used as the brain. Jaeger keeps the loop,
+                           tools, memory, and permissions. Delegates remain
+                           workers (``delegate_task``).
 
     ``lmstudio`` and ``ollama`` are both still on-device — a separate
     local server, used to A/B against the in-process model when
@@ -674,7 +678,7 @@ class ExternalModelConfig(BaseModel):
     enabled: bool = False
     provider: Literal[
         "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
     ] = "lmstudio"
     base_url: str = Field(
         "http://localhost:1234/v1",
@@ -1044,6 +1048,61 @@ except ImportError:
         default_emotion: str = "neutral"
 
 
+class ContainersConfig(BaseModel):
+    """Configuration for Apple native container tools and services.
+
+    ``use_hermes_webui`` is the plugin-style toggle that makes the Hermes
+    WebUI Apple container Jaeger's temporary browser UI: when enabled,
+    ``jaeger webui start`` brings up the named container and the loopback
+    Hermes WebUI adapter so the browser can talk to Jaeger.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    engine: str = Field(
+        "/opt/homebrew/bin/container",
+        json_schema_extra=_setting("containers"),
+        description="Path to Apple container CLI binary.",
+    )
+    auto_start_system: bool = Field(
+        True,
+        json_schema_extra=_setting("containers"),
+        description="Automatically start the container system service when needed.",
+    )
+    use_hermes_webui: bool = Field(
+        False,
+        json_schema_extra=_setting("containers"),
+        description=(
+            "Use the Hermes WebUI Apple container as Jaeger's temporary web UI "
+            "(starts container + hermes-webui-adapter via `jaeger webui start`)."
+        ),
+    )
+    hermes_webui_container: str = Field(
+        "hermes-webui-hermes-webui",
+        json_schema_extra=_setting("containers", advanced=True),
+        description="Apple container id that serves the Hermes WebUI.",
+    )
+    hermes_webui_port: int = Field(
+        8787,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("containers", advanced=True),
+        description=(
+            "Host port published by the Hermes WebUI container "
+            "(open http://127.0.0.1:<port>/)."
+        ),
+    )
+    adapter_port: int = Field(
+        8791,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("containers", advanced=True),
+        description=(
+            "Loopback port for `jaeger hermes-webui-adapter` "
+            "(HERMES_WEBUI_RUNNER_BASE_URL). Kept at 8791; webhooks use 8793."
+        ),
+    )
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1073,6 +1132,7 @@ class Config(BaseModel):
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
+    containers: ContainersConfig = Field(default_factory=ContainersConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

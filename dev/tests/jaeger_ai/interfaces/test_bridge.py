@@ -18,8 +18,8 @@ import threading
 import time
 
 import pytest
-
 from jaeger_os.contract import protocol
+
 from jaeger_ai.interfaces import bridge
 
 
@@ -30,6 +30,23 @@ class _FakeBoot:
 
     def cleanup(self):
         self.cleaned = True
+
+
+class _BrokenOutput:
+    def __init__(self, *, attached: bool):
+        self._jaeger_attach_stream = attached
+
+    def write(self, _value):
+        raise BrokenPipeError("client disconnected")
+
+    def flush(self):
+        raise AssertionError("write already failed")
+
+
+def test_detached_socket_output_cannot_kill_shared_turn_worker():
+    bridge._emit(_BrokenOutput(attached=True), {"type": "state", "busy": False})
+    with pytest.raises(BrokenPipeError):
+        bridge._emit(_BrokenOutput(attached=False), {"type": "state", "busy": False})
 
 
 @pytest.fixture(autouse=True)
@@ -203,7 +220,9 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
         # The real TUIBootResult carries the layout — post-boot queries
         # (instance_exists, config, …) read it off the boot object.
         from jaeger_ai.core.instance.instance import (
-            InstanceLayout, resolve_instance_dir)
+            InstanceLayout,
+            resolve_instance_dir,
+        )
         boot.layout = InstanceLayout(resolve_instance_dir(instance_name))
         return boot
 
@@ -227,6 +246,18 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
     rc = bridge.main(argv=argv if argv is not None else [])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
     return rc, frames, boot
+
+
+def test_bridge_help_does_not_resolve_or_create_an_instance(monkeypatch, capsys):
+    def fail():
+        raise AssertionError("help must not resolve the default instance")
+
+    monkeypatch.setattr(
+        "jaeger_ai.core.instance.instance.default_instance_name", fail,
+    )
+
+    assert bridge.main(argv=["--help"]) == 0
+    assert "usage:" in capsys.readouterr().out
 
 
 def test_fast_ready_then_agent_state_then_turn(monkeypatch):
@@ -371,6 +402,32 @@ def test_bridge_credential_inventory_never_returns_values(tmp_path):
     assert "secret-value" not in repr(result)
 
 
+def test_model_catalog_separates_ollama_local_and_cloud(monkeypatch):
+    from jaeger_ai.core.models import model_resolver
+
+    monkeypatch.setattr(model_resolver, "list_registered_models", lambda: [
+        {"name": "gemma4:latest", "provider": "ollama", "location": "local"},
+        {"name": "glm-5.2:cloud", "provider": "ollama", "location": "cloud",
+         "serving": True},
+    ])
+    monkeypatch.setattr(model_resolver, "serving_model", lambda: {
+        "name": "glm-5.2:cloud", "provider": "ollama", "location": "cloud",
+        "context_length": 1_048_576,
+    })
+
+    result = bridge._query("model_catalog", {}, type("B", (), {
+        "layout": None, "instance_name": "jaeger",
+    })())
+
+    assert result["serving"]["provider"] == "ollama-cloud"
+    assert result["serving"]["route_provider"] == "ollama"
+    assert [(row["id"], row["provider"], row["route_provider"])
+            for row in result["models"]] == [
+        ("gemma4:latest", "ollama-local", "ollama"),
+        ("glm-5.2:cloud", "ollama-cloud", "ollama"),
+    ]
+
+
 def test_session_key_flows_through(monkeypatch):
     seen = {}
 
@@ -448,7 +505,7 @@ class _FakeCron:
     ``start`` synchronously fires one scheduled prompt so the callback's
     reply-frame surfacing is exercised end-to-end."""
 
-    instances: list["_FakeCron"] = []
+    instances: list[_FakeCron] = []
 
     def __init__(self, cb, *, poll_s=30.0, llm_lock=None, housekeeping=None):
         self.cb = cb
@@ -620,7 +677,12 @@ def test_create_instance_command_writes_instance_and_boots(monkeypatch, tmp_path
 
     # The instance on disk is complete and schema-valid.
     from jaeger_ai.core.instance.schemas import (
-        Config, Identity, Manifest, load_json, load_yaml)
+        Config,
+        Identity,
+        Manifest,
+        load_json,
+        load_yaml,
+    )
     ident = load_yaml(inst_dir / "identity.yaml", Identity)
     cfg = load_yaml(inst_dir / "config.yaml", Config)
     man = load_json(inst_dir / "manifest.json", Manifest)
@@ -781,6 +843,7 @@ def test_permission_request_timeout_denies(monkeypatch):
     hangs — a short fuse proves the wait actually bounds, not just that a
     late answer happens to resolve it."""
     from jaeger_os.core.safety.permissions import current_policy
+
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider
     monkeypatch.setattr(BridgeConfirmationProvider, "TIMEOUT_S", 0.1)
     original = current_policy().confirmation
@@ -851,10 +914,13 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     construct — executes with NO frame at all."""
     import types as _types
 
-    from jaeger_os.core.safety.permissions import (
-        PermissionGrants, PermissionPolicy, use_policy,
-    )
     from jaeger_agent.tools.host import _t_open_on_host
+    from jaeger_os.core.safety.permissions import (
+        PermissionGrants,
+        PermissionPolicy,
+        use_policy,
+    )
+
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
 
     opened = []
@@ -949,6 +1015,7 @@ def test_bridge_confirmation_provider_follows_attached_turn_output(_instance_on_
 
 def test_clarify_and_secret_tools_use_turn_scoped_interaction_sink():
     from jaeger_os.core.tools.tool_registry import get_tool
+
     from jaeger_ai.main import _register_builtins, interaction_request_sink
 
     _register_builtins(None)
@@ -1047,12 +1114,10 @@ def test_speak_command_while_booting_reports_not_ready(monkeypatch):
 def test_config_query_carries_speech_engine(monkeypatch):
     """The Swift shell routes its speaker button on ``speech_engine`` read
     over the existing config query — pin the field's presence + default."""
-    import io as _io
     import pathlib
     import tempfile
 
-    from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml)
+    from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml
 
     tmp = pathlib.Path(tempfile.mkdtemp())
     dump_yaml(tmp / "config.yaml", Config(
@@ -1091,7 +1156,12 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
     import tempfile
 
     from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml, load_yaml)
+        Config,
+        Identity,
+        ModelConfig,
+        dump_yaml,
+        load_yaml,
+    )
 
     tmp = pathlib.Path(tempfile.mkdtemp())
     dump_yaml(tmp / "config.yaml", Config(
@@ -1129,8 +1199,7 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
 def _write_valid_instance(root):
     """Overwrite the fixture's ``{}`` config/identity with schema-valid
     files so the settings catalog (which loads the real ``Config``) works."""
-    from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml)
+    from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml
     dump_yaml(root / "config.yaml",
               Config(instance_name="t", model=ModelConfig(model_path="/dev/null")))
     dump_yaml(root / "identity.yaml",
@@ -1193,7 +1262,7 @@ def test_reply_carries_turn_telemetry_when_available(monkeypatch):
     reply frame (v1 additive). ctx_used/ctx_max are absent here because the
     faked pipeline has no session agent / loaded model — absence, not null,
     is the contract for unknown telemetry."""
-    def timed_run(client, text, session_key=None):  # noqa: ARG001
+    def timed_run(client, text, session_key=None):
         return {"text": "pong", "error": None, "elapsed_s": 2.5}
 
     rc, frames, _ = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n',
@@ -1208,7 +1277,7 @@ def test_reply_carries_turn_telemetry_when_available(monkeypatch):
 def test_slash_help_answers_without_an_agent_turn(monkeypatch):
     """A leading ``/`` is a command, not a prompt — ``/help`` renders the
     TUI's command list over the bridge and never reaches run_for_voice."""
-    def explode(client, text, session_key=None):  # noqa: ARG001
+    def explode(client, text, session_key=None):
         raise AssertionError("slash text must not reach the agent turn")
 
     rc, frames, _ = _run(monkeypatch, '{"text":"/help"}\n{"op":"quit"}\n',
@@ -1234,7 +1303,7 @@ def test_inner_cap_halt_re_fires_the_turn(monkeypatch):
     """Inner-turn fuse is the next step, not a finished reply."""
     calls: list[str] = []
 
-    def fake_run(client, text, session_key=None, **kwargs):  # noqa: ARG001
+    def fake_run(client, text, session_key=None, **kwargs):
         calls.append(text)
         if len(calls) == 1:
             return {
@@ -1260,7 +1329,7 @@ def test_slash_goal_with_job_runs_as_a_turn(monkeypatch):
     job itself. The slash prefix is stripped before run_for_voice."""
     seen = {}
 
-    def fake_run(client, text, session_key=None, **kwargs):  # noqa: ARG001
+    def fake_run(client, text, session_key=None, **kwargs):
         seen["text"] = text
         return {"text": "working the notes", "error": None}
 
@@ -1278,7 +1347,7 @@ def test_slash_goal_with_job_runs_as_a_turn(monkeypatch):
 
 
 def test_slash_auto_dispatches_execution_mode_not_a_turn(monkeypatch):
-    def explode(client, text, session_key=None):  # noqa: ARG001
+    def explode(client, text, session_key=None):
         raise AssertionError("/auto must not reach the agent turn")
 
     rc, frames, _ = _run(
@@ -1292,7 +1361,7 @@ def test_slash_auto_dispatches_execution_mode_not_a_turn(monkeypatch):
 
 
 def test_slash_bare_goal_is_usage(monkeypatch):
-    def explode(client, text, session_key=None):  # noqa: ARG001
+    def explode(client, text, session_key=None):
         raise AssertionError("bare /goal must not reach the agent turn")
 
     rc, frames, _ = _run(
@@ -1393,7 +1462,9 @@ def test_v2_session_mutations_are_canonical_and_idempotent(monkeypatch, _instanc
 
 def test_turn_workspace_binds_and_restores_ares_path(monkeypatch, tmp_path):
     from types import SimpleNamespace
+
     from jaeger_agent import tools as jaeger_tools
+
     from jaeger_ai.main import _pipeline
 
     configured = tmp_path / "configured"
