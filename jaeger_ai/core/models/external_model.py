@@ -13,6 +13,9 @@ is enabled, the agent runs on an external provider instead:
   • ``anthropic``    — Claude via the Anthropic API.
   • ``gemini``       — Google Gemini via its OpenAI-compatible endpoint.
   • ``xai``          — xAI Grok via its OpenAI-compatible endpoint.
+  • ``cli``          — an installed agent CLI (claude / codex / grok /
+                       gemini / hermes) used as the brain. Jaeger keeps
+                       the loop; this is not ``delegate_task``.
 
 The agent loop (``agent.iter()``, skip-final, the fix loop, Deep Think)
 is model-agnostic — it only needs (a) a pydantic-ai ``Model`` for the
@@ -134,7 +137,15 @@ def selection_failure_message(ext: ExternalModelConfig, reason: str) -> str:
         f"selected model cannot serve — provider {provider!r}, "
         f"model {model!r}: {reason}",
     ]
-    if provider in _CLOUD_PROVIDERS:
+    if provider == "cli":
+        lines.append(
+            "  • install the CLI on PATH (`jaeger backends`) and retry"
+        )
+        lines.append(
+            f"  • model id is the backend name (claude / codex / grok / "
+            f"gemini / hermes), got {model!r}"
+        )
+    elif provider in _CLOUD_PROVIDERS:
         cred = str(getattr(ext, "api_key_credential", "") or "")
         envs = list(_CONVENTIONAL_ENV.get(provider, ()))
         env_named = str(getattr(ext, "api_key_env", "") or "")
@@ -270,6 +281,11 @@ def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:
             )
         return api_key
 
+    if ext.provider == "cli":
+        # PATH-installed CLI — no API key at this layer. The binary
+        # may still read ANTHROPIC_API_KEY / OPENAI_API_KEY itself.
+        return api_key
+
     raise ExternalModelError(f"unknown provider {ext.provider!r}")
 
 
@@ -341,6 +357,8 @@ class ExternalModelClient:
         is_oai = self.provider in _OPENAI_COMPATIBLE
 
         def _call() -> str:
+            if self.provider == "cli":
+                return self._chat_cli(messages, max_tokens, temperature, top_p)
             if is_oai:
                 return self._chat_openai(messages, max_tokens, temperature, top_p)
             return self._chat_anthropic(messages, max_tokens, temperature, top_p)
@@ -422,6 +440,27 @@ class ExternalModelClient:
                 pass
         return active
 
+    def _chat_cli(self, messages, max_tokens, temperature, top_p) -> str:
+        """One-shot completion through the installed agent CLI."""
+        del max_tokens, temperature, top_p
+        import threading
+
+        from jaeger_agent.adapters.cli_backend import CliBackendAdapter
+        from jaeger_agent.schemas.message_types import Message
+
+        adapter = CliBackendAdapter(
+            backend_id=self.ext.model,
+            timeout_s=float(self.ext.timeout_s or 600.0),
+        )
+        formatted = adapter.format_messages(
+            [Message(role=m["role"], content=m.get("content") or "") for m in messages],
+            [],
+            "",
+        )
+        raw = adapter.call(formatted, threading.Event())
+        parsed = adapter.parse_response(raw)
+        return str(parsed.get("content") or "")
+
     def _chat_anthropic(self, messages, max_tokens, temperature, top_p) -> str:
         from anthropic import Anthropic
 
@@ -451,6 +490,8 @@ class ExternalModelClient:
 
     # -- diagnostics -------------------------------------------------------
     def describe(self) -> str:
+        if self.provider == "cli":
+            return f"external · cli · {self.ext.model} · local-cli"
         where = self.ext.base_url if self.provider in _OPENAI_COMPATIBLE else "api.anthropic.com"
         return f"external · {self.provider} · {self.ext.model} · {where}"
 
@@ -467,6 +508,14 @@ class ExternalModelClient:
         output quality."""
         started = time.perf_counter()
         try:
+            if self.provider == "cli":
+                from jaeger_agent.adapters.cli_backend import CliBackendAdapter
+                result = CliBackendAdapter(
+                    backend_id=self.ext.model,
+                    timeout_s=min(float(self.ext.timeout_s or 60.0), 10.0),
+                ).health_check()
+                result.setdefault("latency_s", round(time.perf_counter() - started, 2))
+                return result
             if self.provider in _OPENAI_COMPATIBLE:
                 import requests
 

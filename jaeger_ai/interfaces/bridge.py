@@ -2390,6 +2390,15 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 if isinstance(parsed, dict):
                     inbound.put((parsed, owner_out))
         finally:
+            # Socket attach (Hermes WebUI / other clients) is the live control
+            # plane. Stdin EOF from launchd/nohup must not kill that agent.
+            ctx.booted.wait(timeout=120)
+            deadline = time.monotonic() + 5.0
+            while ctx.bridge_sock is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if ctx.bridge_sock is not None:
+                print("[bridge] stdin closed; unix socket still serving", file=sys.stderr, flush=True)
+                return
             inbound.put(None)
 
     threading.Thread(target=_read_stdio, name="bridge-stdio", daemon=True).start()

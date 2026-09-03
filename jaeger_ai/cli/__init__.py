@@ -13,6 +13,8 @@ Subcommands:
   roadmap       view current roadmap progress
   prompt        inspect the system prompt the LLM receives (per fragment)
   config        view effective settings + defaults + descriptions
+  runtime       inspect + select inference engines (the Runtime panel)
+  backends      list installed agent CLI backends (models, not delegates)
 
 Each subcommand has:
   - A ``register(subparsers)`` function that adds argparse args
@@ -40,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from . import (
         avatar_cmd,
+        backends_cmd,
         config_cmd,
         personality_cmd,
         prompt_cmd,
@@ -100,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     prompt_cmd.register(subparsers)
     config_cmd.register(subparsers)
     runtime_cmd.register(subparsers)
+    backends_cmd.register(subparsers)
 
     args = parser.parse_args(argv)
     if args.subcommand is None:

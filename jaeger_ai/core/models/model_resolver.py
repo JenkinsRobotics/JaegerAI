@@ -543,6 +543,8 @@ def serving_model() -> dict[str, Any] | None:
     )
     if kind == "external" and ("cloud" in provider or cloud_via_local_ollama):
         location = "cloud"
+    elif provider == "cli" or provider.endswith("-cli"):
+        location = "local-cli"
     elif kind == "external":
         # Local Ollama / LM Studio — on this machine, not a hosted API.
         location = "local"
@@ -743,6 +745,14 @@ def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
                     "status": "available on xAI Grok (API key configured)",
                     "description": "xAI cloud model",
                 })
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Installed agent CLIs are models, not delegates. Always catalogued
+    # when the binary exists — no API key required.
+    try:
+        from jaeger_ai.features.cli_backends.service import to_model_rows
+        rows.extend(to_model_rows())
     except Exception:  # noqa: BLE001
         pass
 

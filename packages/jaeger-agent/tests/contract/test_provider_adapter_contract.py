@@ -14,6 +14,7 @@ import pytest
 
 from jaeger_agent.adapters.anthropic import AnthropicAdapter
 from jaeger_agent.adapters.base import KNOWN_FEATURES, ProviderAdapter
+from jaeger_agent.adapters.cli_backend import CliBackendAdapter
 from jaeger_agent.adapters.hermes_xml import HermesXMLAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.mlx import MLXAdapter
@@ -74,7 +75,8 @@ def test_health_check_shape():
 
 
 @pytest.mark.parametrize("cls", [
-    OpenAIAdapter, AnthropicAdapter, LocalLlamaAdapter, MLXAdapter, HermesXMLAdapter,
+    OpenAIAdapter, AnthropicAdapter, LocalLlamaAdapter, MLXAdapter,
+    HermesXMLAdapter, CliBackendAdapter,
 ])
 def test_production_adapters_are_provider_adapters(cls):
     assert issubclass(cls, ProviderAdapter)

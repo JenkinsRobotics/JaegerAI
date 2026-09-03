@@ -40,6 +40,8 @@ instance, one word now.)
 | `jaeger avatar …` | Avatar controls |
 | `jaeger prompt …` | Prompt inspection |
 | `jaeger config …` | Config get/set |
+| `jaeger runtime …` | Inspect / select GGUF and MLX inference engines |
+| `jaeger backends` | List installed agent CLI backends (models, not delegates) |
 | `jaeger memory …` | Agent memory tools |
 | `jaeger settings …` | Runtime settings |
 | `jaeger skill …` | Single-skill operations |

@@ -231,6 +231,16 @@ routing. Set `JAEGER_OLLAMA_DELEGATE_MODEL` to enable the local Ollama delegate.
 Private and secret tasks are rejected unless the selected runtime is explicitly
 local.
 
+### CLI backends are models; delegates are workers
+
+The same installed CLIs (`claude`, `codex`, `grok`, `gemini`, `hermes`)
+are first-class **models** in Jaeger's own loop when they are on PATH.
+`jaeger backends` probes them; they appear in the model catalog as
+`cli:claude` (provider `claude-cli`, location `local-cli`). Select one
+as the active brain with `/model use cli claude` — Jaeger keeps tools,
+memory, and permissions. `delegate_task` is still the worker path: go
+do this whole job in that agent. Do not confuse the two.
+
 ### ARES absorption and migration
 
 Imported product capabilities are split by feature under `jaeger_ai/features/`;
