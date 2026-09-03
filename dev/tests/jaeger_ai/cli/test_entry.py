@@ -15,7 +15,8 @@ def route(argv):
 
 def test_console_subcommands_go_to_cli():
     for sub in ("skills", "personality", "status",
-                "roadmap", "avatar", "prompt", "config"):
+                "roadmap", "avatar", "prompt", "config",
+                "runtime", "backends"):
         assert route([sub, "x"]) == [PY, "-m", "jaeger_ai.cli", sub, "x"]
 
 

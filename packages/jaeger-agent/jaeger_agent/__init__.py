@@ -11,6 +11,7 @@ from .config import AgentConfig
 from .contracts import AgentRuntime, RuntimeEvents, TurnResult
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.base import KNOWN_FEATURES, ProviderAdapter
+from .adapters.cli_backend import CliBackendAdapter
 from .adapters.hermes_xml import HermesXMLAdapter
 from .adapters.local_llama import LocalLlamaAdapter
 from .adapters.mlx import MLXAdapter
@@ -98,6 +99,7 @@ __all__ = [
     "AgentRuntime",
     "AgentState",
     "AnthropicAdapter",
+    "CliBackendAdapter",
     "ChatMessage",
     "ChatReply",
     "DirectToolExecutor",

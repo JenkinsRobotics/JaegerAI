@@ -614,7 +614,7 @@ class FallbackModel(BaseModel):
     provider: Literal[
         "local", "lmstudio", "ollama", "ollama-cloud",
         "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
@@ -655,6 +655,10 @@ class ExternalModelConfig(BaseModel):
       • ``groq``         — Groq LPU fast inference engine
       • ``deepseek``     — DeepSeek R1 / V3 API
       • ``vllm``         — High-throughput vLLM server
+      • ``cli``          — an installed agent CLI (claude/codex/grok/gemini/hermes)
+                           on PATH, used as the brain. Jaeger keeps the loop,
+                           tools, memory, and permissions. Delegates remain
+                           workers (``delegate_task``).
 
     ``lmstudio`` and ``ollama`` are both still on-device — a separate
     local server, used to A/B against the in-process model when
@@ -674,7 +678,7 @@ class ExternalModelConfig(BaseModel):
     enabled: bool = False
     provider: Literal[
         "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
     ] = "lmstudio"
     base_url: str = Field(
         "http://localhost:1234/v1",

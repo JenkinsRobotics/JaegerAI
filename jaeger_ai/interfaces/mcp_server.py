@@ -140,14 +140,40 @@ def build_server(client: Any, instance: str, model: str | None,
 
         @mcp.tool()
         def list_delegates() -> dict:
-            """Cheap delegate catalog: filter live list_tools for delegate_* names."""
+            """Delegate catalog: builtin runtimes plus any delegate_* bridge tools."""
+            names: list[str] = []
+            payload_error = None
             try:
                 payload = bridge.query("list_tools")
+                names = _tool_names(payload)
             except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": str(exc), "delegates": []}
-            names = _tool_names(payload)
-            delegates = [name for name in names if "delegate" in name.lower()]
-            return {"ok": True, "delegates": delegates, "tools": names}
+                payload_error = str(exc)
+            builtin: list[str] = []
+            registry_error = None
+            try:
+                from jaeger_agent.delegates import (
+                    get_delegate_registry,
+                    register_builtin_delegates,
+                )
+                register_builtin_delegates()
+                builtin = [rt.runtime_id for rt in get_delegate_registry().list()]
+            except Exception as exc:  # noqa: BLE001
+                registry_error = str(exc)
+            delegates = sorted({
+                *(name for name in names if "delegate" in name.lower()),
+                *builtin,
+            })
+            out: dict[str, object] = {
+                "ok": not (payload_error and registry_error),
+                "delegates": delegates,
+                "tools": names,
+                "runtimes": builtin,
+            }
+            if payload_error:
+                out["bridge_error"] = payload_error
+            if registry_error:
+                out["registry_error"] = registry_error
+            return out
 
     return mcp
 

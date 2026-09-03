@@ -28,6 +28,7 @@ from pathlib import Path
 _CONSOLE = (
     "skills", "personality", "status",
     "roadmap", "avatar", "prompt", "config",
+    "runtime", "backends",
 )
 
 

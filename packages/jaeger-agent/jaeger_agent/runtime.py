@@ -144,6 +144,14 @@ def build_adapter(cfg: AgentConfig) -> Any:
             temperature=cfg.temperature,
         )
 
+    if provider == "cli":
+        from .adapters.cli_backend import CliBackendAdapter
+
+        return CliBackendAdapter(
+            backend_id=cfg.model or "claude",
+            timeout_s=cfg.timeout_s,
+        )
+
     if provider == "anthropic":
         if not api_key:
             raise RuntimeError(
