@@ -193,7 +193,7 @@ actor BridgeProcess {
 
     /// Resolve the ``jaeger`` launcher. ``$JAEGER_BRIDGE_CMD`` overrides
     /// outright; then a dev bundle self-locates the repo it was built in
-    /// (JaegerOS-dev.app lives at ``<repo>/…/swift/.build/``, so walking
+    /// (the Jaeger AI dev bundle lives at ``<repo>/…/swift/.build/``, so walking
     /// up from the bundle finds ``<repo>/jaeger`` — no PATH games); then
     /// ``$JAEGER_REPO/jaeger``; else the dev-tree default.
     static func jaegerPath() -> String {
@@ -217,7 +217,7 @@ actor BridgeProcess {
     /// Launch the bridge and await its ``ready`` frame (or ``fatal``).
     /// FAST: ready means the transport is up, not that the model is loaded
     /// — watch ``onAgentState`` for booting → ready. ``instance`` pins the
-    /// bridge to a named instance (the dev app passes ``jros-dev`` via
+    /// bridge to a named instance (the dev app passes ``jaeger-dev`` via
     /// LSEnvironment); nil lets the bridge resolve its own default.
     func start(instance: String? = nil) async throws -> BridgeReady {
         guard process == nil else { throw BridgeError.launchFailed("already running") }

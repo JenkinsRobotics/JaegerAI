@@ -99,7 +99,7 @@ final class AgentBridge: ObservableObject {
     }
 
     /// An EXPLICIT instance override, or nil to let the bridge resolve its
-    /// own default. JaegerOS-dev.app pins ``jros-dev`` here via its
+    /// own default. A Jaeger AI development launch pins ``jaeger-dev`` here via its
     /// Info.plist LSEnvironment; the product app leaves it unset.
     static var explicitInstance: String? {
         let v = ProcessInfo.processInfo.environment["JAEGER_INSTANCE_NAME"] ?? ""

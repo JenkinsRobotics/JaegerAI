@@ -68,13 +68,13 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-# The single dev instance, shared with `jaeger --dev`. Lives under the
+# The single Jaeger AI dev instance, shared with `jaeger --dev`. Lives under the
 # repo's gitignored operator-state root (`.jaeger_os/`), so it never
 # ships to end users. (Pre-2026-06-19 this was an isolated `sandbox/`
 # copy — removed; the two drifted, which only caused confusion.)
-DEV_INSTANCE = REPO / ".jaeger_os" / "instances" / "jros-dev"
+INSTANCE_NAME = "jaeger-dev"
+DEV_INSTANCE = REPO / ".jaeger_os" / "instances" / INSTANCE_NAME
 VENV_PY = REPO / ".venv" / "bin" / "python"
-INSTANCE_NAME = "jros-dev"
 # Legacy daemon pid-file (0.3.0 pre-pivot architecture).  Stays in tree
 # but the launcher no longer spawns it — if a previous --daemon run
 # left one lingering, cmd_boot stops it during the boot scroll so the
@@ -388,7 +388,7 @@ def dev_env() -> dict[str, str]:
     """Build the env the TUI subprocess inherits.
 
     Points JAEGER_HOME / JAEGER_INSTANCE_* at the dev instance so the
-    TUI's instance resolver picks up ``.jaeger_os/instances/jros-dev/``.
+    TUI's instance resolver picks up ``.jaeger_os/instances/jaeger-dev/``.
     PYTHONPATH puts the top-level ``jaeger_os/`` first so the TUI imports
     the code you're editing, not a stale install."""
     env = dict(os.environ)
@@ -550,7 +550,7 @@ def cmd_boot(env: dict[str, str], *, no_voice: bool) -> int:
     if not DEV_INSTANCE.exists():
         scroll("COCKPIT VALIDATION", "FAIL",
                suffix=f"dev instance missing: {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it")
+        say(f"run ./jaeger agent create --name {INSTANCE_NAME} to create it")
         return 1
     scroll("COCKPIT VALIDATION", "READY", suffix=str(DEV_INSTANCE))
 
@@ -689,7 +689,8 @@ def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
         return 1
     if not DEV_INSTANCE.exists():
         fail(f"dev instance not found at {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it", prefix="launch")
+        say(f"run ./jaeger agent create --name {INSTANCE_NAME} to create it",
+            prefix="launch")
         return 1
     # Toolkit routing: Swift native app (default) vs the PySide6 shell.
     if _ui_toolkit() == "swift":
@@ -731,7 +732,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     built JaegerOS.app and only builds when nothing is built yet;
     ``./launch --dev`` forces a rebuild. ONE app since 2026-07-14 —
     dev is a launch state, not a separate bundle: this launcher pins
-    the jros-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
+    the jaeger-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
     same bundle (same TCC identity, one permission grant) serves both
     dev and product.
 
@@ -761,7 +762,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
     if not bundle_bin.exists():
         return None
-    say("launching Jaeger AI (jros-dev instance) — menu-bar tray + chat window…",
+    say("launching Jaeger AI (jaeger-dev instance) — menu-bar tray + chat window…",
         prefix="launch")
     sys.stdout.flush()
     return subprocess.run([str(bundle_bin)], env=env).returncode
@@ -854,7 +855,8 @@ def main() -> int:
 
     if not DEV_INSTANCE.exists():
         fail(f"dev instance not found at {DEV_INSTANCE}")
-        say("run ./run.sh setup jros-dev to create it", prefix="launch")
+        say(f"run ./jaeger agent create --name {INSTANCE_NAME} to create it",
+            prefix="launch")
         return 1
 
     env = dev_env()

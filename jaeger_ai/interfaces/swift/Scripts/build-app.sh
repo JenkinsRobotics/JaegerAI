@@ -45,7 +45,7 @@ done
 
 # ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
 # split): dev is a launch STATE, not a separate bundle. `jaeger dev`
-# runs this same JaegerOS.app against the repo's jros-dev instance via
+# runs this same internal bundle against the repo's jaeger-dev instance via
 # the environment it launches with; a separate JaegerOS-dev.app meant a
 # second bundle id, and macOS TCC keys permission grants on bundle id —
 # every permission had to be granted twice. `--dev` is still accepted
