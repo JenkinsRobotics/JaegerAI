@@ -499,18 +499,11 @@ final class ChatViewModel: ObservableObject {
                 contextUsage = (used, mx)
             }
 
-            // Voice-loop completion: speak the reply through TTS so
-            // the operator hears it.  Respects the operator's auto-
-            // speak preference; the markdown strip happens inside
-            // TTSManager so the synthesizer doesn't read literal
-            // asterisks.  Skipped for empty replies.
-            NSLog("[ChatViewModel] reply received — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) replyLen=\(replyText.count)")
-            if TTSManager.shared.autoSpeakEnabled, !replyText.isEmpty {
-                NSLog("[ChatViewModel] dispatching to TTSManager.speak")
-                TTSManager.shared.speak(replyText)
-            } else {
-                NSLog("[ChatViewModel] TTS skipped — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) empty=\(replyText.isEmpty)")
-            }
+            // Final-response modality belongs to JaegerAgent. Never feed a
+            // completed text reply back through the app's TTS manager: that
+            // would duplicate speech selected and emitted by the agent's own
+            // multimodal output stage. TTSManager remains available for the
+            // explicit per-message "read aloud" action only.
         } catch {
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text =

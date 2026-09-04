@@ -20,10 +20,10 @@ import numpy as np
 class AttachedAgentRuntime:
     """AgentRuntime-compatible proxy over the bridge's private Unix socket.
 
-    Camera capture, playback, and duplex/AEC stay with the face. Neural work
-    (Gemma, Whisper, Kokoro), memory, tools, and the JaegerAgent loop stays in
-    the already-running bridge so opening another face never loads another
-    model stack.
+    Camera capture stays with the face. JaegerAgent owns the live pipeline:
+    duplex policy and playback remain methods of its engine, while Gemma,
+    Whisper, Kokoro, memory, and tools are hosted in the already-running agent
+    process. Opening another face therefore never loads another model stack.
     """
 
     vision_is_remote = True
@@ -248,7 +248,7 @@ class _RemoteWhisperModel:
 
 
 class RemoteSttNode:
-    """STT-node contract backed by the bridge's prewarmed Whisper."""
+    """STT-node transport backed by JaegerAgent's prewarmed Whisper node."""
 
     def __init__(self, runtime: AttachedAgentRuntime, *, model: str) -> None:
         self.runtime = runtime
@@ -259,7 +259,7 @@ class RemoteSttNode:
     def load(self, say=print, *, model_name: str | None = None) -> None:
         if model_name:
             self.model_name = model_name
-        say(f"using bridge-owned Whisper {self.model_name}")
+        say(f"using JaegerAgent-owned Whisper {self.model_name}")
 
     def transcribe(self, audio: Any) -> str:
         with self._lock:
@@ -267,7 +267,7 @@ class RemoteSttNode:
 
 
 class RemoteTtsNode:
-    """TTS-node contract backed by the bridge's prewarmed Kokoro."""
+    """TTS-node transport backed by JaegerAgent's prewarmed Kokoro node."""
 
     def __init__(self, runtime: AttachedAgentRuntime) -> None:
         self.runtime = runtime
@@ -275,7 +275,7 @@ class RemoteTtsNode:
 
     def load(self, say=print, **_kwargs: Any) -> None:
         self.tts = self
-        say("using bridge-owned Kokoro")
+        say("using JaegerAgent-owned Kokoro")
 
     def synth(self, text: str):
         audio = self.runtime.synthesize_audio(text)

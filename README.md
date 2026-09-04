@@ -39,9 +39,10 @@ It pins [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) (the
 framework tier — bus, nodes, modules/slots, supervisor, safety, wire
 contract, capability layer) and builds everything agentic on top:
 
-- **`modules/`** — provider-named application integrations for JaegerAgent,
-  JaegerKokoroTTS, and JaegerWhisperSTT. These state how this app uses an
-  imported module; engine implementation stays in its provider package.
+- **`modules/`** — optional provider-named application integrations.
+  JaegerKokoroTTS and JaegerWhisperSTT remain available for explicit tools or
+  app-specific features; they are not the live conversational speech path.
+  JaegerAgent owns that end-to-end multimodal pipeline.
 - **`core/`** — Jaeger AI's application lifecycle, instance integration,
   policy, diagnostics, and the **`persona_first`** pipeline: an id/ego split
   where a persona lane speaks to the user directly, in character, and
@@ -62,7 +63,7 @@ contract, capability layer) and builds everything agentic on top:
 - **Its own faces** — the Swift app (default windowed UI), the TUI
   (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
-  (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
+  (through JaegerAgent's built-in multimodal nodes), and the
   PySide6 Multimodal face. The Multimodal window is a renderer and device
   pump over `jaeger_agent`; the agent package owns its audio
   pipeline, turn policy, vision transport, and speech. All faces are clients
@@ -75,9 +76,10 @@ contract, capability layer) and builds everything agentic on top:
   `runtime`, `agent create/list/use/inspect/delete`, `update`, …).
   JaegerOS ships no CLI at all — this repo is where it lives.
 
-Engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
+Optional engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
 [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
-are **optional extras** — each its own repo, pinning JaegerOS only, so a
+are **tool/add-on extras**, not the agent's final-response pipeline. Each is
+its own repo, pinning JaegerOS only, so a
 robot body can run without the AI product installed at all.
 
 ## Install

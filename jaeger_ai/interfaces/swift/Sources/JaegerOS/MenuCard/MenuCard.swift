@@ -14,7 +14,6 @@ import SwiftUI
 
 struct MenuCard: View {
     @ObservedObject var agent: AgentBridge
-    @ObservedObject var tts: TTSManager
     @ObservedObject private var settings = SettingsStore.shared
 
     /// Display name = the AGENT's name (identity.yaml), never the character —
@@ -115,11 +114,6 @@ struct MenuCard: View {
 
     private var powerMenu: some View {
         Menu {
-            if agent.isConnected {
-                Button("Stop Agent") { Task { await agent.disconnect() } }
-            } else {
-                Button("Start Agent") { Task { await agent.tryConnect() } }
-            }
             Button("Restart") { relaunch() }
             Divider()
             Button("Quit Jaeger AI", role: .destructive) {

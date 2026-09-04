@@ -96,7 +96,6 @@ final class AvatarChatWindowController {
 
 private struct AvatarChatView: View {
     @ObservedObject var agent: AgentBridge
-    @ObservedObject private var tts = TTSManager.shared
     @State private var micOn = false     // chat-mode default: mic off
 
     var body: some View {
@@ -121,16 +120,14 @@ private struct AvatarChatView: View {
         .task { await loadVoiceConfig() }
     }
 
-    /// Seed the toggles from the instance config (``voice.enabled`` +
-    /// ``voice.speak_replies``) — the same defaults the PySide6 window
-    /// reads. Speaker state also syncs the runtime auto-speak switch.
+    /// Seed microphone acquisition from the instance config. Final-response
+    /// speech is selected and emitted by JaegerAgent, not by this view.
     private func loadVoiceConfig() async {
         let result = await agent.query("config")
         guard result.ok, let data = result.json,
               let cfg = try? JSONDecoder().decode(AppConfig.self, from: data)
         else { return }
         micOn = cfg.voice_enabled
-        tts.autoSpeakEnabled = cfg.speak_replies
     }
 
     private var controls: some View {
@@ -148,14 +145,6 @@ private struct AvatarChatView: View {
                     await agent.command("settings_set",
                         args: ["path": "voice.enabled", "value": on])
                 }
-            }
-            toggle(on: tts.autoSpeakEnabled, onSymbol: "speaker.wave.2.fill",
-                   offSymbol: "speaker.slash",
-                   help: tts.autoSpeakEnabled ? "Speaker ON — reads replies aloud"
-                                              : "Speaker OFF") {
-                tts.autoSpeakEnabled.toggle()   // live, this session
-                let on = tts.autoSpeakEnabled   // …and persisted
-                Task { await agent.command("save_config", args: ["speak_replies": on]) }
             }
             Spacer()
         }
