@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import importlib
 import queue
 import threading
 from types import SimpleNamespace
@@ -90,27 +89,21 @@ def test_attached_face_routes_both_modes_to_one_existing_runtime(tmp_path, monke
     assert not server.path.exists()
 
 
-def test_attached_face_borrows_bridge_whisper_and_kokoro(tmp_path, monkeypatch):
-    from jaeger_os.nodes import runtime as node_runtime
-
-    listen_module = importlib.import_module("jaeger_agent.tools.listen")
+def test_attached_face_uses_jaeger_agent_speech_runtime(tmp_path):
     calls = []
-    monkeypatch.setattr(
-        listen_module,
-        "transcribe_samples",
-        lambda audio, model: calls.append(("stt", model, audio.shape)) or "heard",
-    )
-    synth = SimpleNamespace(
-        render=lambda text: (
+    speech = SimpleNamespace(
+        config=SimpleNamespace(stt_model="large-v3-turbo"),
+        transcribe=lambda audio: calls.append(("stt", audio.shape)) or "heard",
+        synthesize=lambda text: (
             calls.append(("tts", text)) or np.asarray([0.25, -0.25], dtype=np.float32)
-        )
+        ),
     )
-    monkeypatch.setattr(node_runtime, "get_synth", lambda: synth)
 
     ctx = bridge._Ctx()
     ctx.layout = SimpleNamespace(root=tmp_path)
     ctx.client = object()
     ctx.runtime = _Runtime()
+    ctx.speech = speech
     ctx.booted.set()
     server = bridge._AttachedFaceServer(ctx, queue.Queue())
     server.start()
@@ -128,6 +121,6 @@ def test_attached_face_borrows_bridge_whisper_and_kokoro(tmp_path, monkeypatch):
         server.stop()
 
     assert calls == [
-        ("stt", "large-v3-turbo", (320,)),
+        ("stt", (320,)),
         ("tts", "hello"),
     ]

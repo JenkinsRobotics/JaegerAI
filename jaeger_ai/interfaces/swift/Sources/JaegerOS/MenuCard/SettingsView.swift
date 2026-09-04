@@ -25,22 +25,6 @@ struct SettingsView: View {
     }
 }
 
-private struct GeneralSettings: View {
-    @ObservedObject private var tts = TTSManager.shared
-
-    var body: some View {
-        Form {
-            Section("Voice") {
-                Toggle("Auto-speak replies", isOn: $tts.autoSpeakEnabled)
-                Text("Speak the agent's reply aloud after each turn.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-}
-
 private struct AgentSettingsInfo: View {
     @ObservedObject private var agent = AgentBridge.shared
 

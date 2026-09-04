@@ -535,6 +535,7 @@ class _Ctx:
         self.client: Any = None
         self.cron: Any = None  # CronRunner — fires scheduled prompts
         self.runtime: Any = None  # adapter borrowing ``boot`` (one brain)
+        self.speech: Any = None  # JaegerAgent-owned Whisper + Kokoro runtime
         self.vision_node: Any = None  # bridge-owned mmproj, loaded on request
         self.outputs: set[TextIO] = set()  # native shell + attached faces
         self.sidecar: Any = None
@@ -656,7 +657,14 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         # measured on gemma-4-E4B). prewarm_session below primes the
         # EXACT first-turn prefix instead — same warm-boot cost, zero
         # first-message delay.
-        boot = boot_for_tui(instance_name=instance, prewarm_model=False)
+        # JaegerAgent's multimodal speech runtime below owns the conversational
+        # Whisper/Kokoro pair.  Keep JaegerAI's legacy/tool node warmers lazy;
+        # otherwise app startup would load a second speech stack.
+        boot = boot_for_tui(
+            instance_name=instance,
+            prewarm_model=False,
+            warmup=False,
+        )
     except Exception as exc:  # noqa: BLE001 — reported, never raised
         msg = str(exc)
         kind = "locked" if "lock" in msg.lower() else "boot"
@@ -673,6 +681,27 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     from jaeger_ai.core.mind_runtime import JaegerAIRuntime
 
     ctx.runtime = JaegerAIRuntime.from_boot(boot)
+
+    # Prewarm the speech nodes that are part of JaegerAgent itself.  The app
+    # hosts this runtime, but it neither selects nor implements the decoder or
+    # synthesizer. Explicit listen/TTS tools retain their independent module
+    # path and load only when a tool call actually asks for them.
+    try:
+        from jaeger_agent import SpeechRuntime
+
+        ctx.speech = SpeechRuntime()
+        ctx.speech.load(
+            lambda message: print(
+                f"[jaeger-agent] {message}", file=sys.stderr, flush=True
+            )
+        )
+    except Exception as exc:
+        msg = f"JaegerAgent speech pipeline failed to start: {exc}"
+        ctx.boot_error = msg
+        _emit(proto, protocol.agent_state_frame("failed", error=msg))
+        _emit(proto, protocol.fatal_frame(msg, kind="multimodal-speech"))
+        ctx.booted.set()
+        return
 
     # First boot on this machine: trigger every TCC prompt now (macOS
     # can't grant in install.sh — grants attach to THIS app identity),
@@ -1177,36 +1206,25 @@ class _AttachedFaceServer:
             self.ctx.booted.wait()
             if self.ctx.runtime is None:
                 raise RuntimeError(self.ctx.boot_error or "agent failed to boot")
+            if self.ctx.speech is None:
+                raise RuntimeError("JaegerAgent speech runtime is unavailable")
             op = req.get("op")
             if op == "stt":
                 import numpy as np
 
-                from jaeger_agent.core.policy import STT_MODEL
-                from jaeger_agent.tools.listen import transcribe_samples
-
                 raw = base64.b64decode(str(req.get("pcm") or ""), validate=True)
                 audio = np.frombuffer(raw, dtype="<f4")
-                model = str(req.get("model") or STT_MODEL)
-                data = {"text": transcribe_samples(audio, model=model), "model": model}
+                data = {
+                    "text": self.ctx.speech.transcribe(audio),
+                    "model": self.ctx.speech.config.stt_model,
+                }
             elif op == "tts":
                 import numpy as np
 
-                from jaeger_os.nodes import runtime as node_runtime
-
                 text = str(req.get("text") or "").strip()
                 with self.ctx.tts_render_lock:
-                    synth = node_runtime.get_synth()
-                    if synth is None:
-                        node_runtime.ensure_tts_node(warm=True)
-                        synth = node_runtime.get_synth()
-                    if synth is None:
-                        raise RuntimeError(
-                            "the bridge-owned Kokoro node is unavailable"
-                        )
-                    audio = synth.render(text)
-                pcm = np.asarray(
-                    audio if audio is not None else [], dtype="<f4"
-                ).reshape(-1)
+                    audio = self.ctx.speech.synthesize(text)
+                pcm = np.asarray(audio, dtype="<f4").reshape(-1)
                 data = {
                     "pcm": base64.b64encode(pcm.tobytes()).decode("ascii"),
                     "sample_rate": 24000,

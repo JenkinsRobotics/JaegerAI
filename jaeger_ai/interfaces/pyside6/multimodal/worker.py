@@ -189,8 +189,9 @@ class MultimodalWorker(QThread):
             kwargs["runtime"] = BorrowedRuntime(runtime, agentic_tools=agentic_tools)
         self.engine = engine_factory(**kwargs)
         if runtime is not None and getattr(runtime, "speech_is_remote", False):
-            # The face owns capture/playback, never a second Whisper/Kokoro.
-            # Install the bridge-backed node shapes before engine.load().
+            # The face only acquires frames. JaegerAgent still owns the engine,
+            # playback, and the process-hosted Whisper/Kokoro nodes. Install
+            # their transport shapes before engine.load().
             self.engine.node_stt = runtime.make_stt_node(self.engine.config.stt_model)
             self.engine.node_tts = runtime.make_tts_node()
             self.engine._stt_lock = self.engine.node_stt._lock

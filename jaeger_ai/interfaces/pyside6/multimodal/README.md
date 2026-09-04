@@ -16,9 +16,10 @@ The normal Jaeger AI app exposes the face beside its Chat and Avatar buttons.
 It connects over a private local socket to the already-running bridge and
 borrows that exact Gemma/JaegerAgent runtime. Opening or closing the window
 does not stop, reload, or replace the model, memory, tools, or agent loop.
-Camera/microphone capture and duplex audio mechanics remain face adapters;
-their committed text/image turns enter the same agent brain as every other
-interface. The Multimodal conversation keeps its own session key. The
+Camera/microphone acquisition remains a face adapter. Endpointing, STT,
+duplex/AEC policy, output selection, TTS, and speaker playback remain inside
+JaegerAgent; committed text/image turns enter the same agent brain as every
+other interface. The Multimodal conversation keeps its own session key. The
 composer's **Mode: Agentic** button flips to **Mode: Chatbot** at any time.
 Agentic is the default. Chatbot mode uses the same
 loaded Gemma model as a tool-free chatbot with an isolated conversation

@@ -16,6 +16,7 @@ import io
 import json
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -72,13 +73,17 @@ def test_effective_icon_prefers_instance_avatar_over_character_card(tmp_path):
     # A custom instance avatar (relative to the instance dir) wins.
     pic = lay.root / "me.png"
     pic.write_bytes(b"y")
-    dump_yaml(lay.identity_path,
-              Identity(name="Ted", role="r", personality="p", avatar="me.png"))
+    dump_yaml(
+        lay.identity_path,
+        Identity(name="Ted", role="r", personality="p", avatar="me.png"),
+    )
     assert bridge._effective_icon(boot, char) == str(pic)
 
     # A set-but-missing avatar path falls back to the card (never a broken icon).
-    dump_yaml(lay.identity_path,
-              Identity(name="Ted", role="r", personality="p", avatar="gone.png"))
+    dump_yaml(
+        lay.identity_path,
+        Identity(name="Ted", role="r", personality="p", avatar="gone.png"),
+    )
     assert bridge._effective_icon(boot, char) == str(card)
 
 
@@ -100,12 +105,13 @@ def test_save_identity_sets_name_and_copies_avatar(tmp_path):
 
     picked = tmp_path / "picked.png"
     picked.write_bytes(b"IMG")
-    ok, err = bridge._command("save_identity",
-                              {"name": "Ted", "avatar": str(picked)}, boot)
+    ok, err = bridge._command(
+        "save_identity", {"name": "Ted", "avatar": str(picked)}, boot
+    )
     assert ok, err
     ident = load_yaml(lay.identity_path, Identity)
     assert ident.name == "Ted"
-    assert ident.avatar == "avatar.png"           # copied in, stored relative
+    assert ident.avatar == "avatar.png"  # copied in, stored relative
     assert (lay.root / "avatar.png").is_file()
 
     # Clearing the avatar keeps the name and falls back to the character card.
@@ -162,9 +168,19 @@ class _LineDelayStdin:
         return line
 
 
-def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
-         boot_delay=0.0, run_fn=None, stdin_delay=0.0, argv=None,
-         default_name="test-inst", stdin_obj=None):
+def _run(
+    monkeypatch,
+    stdin_text,
+    *,
+    run_reply=None,
+    boot_exc=None,
+    boot_delay=0.0,
+    run_fn=None,
+    stdin_delay=0.0,
+    argv=None,
+    default_name="test-inst",
+    stdin_obj=None,
+):
     """Drive ``bridge.main`` with faked deps; return parsed stdout frames.
 
     ``argv`` mirrors what the Swift shell passes on the ``jaeger bridge``
@@ -186,7 +202,10 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
         # The real TUIBootResult carries the layout — post-boot queries
         # (instance_exists, config, …) read it off the boot object.
         from jaeger_ai.core.instance.instance import (
-            InstanceLayout, resolve_instance_dir)
+            InstanceLayout,
+            resolve_instance_dir,
+        )
+
         boot.layout = InstanceLayout(resolve_instance_dir(instance_name))
         return boot
 
@@ -194,8 +213,17 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
         return run_reply or {"text": f"echo:{text}", "error": None}
 
     monkeypatch.setattr("jaeger_ai.main.boot_for_tui", fake_boot, raising=False)
-    monkeypatch.setattr("jaeger_ai.main.run_for_voice", run_fn or fake_run,
-                        raising=False)
+    monkeypatch.setattr(
+        "jaeger_ai.main.run_for_voice", run_fn or fake_run, raising=False
+    )
+
+    class _FakeSpeechRuntime:
+        config = SimpleNamespace(stt_model="large-v3-turbo")
+
+        def load(self, _say):
+            return None
+
+    monkeypatch.setattr("jaeger_agent.SpeechRuntime", _FakeSpeechRuntime)
     # Protocol unit tests must not ask macOS for camera/mic/accessibility
     # permissions. Concurrent xdist workers invoking the real first-boot TCC
     # probe can terminate a worker inside native frameworks.
@@ -206,14 +234,16 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
     )
     monkeypatch.setattr(
         "jaeger_ai.core.instance.instance.default_instance_name",
-        lambda: default_name, raising=False,
+        lambda: default_name,
+        raising=False,
     )
 
     proto = io.StringIO()
     monkeypatch.setattr("sys.stdout", proto)
-    monkeypatch.setattr("sys.stdin",
-                        stdin_obj if stdin_obj is not None
-                        else _SlowStdin(stdin_text, stdin_delay))
+    monkeypatch.setattr(
+        "sys.stdin",
+        stdin_obj if stdin_obj is not None else _SlowStdin(stdin_text, stdin_delay),
+    )
 
     rc = bridge.main(argv=argv if argv is not None else [])
     frames = [json.loads(ln) for ln in proto.getvalue().splitlines() if ln.strip()]
@@ -226,8 +256,15 @@ def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     types = [f["type"] for f in frames]
     # FAST READY: transport first, agent streams in behind, bye marks
     # the orderly exit.
-    assert types == ["ready", "agent_state", "agent_state",
-                     "state", "reply", "state", "bye"]
+    assert types == [
+        "ready",
+        "agent_state",
+        "agent_state",
+        "state",
+        "reply",
+        "state",
+        "bye",
+    ]
     ready = frames[0]
     assert ready["instance"] == "test-inst"
     assert ready["proto"] == protocol.PROTOCOL_VERSION
@@ -235,8 +272,12 @@ def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     assert set(protocol.CAPABILITIES) == set(ready["capabilities"])
     assert frames[1]["state"] == "booting"
     assert frames[2]["state"] == "ready"
-    assert frames[4] == {"type": "reply", "text": "echo:hi", "error": None,
-                         "session": "desktop-app"}
+    assert frames[4] == {
+        "type": "reply",
+        "text": "echo:hi",
+        "error": None,
+        "session": "desktop-app",
+    }
     assert frames[6]["type"] == "bye"
     assert boot.cleaned is True  # graceful teardown ran
 
@@ -248,9 +289,11 @@ def test_session_key_flows_through(monkeypatch):
         seen["session"] = session_key
         return {"text": "ok", "error": None}
 
-    _run(monkeypatch,
-         '{"op":"send","text":"hi","session":"chat-win-2"}\n{"op":"quit"}\n',
-         run_fn=run_fn)
+    _run(
+        monkeypatch,
+        '{"op":"send","text":"hi","session":"chat-win-2"}\n{"op":"quit"}\n',
+        run_fn=run_fn,
+    )
     assert seen["session"] == "chat-win-2"
 
 
@@ -268,9 +311,11 @@ def test_mid_turn_send_queues_with_ack_and_both_complete_in_order(monkeypatch):
             time.sleep(0.15)
         return {"text": f"echo:{text}", "error": None}
 
-    stdin = ('{"op":"send","text":"first","session":"s1"}\n'
-             '{"op":"send","text":"second","session":"s1"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"send","text":"first","session":"s1"}\n'
+        '{"op":"send","text":"second","session":"s1"}\n'
+        '{"op":"quit"}\n'
+    )
     # Delay yielding line index 1 ("second") just long enough that the
     # worker thread has already picked up "first" and flipped ctx.busy —
     # deterministically landing the send mid-turn instead of racing it.
@@ -293,21 +338,30 @@ def test_mid_turn_send_queues_with_ack_and_both_complete_in_order(monkeypatch):
 
 
 def test_boot_failure_streams_failed_then_fatal(monkeypatch):
-    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
-                         boot_exc=RuntimeError("model file missing"))
+    rc, frames, _ = _run(
+        monkeypatch, '{"op":"quit"}\n', boot_exc=RuntimeError("model file missing")
+    )
     assert rc == 1
     types = [f["type"] for f in frames]
     assert types == ["ready", "agent_state", "agent_state", "fatal", "bye"]
-    assert frames[2] == {"type": "agent_state", "state": "failed",
-                         "model": None, "character": None, "icon": None,
-                         "error": "model file missing", "agent_name": None}
+    assert frames[2] == {
+        "type": "agent_state",
+        "state": "failed",
+        "model": None,
+        "character": None,
+        "icon": None,
+        "error": "model file missing",
+        "agent_name": None,
+    }
     assert frames[3]["kind"] == "boot"
 
 
 def test_lock_conflict_gets_the_locked_kind(monkeypatch):
     rc, frames, _ = _run(
-        monkeypatch, '{"op":"quit"}\n',
-        boot_exc=RuntimeError("instance 'x' is locked by pid 4 (still running)."))
+        monkeypatch,
+        '{"op":"quit"}\n',
+        boot_exc=RuntimeError("instance 'x' is locked by pid 4 (still running)."),
+    )
     fatal = next(f for f in frames if f["type"] == "fatal")
     assert fatal["kind"] == "locked"
     assert rc == 1
@@ -345,8 +399,8 @@ def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
     would deadlock the fired turn."""
     _FakeCron.instances.clear()
     monkeypatch.setattr(
-        "jaeger_agent.background.cron_runner.CronRunner", _FakeCron,
-        raising=False)
+        "jaeger_agent.background.cron_runner.CronRunner", _FakeCron, raising=False
+    )
 
     rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
     assert rc == 0
@@ -354,13 +408,14 @@ def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
     assert len(_FakeCron.instances) == 1
     cron = _FakeCron.instances[0]
     assert cron.started is True
-    assert cron.stopped is True          # stopped on teardown
-    assert cron.llm_lock is None         # no re-entrant deadlock
+    assert cron.stopped is True  # stopped on teardown
+    assert cron.llm_lock is None  # no re-entrant deadlock
 
     # The fired prompt surfaced as a reply frame on the cron session, so a
     # reminder shows up in the chat.
-    cron_replies = [f for f in frames
-                    if f["type"] == "reply" and f["session"] == "cron:reminder"]
+    cron_replies = [
+        f for f in frames if f["type"] == "reply" and f["session"] == "cron:reminder"
+    ]
     assert cron_replies, f"no cron reply frame surfaced: {frames}"
     assert cron_replies[0]["text"] == "echo:check the logs"
 
@@ -373,8 +428,9 @@ def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
     # If boot ran anyway, the faked boot would emit ``agent_state booting``
     # + ``ready`` — the exact frame-sequence assert below catches it.
-    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
-                         boot_exc=AssertionError("boot must not run"))
+    rc, frames, _ = _run(
+        monkeypatch, '{"op":"quit"}\n', boot_exc=AssertionError("boot must not run")
+    )
     types = [f["type"] for f in frames]
     assert types == ["ready", "agent_state", "fatal", "bye"]
     assert frames[1]["state"] == "failed"
@@ -384,7 +440,8 @@ def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path
 
 
 def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
-        monkeypatch, tmp_path):
+    monkeypatch, tmp_path
+):
     """``./jaeger agent create lilith`` pins the operator-typed name onto
     the ``jaeger bridge`` argv (mirroring ``JAEGER_INSTANCE_NAME`` — see
     main.py's ``_launch_swift_app``). The no_instance fatal frame must
@@ -392,25 +449,32 @@ def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
     identity field to it instead of orphaning it behind whatever
     character gets picked."""
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
-    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
-                         boot_exc=AssertionError("boot must not run"),
-                         argv=["lilith"])
+    rc, frames, _ = _run(
+        monkeypatch,
+        '{"op":"quit"}\n',
+        boot_exc=AssertionError("boot must not run"),
+        argv=["lilith"],
+    )
     fatal = next(f for f in frames if f["type"] == "fatal")
     assert fatal["kind"] == "no_instance"
     assert fatal["suggested_name"] == "lilith"
 
 
 def test_no_instance_fatal_omits_suggested_name_for_generic_default(
-        monkeypatch, tmp_path):
+    monkeypatch, tmp_path
+):
     """No explicit CLI name → the resolver's generic ``"default"``
     fallback (a fresh box, no sticky, no env pin) must NOT leak into
     onboarding as a suggestion — that would wrongly override the
     character-name default the identity step is supposed to fall back
     to."""
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
-    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
-                         boot_exc=AssertionError("boot must not run"),
-                         default_name="default")
+    rc, frames, _ = _run(
+        monkeypatch,
+        '{"op":"quit"}\n',
+        boot_exc=AssertionError("boot must not run"),
+        default_name="default",
+    )
     fatal = next(f for f in frames if f["type"] == "fatal")
     assert fatal["kind"] == "no_instance"
     assert "suggested_name" not in fatal
@@ -425,11 +489,10 @@ def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     assert set(result["data"]) == {"agent_name", "character", "icon", "avatar", "model"}
-    assert result["data"]["agent_name"] is None   # no identity.yaml yet
+    assert result["data"]["agent_name"] is None  # no identity.yaml yet
 
 
-def test_instance_exists_query_both_states(monkeypatch, tmp_path,
-                                            _instance_on_disk):
+def test_instance_exists_query_both_states(monkeypatch, tmp_path, _instance_on_disk):
     """``instance_exists`` — the first-run probe. True with the fixture's
     on-disk instance; false when the resolution points at nothing."""
     stdin = '{"op":"query","what":"instance_exists","id":"r1"}\n{"op":"quit"}\n'
@@ -453,8 +516,15 @@ def test_setup_defaults_query_serves_recommendations(monkeypatch, tmp_path):
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     data = result["data"]
-    assert {"host_memory_gb", "tier_label", "awake", "asleep", "voices",
-            "default_character", "permission_modes"} <= set(data)
+    assert {
+        "host_memory_gb",
+        "tier_label",
+        "awake",
+        "asleep",
+        "voices",
+        "default_character",
+        "permission_modes",
+    } <= set(data)
     assert data["awake"]["key"]
     assert data["voices"] and {"id", "label"} == set(data["voices"][0])
 
@@ -469,27 +539,43 @@ def test_create_instance_command_writes_instance_and_boots(monkeypatch, tmp_path
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "opstate"))
     # No git shell-out for the instance repo in the unit walk.
     from jaeger_ai.core.instance import setup_wizard as W
+
     monkeypatch.setattr(W, "_git_init", lambda root: None)
 
-    stdin = ('{"op":"command","cmd":"create_instance",'
-             '"args":{"character_id":"jarvis","display_name":"Jarvis"},'
-             '"id":"r1"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"create_instance",'
+        '"args":{"character_id":"jarvis","display_name":"Jarvis"},'
+        '"id":"r1"}\n'
+        '{"op":"quit"}\n'
+    )
     rc, frames, _ = _run(monkeypatch, stdin)
     types = [f["type"] for f in frames]
     # no-instance handshake, then the create result, then a REAL boot.
-    assert types == ["ready", "agent_state", "fatal",
-                     "result", "agent_state", "agent_state", "bye"]
+    assert types == [
+        "ready",
+        "agent_state",
+        "fatal",
+        "result",
+        "agent_state",
+        "agent_state",
+        "bye",
+    ]
     result = frames[3]
     assert result["ok"] is True
     assert result["data"]["root"] == str(inst_dir)
     assert frames[4]["state"] == "booting"
     assert frames[5]["state"] == "ready"
-    assert rc == 0   # boot_error cleared by the restart
+    assert rc == 0  # boot_error cleared by the restart
 
     # The instance on disk is complete and schema-valid.
     from jaeger_ai.core.instance.schemas import (
-        Config, Identity, Manifest, load_json, load_yaml)
+        Config,
+        Identity,
+        Manifest,
+        load_json,
+        load_yaml,
+    )
+
     ident = load_yaml(inst_dir / "identity.yaml", Identity)
     cfg = load_yaml(inst_dir / "config.yaml", Config)
     man = load_json(inst_dir / "manifest.json", Manifest)
@@ -501,8 +587,9 @@ def test_create_instance_command_writes_instance_and_boots(monkeypatch, tmp_path
 
 def test_create_instance_requires_character(monkeypatch, tmp_path):
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "missing"))
-    stdin = ('{"op":"command","cmd":"create_instance","args":{},"id":"r1"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"create_instance","args":{},"id":"r1"}\n{"op":"quit"}\n'
+    )
     _, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is False
@@ -510,8 +597,9 @@ def test_create_instance_requires_character(monkeypatch, tmp_path):
 
 
 def test_turn_during_failed_boot_reports_error(monkeypatch):
-    rc, frames, _ = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n',
-                         boot_exc=RuntimeError("nope"))
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n', boot_exc=RuntimeError("nope")
+    )
     reply = next(f for f in frames if f["type"] == "reply")
     assert reply["error"] == "nope"
     assert reply["text"] == ""
@@ -520,19 +608,23 @@ def test_turn_during_failed_boot_reports_error(monkeypatch):
 def test_malformed_and_blank_lines_ignored(monkeypatch):
     rc, frames, _ = _run(monkeypatch, '\nnot json\n{"text":"  "}\n{"op":"quit"}\n')
     # No turn frames — blank/garbage/empty-text lines produce nothing.
-    assert [f["type"] for f in frames] == ["ready", "agent_state",
-                                           "agent_state", "bye"]
+    assert [f["type"] for f in frames] == ["ready", "agent_state", "agent_state", "bye"]
     assert rc == 0
 
 
 def test_turn_error_is_reported_not_raised(monkeypatch):
     rc, frames, _ = _run(
-        monkeypatch, '{"text":"x"}\n{"op":"quit"}\n',
+        monkeypatch,
+        '{"text":"x"}\n{"op":"quit"}\n',
         run_reply={"text": "", "error": "model exploded"},
     )
     reply = next(f for f in frames if f["type"] == "reply")
-    assert reply == {"type": "reply", "text": "", "error": "model exploded",
-                     "session": "desktop-app"}
+    assert reply == {
+        "type": "reply",
+        "text": "",
+        "error": "model exploded",
+        "session": "desktop-app",
+    }
     assert rc == 0
 
 
@@ -541,6 +633,7 @@ def test_permission_request_respond_roundtrip(monkeypatch):
     ``respond`` op resolves it — 'once' reaches the tool as True. Proves the
     stdin thread stays free while a turn blocks on the answer."""
     from jaeger_os.core.safety.permissions import current_policy
+
     original = current_policy().confirmation
     answers = {}
 
@@ -548,13 +641,16 @@ def test_permission_request_respond_roundtrip(monkeypatch):
         # Simulate a gated tool consulting the policy mid-turn (this runs
         # on the TURN thread, exactly like the real permission path).
         answers["granted"] = current_policy().confirmation.confirm(
-            type("Req", (), {"skill": "files", "operation": "write_file"})())
+            type("Req", (), {"skill": "files", "operation": "write_file"})()
+        )
         return {"text": "done", "error": None}
 
     # respond arrives AFTER the turn starts.
-    stdin = ('{"text":"write it"}\n'
-             '{"op":"respond","id":"perm1","answer":"once"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"text":"write it"}\n'
+        '{"op":"respond","id":"perm1","answer":"once"}\n'
+        '{"op":"quit"}\n'
+    )
     try:
         rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
     finally:
@@ -570,17 +666,21 @@ def test_permission_request_respond_roundtrip(monkeypatch):
 def test_permission_request_deny(monkeypatch):
     """A 'deny' answer reaches the gated tool as False."""
     from jaeger_os.core.safety.permissions import current_policy
+
     original = current_policy().confirmation
     answers = {}
 
     def run_fn(client, text, session_key=None):
         answers["granted"] = current_policy().confirmation.confirm(
-            type("Req", (), {"skill": "host", "operation": "open_on_host"})())
+            type("Req", (), {"skill": "host", "operation": "open_on_host"})()
+        )
         return {"text": "done", "error": None}
 
-    stdin = ('{"text":"open it"}\n'
-             '{"op":"respond","id":"perm1","answer":"deny"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"text":"open it"}\n'
+        '{"op":"respond","id":"perm1","answer":"deny"}\n'
+        '{"op":"quit"}\n'
+    )
     try:
         rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
     finally:
@@ -593,6 +693,7 @@ def test_permission_request_once_does_not_persist(monkeypatch):
     """'once' approves only the call in flight — nothing is recorded, so a
     SECOND tier-2 call on the same skill (same turn) prompts again."""
     from jaeger_os.core.safety.permissions import current_policy
+
     original = current_policy().confirmation
     grants = []
 
@@ -603,16 +704,18 @@ def test_permission_request_once_does_not_persist(monkeypatch):
         grants.extend([first, second])
         return {"text": "done", "error": None}
 
-    stdin = ('{"text":"open it twice"}\n'
-             '{"op":"respond","id":"perm1","answer":"once"}\n'
-             '{"op":"respond","id":"perm2","answer":"once"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"text":"open it twice"}\n'
+        '{"op":"respond","id":"perm1","answer":"once"}\n'
+        '{"op":"respond","id":"perm2","answer":"once"}\n'
+        '{"op":"quit"}\n'
+    )
     try:
         rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
     finally:
         current_policy().confirmation = original
     requests = [f for f in frames if f["type"] == "request"]
-    assert len(requests) == 2                      # asked BOTH times
+    assert len(requests) == 2  # asked BOTH times
     assert grants == [True, True]
     assert rc == 0
 
@@ -623,13 +726,15 @@ def test_permission_request_timeout_denies(monkeypatch):
     late answer happens to resolve it."""
     from jaeger_os.core.safety.permissions import current_policy
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider
+
     monkeypatch.setattr(BridgeConfirmationProvider, "TIMEOUT_S", 0.1)
     original = current_policy().confirmation
     answers = {}
 
     def run_fn(client, text, session_key=None):
         answers["granted"] = current_policy().confirmation.confirm(
-            type("Req", (), {"skill": "host", "operation": "open_on_host"})())
+            type("Req", (), {"skill": "host", "operation": "open_on_host"})()
+        )
         return {"text": "done", "error": None}
 
     # No respond frame at all — the client vanished / never answered.
@@ -643,13 +748,15 @@ def test_permission_request_timeout_denies(monkeypatch):
 
 
 def test_permission_request_always_persists_and_second_call_has_no_frame(
-        monkeypatch, _instance_on_disk):
+    monkeypatch, _instance_on_disk
+):
     """The field case's core assertion: 'always' writes the SAME
     ``<instance>/permissions.json`` grant store the console provider uses,
     and a subsequent tier-2 call on that skill executes WITHOUT ever
     emitting a ``request`` frame — no round trip, no UI, on this boot or
     (via the persisted file) any future one."""
     from jaeger_os.core.safety.permissions import PermissionGrants, current_policy
+
     original = current_policy().confirmation
     calls = []
 
@@ -658,16 +765,18 @@ def test_permission_request_always_persists_and_second_call_has_no_frame(
         calls.append(current_policy().confirmation.confirm(req))
         return {"text": "done", "error": None}
 
-    stdin = ('{"text":"open youtube in safari"}\n'
-             '{"op":"respond","id":"perm1","answer":"always"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"text":"open youtube in safari"}\n'
+        '{"op":"respond","id":"perm1","answer":"always"}\n'
+        '{"op":"quit"}\n'
+    )
     try:
         rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn)
     finally:
         current_policy().confirmation = original
     assert calls == [True]
     requests = [f for f in frames if f["type"] == "request"]
-    assert len(requests) == 1                       # asked exactly once
+    assert len(requests) == 1  # asked exactly once
     assert PermissionGrants.load(_instance_on_disk).is_granted("host")
 
     # A brand-new provider instance (as a fresh boot would construct) loads
@@ -675,13 +784,14 @@ def test_permission_request_always_persists_and_second_call_has_no_frame(
     import types as _types
 
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
+
     ctx2 = _Ctx()
     ctx2.layout = _types.SimpleNamespace(root=_instance_on_disk)
     out = io.StringIO()
     provider2 = BridgeConfirmationProvider(out, ctx2)
     req = type("Req", (), {"skill": "host", "operation": "open_on_host"})()
     assert provider2.confirm(req) is True
-    assert out.getvalue() == ""                      # NO frame emitted
+    assert out.getvalue() == ""  # NO frame emitted
 
 
 def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk):
@@ -693,7 +803,9 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     import types as _types
 
     from jaeger_os.core.safety.permissions import (
-        PermissionGrants, PermissionPolicy, use_policy,
+        PermissionGrants,
+        PermissionPolicy,
+        use_policy,
     )
     from jaeger_agent.tools.host import _t_open_on_host
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
@@ -701,7 +813,8 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     opened = []
     monkeypatch.setattr(
         "jaeger_agent.tools.host._run_open",
-        lambda args, label: opened.append(args) or {"opened": True, **label})
+        lambda args, label: opened.append(args) or {"opened": True, **label},
+    )
 
     ctx = _Ctx()
     ctx.layout = _types.SimpleNamespace(root=_instance_on_disk)
@@ -728,6 +841,7 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
                     break
                 _time.sleep(0.01)
             _respond_always()
+
         t = threading.Thread(target=_delayed_respond)
         t.start()
         result1 = _t_open_on_host(target="https://youtube.com")
@@ -737,7 +851,7 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     assert opened == [["https://youtube.com"]]
     assert PermissionGrants.load(_instance_on_disk).is_granted("host")
     frames_after_first = proto.getvalue().count("\n")
-    assert frames_after_first == 1                   # exactly one request frame
+    assert frames_after_first == 1  # exactly one request frame
 
     # SECOND call — a fresh provider (as a real restart constructs), same
     # instance dir — executes with NO approval frame at all.
@@ -748,7 +862,7 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     with use_policy(PermissionPolicy(confirmation=provider2)):
         result2 = _t_open_on_host(target="https://youtube.com")
     assert result2 == {"opened": True, "url": "https://youtube.com"}
-    assert proto2.getvalue() == ""                    # NO frame — already granted
+    assert proto2.getvalue() == ""  # NO frame — already granted
 
 
 def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
@@ -758,7 +872,8 @@ def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
     AGENT's own name (identity.yaml — never the character's); surfaces
     lead with it and show the character as secondary flavor."""
     (_instance_on_disk / "identity.yaml").write_text(
-        "name: Ted\nrole: assistant\npersonality: plain\n", encoding="utf-8")
+        "name: Ted\nrole: assistant\npersonality: plain\n", encoding="utf-8"
+    )
     stdin = '{"op":"query","what":"identity","id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
@@ -790,9 +905,11 @@ def test_speak_command_roundtrip(monkeypatch):
     # attribute lookup, so the string form patches the wrong object.
     speak_mod = importlib.import_module("jaeger_agent.tools.speak")
     monkeypatch.setattr(speak_mod, "speak", fake_speak)
-    stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
-             '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
+        '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
+        '{"op":"quit"}\n'
+    )
     # Hold the first command back so the (faked, instant) boot wins the
     # race — this test pins the POST-boot speak path; the pre-boot path
     # has its own test below.
@@ -809,8 +926,9 @@ def test_speak_command_roundtrip(monkeypatch):
 def test_speak_command_while_booting_reports_not_ready(monkeypatch):
     """Before the model lands there is no agent to route speech through —
     the command reports instead of wedging or crashing."""
-    stdin = ('{"op":"command","cmd":"speak","args":{"text":"hi"},"id":"r1"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"speak","args":{"text":"hi"},"id":"r1"}\n{"op":"quit"}\n'
+    )
     rc, frames, _ = _run(monkeypatch, stdin, boot_delay=0.5)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is False
@@ -825,14 +943,17 @@ def test_config_query_carries_speech_engine(monkeypatch):
     import pathlib
     import tempfile
 
-    from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml)
+    from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml
 
     tmp = pathlib.Path(tempfile.mkdtemp())
-    dump_yaml(tmp / "config.yaml", Config(
-        instance_name="t", model=ModelConfig(model_path="/dev/null")))
-    dump_yaml(tmp / "identity.yaml", Identity(
-        name="T", role="r", personality="p", voice_tone="v"))
+    dump_yaml(
+        tmp / "config.yaml",
+        Config(instance_name="t", model=ModelConfig(model_path="/dev/null")),
+    )
+    dump_yaml(
+        tmp / "identity.yaml",
+        Identity(name="T", role="r", personality="p", voice_tone="v"),
+    )
 
     class _Lay:
         config_path = tmp / "config.yaml"
@@ -849,7 +970,8 @@ def test_config_query_carries_speech_engine(monkeypatch):
     ok, err = bridge._command(
         "save_config",
         {"activity_trace": "summary", "turn_separators": False},
-        type("B", (), {"layout": _Lay()})())
+        type("B", (), {"layout": _Lay()})(),
+    )
     assert ok and err is None
     data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
     assert data["activity_trace"] == "summary"
@@ -865,13 +987,22 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
     import tempfile
 
     from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml, load_yaml)
+        Config,
+        Identity,
+        ModelConfig,
+        dump_yaml,
+        load_yaml,
+    )
 
     tmp = pathlib.Path(tempfile.mkdtemp())
-    dump_yaml(tmp / "config.yaml", Config(
-        instance_name="t", model=ModelConfig(model_path="/dev/null")))
-    dump_yaml(tmp / "identity.yaml", Identity(
-        name="T", role="r", personality="p", voice_tone="v"))
+    dump_yaml(
+        tmp / "config.yaml",
+        Config(instance_name="t", model=ModelConfig(model_path="/dev/null")),
+    )
+    dump_yaml(
+        tmp / "identity.yaml",
+        Identity(name="T", role="r", personality="p", voice_tone="v"),
+    )
 
     class _Lay:
         config_path = tmp / "config.yaml"
@@ -879,13 +1010,15 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
         root = tmp
 
     data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
-    assert data["model_ctx"] == 8192       # ModelConfig defaults
+    assert data["model_ctx"] == 8192  # ModelConfig defaults
     assert data["model_aux_ctx"] == 4096
 
     # save_config roundtrip: both knobs persist and re-read.
     ok, err = bridge._command(
-        "save_config", {"model_ctx": 65_536, "model_aux_ctx": 2048},
-        type("B", (), {"layout": _Lay()})())
+        "save_config",
+        {"model_ctx": 65_536, "model_aux_ctx": 2048},
+        type("B", (), {"layout": _Lay()})(),
+    )
     assert ok and err is None
     data = bridge._query("config", {}, type("B", (), {"layout": _Lay()})())
     assert data["model_ctx"] == 65_536
@@ -895,37 +1028,46 @@ def test_config_query_carries_context_window_knobs(monkeypatch):
 
     # Schema bounds still enforced through the bridge (ge=0 / le=131072).
     ok, err = bridge._command(
-        "save_config", {"model_ctx": 999_999},
-        type("B", (), {"layout": _Lay()})())
+        "save_config", {"model_ctx": 999_999}, type("B", (), {"layout": _Lay()})()
+    )
     assert not ok and err
 
 
 def _write_valid_instance(root):
     """Overwrite the fixture's ``{}`` config/identity with schema-valid
     files so the settings catalog (which loads the real ``Config``) works."""
-    from jaeger_ai.core.instance.schemas import (
-        Config, Identity, ModelConfig, dump_yaml)
-    dump_yaml(root / "config.yaml",
-              Config(instance_name="t", model=ModelConfig(model_path="/dev/null")))
-    dump_yaml(root / "identity.yaml",
-              Identity(name="T", role="r", personality="p"))
+    from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml
+
+    dump_yaml(
+        root / "config.yaml",
+        Config(instance_name="t", model=ModelConfig(model_path="/dev/null")),
+    )
+    dump_yaml(root / "identity.yaml", Identity(name="T", role="r", personality="p"))
 
 
-def test_settings_catalog_query_returns_grouped_descriptors(monkeypatch,
-                                                            _instance_on_disk):
+def test_settings_catalog_query_returns_grouped_descriptors(
+    monkeypatch, _instance_on_disk
+):
     """``query what=settings_catalog`` serves the schema-derived catalog the
     native app renders — grouped, typed descriptors, no hand-enumerated list.
     The SAME backend `jaeger settings` drives."""
     _write_valid_instance(_instance_on_disk)
-    stdin = ('{"op":"query","what":"settings_catalog","id":"r1"}\n'
-             '{"op":"quit"}\n')
+    stdin = '{"op":"query","what":"settings_catalog","id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     data = result["data"]
     # The eight spec groups are live.
-    assert {"model", "display", "voice", "tts", "autonomy",
-            "permissions", "retention", "interaction"} <= set(data)
+    assert {
+        "model",
+        "display",
+        "voice",
+        "tts",
+        "autonomy",
+        "permissions",
+        "retention",
+        "interaction",
+    } <= set(data)
     engine = next(d for d in data["tts"] if d["path"] == "voice.speech_engine")
     assert engine["type"] == "enum" and engine["choices"] == ["kokoro", "apple"]
     assert rc == 0
@@ -936,14 +1078,17 @@ def test_settings_set_command_roundtrip(monkeypatch, _instance_on_disk):
     model and reports ``restart_required``. Proves single-source: the write
     lands in config.yaml, readable by every other surface."""
     from jaeger_ai.core.instance.schemas import Config, load_yaml
+
     _write_valid_instance(_instance_on_disk)
-    stdin = ('{"op":"command","cmd":"settings_set",'
-             '"args":{"path":"voice.speak_replies","value":false},"id":"r1"}\n'
-             '{"op":"command","cmd":"settings_set",'
-             '"args":{"path":"model.ctx","value":16384},"id":"r2"}\n'
-             '{"op":"command","cmd":"settings_set",'
-             '"args":{"path":"model.ctx","value":999999},"id":"r3"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"settings_set",'
+        '"args":{"path":"voice.speak_replies","value":false},"id":"r1"}\n'
+        '{"op":"command","cmd":"settings_set",'
+        '"args":{"path":"model.ctx","value":16384},"id":"r2"}\n'
+        '{"op":"command","cmd":"settings_set",'
+        '"args":{"path":"model.ctx","value":999999},"id":"r3"}\n'
+        '{"op":"quit"}\n'
+    )
     rc, frames, _ = _run(monkeypatch, stdin)
     results = {f["id"]: f for f in frames if f["type"] == "result"}
     # voice pref: ok, no restart.
@@ -967,11 +1112,13 @@ def test_reply_carries_turn_telemetry_when_available(monkeypatch):
     reply frame (v1 additive). ctx_used/ctx_max are absent here because the
     faked pipeline has no session agent / loaded model — absence, not null,
     is the contract for unknown telemetry."""
+
     def timed_run(client, text, session_key=None):  # noqa: ARG001
         return {"text": "pong", "error": None, "elapsed_s": 2.5}
 
-    rc, frames, _ = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n',
-                         run_fn=timed_run)
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n', run_fn=timed_run
+    )
     assert rc == 0
     reply = next(f for f in frames if f["type"] == "reply")
     assert reply["text"] == "pong"
@@ -982,11 +1129,13 @@ def test_reply_carries_turn_telemetry_when_available(monkeypatch):
 def test_slash_help_answers_without_an_agent_turn(monkeypatch):
     """A leading ``/`` is a command, not a prompt — ``/help`` renders the
     TUI's command list over the bridge and never reaches run_for_voice."""
+
     def explode(client, text, session_key=None):  # noqa: ARG001
         raise AssertionError("slash text must not reach the agent turn")
 
-    rc, frames, _ = _run(monkeypatch, '{"text":"/help"}\n{"op":"quit"}\n',
-                         run_fn=explode)
+    rc, frames, _ = _run(
+        monkeypatch, '{"text":"/help"}\n{"op":"quit"}\n', run_fn=explode
+    )
     assert rc == 0
     reply = next(f for f in frames if f["type"] == "reply")
     assert reply["error"] is None
@@ -1001,7 +1150,7 @@ def test_slash_unsafe_command_reports_tui_only(monkeypatch):
     assert rc == 0
     reply = next(f for f in frames if f["type"] == "reply")
     assert "needs the terminal TUI" in reply["text"]
-    assert "/help" in reply["text"]          # the safe list is advertised
+    assert "/help" in reply["text"]  # the safe list is advertised
 
 
 def test_slash_unknown_command_hints_help(monkeypatch):
@@ -1016,6 +1165,7 @@ def test_list_sessions_query_returns_rows(monkeypatch, _instance_on_disk):
     layout-only stub (pre-boot fast-ready) since the session store is
     layout-keyed, not agent-keyed."""
     from jaeger_ai.core.sessions import SessionStore
+
     (_instance_on_disk / "memory").mkdir(parents=True, exist_ok=True)
     store = SessionStore(_instance_on_disk / "memory" / "sessions.db")
     store.record("s1", "user", "first conversation")
@@ -1023,11 +1173,11 @@ def test_list_sessions_query_returns_rows(monkeypatch, _instance_on_disk):
     store.close()
 
     stdin = '{"op":"query","what":"list_sessions","id":"r1"}\n{"op":"quit"}\n'
-    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)   # answer pre-boot
+    _, frames, _ = _run(monkeypatch, stdin, boot_delay=0.2)  # answer pre-boot
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     ids = [row["id"] for row in result["data"]]
-    assert ids == ["s2", "s1"]                    # most-active first
+    assert ids == ["s2", "s1"]  # most-active first
     assert result["data"][0]["preview"] == "second conversation"
 
 
@@ -1042,21 +1192,28 @@ def test_load_session_query_returns_history_and_replays(monkeypatch):
     def fake_resume(client, session_id, layout=None):
         seen["client"] = client
         seen["session_id"] = session_id
-        return [{"role": "user", "text": "hi", "ts": 1.0},
-                {"role": "assistant", "text": "hello", "ts": 2.0}]
+        return [
+            {"role": "user", "text": "hi", "ts": 1.0},
+            {"role": "assistant", "text": "hello", "ts": 2.0},
+        ]
 
-    monkeypatch.setattr("jaeger_ai.main.resume_session_from_store",
-                        fake_resume, raising=False)
+    monkeypatch.setattr(
+        "jaeger_ai.main.resume_session_from_store", fake_resume, raising=False
+    )
 
-    stdin = ('{"op":"query","what":"load_session","args":{"id":"picked"},'
-             '"id":"r1"}\n{"op":"quit"}\n')
+    stdin = (
+        '{"op":"query","what":"load_session","args":{"id":"picked"},'
+        '"id":"r1"}\n{"op":"quit"}\n'
+    )
     _, frames, boot = _run(monkeypatch, stdin, stdin_delay=0.25)  # after boot
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
-    assert result["data"] == [{"role": "user", "text": "hi", "ts": 1.0},
-                              {"role": "assistant", "text": "hello", "ts": 2.0}]
+    assert result["data"] == [
+        {"role": "user", "text": "hi", "ts": 1.0},
+        {"role": "assistant", "text": "hello", "ts": 2.0},
+    ]
     assert seen["session_id"] == "picked"
-    assert seen["client"] is boot.client          # the booted client, not None
+    assert seen["client"] is boot.client  # the booted client, not None
 
 
 def test_load_session_query_without_id_returns_empty(monkeypatch):
@@ -1073,13 +1230,16 @@ def test_new_session_command_mints_id_and_evicts_old(monkeypatch):
     settings_set/create_instance for the same reason) and evicts the old
     session key when one is given."""
     evicted = []
-    monkeypatch.setattr("jaeger_ai.main.evict_session",
-                        lambda key: evicted.append(key), raising=False)
+    monkeypatch.setattr(
+        "jaeger_ai.main.evict_session", lambda key: evicted.append(key), raising=False
+    )
 
-    stdin = ('{"op":"command","cmd":"new_session",'
-             '"args":{"old_id":"stale-key"},"id":"r1"}\n'
-             '{"op":"command","cmd":"new_session","args":{},"id":"r2"}\n'
-             '{"op":"quit"}\n')
+    stdin = (
+        '{"op":"command","cmd":"new_session",'
+        '"args":{"old_id":"stale-key"},"id":"r1"}\n'
+        '{"op":"command","cmd":"new_session","args":{},"id":"r2"}\n'
+        '{"op":"quit"}\n'
+    )
     rc, frames, _ = _run(monkeypatch, stdin)
     results = {f["id"]: f for f in frames if f["type"] == "result"}
     assert results["r1"]["ok"] is True
@@ -1097,74 +1257,111 @@ def test_fixture_frames_match_builders():
     builder changes shape, this fails here and the Swift decoder test
     fails there, symmetrically."""
     import pathlib
+
     fx = json.loads(
-        (pathlib.Path(protocol.__file__).parent / "protocol_v1_fixtures.json")
-        .read_text())
+        (
+            pathlib.Path(protocol.__file__).parent / "protocol_v1_fixtures.json"
+        ).read_text()
+    )
     frames = fx["frames"]
     assert fx["proto"] == protocol.PROTOCOL_VERSION
-    assert frames["ready"] == protocol.ready_frame(
-        "jros-dev", None, agent="booting")
+    assert frames["ready"] == protocol.ready_frame("jros-dev", None, agent="booting")
     # The split: agent_name (the instance the operator named) is DISTINCT from
     # character (the persona it plays) — "Jarvis playing HAL 9000".
     assert frames["ready_warm"] == protocol.ready_frame(
-        "jros-dev", "gemma-4-E4B-it-Q4_K_M.gguf", "HAL 9000",
-        "/tmp/hal.png", agent="ready", agent_name="Jarvis")
+        "jros-dev",
+        "gemma-4-E4B-it-Q4_K_M.gguf",
+        "HAL 9000",
+        "/tmp/hal.png",
+        agent="ready",
+        agent_name="Jarvis",
+    )
     assert frames["agent_state_booting"] == protocol.agent_state_frame("booting")
     assert frames["agent_state_ready"] == protocol.agent_state_frame(
-        "ready", model="gemma-4-E4B-it-Q4_K_M.gguf",
-        character="HAL 9000", icon="/tmp/hal.png", agent_name="Jarvis")
+        "ready",
+        model="gemma-4-E4B-it-Q4_K_M.gguf",
+        character="HAL 9000",
+        icon="/tmp/hal.png",
+        agent_name="Jarvis",
+    )
     assert frames["agent_state_failed"] == protocol.agent_state_frame(
-        "failed", error="model file missing")
+        "failed", error="model file missing"
+    )
     assert frames["state_busy"] == protocol.state_frame(True, "desktop-app")
     assert frames["state_idle"] == protocol.state_frame(False, "desktop-app")
     assert frames["tool"] == protocol.tool_frame(
-        "web_search", "done", 1.25, "desktop-app")
+        "web_search", "done", 1.25, "desktop-app"
+    )
     # v1 additive tool detail — key present only when supplied, so the base
     # "tool" fixture above (no detail key) stays byte-identical.
     assert frames["tool_skill_detail"] == protocol.tool_frame(
-        "skill", "start", 0.0, "desktop-app", detail="view scheduling")
+        "skill", "start", 0.0, "desktop-app", detail="view scheduling"
+    )
     assert "detail" not in protocol.tool_frame("web_search", "done")
     assert frames["reply"] == protocol.reply_frame(
-        "It's 3:48 PM PDT.", None, "desktop-app")
+        "It's 3:48 PM PDT.", None, "desktop-app"
+    )
     assert frames["reply_error"] == protocol.reply_frame(
-        "", "model exploded", "desktop-app")
+        "", "model exploded", "desktop-app"
+    )
     # v1 additive reply telemetry — keys present only when supplied, so the
     # base "reply" fixture above (no telemetry keys) stays byte-identical.
     assert frames["reply_telemetry"] == protocol.reply_frame(
-        "It's 3:48 PM PDT.", None, "desktop-app",
-        elapsed_s=3.21, ctx_used=18300, ctx_max=32768)
+        "It's 3:48 PM PDT.",
+        None,
+        "desktop-app",
+        elapsed_s=3.21,
+        ctx_used=18300,
+        ctx_max=32768,
+    )
     assert "elapsed_s" not in protocol.reply_frame("hi")
     assert frames["request_approval"] == protocol.request_frame(
-        "perm1", "approval", "Allow files.write_file?", ("allow", "deny"))
+        "perm1", "approval", "Allow files.write_file?", ("allow", "deny")
+    )
     assert frames["fatal_boot"] == protocol.fatal_frame("model file missing")
     assert frames["fatal_locked"] == protocol.fatal_frame(
-        "instance 'jros-dev' is locked by pid 4242 (still running).",
-        kind="locked")
+        "instance 'jros-dev' is locked by pid 4242 (still running).", kind="locked"
+    )
     assert frames["fatal_no_instance"] == protocol.fatal_frame(
         "no instance named 'default' exists yet — first-run setup required",
-        kind="no_instance")
+        kind="no_instance",
+    )
     # v1 additive suggested_name — omitted by default (fixture above stays
     # byte-identical), present only when the bridge has a real operator
     # pin to hand onboarding.
-    assert "suggested_name" not in protocol.fatal_frame(
-        "x", kind="no_instance")
+    assert "suggested_name" not in protocol.fatal_frame("x", kind="no_instance")
     assert frames["fatal_no_instance_suggested"] == protocol.fatal_frame(
         "no instance named 'lilith' exists yet — first-run setup required",
-        kind="no_instance", suggested_name="lilith")
+        kind="no_instance",
+        suggested_name="lilith",
+    )
     assert frames["bye"] == protocol.bye_frame()
     # v1 additive: the settings_set result carries restart_required in data.
     assert frames["result_settings_set"] == protocol.result_frame(
-        "r7", data={"restart_required": True, "path": "model.ctx",
-                    "value": 16384}, ok=True)
+        "r7",
+        data={"restart_required": True, "path": "model.ctx", "value": 16384},
+        ok=True,
+    )
     # In-app updates (0.8): check_update / run_update result shapes.
     assert frames["result_check_update"] == protocol.result_frame(
-        "r12", data={"current": "0.8.0", "latest": "0.9.0", "available": True,
-                    "notes_url": "https://github.com/JenkinsRobotics/JROS/releases/tag/0.9.0"},
-        ok=True)
+        "r12",
+        data={
+            "current": "0.8.0",
+            "latest": "0.9.0",
+            "available": True,
+            "notes_url": "https://github.com/JenkinsRobotics/JROS/releases/tag/0.9.0",
+        },
+        ok=True,
+    )
     assert frames["result_run_update"] == protocol.result_frame(
-        "r13", data={"restart_required": True, "returncode": 0,
-                    "output": "[jaeger update] now at 0.9.0. Restart `jaeger` to apply."},
-        ok=True)
+        "r13",
+        data={
+            "restart_required": True,
+            "returncode": 0,
+            "output": "[jaeger update] now at 0.9.0. Restart `jaeger` to apply.",
+        },
+        ok=True,
+    )
     assert fx["ops"]["send"] == protocol.send_op("hello", "desktop-app")
     assert fx["ops"]["respond"] == protocol.respond_op("perm1", "allow")
     assert fx["ops"]["quit"] == protocol.quit_op()
@@ -1178,12 +1375,15 @@ def test_check_update_query_roundtrip(monkeypatch, _instance_on_disk):
     keyed to the resolved instance's layout — works pre-boot."""
     monkeypatch.setattr(
         "jaeger_ai.core.version_check.latest_version",
-        lambda *a, **k: "99.0.0", raising=False)
+        lambda *a, **k: "99.0.0",
+        raising=False,
+    )
     stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
     import jaeger_ai
+
     assert result["data"]["current"] == jaeger_ai.__version__
     assert result["data"]["latest"] == "99.0.0"
     assert result["data"]["available"] is True
@@ -1195,7 +1395,9 @@ def test_check_update_query_fails_soft_offline(monkeypatch, _instance_on_disk):
     """No network (latest_version -> None): available False, no crash."""
     monkeypatch.setattr(
         "jaeger_ai.core.version_check.latest_version",
-        lambda *a, **k: None, raising=False)
+        lambda *a, **k: None,
+        raising=False,
+    )
     stdin = '{"op":"query","what":"check_update","id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
@@ -1213,14 +1415,23 @@ def test_run_update_command_invokes_the_existing_updater(monkeypatch):
 
     def fake_run_update(*, ref=None, **kwargs):
         seen["ref"] = ref
-        return {"ok": True, "returncode": 0, "output": "done",
-                "restart_required": True, "error": None}
+        return {
+            "ok": True,
+            "returncode": 0,
+            "output": "done",
+            "restart_required": True,
+            "error": None,
+        }
 
     monkeypatch.setattr(
         "jaeger_ai.cli.verbs.update_verb.run_update_subprocess",
-        fake_run_update, raising=False)
-    stdin = ('{"op":"command","cmd":"run_update","args":{"ref":"0.9.0"},'
-             '"id":"r1"}\n{"op":"quit"}\n')
+        fake_run_update,
+        raising=False,
+    )
+    stdin = (
+        '{"op":"command","cmd":"run_update","args":{"ref":"0.9.0"},'
+        '"id":"r1"}\n{"op":"quit"}\n'
+    )
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is True
@@ -1232,12 +1443,19 @@ def test_run_update_command_invokes_the_existing_updater(monkeypatch):
 
 def test_run_update_command_reports_failure_without_crashing(monkeypatch):
     def fake_run_update(*, ref=None, **kwargs):
-        return {"ok": False, "returncode": 1, "output": "boom",
-                "restart_required": True, "error": "update exited 1"}
+        return {
+            "ok": False,
+            "returncode": 1,
+            "output": "boom",
+            "restart_required": True,
+            "error": "update exited 1",
+        }
 
     monkeypatch.setattr(
         "jaeger_ai.cli.verbs.update_verb.run_update_subprocess",
-        fake_run_update, raising=False)
+        fake_run_update,
+        raising=False,
+    )
     stdin = '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n{"op":"quit"}\n'
     rc, frames, _ = _run(monkeypatch, stdin)
     result = next(f for f in frames if f["type"] == "result")
@@ -1287,22 +1505,31 @@ def test_run_update_command_refuses_while_a_turn_is_in_flight(monkeypatch):
 
     def fake_run_update(*, ref=None, **kwargs):
         called.append(1)
-        return {"ok": True, "returncode": 0, "output": "",
-                "restart_required": True, "error": None}
+        return {
+            "ok": True,
+            "returncode": 0,
+            "output": "",
+            "restart_required": True,
+            "error": None,
+        }
 
     monkeypatch.setattr(
         "jaeger_ai.cli.verbs.update_verb.run_update_subprocess",
-        fake_run_update, raising=False)
+        fake_run_update,
+        raising=False,
+    )
 
-    lines = ['{"text":"slow"}\n',
-             '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n',
-             '{"op":"quit"}\n']
+    lines = [
+        '{"text":"slow"}\n',
+        '{"op":"command","cmd":"run_update","args":{},"id":"r1"}\n',
+        '{"op":"quit"}\n',
+    ]
     stdin_obj = _GatedStdin(lines, started, release)
     rc, frames, _ = _run(monkeypatch, "", run_fn=slow_run, stdin_obj=stdin_obj)
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is False
     assert "turn is in flight" in result["error"]
-    assert called == []            # the updater was never invoked
+    assert called == []  # the updater was never invoked
     assert rc == 0
 
 

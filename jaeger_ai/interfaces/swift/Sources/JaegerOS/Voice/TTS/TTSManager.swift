@@ -27,15 +27,6 @@ final class TTSManager: ObservableObject {
 
     @Published private(set) var isSpeaking: Bool = false
 
-    /// Operator preference — when off, the auto-speak path in
-    /// ChatViewModel short-circuits.  Default OFF: the agent has its
-    /// own Kokoro tool that decides when to vocalize — auto-speaking
-    /// every reply would compete with that agency.  Operators who
-    /// want every reply spoken (accessibility, eyes-off contexts)
-    /// flip this on from the menu bar.  The per-bubble manual speak
-    /// button is the primary surface for "speak this specific reply."
-    @Published var autoSpeakEnabled: Bool = false
-
     let appleSpeech = AppleSpeechSynth()
 
     private let log = Logger(subsystem: "com.jenkinsrobotics.JaegerOS",
@@ -49,8 +40,8 @@ final class TTSManager: ObservableObject {
     /// doesn't read asterisks aloud.  Routes to the agent's Kokoro
     /// voice over the bridge when connected + configured (the
     /// default); falls back to the local Apple synth otherwise.
-    /// No-op if ``autoSpeakEnabled`` is false (the call site passes
-    /// the operator-preference check in; this method respects it).
+    /// This is an explicit read-aloud action only. Conversational output is
+    /// routed and spoken inside JaegerAgent's multimodal pipeline.
     func speak(_ text: String) {
         let body = TTSText.plainForSpeech(text)
         NSLog("[TTSManager] speak called — input=\(text.count) chars, afterStrip=\(body.count) chars")
