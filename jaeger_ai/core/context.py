@@ -3,7 +3,7 @@
 0.11: this file WAS the agent's sandbox (path resolution, the read/write
 gates, the audit trail, git autocommit). It lived under ``core/``
 because that is where it grew, but every caller was a tool — so it moved
-with them, to :mod:`jaeger_agent.workspace`.
+with them, to :mod:`jaeger_agent.core.workspace`.
 
 ``bind()`` is still called by JaegerAI's boot to point the module's
 workspace at the active instance layout. That call IS the seam: the
@@ -18,6 +18,6 @@ possible failure in a file-writing tool.
 
 import sys
 
-from jaeger_agent import workspace as _workspace
+from jaeger_agent.core import workspace as _workspace
 
 sys.modules[__name__] = _workspace

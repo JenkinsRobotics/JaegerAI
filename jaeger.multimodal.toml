@@ -1,0 +1,28 @@
+# Dedicated JaegerAI multimodal face. The same surface is available from the
+# normal windowed app's tray; this manifest makes it the main Qt surface for
+# `python -m jaeger_ai.interfaces.pyside6.multimodal` and CLI audio flags.
+
+[app]
+id = "org.jenkinsrobotics.app.jaeger-ai.multimodal"
+name = "jros-multimodal"
+type = "application"
+version = "0.12.0"
+requires_framework = ">=0.1"
+mode = "fused"
+event_loop = "qt"
+ui = "pyside6"
+single_instance = false
+shell_quits_core = true
+config = ""
+
+[bus]
+backend = "inproc"
+
+[core]
+factory = "jaeger_ai.core.agent_core:make_core"
+config_key = "agent"
+
+[[surface]]
+id = "multimodal"
+main = true
+factory = "jaeger_ai.interfaces.pyside6.multimodal.window:make_surface"

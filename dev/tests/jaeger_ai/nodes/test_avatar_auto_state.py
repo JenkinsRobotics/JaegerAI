@@ -20,9 +20,9 @@ from jaeger_os.transport import InProcBus
 @pytest.fixture
 def captured():
     bus = InProcBus()
-    received: list[topics.AnimationCommand] = []
+    received: list[topics.DisplayCommand] = []
     bus.subscribe(
-        topics.ACT_ANIMATION,
+        topics.ACT_DISPLAY_PLAY,
         lambda msg: received.append(msg),
     )
     driver = AvatarAutoStateDriver(bus=bus)
@@ -82,8 +82,8 @@ def test_start_is_idempotent() -> None:
     driver = AvatarAutoStateDriver(bus=bus)
     driver.start()
     driver.start()  # second call no-op
-    received: list[topics.AnimationCommand] = []
-    bus.subscribe(topics.ACT_ANIMATION,
+    received: list[topics.DisplayCommand] = []
+    bus.subscribe(topics.ACT_DISPLAY_PLAY,
                    lambda msg: received.append(msg))
     bus.publish(topics.SpeechCommand(text="x"))
     time.sleep(0.1)
@@ -100,8 +100,8 @@ def test_stop_then_start_works() -> None:
     driver.start()
     driver.stop()
     driver.start()  # should re-subscribe
-    received: list[topics.AnimationCommand] = []
-    bus.subscribe(topics.ACT_ANIMATION,
+    received: list[topics.DisplayCommand] = []
+    bus.subscribe(topics.ACT_DISPLAY_PLAY,
                    lambda msg: received.append(msg))
     bus.publish(topics.SpeechCommand(text="x"))
     time.sleep(0.1)
@@ -122,8 +122,8 @@ def test_custom_emotion_targets() -> None:
         idle_emotion="focused",
     )
     driver.start()
-    received: list[topics.AnimationCommand] = []
-    bus.subscribe(topics.ACT_ANIMATION,
+    received: list[topics.DisplayCommand] = []
+    bus.subscribe(topics.ACT_DISPLAY_PLAY,
                    lambda msg: received.append(msg))
     bus.publish(topics.SpeechCommand(text="x"))
     time.sleep(0.05)

@@ -4,7 +4,7 @@ Given a :class:`Timeline`, dispatches each clip on the bus at its
 ``t_offset_ms`` and waits the right duration before moving on.
 Per-track dispatch routes by ``track.kind``:
 
-    animation → :class:`jaeger_os.transport.topics.AnimationCommand` on
+    animation → :class:`jaeger_os.transport.topics.DisplayCommand` on
                 /act/animation
     speech    → :class:`jaeger_os.transport.topics.SpeechCommand`     on
                 /act/speech
@@ -184,7 +184,7 @@ class TimelineRunner:
 
     def _dispatch_animation(self, clip: TimelineClip) -> None:
         payload = clip.payload or {}
-        self.bus.publish(topics.AnimationCommand(
+        self.bus.publish(topics.DisplayCommand(
             adapter=str(payload.get("adapter", "image")),
             asset_path=str(payload.get("asset", payload.get("asset_path", ""))),
             duration_ms=int(clip.duration_ms),

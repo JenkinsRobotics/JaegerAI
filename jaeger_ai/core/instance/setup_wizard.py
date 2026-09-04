@@ -369,7 +369,7 @@ def run_wizard(
     name = instance_name
     layout = InstanceLayout(root=resolve_instance_dir(name)) if name else None
 
-    _banner("Welcome to Jaeger-OS")
+    _banner("Welcome to Jaeger AI")
     print()
     # Show the install destination LOUDLY before anything else — the path was
     # set by the install, never asked here. An operator who didn't mean to
@@ -584,7 +584,7 @@ def run_wizard(
     interaction_mode = _ask_choice(
         "Pick a mode",
         [
-            ("gui", "Desktop app — JaegerOS window + menu-bar tray  (recommended)"),
+            ("gui", "Desktop app — Jaeger AI window + menu-bar tray  (recommended)"),
             ("tui", "Terminal — text TUI (`jaeger --tui`)"),
             ("voice", "Voice — always-on mic + spoken responses  (experimental)"),
         ],

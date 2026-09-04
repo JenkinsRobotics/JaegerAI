@@ -42,11 +42,10 @@ requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
 [project.optional-dependencies]
-# Acoustic echo cancellation for duplex voice — passed through from
-# jaeger-os (core/audio/aec.py); re-declared here so `pip install
-# 'jaeger-ai[aec]'` works without the operator needing to know it's
-# actually a jaeger-os extra.
-aec = ["speexdsp>=0.1.1"]
+# Compatibility alias for installations that explicitly requested AEC before
+# the 0.12 product began installing JaegerAgent's complete duplex extra by
+# default.  The imported multimodal pipeline uses pyaec, not speexdsp.
+aec = ["pyaec>=1.0.1"]
 
 [project.scripts]
 jaeger = "jaeger_ai.cli.entry:main"
@@ -63,6 +62,9 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
+# JaegerAI intentionally uses PEP 420 subpackages (for example ``core/``).
+# Keep namespace discovery, but explicitly reject interpreter-cache packages.
+exclude = ["jaeger_ai*.__pycache__", "jaeger_ai*.__pycache__.*"]
 
 [tool.setuptools.package-data]
 # Non-.py assets under the package (module.yaml/plugin.yaml, character
@@ -77,6 +79,19 @@ include = ["jaeger_ai*"]
 # "**/*" is deliberately broad rather than an extension allowlist that
 # silently misses the next asset type a character/skill adds.
 jaeger_ai = ["**/*"]
+
+[tool.setuptools.exclude-package-data]
+# Editable development keeps model symlinks and bytecode beside the source.
+# Neither belongs in a wheel: following a local GGUF symlink can otherwise
+# turn a small application release into a tens-of-gigabytes artifact.
+"*" = [
+    "**/__pycache__/*",
+    "**/*.pyc",
+    "**/*.pyo",
+    "models/*.gguf",
+    "models/*.bin",
+    "models/*.safetensors",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["dev/tests"]

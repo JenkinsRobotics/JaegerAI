@@ -26,7 +26,7 @@
 
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 
 # ── env hygiene ────────────────────────────────────────────────────
@@ -87,23 +87,24 @@ done
 
 # ── pytest invocation ──────────────────────────────────────────────
 
-PYTEST=".venv/bin/pytest"
-if [ ! -x "$PYTEST" ]; then
-    PYTEST="pytest"
+PYTHON=".venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON="python3"
 fi
+PYTEST=("$PYTHON" -m pytest)
 
 # pytest-xdist parallel workers if installed — falls back to serial.
 # ``-n auto`` uses every core; that's noisy on a dev laptop and
 # exposes CI-vs-local differences (test ordering, fixture races).
 # ``JROS_TEST_WORKERS`` pins the count for reproducibility; export
 # it = 1 to debug a flake.
-if "$PYTEST" --help 2>/dev/null | grep -q -- '-n NUMPROCESSES'; then
+if "$PYTHON" -c 'import xdist' >/dev/null 2>&1; then
     XDIST_ARGS=(-n "${JROS_TEST_WORKERS:-4}")
 else
     XDIST_ARGS=()
 fi
 
-CMD=("$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"})
+CMD=("${PYTEST[@]}" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"})
 if [ -n "$MARKER_EXPR" ]; then
     CMD+=(-m "$MARKER_EXPR")
 fi

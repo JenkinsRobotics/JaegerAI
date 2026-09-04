@@ -14,10 +14,17 @@ itself yet.
 from __future__ import annotations
 
 from jaeger_agent.bench.cases import (  # noqa: F401
+    BENCHMARK_VERSION,
     CASES,
     UMBRELLA_EQUIVALENTS,
     BenchCase,
     all_tags,
 )
 
-__all__ = ["CASES", "UMBRELLA_EQUIVALENTS", "BenchCase", "all_tags"]
+__all__ = [
+    "BENCHMARK_VERSION",
+    "CASES",
+    "UMBRELLA_EQUIVALENTS",
+    "BenchCase",
+    "all_tags",
+]

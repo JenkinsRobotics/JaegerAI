@@ -1,6 +1,6 @@
-"""JROS as an MCP server — let editors/clients (Claude Code, Cursor, Zed)
-drive the agent as a tool. The other half of MCP: JROS is already an MCP
-*client* (``plugins/mcp``); this exposes JROS *to* MCP.
+"""Jaeger AI as an MCP server — let editors and clients drive the agent as
+a tool. Jaeger AI is already an MCP client (``plugins/mcp``); this exposes
+the application to MCP clients.
 
 Opt-in stdio, no daemon: the MCP client spawns this process; nothing is
 always-on. It boots the agent in-process and exposes a small tool surface
@@ -32,18 +32,25 @@ def _run_chat(run_turn: TurnFn, client: Any, message: str) -> str:
 
 def build_server(client: Any, instance: str, model: str | None,
                  run_turn: TurnFn | None = None) -> Any:
-    """Build the FastMCP server exposing JROS. ``run_turn`` defaults to the
-    real ``run_for_voice``; injectable for tests."""
-    from mcp.server.fastmcp import FastMCP
+    """Build the MCP server exposing JaegerAI.
+
+    MCP SDK 2 renamed ``FastMCP`` to ``MCPServer`` while retaining the tool
+    decorator and stdio ``run()`` surface used here. Support both SDK majors
+    because existing installations may still carry v1.
+    """
+    try:
+        from mcp.server.fastmcp import FastMCP as Server
+    except ModuleNotFoundError:
+        from mcp.server.mcpserver import MCPServer as Server
 
     if run_turn is None:
         from jaeger_ai.main import run_for_voice as run_turn  # noqa: PLW0127
 
-    mcp = FastMCP("jros")
+    mcp = Server("jros")
 
     @mcp.tool()
     def chat(message: str) -> str:
-        """Send a message to the local JROS agent and return its reply.
+        """Send a message to the local Jaeger AI agent and return its reply.
 
         The agent has its own tools, memory, and skills; this drives a full
         turn (it may take a while for a complex request)."""
@@ -51,7 +58,7 @@ def build_server(client: Any, instance: str, model: str | None,
 
     @mcp.tool()
     def agent_info() -> dict:
-        """Return the JROS agent's instance name and loaded model."""
+        """Return the Jaeger AI agent's instance name and loaded model."""
         return {"instance": instance, "model": model or "unknown"}
 
     return mcp
@@ -71,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             boot = boot_for_tui(instance_name=instance)
         except Exception as exc:  # noqa: BLE001
-            print(f"[jros-mcp] boot failed: {exc}", file=sys.stderr)
+            print(f"[jaeger-ai-mcp] boot failed: {exc}", file=sys.stderr)
             return 1
 
     server = build_server(boot.client, instance, _model_name(boot))

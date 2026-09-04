@@ -1,11 +1,11 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <em>The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind. Runs on JaegerOS; headless is a config, not a fork.</em>
+  <em>Jaeger AI — powered by JaegerAgent on the JaegerOS framework, with local inference, tools, skills, memory, persona, chat/voice/TUI faces, and the client protocol.</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.10.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.12.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
@@ -18,10 +18,10 @@
 
 ## What it is
 
-JaegerAI is a complete **application** built on JaegerOS — the turnkey
-agentic product and module host, not an embeddable library. It currently
-ships a complete universal agentic experience (Hermes lineage) by combining
-the reusable JaegerAgent loop with its tools, skills, memory, the
+JaegerAI is a complete **application** built on JaegerOS, alongside applications
+such as JP01 and Mochi. It is not the operating-system framework and not the
+reusable agent library. It ships a complete universal agentic experience
+(Hermes lineage) by combining the reusable JaegerAgent brain with the
 id/ego persona pipeline, local inference, **and its own faces** — chat
 app, TUI, voice, and the protocol it serves. Headless (running on a
 robot with no display) is a **config** of JaegerAI, not a fork of it.
@@ -60,7 +60,10 @@ contract, capability layer) and builds everything agentic on top:
   (`jaeger_os/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
   (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
-  frozen PySide6 shipping set. All faces are clients of one protocol.
+  PySide6 Multimodal face. The Multimodal window is a renderer and device
+  pump over `jaeger_agent`; the agent package owns its audio
+  pipeline, turn policy, vision transport, and speech. All faces are clients
+  of one protocol.
 - **The client protocol** — `jaeger_ai/contract` (vendored from
   JaegerOS) + `jaeger_ai/interfaces/client.py` (`JrosClient`), a
   versioned NDJSON wire contract any surface — including third-party
@@ -76,8 +79,21 @@ robot body can run without the AI product installed at all.
 
 ## Install
 
-The standard method is the same as pre-split JROS: clone, run
-`./install.sh`, keep current with `jaeger update`.
+The standard product install is one command. It installs into `~/JaegerAI`,
+builds the native **Jaeger AI** application, and adds it to Applications and
+Launchpad on macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/master/scripts/install.sh | bash
+```
+
+If it finds a 0.9-era `~/jaeger` install, it safely migrates `.jaeger_os/`
+(agents, memory, settings, credentials, and active-agent selection) while the
+old app is stopped. The old directory is retained as a rollback copy until you
+verify the new app. Future upgrades use `jaeger update` or **Update now** in
+Jaeger AI Settings.
+
+For a development checkout:
 
 ```bash
 git clone https://github.com/JenkinsRobotics/JaegerAI.git
@@ -94,11 +110,6 @@ otherwise. JaegerAI installs **editable** (PEP 660), same model as
 JaegerOS: the code stays writable in place because the agent
 self-modifies its own skills.
 
-**The from-scratch flow (a clean machine with no prior checkout) is
-being finalized for the 0.9 release** — `install.sh` still carries some
-pre-split assumptions (e.g. its curl-side fallback clones the old
-monorepo URL) that haven't been re-walked end-to-end since the split;
-the in-checkout `./install.sh` path above is the verified one.
 `pip install jaeger-ai` from PyPI is **(planned, 1.0)** — not available
 yet.
 
@@ -115,6 +126,12 @@ pip install -e '.[whisper_stt]'    # listen (JaegerWhisperSTT)
 ./jaeger agent create              # opens the setup wizard (character, model, permissions)
                                     # --tui for the terminal wizard
 ./jaeger                           # launch the default agent
+./jaeger multimodal --check        # preflight models, mic, camera, engine
+./jaeger multimodal --audio full --check  # also require the duplex AEC runtime
+./jaeger multimodal                # launch the dedicated multimodal face
+# Or double-click "Jaeger AI.app" at the repository root.
+# Install a Spotlight/Launchpad launcher with one command:
+./jaeger launcher install
 ```
 
 Manage multiple agents — a character is the persona; an agent is a
@@ -130,23 +147,36 @@ deployed AI that plays one, with its own memory + config:
 `jaeger` is the one operator command — installed on `PATH` after
 `install.sh`, or run as `./jaeger` from the clone.
 
+### Runtime state ownership
+
+JaegerAI owns deployed application instances under
+`.jaeger_os/instances/<name>/`. Each instance has one identity, configuration,
+memory database, logs, skills workspace, and process lock. At application boot,
+JaegerAI injects that instance layout into JaegerAgent, so the reusable agent
+reads and writes the same state; it does not create a second agent instance.
+
+A `.jaeger_agent/` directory is JaegerAgent's standalone fallback when its CLI
+or library is run directly without a host. It is not part of a hosted JaegerAI
+instance and can coexist in a development checkout without being selected by
+the application.
+
 ## Architecture
 
-JaegerAI is the **Mind** tier — the second layer in the Jaeger ecosystem's
-four-tier map, pinning JaegerOS and pinned in turn by nothing:
+JaegerAI is an **application**. JaegerOS supplies the application/runtime
+framework; JaegerAgent supplies the reusable agentic mind:
 
 ```
-JaegerOS      ← the framework this repo pins. Never forked, never edited.
+JaegerOS      ← application/runtime framework
 
-JaegerAI      ← YOU ARE HERE. The Mind — loop, tools, skills, memory,
-                persona, local inference, and its own faces. Ships the
-                jaeger CLI (JaegerOS ships none).
+JaegerAgent   ← reusable multimodal agentic mind
+
+JaegerAI      ← YOU ARE HERE: an app using both layers, adding persona,
+                product policy, interfaces, plugins, defaults, and the CLI
 
 Modules       ← engine modules this repo can optionally install:
                 JaegerKokoroTTS (tts), JaegerWhisperSTT (stt).
 
-Projects      ← the assembled things that install JaegerAI: JP01 (the
-                robot, headless config), a desktop companion.
+Other apps    ← JP01, Mochi, and future products can compose the same layers
 ```
 
 The connection rule (from
@@ -161,7 +191,8 @@ for the full tier-map reasoning this repo is built against.
 | Repo | Tier | What |
 |---|---|---|
 | [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) | Framework | Bus, node, modules/slots, supervisor, safety, contract, capability layer. This repo pins it. |
-| **JaegerAI** | Mind (product) | This repo — the turnkey agentic product and its faces. |
+| [JaegerAgent](https://github.com/JenkinsRobotics/jaeger-agent) | Agent module | Reusable multimodal agentic mind: loop, tools, skills, memory contracts, and capability nodes. |
+| **JaegerAI** | Application | This repo — the reference agent application and its faces. |
 | [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS) | Engine module (`tts` slot) | Streaming Kokoro speech synthesis. Optional extra of this repo. |
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Optional extra of this repo. |
 | JP01 | Project (Body) | The reference hardware Jaeger — installs this repo headless. |

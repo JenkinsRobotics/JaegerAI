@@ -51,6 +51,7 @@ done
 # every permission had to be granted twice. `--dev` is still accepted
 # (dev-checkout builds pass it) but only means "debug config" now.
 APP_NAME="JaegerOS"
+DISPLAY_APP_NAME="Jaeger AI"
 
 # Resolve paths — APP_ROOT is jaeger_ai/interfaces/swift, REPO_ROOT is the
 # JaegerAI repo root (three levels up: swift → interfaces → jaeger_ai → repo root).
@@ -203,13 +204,13 @@ codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 ||
 # Keep the app VISIBLE at the repo root (gitignored symlink) — the
 # bundle itself lives in swift/.build, which nobody should have to find.
 # (One-app collapse 2026-07-14: also drop the old dev-shell symlink.)
-rm -f "$REPO_ROOT/JaegerOS-dev.app"
-ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerOS.app"
+rm -f "$REPO_ROOT/JaegerOS-dev.app" "$REPO_ROOT/JaegerOS.app"
+ln -sfn "$APP_BUNDLE" "$REPO_ROOT/Jaeger AI.app"
 
 if [[ "$INSTALL" == "1" ]]; then
-    echo "[build-app] installing -> /Applications/$APP_NAME.app"
-    rm -rf "/Applications/$APP_NAME.app"
-    ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
+    echo "[build-app] installing -> /Applications/$DISPLAY_APP_NAME.app"
+    rm -rf "/Applications/$DISPLAY_APP_NAME.app"
+    ditto "$APP_BUNDLE" "/Applications/$DISPLAY_APP_NAME.app"
 fi
 
 echo "$APP_BUNDLE"

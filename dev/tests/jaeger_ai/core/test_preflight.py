@@ -51,6 +51,7 @@ def test_missing_returns_only_failures():
 
 def test_report_clean_when_all_ok():
     report = format_report([Check("a", "voice", ok=True, detail="installed")])
+    assert "Jaeger AI — environment check" in report
     assert "fully operational" in report
     assert boot_warning([Check("a", "voice", ok=True)]) == ""
 
@@ -70,7 +71,7 @@ def test_report_and_boot_warning_surface_fixes():
 
     warning = boot_warning(checks)
     assert "kokoro" in warning and "PortAudio" in warning
-    assert "--doctor" in warning  # boot points at the doctor to fix
+    assert "`jaeger doctor`" in warning  # boot points at the doctor to fix
 
 
 def _write_config(tmp_path, *, model_path="dummy.gguf", ctx=8192):

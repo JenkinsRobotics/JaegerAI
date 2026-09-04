@@ -10,7 +10,7 @@ struct AvatarApp: App {
     @StateObject private var frameStore = FrameStore()
 
     var body: some Scene {
-        WindowGroup("JROS Avatar") {
+        WindowGroup("Jaeger AI Avatar") {
             ContentView()
                 .environmentObject(client)
                 .environmentObject(frameStore)

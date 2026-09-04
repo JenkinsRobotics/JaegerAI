@@ -28,7 +28,7 @@ def register(subparsers: Any) -> None:
 def run_status(args: Any) -> int:
     layout = c.get_active_instance_layout()
     print()
-    print(f"  {c.bold('JROS status')}")
+    print(f"  {c.bold('Jaeger AI status')}")
     print()
     if layout is None:
         print(c.red("  no active instance"))

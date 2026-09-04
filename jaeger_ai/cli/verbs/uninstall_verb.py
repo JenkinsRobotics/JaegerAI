@@ -47,7 +47,7 @@ def _cmd_uninstall_argv(argv: list[str]) -> int:
         print(
             "usage: jaeger uninstall [--purge] [--yes]\n"
             "\n"
-            "  Remove the framework (product files + .venv). Keeps .jaeger_os/\n"
+            "  Remove Jaeger AI (application files + .venv). Keeps .jaeger_os/\n"
             "  (your agents) unless --purge. Refuses on a dev clone.\n",
             file=sys.stderr,
         )

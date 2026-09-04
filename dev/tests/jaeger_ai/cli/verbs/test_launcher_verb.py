@@ -19,32 +19,37 @@ def test_stub_execs_the_jaeger_exe():
 
 def test_info_plist_keys():
     p = L._info_plist()
-    assert p["CFBundleExecutable"] == "Jaeger"
+    assert p["CFBundleExecutable"] == "Jaeger AI"
+    assert p["CFBundleDisplayName"] == "Jaeger AI"
     assert p["CFBundleIdentifier"] == L._BUNDLE_ID
     assert p["CFBundleShortVersionString"]            # the live __version__
 
 
 def test_write_bundle_creates_executable_stub_and_valid_plist(tmp_path):
-    app = tmp_path / "Jaeger.app"
+    app = tmp_path / "Jaeger AI.app"
     exe = Path("/x/jaeger/.venv/bin/jaeger")
-    stub = L._write_bundle(app, exe)
-    assert stub == app / "Contents" / "MacOS" / "Jaeger"
+    icon = tmp_path / "source.icns"
+    icon.write_bytes(b"icon")
+    stub = L._write_bundle(app, exe, icon_source=icon)
+    assert stub == app / "Contents" / "MacOS" / "Jaeger AI"
     assert str(exe) in stub.read_text()
     assert os.access(stub, os.X_OK)                   # +x bit set
     with open(app / "Contents" / "Info.plist", "rb") as f:
         plist = plistlib.load(f)                      # parses → valid plist
-    assert plist["CFBundleExecutable"] == "Jaeger"
+    assert plist["CFBundleExecutable"] == "Jaeger AI"
+    assert plist["CFBundleIconFile"] == "AppIcon"
+    assert (app / "Contents" / "Resources" / "AppIcon.icns").read_bytes() == b"icon"
 
 
 def test_app_dir_prefers_applications_when_writable(monkeypatch):
     monkeypatch.setattr(L.Path, "is_dir", lambda self: True)
     monkeypatch.setattr(L.os, "access", lambda p, m: True)
-    assert L._app_dir() == Path("/Applications") / "Jaeger.app"
+    assert L._app_dir() == Path("/Applications") / "Jaeger AI.app"
 
 
 def test_app_dir_falls_back_to_home_when_not_writable(monkeypatch):
     monkeypatch.setattr(L.os, "access", lambda p, m: False)
-    assert L._app_dir() == Path.home() / "Applications" / "Jaeger.app"
+    assert L._app_dir() == Path.home() / "Applications" / "Jaeger AI.app"
 
 
 def test_routing_unknown_help_and_non_macos(monkeypatch):

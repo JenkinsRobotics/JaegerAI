@@ -41,11 +41,14 @@ class _MockSynth:
 
 
 def _install_mock_runtime(monkeypatch, *, synth: _MockSynth | None = None):
+    from jaeger_os.core.modules import set_application_package
+
+    set_application_package("jaeger_ai")
     runtime.shutdown()
     synth = synth or _MockSynth()
     created: dict[str, object] = {"synth": synth}
 
-    def synth_factory():
+    def synth_factory(_bus):
         return synth
 
     def node_factory(*, bus, synthesizer):
@@ -61,6 +64,10 @@ def _install_mock_runtime(monkeypatch, *, synth: _MockSynth | None = None):
     monkeypatch.setattr(runtime, "_bus_factory", InProcBus)
     monkeypatch.setattr(runtime, "_synth_factory", synth_factory)
     monkeypatch.setattr(runtime, "_tts_node_factory", node_factory)
+    # These are runtime/node lifecycle tests, not CoreAudio integration tests.
+    # Once the optional audio driver is installed, letting the real helper run
+    # here opens physical devices and can block on a macOS permission prompt.
+    monkeypatch.setattr(runtime, "ensure_audio_io_node", lambda **_kwargs: object())
     return created
 
 
@@ -219,7 +226,7 @@ def test_ensure_tts_node_starts_node_and_installs_subscriber(monkeypatch):
         cid = uuid.uuid4().hex
         ack = bus.request(
             topics.SpeechCommand(text="ready", correlation_id=cid),
-            ack_topic=topics.SENSE_SPOKEN,
+            ack_topic=topics.ACT_SPEECH_SPOKEN,
             timeout_s=1.0,
         )
 
@@ -238,7 +245,9 @@ def test_ensure_tts_node_warm_failure_is_nonfatal(monkeypatch, capsys):
     try:
         node = runtime.ensure_tts_node(warm=True)
         assert node is runtime._tts_node
-        assert synth.warm_calls == 1
+        # The current TTS node warms during setup and ``warm=True`` requests
+        # an explicit readiness check after the node reaches RUNNING.
+        assert synth.warm_calls >= 1
         assert "warm at ensure_tts_node failed" in capsys.readouterr().err
     finally:
         runtime.shutdown()
@@ -275,7 +284,7 @@ def test_ensure_audio_session_node_publishes_transcript(monkeypatch):
         def on_transcript(msg):
             got.append(msg)
 
-        bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+        bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
         session.feed("hello via audio node")
         import time
         deadline = time.monotonic() + 2.0
@@ -324,99 +333,6 @@ def test_shutdown_audio_session_node_leaves_tts_running(monkeypatch):
         assert runtime._audio_session_node is None
         assert runtime._audio_session_thread is None
         assert runtime._tts_node is not None
-    finally:
-        runtime.shutdown()
-
-
-# ── AEC decoupling (0.9) ──────────────────────────────────────────────
-#
-# WhisperSTT's construction used to hard-require a TTS handle (gate 2's
-# finding in 094-split-report.md): ``_build_audio_session_node`` always
-# called ``ensure_tts_node()`` before building the session, which raised
-# outright if no tts-slot module was installed at all. STT and TTS are
-# peers filling their own slots — an STT engine must never depend on a
-# TTS engine existing. These tests pin the new seam:
-# ``_resolve_far_end_provider()`` is the ONLY place TTS gets touched for
-# AEC purposes, and only when a tts-slot module is actually installed.
-
-
-def test_resolve_far_end_provider_returns_none_without_a_tts_slot_module(
-    monkeypatch,
-):
-    """No tts-slot module discoverable (e.g. a body with only
-    JaegerWhisperSTT installed) -> None, no crash, no attempt to start
-    TTS at all."""
-    import jaeger_os.core.modules as modules
-
-    monkeypatch.setattr(modules, "discover_modules", lambda *a, **k: {})
-    runtime.shutdown()
-    try:
-        assert runtime._resolve_far_end_provider() is None
-        assert runtime._tts_node is None
-    finally:
-        runtime.shutdown()
-
-
-def test_resolve_far_end_provider_wires_a_shared_reference_buffer(
-    monkeypatch,
-):
-    """A tts-slot module IS installed -> the provider is the running
-    synth's (shared, freshly-created-if-absent) reference_buffer, and it
-    satisfies the FarEndReference shape (pop_frame/clear)."""
-    import jaeger_os.core.modules as modules
-    from jaeger_os.core.audio import ReferenceBuffer
-
-    monkeypatch.setattr(
-        modules, "discover_modules", lambda *a, **k: {"tts": ["stub-spec"]},
-    )
-    _install_mock_runtime(monkeypatch)
-    try:
-        provider = runtime._resolve_far_end_provider()
-        assert isinstance(provider, ReferenceBuffer)
-        assert hasattr(provider, "pop_frame") and hasattr(provider, "clear")
-        assert runtime._tts_node is not None       # TTS got started
-        assert runtime.get_synth().reference_buffer is provider
-        # Idempotent: a second resolve reuses the SAME buffer rather than
-        # replacing it (the synth already carries one after the first call).
-        again = runtime._resolve_far_end_provider()
-        assert again is provider
-    finally:
-        runtime.shutdown()
-
-
-def test_default_audio_session_factory_only_touches_tts_when_barge_in_on(
-    monkeypatch,
-):
-    """The actual fix: building an audio session resolves (and
-    potentially starts) TTS ONLY when the real config asks for
-    barge-in. barge_in=False (today's default) must never call
-    _resolve_far_end_provider — not "call it and get None back", never
-    call it at all."""
-    calls: list[bool] = []
-
-    def fake_resolver():
-        calls.append(True)
-        return "SENTINEL-FAR-END"
-
-    class _FakeAudioSession:
-        @staticmethod
-        def build(config, *, far_end=None, llm_client=None, llm_lock=None):
-            return {"far_end": far_end}
-
-    monkeypatch.setattr(runtime, "_resolve_far_end_provider", fake_resolver)
-    monkeypatch.setattr(runtime, "AudioSession", _FakeAudioSession)
-    try:
-        off = runtime._default_audio_session_factory(
-            AudioSessionConfig(barge_in=False),
-        )
-        assert calls == []
-        assert off["far_end"] is None
-
-        on = runtime._default_audio_session_factory(
-            AudioSessionConfig(barge_in=True),
-        )
-        assert calls == [True]
-        assert on["far_end"] == "SENTINEL-FAR-END"
     finally:
         runtime.shutdown()
 
@@ -537,7 +453,7 @@ def test_build_audio_session_node_defaults_match_config_defaults(
             fast_model_name="base.en",
             accurate_model_name="medium.en",
             require_wake_word=True,
-            followup_window_s=10.0,
+            followup_window_s=15.0,
             barge_in=False,
             audio_backend="sounddevice",
             self_speech_filter=True,

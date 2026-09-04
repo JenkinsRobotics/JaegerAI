@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QWidget
 
 _BARS = 72
 _AGENT_STATE = "/sense/agent_state"
-_TTS_CHUNK = "/sense/tts_chunk"      # amplitude proxy (fallback)
+_TTS_CHUNK = "/act/speech/chunk"     # amplitude proxy (fallback)
 _AUDIO_OUT = "/act/audio_out"        # real float32 PCM → true FFT spectrum
 
 

@@ -50,7 +50,7 @@ def test_glyph_for_each_state(state, glyph):
 
 
 def test_menu_when_stopped_offers_start_disables_stop():
-    """Stopped: only 'Start Jaeger OS' is enabled among lifecycle
+    """Stopped: only 'Start Jaeger AI' is enabled among lifecycle
     items. 'Stop' / 'Restart' would be no-ops, so we grey them out
     rather than letting the user fire a doomed subprocess."""
     items = {i.action: i for i in menu_items_for(TrayState.STOPPED) if i.action}
@@ -94,7 +94,7 @@ def test_menu_status_label_reflects_state():
 
 
 def test_menu_labels_say_jaeger_os_not_daemon():
-    """User-facing labels say 'Jaeger OS' so people know what's being
+    """User-facing labels say 'Jaeger AI' so people know which app is being
     started/stopped — 'daemon' is an internal implementation detail
     and confused users testing the tray. The status row, the three
     lifecycle items, the About entry, and the Quit row all carry
@@ -104,14 +104,14 @@ def test_menu_labels_say_jaeger_os_not_daemon():
     joined = " | ".join(labels)
     assert "Daemon" not in joined, \
         f"menu still references 'Daemon': {joined!r}"
-    assert any("Start Jaeger OS" == lbl for lbl in labels)
-    assert any("Stop Jaeger OS" == lbl for lbl in labels)
-    assert any("Restart Jaeger OS" == lbl for lbl in labels)
-    assert any("Jaeger OS: running" == lbl for lbl in labels)
+    assert any("Start Jaeger AI" == lbl for lbl in labels)
+    assert any("Stop Jaeger AI" == lbl for lbl in labels)
+    assert any("Restart Jaeger AI" == lbl for lbl in labels)
+    assert any("Jaeger AI: running" == lbl for lbl in labels)
     # Quit tears the WHOLE product down (daemon + every tray) — the
     # label must signal that, not "just close this icon".
-    assert any("Quit Jaeger OS" == lbl for lbl in labels), \
-        f"Quit label still 'Quit Tray' — must be 'Quit Jaeger OS': " \
+    assert any("Quit Jaeger AI" == lbl for lbl in labels), \
+        f"Quit label still 'Quit Tray' — must be 'Quit Jaeger AI': " \
         f"{labels}"
 
 

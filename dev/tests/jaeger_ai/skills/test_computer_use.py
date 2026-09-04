@@ -9,28 +9,9 @@ are exercised here.
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import pytest
 
-_MODULE_PATH = (
-    # dev/tests/jaeger_ai/skills/ → repo root is 4 up.
-    Path(__file__).resolve().parents[4]
-    / "jaeger_ai" / "agent" / "skills"
-    / "computer_use_v1" / "computer_use.py"
-)
-
-
-def _load():
-    spec = importlib.util.spec_from_file_location("computer_use", _MODULE_PATH)
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-cu = _load()
+from jaeger_agent.skills.computer_use_v1 import computer_use as cu
 
 
 # ── pure grounding logic ─────────────────────────────────────────────

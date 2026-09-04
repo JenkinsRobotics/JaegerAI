@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""jaeger_os.cli.devtools — the developer toolbox behind `jaeger --dev`.
+"""Jaeger AI developer toolbox behind ``jaeger dev``.
 
 Replaces the old repo-root launch.py (removed 2026-07-05): the windowed
-dev shell is the repo's JaegerOS.app run in the dev STATE (`jaeger --dev`
-builds + runs it pinned to the jros-dev instance — one bundle, one TCC
+dev shell is the repo's native Jaeger AI app run in the dev state (``jaeger dev``
+builds and runs it pinned to the development instance — one bundle, one TCC
 permission grant, since 2026-07-14); this module keeps the dev TUI +
 utility verbs.
 
 Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 
-   ./launch          Windowed app — the Swift app if available, otherwise
-                     the PySide6 shell.
-   ./launch --tui    CLI/TUI — the in-process TUI agent (this terminal
-                     becomes the TUI).
+   jaeger dev          Windowed Jaeger AI app.
+   jaeger dev --tui    Jaeger AI TUI (this terminal becomes the TUI).
 
 The in-process TUI loads the plugin stack directly:
 
@@ -23,22 +21,22 @@ The in-process TUI loads the plugin stack directly:
    - Gemma 4 + updated registry                         (core/models/)
    - bench infra (writer/aggregator dir fix)            (core/bench/)
 
-   ./launch                   boot the windowed JROS app
-   ./launch --tui             boot the in-process TUI in this terminal
-   ./launch --tui --no-voice   ... skipping voice startup
-   ./launch --stop             kill a lingering TUI singleton
-   ./launch --restart          stop, then boot the TUI
-   ./launch --status           show whether a TUI is running
-   ./launch --reset-audio      sudo killall coreaudiod
-   ./launch --clean-logs       truncate <instance>/run/jaeger.log to 0
-   ./launch --health           preflight checks
+   jaeger dev                   boot the windowed Jaeger AI app
+   jaeger dev --tui             boot the TUI in this terminal
+   jaeger dev --tui --no-voice  ... skipping voice startup
+   jaeger dev --stop            kill a lingering TUI singleton
+   jaeger dev --restart         stop, then boot the TUI
+   jaeger dev --status          show whether a TUI is running
+   jaeger dev --reset-audio     sudo killall coreaudiod
+   jaeger dev --clean-logs      truncate <instance>/run/jaeger.log to 0
+   jaeger dev --health          preflight checks
 
 The terminal becomes the TUI.  Ctrl-C / ``/quit`` ends the session;
 Gemma + Kokoro + Whisper unload cleanly with the process.
 
-Every run uses the dev instance at
-``.jaeger_os/instances/jros-dev/`` — gitignored, so it never ships to
-end users.  `jaeger --dev` boots the same instance through this launcher.
+Every run uses a gitignored development instance under
+``.jaeger_os/instances/`` so it never ships to end users. ``jaeger dev``
+boots that same instance through this launcher.
 """
 
 from __future__ import annotations
@@ -120,7 +118,7 @@ def _load_tui_banner() -> str:
         from jaeger_ai.interfaces.tui.banner import JAEGER_ASCII, TAGLINE
         from jaeger_ai import __version__ as JAEGER_VERSION
     except Exception:  # noqa: BLE001
-        return "\n\033[36m\033[1mJAEGER-OS\033[0m\n\n"
+        return "\n\033[36m\033[1mJAEGER AI\033[0m\n\n"
 
     banner_lines = JAEGER_ASCII.splitlines()
     banner_w = max(len(ln) for ln in banner_lines)
@@ -753,7 +751,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
             warn("swift toolchain missing — launching the existing (stale) app")
         else:
-            say("building JaegerOS.app (Scripts/build-app.sh --dev)…",
+            say("building Jaeger AI.app (Scripts/build-app.sh --dev)…",
                 prefix="launch")
             build = subprocess.run(
                 [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
@@ -763,7 +761,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
                 return None
     if not bundle_bin.exists():
         return None
-    say("launching JaegerOS (jros-dev instance) — menu-bar tray + chat window…",
+    say("launching Jaeger AI (jros-dev instance) — menu-bar tray + chat window…",
         prefix="launch")
     sys.stdout.flush()
     return subprocess.run([str(bundle_bin)], env=env).returncode
@@ -800,7 +798,7 @@ def cmd_update() -> int:
     # failed last time — a diff-keyed check misses both.
     from jaeger_ai.cli._common import swift_app_is_stale
     if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerOS.app"):
-        say("Swift app lags the tree — rebuilding JaegerOS.app…",
+        say("Jaeger AI app lags the tree — rebuilding…",
             prefix="update")
         subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),
                         "--dev"])
@@ -823,12 +821,12 @@ def main() -> int:
                         help="tell the TUI to skip voice startup")
     parser.add_argument("--tui", action="store_true",
                         help="boot the CLI/TUI in-process agent (Pattern 0). "
-                             "A bare ./launch boots the windowed JROS app.")
+                             "A bare `jaeger dev` boots the windowed Jaeger AI app.")
     parser.add_argument("--update", action="store_true",
                         help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",
                         help="rebuild the Swift app before launching it "
-                             "(a bare ./launch runs the existing build)")
+                             "(a bare `jaeger dev` runs the existing build)")
     # Housekeeping
     parser.add_argument("--reset-audio", action="store_true",
                         help="sudo killall coreaudiod — unwedge CoreAudio")

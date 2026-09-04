@@ -84,7 +84,7 @@ def _systemd_unit(jaeger_exe: Path, home: Path, args: list[str]) -> str:
     execstart = " ".join([str(jaeger_exe), *args])
     return (
         "[Unit]\n"
-        "Description=JROS (Jaeger-OS) agent\n"
+        "Description=Jaeger AI agent application\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n"
         "\n"

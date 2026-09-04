@@ -74,6 +74,7 @@ def _mk_worker(**over):
         silence_hangover_ms=700, min_speech_ms=400,
         max_speech_ms=8000, barge_in_ms=200,
         short_phrase_max_ms=1500, short_phrase_hangover_ms=350,
+        language="en",
     )
     params.update(over)
     return _VadWorker(

@@ -158,7 +158,7 @@ final class AgentBridge: ObservableObject {
                 await proc.stop()
                 throw BridgeError.bootFailed(
                     "protocol mismatch: core speaks v\(ready.proto), "
-                    + "shell speaks v\(ProtocolV1.version) — update JROS")
+                    + "shell speaks v\(ProtocolV1.version) — update Jaeger AI")
             }
             bridge = proc
             state = .ready

@@ -1,6 +1,6 @@
-"""TUI theme — the Jaeger-OS accent colour.
+"""TUI theme — the Jaeger AI accent colour.
 
-hermes-agent's reference TUI is amber/gold; Jaeger-OS shifts the same
+hermes-agent's reference TUI is amber/gold; Jaeger AI shifts the same
 shade family to **blue** for its own identity. Every piece of brand
 chrome — the banner, turn rules, the answer box, the ``❯`` prompt, the
 status bar — draws in :data:`ACCENT`.

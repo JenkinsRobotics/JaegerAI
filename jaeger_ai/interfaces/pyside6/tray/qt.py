@@ -43,7 +43,7 @@ def apply_app_icon() -> None:
 
 def _agent_name(ctx: Any) -> str:
     return (getattr(getattr(ctx, "core", None), "agent_name", None)
-            or getattr(ctx, "agent_name", None) or "JROS")
+            or getattr(ctx, "agent_name", None) or "Jaeger AI")
 
 
 def _subtitle(ctx: Any) -> str:
@@ -63,6 +63,7 @@ class QtTray:
         self._menu: Any = None
         self._settings: Any = None
         self._companion: Any = None
+        self._multimodal: Any = None
         self._state = "idle"
 
         # Brand the app — window + macOS Dock icon (the tray is the
@@ -81,7 +82,7 @@ class QtTray:
             pix = QPixmap(18, 18)
             pix.fill(QColor("#1e88e5"))
             self._icon = QSystemTrayIcon(QIcon(pix))
-        self._icon.setToolTip(f"JROS — {self._name}")
+        self._icon.setToolTip(f"Jaeger AI — {self._name}")
 
         # Clicking the icon shows the rich dropdown (no native QMenu — a
         # context menu would intercept the click before our popup).
@@ -123,6 +124,7 @@ class QtTray:
                 on_quick_input=self._show_pill,
                 on_open_chat=self._open_chat,
                 on_open_companion=self._open_companion,
+                on_open_multimodal=self._open_multimodal,
                 on_quit=self._quit,
                 on_restart=self._restart,
                 on_settings=self._open_settings,
@@ -211,11 +213,31 @@ class QtTray:
         try:
             from jaeger_ai.interfaces.avatar_chat.window import make_surface
             self._companion = make_surface(self.ctx)
-            self._companion.show(); self._companion.raise_(); self._companion.activateWindow()
+            self._companion.show()
+            self._companion.raise_()
+            self._companion.activateWindow()
             return self._companion
         except Exception as exc:  # noqa: BLE001
             self._warn("Avatar + chat", exc)
             return None
+
+    def _open_multimodal(self) -> Any:
+        """Show the chassis-owned multimodal surface without building a second one."""
+        self._multimodal = self._find_multimodal_window()
+        if self._multimodal is None:
+            self._warn("Multimodal", RuntimeError("multimodal surface is unavailable"))
+            return None
+        self._multimodal.show()
+        self._multimodal.raise_()
+        self._multimodal.activateWindow()
+        return self._multimodal
+
+    @staticmethod
+    def _find_multimodal_window() -> Any:
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, "current_audio_mode") and hasattr(widget, "start_session"):
+                return widget
+        return None
 
     def _restart(self) -> None:
         """Restart the agent/app by re-execing the process."""
@@ -257,7 +279,13 @@ class QtTray:
         os._exit(0)
 
     def close(self) -> None:
-        for widget in (self._pill, self._menu, self._settings, self._companion):
+        for widget in (
+            self._pill,
+            self._menu,
+            self._settings,
+            self._companion,
+            self._multimodal,
+        ):
             if widget is not None:
                 try:
                     widget.close()

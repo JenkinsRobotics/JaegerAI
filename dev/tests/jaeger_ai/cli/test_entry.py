@@ -46,6 +46,15 @@ def test_bridge_and_mcp():
     assert route(["mcp", "--x"]) == [PY, "-m", "jaeger_ai.interfaces.mcp_server", "--x"]
 
 
+def test_multimodal_routes_to_the_dedicated_face():
+    assert route(["multimodal", "--check"]) == [
+        PY,
+        "-m",
+        "jaeger_ai.interfaces.pyside6.multimodal",
+        "--check",
+    ]
+
+
 def test_dev_defaults_to_tui_and_passes_flags():
     assert route(["--dev"]) == [PY, "-m", "jaeger_ai.cli.devtools"]
     assert route(["--dev", "--status"]) == [PY, "-m", "jaeger_ai.cli.devtools", "--status"]
@@ -56,6 +65,16 @@ def test_version_and_help_go_to_cli():
     assert route(["version"]) == [PY, "-m", "jaeger_ai.cli", "--version"]
     for h in ("help", "--help", "-h"):
         assert route([h]) == [PY, "-m", "jaeger_ai.cli", "--help"]
+
+
+def test_product_checkout_update_uses_full_end_user_updater(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / ".jaeger-product-install").write_text("")
+    monkeypatch.setattr(entry, "_REPO_ROOT", tmp_path)
+    assert route(["update", "--check"]) == [
+        PY, "-m", "jaeger_ai.cli.run", "update", "--check",
+    ]
 
 
 def test_bare_and_agent_flags_run_the_agent():

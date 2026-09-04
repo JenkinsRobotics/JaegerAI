@@ -196,6 +196,14 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
     monkeypatch.setattr("jaeger_ai.main.boot_for_tui", fake_boot, raising=False)
     monkeypatch.setattr("jaeger_ai.main.run_for_voice", run_fn or fake_run,
                         raising=False)
+    # Protocol unit tests must not ask macOS for camera/mic/accessibility
+    # permissions. Concurrent xdist workers invoking the real first-boot TCC
+    # probe can terminate a worker inside native frameworks.
+    monkeypatch.setattr(
+        "jaeger_ai.core.diagnostics.tcc_permissions.first_boot_preflight",
+        lambda: None,
+        raising=False,
+    )
     monkeypatch.setattr(
         "jaeger_ai.core.instance.instance.default_instance_name",
         lambda: default_name, raising=False,

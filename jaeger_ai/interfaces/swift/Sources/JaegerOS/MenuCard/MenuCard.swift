@@ -4,8 +4,9 @@
 //
 //  The rich menu-bar dropdown — the Swift twin of the PySide6
 //  ``tray/menu.py`` card. Header: the AGENT's avatar + name (identity.yaml,
-//  not the character) over a live status line (● + words). Then an action bar: chat · agent, with
-//  quick-input on the right. Settings + power live in the header.
+//  not the character) over a live status line (● + words). Then an action bar:
+//  chat · avatar chat · multimodal, with quick-input on the right. Settings +
+//  power live in the header.
 //
 
 import AppKit
@@ -121,14 +122,16 @@ struct MenuCard: View {
             }
             Button("Restart") { relaunch() }
             Divider()
-            Button("Quit JROS", role: .destructive) { NSApplication.shared.terminate(nil) }
+            Button("Quit Jaeger AI", role: .destructive) {
+                NSApplication.shared.terminate(nil)
+            }
         } label: {
             Image(systemName: "power").font(.system(size: 15)).foregroundStyle(.secondary)
         }
         .menuStyle(.borderlessButton).fixedSize().help("Agent · restart · quit")
     }
 
-    // MARK: - action bar (chat · agent · quick-input)
+    // MARK: - action bar (chat · avatar chat · multimodal · quick-input)
 
     private var actionBar: some View {
         HStack(spacing: 8) {
@@ -137,6 +140,9 @@ struct MenuCard: View {
             }
             iconButton("person.crop.circle", "Agent — avatar + chat") {
                 AvatarChatWindowController.show(agent: agent)
+            }
+            iconButton("camera.viewfinder", "Multimodal — camera + microphone + text") {
+                MultimodalWindowController.show(agent: agent)
             }
             Spacer()
             iconButton("bolt.fill", "Quick input") {

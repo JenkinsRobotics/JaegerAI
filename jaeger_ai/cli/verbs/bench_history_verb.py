@@ -1299,7 +1299,7 @@ def _render(
     yesterday vs. last week?" (chronological)."""
     if not rows:
         return (
-            "# Jaeger-OS Benchmark Leaderboard\n\n"
+            "# Jaeger AI Benchmark Leaderboard\n\n"
             "No bench artifacts found. Run ``jaeger bench run`` or\n"
             "``jaeger bench compare`` first.\n"
         )
@@ -1317,7 +1317,7 @@ def _render(
             "``dev/benchmark/flat/``."
         )
     lines = [
-        "# Jaeger-OS Benchmark Leaderboard",
+        "# Jaeger AI Benchmark Leaderboard",
         "",
         f"_Generated {now_iso} from {total_entries} run(s) across "
         f"`dev/benchmark/sweep/` and `dev/benchmark/flat/` — showing "

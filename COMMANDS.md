@@ -68,8 +68,9 @@ instance, one word now.)
 | `jaeger bench …` | Benchmarks (`run` / `timing` / `compare` / `history`) |
 | `jaeger bridge` | Run the app bridge protocol on stdio |
 | `jaeger mcp` | Run the MCP server |
-| `jaeger launcher …` | Launcher plumbing |
+| `jaeger launcher install` | Install the clickable Jaeger AI app in Applications/Launchpad |
 
-There is ONE app bundle: `JaegerOS.app`. Dev is a launch state
+There is ONE displayed product app: `Jaeger AI.app`. `JaegerOS` remains the
+internal Swift executable/target name. Dev is a launch state
 (`jaeger dev`), not a separate app — one TCC permission grant covers
 everything.

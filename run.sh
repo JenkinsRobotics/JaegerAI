@@ -1,5 +1,5 @@
 #!/bin/bash
-# JROS launcher — entry point for everything you do with the agent.
+# Jaeger AI launcher — entry point for everything you do with the agent.
 #
 # AGENT MANAGEMENT
 #   ./run.sh setup [NAME]      Create a new agent (or re-run wizard against
@@ -168,7 +168,7 @@ cmd_delete() {
 
 cmd_help() {
   cat <<'EOF'
-JROS launcher — entry point for everything you do with the agent.
+Jaeger AI launcher — entry point for everything you do with the agent.
 
 AGENT MANAGEMENT
   ./run.sh setup [NAME]      Create a new agent (or re-run wizard against

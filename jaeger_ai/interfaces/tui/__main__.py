@@ -1,4 +1,4 @@
-"""Entry point: ``python -m jaeger_os.interfaces.tui``.
+"""Entry point for the Jaeger AI terminal interface.
 
 Light wrapper around :func:`jaeger_os.interfaces.tui.app.run`. Honors
 two CLI flags:
@@ -43,7 +43,7 @@ def _boot_chassis() -> int:
     try:
         JaegerApp(_REPO_ROOT).boot()
     except SecondInstanceError as exc:
-        print(f"jaeger-os: {exc}", file=sys.stderr)
+        print(f"jaeger-ai: {exc}", file=sys.stderr)
         return 1
     return 0
 

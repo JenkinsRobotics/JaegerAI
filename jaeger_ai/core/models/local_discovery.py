@@ -14,7 +14,7 @@ path that just happens to be missing.
 Scan order (deduped, first hit wins for any given filename):
 
   1. ``JAEGER_MODEL_SCAN_PATHS`` env var (colon-separated, override)
-  2. ``~/.jaeger/models/`` (JROS production cache)
+  2. ``~/.jaeger/models/`` (Jaeger AI production cache)
   3. ``<repo>/src/jaeger_os/models/`` (in-tree dev / symlink slot)
   4. ``~/.lmstudio/models/`` (LM Studio default)
   5. ``~/Library/Application Support/LM Studio/models/`` (macOS alt)
@@ -22,9 +22,9 @@ Scan order (deduped, first hit wins for any given filename):
   7. ``~/.cache/huggingface/hub/`` (Hugging Face Hub cache)
   8. ``~/Models/`` (generic catch-all)
 
-The first path that hits a given GGUF filename wins, so the JROS-
-owned locations rank above third-party caches — if a user has the
-same file in both ``~/.jaeger/models/`` and LM Studio, the JROS
+The first path that hits a given GGUF filename wins, so locations owned by
+Jaeger AI rank above third-party caches — if a user has the
+same file in both ``~/.jaeger/models/`` and LM Studio, the Jaeger AI
 copy is reported.
 
 Returned ``DiscoveredModel`` records carry ``path`` (absolute,
@@ -88,7 +88,7 @@ def _in_tree_models_path() -> tuple[str, str] | None:
     # core/models/local_discovery.py → core/.. → jaeger_os/models
     candidate = here.parent.parent.parent / "models"
     if candidate.is_dir():
-        return (str(candidate), "JROS in-tree (dev)")
+        return (str(candidate), "Jaeger AI in-tree (dev)")
     return None
 
 
@@ -102,7 +102,7 @@ def _operator_state_models_path() -> tuple[str, str] | None:
         return None
     candidate = operator_state_root() / "models"
     if candidate.is_dir():
-        return (str(candidate), "JROS cache")
+        return (str(candidate), "Jaeger AI cache")
     return None
 
 
@@ -151,7 +151,7 @@ class DiscoveredModel:
     """One GGUF file found on disk by the scanner."""
     path: pathlib.Path           # absolute, symlinks NOT followed (.resolve() of name only)
     size_gb: float               # real bytes / 1e9; -1.0 if stat failed
-    source: str                  # human label: "LM Studio", "JROS cache", etc.
+    source: str              # human label: "LM Studio", "Jaeger AI cache", etc.
 
     @property
     def filename(self) -> str:
@@ -186,7 +186,7 @@ def discover_local_gguf_files() -> list[DiscoveredModel]:
 
     Returns a deduplicated list — same filename in two scan paths
     only appears once, with the source from whichever path ranked
-    higher (env override → in-tree → JROS cache → LM Studio → …).
+    higher (env override → in-tree → Jaeger AI cache → LM Studio → …).
     Sorted by filename for stable, predictable wizard output.
     """
     found: dict[str, DiscoveredModel] = {}
