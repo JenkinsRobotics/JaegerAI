@@ -338,7 +338,9 @@ When the user asks you to "review PR #N", "look at this PR", or gives you a PR U
 ### Step 1: Set up environment
 
 ```bash
-source "${HERMES_HOME:-$HOME/.hermes}/skills/github/github-auth/scripts/gh-env.sh"
+# Load the github-auth skill first — use_skill("github-auth") reports its
+# folder; source gh-env.sh from there to set $GITHUB_TOKEN/$GH_OWNER/$GH_REPO.
+source "<github-auth skill folder>/scripts/gh-env.sh"
 # Or run the inline setup block from the top of this skill
 ```
 

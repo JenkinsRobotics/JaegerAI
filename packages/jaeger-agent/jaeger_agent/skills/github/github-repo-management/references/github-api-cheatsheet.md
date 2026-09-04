@@ -6,7 +6,9 @@ All requests need: `-H "Authorization: token $GITHUB_TOKEN"`
 
 Use the `gh-env.sh` helper to set `$GITHUB_TOKEN`, `$GH_OWNER`, `$GH_REPO` automatically:
 ```bash
-source "${HERMES_HOME:-$HOME/.hermes}/skills/github/github-auth/scripts/gh-env.sh"
+# Load the github-auth skill first — use_skill("github-auth") reports its
+# folder; source gh-env.sh from there to set $GITHUB_TOKEN/$GH_OWNER/$GH_REPO.
+source "<github-auth skill folder>/scripts/gh-env.sh"
 ```
 
 ## Repositories
