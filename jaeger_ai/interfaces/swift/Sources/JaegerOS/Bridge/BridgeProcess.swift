@@ -275,13 +275,30 @@ actor BridgeProcess {
 
     /// Send one turn and await the agent's reply. ``session`` keeps each
     /// window/conversation isolated on the Python side (sessions.db).
-    func runTurn(_ text: String, session: String = "desktop-app")
+    func runTurn(
+        _ text: String,
+        session: String = "desktop-app",
+        agenticTools: Bool = true,
+        imageDataURI: String? = nil
+    )
         async -> TurnResult
     {
         guard process != nil else {
             return TurnResult(text: "", error: "agent bridge not running")
         }
-        write(["op": "send", "text": text, "session": session])
+        var request: [String: Any] = [
+            "op": "send",
+            "text": text,
+            "session": session,
+            "agentic_tools": agenticTools,
+        ]
+        if let imageDataURI, !imageDataURI.isEmpty {
+            request["content"] = [
+                ["type": "image_url", "image_url": ["url": imageDataURI]],
+                ["type": "text", "text": text],
+            ]
+        }
+        write(request)
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
             await self.expireTurn()

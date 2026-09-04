@@ -1,4 +1,4 @@
-"""Optional Hermes subprocess worker controlled by Jaeger's delegation tool."""
+"""Optional Hermes subprocess integration for delegated Jaeger tasks."""
 
 from __future__ import annotations
 
@@ -84,3 +84,6 @@ def run(subtask: str, depth: int) -> dict[str, Any]:
         "depth": depth + 1,
         "elapsed_s": round(time.perf_counter() - started, 3),
     }
+
+
+__all__ = ["enabled", "run"]

@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytestmark = pytest.mark.ui
 
-from PySide6.QtWidgets import QApplication, QGroupBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QGroupBox, QPushButton  # noqa: E402
 
 from jaeger_ai.interfaces.pyside6.multimodal.preflight import (  # noqa: E402
     Check,
@@ -181,6 +181,11 @@ def test_window_builds_four_sections_and_all_required_controls(qapp) -> None:
         assert window.current_barge_mode() == "stop"
         assert window.current_agentic_tools() is True
         assert window.agentic_check.text() == "Mode: Agentic"
+        assert window.mic_check.isChecked() is True
+        assert not any(
+            button.text() in {"● Start", "Stop"}
+            for button in window.findChildren(QPushButton)
+        )
         window.agentic_check.click()
         assert window.current_agentic_tools() is False
         assert window.agentic_check.text() == "Mode: Chatbot"

@@ -815,6 +815,8 @@ class AgentSettingsWindow(QWidget):
 
     # ── ARES & Extensions Suite ──
     def _ares_page(self) -> QWidget:
+        from jaeger_ai.plugins import ares
+
         page, v = self._page("ARES & Extensions Suite")
         sub = QLabel("Central bridge for ARES WebUI, Mac App, Minecraft companion, and plugin tools.")
         sub.setObjectName("Sub")
@@ -833,15 +835,7 @@ class AgentSettingsWindow(QWidget):
         sc_v.addWidget(sc_title)
 
         # Check endpoint
-        is_online = False
-        try:
-            import urllib.request
-            req = urllib.request.Request("http://127.0.0.1:8788/health")
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
-                if resp.status == 200:
-                    is_online = True
-        except Exception:
-            pass
+        is_online = bool(ares.health().get("online"))
 
         st_lbl = QLabel(f"Status: {'● ONLINE (Port 8788)' if is_online else '○ OFFLINE (Port 8788)'}")
         st_lbl.setStyleSheet(f"color: {'#43E08A' if is_online else '#FF6B6B'}; font-weight: 700; font-size: 13px;")
@@ -855,8 +849,7 @@ class AgentSettingsWindow(QWidget):
         btn_web.setObjectName("SaveBtn")
         btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_web():
-            import webbrowser
-            webbrowser.open("http://127.0.0.1:8788")
+            ares.open_web()
         btn_web.clicked.connect(_open_web)
         btn_row.addWidget(btn_web)
 
@@ -864,28 +857,23 @@ class AgentSettingsWindow(QWidget):
         btn_mac.setStyleSheet("background: #1e293b; color: #43E08A; border: 1px solid #2e4438; border-radius: 9px; padding: 8px 14px; font-weight: 700;")
         btn_mac.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_mac():
-            import os
-            import subprocess
-            app_paths = [
-                "/Users/matthewjenkins/Applications/ARES.app",
-                "/Applications/ARES.app",
-            ]
-            for p in app_paths:
-                if os.path.exists(p):
-                    subprocess.Popen(["open", p])
-                    return
-            subprocess.Popen(["open", "-a", "ARES"])
+            result = ares.open_app()
+            if not result.get("opened"):
+                self._toast(sub, f"ARES launch failed: {result.get('error')}", error=True)
         btn_mac.clicked.connect(_open_mac)
         btn_row.addWidget(btn_mac)
 
-        btn_sync = QPushButton("🔄 Sync Models & Directives")
+        btn_sync = QPushButton("🔄 Refresh ARES Connection")
         btn_sync.setStyleSheet("background: transparent; color: #B8B3D0; border: 1px solid #3889FD; border-radius: 9px; padding: 8px 14px; font-weight: 600;")
         btn_sync.setCursor(Qt.CursorShape.PointingHandCursor)
         def _sync_ares():
-            try:
-                self._toast(sub, "✓ Models & Directives synced with ARES")
-            except Exception as e:
-                self._toast(sub, f"Sync error: {e}", error=True)
+            result = ares.health()
+            self._toast(
+                sub,
+                "✓ ARES connection online" if result.get("online")
+                else f"ARES offline: {result.get('error', 'health check failed')}",
+                error=not bool(result.get("online")),
+            )
         btn_sync.clicked.connect(_sync_ares)
         btn_row.addWidget(btn_sync)
 

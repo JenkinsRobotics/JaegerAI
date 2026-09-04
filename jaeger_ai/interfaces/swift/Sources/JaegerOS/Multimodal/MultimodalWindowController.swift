@@ -3,9 +3,8 @@
 //  Jaeger AI / Multimodal
 //
 //  Opens the imported PySide6 multimodal workspace from the native menu card.
-//  The normal Swift bridge and that workspace both own a complete AgentRuntime,
-//  so they must not hold the same instance/model lock at once. This controller
-//  performs an orderly handoff and reconnects the normal bridge on close.
+//  The workspace is a thin face attached to the normal Swift bridge. The
+//  bridge remains the sole owner of Gemma, memory, tools, and AgentRuntime.
 //
 
 import AppKit
@@ -15,13 +14,10 @@ import Foundation
 final class MultimodalWindowController {
     static let shared = MultimodalWindowController()
 
-    static let launchArguments = ["multimodal", "--audio", "structured"]
+    static let launchArguments = ["multimodal", "--attach", "--audio", "structured"]
 
     private var process: Process?
-    private weak var owningAgent: AgentBridge?
-    private var instanceName = AgentBridge.defaultInstanceName
     private var launchInProgress = false
-    private var reconnectOnExit = true
 
     private init() {}
 
@@ -44,10 +40,10 @@ final class MultimodalWindowController {
             return
         }
         guard !launchInProgress else { return }
-        guard !agent.isBusy else {
+        guard agent.isConnected else {
             showFailure(
-                title: "Multimodal workspace is waiting",
-                message: "Let the current agent task finish, then open Multimodal again."
+                title: "Jaeger AI is still starting",
+                message: "Wait for the agent to be ready, then open Multimodal again."
             )
             return
         }
@@ -56,15 +52,6 @@ final class MultimodalWindowController {
         defer { launchInProgress = false }
 
         let instance = agent.status?.instance ?? AgentBridge.defaultInstanceName
-        instanceName = instance
-        owningAgent = agent
-        reconnectOnExit = true
-
-        // Release the one AgentRuntime/model/instance lock before the dedicated
-        // multimodal face acquires it. It reconnects in processDidTerminate().
-        if agent.isConnected {
-            await agent.shutdownForQuit()
-        }
 
         let path = BridgeProcess.jaegerPath()
         guard FileManager.default.isExecutableFile(atPath: path) else {
@@ -72,7 +59,6 @@ final class MultimodalWindowController {
                 title: "Couldn’t open Multimodal",
                 message: "The Jaeger AI launcher is not executable at \(path)."
             )
-            await agent.tryConnect(instance: instance)
             return
         }
 
@@ -90,7 +76,7 @@ final class MultimodalWindowController {
         child.standardError = FileHandle.standardError
         child.terminationHandler = { [weak self] _ in
             Task { @MainActor in
-                await self?.processDidTerminate()
+                self?.processDidTerminate()
             }
         }
 
@@ -102,7 +88,6 @@ final class MultimodalWindowController {
                 title: "Couldn’t open Multimodal",
                 message: error.localizedDescription
             )
-            await agent.tryConnect(instance: instance)
             return
         }
 
@@ -118,18 +103,14 @@ final class MultimodalWindowController {
             .activate(options: [.activateAllWindows])
     }
 
-    private func processDidTerminate() async {
+    private func processDidTerminate() {
         process = nil
-        guard reconnectOnExit, let agent = owningAgent else { return }
-        await agent.tryConnect(instance: instanceName)
     }
 
     func stopForApplicationQuit() {
-        reconnectOnExit = false
         process?.terminationHandler = nil
         if process?.isRunning == true { process?.terminate() }
         process = nil
-        owningAgent = nil
     }
 
     private func showFailure(title: String, message: String) {

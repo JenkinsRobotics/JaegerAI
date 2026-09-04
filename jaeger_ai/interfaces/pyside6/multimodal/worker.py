@@ -10,27 +10,30 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 
-EVENT_KINDS = frozenset({
-    "user",
-    "assistant",
-    "overheard",
-    "environment",
-    "self",
-    "submitted",
-    "session",
-    "status",
-    "state",
-    "live",
-    "latency",
-    "audio",
-    "mic",
-})
+EVENT_KINDS = frozenset(
+    {
+        "user",
+        "assistant",
+        "overheard",
+        "environment",
+        "self",
+        "submitted",
+        "session",
+        "status",
+        "state",
+        "live",
+        "latency",
+        "audio",
+        "mic",
+    }
+)
 
 
 class BorrowedRuntime:
@@ -39,6 +42,8 @@ class BorrowedRuntime:
     def __init__(self, runtime: Any, *, agentic_tools: bool = True) -> None:
         self.runtime = runtime
         self.agentic_tools = agentic_tools
+        self.vision_is_remote = bool(getattr(runtime, "vision_is_remote", False))
+        self.persistent_vision = bool(getattr(runtime, "persistent_vision", False))
 
     def run_turn(self, text: str, *, session_key: str) -> Any:
         if not self.agentic_tools:
@@ -111,7 +116,7 @@ class BorrowedRuntime:
         # handler from the shared Llama object without closing JaegerAI's
         # process-owned runtime or model.
         method = getattr(self.runtime, "configure_vision", None)
-        if callable(method):
+        if callable(method) and not self.persistent_vision:
             method(None)
 
 
@@ -164,9 +169,17 @@ class MultimodalWorker(QThread):
             from jaeger_agent import MultimodalAgent
 
             engine_factory = MultimodalAgent
+        remote_vision = bool(
+            runtime is not None and getattr(runtime, "vision_is_remote", False)
+        )
+        if remote_vision and want_vision:
+            # The projector must live beside the shared Llama instance. Asking
+            # the bridge to load it avoids a useless second Metal projector in
+            # this UI process while image composition remains in the engine.
+            runtime.configure_vision(True)
         kwargs: dict[str, Any] = {
             "on_event": self._on_event,
-            "want_vision": want_vision,
+            "want_vision": want_vision and not remote_vision,
             "extra_prompt": extra_prompt,
             "half_duplex": self.gui_feeds_audio,
             "audio_mode": audio_mode,
@@ -175,6 +188,12 @@ class MultimodalWorker(QThread):
         if runtime is not None:
             kwargs["runtime"] = BorrowedRuntime(runtime, agentic_tools=agentic_tools)
         self.engine = engine_factory(**kwargs)
+        if runtime is not None and getattr(runtime, "speech_is_remote", False):
+            # The face owns capture/playback, never a second Whisper/Kokoro.
+            # Install the bridge-backed node shapes before engine.load().
+            self.engine.node_stt = runtime.make_stt_node(self.engine.config.stt_model)
+            self.engine.node_tts = runtime.make_tts_node()
+            self.engine._stt_lock = self.engine.node_stt._lock
         self.engine.drain_input = self._drain_audio
         self._index = 0
         self._turns = 0
@@ -212,8 +231,24 @@ class MultimodalWorker(QThread):
         self.barge_mode = mode
         method = getattr(self.engine, "set_barge_mode", None)
         if not callable(method):
-            raise RuntimeError("jaeger-agent 1.2.0 set_barge_mode() hook is unavailable")
+            raise RuntimeError(
+                "jaeger-agent 1.2.0 set_barge_mode() hook is unavailable"
+            )
         method(mode)
+
+    def set_agentic_tools(self, enabled: bool) -> None:
+        """Switch the next turn between the shared agentic/chatbot lanes."""
+        self.agentic_tools = bool(enabled)
+        brain = getattr(self.engine, "node_llm", None)
+        borrowed = getattr(brain, "runtime", None)
+        if borrowed is not None and hasattr(borrowed, "agentic_tools"):
+            borrowed.agentic_tools = self.agentic_tools
+        output_mode = "dynamic" if self.agentic_tools else "speech"
+        self.output_mode = output_mode
+        config = getattr(self.engine, "config", None)
+        copy = getattr(config, "model_copy", None)
+        if callable(copy):
+            self.engine.config = copy(update={"output_mode": output_mode})
 
     def force_listen(self) -> None:
         method = getattr(self.engine, "force_listen", None)

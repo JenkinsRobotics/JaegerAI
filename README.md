@@ -131,7 +131,7 @@ pip install -e '.[whisper_stt]'    # listen (JaegerWhisperSTT)
 ./jaeger                           # launch the default agent
 ./jaeger multimodal --check        # preflight models, mic, camera, engine
 ./jaeger multimodal --audio full --check  # also require the duplex AEC runtime
-./jaeger multimodal                # launch the dedicated multimodal face
+./jaeger multimodal                # attach the multimodal face to a running Jaeger AI
 # Or double-click "Jaeger AI.app" at the repository root.
 # Install a Spotlight/Launchpad launcher with one command:
 ./jaeger launcher install
@@ -157,6 +157,13 @@ JaegerAI owns deployed application instances under
 memory database, logs, skills workspace, and process lock. At application boot,
 JaegerAI injects that instance layout into JaegerAgent, so the reusable agent
 reads and writes the same state; it does not create a second agent instance.
+
+Chat, Avatar, and Multimodal are three faces on this same running agent. Chat
+sends text; Avatar sends text/audio; Multimodal sends text/audio/video. The
+Multimodal face defaults to **Half-Duplex** and can switch its audio front end
+to experimental **Quasi Full-Duplex** or **Full-Duplex** without swapping the
+model or agent pipeline. The explicit `./jaeger multimodal --standalone` mode
+exists only for isolated reference benchmarks and development.
 
 A `.jaeger_agent/` directory is JaegerAgent's standalone fallback when its CLI
 or library is run directly without a host. It is not part of a hosted JaegerAI

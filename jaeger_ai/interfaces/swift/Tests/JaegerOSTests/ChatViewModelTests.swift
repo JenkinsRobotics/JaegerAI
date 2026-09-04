@@ -16,6 +16,12 @@ import XCTest
 
 final class ChatViewModelTests: XCTestCase {
 
+    @MainActor
+    func testAgenticModeIsTheComposerDefault() {
+        let model = ChatViewModel(agent: AgentBridge.shared)
+        XCTAssertTrue(model.agenticTools)
+    }
+
     // MARK: rebuildMessages — load_session's turn list -> transcript
 
     func testRebuildMessagesMapsRolesInOrder() {

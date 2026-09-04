@@ -1201,7 +1201,7 @@ _delegate_depth = threading.local()
 
 def _hermes_delegate_enabled() -> bool:
     """Whether Jaeger should use Hermes for delegated subtasks only."""
-    from jaeger_ai.core.runtime.hermes_worker import enabled
+    from jaeger_ai.plugins.hermes_delegate import enabled
 
     return enabled()
 
@@ -1212,7 +1212,7 @@ def _delegate_to_hermes(subtask: str, depth: int) -> dict[str, Any]:
     This deliberately uses one-shot stdio. It never connects to a Hermes
     WebUI/backend port and ARES never imports the worker's session database.
     """
-    from jaeger_ai.core.runtime.hermes_worker import run
+    from jaeger_ai.plugins.hermes_delegate import run
 
     return run(subtask, depth)
 

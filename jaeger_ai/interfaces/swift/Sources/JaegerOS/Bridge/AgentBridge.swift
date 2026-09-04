@@ -265,9 +265,19 @@ final class AgentBridge: ObservableObject {
     /// ``session`` isolates this conversation on the Python side
     /// (sessions.db) so multiple windows / saved chats never collapse
     /// into one history.
-    func sendChat(text: String, session: String = "desktop-app") async throws -> TurnResult {
+    func sendChat(
+        text: String,
+        session: String = "desktop-app",
+        agenticTools: Bool = true,
+        imageDataURI: String? = nil
+    ) async throws -> TurnResult {
         guard let bridge else { throw BridgeError.notRunning }
-        let result = await bridge.runTurn(text, session: session)
+        let result = await bridge.runTurn(
+            text,
+            session: session,
+            agenticTools: agenticTools,
+            imageDataURI: imageDataURI
+        )
         if let error = result.error, !error.isEmpty {
             throw BridgeError.bootFailed(error)
         }

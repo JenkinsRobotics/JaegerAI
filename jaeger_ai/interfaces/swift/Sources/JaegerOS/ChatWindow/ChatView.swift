@@ -16,7 +16,9 @@
 //    * Slim status bar showing agent state + model
 //
 
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @EnvironmentObject private var agent: AgentBridge
@@ -280,6 +282,42 @@ struct ChatView: View {
                 )
                 .onSubmit(sendCurrent)
 
+            Button(action: attachImage) {
+                Image(systemName: chat.attachedImageDataURI == nil
+                      ? "plus.circle"
+                      : "paperclip.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(chat.attachedImageDataURI == nil ? Term.inkDim : Term.accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(chat.isSending)
+            .help(chat.attachedImageName.map { "Attached: \($0)" } ?? "Attach an image")
+
+            Menu {
+                Button {
+                    chat.agenticTools = true
+                } label: {
+                    Label("Agentic", systemImage: chat.agenticTools ? "checkmark" : "bolt")
+                }
+                Button {
+                    chat.agenticTools = false
+                } label: {
+                    Label("Chatbot", systemImage: chat.agenticTools ? "bubble.left" : "checkmark")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: chat.agenticTools ? "bolt.fill" : "bubble.left.fill")
+                    Text(chat.agenticTools ? "Agentic" : "Chatbot")
+                }
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(chat.agenticTools ? Term.accent : Term.inkDim)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(chat.agenticTools
+                  ? "Agentic mode — memory and tools enabled"
+                  : "Chatbot mode — same Gemma, tools disabled")
+
             // Voice toggle button.  Tap to start recording (icon goes
             // red, level bar appears at the composer's bottom edge);
             // tap again to stop and submit the capture.
@@ -432,13 +470,30 @@ struct ChatView: View {
         // flight or an empty composer blocks it.
         agent.isConnected
             && !chat.isTranscribing
-            && !chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || chat.attachedImageDataURI != nil)
     }
 
     private func sendCurrent() {
-        let text = chat.composerText
+        let image = chat.attachedImageDataURI
+        let text = chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && image != nil ? "What do you see?" : chat.composerText
         chat.composerText = ""
-        Task { await chat.send(text) }
+        chat.attachedImageName = nil
+        chat.attachedImageDataURI = nil
+        Task { await chat.send(text, imageDataURI: image) }
+    }
+
+    private func attachImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url,
+              let data = try? Data(contentsOf: url) else { return }
+        let ext = url.pathExtension.lowercased()
+        let mime = ext == "png" ? "image/png" : (ext == "webp" ? "image/webp" : "image/jpeg")
+        chat.attachedImageName = url.lastPathComponent
+        chat.attachedImageDataURI = "data:\(mime);base64,\(data.base64EncodedString())"
     }
 
     private func startNewChat() {

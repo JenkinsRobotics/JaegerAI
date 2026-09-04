@@ -89,7 +89,7 @@ jaeger_ai/
   packaging entrypoint and must remain importable without booting the app.
 
 Everything else belongs in a subsystem. The optional Hermes subprocess helper,
-for example, lives in `core/runtime/hermes_worker.py`, not at package root.
+for example, lives in `plugins/hermes_delegate/`, not in the agent core.
 
 ## Mochi-aligned application convention
 

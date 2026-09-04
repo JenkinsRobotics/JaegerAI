@@ -13,17 +13,25 @@ import os
 import queue
 import threading
 import time
+from collections.abc import Callable
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtMultimedia import QCamera, QMediaCaptureSession, QMediaDevices, QVideoSink
+from PySide6.QtMultimedia import (
+    QCamera,
+    QMediaCaptureSession,
+    QMediaDevices,
+    QVideoSink,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -205,6 +213,7 @@ class MultimodalWindow(QMainWindow):
     """Camera, microphone, text, interaction log, and full telemetry."""
 
     camera_devices_ready = Signal(object, str)
+    remote_agent_event = Signal(object)
 
     MODES = (
         ("Half-Duplex", "structured"),
@@ -258,6 +267,11 @@ class MultimodalWindow(QMainWindow):
         self.setObjectName("MultimodalWindow")
         self.setWindowTitle("Jaeger AI — Multimodal")
         self.resize(1760, 900)
+        self.remote_agent_event.connect(self._on_remote_agent_event)
+        runtime = self._runtime()
+        set_event_sink = getattr(runtime, "set_event_sink", None)
+        if callable(set_event_sink):
+            set_event_sink(self.remote_agent_event.emit)
         self._build_ui()
         self.camera_devices_ready.connect(self._on_camera_devices_ready)
         self._begin_camera_discovery()
@@ -292,15 +306,6 @@ class MultimodalWindow(QMainWindow):
         header.addWidget(title)
         header.addWidget(QLabel("camera · microphone · text → Jaeger Agent"))
         header.addStretch(1)
-        self.agentic_check = QPushButton("Mode: Agentic")
-        self.agentic_check.setObjectName("AgentMode")
-        self.agentic_check.setCheckable(True)
-        self.agentic_check.setChecked(True)
-        self.agentic_check.setToolTip(
-            "Click to switch the next session between Agentic and Gemma Chatbot mode."
-        )
-        self.agentic_check.toggled.connect(self._agent_mode_changed)
-        header.addWidget(self.agentic_check)
         header.addWidget(QLabel("Audio pipeline"))
         self.mode_box = QComboBox()
         for label, mode in self.MODES:
@@ -327,27 +332,22 @@ class MultimodalWindow(QMainWindow):
         controls.addStretch(1)
         self.force_btn = QPushButton("Force Listen")
         self.force_btn.clicked.connect(self._force_listen)
-        self.pause_btn = QPushButton("Pause")
-        self.pause_btn.setCheckable(True)
-        self.pause_btn.toggled.connect(self._pause_changed)
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.clicked.connect(self.stop_session)
-        self.start_btn = QPushButton("● Start")
-        self.start_btn.setObjectName("Primary")
-        self.start_btn.clicked.connect(self.start_session)
+        self.mic_check = QPushButton("Mic: On")
+        self.mic_check.setCheckable(True)
+        self.mic_check.setChecked(True)
+        self.mic_check.setToolTip("Mute or enable microphone input; on by default.")
+        self.mic_check.toggled.connect(self._mic_enabled_changed)
         self.record_check = QCheckBox("Record")
         self.record_check.toggled.connect(self._set_record_enabled)
         for widget in (
             self.force_btn,
-            self.pause_btn,
-            self.stop_btn,
-            self.start_btn,
+            self.mic_check,
             self.record_check,
         ):
             controls.addWidget(widget)
         controls.addStretch(1)
         root.addLayout(controls)
-        self.status_label = QLabel("Idle — press Start to load the audio pipeline.")
+        self.status_label = QLabel("Attaching to the running Jaeger AI agent…")
         self.status_label.setObjectName("Status")
         root.addWidget(self.status_label)
         self._set_running_controls(False)
@@ -381,11 +381,25 @@ class MultimodalWindow(QMainWindow):
         layout.addWidget(self.prompt_edit)
         typed_row = QHBoxLayout()
         self.typed_edit = QLineEdit()
-        self.typed_edit.setPlaceholderText("Type a message — Enter sends; no wake phrase")
+        self.typed_edit.setPlaceholderText(
+            "Type a message — Enter sends; no wake phrase"
+        )
         self.typed_edit.returnPressed.connect(self._send_typed)
         self.send_btn = QPushButton("Send")
         self.send_btn.clicked.connect(self._send_typed)
+        self.attach_btn = QPushButton("Attach Image")
+        self.attach_btn.clicked.connect(self._attach_image)
+        self.agentic_check = QPushButton("Mode: Agentic")
+        self.agentic_check.setObjectName("AgentMode")
+        self.agentic_check.setCheckable(True)
+        self.agentic_check.setChecked(True)
+        self.agentic_check.setToolTip(
+            "Agentic uses memory/tools; Chatbot uses the same Gemma with tools disabled."
+        )
+        self.agentic_check.toggled.connect(self._agent_mode_changed)
         typed_row.addWidget(self.typed_edit, stretch=1)
+        typed_row.addWidget(self.attach_btn)
+        typed_row.addWidget(self.agentic_check)
         typed_row.addWidget(self.send_btn)
         layout.addLayout(typed_row)
         return panel
@@ -508,7 +522,9 @@ class MultimodalWindow(QMainWindow):
         self.tool_chain = QTextEdit()
         self.tool_chain.setObjectName("WorkspaceLog")
         self.tool_chain.setReadOnly(True)
-        self.tool_chain.setPlaceholderText("Tool start, completion, error, and duration")
+        self.tool_chain.setPlaceholderText(
+            "Tool start, completion, error, and duration"
+        )
         layout.addWidget(self.tool_chain, stretch=2)
 
         layout.addWidget(QLabel("TOOL OUTPUTS"))
@@ -613,7 +629,6 @@ class MultimodalWindow(QMainWindow):
         self.agent_waveform.clear()
         self._clear_workspace()
         self._recorded = []
-        self.pause_btn.setChecked(False)
         self.worker = MultimodalWorker(
             runtime=runtime,
             engine_factory=self._engine_factory,
@@ -624,9 +639,7 @@ class MultimodalWindow(QMainWindow):
             agentic_tools=self.current_agentic_tools(),
         )
         brain = getattr(self.worker.engine, "node_llm", None)
-        self._workspace_session = str(
-            getattr(brain, "session_key", "") or "multimodal"
-        )
+        self._workspace_session = str(getattr(brain, "session_key", "") or "multimodal")
         self.worker.commit.connect(self._on_commit)
         self.worker.output.connect(self._on_output_decision)
         self.worker.summary.connect(self.summary_label.setText)
@@ -661,7 +674,7 @@ class MultimodalWindow(QMainWindow):
 
     def _on_ready(self) -> None:
         worker = self.worker
-        if worker is not None and worker.gui_feeds_audio:
+        if worker is not None and worker.gui_feeds_audio and self.mic_check.isChecked():
             self._open_microphone()
         else:
             self._set_status("Engine-owned 48 kHz AEC device is active")
@@ -679,12 +692,11 @@ class MultimodalWindow(QMainWindow):
         self._set_running_controls(False)
 
     def _set_running_controls(self, running: bool) -> None:
-        self.start_btn.setEnabled(not running)
-        self.stop_btn.setEnabled(running)
-        self.pause_btn.setEnabled(running)
+        self.mic_check.setEnabled(running)
         self.force_btn.setEnabled(False if not running else self.force_btn.isEnabled())
         self.prompt_edit.setEnabled(not running)
-        self.agentic_check.setEnabled(not running)
+        self.agentic_check.setEnabled(True)
+        self.mode_box.setEnabled(True)
 
     def _agent_mode_changed(self, enabled: bool) -> None:
         mode = "Agentic tools" if enabled else "Gemma chatbot"
@@ -695,21 +707,26 @@ class MultimodalWindow(QMainWindow):
             self.reasoning_activity,
             "mode",
             (
-                "Agentic monitoring enabled for the next session"
+                "Agentic monitoring enabled"
                 if enabled
                 else "Chatbot mode selected; tool execution is disabled"
             ),
             _GREEN if enabled else _INK_DIM,
         )
-        self._set_status(f"{mode} selected for the next session")
+        worker = self.worker
+        if worker is not None and worker.isRunning():
+            worker.set_agentic_tools(enabled)
+        self._set_status(f"{mode} active")
 
     def _mode_changed(self, _index: int) -> None:
         if self.worker is not None and self.worker.isRunning():
-            self._set_status(
-                "Audio pipeline changes require Stop then Start; the current session is unchanged."
-            )
+            self._set_status(f"Switching to {self.mode_box.currentText()}…")
+            if self.stop_session():
+                self.start_session()
         else:
-            self._set_status(f"{self.mode_box.currentText()} selected for the next session")
+            self._set_status(
+                f"{self.mode_box.currentText()} selected for the next session"
+            )
 
     def _barge_changed(self, _index: int) -> None:
         mode = self.current_barge_mode()
@@ -720,13 +737,20 @@ class MultimodalWindow(QMainWindow):
                 self._set_status(f"Barge control failed: {exc}")
         self._on_telemetry("Barge", mode)
 
-    def _pause_changed(self, paused: bool) -> None:
-        self.pause_btn.setText("Resume" if paused else "Pause")
-        if self.worker is not None and self.worker.isRunning():
+    def _mic_enabled_changed(self, enabled: bool) -> None:
+        self.mic_check.setText("Mic: On" if enabled else "Mic: Muted")
+        worker = self.worker
+        if worker is not None and worker.isRunning():
             try:
-                self.worker.set_paused(paused)
+                worker.set_paused(not enabled)
+                if worker.gui_feeds_audio:
+                    if enabled:
+                        self._open_microphone()
+                    else:
+                        self._close_microphone()
             except Exception as exc:  # noqa: BLE001
-                self._set_status(f"Pause control failed: {exc}")
+                self._set_status(f"Microphone control failed: {exc}")
+        self._on_telemetry("Microphone", "ON" if enabled else "MUTED")
 
     def _force_listen(self) -> None:
         if self.worker is None:
@@ -742,10 +766,35 @@ class MultimodalWindow(QMainWindow):
             return
         worker = self.worker
         if worker is None or not worker.isRunning():
-            self._set_status("Press Start first — no multimodal session is running")
+            self._set_status("The multimodal face is still attaching")
             return
         self.typed_edit.clear()
         worker.submit_text(text)
+
+    def _attach_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Attach image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp)",
+        )
+        if not path:
+            return
+        worker = self.worker
+        if worker is None or not worker.isRunning():
+            self._set_status("The multimodal face is still attaching")
+            return
+        suffix = Path(path).suffix.lower()
+        mime = "image/png" if suffix == ".png" else (
+            "image/webp" if suffix == ".webp" else "image/jpeg"
+        )
+        try:
+            payload = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        except OSError as exc:
+            self._set_status(f"Could not attach image: {exc}")
+            return
+        worker.submit_image(f"data:{mime};base64,{payload}")
+        self._set_status(f"Attached {Path(path).name} to the next turn")
 
     def _open_microphone(self) -> None:
         if self.mic_stream is not None:
@@ -794,7 +843,7 @@ class MultimodalWindow(QMainWindow):
             worker is not None
             and worker.isRunning()
             and worker.gui_feeds_audio
-            and not self.pause_btn.isChecked()
+            and self.mic_check.isChecked()
         ):
             worker.audio_q.put(mono)
 
@@ -839,9 +888,7 @@ class MultimodalWindow(QMainWindow):
         who = "You" if role == "user" else "Assistant"
         color = _GREEN if role == "user" else _ACCENT
         safe = html.escape(text).replace("\n", "<br>")
-        self.conversation.append(
-            f'<p><b style="color:{color}">{who}:</b> {safe}</p>'
-        )
+        self.conversation.append(f'<p><b style="color:{color}">{who}:</b> {safe}</p>')
         self.ticker.push(role == "assistant")
         self.ticker_label.setText(f"{self._commit_count} committed events")
         if role == "user":
@@ -966,6 +1013,27 @@ class MultimodalWindow(QMainWindow):
                 "#FF6B6B" if state == "error" else _INK_DIM,
             )
 
+    def _on_remote_agent_event(self, frame: object) -> None:
+        """Translate bridge wire telemetry into the existing workspace feed."""
+        if not isinstance(frame, dict):
+            return
+        kind = str(frame.get("type") or "")
+        if kind == "tool":
+            self._on_agent_event(
+                SimpleNamespace(
+                    topic="/sense/tool",
+                    name=frame.get("name", ""),
+                    phase=frame.get("phase", "start"),
+                    detail=frame.get("detail", ""),
+                    elapsed_s=frame.get("elapsed_s", 0.0),
+                    session=frame.get("session", ""),
+                )
+            )
+        elif kind == "agent_event":
+            values = dict(frame)
+            values.pop("type", None)
+            self._on_agent_event(SimpleNamespace(**values))
+
     def _on_tool_event(self, message: Any) -> None:
         name = str(getattr(message, "name", "") or "tool")
         phase = str(getattr(message, "phase", "start") or "start")
@@ -1046,7 +1114,9 @@ class MultimodalWindow(QMainWindow):
     def _on_latency(self, key: str, milliseconds: Any) -> None:
         row = self.latency_rows.get(key)
         if row is not None:
-            row.setText("—" if milliseconds is None else f"{float(milliseconds):,.0f} ms")
+            row.setText(
+                "—" if milliseconds is None else f"{float(milliseconds):,.0f} ms"
+            )
         if key == "Reply ready" and milliseconds is not None:
             self.workspace_rows["Reply latency"].setText(
                 f"{float(milliseconds):,.0f} ms"
@@ -1100,7 +1170,9 @@ class MultimodalWindow(QMainWindow):
         self.camera_box.setEnabled(bool(self._camera_devices))
         self.camera_box.blockSignals(False)
         if not self._camera_devices:
-            self.camera_label.setText(f"camera unavailable: {error}" if error else "no camera found")
+            self.camera_label.setText(
+                f"camera unavailable: {error}" if error else "no camera found"
+            )
             self._camera_enable_pending = False
             self.video_check.setChecked(False)
             return
@@ -1118,7 +1190,9 @@ class MultimodalWindow(QMainWindow):
         self.camera = QCamera(camera)
         self.camera_label.setText(f"starting {camera.description()}…")
         self.camera.errorOccurred.connect(
-            lambda _error, message: self.camera_label.setText(f"camera error: {message}")
+            lambda _error, message: self.camera_label.setText(
+                f"camera error: {message}"
+            )
         )
         self.capture = QMediaCaptureSession()
         self.video_sink = QVideoSink()
@@ -1178,9 +1252,9 @@ class MultimodalWindow(QMainWindow):
             self._last_jpeg = now
             buffer = QBuffer()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            image.scaledToWidth(
-                448, Qt.TransformationMode.SmoothTransformation
-            ).save(buffer, "JPG", 85)
+            image.scaledToWidth(448, Qt.TransformationMode.SmoothTransformation).save(
+                buffer, "JPG", 85
+            )
             uri = "data:image/jpeg;base64," + base64.b64encode(
                 bytes(buffer.data())
             ).decode("ascii")
@@ -1190,8 +1264,8 @@ class MultimodalWindow(QMainWindow):
         super().showEvent(event)
         if not getattr(self, "_opened_once", False):
             self._opened_once = True
-            if self.camera_box.count():
-                QTimer.singleShot(100, lambda: self.video_check.setChecked(True))
+            QTimer.singleShot(0, self.start_session)
+            QTimer.singleShot(100, lambda: self.video_check.setChecked(True))
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802 — Qt override
         if not self.stop_session():
