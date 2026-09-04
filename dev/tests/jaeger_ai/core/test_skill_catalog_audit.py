@@ -36,9 +36,10 @@ def test_migrated_large_entrypoints_are_concise() -> None:
         assert len(skill.path.read_text(encoding="utf-8").splitlines()) <= 130
         assert (skill.path.parent / "references" / "imported-guide.md").is_file()
 
-    # The red-team import is preserved on disk but quarantined from both
-    # automatic and explicit discovery because its bundled attack scripts trip
-    # the safety guard.
+    # The red-team import was removed outright before public release: its
+    # scripts only ever exec()'d files out of a Hermes install path that does
+    # not exist here, so the skill could never load. Kept as a regression pin
+    # so it cannot reappear in discovery.
     assert pb.find_playbook("godmode") is None
 
 
