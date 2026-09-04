@@ -43,8 +43,8 @@
 # Usage
 # -----
 #   source dev/dev/scripts/dev_env.sh           # set up + export env into shell
-#   ./run.sh setup jros-dev             # creates sandbox's test instance
-#   ./run.sh --instance jros-dev        # launch the sandbox agent
+#   ./jaeger agent create --name jaeger-dev  # create the app dev instance
+#   ./jaeger dev                              # launch the app dev instance
 #
 # Or one-shot:
 #
