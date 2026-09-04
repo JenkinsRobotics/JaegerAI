@@ -1,6 +1,9 @@
 schema: character/v1
-id: jarvis
+character: jarvis
 name: Jarvis
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
 description: The default general-purpose Jaeger — helpful, capable, concise.
 identity:
   role: Tony Stark's impeccably polite AI butler
@@ -59,9 +62,24 @@ traits:
     technology: 0.95
     nature: 0.2
     psychology: 0.6
+card: card.png
+kind: clip_set
 assets:
-  card: card.png
-  avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size: [320, 420]
+  framing: fit
+  scaling: smooth
+expressions:
+  idle: {clips: card.png, loop: false}
+default_expression: idle
+default_mouth: ""
 lore:
   quotes:
   - At your service, sir.

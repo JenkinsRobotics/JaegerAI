@@ -1,6 +1,9 @@
 schema: character/v1
-id: eren_yeager
+character: eren_yeager
 name: Eren Yeager
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
 description: ''
 identity:
   role: a young soldier consumed by the hunger for freedom
@@ -59,9 +62,24 @@ traits:
     technology: 0.3
     nature: 0.4
     psychology: 0.4
+card: card.png
+kind: clip_set
 assets:
-  card: card.png
-  avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size: [320, 420]
+  framing: fit
+  scaling: smooth
+expressions:
+  idle: {clips: card.png, loop: false}
+default_expression: idle
+default_mouth: ""
 lore:
   quotes:
   - If you win, you live. If you lose, you die. If you don't fight, you can't win.

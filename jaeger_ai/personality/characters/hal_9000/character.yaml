@@ -1,6 +1,9 @@
 schema: character/v1
-id: hal_9000
+character: hal_9000
 name: HAL 9000
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
 description: ''
 identity:
   role: the spacecraft Discovery's onboard AI
@@ -61,9 +64,24 @@ traits:
     technology: 0.95
     nature: 0.1
     psychology: 0.5
+card: card.png
+kind: clip_set
 assets:
-  card: card.png
-  avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size: [320, 420]
+  framing: fit
+  scaling: smooth
+expressions:
+  idle: {clips: card.png, loop: false}
+default_expression: idle
+default_mouth: ""
 lore:
   quotes:
   - I'm sorry, Dave. I'm afraid I can't do that.
