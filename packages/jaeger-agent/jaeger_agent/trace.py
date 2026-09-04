@@ -36,7 +36,6 @@ def _safe_detail(value: Any) -> str:
 
 
 # ── emit side: the live Tracer ──────────────────────────────────────
-import threading
 
 class Tracer:
     """Holds the current turn's id + clock; publishes TraceStep events (thread-safe, Hermes pattern)."""

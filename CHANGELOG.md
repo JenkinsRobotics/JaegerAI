@@ -3,6 +3,22 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## Unreleased — one assistant, one private web surface
+
+- Repositioned JaegerAI consistently as a general local-first assistant
+  platform; robotics is an optional deployment target, not its identity.
+- Added a Jaeger-branded WebUI launch path with optional Tailscale Serve
+  publication, while retaining the Apple-container mode for compatibility.
+- Exposed all 107 mutable configuration fields through the schema-derived
+  settings catalog and both desktop settings interfaces. Structured settings
+  use validated JSON and secrets remain redacted.
+- Fixed toolset classification and instance-path isolation defects, and reset
+  process-global interrupt state between tests.
+- Fixed wheel discovery for PEP 420 namespace directories; built artifacts now
+  contain the same core modules exercised by editable installs.
+- Made both supported installers initialize the pinned WebUI submodule, so a
+  fresh checkout can launch the primary browser interface immediately.
+
 ## `0.11.0` — consolidated release line
 
 All retained feature, reliability, runtime, memory, and publication branch
@@ -1780,7 +1796,7 @@ user customisation.
 ### Architecture — System / Runtime / User layers
 
 New canonical reference at
-[`dev/docs/architecture/system_runtime_user.md`](dev/docs/architecture/system_runtime_user.md).
+[`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md).
 Every persistent file in a JaegerAI deployment now belongs to exactly one
 of three layers:
 
@@ -1850,7 +1866,7 @@ user customisation.
 ## `0.2.0` — 2026-05-31
 
 Theme: refinement + Jaeger-port enablement; not a major reshape.
-See [docs/ROADMAP_0.2.0.md](docs/ROADMAP_0.2.0.md) for the original
+See `docs/ROADMAP_0.2.0.md` (since removed) for the original
 slate. The 0.2.0 acceptance bar — "0.1.0 bench numbers held or
 improved on every suite" — was MET against the new 1.1 corpus
 (see `### Result` below).
@@ -1864,7 +1880,7 @@ Headline additions:
   ``preferred_mode`` hint (auto-inferred from tags when omitted);
   the daemon swaps to the asleep model when the user has been gone
   long enough AND there's queued work. See updated
-  [`docs/deep_think_design.md`](docs/deep_think_design.md).
+  [`dev/docs/core/deep_think_design.md`](dev/docs/core/deep_think_design.md).
 - **Memory-tier-aware setup wizard**. ``setup_wizard`` step 2 now
   detects the host's unified memory via stdlib (`sysctl hw.memsize`
   on macOS, `sysconf` on Linux), classifies into a tier (12 / 24 /

@@ -40,7 +40,7 @@ from jaeger_agent.loop.loop_backstop import (
 from jaeger_agent.loop.tool_result_safety import protect_tool_result
 from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
 from jaeger_agent.schemas.message_types import Message, ToolCall
-from jaeger_agent.tool_executor import LedgerToolExecutor, ToolExecutor
+from jaeger_agent.tool_executor import ToolExecutor
 from jaeger_os.core.tools.tool_registry import get_tools
 from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow

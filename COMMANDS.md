@@ -45,6 +45,8 @@ instance, one word now.)
 | `jaeger memory …` | Agent memory tools |
 | `jaeger settings …` | Runtime settings |
 | `jaeger skill …` | Single-skill operations |
+| `jaeger webui {start,stop,status,url}` | Jaeger WebUI + adapter, optional Tailscale publishing |
+| `jaeger container {list,start,stop,status,delete,create,system}` | Apple native container tools |
 
 ## Install / maintain
 
@@ -58,7 +60,6 @@ instance, one word now.)
 | `jaeger uninstall` | Remove the install |
 | `jaeger autostart …` | Login-item autostart on/off |
 | `jaeger kill` | Stop a stuck agent process |
-| `jaeger stop` | Stop the running daemon |
 
 ## Developer (repo checkout)
 
