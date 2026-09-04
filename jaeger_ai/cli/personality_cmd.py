@@ -53,10 +53,10 @@ def _load() -> tuple[Any | None, Any | None]:
         # Synthesize an empty personality so ``set`` can populate
         # from scratch; callers can re-check existence via the
         # path.
-        from jaeger_ai.personality import Personality
+        from jaeger_ai.characters import Personality
         return layout, Personality(name=layout.root.name)
     try:
-        from jaeger_ai.personality import load_personality
+        from jaeger_ai.characters import load_personality
         return layout, load_personality(pj)
     except Exception:  # noqa: BLE001
         return layout, None
@@ -150,7 +150,7 @@ def run_set(args: Any) -> int:
         print(c.red(f"bad value: {exc}"))
         return 1
     pj = layout.root / "personality.json"
-    from jaeger_ai.personality import save_personality
+    from jaeger_ai.characters import save_personality
     save_personality(updated, pj)
     print(c.green(f"updated {field_path} = {raw_value}"))
     print(c.dim(f"saved: {pj}"))

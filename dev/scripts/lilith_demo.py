@@ -36,7 +36,7 @@ from jaeger_ai.nodes.animation.adapters import MathAdapter
 # stale twice over after 0.10 rehomed the avatar bundle beside Lilith's
 # cards.
 FACE_SCRIPT = (
-    REPO / "jaeger_ai" / "personality" / "characters" / "lilith"
+    REPO / "jaeger_ai" / "characters" / "lilith"
     / "avatar" / "faces" / "lilith_face.py"
 )
 

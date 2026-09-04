@@ -50,7 +50,7 @@ def test_agent_prompt_has_no_persona(layout) -> None:
 
 # ── an active character still does not leak into the worker ────────
 def test_active_character_does_not_reach_worker_prompt(layout) -> None:
-    from jaeger_ai.personality.character import set_active_character
+    from jaeger_ai.characters.character import set_active_character
     set_active_character(layout.root, "eren_yeager")   # directness 0.85
     from jaeger_agent.prompts.assemble import assemble_prompt
     out = assemble_prompt(layout, mode="agent")

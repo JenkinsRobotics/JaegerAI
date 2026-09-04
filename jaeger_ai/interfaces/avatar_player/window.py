@@ -162,7 +162,7 @@ def resolve_character(ctx: Any) -> Any:
     """The character to display — the instance's active one, else the library
     default, else None. Lets a surface show a real card even standalone."""
     try:
-        from jaeger_ai.personality.character import (
+        from jaeger_ai.characters.character import (
             DEFAULT_CHARACTER_ID, active_character, list_characters,
         )
         root = getattr(getattr(ctx, "layout", None), "root", None)

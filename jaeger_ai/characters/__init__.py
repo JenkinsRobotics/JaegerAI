@@ -1,8 +1,7 @@
-"""Personality — structured persona model the agent USES every turn.
+"""Portable character packs and structured persona models.
 
-Replaces 0.1.0's single free-text ``personality`` field on
-``Identity`` with a five-dimension structured model the brain
-composes into its system prompt:
+Each direct child carrying ``character.yaml`` is one ``character/v1`` pack.
+The structured layers describe the speaking/agentic half:
 
     HEXACO          six big-five-like personality factors (0..1)
     SPECIAL         Fallout-style stat block (charisma, perception, ...)
@@ -17,22 +16,16 @@ composes into its system prompt:
     SpeechPatterns  short fragments characterising HOW the agent
                     phrases things (operator-authored micro-rules)
 
-Source data for this module shape comes directly from operator's
-Lilith-AI prior work (``/Users/jonathanjenkins/GITHUB/Lilith-AI/
-archive/lilith-0.2.2/persona.json``).  We carry the schema forward
-exactly so existing personas port without conversion.
-
 Public surface::
 
-    from jaeger_os.personality import (
+    from jaeger_ai.characters import (
         Personality, HEXACO, SPECIAL, Expression, Domains,
         load_personality, save_personality, compose_block,
     )
 
-The brain's system prompt assembler appends ``compose_block(p)``
-when an instance has personality_v2 set, gating off the legacy
-free-text ``Identity.personality`` field when both are present
-(operator preference: structured wins).
+The main agent's worker prompt remains persona-free. Character prose and
+compiled traits are applied by Jaeger AI's response-voice path, keeping tool
+arguments and plans literal.
 """
 
 from .compose import compose_block

@@ -24,7 +24,7 @@ def main(argv: list[str]) -> int:
         asset = pathlib.Path(argv[0])
     else:  # fall back to any character card as a test image
         asset = next(
-            (_REPO / "jaeger_os/personality/characters").rglob("card.png"), None)
+            (_REPO / "jaeger_ai/characters").rglob("card.png"), None)
 
     try:
         h = NodeHarness(lambda bus: MediaNode(bus=bus))

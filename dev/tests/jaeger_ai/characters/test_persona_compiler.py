@@ -6,11 +6,11 @@ leaks raw floats into the model's View. See dev/docs/reality/persona_compiler.md
 
 from __future__ import annotations
 
-from jaeger_ai.personality.character import Character
-from jaeger_ai.personality.compose import (
+from jaeger_ai.characters.character import Character
+from jaeger_ai.characters.compose import (
     domain_lens, expression_clauses,
 )
-from jaeger_ai.personality.schema import Domains, Expression, Personality
+from jaeger_ai.characters.schema import Domains, Expression, Personality
 
 
 # ── expression_clauses: deviations only ─────────────────────────────

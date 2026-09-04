@@ -285,7 +285,7 @@ def test_create_instance_cli_name_wins_dir_and_identity_over_character(
     # comparison (identity.yaml's name vs. the active character's name).
     # Mirrored here rather than calling ``_apply_persona_filter`` directly
     # (that reads the live ``_pipeline`` globals — a full model boot).
-    from jaeger_ai.personality.character import active_character
+    from jaeger_ai.characters.character import active_character
     character = active_character(layout.root)
     assert character is not None
     assert ident.name.lower() != character.name.lower(), (
@@ -307,7 +307,7 @@ def test_create_instance_no_name_dirs_and_names_from_character(
     ident = load_yaml(layout.identity_path, Identity)
     assert ident.name == "Anakin Skywalker"
 
-    from jaeger_ai.personality.character import active_character
+    from jaeger_ai.characters.character import active_character
     character = active_character(layout.root)
     assert character is not None
     assert ident.name.lower() == character.name.lower(), (

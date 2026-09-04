@@ -47,7 +47,7 @@ DEFAULT_EXPRESSIONS: dict[str, dict[str, Any]] = {
 # working face out of the box without the wizard having to copy files.
 FRAMEWORK_AVATAR_DEFAULTS = (
     Path(__file__).resolve().parents[2]  # jaeger_ai/
-    / "personality" / "characters" / "lilith" / "avatar"
+    / "characters" / "lilith" / "avatar"
 )
 
 

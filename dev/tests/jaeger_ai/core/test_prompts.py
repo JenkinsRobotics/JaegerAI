@@ -71,7 +71,7 @@ def test_identity_name_never_overwritten_by_active_character(
     ("a robot like Jarvis, but I will name him Ted"). The old
     JAEGER_BENCH_NEUTRAL_IDENTITY flag is a no-op: identity.yaml-only is
     the behaviour everywhere now, flag or not."""
-    import jaeger_ai.personality.character as character
+    import jaeger_ai.characters.character as character
 
     class _Hal:
         name = "HAL 9000"
