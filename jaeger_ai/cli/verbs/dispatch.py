@@ -35,7 +35,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "backup", "restore", "update", "reinstall", "uninstall",
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
-    "container", "webui",
+    "container", "webui", "delegate",
 })
 
 
@@ -102,6 +102,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "container":
         from jaeger_ai.cli.verbs.container_verb import _cmd_container_argv
         return _cmd_container_argv(list(argv[1:]))
+    if argv[0] == "delegate":
+        from jaeger_ai.cli.verbs.delegate_verb import _cmd_delegate_argv
+        return _cmd_delegate_argv(argv[1:])
     if argv[0] == "webui":
         from jaeger_ai.cli.verbs.webui_verb import _cmd_webui_argv
         return _cmd_webui_argv(list(argv[1:]))

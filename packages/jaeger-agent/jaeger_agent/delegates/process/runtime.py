@@ -289,9 +289,82 @@ def _extract_summary(text: str) -> str:
     try:
         value = json.loads(clean)
     except json.JSONDecodeError:
-        return clean[-100_000:]
+        streamed = _extract_from_jsonl(clean)
+        return streamed if streamed else clean[-100_000:]
     extracted = _find_text(value)
     return extracted.strip() if extracted else clean[-100_000:]
+
+
+def _extract_from_jsonl(text: str) -> str:
+    """Pull the assistant's answer out of a JSONL event stream.
+
+    Several agent CLIs (codex among them) emit one JSON object per line
+    rather than a single document, so the whole-blob ``json.loads`` above
+    fails and the operator gets the raw stream as the "summary". Parse the
+    lines instead and prefer the last real assistant message.
+
+    Events that merely narrate the run — usage totals, thread ids, and the
+    CLI's own warnings — are skipped: taking the last line with any text at
+    all would surface a token count or a truncation notice as the answer.
+    """
+    events: list[Any] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line[0] not in "{[":
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not events:
+        return ""
+
+    for event in reversed(events):
+        message = _assistant_message(event)
+        if message:
+            return message.strip()
+    for event in reversed(events):
+        if _event_kind(event) in _NARRATION_KINDS:
+            continue
+        found = _find_text(event)
+        if found:
+            return found.strip()
+    return ""
+
+
+_ASSISTANT_KINDS = frozenset({"agent_message", "assistant_message", "assistant", "message"})
+_NARRATION_KINDS = frozenset({
+    "error", "thread.started", "turn.started", "turn.completed", "usage",
+})
+
+
+def _event_kind(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("type", "kind", "event"):
+            kind = value.get(key)
+            if isinstance(kind, str):
+                return kind
+    return ""
+
+
+def _assistant_message(value: Any) -> str:
+    """Text from a node explicitly typed as the assistant speaking."""
+    if isinstance(value, dict):
+        if _event_kind(value) in _ASSISTANT_KINDS:
+            for key in ("text", "content", "message"):
+                found = _find_text(value.get(key))
+                if found:
+                    return found
+        for child in reversed(tuple(value.values())):
+            found = _assistant_message(child)
+            if found:
+                return found
+    if isinstance(value, list):
+        for child in reversed(value):
+            found = _assistant_message(child)
+            if found:
+                return found
+    return ""
 
 
 def _find_text(value: Any) -> str:
