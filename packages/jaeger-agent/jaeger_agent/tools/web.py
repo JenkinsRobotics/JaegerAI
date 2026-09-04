@@ -238,7 +238,14 @@ def _backend_wikipedia(query: str, max_results: int) -> list[_Result]:
 
 
 def _backend_searxng(query: str, max_results: int) -> list[_Result]:
-    """Rackpc SearXNG (TS then LAN). Shared with Hermes. No Hermes import."""
+    """Self-hosted SearXNG, opt-in via environment.
+
+    Operator-configured only: set ``SEARXNG_URL`` (and optionally
+    ``SEARXNG_URL_FALLBACK``) to point at your own instance. With neither
+    set this backend declines immediately and the chain moves on to
+    ``ddgs`` — no default endpoint is dialled, so a stock install never
+    sends a query to a host its operator did not choose.
+    """
     import os
     import requests
 
@@ -246,11 +253,11 @@ def _backend_searxng(query: str, max_results: int) -> list[_Result]:
     for raw in (
         (os.environ.get("SEARXNG_URL") or "").strip().rstrip("/"),
         (os.environ.get("SEARXNG_URL_FALLBACK") or "").strip().rstrip("/"),
-        "http://100.78.245.49:8888",
-        "http://10.15.0.239:8888",
     ):
         if raw and raw not in urls:
             urls.append(raw)
+    if not urls:
+        raise RuntimeError("searxng not configured (set SEARXNG_URL)")
     last_exc: Exception | None = None
     for base in urls:
         try:
