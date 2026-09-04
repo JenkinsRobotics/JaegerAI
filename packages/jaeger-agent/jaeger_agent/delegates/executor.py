@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 
 from jaeger_agent.cognition.runs import RunStore
 
@@ -14,6 +16,35 @@ from .registry import DelegateRegistry
 
 class DelegateExecutionError(RuntimeError):
     pass
+
+
+class AllDelegatesFailed(DelegateExecutionError):
+    """Every candidate in a failover chain was tried and none completed.
+
+    Carries the per-delegate causes so the caller can report *why* the chain
+    ran out rather than just that it did — the difference between "nothing
+    was installed" and "all four were installed and each rejected the work".
+    """
+
+    def __init__(self, attempts: "tuple[FailoverAttempt, ...]") -> None:
+        self.attempts = attempts
+        detail = ", ".join(f"{a.runtime_id}: {a.error}" for a in attempts) or "no candidates"
+        super().__init__(f"all delegates failed ({detail})")
+
+
+@dataclass(frozen=True, slots=True)
+class FailoverAttempt:
+    runtime_id: str
+    error: str
+
+
+@dataclass(frozen=True, slots=True)
+class EnsembleOutcome:
+    """One delegate's contribution to an ensemble — a result or a reason."""
+
+    runtime_id: str
+    result: DelegateResult | None
+    error: str | None
 
 
 class DelegateExecutor:
@@ -104,6 +135,100 @@ class DelegateExecutor:
             error=None if result.status == "completed" else result.status,
         )
         return result
+
+    async def execute_with_fallback(
+        self,
+        runtime_ids: Sequence[str],
+        request: DelegateRequest,
+        *,
+        on_event: Callable[[DelegateEvent], None] | None = None,
+        on_failover: Callable[[str, BaseException], None] | None = None,
+    ) -> DelegateResult:
+        """Try each delegate in order and return the first completed result.
+
+        ``execute`` is the single-delegate path and stays exactly as it was:
+        it raises, and the run goes to ``blocked``. This wrapper is for the
+        case where the caller has alternatives — it swallows a failure only
+        so it can try the next candidate, and re-raises as
+        :class:`AllDelegatesFailed` once the list is exhausted.
+
+        A delegate that returns a non-completed *result* (``failed``,
+        ``blocked``) counts as a failure too: an agent CLI that exits 0 while
+        refusing the work is the same outcome to the caller as one that
+        crashed, and both should hand off. ``execute`` has already recorded
+        health for either shape, so the ranking learns from the whole chain.
+
+        The run is re-opened between attempts because ``execute`` transitions
+        it to a terminal state on the way out; without that, attempt two would
+        fail its own state check rather than the delegate's.
+        """
+        attempts: list[FailoverAttempt] = []
+        for runtime_id in runtime_ids:
+            run = self.runs.get(request.task_id)
+            if run is not None and run.state in {"blocked", "failed"}:
+                self.runs.transition(run.id, "active", reason="delegate_failover_retry")
+            try:
+                result = await self.execute(runtime_id, request, on_event=on_event)
+            except BaseException as exc:  # noqa: BLE001 — recorded, then re-raised below
+                attempts.append(FailoverAttempt(runtime_id, type(exc).__name__))
+                if on_failover is not None:
+                    on_failover(runtime_id, exc)
+                continue
+            if result.status == "completed":
+                return result
+            # A refusal is a handoff too, so it has to reach on_failover the
+            # same way a crash does — otherwise the chain silently skips a
+            # delegate and the operator cannot tell it was ever tried.
+            attempts.append(FailoverAttempt(runtime_id, f"status:{result.status}"))
+            if on_failover is not None:
+                on_failover(
+                    runtime_id,
+                    DelegateExecutionError(
+                        f"{runtime_id} returned {result.status}: "
+                        f"{(result.summary or '').strip()[:160]}"
+                    ),
+                )
+        raise AllDelegatesFailed(tuple(attempts))
+
+    async def execute_ensemble(
+        self,
+        runtime_ids: Sequence[str],
+        request: DelegateRequest,
+        *,
+        require: int = 1,
+    ) -> "tuple[EnsembleOutcome, ...]":
+        """Run the same request on several delegates at once.
+
+        Failover asks "who can do this?"; an ensemble asks "what do several
+        of them say?" — useful when the answer matters more than the latency
+        and disagreement between agents is itself signal.
+
+        Every delegate gets its OWN run, because a run is the unit of
+        lineage and two delegates sharing one would interleave their
+        checkpoints into an unreadable history. Failures are returned rather
+        than raised: a partial ensemble is still useful, and the caller
+        decides whether ``require`` completions is enough.
+        """
+        async def one(runtime_id: str) -> EnsembleOutcome:
+            run = self.runs.create("ensemble", provider=runtime_id)
+            scoped = replace(request, task_id=run.id)
+            try:
+                result = await self.execute(runtime_id, scoped)
+            except BaseException as exc:  # noqa: BLE001 — reported, not raised
+                return EnsembleOutcome(runtime_id, None, type(exc).__name__)
+            return EnsembleOutcome(runtime_id, result, None)
+
+        outcomes = tuple(
+            await asyncio.gather(*(one(rid) for rid in runtime_ids))
+        )
+        completed = [o for o in outcomes if o.result is not None
+                     and o.result.status == "completed"]
+        if len(completed) < require:
+            raise AllDelegatesFailed(tuple(
+                FailoverAttempt(o.runtime_id, o.error or f"status:{o.result.status}")
+                for o in outcomes if o not in completed
+            ))
+        return outcomes
 
     def _record(
         self,

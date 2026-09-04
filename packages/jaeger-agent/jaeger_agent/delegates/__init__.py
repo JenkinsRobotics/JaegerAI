@@ -10,10 +10,17 @@ from .contracts import (
     DelegateRuntime,
     RuntimeStatus,
 )
-from .executor import DelegateExecutionError, DelegateExecutor
+from .executor import (
+    AllDelegatesFailed,
+    EnsembleOutcome,
+    DelegateExecutionError,
+    DelegateExecutor,
+    FailoverAttempt,
+)
 from .registry import DelegateRegistry, get_delegate_registry
 
 __all__ = [
+    "AllDelegatesFailed",
     "DelegateArtifact",
     "DelegateEvent",
     "DelegateExecutionError",
@@ -23,6 +30,8 @@ __all__ = [
     "DelegateRequest",
     "DelegateResult",
     "DelegateRuntime",
+    "EnsembleOutcome",
+    "FailoverAttempt",
     "RuntimeStatus",
     "get_delegate_registry",
     "register_builtin_delegates",

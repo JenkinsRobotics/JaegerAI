@@ -13,6 +13,12 @@ def _args(request: DelegateRequest, executable: str) -> tuple[str, ...]:
         "json",
         "--approval-mode",
         "auto_edit",
+        # Gemini CLI refuses to run in an "untrusted" folder and, headless,
+        # there is no interactive prompt to accept one — it just exits. This
+        # is the flag its own error message names for automated use. The
+        # workspace is one Jaeger chose and already governs through its own
+        # permission tiers, so the CLI's separate trust gate adds nothing.
+        "--skip-trust",
     )
 
 

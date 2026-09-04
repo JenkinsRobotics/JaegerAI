@@ -30,13 +30,21 @@ class DelegateRouter:
         self.registry = registry
         self.health = health or get_delegate_health_store()
 
-    async def choose(
+    async def rank(
         self,
         *,
         required_capabilities: frozenset[str] = frozenset(),
         sensitivity: str = "personal",
         preferred: str | None = None,
-    ) -> DelegateRoute:
+    ) -> tuple[DelegateRoute, ...]:
+        """Every eligible delegate, best first.
+
+        The full order is what makes failover possible: a caller that only
+        gets the winner has nowhere to go when that delegate is available at
+        probe time and then fails mid-run, which is the common case (a CLI
+        that is installed but unauthenticated, a rate limit, a crash).
+        Ties break on runtime_id so the order is deterministic.
+        """
         require_local = sensitivity in {"private", "secret"}
         runtimes = self.registry.list()
         statuses = await asyncio.gather(*(runtime.probe() for runtime in runtimes))
@@ -59,11 +67,25 @@ class DelegateRouter:
                     "eligible; ranked by success, quality, latency, cost, and preference",
                 )
             )
-        if not candidates:
+        return tuple(sorted(candidates, key=lambda item: (-item.score, item.runtime_id)))
+
+    async def choose(
+        self,
+        *,
+        required_capabilities: frozenset[str] = frozenset(),
+        sensitivity: str = "personal",
+        preferred: str | None = None,
+    ) -> DelegateRoute:
+        routes = await self.rank(
+            required_capabilities=required_capabilities,
+            sensitivity=sensitivity,
+            preferred=preferred,
+        )
+        if not routes:
             raise NoEligibleDelegate(
                 "no available delegate satisfies locality and capability requirements"
             )
-        return min(candidates, key=lambda item: (-item.score, item.runtime_id))
+        return routes[0]
 
 
 def _score(effectiveness: Effectiveness, preferred: bool) -> float:

@@ -47,6 +47,9 @@ instance, one word now.)
 | `jaeger skill …` | Single-skill operations |
 | `jaeger webui {start,stop,status,url}` | Jaeger WebUI + adapter, optional Tailscale publishing |
 | `jaeger container {list,start,stop,status,delete,create,system}` | Apple native container tools |
+| `jaeger delegate list` | Probe every external agent runtime (claude, codex, hermes, openclaw, …) |
+| `jaeger delegate run [--chain] [--to N] <prompt>` | Run a task on a delegate; `--chain` fails over down the ranked list |
+| `jaeger delegate moa [-n N] <prompt>` | Mixture of Agents — ask several at once, compare answers |
 
 ## Install / maintain
 
