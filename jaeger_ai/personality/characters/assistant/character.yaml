@@ -1,6 +1,9 @@
 schema: character/v1
-id: assistant
+character: assistant
 name: Assistant
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
 description: The plain default — professional, clear, no character overlay.
 identity:
   role: a general-purpose AI that just helps
@@ -53,9 +56,24 @@ traits:
     technology: 0.7
     nature: 0.4
     psychology: 0.5
+card: card.png
+kind: clip_set
 assets:
-  card: card.png
-  avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size: [320, 420]
+  framing: fit
+  scaling: smooth
+expressions:
+  idle: {clips: card.png, loop: false}
+default_expression: idle
+default_mouth: ""
 lore:
   quotes: []
   mannerisms: []

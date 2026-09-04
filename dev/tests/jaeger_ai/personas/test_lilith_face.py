@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_ai.nodes.animation.adapters import MathAdapter, MathScript
+from jaeger_ai.nodes.animation.adapters import MathAdapter
 
 # The Lilith face / animation node is a beta, dev-mode prototype: its
 # avatar tools are JAEGER_DEV_MODE-gated and the node is disabled by
@@ -49,11 +49,11 @@ def test_lilith_character_yaml_ships() -> None:
     import yaml
     assert _CHARACTER_PATH.exists(), "Lilith character YAML must ship"
     data = yaml.safe_load(_CHARACTER_PATH.read_text())
-    assert data["id"] == "lilith"
+    assert data["character"] == "lilith"
     assert data["name"] == "Lilith"
     assert "hexaco" in data["traits"]
     # The avatar bundle ships with the character that uses it.
-    assert (_CHARACTER_PATH.parent / data["assets"]["avatar"]).is_dir()
+    assert (_CHARACTER_PATH.parent / data["assets"]["avatar"]["root"]).is_dir()
 
 
 def test_lilith_character_structured_personality_block_valid() -> None:
@@ -63,7 +63,11 @@ def test_lilith_character_structured_personality_block_valid() -> None:
     p_data = data["traits"]
 
     from jaeger_ai.personality import (
-        Domains, Expression, HEXACO, Personality, SPECIAL,
+        HEXACO,
+        SPECIAL,
+        Domains,
+        Expression,
+        Personality,
     )
     persona = Personality(
         name="Lilith",
@@ -190,9 +194,9 @@ def test_avatar_tool_falls_back_to_framework_defaults(
     """A fresh instance with no avatar/ directory should still get
     Lilith's face — the avatar tool falls back to the framework
     default location."""
-    from jaeger_ai.nodes.animation import tools as avatar
     from jaeger_ai.core import context as tool_common
     from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.nodes.animation import tools as avatar
 
     inst = tmp_path / "instance"
     inst.mkdir()

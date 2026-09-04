@@ -55,6 +55,11 @@ machine.
   are bounded subprocesses and cannot hang the launcher.
 - `jaeger_ai/interfaces/pyside6/multimodal/window.py`: camera enumeration is
   asynchronous, so opening the multimodal window cannot block indefinitely.
+- `jaeger_ai/personality/`: all 15 bundled personalities are now portable
+  `character/v1` packs using the Mochi/JaegerAnimation identity, provenance,
+  typed-asset, and render fields. Jaeger-only traits and progression remain
+  additive extensions, and the loader retains compatibility with legacy `id`
+  plus flat asset entries.
 - `jaeger_ai/cli/verbs/launcher_verb.py:22-146`: the installed launcher is now
   `Jaeger AI.app`, carries the product icon, and removes the legacy launcher on
   uninstall.
@@ -79,9 +84,9 @@ machine.
 
 - JaegerAI canonical all-tier command:
   `dev/scripts/run_tests.sh --all -- --timeout=60 --timeout-method=thread`
-  -> **2668 passed, 10 skipped** in 32.82 s on the final tree. The new tests
-  execute legacy-home migration, its live-process safety gate, and product-vs-
-  development update routing.
+  -> **2674 passed, 10 skipped** in 34.51 s on the final tree. The new tests
+  execute legacy-home migration, its live-process safety gate, product-vs-
+  development update routing, and character-pack compatibility.
 - JaegerAgent full suite:
   `python -m pytest -q --timeout=60 --timeout-method=thread`
   -> **468 passed** in 15.37 s on the final tree.
@@ -98,7 +103,7 @@ machine.
 - `pip check` -> **No broken requirements found**.
 - `git diff --check` -> clean in JaegerAI, JaegerAgent, and JaegerOS.
 
-The Python/Swift suite total is **3732 passed, 10 skipped** across JaegerAI,
+The Python/Swift suite total is **3738 passed, 10 skipped** across JaegerAI,
 JaegerAgent, JaegerOS, and Swift. In addition, the two explicit multimodal
 selftest commands passed 23 and 11 contract checks, and Agent selfcheck passed
 19 checks; focused reruns are not double-counted.
@@ -107,7 +112,11 @@ selftest commands passed 23 and 11 contract checks, and Agent selfcheck passed
 
 - JaegerAI wheel and sdist build successfully at 39 MB each. Both contain zero
   `.pyc`, zero local neural weights, and zero Swift `.build` entries. The wheel
-  contains the application core and multimodal GUI.
+  contains the application core and multimodal GUI. A fresh 0.12.0 wheel check
+  also found all **15** character manifests, all **15** card images, and the
+  personality format guide.
+- JaegerAnimation's strict `character/v1` loader accepted **15/15** bundled
+  Jaeger AI packs, proving they can cross the app boundary without conversion.
 - JaegerAgent wheel is 3.0 MB and sdist is 2.6 MB. Both ship all **6**
   `node.json` manifests and **107** `SKILL.md` recipes with zero `.pyc` files.
 - An isolated import directly from the built JaegerAgent wheel succeeds while
