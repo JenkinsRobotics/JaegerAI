@@ -15,9 +15,7 @@ names instead of erroring "manifest missing or invalid".
 
 from __future__ import annotations
 
-import pathlib
 import sys
-import tempfile
 
 from jaeger_agent import tools as agent_tools
 from jaeger_agent.tools.plugins import list_plugins, setup_plugin
@@ -93,22 +91,23 @@ def test_setup_plugin_channel_path_names_the_right_credential() -> None:
         assert "env_status" not in res
 
 
-def test_setup_plugin_channel_path_stores_the_right_credential_names() -> None:
+def test_setup_plugin_channel_path_stores_the_right_credential_names(tmp_path) -> None:
     """End-to-end: set_credential the name setup_plugin told us to, and
     list_plugins must flip that channel's status to reflect it — proving
     the name setup_plugin surfaces is EXACTLY the name the credential
     store / activate_plugin's plugin_credential lookup reads back."""
+    from jaeger_agent import workspace as agent_workspace
     from jaeger_agent.credentials import set_credential
 
-    root = pathlib.Path(tempfile.mkdtemp())
-    layout = InstanceLayout(root=root)
+    layout = InstanceLayout(root=tmp_path)
     layout.ensure_dirs()
 
-    prev = None
-    try:
-        prev = agent_tools.get_layout()
-    except Exception:  # noqa: BLE001 — none bound yet
-        pass
+    # Save the RAW module global, not get_layout() — that raises when
+    # nothing is bound, and the old `if prev is not None` restore then
+    # left this temp layout bound for the rest of the session. Test order
+    # is not stable, so whichever test ran next saw a stored
+    # DISCORD_BOT_TOKEN and failed on `env_status == {... "missing"}`.
+    prev = agent_workspace._layout
     agent_tools.bind(layout)
     try:
         before = setup_plugin("discord")
@@ -124,5 +123,4 @@ def test_setup_plugin_channel_path_stores_the_right_credential_names() -> None:
         assert after_row["status"] == "ready"
         assert after_row["env_required"]["DISCORD_BOT_TOKEN"] is True
     finally:
-        if prev is not None:
-            agent_tools.bind(prev)
+        agent_workspace._layout = prev
