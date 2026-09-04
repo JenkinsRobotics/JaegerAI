@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent import credentials as creds
+from jaeger_os.core.modules import set_application_package
+from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.runtime import log_rotation
 from jaeger_agent.memory import memory as mem
 from jaeger_agent.prompts import prompts as prompt_module
@@ -62,6 +63,11 @@ from jaeger_ai.core.instance.schemas import SCHEMA_VERSION, Config
 from jaeger_ai.core.instance.schemas import load_yaml
 from jaeger_agent.skill_registry.skill_loader import load_and_register
 from jaeger_ai.core.instance.setup_wizard import run_wizard
+
+
+# JaegerAI is the application host. JaegerAgent fills its mind slot but does
+# not own JaegerAI's instance schemas, identity, personality, or app config.
+set_application_package("jaeger_ai")
 
 
 # ---------------------------------------------------------------------------
@@ -2199,9 +2205,14 @@ def _apply_persona_filter(answer: str) -> str:
         if character is None:
             return answer
         block = _persona_identity_block(_persona_agent_name(layout), character)
+        from jaeger_agent.core.outputs import transform_output_content
         from jaeger_agent.prompts.persona_filter import apply_persona_voice
-        return apply_persona_voice(
-            client, answer, block, max_chars=pconf.max_chars,
+
+        return transform_output_content(
+            answer,
+            lambda content: apply_persona_voice(
+                client, content, block, max_chars=pconf.max_chars,
+            ),
         )
     except Exception:  # noqa: BLE001 — voice is optional, the answer is not
         return answer
@@ -2440,7 +2451,12 @@ def _run_persona_lane_turn(
         return None, None
 
 
-def _ensure_session_agent(client: Any, session_key: str) -> Any:
+def _ensure_session_agent(
+    client: Any,
+    session_key: str,
+    *,
+    scope_tools: bool | None = None,
+) -> Any:
     """Build (or fetch) the per-session :class:`JaegerAgent` — the exact
     object the next turn on ``session_key`` drives. Factored out of
     :func:`_run_turn_via_jaeger_agent` so :func:`prewarm_session` can
@@ -2449,6 +2465,13 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
 
     key = session_key
+    # ``None`` means "keep the profile of an existing session". A host may
+    # explicitly request scoped schemas for one context-tight face without
+    # changing the normal JaegerAI agent catalogue process-wide.
+    if key in _jaeger_agents_by_session and scope_tools is not None:
+        existing = _jaeger_agents_by_session[key]
+        if bool(getattr(existing, "_jaeger_scope_tools", False)) != scope_tools:
+            _jaeger_agents_by_session.pop(key, None)
     # First call per session builds + caches a JaegerAgent. Force the
     # pydantic-ai agent to build too so its tool registrations + the
     # bridge's mirror both fire.
@@ -2486,7 +2509,11 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             bus = _pipeline.get("event_bus")
             if bus is not None:
                 try:
-                    payload: dict[str, Any] = {"name": name, "phase": phase}
+                    payload: dict[str, Any] = {
+                        "name": name,
+                        "phase": phase,
+                        "session": key,
+                    }
                     if isinstance(data, dict):
                         # Only ship JSON-able scalars; the full data
                         # dict can hold non-serializable references.
@@ -2506,7 +2533,9 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
                     if phase == "start":
                         ap = payload.get("args_preview")
                         line = f"{name}({str(ap)[:60]})" if ap else name
-                        bus.publish("agent.activity", kind="tool", text=line)
+                        bus.publish(
+                            "agent.activity", kind="tool", text=line, session=key
+                        )
                 except Exception:  # noqa: BLE001 — never let pub break the agent
                     pass
 
@@ -2535,13 +2564,35 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             except Exception:  # noqa: BLE001 — observer must never break the turn
                 pass
             try:
-                from jaeger_agent import trace as _trace
+                from jaeger_agent.core import trace as _trace
                 _trace.trace_step(
                     "tool", name, dur_s=elapsed_s, ok=ok,
                     detail=f"{args} => {error if not ok else result}",
                 )
             except Exception:  # noqa: BLE001 — tracing never breaks the turn
                 pass
+            # The agent loop stays unchanged; this is a passive, redacted
+            # operator feed for workspace-style surfaces.
+            bus = _pipeline.get("event_bus")
+            if bus is not None:
+                try:
+                    from jaeger_ai.core.agent_observability import (
+                        artifact_paths,
+                        safe_preview,
+                    )
+
+                    observed = error if not ok else result
+                    bus.publish(
+                        "tool.output",
+                        name=name,
+                        ok=ok,
+                        elapsed_s=elapsed_s,
+                        detail=safe_preview(observed),
+                        artifacts=artifact_paths(result),
+                        session=key,
+                    )
+                except Exception:  # noqa: BLE001 — telemetry never breaks the turn
+                    pass
 
         def _heartbeat(elapsed_s: float) -> None:
             # Keep the status line honest while the first model call is
@@ -2566,7 +2617,9 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             bus = _pipeline.get("event_bus")
             if bus is not None:
                 try:
-                    bus.publish("agent.activity", kind="thinking", text=str(state))
+                    bus.publish(
+                        "agent.activity", kind="thinking", text=str(state), session=key
+                    )
                 except Exception:  # noqa: BLE001 — never let pub break the turn
                     pass
 
@@ -2631,7 +2684,9 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             artifact_dir=_artifact_dir,
             stale_call_timeout_s=_stall_s,
             context_summarizer=_summarizer,
+            scope_tools=bool(scope_tools),
         )
+        _jaeger_agents_by_session[key]._jaeger_scope_tools = bool(scope_tools)
         # Cross-restart continuity: seed the brand-new agent with a
         # digest of this session's pre-restart turns (orientation, not
         # task state — see _previous_session_digest). Seeded as a
@@ -2788,6 +2843,8 @@ def _run_turn_via_jaeger_agent(
     user_text: str,
     *,
     session_key: str,
+    content: Any = None,
+    system_prompt_addon: str = "",
 ) -> dict[str, Any]:
     """Phase-6 parallel implementation of :func:`_run_turn` that drives
     the loop through :class:`JaegerAgent`. Returns the exact same dict
@@ -2804,7 +2861,7 @@ def _run_turn_via_jaeger_agent(
     # Reset the per-turn tool-time accumulator before the dispatch so
     # cross-turn leakage doesn't inflate this turn's report.
     _pipeline["turn_tool_time"] = 0.0
-    from jaeger_agent import trace as _trace
+    from jaeger_agent.core import trace as _trace
     _trace.trace_begin(key, user_text)
     persona_handled = False
     try:
@@ -2812,6 +2869,7 @@ def _run_turn_via_jaeger_agent(
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
         _context.set_current_session(key)    # same, for tools that live in tools/
         _refresh_character_prompt(jaeger_agent)
+        _apply_multimodal_system_prompt(jaeger_agent, system_prompt_addon)
         _tag_confirm_session(key)   # route a mid-turn approval to this channel
 
         # Persona Mode C (design: dev/docs/roadmap/PERSONA_PIPELINE_ABC_
@@ -2829,7 +2887,8 @@ def _run_turn_via_jaeger_agent(
         # context llm_lock exists to serialize. No aux lane this turn →
         # skip Mode C entirely and fall through to the locked persona_last
         # path.
-        if _persona_mode() == "persona_first" and _persona_lane_aux_available(client):
+        if (content is None and _persona_mode() == "persona_first"
+                and _persona_lane_aux_available(client)):
             from jaeger_ai.personality.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
@@ -2852,11 +2911,16 @@ def _run_turn_via_jaeger_agent(
                     persona_handled = True
 
         if result is None:
+            def _drive() -> dict[str, Any]:
+                if content is None:
+                    return drive_one_turn(jaeger_agent, user_text)
+                return drive_one_turn(jaeger_agent, user_text, content=content)
+
             if lock is not None:
                 with lock:
-                    result = drive_one_turn(jaeger_agent, user_text)
+                    result = _drive()
             else:
-                result = drive_one_turn(jaeger_agent, user_text)
+                result = _drive()
     except Exception as exc:  # noqa: BLE001 — match legacy crash surface
         elapsed = time.perf_counter() - started
         report = LatencyReport(elapsed, 0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -2866,7 +2930,7 @@ def _run_turn_via_jaeger_agent(
         })
         set_agent_status("error", detail=f"{type(exc).__name__}")
         try:
-            from jaeger_agent import trace as _trace
+            from jaeger_agent.core import trace as _trace
             _trace.trace_end("", elapsed, ok=False)
         except Exception:  # noqa: BLE001
             pass
@@ -2914,7 +2978,7 @@ def _run_turn_via_jaeger_agent(
     )
 
     try:
-        from jaeger_agent import trace as _trace
+        from jaeger_agent.core import trace as _trace
         _trace.trace_step("think", "", dur_s=report.decision,
                           detail=(first_decision or ""))
         _trace.trace_end(answer, report.total, ok=True)
@@ -2981,7 +3045,14 @@ def _run_turn_via_jaeger_agent(
     }
 
 
-def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any]:
+def _run_turn(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+    content: Any = None,
+    system_prompt_addon: str = "",
+) -> dict[str, Any]:
     """The unified agent turn — the one path every entry point shares.
 
     Runs the loop, extracts the answer + tool activity, writes the log,
@@ -2992,7 +3063,13 @@ def _run_turn(client: Any, user_text: str, *, session_key: str) -> dict[str, Any
     JaegerAgent is the unconditional loop implementation; JaegerAI supplies
     product prompts, tools, memory, personality, and user-facing policy through
     its runtime adapter."""
-    return _run_turn_via_jaeger_agent(client, user_text, session_key=session_key)
+    return _run_turn_via_jaeger_agent(
+        client,
+        user_text,
+        session_key=session_key,
+        content=content,
+        system_prompt_addon=system_prompt_addon,
+    )
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
@@ -3054,7 +3131,24 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
         pass
 
 
-def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -> dict[str, Any]:
+def _apply_multimodal_system_prompt(jaeger_agent: Any, addon: str) -> None:
+    """Append engine transport guidance without replacing JaegerAI's persona."""
+    addon = (addon or "").strip()
+    if not addon:
+        return
+    marker = "\n\n# Multimodal transport\n"
+    base_prompt = str(jaeger_agent.system_prompt).split(marker, 1)[0]
+    jaeger_agent.system_prompt = f"{base_prompt}{marker}{addon}"
+
+
+def run_for_voice(
+    client: Any,
+    user_text: str,
+    session_key: str | None = None,
+    *,
+    content: Any = None,
+    system_prompt_addon: str = "",
+) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
     path and the messaging bridges (which pass channel-specific
@@ -3064,7 +3158,16 @@ def run_for_voice(client: Any, user_text: str, session_key: str | None = None) -
     turn as a typed one; the dict just carries the text + tool activity
     for the voice consumer to speak."""
     session = session_key or "voice"
-    out = _run_turn(client, user_text, session_key=session)
+    if content is None and not system_prompt_addon:
+        out = _run_turn(client, user_text, session_key=session)
+    else:
+        out = _run_turn(
+            client,
+            user_text,
+            session_key=session,
+            content=content,
+            system_prompt_addon=system_prompt_addon,
+        )
     # Persist the turn so conversations survive app close + are listable.
     # ``preview`` (first user line, set by SessionStore.record) already
     # serves as the History list's title fallback — see
@@ -3723,7 +3826,7 @@ def _cli_create_instance(name: str, *, force: bool = False) -> int:
     print(f"[jaeger] created instance {name!r} at {layout.root}")
     print("         identity.yaml + config.yaml + manifest.json populated with defaults.")
     print("         edit identity.yaml / config.yaml to customize, then launch with:")
-    print(f"           python -m jaeger_os --instance {name}")
+    print(f"           jaeger --instance {name}")
     return 0
 
 
@@ -3816,7 +3919,7 @@ def _cli_clear_instance(name: str, *, force: bool = False) -> int:
 # CLI argparse + main
 # ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Jaeger: self-improving local agent.")
+    p = argparse.ArgumentParser(description="Jaeger AI: self-improving local agent application.")
     p.add_argument("prompt", nargs="*", help="Optional one-shot command.")
     p.add_argument("--instance", "--agent", type=str, default=None, dest="instance",
                    help="Agent to run (default: JAEGER_INSTANCE_NAME or 'default'). "
@@ -3867,7 +3970,7 @@ def parse_args() -> argparse.Namespace:
                          "All flags after --voice are forwarded to voice_loop "
                          "(--stt-mode, --barge-in, --no-aec, --require-wake-word, "
                          "--no-chimes, --fast-model, --accurate-model). "
-                         "See `python -m jaeger_os --voice --help` for the "
+                         "See `jaeger --voice --help` for the "
                          "voice flag surface."))
     p.add_argument("--daemon", action="store_true",
                    help=("Run headless: boot the pipeline, start the cron "
@@ -3969,7 +4072,7 @@ def boot_for_tui(
             jaeger_tools.bind(layout, workspace_override=config.workspace.location)
         _pipeline["layout"] = layout
         try:
-            from jaeger_agent.trace import start_trace_recorder
+            from jaeger_agent.core.trace import start_trace_recorder
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
             pass
@@ -3979,7 +4082,7 @@ def boot_for_tui(
             # <instance>/logs/usage.json across restarts. Previously the
             # module imported this module directly from four places, which
             # left any host that is not JaegerAI with no usage data at all.
-            from jaeger_agent import usage as _agent_usage
+            from jaeger_agent.core import usage as _agent_usage
             from jaeger_ai.core.runtime import usage_stats as _usage_stats
             _agent_usage.set_sink(_usage_stats)
         except Exception:  # noqa: BLE001 — telemetry is best-effort
@@ -4022,7 +4125,7 @@ def boot_for_tui(
         # can't reach for ``send_message`` when Discord isn't set
         # up. The wiring is idempotent + best-effort.
         try:
-            from jaeger_agent.availability import wire_availability_checks
+            from jaeger_agent.core.availability import wire_availability_checks
             wired = wire_availability_checks(agent)
             if wired:
                 print(f"[jaeger] availability wired for {wired} plugin-backed tool(s)",
@@ -4269,16 +4372,16 @@ def run_daemon(*, instance_name: str | None = None,
 
 def _swift_app_binary() -> "Path | None":
     """The built app's inner binary, or None. One bundle since
-    2026-07-14 — ``jaeger`` launches JaegerOS.app on the default
+    2026-07-14 — ``jaeger`` launches the native Jaeger AI app on the default
     instance; ``jaeger dev`` (cli/devtools) launches the SAME bundle
     pinned to jros-dev via its environment. Running the inner binary
     (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
     swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
-    candidates = [
-        _P("/Applications/JaegerOS.app"),
-        swift / "JaegerOS.app",
-    ]
+    # Always run this installation's bundle. A pre-0.12 machine may still have
+    # /Applications/JaegerOS.app; preferring it here would silently reopen the
+    # old 0.9 product after the user launched Jaeger AI 0.12.
+    candidates = [swift / "JaegerOS.app"]
     for app in candidates:
         binary = app / "Contents" / "MacOS" / "JaegerOS"
         if binary.exists():
@@ -4287,7 +4390,7 @@ def _swift_app_binary() -> "Path | None":
 
 
 def _launch_swift_app(binary: "Path", instance_name: str) -> int:
-    """Launch the built JaegerOS.app DETACHED (0.7.2): the app gets its
+    """Launch the native Jaeger AI app DETACHED (0.7.2): the app gets its
     own session and a log file, ``./jaeger`` returns immediately, and
     the terminal window can be closed without killing the agent.
     ``JAEGER_ATTACH=1`` keeps the pre-0.7.2 behaviour — stdout in the
@@ -4300,24 +4403,27 @@ def _launch_swift_app(binary: "Path", instance_name: str) -> int:
     resolution could disagree."""
     if instance_name:
         os.environ["JAEGER_INSTANCE_NAME"] = instance_name
-    app_name = binary.parent.parent.parent.name
+    # The Swift target and build directory retain their internal historical
+    # name for build compatibility; never leak that framework-era name into
+    # the product-facing terminal output.
+    app_name = "Jaeger AI.app"
     import subprocess as _sp
     # Detach ONLY from an interactive terminal. Non-tty callers stay
     # attached: launchd's autostart LaunchAgent has KeepAlive=true and
     # supervises this process — detaching there would make launchd
     # respawn `jaeger` (and the app) in a loop.
     if os.environ.get("JAEGER_ATTACH") or not sys.stdin.isatty():
-        print(f"[jros] launching {app_name} (attached) — "
+        print(f"[jaeger-ai] launching {app_name} (attached) — "
               "menu-bar tray + chat window…", file=sys.stderr, flush=True)
         return _sp.run([str(binary)]).returncode
     from pathlib import Path as _P
     log = (_P(__file__).resolve().parent.parent
-           / ".jaeger_os" / "logs" / "JaegerOS.log")
+           / ".jaeger_os" / "logs" / "JaegerAI.log")
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
         _sp.Popen([str(binary)], stdout=fh, stderr=fh,
                   start_new_session=True)
-    print(f"[jros] {app_name} launched — menu-bar tray + chat window.\n"
+    print(f"[jaeger-ai] {app_name} launched — menu-bar tray + chat window.\n"
           f"       This terminal can be closed. (app log: {log};\n"
           "       JAEGER_ATTACH=1 to run attached)",
           file=sys.stderr, flush=True)
@@ -4392,7 +4498,7 @@ def _main_dispatch() -> int:
         )
         print(
             "[jaeger] streaming mode — open the Swift renderer at:\n"
-            "          jaeger_os/interfaces/avatar (swift run JROSAvatar)\n"
+            "          jaeger_ai/interfaces/avatar (swift run JROSAvatar)\n"
             "        connect URL:\n"
             f"          ws://{ANIMATION_BRIDGE_HOST}:{ANIMATION_BRIDGE_DEFAULT_PORT}/frames",
             flush=True,
@@ -4463,7 +4569,7 @@ def _main_dispatch() -> int:
                 print(format_report(checks))
                 if missing(checks):
                     print("  Anything still missing may just need a restart to "
-                          "register — re-run `jaeger-os --doctor` to confirm.")
+                          "register — re-run `jaeger doctor` to confirm.")
         return 1 if missing(checks) else 0
     # Headless daemon mode — boot, cron, work the Deep Think queue.
     if getattr(args, "daemon", False):
@@ -4630,7 +4736,7 @@ def _main_dispatch() -> int:
         config: Config = load_yaml(layout.config_path, Config)
         _pipeline["layout"] = layout
         try:
-            from jaeger_agent.trace import start_trace_recorder
+            from jaeger_agent.core.trace import start_trace_recorder
             start_trace_recorder(layout)
         except Exception:  # noqa: BLE001 — tracing is best-effort
             pass
@@ -4640,7 +4746,7 @@ def _main_dispatch() -> int:
             # <instance>/logs/usage.json across restarts. Previously the
             # module imported this module directly from four places, which
             # left any host that is not JaegerAI with no usage data at all.
-            from jaeger_agent import usage as _agent_usage
+            from jaeger_agent.core import usage as _agent_usage
             from jaeger_ai.core.runtime import usage_stats as _usage_stats
             _agent_usage.set_sink(_usage_stats)
         except Exception:  # noqa: BLE001 — telemetry is best-effort

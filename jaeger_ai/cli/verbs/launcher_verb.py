@@ -1,12 +1,12 @@
-"""``jaeger launcher`` — a clickable macOS ``.app`` that launches the agent.
+"""``jaeger launcher`` — a clickable macOS ``.app`` that launches JaegerAI.
 
-A **thin** launcher (no bundling, no signing): ``Jaeger.app`` whose
-``Contents/MacOS/Jaeger`` stub just execs the install's ``jaeger`` command.
+A **thin** launcher (no bundling, no signing): ``Jaeger AI.app`` whose
+``Contents/MacOS/Jaeger AI`` stub just execs the install's ``jaeger`` command.
 Because it's *created locally* (not downloaded), it carries no quarantine
 flag — it opens without the "unidentified developer" block, no notarization.
 macOS only; the agent + its `.venv` stay exactly where the installer put them.
 
-  jaeger launcher install   drop Jaeger.app into /Applications (Dock/Launchpad)
+  jaeger launcher install   drop Jaeger AI.app into /Applications (Dock/Launchpad)
   jaeger launcher remove    delete it
 """
 
@@ -19,8 +19,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-_APP_NAME = "Jaeger.app"
-_BUNDLE_ID = "com.jenkinsrobotics.jaeger"
+_APP_NAME = "Jaeger AI.app"
+_LEGACY_APP_NAMES = ("Jaeger.app",)
+_BUNDLE_ID = "com.jenkinsrobotics.JaegerAI"
 _LSREGISTER = (
     "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
     "LaunchServices.framework/Support/lsregister"
@@ -28,7 +29,7 @@ _LSREGISTER = (
 _USAGE = (
     "usage: jaeger launcher {install|remove}\n"
     "\n"
-    "  install   create a clickable Jaeger.app (Dock / Launchpad) that runs\n"
+    "  install   create a clickable Jaeger AI.app (Dock / Launchpad) that runs\n"
     "            this install's `jaeger`. Thin launcher — no bundling/signing,\n"
     "            opens without a Gatekeeper prompt. Opt-in.\n"
     "  remove    delete the launcher.\n"
@@ -63,7 +64,7 @@ def _stub_script(jaeger_exe: Path) -> str:
     return (
         "#!/bin/bash\n"
         "# Thin launcher created locally by `jaeger launcher install` — no\n"
-        "# bundling/signing. Execs the JROS agent in place.\n"
+        "# bundling/signing. Execs Jaeger AI in place.\n"
         f'exec "{jaeger_exe}" "$@"\n'
     )
 
@@ -71,10 +72,10 @@ def _stub_script(jaeger_exe: Path) -> str:
 def _info_plist() -> dict:
     import jaeger_ai
     return {
-        "CFBundleName": "Jaeger",
-        "CFBundleDisplayName": "Jaeger",
+        "CFBundleName": "Jaeger AI",
+        "CFBundleDisplayName": "Jaeger AI",
         "CFBundleIdentifier": _BUNDLE_ID,
-        "CFBundleExecutable": "Jaeger",
+        "CFBundleExecutable": "Jaeger AI",
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleShortVersionString": jaeger_ai.__version__,
@@ -83,16 +84,28 @@ def _info_plist() -> dict:
     }
 
 
-def _write_bundle(app: Path, jaeger_exe: Path) -> Path:
-    """Write a minimal .app bundle at ``app`` (Contents/MacOS/Jaeger stub +
+def _write_bundle(
+    app: Path,
+    jaeger_exe: Path,
+    *,
+    icon_source: Path | None = None,
+) -> Path:
+    """Write a minimal .app bundle at ``app`` (Contents/MacOS stub +
     Contents/Info.plist). Returns the stub path."""
     macos = app / "Contents" / "MacOS"
     macos.mkdir(parents=True, exist_ok=True)
-    stub = macos / "Jaeger"
+    stub = macos / "Jaeger AI"
     stub.write_text(_stub_script(jaeger_exe), encoding="utf-8")
     stub.chmod(0o755)
+    plist = _info_plist()
+    if icon_source is not None and icon_source.is_file():
+        resources = app / "Contents" / "Resources"
+        resources.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(icon_source, resources / "AppIcon.icns")
+        plist["CFBundleIconFile"] = "AppIcon"
+        plist["CFBundleIconName"] = "AppIcon"
     with open(app / "Contents" / "Info.plist", "wb") as f:
-        plistlib.dump(_info_plist(), f)
+        plistlib.dump(plist, f)
     return stub
 
 
@@ -105,7 +118,8 @@ def _macos_install() -> int:
     app = _app_dir()
     if app.exists():
         shutil.rmtree(app)          # idempotent re-install
-    _write_bundle(app, exe)
+    icon = home / "jaeger_ai" / "interfaces" / "swift" / ".build" / "AppIcon.icns"
+    _write_bundle(app, exe, icon_source=icon)
     # Best-effort: register with LaunchServices so it shows immediately in
     # Spotlight / Launchpad without a re-login.
     subprocess.run([_LSREGISTER, "-f", str(app)], capture_output=True)
@@ -118,9 +132,12 @@ def _macos_install() -> int:
 
 def _macos_remove() -> int:
     removed = []
-    for a in (Path("/Applications") / _APP_NAME,
-              Path.home() / "Applications" / _APP_NAME):
-        if a.exists():
+    names = (_APP_NAME, *_LEGACY_APP_NAMES)
+    for directory in (Path("/Applications"), Path.home() / "Applications"):
+        for name in names:
+            a = directory / name
+            if not a.exists():
+                continue
             shutil.rmtree(a)
             removed.append(str(a))
     if removed:

@@ -37,6 +37,9 @@ from typing import Any
 def _detect_method() -> str:
     """Same detection as ``instance.detect_install_method`` —
     re-imported here for clarity at call sites."""
+    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
+    if (PACKAGE_ROOT.parent / ".jaeger-product-install").is_file():
+        return "product-checkout"
     from jaeger_ai.core.instance.instance import detect_install_method
     return detect_install_method()
 
@@ -241,31 +244,32 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
     rebuild when the Swift tree hasn't changed since the app was built.
 
     Flavor follows the install: a dev checkout (``dev/`` present) builds
-    debug (``--dev``); a clean product install builds ``--release``. Same
-    JaegerOS.app either way (one bundle since 2026-07-14 — dev is a launch
-    state, not a separate app) — mirrors install.sh."""
+    debug (``--dev``); a clean product install builds ``--release``. The same
+    Jaeger AI app is used either way (one bundle since 2026-07-14 — dev is a
+    launch state, not a separate app) — mirrors install.sh."""
     swift_dir = home / "jaeger_ai" / "interfaces" / "swift"
     script = swift_dir / "Scripts" / "build-app.sh"
     if not script.exists():
         return
-    flag = "--dev" if (home / "dev").exists() else "--release"
+    product = (home / ".jaeger-product-install").is_file()
+    flag = "--release" if product else ("--dev" if (home / "dev").exists() else "--release")
     built = swift_dir / ".build" / "JaegerOS.app"
     if only_if_stale:
         from jaeger_ai.cli._common import swift_app_is_stale
         if not swift_app_is_stale(home, built):
             return
     if shutil.which("swift") is None:
-        print(f"[jaeger update] ⚠ swift toolchain missing — JaegerOS.app NOT "
+        print(f"[jaeger update] ⚠ swift toolchain missing — Jaeger AI.app NOT "
               "(re)built and now lags the core; build when available:",
               file=sys.stderr)
         print(f"                 bash {script} {flag}", file=sys.stderr)
         return
     verb = "rebuilding" if built.exists() else "building"
-    print(f"[jaeger update] {verb} JaegerOS.app…")
+    print(f"[jaeger update] {verb} Jaeger AI.app…")
     rc = subprocess.run(["bash", str(script), flag],
                         stdout=subprocess.DEVNULL).returncode
     if rc == 0:
-        print(f"[jaeger update] ✓ JaegerOS.app ready")
+        print(f"[jaeger update] ✓ Jaeger AI.app ready")
     else:
         print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
               f"bash {script} {flag}", file=sys.stderr)
@@ -373,7 +377,9 @@ def _update_editable(*, ref: str | None = None) -> int:
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:
-    if method == "dev-checkout":            # editable / clone install (default 0.6+)
+    if method in ("dev-checkout", "product-checkout"):
+        # Both are editable Git trees. The product marker changes routing and
+        # ensures this full updater (including instance migration) is used.
         return _update_editable(ref=ref)
     cmd = _upgrade_command(method)
     if cmd is None:
@@ -518,9 +524,11 @@ def _cmd_update_argv(argv: list[str]) -> int:
     # but a clean curl install has no .git and updates by tarball —
     # label it honestly so operators don't think they're on a git clone.
     label = method
-    if method == "dev-checkout":
+    if method in ("dev-checkout", "product-checkout"):
         from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-        if not (PACKAGE_ROOT.parent / ".git").exists():
+        if method == "product-checkout":
+            label = "Jaeger AI product install"
+        elif not (PACKAGE_ROOT.parent / ".git").exists():
             label = "clean install (download + apply)"
     print(f"[jaeger update] install method: {label}")
 

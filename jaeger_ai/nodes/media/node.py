@@ -1,8 +1,8 @@
-"""MediaNode — ACT_MEDIA → decode → MediaFrame on the bus.
+"""MediaNode — display command → decode → display frames on the bus.
 
 Reuses the live image/gif adapters + our VideoAdapter (custom decoders) to
-turn a media file into RGBA FrameBuffers, streamed as ``MediaFrame`` so any
-renderer/device shows it. A new ACT_MEDIA preempts the current clip.
+turn a media file into RGBA FrameBuffers, streamed as ``DisplayFrame`` so any
+renderer/device shows it. A new display command preempts the current clip.
 """
 
 from __future__ import annotations
@@ -31,8 +31,7 @@ def media_kind(path: str) -> str:
 
 
 class MediaNode(Node):
-    """SUB ``/act/media`` → render frames → PUB ``/sense/media_frame`` +
-    ``/sense/media_state``. Streaming runs on its own worker thread."""
+    """SUB ``/act/display/play`` → PUB display frames and state."""
 
     def __init__(self, bus: Any, *, width: int = 480, height: int = 360,
                  name: str | None = None) -> None:
@@ -42,21 +41,22 @@ class MediaNode(Node):
         self._worker: threading.Thread | None = None
 
     def setup(self) -> None:
-        self.bus.subscribe(topics.ACT_MEDIA, self._on_command)
+        self.bus.subscribe(topics.ACT_DISPLAY_PLAY, self._on_command)
         self._worker = threading.Thread(target=self._run, name="media-stream", daemon=True)
         self._worker.start()
 
     def teardown(self) -> None:
         try:
-            self.bus.unsubscribe(topics.ACT_MEDIA, self._on_command)
+            self.bus.unsubscribe(topics.ACT_DISPLAY_PLAY, self._on_command)
         except Exception:  # noqa: BLE001
             pass
 
     # ── bus ───────────────────────────────────────────────────────
     def _on_command(self, msg: Any) -> None:
-        path = getattr(msg, "path", "") or ""
+        path = getattr(msg, "asset_path", "") or ""
         if path:
-            self._req.put((path, bool(getattr(msg, "loop", True))))
+            params = dict(getattr(msg, "params", {}) or {})
+            self._req.put((path, bool(params.get("loop", True))))
 
     def _adapter_for(self, path: str) -> Any:
         return {"gif": GifAdapter, "video": VideoAdapter}.get(media_kind(path), ImageAdapter)()
@@ -81,17 +81,23 @@ class MediaNode(Node):
         try:
             adapter.open(path, width=self._w, height=self._h, params={"loop": loop})
         except Exception:  # noqa: BLE001 — a bad file never kills the node
-            self.bus.publish(topics.MediaState(path=path, kind=kind, playing=False))
+            self.bus.publish(topics.DisplayState(
+                asset_path=path, adapter=kind, state="idle", reason="decode failed",
+            ))
             return
-        self.bus.publish(topics.MediaState(path=path, kind=kind, playing=True))
+        self.bus.publish(topics.DisplayState(
+            asset_path=path, adapter=kind, state="playing",
+        ))
         t0 = time.perf_counter()
         try:
             while not self._stop_event.is_set() and self._req.empty():
                 frame = adapter.next_frame(time.perf_counter() - t0)
                 if frame is None:
                     break
-                self.bus.publish(topics.MediaFrame(
-                    data=bytes(frame.data), width=frame.width, height=frame.height))
+                self.bus.publish(topics.DisplayFrame(
+                    data=bytes(frame.data), width=frame.width, height=frame.height,
+                    duration_ms=frame.duration_ms, is_final=frame.is_final,
+                ))
                 if kind == "image":
                     break                            # static — one frame, held by the renderer
                 if self._stop_event.wait((frame.duration_ms or 33) / 1000.0):
@@ -101,7 +107,9 @@ class MediaNode(Node):
                 adapter.close()
             except Exception:  # noqa: BLE001
                 pass
-            self.bus.publish(topics.MediaState(path=path, kind=kind, playing=False))
+            self.bus.publish(topics.DisplayState(
+                asset_path=path, adapter=kind, state="idle",
+            ))
 
 
 def make_media_node(bus: Any, config: dict | None = None) -> MediaNode:

@@ -1,4 +1,4 @@
-"""Slash-command parser for the Jaeger-OS TUI.
+"""Slash-command parser for the Jaeger AI TUI.
 
 Hermes-agent style: lines starting with ``/`` are commands, not
 prompts to the agent. The handler set covers admin operations the
@@ -90,7 +90,7 @@ def _help(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
 
     c.print()
     c.print(Text("┌" + "─" * width + "┐", style=ACCENT_BOLD))
-    c.print(Text("│" + "Jaeger-OS · slash commands".center(width) + "│",
+    c.print(Text("│" + "Jaeger AI · slash commands".center(width) + "│",
                  style=ACCENT_BOLD))
     c.print(Text("└" + "─" * width + "┘", style=ACCENT_BOLD))
 
@@ -521,7 +521,7 @@ def _model_list(ctx: SlashContext) -> SlashResult:
         found = discover_all(_resolve_cloud_key(ctx))
 
     # JROS in-process GGUF models.
-    ctx.console.print("\n[bold]JROS models[/] [dim]· registered, in-process[/]")
+    ctx.console.print("\n[bold]Jaeger AI models[/] [dim]· registered, in-process[/]")
     for m in found["jaeger"]:
         dot = "[green]●[/]" if m.get("path") else "[dim]○[/]"
         size = f"{m['size_gb']} GB" if m.get("size_gb") else ""
@@ -613,7 +613,7 @@ def _ensure_cloud_key(ctx: SlashContext, cfg: Any, provider: str) -> bool:
     The key resolves against ``cfg.external_model.api_key_credential`` —
     which the caller sets to the provider's own credential name — so
     each provider keeps a separate stored key."""
-    from jaeger_agent import credentials as creds
+    from jaeger_agent.core import credentials as creds
     from jaeger_ai.core.models.external_model import resolve_api_key
     from jaeger_ai.core.instance.instance import InstanceLayout
 

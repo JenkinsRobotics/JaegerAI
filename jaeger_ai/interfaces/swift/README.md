@@ -1,9 +1,9 @@
-# JaegerOS — native macOS desktop app
+# Jaeger AI — native macOS desktop app
 
-> The primary UI since 0.7.0. `JaegerOS.app` (default instance) and
-> `JaegerOS-dev.app` (the `jros-dev` dev instance) are built from this
-> package; `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
-> terminal first-class. (`launch.py` was removed in 0.7.)
+> The primary UI since 0.7.0. One `Jaeger AI.app` serves both normal and dev
+> instances; dev is runtime state, not a second bundle. `JaegerOS` remains the
+> internal SwiftPM target/executable name. `jaeger` launches the app, while
+> `jaeger --tui` / `jaeger dev --tui` keep the terminal first-class.
 
 One Swift process owns the tray card, the chat window, the avatar orb,
 the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
@@ -16,11 +16,12 @@ speaks **protocol v1** — the single wire contract in
 ## Build, test, run
 
 ```bash
-cd jaeger_os/interfaces/swift
+cd jaeger_ai/interfaces/swift
 swift build            # debug build
 swift test             # ProtocolFixtureTests — the wire contract
-Scripts/build-app.sh --dev   # .build/JaegerOS-dev.app (pins the jros-dev instance)
-Scripts/build-app.sh         # .build/JaegerOS.app (product)
+Scripts/build-app.sh --dev   # debug build; repo-root Jaeger AI.app
+Scripts/build-app.sh         # same app, normal instance at launch
+../../../jaeger launcher install  # Applications + Spotlight/Launchpad
 ```
 
 `xed Package.swift` opens the package in Xcode.

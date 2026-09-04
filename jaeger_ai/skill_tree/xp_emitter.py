@@ -60,7 +60,7 @@ class XpEmitter:
         self._listener_installed = True
         if not self._subscribed:
             self.bus.subscribe(
-                topics.SENSE_XP_AWARDED,
+                topics.SYS_SKILL_XP_AWARDED,
                 self._on_xp_event,
             )
             self._subscribed = True
@@ -69,7 +69,7 @@ class XpEmitter:
         if self._subscribed:
             try:
                 self.bus.unsubscribe(
-                    topics.SENSE_XP_AWARDED,
+                    topics.SYS_SKILL_XP_AWARDED,
                     self._on_xp_event,
                 )
             except Exception:  # noqa: BLE001

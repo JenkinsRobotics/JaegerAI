@@ -19,16 +19,18 @@ import re
 from pathlib import Path
 
 import pytest
+import jaeger_agent
 
 REPO = Path(__file__).resolve().parents[4]
-SKILLS_DIR = REPO / "jaeger_ai" / "agent" / "skills"
+AGENT_SOURCE_ROOT = Path(jaeger_agent.__file__).resolve().parent
+SKILLS_DIR = AGENT_SOURCE_ROOT / "skills"
 
 # Registration happens in three layers: module import (agent/tools/*),
 # agent-build time (main.py closures), and skill/plugin load time. Scanning
 # every source file for the registration decorators catches all three —
 # a bare ``import jaeger_os.agent.tools`` misses the latter two, which is
 # exactly how the delegate_task incident happened.
-_SOURCE_ROOT = REPO / "jaeger_ai"
+_SOURCE_ROOTS = (REPO / "jaeger_ai", AGENT_SOURCE_ROOT)
 
 
 def _decorated_tool_names(src: str) -> set[str]:
@@ -57,13 +59,14 @@ def registry_names() -> set[str]:
     import jaeger_agent.tools  # noqa: F401 — triggers module-level registration
     from jaeger_os.core.tools.tool_registry import get_tools
     names = {t.name for t in get_tools()}
-    for path in _SOURCE_ROOT.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            names |= _decorated_tool_names(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
+    for source_root in _SOURCE_ROOTS:
+        for path in source_root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                names |= _decorated_tool_names(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
     return names
 
 

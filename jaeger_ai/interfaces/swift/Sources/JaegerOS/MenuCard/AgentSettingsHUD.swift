@@ -733,7 +733,7 @@ private struct UpdatesSection: View {
     @ViewBuilder
     private func resultBanner(_ res: UpdateRunResult) -> some View {
         if res.restart_required {
-            Text("✓ Update applied — quit and reopen JaegerOS to finish.")
+            Text("✓ Update applied — quit and reopen Jaeger AI to finish.")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(HUD.accent)
         } else {
@@ -992,4 +992,3 @@ private struct AresPage: View {
         }
     }
 }
-

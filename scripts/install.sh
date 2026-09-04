@@ -8,7 +8,7 @@
 #   JAEGER_REF=0.9.0 curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/0.9.0/scripts/install.sh | bash
 #
 # Custom install location:
-#   JAEGER_HOME=/opt/jaeger curl -fsSL .../install.sh | bash
+#   JAEGER_HOME=/opt/JaegerAI curl -fsSL .../install.sh | bash
 #
 # What this does:
 #   1. Verify prereqs (git, python 3.11/3.12, C toolchain).
@@ -21,7 +21,8 @@
 #      jaeger-whisper-stt straight from GitHub — one install resolves
 #      the whole 4-package stack), app build, scaffold $JAEGER_HOME/
 #      .jaeger_os/ for instance state.
-#   4. Print next steps.
+#   4. On macOS, install/refresh the Jaeger AI Launchpad application.
+#   5. Print next steps.
 #
 # Re-running refreshes JaegerAI from the latest ref (git pull + editable
 # reinstall) while leaving .venv/ and .jaeger_os/ instance state
@@ -29,7 +30,25 @@
 
 set -euo pipefail
 
-JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
+# Since 0.12 the product name and default folder agree: Jaeger AI lives at
+# ~/JaegerAI. 0.9.x used ~/jaeger. A normal install detects that legacy tree,
+# copies its operator state after the new checkout is created, and leaves the
+# old tree untouched as a rollback copy. Explicit JAEGER_HOME always wins.
+JAEGER_HOME_WAS_SET=0
+[[ -n "${JAEGER_HOME+x}" ]] && JAEGER_HOME_WAS_SET=1
+JAEGER_HOME="${JAEGER_HOME:-$HOME/JaegerAI}"
+LEGACY_JAEGER_HOME="${JAEGER_LEGACY_HOME:-$HOME/jaeger}"
+MIGRATE_LEGACY=0
+if [[ "$JAEGER_HOME_WAS_SET" -eq 0 \
+      && "${JAEGER_MIGRATE_LEGACY:-1}" != "0" \
+      && -d "$LEGACY_JAEGER_HOME/.jaeger_os" ]]; then
+  # Also resume after a clone succeeded but state copying was interrupted.
+  # Never overwrite a target that already has its own operator-state root.
+  if [[ ! -e "$JAEGER_HOME" \
+        || (-d "$JAEGER_HOME/.git" && ! -e "$JAEGER_HOME/.jaeger_os") ]]; then
+    MIGRATE_LEGACY=1
+  fi
+fi
 JAEGER_REF="${JAEGER_REF:-master}"
 REPO_URL="${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}"
 # Raw URL for the upgrade hint (github.com → raw.githubusercontent.com, no .git).
@@ -43,6 +62,32 @@ cat <<EOF
   ref:              $JAEGER_REF
 
 EOF
+
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  echo "  legacy install:  $LEGACY_JAEGER_HOME"
+  echo "  migration:       instances + settings → $JAEGER_HOME"
+  echo
+
+  # Never copy live SQLite/WAL state. Match commands that START inside the
+  # legacy tree; unlike a broad pgrep, this does not match this installer just
+  # because the legacy path appears in its environment or arguments.
+  # macOS may report /private/var paths through their /var alias in `ps`.
+  LEGACY_PROCESS_ALIAS="${LEGACY_JAEGER_HOME#/private}"
+  LEGACY_PROCESS="$(ps -axo pid=,command= 2>/dev/null | while read -r pid command; do
+    if [[ "$command" == "$LEGACY_JAEGER_HOME/"* \
+          || ("$LEGACY_PROCESS_ALIAS" != "$LEGACY_JAEGER_HOME" \
+              && "$command" == "$LEGACY_PROCESS_ALIAS/"*) ]]; then
+      printf '%s %s\n' "$pid" "$command"
+      break
+    fi
+  done)"
+  if [[ -n "$LEGACY_PROCESS" ]]; then
+    echo "✗ Jaeger AI 0.9 is still running from $LEGACY_JAEGER_HOME" >&2
+    echo "  Quit the old app, then run this installer again." >&2
+    echo "  running: $LEGACY_PROCESS" >&2
+    exit 1
+  fi
+fi
 
 # 1. Prereqs — git is required
 if ! command -v git >/dev/null 2>&1; then
@@ -140,6 +185,27 @@ else
   git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_HOME" --quiet
 fi
 
+# Carry the complete operator-state root into the correctly named install.
+# This includes every agent instance, memory database, settings, credentials,
+# and the active-instance selector. The source remains intact for rollback.
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  echo "→ migrating Jaeger AI state from $LEGACY_JAEGER_HOME"
+  STATE_STAGE="$(mktemp -d "$JAEGER_HOME/.jaeger-state-migration.XXXXXX")"
+  trap '[[ -z "${STATE_STAGE:-}" ]] || rm -rf -- "$STATE_STAGE"' EXIT
+  if command -v ditto >/dev/null 2>&1; then
+    ditto "$LEGACY_JAEGER_HOME/.jaeger_os" "$STATE_STAGE/state"
+  else
+    mkdir -p "$STATE_STAGE/state"
+    cp -a "$LEGACY_JAEGER_HOME/.jaeger_os/." "$STATE_STAGE/state/"
+  fi
+  printf '%s\n' "$LEGACY_JAEGER_HOME" \
+    > "$STATE_STAGE/state/.migrated-from"
+  mv "$STATE_STAGE/state" "$JAEGER_HOME/.jaeger_os"
+  rmdir "$STATE_STAGE"
+  STATE_STAGE=""
+  echo "  ✓ instances and settings copied; legacy install retained for rollback"
+fi
+
 # 3. Run the in-repo installer (.venv + deps incl. the git-resolved
 #    jaeger-os/jaeger-kokoro-tts/jaeger-whisper-stt stack + app build +
 #    .jaeger_os/ scaffold). --product tells it this is an end-user
@@ -168,3 +234,15 @@ Upgrade later:
   curl -fsSL $RAW_URL | JAEGER_HOME=$JAEGER_HOME JAEGER_REF=$JAEGER_REF bash
 
 EOF
+
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  cat <<EOF
+Migration complete:
+  New app:       $JAEGER_HOME
+  Rollback copy: $LEGACY_JAEGER_HOME
+
+Launch Jaeger AI and confirm your agents, memory, and settings. Only then may
+you remove the old folder; the installer deliberately does not delete it.
+
+EOF
+fi

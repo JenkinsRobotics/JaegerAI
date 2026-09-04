@@ -68,7 +68,7 @@ class _EchoNode(Node):
         super().__init__(install_signal_handlers=False, **kwargs)
 
     def setup(self):
-        self.bus.subscribe(topics.SENSE_TRANSCRIPT, self._on_transcript)
+        self.bus.subscribe(topics.SENSE_STT_TRANSCRIPT, self._on_transcript)
 
     def _on_transcript(self, msg):
         self.bus.publish(topics.SpeechCommand(
@@ -210,7 +210,7 @@ def test_echo_node_round_trip(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.ACT_SPEECH, on_speech)
+    bus.subscribe(topics.ACT_SPEECH_SAY, on_speech)
 
     # Pretend to be the STT node publishing a transcript.
     cid = uuid.uuid4().hex

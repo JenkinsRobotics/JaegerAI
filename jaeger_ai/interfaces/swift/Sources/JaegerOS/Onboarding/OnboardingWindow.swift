@@ -240,7 +240,7 @@ private struct OnboardingRootView: View {
         VStack(spacing: 14) {
             HStack(spacing: 10) {
                 JaegerMechIcon(size: 22)
-                Text("JAEGER OS SETUP")
+                Text("JAEGER AI SETUP")
                     .font(.system(size: 11, weight: .semibold))
                     .kerning(2.2)
                     .foregroundStyle(Term.inkDim)
@@ -336,11 +336,11 @@ private struct WelcomeStep: View {
         VStack(spacing: 18) {
             Spacer()
             JaegerMechIcon(size: 72)
-            Text("REAL-WORLD LOCAL AGENTIC AGENT FRAMEWORK")
+            Text("LOCAL MULTIMODAL AGENT APPLICATION")
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(1.4)
                 .foregroundStyle(Color.white.opacity(0.55))
-            Text("Welcome to JAEGER OS")
+            Text("Welcome to JAEGER AI")
                 .font(.system(size: 38, weight: .heavy))
                 .foregroundStyle(.white)
             Text("Let's build your Jaeger — a local agent that lives\n"

@@ -581,10 +581,10 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     # Interactive permission approval over the wire (deny on timeout).
     try:
         from jaeger_os.core.safety.permissions import (
-            AllowAllProvider, current_policy)
+            AllowAllProvider, current_policy, install_confirmation_provider)
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
-            policy.confirmation = BridgeConfirmationProvider(proto, ctx)
+            install_confirmation_provider(BridgeConfirmationProvider(proto, ctx))
     except Exception:  # noqa: BLE001
         pass
 
@@ -767,7 +767,12 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
+    # ``argv is None`` means this function owns the command-line process.
+    # Callers that pass a list are embedding the bridge and must get a normal
+    # return; killing that host because some unrelated code imported Whisper
+    # earlier is never valid (and used to terminate pytest workers).
+    owns_process = argv is None
+    argv = sys.argv[1:] if owns_process else argv
 
     # The protocol stream is the REAL stdout.  Repoint sys.stdout at
     # stderr for the rest of the process so boot logs / stray prints land
@@ -1030,7 +1035,9 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:  # noqa: BLE001 — best-effort teardown
                 pass
         _emit(proto, protocol.bye_frame())
-        if "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules:
+        if owns_process and (
+            "llama_cpp" in sys.modules or "_pywhispercpp" in sys.modules
+        ):
             try:
                 proto.flush()
                 sys.stderr.flush()

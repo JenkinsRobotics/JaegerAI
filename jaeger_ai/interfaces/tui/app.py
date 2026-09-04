@@ -1,4 +1,4 @@
-"""Jaeger-OS TUI app — REPL loop with hermes-agent-inspired chrome.
+"""Jaeger AI TUI app — REPL loop with hermes-agent-inspired chrome.
 
 Parallel implementation to
 :mod:`jaeger_os.instance.lilith.interfaces.tui.app`. Same
@@ -322,7 +322,7 @@ class _TuiConfirmationProvider:
 
 
 class JaegerTUI:
-    """The interactive TUI driver for Jaeger-OS.
+    """The interactive TUI driver for Jaeger AI.
 
     Owns the Rich Console, the agent (lazy-built on first turn so
     `--banner-only` is cheap), the slash-command context, and the
@@ -693,7 +693,7 @@ class JaegerTUI:
         if is_err:
             # Recognise common model-server failures and surface a clear,
             # actionable hint instead of the raw HTTP body.
-            from jaeger_agent.errors import friendly_error_text
+            from jaeger_agent.core.errors import friendly_error_text
             body = friendly_error_text(body, model_name=self.model_name)
         else:
             self._last_answer = body   # for /copy

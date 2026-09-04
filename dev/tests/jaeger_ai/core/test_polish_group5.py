@@ -101,28 +101,29 @@ def test_wake_phrase_fuzzy_head_match_still_works():
     assert "pick up the trash" in remainder
 
 
-def test_continuous_extract_command_head_only(monkeypatch):
-    """The continuous-mode wake matcher (``_extract_command``)
+def test_continuous_extract_command_head_only():
+    """The continuous-mode wake matcher (``_find_wake``)
     enforces the same head-only contract."""
     from jaeger_whisper_stt.engine.continuous import (
         WhisperSTTContinuous,
     )
-    # Hand-build a stub instance with just the attrs _extract_command
+    # Hand-build a stub instance with just the attrs _find_wake
     # uses — saves wiring a full mic stream for a logic test.
     stub = WhisperSTTContinuous.__new__(WhisperSTTContinuous)
     stub.wake_phrases = ("hey jaeger",)
     stub.wake_match_threshold = 0.78
-    assert stub._extract_command("hey jaeger turn on the lights") == "turn on the lights"
-    assert stub._extract_command("turn the lights on hey jaeger") is None
+    assert stub._find_wake("hey jaeger turn on the lights") == (
+        True,
+        "turn on the lights",
+    )
+    assert stub._find_wake("turn the lights on hey jaeger") == (False, "")
 
 
 # ── VOICE-4: pre-wake transcripts surface visibly ───────────────────
 
 
-def test_pre_wake_transcript_is_logged_as_not_sent(capsys, monkeypatch):
-    """When wake-required mode is on AND no wake match, the
-    transcript should print as ``[mic heard X — not sent]`` AND not
-    land in the committed queue."""
+def test_pre_wake_transcript_is_reported_as_not_sent():
+    """A wake miss reaches the activity callback and not the command queue."""
     from jaeger_whisper_stt.engine.continuous import WhisperSTTContinuous
     stub = WhisperSTTContinuous.__new__(WhisperSTTContinuous)
     stub.require_wake_word = True
@@ -130,23 +131,14 @@ def test_pre_wake_transcript_is_logged_as_not_sent(capsys, monkeypatch):
     stub.wake_match_threshold = 0.78
     stub._state = "WAKE"
     stub._followup_deadline = 0.0
+    stub._command_deadline = 0.0
+    stub._output_drops = 0
     import queue as _queue
     stub._committed_q = _queue.Queue()
-
-    # 2026-06-07: stt_verbose() gates the "not sent" stdout print
-    # since the TUI's voice-activity log replaced inline debug output
-    # for the common case.  This test still verifies the BEHAVIOUR
-    # (phrase not committed) and asserts the verbose-mode log path
-    # still works when JAEGER_STT_VERBOSE=1.
-    import os
-    os.environ["JAEGER_STT_VERBOSE"] = "1"
-    try:
-        stub._commit("ambient podcast audio about nothing")
-        out = capsys.readouterr().out
-        assert "not sent" in out
-        assert "ambient podcast audio about nothing" in out
-    finally:
-        os.environ.pop("JAEGER_STT_VERBOSE", None)
+    missed: list[str] = []
+    stub.set_on_wake_miss(missed.append)
+    stub._commit("ambient podcast audio about nothing")
+    assert missed == ["ambient podcast audio about nothing"]
     # Nothing was queued — the load-bearing behavioural assertion.
     assert stub._committed_q.empty()
 

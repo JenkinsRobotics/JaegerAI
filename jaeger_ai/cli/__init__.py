@@ -20,7 +20,7 @@ Each subcommand has:
   - A ``run(args)`` function that does the work and exits
 
 Entry point:
-  ``jaeger`` shell shim → ``python -m jaeger_os.cli``
+  ``jaeger`` console script → ``python -m jaeger_ai.cli``
 
 Headless-safe: nothing here imports the LLM client or the audio
 plugins — operators can inspect instance state without booting the
@@ -35,7 +35,7 @@ __all__ = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point.  Dispatched from ``python -m jaeger_os.cli``."""
+    """CLI entry point. Dispatched from ``python -m jaeger_ai.cli``."""
     import argparse
     import sys
 
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="jaeger",
         description=(
-            "JROS operator console.  Every subcommand here is also "
+            "Jaeger AI operator console. Every subcommand here is also "
             "reachable from the GUI — terminal-first by design."
         ),
     )

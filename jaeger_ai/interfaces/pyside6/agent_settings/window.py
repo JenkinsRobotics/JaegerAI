@@ -289,7 +289,7 @@ class AgentSettingsWindow(QWidget):
         self._trait_sliders: dict[tuple[str, str], QSlider] = {}
 
         self.setObjectName("AgentSettings")
-        self.setWindowTitle(f"JROS — {self._name} · settings")
+        self.setWindowTitle(f"Jaeger AI — {self._name} · settings")
         self.resize(1080, 680)
         self.setStyleSheet(_QSS)
 

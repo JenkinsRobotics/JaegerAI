@@ -126,7 +126,7 @@ def test_mind_slot_availability_follows_the_standard_probe():
     — the same function messaging's ANY-OF gate uses) reports the mind
     slot ready, driven purely by requires_libraries against the REAL
     jaeger_os/agent/module.yaml — no special-casing for this slot."""
-    from jaeger_agent.availability import _slot_ready, clear_availability_caches
+    from jaeger_agent.core.availability import _slot_ready, clear_availability_caches
 
     clear_availability_caches()
     assert _slot_ready("mind") is True

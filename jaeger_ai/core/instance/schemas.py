@@ -155,7 +155,7 @@ class ModelConfig(BaseModel):
     extra_gguf_dirs: list[str] = Field(
         default_factory=list,
         description="Extra directories to scan for local .gguf models, "
-                    "beyond the repo models/, the JROS cache, and LM "
+                    "beyond the repo models/, the Jaeger AI cache, and LM "
                     "Studio. Add/remove with the model_location tool; "
                     "persisted here so the agent can extend the scan set "
                     "without editing core code.",

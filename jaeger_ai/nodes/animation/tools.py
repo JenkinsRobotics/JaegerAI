@@ -268,8 +268,8 @@ def _publish_animation(
     params: dict | None = None,
     wait: bool,
 ) -> dict[str, Any]:
-    """Publish an :class:`AnimationCommand` on the bus.  If ``wait``,
-    block briefly on the matching :class:`AnimationState` event."""
+    """Publish a :class:`DisplayCommand` on the bus.  If ``wait``,
+    block briefly on the matching :class:`DisplayState` event."""
     from jaeger_os.transport import topics
     from jaeger_os.nodes import runtime
 
@@ -277,7 +277,7 @@ def _publish_animation(
     bus = runtime.get_bus()
 
     cid = uuid.uuid4().hex
-    cmd = topics.AnimationCommand(
+    cmd = topics.DisplayCommand(
         adapter=adapter,
         asset_path=asset_path,
         duration_ms=duration_ms,
@@ -307,7 +307,7 @@ def _publish_animation(
     try:
         ack = bus.request(
             cmd,
-            ack_topic=topics.SENSE_ANIMATION_STATE,
+            ack_topic=topics.ACT_DISPLAY_STATE,
             timeout_s=_ACK_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001

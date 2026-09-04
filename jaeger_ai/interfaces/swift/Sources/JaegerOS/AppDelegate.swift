@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a missing bridge is the expected state for an operator
             // who has not started the agent yet, not an exception.
             splash.start("bridge", "Agent bridge",
-                         detail: "Starting JROS bridge and waiting for model readiness",
+                         detail: "Starting Jaeger AI and waiting for model readiness",
                          progress: 0.32)
             await AgentBridge.shared.tryConnect()
             if AgentBridge.shared.isConnected {
@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if shutdownStarted { return .terminateNow }
         shutdownStarted = true
+        MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()
             sender.reply(toApplicationShouldTerminate: true)

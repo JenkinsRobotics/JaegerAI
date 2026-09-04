@@ -15,28 +15,63 @@ import XCTest
 
 final class ProtocolFixtureTests: XCTestCase {
 
-    // Fixtures live beside protocol.py in jaeger_os/contract/ (the 0.9
-    // contract package — see dev/docs/vision/THREE_TIER_STRUCTURE.md),
-    // five directories up from the swift package: Tests file → repo
-    // navigation via #filePath keeps the single source of truth without
-    // copying.
-    private func fixtures() throws -> [String: Data] {
+    // Fixtures live beside protocol.py in the separately packaged JaegerOS
+    // framework. Resolve either a sibling development checkout or the active
+    // virtualenv; this keeps one source of truth after the repository split.
+    private func fixtureURL() throws -> URL {
+        let fileManager = FileManager.default
+        if let override = ProcessInfo.processInfo.environment["JAEGER_OS_PROTOCOL_FIXTURES"],
+           fileManager.fileExists(atPath: override) {
+            return URL(fileURLWithPath: override)
+        }
+
         let here = URL(fileURLWithPath: #filePath)
-        let jaegerOs = here                          // …/interfaces/swift/Tests/JaegerOSTests/x.swift
+        let repo = here
             .deletingLastPathComponent()             // JaegerOSTests
             .deletingLastPathComponent()             // Tests
             .deletingLastPathComponent()             // swift
             .deletingLastPathComponent()             // interfaces
-            .deletingLastPathComponent()             // jaeger_os
-        let url = jaegerOs
-            .appendingPathComponent("contract")
-            .appendingPathComponent("protocol_v1_fixtures.json")
-        let root = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: url)) as? [String: Any]
-        let proto = root?["proto"] as? String
+            .deletingLastPathComponent()             // jaeger_ai
+            .deletingLastPathComponent()             // JaegerAI repo
+        var candidates = [
+            repo.deletingLastPathComponent()
+                .appendingPathComponent("JaegerOS/jaeger_os/contract/protocol_v1_fixtures.json"),
+        ]
+        let venvLib = repo.appendingPathComponent(".venv/lib")
+        if let versions = try? fileManager.contentsOfDirectory(
+            at: venvLib,
+            includingPropertiesForKeys: nil
+        ) {
+            candidates += versions.map {
+                $0.appendingPathComponent(
+                    "site-packages/jaeger_os/contract/protocol_v1_fixtures.json"
+                )
+            }
+        }
+        if let found = candidates.first(where: {
+            fileManager.fileExists(atPath: $0.path)
+        }) {
+            return found
+        }
+        throw NSError(
+            domain: "ProtocolFixtureTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey:
+                "canonical JaegerOS protocol_v1_fixtures.json was not found"]
+        )
+    }
+
+    private func fixtureRoot() throws -> [String: Any] {
+        try JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtureURL())) as? [String: Any] ?? [:]
+    }
+
+    private func fixtures() throws -> [String: Data] {
+        let root = try fixtureRoot()
+        let proto = root["proto"] as? String
         XCTAssertEqual(proto, ProtocolV1.version,
                        "fixture proto version drifted from the shell's")
-        let frames = root?["frames"] as? [String: Any] ?? [:]
+        let frames = root["frames"] as? [String: Any] ?? [:]
         var out: [String: Data] = [:]
         for (name, obj) in frames {
             out[name] = try JSONSerialization.data(withJSONObject: obj)
@@ -192,18 +227,7 @@ final class ProtocolFixtureTests: XCTestCase {
         // args: ["text": …]) — assert the cross-language fixture pins the
         // exact shape that call serializes, so a Python-side rename breaks
         // here too.
-        let here = URL(fileURLWithPath: #filePath)
-        let url = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("contract")
-            .appendingPathComponent("protocol_v1_fixtures.json")
-        let root = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: url)) as? [String: Any]
-        let ops = root?["ops"] as? [String: Any]
+        let ops = try fixtureRoot()["ops"] as? [String: Any]
         guard let speak = ops?["command_speak"] as? [String: Any] else {
             return XCTFail("command_speak op fixture missing")
         }
@@ -218,18 +242,7 @@ final class ProtocolFixtureTests: XCTestCase {
         // query "instance_exists", query "setup_defaults", and command
         // "create_instance". Pin the shapes the shell serializes via
         // BridgeProcess.query/command so a Python-side rename breaks here.
-        let here = URL(fileURLWithPath: #filePath)
-        let url = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("contract")
-            .appendingPathComponent("protocol_v1_fixtures.json")
-        let root = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: url)) as? [String: Any]
-        let ops = root?["ops"] as? [String: Any]
+        let ops = try fixtureRoot()["ops"] as? [String: Any]
 
         guard let exists = ops?["query_instance_exists"] as? [String: Any] else {
             return XCTFail("query_instance_exists op fixture missing")
@@ -258,18 +271,7 @@ final class ProtocolFixtureTests: XCTestCase {
         // query "settings_catalog" (SettingsStore.loadSettingsCatalog) and
         // command "settings_set" (SettingsStore.setSetting). Pin the shapes
         // the shell serializes so a Python-side rename breaks here too.
-        let here = URL(fileURLWithPath: #filePath)
-        let url = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("contract")
-            .appendingPathComponent("protocol_v1_fixtures.json")
-        let root = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: url)) as? [String: Any]
-        let ops = root?["ops"] as? [String: Any]
+        let ops = try fixtureRoot()["ops"] as? [String: Any]
 
         guard let cat = ops?["query_settings_catalog"] as? [String: Any] else {
             return XCTFail("query_settings_catalog op fixture missing")
@@ -307,18 +309,7 @@ final class ProtocolFixtureTests: XCTestCase {
         // "run_update" (SettingsStore.runUpdate). Pin the shapes the shell
         // serializes + the result payloads it decodes, so a Python-side
         // rename breaks here too.
-        let here = URL(fileURLWithPath: #filePath)
-        let url = here
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("contract")
-            .appendingPathComponent("protocol_v1_fixtures.json")
-        let root = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: url)) as? [String: Any]
-        let ops = root?["ops"] as? [String: Any]
+        let ops = try fixtureRoot()["ops"] as? [String: Any]
 
         guard let check = ops?["query_check_update"] as? [String: Any] else {
             return XCTFail("query_check_update op fixture missing")

@@ -54,7 +54,7 @@ class AvatarChatWindow(QWidget):
         )
         name = agent_name(ctx)
         self.setObjectName("JrosAvatarChatWindow")
-        self.setWindowTitle(f"JROS — {name} · avatar + chat")
+        self.setWindowTitle(f"Jaeger AI — {name} · avatar + chat")
         self.resize(1240, 700)
         self.setStyleSheet(
             f"QWidget#JrosAvatarChatWindow {{ background-color: {_CANVAS}; }}"

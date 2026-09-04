@@ -22,6 +22,15 @@ import os
 import sys
 from pathlib import Path
 
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PRODUCT_MARKER = ".jaeger-product-install"
+
+
+def _is_product_checkout(repo: Path = _REPO_ROOT) -> bool:
+    """True for a one-line end-user install that intentionally retains Git."""
+    return (repo / _PRODUCT_MARKER).is_file()
+
 # Operator-console subcommands handled by jaeger_os.cli (argparse subparsers).
 # (0.9.6: "instances" removed — `jaeger agent` is the one management
 # surface; it rides the run path's verb dispatch, not this console.)
@@ -53,6 +62,8 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":
         return [py, "-m", "jaeger_ai.interfaces.mcp_server", *rest]
+    if cmd == "multimodal":
+        return [py, "-m", "jaeger_ai.interfaces.pyside6.multimodal", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
     if cmd == "update":
@@ -61,8 +72,10 @@ def _route(argv: list[str], py: str) -> list[str]:
         # fall through to the real end-user updater (cli/verbs/update_verb,
         # reached via the main dispatch). Detect the checkout by the repo
         # markers next to this package — a pip install has neither.
-        _repo = Path(__file__).resolve().parents[2]
-        if (_repo / "pyproject.toml").exists() and (_repo / ".git").exists():
+        _repo = _REPO_ROOT
+        if ((_repo / "pyproject.toml").exists()
+                and (_repo / ".git").exists()
+                and not _is_product_checkout(_repo)):
             return [py, "-m", "jaeger_ai.cli.devtools", "--update"]
         return [py, "-m", "jaeger_ai.cli.run", "update", *rest]
     if cmd in ("--dev", "dev"):

@@ -68,13 +68,13 @@ def test_kokoro_tts_engine_module_group_is_live(layout):
     group with zero catalog-code edits — the whole point of the
     single-source design this file pins."""
     rows = {g["name"]: g["count"] for g in groups(layout)}
-    assert rows.get("kokoro_tts") == 3
+    assert rows.get("kokoro_tts") == 5
     voice = describe(layout, "kokoro_tts.voice")
     assert voice["type"] == "str" and voice["group"] == "kokoro_tts"
     lang = describe(layout, "kokoro_tts.lang")
     assert lang["type"] == "str"
-    rate = describe(layout, "kokoro_tts.sample_rate")
-    assert rate["type"] == "int" and rate["advanced"] is True
+    warm = describe(layout, "kokoro_tts.warm")
+    assert warm["type"] == "bool" and warm["advanced"] is True
 
 
 def test_whisper_stt_engine_module_group_is_live(layout):
@@ -83,7 +83,7 @@ def test_whisper_stt_engine_module_group_is_live(layout):
     expose its ``whisper_stt`` group with zero catalog-code edits —
     same single-source contract the kokoro_tts test above pins."""
     rows = {g["name"]: g["count"] for g in groups(layout)}
-    assert rows.get("whisper_stt") == 3
+    assert rows.get("whisper_stt") == 29
     stt_mode = describe(layout, "whisper_stt.stt_mode")
     assert stt_mode["type"] == "str" and stt_mode["group"] == "whisper_stt"
     fast = describe(layout, "whisper_stt.fast_model_name")

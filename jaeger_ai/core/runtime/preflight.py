@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -190,7 +191,7 @@ def _check_install_method() -> Check:
             category="system",
             ok=True,
             detail=(
-                "installed via pip — legacy 0.2.2 layout. JROS 0.2.3+ "
+                "installed via pip — legacy 0.2.2 layout. Jaeger AI 0.2.3+ "
                 "ships as a git-clone install (the in-tree install.sh / "
                 "scripts/install.sh curl one-liner). Re-install via the "
                 "curl one-liner so upgrades become `git pull && "
@@ -566,8 +567,8 @@ def install_missing(checks: list[Check]) -> list[Check]:
 
 
 def format_report(checks: list[Check]) -> str:
-    """A grouped, human-readable report for ``jaeger-os --doctor``."""
-    lines = ["", "  Jaeger-OS — environment check", ""]
+    """A grouped, human-readable report for ``jaeger doctor``."""
+    lines = ["", "  Jaeger AI — environment check", ""]
     for category in ("instance", "daemon", "runtime", "memory", "plugins", "skills",
                      "voice", "vision", "external", "messaging", "system"):
         group = [c for c in checks if c.category == category]
@@ -597,7 +598,7 @@ def boot_warning(checks: list[Check]) -> str:
         return ""
     names = ", ".join(c.name for c in bad)
     out = [f"[jaeger] ⚠ {len(bad)} optional dependency issue(s): {names}",
-           "[jaeger]   run `jaeger-os --doctor` to install them"]
+           "[jaeger]   run `jaeger doctor` to install them"]
     return "\n".join(out)
 
 

@@ -27,7 +27,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 # OUTSIDE a checkout — detect that (no pyproject beside us), clone, and
 # re-exec inside the fresh clone.
 if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
-  JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
+  JAEGER_HOME="${JAEGER_HOME:-$HOME/JaegerAI}"
   echo "no checkout here — cloning JaegerAI to $JAEGER_HOME"
   git clone "${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}" "$JAEGER_HOME"
   exec bash "$JAEGER_HOME/install.sh" "$@"
@@ -98,6 +98,39 @@ if [[ ! -d "$VENV" ]]; then
 fi
 PIP="$VENV/bin/pip"
 
+# Resolve coordinated sibling checkouts before installing JaegerAI itself.
+# In development mode these are resolver overrides as well as later editable
+# overlays. Without the overrides, pip/uv tries the public release refs first
+# and cannot bootstrap a release branch that has not been tagged yet.
+if [[ "${JAEGER_DEV_SIBLINGS:-0}" == "1" ]]; then
+  SIBLING_ROOT="${JAEGER_SIBLING_ROOT:-$HOME/GITHUB}"
+else
+  SIBLING_ROOT=""
+fi
+SIBLINGS_FOUND=()
+[[ -n "$SIBLING_ROOT" ]] &&
+for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
+  if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
+    SIBLINGS_FOUND+=("$sib")
+  fi
+done
+
+DEV_OVERRIDE_FILE=""
+if [[ "${#SIBLINGS_FOUND[@]}" -gt 0 ]]; then
+  DEV_OVERRIDE_FILE="$(mktemp -t jaeger-dev-overrides.XXXXXX)"
+  trap '[[ -z "${DEV_OVERRIDE_FILE:-}" ]] || rm -f "$DEV_OVERRIDE_FILE"' EXIT
+  for sib in "${SIBLINGS_FOUND[@]}"; do
+    case "$sib" in
+      JaegerOS)          dist_name="jaeger-os" ;;
+      jaeger-agent)      dist_name="jaeger-agent" ;;
+      JaegerKokoroTTS)   dist_name="jaeger-kokoro-tts" ;;
+      JaegerWhisperSTT)  dist_name="jaeger-whisper-stt" ;;
+    esac
+    printf '%s @ file://%s/%s\n' "$dist_name" "$SIBLING_ROOT" "$sib" \
+      >> "$DEV_OVERRIDE_FILE"
+  done
+fi
+
 # 3. Install JaegerAI — EDITABLE, so the clone IS the live package: a
 #    `jaeger` command + `jaeger --version`, code still writable in place
 #    (the agent self-modifies its skills; you can hack the framework).
@@ -117,10 +150,19 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   fi
   if [[ -x "$UV" ]]; then
     echo "→ Installing JaegerAI (editable) via uv..."
-    "$UV" pip install --python "$VENV/bin/python" -e "$REPO_ROOT" --quiet
+    if [[ -n "$DEV_OVERRIDE_FILE" ]]; then
+      "$UV" pip install --python "$VENV/bin/python" \
+        --overrides "$DEV_OVERRIDE_FILE" -e "$REPO_ROOT" --quiet
+    else
+      "$UV" pip install --python "$VENV/bin/python" -e "$REPO_ROOT" --quiet
+    fi
   else
     echo "→ uv unavailable — installing JaegerAI (editable) via pip..."
-    "$PIP" install -e "$REPO_ROOT" --quiet
+    if [[ -n "$DEV_OVERRIDE_FILE" ]]; then
+      "$PIP" install --constraint "$DEV_OVERRIDE_FILE" -e "$REPO_ROOT" --quiet
+    else
+      "$PIP" install -e "$REPO_ROOT" --quiet
+    fi
   fi
 
   # 3b. Dev-clone sibling detection — OPT-IN ONLY (JAEGER_DEV_SIBLINGS=1).
@@ -133,25 +175,21 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   # half-finished refactor would break the station live. Hence the
   # explicit flag: nobody gets dev wiring by accident of directory
   # layout. (Field-caught by the operator on migration day, 2026-07-12.)
-  if [[ "${JAEGER_DEV_SIBLINGS:-0}" != "1" ]]; then
-    SIBLING_ROOT=""
-  else
-    SIBLING_ROOT="${JAEGER_SIBLING_ROOT:-$HOME/GITHUB}"
-  fi
-  SIBLINGS_FOUND=()
-  [[ -n "$SIBLING_ROOT" ]] &&
-  for sib in JaegerOS jaeger-agent JaegerKokoroTTS JaegerWhisperSTT; do
-    if [[ -f "$SIBLING_ROOT/$sib/pyproject.toml" ]]; then
-      SIBLINGS_FOUND+=("$sib")
-    fi
-  done
   if [[ "${#SIBLINGS_FOUND[@]}" -gt 0 ]]; then
     echo "→ dev sibling checkouts found (${SIBLINGS_FOUND[*]}) — installing editable over the git-resolved copies..."
     for sib in "${SIBLINGS_FOUND[@]}"; do
+      SIBLING_SPEC="$SIBLING_ROOT/$sib"
+      # JaegerAI ships the full multimodal voice pipeline. Preserve that
+      # dependency set when the reusable mind is overlaid from a local
+      # editable checkout; installing only its base package would silently
+      # drop Whisper/Kokoro/AEC from a developer launch environment.
+      if [[ "$sib" == "jaeger-agent" ]]; then
+        SIBLING_SPEC="$SIBLING_SPEC[multimodal-duplex]"
+      fi
       if [[ -x "$UV" ]]; then
-        "$UV" pip install --python "$VENV/bin/python" -e "$SIBLING_ROOT/$sib" --quiet
+        "$UV" pip install --python "$VENV/bin/python" -e "$SIBLING_SPEC" --quiet
       else
-        "$PIP" install -e "$SIBLING_ROOT/$sib" --quiet
+        "$PIP" install -e "$SIBLING_SPEC" --quiet
       fi
       echo "  ✓ $sib (editable, from $SIBLING_ROOT/$sib)"
     done
@@ -170,6 +208,14 @@ fi
 
 # 4. Scaffold .jaeger_os/ (idempotent) — operator state root
 mkdir -p "$REPO_ROOT/.jaeger_os/instances"
+
+# A one-line product install is intentionally still a Git checkout so the
+# public installer can refresh it efficiently. Mark it explicitly so the CLI
+# does not mistake it for a developer's working tree and bypass the full
+# end-user update + instance-migration workflow.
+if [[ "$PRODUCT_MODE" -eq 1 ]]; then
+  : > "$REPO_ROOT/.jaeger-product-install"
+fi
 
 # 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
 #    PRODUCT installs only — a dev checkout must never claim the global
@@ -199,9 +245,9 @@ if [[ "$PRODUCT_MODE" -eq 0 ]]; then
   # (git clone + ./install.sh, or a repeat run inside one). Build the
   # dev shell so the first thing a developer sees works.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerOS.app (debug)…"
+    echo; echo "building Jaeger AI.app (debug)…"
     "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
-      && echo "✓ JaegerOS.app ready (symlinked at repo root)" \
+      && echo "✓ Jaeger AI.app ready (symlinked at repo root)" \
       || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
   fi
   echo
@@ -215,15 +261,21 @@ else
   # PRODUCT app; it's what `./jaeger` launches. No Swift toolchain
   # (Linux/headless) → terminal remains the surface, quietly.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerOS.app (first build takes a minute)…"
+    echo; echo "building Jaeger AI.app (first build takes a minute)…"
     "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
-      && echo "✓ JaegerOS.app ready" \
+      && echo "✓ Jaeger AI.app ready" \
       || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
+  fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo; echo "installing Jaeger AI in Applications/Launchpad…"
+    "$REPO_ROOT/jaeger" launcher install \
+      || echo "⚠ App launcher install failed — retry with: ./jaeger launcher install"
   fi
   echo
   echo "Next steps:"
   echo "  ./jaeger agent create   # create your first agent"
   echo "  ./jaeger                # run it   (--tui for terminal)"
+  echo "  ./jaeger launcher install  # refresh the Applications/Launchpad icon"
   echo "  ./jaeger doctor         # environment + readiness check"
   echo
   echo "Optional:"

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from jaeger_agent import AgentBridge as _ReusableAgentBridge
-from jaeger_agent.messages import AgentActivity, ToolEvent
+from jaeger_agent.core.messages import AgentActivity, ToolEvent
 
 TurnFn = Callable[..., dict[str, Any]]
 
@@ -57,12 +57,16 @@ class _CompatibilityRuntime:
         _pipeline["chassis_bus"] = bus
         try:
             from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
-            from jaeger_os.core.safety.permissions import AllowAllProvider, current_policy
+            from jaeger_os.core.safety.permissions import (
+                AllowAllProvider,
+                current_policy,
+                install_confirmation_provider,
+            )
 
             policy = current_policy()
             if not isinstance(policy.confirmation, AllowAllProvider):
                 self._confirmation = BusConfirmationProvider(bus)
-                policy.confirmation = self._confirmation
+                install_confirmation_provider(self._confirmation)
         except Exception:  # noqa: BLE001 - optional approval routing
             self._confirmation = None
 

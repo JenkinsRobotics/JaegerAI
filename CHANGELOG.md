@@ -1,7 +1,27 @@
 # Changelog
 
-JROS follows pragmatic semver — major.minor.patch — with the
+Jaeger AI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
+
+## `0.12.0` — the multimodal face
+
+JaegerAI now ships a four-column PySide6 Multimodal face for camera,
+microphone, and typed input. It is deliberately only a device pump and Event
+renderer: `jaeger_agent` owns wake/endpoint policy, transcription,
+vision transport, agent turns, speech, and barge-in behavior. The regular
+PySide6 and native Swift menu cards open the face from a dedicated camera
+button, while `jaeger multimodal` launches it directly. The launcher performs
+an orderly runtime handoff and reconnects normal Chat when the multimodal
+window closes, preserving one model and instance-lock owner. A read-only
+preflight and model-free headless Event-routing selftest cover the deployment
+boundaries.
+
+The macOS product is now consistently branded **Jaeger AI** in its splash,
+menus, settings, permissions, terminal launch message, and Launchpad bundle;
+JaegerOS remains the underlying framework name in technical system details.
+Fresh installs use `~/JaegerAI`. The one-line installer detects legacy
+`~/jaeger` 0.9.x installs, refuses to copy live state, atomically migrates the
+complete `.jaeger_os/` state root, and retains the old tree for rollback.
 
 ## `0.11.0` — the app owns the wiring
 

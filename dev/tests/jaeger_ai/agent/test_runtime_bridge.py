@@ -157,6 +157,13 @@ def test_build_jaeger_agent_wires_skip_final_tools():
     assert agent.max_iterations == 24
 
 
+def test_build_jaeger_agent_can_lock_the_chatbot_lane_to_zero_tools():
+    agent = build_jaeger_agent(_FakeLocalClient(), tools_enabled=False)
+
+    assert agent.tools == []
+    assert agent.all_tools == []
+
+
 def test_build_jaeger_agent_picks_120s_stall_for_local_backend():
     """In-process llama-cpp can have legitimately slow cold-prefill
     plus a long decode on a 30B Q4. The default stall watchdog must

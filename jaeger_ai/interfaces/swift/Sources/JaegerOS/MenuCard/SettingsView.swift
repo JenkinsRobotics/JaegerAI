@@ -54,7 +54,7 @@ private struct AgentSettingsInfo: View {
             }
             Section {
                 Text("Persona, model, engine, voice, and permission settings "
-                     + "are owned by the agent. Edit them in the JROS chat "
+                     + "are owned by the agent. Edit them in the Jaeger AI chat "
                      + "app's Settings, or with `jaeger config` / "
                      + "`jaeger personality`.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -69,11 +69,11 @@ private struct AboutSettings: View {
     var body: some View {
         VStack(spacing: 12) {
             JaegerMechIcon(size: 56)
-            Text("JROS").font(.title2).bold()
-            Text("Real-world local agentic agent framework")
+            Text("Jaeger AI").font(.title2).bold()
+            Text("Agent application powered by JaegerAgent on JaegerOS")
                 .font(.callout).foregroundStyle(.secondary)
-            Link("github.com/JenkinsRobotics/JROS",
-                 destination: URL(string: "https://github.com/JenkinsRobotics/JROS")!)
+            Link("github.com/JenkinsRobotics/JaegerAI",
+                 destination: URL(string: "https://github.com/JenkinsRobotics/JaegerAI")!)
                 .font(.callout)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -28,6 +28,8 @@ same kind concurrently.
 from __future__ import annotations
 
 import atexit
+import contextlib
+import fcntl
 import os
 from pathlib import Path
 from typing import Callable
@@ -35,6 +37,25 @@ from typing import Callable
 
 def _slot_path(run_dir: Path, slot_name: str) -> Path:
     return run_dir / f"{slot_name}.pid"
+
+
+@contextlib.contextmanager
+def _claim_lock(run_dir: Path, slot_name: str):
+    """Serialise inspection and creation of one slot across processes.
+
+    ``O_EXCL`` arbitrates creation, but a PID file necessarily has a tiny
+    empty-file window between ``open`` and ``write``. Without this lock a
+    contender can mistake that live claim for corrupt stale state and unlink
+    it. The sidecar stays on disk; the advisory lock, not its presence, is the
+    ownership signal.
+    """
+    lock_path = run_dir / f".{slot_name}.pid.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -153,38 +174,35 @@ def acquire_slot_exclusive(
     def _noop() -> None:
         pass
 
-    for _ in range(5):  # bounded retries for stale-file reclaim races
-        try:
-            fd = os.open(pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
+    try:
+        lock_context = _claim_lock(run_dir, slot_name)
+        with lock_context:
             # Slot file already present — live owner, or a stale leftover?
-            try:
-                recorded = int(pid_file.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
-                recorded = -1
-            if recorded == me:
-                return True, me, _make_cleanup(pid_file)
-            if _pid_alive(recorded):
-                return False, recorded, _noop  # genuinely taken
-            # Stale (owner gone / garbage) → drop it and retry the
-            # exclusive create. If another racer unlinks + recreates
-            # first, our next O_EXCL fails and we read THEIR live pid.
-            try:
-                pid_file.unlink()
-            except OSError:
-                pass
-            continue
-        except OSError:
-            return False, None, _noop  # filesystem error → fail closed
-        else:
+            if pid_file.exists():
+                try:
+                    recorded = int(pid_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    recorded = -1
+                if recorded == me:
+                    return True, me, _make_cleanup(pid_file)
+                if _pid_alive(recorded):
+                    return False, recorded, _noop  # genuinely taken
+                try:
+                    pid_file.unlink()
+                except OSError:
+                    return False, None, _noop
+
+            fd = os.open(pid_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             try:
                 os.write(fd, str(me).encode("utf-8"))
             finally:
                 os.close(fd)
-            cleanup = _make_cleanup(pid_file)
-            atexit.register(cleanup)
-            return True, me, cleanup
-    return False, None, _noop
+    except OSError:
+        return False, None, _noop  # filesystem error → fail closed
+
+    cleanup = _make_cleanup(pid_file)
+    atexit.register(cleanup)
+    return True, me, cleanup
 
 
 __all__ = ["acquire_slot", "acquire_slot_exclusive", "existing_slot_pid"]
