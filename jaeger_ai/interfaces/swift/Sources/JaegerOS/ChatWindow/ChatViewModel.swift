@@ -111,6 +111,13 @@ final class ChatViewModel: ObservableObject {
     /// view.  The view does ``$chat.composerText`` for the binding.
     @Published var composerText: String = ""
 
+    /// Agentic is the product default. Turning this off keeps the same loaded
+    /// Gemma and session-facing UI but sends the turn through the isolated,
+    /// tool-free chatbot lane in the bridge-owned runtime.
+    @Published var agenticTools: Bool = true
+    @Published var attachedImageName: String? = nil
+    @Published var attachedImageDataURI: String? = nil
+
     /// True while a STT pass is running.  Disables the send button,
     /// shows a "transcribing…" indicator in the status bar.
     @Published private(set) var isTranscribing: Bool = false
@@ -389,7 +396,7 @@ final class ChatViewModel: ObservableObject {
     /// return }``, with the composer already cleared by the caller —
     /// real data loss, not just a missing spinner). It now queues and
     /// drains in order once the in-flight turn finishes.
-    func send(_ text: String) async {
+    func send(_ text: String, imageDataURI: String? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -400,10 +407,10 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        await runTurn(trimmed, appendUserBubble: true)
+        await runTurn(trimmed, imageDataURI: imageDataURI, appendUserBubble: true)
         while !pendingSends.isEmpty {
             let next = pendingSends.removeFirst()
-            await runTurn(next, appendUserBubble: false)
+            await runTurn(next, imageDataURI: nil, appendUserBubble: false)
         }
     }
 
@@ -411,7 +418,11 @@ final class ChatViewModel: ObservableObject {
     /// queued send — ``send`` already appended its bubble the moment it
     /// was typed, so the transcript shows it right away instead of only
     /// once it's finally this message's turn to run.
-    private func runTurn(_ trimmed: String, appendUserBubble: Bool) async {
+    private func runTurn(
+        _ trimmed: String,
+        imageDataURI: String?,
+        appendUserBubble: Bool
+    ) async {
         // Late-bind the display prefs if the init-time fetch raced the
         // transport coming up.
         if !displayConfigLoaded { await loadDisplayConfig() }
@@ -450,7 +461,9 @@ final class ChatViewModel: ObservableObject {
             // telemetry). The session key keeps THIS window's
             // conversation isolated on the Python side.
             let reply = try await agent.sendChat(text: trimmed,
-                                                 session: sessionKey)
+                                                 session: sessionKey,
+                                                 agenticTools: agenticTools,
+                                                 imageDataURI: imageDataURI)
             let replyText = reply.text
 
             // display.activity_trace post-turn disposition for the tool

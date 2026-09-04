@@ -7,7 +7,8 @@ memory, and personality pipeline supplied through this adapter.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 class _PipelineEventAdapter:
@@ -63,6 +64,26 @@ class JaegerAIRuntime:
         self._vision_handler: Any = None
         self._chatbot_sessions: dict[str, Any] = {}
         self._closed = False
+
+    @classmethod
+    def from_boot(cls, boot: Any) -> JaegerAIRuntime:
+        """Borrow an already-booted Jaeger AI brain without loading another.
+
+        The native app bridge owns ``boot`` and its model/instance lock.  Thin
+        faces (notably the attached multimodal workspace) use this adapter so
+        text, image, and spoken turns reach that exact AgentRuntime rather than
+        constructing a second Gemma process.
+        """
+        runtime = cls.__new__(cls)
+        runtime.bus = None
+        runtime.config = {}
+        runtime.boot = boot
+        runtime.client = boot.client
+        runtime._confirmation = None
+        runtime._vision_handler = None
+        runtime._chatbot_sessions = {}
+        runtime._closed = False
+        return runtime
 
     def start(self, *, events: Any, bus: Any) -> None:
         from jaeger_ai.main import _pipeline
@@ -309,7 +330,9 @@ class JaegerAIRuntime:
         self.boot.cleanup()
 
 
-def create_runtime(*, bus: Any, config: Mapping[str, Any] | None = None) -> JaegerAIRuntime:
+def create_runtime(
+    *, bus: Any, config: Mapping[str, Any] | None = None
+) -> JaegerAIRuntime:
     """Factory consumed by JaegerAgent's manifest/programmatic API."""
 
     return JaegerAIRuntime(bus=bus, config=config)

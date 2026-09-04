@@ -37,11 +37,15 @@ or ``python -m jaeger_os.interfaces.bridge [instance_name]``.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import queue as _queue
+import socket
 import sys
 import threading
+from pathlib import Path
 from typing import Any, TextIO
 
 _emit_lock = threading.Lock()
@@ -55,13 +59,49 @@ def _emit(out: TextIO, obj: dict[str, Any]) -> None:
         out.flush()
 
 
+def attached_face_socket_path(instance_root: str | Path) -> Path:
+    """Return a deterministic AF_UNIX path, respecting macOS's 104-byte cap."""
+    preferred = Path(instance_root) / "run" / "multimodal.sock"
+    if len(os.fsencode(preferred)) <= 96:
+        return preferred
+    digest = hashlib.sha256(str(Path(instance_root).resolve()).encode()).hexdigest()[
+        :16
+    ]
+    return Path("/tmp") / f"jaeger-ai-{os.getuid()}-{digest}.sock"
+
+
 def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
     """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
     turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
     guard and the wire frame never drift apart."""
     ctx.busy = busy
     from jaeger_os.contract import protocol
-    _emit(out, protocol.state_frame(busy, session))
+
+    _broadcast(ctx, protocol.state_frame(busy, session), fallback=out)
+
+
+def _broadcast(
+    ctx: "_Ctx", obj: dict[str, Any], *, fallback: TextIO | None = None
+) -> None:
+    """Send shared state/tool events to every attached application surface."""
+    outputs = list(ctx.outputs)
+    if not outputs and fallback is not None:
+        outputs = [fallback]
+    for output in outputs:
+        try:
+            _emit(output, obj)
+        except (BrokenPipeError, OSError, ValueError):
+            ctx.outputs.discard(output)
+
+
+def _reply_frame(
+    protocol: Any, req: dict[str, Any], *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    """Build a reply and echo an optional request id for attached faces."""
+    frame = protocol.reply_frame(*args, **kwargs)
+    if req.get("id") is not None:
+        frame["id"] = req["id"]
+    return frame
 
 
 def _model_name(boot: Any) -> str | None:
@@ -87,6 +127,7 @@ def _active_character(boot: Any) -> tuple[str | None, str | None]:
     a miss is cosmetic."""
     try:
         from jaeger_ai.characters.character import active_character
+
         root = getattr(getattr(boot, "layout", None), "root", None)
         if root is not None:
             c = active_character(root)
@@ -103,8 +144,10 @@ def _effective_icon(boot: Any, character: Any) -> str | None:
     its own face once the operator sets one, while a fresh instance still shows
     the character card as a default (which follows a persona switch)."""
     from pathlib import Path
+
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
         lay = getattr(boot, "layout", None)
         avatar = (load_yaml(lay.identity_path, Identity).avatar or "").strip()
         if avatar:
@@ -127,6 +170,7 @@ def _agent_name(boot: Any) -> str | None:
     named), NEVER the character. Every branded surface leads with this."""
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
         lay = getattr(boot, "layout", None)
         return (load_yaml(lay.identity_path, Identity).name or "").strip() or None
     except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
@@ -157,6 +201,7 @@ def _suggested_name(instance: str | None) -> str | None:
 
 def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
     from jaeger_ai.characters.character import layer_items
+
     stats: list[dict[str, Any]] = []
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -164,33 +209,54 @@ def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
             stats += [{"key": k, "val": float(v)} for k, v in layer_items(sub)]
     icon = c.icon_path()
     card = c.card_path()
-    return {"id": c.id, "name": c.name, "role": c.role, "level": c.level,
-            "revision": c.revision, "icon": str(icon) if icon else None,
-            "card": str(card) if card else None,
-            "active": c.id == active_id, "bound": c.id == bound_id, "stats": stats}
+    return {
+        "id": c.id,
+        "name": c.name,
+        "role": c.role,
+        "level": c.level,
+        "revision": c.revision,
+        "icon": str(icon) if icon else None,
+        "card": str(card) if card else None,
+        "active": c.id == active_id,
+        "bound": c.id == bound_id,
+        "stats": stats,
+    }
 
 
 def _char_detail(c: Any) -> dict[str, Any]:
     from jaeger_ai.characters.character import layer_items
+
     traits: dict[str, dict[str, float]] = {}
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
         if sub is not None:
             traits[layer] = {k: round(float(v), 3) for k, v in layer_items(sub)}
     icon = c.icon_path()
-    return {"id": c.id, "name": c.name, "role": c.role, "level": c.level,
-            "voice_tone": c.voice_tone, "voice_id": c.voice_id,
-            "soul": c.soul, "backstory": c.backstory,
-            "custom_instructions": getattr(c.personality, "custom_instructions", ""),
-            "icon": str(icon) if icon else None, "traits": traits}
+    return {
+        "id": c.id,
+        "name": c.name,
+        "role": c.role,
+        "level": c.level,
+        "voice_tone": c.voice_tone,
+        "voice_id": c.voice_id,
+        "soul": c.soul,
+        "backstory": c.backstory,
+        "custom_instructions": getattr(c.personality, "custom_instructions", ""),
+        "icon": str(icon) if icon else None,
+        "traits": traits,
+    }
 
 
 def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
     from jaeger_ai.characters.character import (
-        active_character, active_character_id, bound_character_id, list_characters,
+        active_character,
+        active_character_id,
+        bound_character_id,
+        list_characters,
     )
+
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
     if what == "identity":
@@ -208,11 +274,17 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         avatar = None
         try:
             from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
             avatar = load_yaml(lay.identity_path, Identity).avatar
         except Exception:  # noqa: BLE001
             avatar = None
-        return {"agent_name": _agent_name(boot), "character": name, "icon": icon,
-                "avatar": avatar, "model": _model_name(boot)}
+        return {
+            "agent_name": _agent_name(boot),
+            "character": name,
+            "icon": icon,
+            "avatar": avatar,
+            "model": _model_name(boot),
+        }
     if what == "characters":
         active_id = active_character_id(root) if root else None
         bound_id = bound_character_id(root) if root else None
@@ -225,32 +297,39 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return _char_detail(c) if c is not None else None
     if what == "config":
         from jaeger_ai.core.instance.schemas import Config, Identity, load_yaml
+
         cfg = load_yaml(lay.config_path, Config)
         ident = load_yaml(lay.identity_path, Identity)
         # v1 additive: ``avatar`` = the raw custom profile picture (None → the
         # tab shows "using the character card"); ``avatar_effective`` = the
         # resolved path actually displayed (custom, else the character card).
-        return {"name": ident.name, "role": ident.role,
-                "avatar": ident.avatar,
-                "avatar_effective": _effective_icon(
-                    boot, active_character(root) if root else None),
-                "default_mode": cfg.interaction.default_mode, "ui": cfg.interaction.ui,
-                "voice_enabled": cfg.voice.enabled, "speak_replies": cfg.voice.speak_replies,
-                "speech_engine": cfg.voice.speech_engine,
-                "show_latency": cfg.display.show_latency,
-                "show_tool_activity": cfg.display.show_tool_activity,
-                "activity_trace": cfg.display.activity_trace,
-                "turn_separators": cfg.display.turn_separators,
-                "idle_minutes": cfg.deep_think.auto_idle_minutes,
-                "allow_lazy_installs": cfg.security.allow_lazy_installs,
-                "permission_mode": cfg.permissions.mode,
-                # v1 additive — the two context-window knobs (tokens).
-                # model_ctx sizes the WORKER lane (agent loop KV);
-                # model_aux_ctx sizes the AUX lane (persona filter /
-                # finalizer / reflection side calls, 0 = disabled).
-                # Both apply on agent restart, not live.
-                "model_ctx": cfg.model.ctx,
-                "model_aux_ctx": cfg.model.aux_ctx}
+        return {
+            "name": ident.name,
+            "role": ident.role,
+            "avatar": ident.avatar,
+            "avatar_effective": _effective_icon(
+                boot, active_character(root) if root else None
+            ),
+            "default_mode": cfg.interaction.default_mode,
+            "ui": cfg.interaction.ui,
+            "voice_enabled": cfg.voice.enabled,
+            "speak_replies": cfg.voice.speak_replies,
+            "speech_engine": cfg.voice.speech_engine,
+            "show_latency": cfg.display.show_latency,
+            "show_tool_activity": cfg.display.show_tool_activity,
+            "activity_trace": cfg.display.activity_trace,
+            "turn_separators": cfg.display.turn_separators,
+            "idle_minutes": cfg.deep_think.auto_idle_minutes,
+            "allow_lazy_installs": cfg.security.allow_lazy_installs,
+            "permission_mode": cfg.permissions.mode,
+            # v1 additive — the two context-window knobs (tokens).
+            # model_ctx sizes the WORKER lane (agent loop KV);
+            # model_aux_ctx sizes the AUX lane (persona filter /
+            # finalizer / reflection side calls, 0 = disabled).
+            # Both apply on agent restart, not live.
+            "model_ctx": cfg.model.ctx,
+            "model_aux_ctx": cfg.model.aux_ctx,
+        }
     if what == "settings_catalog":
         # The schema-derived settings surface — the SAME catalog `jaeger
         # settings` drives. Grouped {group: [descriptor, ...]}; the native
@@ -258,23 +337,31 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # int/float→field, str→field). No hand-enumerated field list on
         # either side — a new setting is one annotated Field in schemas.py.
         from jaeger_ai.core.settings.catalog import catalog as _catalog
-        return _catalog(lay, advanced=bool(args.get("advanced", True)),
-                        group=args.get("group"))
+
+        return _catalog(
+            lay, advanced=bool(args.get("advanced", True)), group=args.get("group")
+        )
     if what == "permissions":
         from jaeger_ai.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
+
         cfg = load_yaml(lay.config_path, Config)
-        return {"mode": cfg.permissions.mode,
-                "granted": sorted(PermissionGrants.load(root).persistent)}
+        return {
+            "mode": cfg.permissions.mode,
+            "granted": sorted(PermissionGrants.load(root).persistent),
+        }
     if what == "instance_exists":
         # v1 additive: first-run probe — does the resolved instance
         # exist on disk? Works pre-boot (fast-ready) and pre-instance.
-        return {"exists": bool(lay is not None and lay.exists()),
-                "root": str(lay.root) if lay is not None else None}
+        return {
+            "exists": bool(lay is not None and lay.exists()),
+            "root": str(lay.root) if lay is not None else None,
+        }
     if what == "setup_defaults":
         # v1 additive: host tier + recommended models + voices for the
         # native onboarding — the same data the CLI wizard prints.
         from jaeger_ai.core.instance.setup_wizard import setup_defaults
+
         return setup_defaults()
     if what == "list_sessions":
         # Runway item 4 (0.8): the native History surface's row list —
@@ -282,6 +369,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # first. Works pre-boot (the store is layout-keyed, not agent-
         # keyed) so History can populate while the model is still warming.
         from jaeger_ai.core.sessions import get_store
+
         store = get_store(lay)
         if store is None:
             return []
@@ -295,11 +383,11 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # ``main.resume_session_from_store`` for why this is a full
         # replay, not the usual clean-slate / lossy-digest resume.
         from jaeger_ai.main import resume_session_from_store
+
         sid = str(args.get("id") or "").strip()
         if not sid:
             return []
-        return resume_session_from_store(
-            getattr(boot, "client", None), sid, layout=lay)
+        return resume_session_from_store(getattr(boot, "client", None), sid, layout=lay)
     if what == "check_update":
         # In-app updates (0.8): {current, latest, available, notes_url}.
         # Cached under <instance>/run/update_check.json for ~24h — see
@@ -307,6 +395,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # tray polling doesn't hammer the GitHub API. Works pre-boot
         # (layout-keyed cache, no client needed).
         from jaeger_ai.core.version_check import cached_update_status
+
         return cached_update_status(lay)
     return None
 
@@ -317,23 +406,32 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     lay = getattr(boot, "layout", None)
     try:
         import jaeger_ai.characters.character as ch
+
         if cmd == "select_character":
-            ch.set_active_character(root, args["id"]); return True, None
+            ch.set_active_character(root, args["id"])
+            return True, None
         if cmd == "make_default":
-            ch.bind_character(root, args["id"]); return True, None
+            ch.bind_character(root, args["id"])
+            return True, None
         if cmd == "save_profile":
             c = ch.active_character(root)
             ch.save_character_profile(
-                c.root, role=args.get("role"), voice_tone=args.get("voice_tone"),
-                voice_id=args.get("voice_id"), soul=args.get("soul"),
+                c.root,
+                role=args.get("role"),
+                voice_tone=args.get("voice_tone"),
+                voice_id=args.get("voice_id"),
+                soul=args.get("soul"),
                 backstory=args.get("backstory"),
-                custom_instructions=args.get("custom_instructions"))
+                custom_instructions=args.get("custom_instructions"),
+            )
             return True, None
         if cmd == "save_traits":
             c = ch.active_character(root)
-            ch.save_character_traits(c.root, args.get("traits") or {}); return True, None
+            ch.save_character_traits(c.root, args.get("traits") or {})
+            return True, None
         if cmd == "save_config":
             from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+
             cfg = load_yaml(lay.config_path, Config)
             _apply_config(cfg, args)
             dump_yaml(lay.config_path, Config.model_validate(cfg.model_dump()))
@@ -347,6 +445,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             import shutil
 
             from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
+
             data = load_yaml(lay.identity_path, Identity).model_dump()
             name = str(args.get("name") or "").strip()
             if name:
@@ -357,14 +456,16 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
                 if srcp is not None and srcp.is_file():
                     dst = Path(lay.root) / f"avatar{srcp.suffix.lower() or '.png'}"
                     shutil.copy2(srcp, dst)
-                    data["avatar"] = dst.name          # relative to the instance
+                    data["avatar"] = dst.name  # relative to the instance
                 else:
-                    data["avatar"] = None              # cleared → character card
+                    data["avatar"] = None  # cleared → character card
             dump_yaml(lay.identity_path, Identity.model_validate(data))
             return True, None
         if cmd == "revoke_permission":
             from jaeger_os.core.safety.permissions import PermissionGrants
-            PermissionGrants.load(root).revoke(args["skill"]); return True, None
+
+            PermissionGrants.load(root).revoke(args["skill"])
+            return True, None
         if cmd == "speak":
             # The agent's REAL voice for the native app's speaker button:
             # synthesize via the Python-side Kokoro node with the ACTIVE
@@ -382,16 +483,18 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             def _speak_bg() -> None:
                 try:
                     from jaeger_agent.tools.speak import speak
+
                     out = speak(text=text)
                     if not out.get("spoken"):
-                        print(f"[bridge] speak failed: {out.get('reason')}",
-                              file=sys.stderr, flush=True)
+                        print(
+                            f"[bridge] speak failed: {out.get('reason')}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
                 except Exception as exc:  # noqa: BLE001 — never crash the bridge
-                    print(f"[bridge] speak crashed: {exc}",
-                          file=sys.stderr, flush=True)
+                    print(f"[bridge] speak crashed: {exc}", file=sys.stderr, flush=True)
 
-            threading.Thread(target=_speak_bg, name="bridge-speak",
-                             daemon=True).start()
+            threading.Thread(target=_speak_bg, name="bridge-speak", daemon=True).start()
             return True, None
         return False, f"unknown command: {cmd}"
     except Exception as exc:  # noqa: BLE001 — a bad command reports, never crashes the bridge
@@ -400,8 +503,10 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
 
 def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
     fields = {
-        "default_mode": ("interaction", "default_mode"), "ui": ("interaction", "ui"),
-        "voice_enabled": ("voice", "enabled"), "speak_replies": ("voice", "speak_replies"),
+        "default_mode": ("interaction", "default_mode"),
+        "ui": ("interaction", "ui"),
+        "voice_enabled": ("voice", "enabled"),
+        "speak_replies": ("voice", "speak_replies"),
         "speech_engine": ("voice", "speech_engine"),
         "show_latency": ("display", "show_latency"),
         "show_tool_activity": ("display", "show_tool_activity"),
@@ -428,7 +533,12 @@ class _Ctx:
         self.layout: Any = None
         self.boot: Any = None
         self.client: Any = None
-        self.cron: Any = None                 # CronRunner — fires scheduled prompts
+        self.cron: Any = None  # CronRunner — fires scheduled prompts
+        self.runtime: Any = None  # adapter borrowing ``boot`` (one brain)
+        self.vision_node: Any = None  # bridge-owned mmproj, loaded on request
+        self.outputs: set[TextIO] = set()  # native shell + attached faces
+        self.sidecar: Any = None
+        self.tts_render_lock = threading.Lock()
         # True while ANY turn (chat, slash, or a fired cron prompt) is
         # running — the cheap "is a turn in flight?" signal run_update's
         # guard reads before shelling out (an update mid-turn would race
@@ -437,7 +547,7 @@ class _Ctx:
         # fire-and-forget, not queryable.
         self.busy = False
         self.boot_error: str | None = None
-        self.booted = threading.Event()      # set on success OR failure
+        self.booted = threading.Event()  # set on success OR failure
         # Pending permission requests: id → (event, answer-slot). An answer
         # that arrives before the request is registered (pipelined client,
         # tests) parks in ``early`` and resolves on registration.
@@ -493,11 +603,13 @@ class BridgeConfirmationProvider:
         self._proto = proto
         self._ctx = ctx
         from jaeger_os.core.safety.permissions import PermissionGrants
+
         root = getattr(getattr(ctx, "layout", None), "root", None)
         self._grants = PermissionGrants.load(root)
 
     def confirm(self, request: object) -> bool:
         from jaeger_os.contract import protocol
+
         skill = getattr(request, "skill", "") or ""
         if self._grants.is_granted(skill):
             return True  # already approved (console "always", or ours) — no frame
@@ -511,9 +623,12 @@ class BridgeConfirmationProvider:
             slot.append(early)
             evt.set()
         op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
-        _emit(self._proto, protocol.request_frame(
-            rid, "approval", f"Allow {op}?",
-            options=("once", "always", "deny")))
+        _emit(
+            self._proto,
+            protocol.request_frame(
+                rid, "approval", f"Allow {op}?", options=("once", "always", "deny")
+            ),
+        )
         try:
             if not evt.wait(self.TIMEOUT_S):
                 return False
@@ -530,8 +645,10 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     """Background boot: load the model, wire tool/permission forwarding,
     then stream the ``agent_state`` transition. Never raises."""
     from jaeger_os.contract import protocol
+
     try:
         from jaeger_ai.main import boot_for_tui
+
         # prewarm_model=False: the generic two-pass prewarm primes a
         # DIFFERENT prefix (bare boot prompt + unfiltered registry
         # schemas) than the one the app's first turn actually sends, so
@@ -551,6 +668,11 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     ctx.boot = boot
     ctx.client = boot.client
+    # Adapt the bridge-owned boot; this constructor performs NO model boot.
+    # Attached faces call this exact runtime over the local socket below.
+    from jaeger_ai.core.mind_runtime import JaegerAIRuntime
+
+    ctx.runtime = JaegerAIRuntime.from_boot(boot)
 
     # First boot on this machine: trigger every TCC prompt now (macOS
     # can't grant in install.sh — grants attach to THIS app identity),
@@ -558,6 +680,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     # never re-prompts, never blocks boot.
     try:
         from jaeger_ai.core.diagnostics.tcc_permissions import first_boot_preflight
+
         first_boot_preflight()
     except Exception:  # noqa: BLE001
         pass
@@ -566,14 +689,62 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     class _ToolEmitter:
         def publish(self, event: str, **payload: object) -> None:
             if event == "tool.progress":
-                _emit(proto, protocol.tool_frame(
-                    str(payload.get("name", "")),
-                    str(payload.get("phase", "start")),
-                    float(payload.get("elapsed_s") or 0.0),
-                    detail=str(payload.get("detail", ""))))
+                _broadcast(
+                    ctx,
+                    protocol.tool_frame(
+                        str(payload.get("name", "")),
+                        str(payload.get("phase", "start")),
+                        float(payload.get("elapsed_s") or 0.0),
+                        detail=str(payload.get("detail", "")),
+                        session=str(payload.get("session", "")),
+                    ),
+                    fallback=proto,
+                )
+            elif event == "tool.output":
+                _broadcast(
+                    ctx,
+                    {
+                        "type": "agent_event",
+                        "topic": "/sense/tool",
+                        "name": str(payload.get("name", "")),
+                        "phase": "output"
+                        if payload.get("ok", True)
+                        else "error-output",
+                        "elapsed_s": float(payload.get("elapsed_s") or 0.0),
+                        "detail": str(payload.get("detail", "")),
+                        "artifacts": list(payload.get("artifacts", ()) or ()),
+                        "session": str(payload.get("session", "")),
+                    },
+                    fallback=proto,
+                )
+                for path in payload.get("artifacts", ()) or ():
+                    _broadcast(
+                        ctx,
+                        {
+                            "type": "agent_event",
+                            "topic": "/sense/activity",
+                            "kind": "artifact",
+                            "text": str(path),
+                            "session": str(payload.get("session", "")),
+                        },
+                        fallback=proto,
+                    )
+            elif event == "agent.activity":
+                _broadcast(
+                    ctx,
+                    {
+                        "type": "agent_event",
+                        "topic": "/sense/activity",
+                        "kind": str(payload.get("kind", "status")),
+                        "text": str(payload.get("text", "")),
+                        "session": str(payload.get("session", "")),
+                    },
+                    fallback=proto,
+                )
 
     try:
         from jaeger_ai.main import _pipeline
+
         _pipeline["event_bus"] = _ToolEmitter()
     except Exception:  # noqa: BLE001
         pass
@@ -581,7 +752,11 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     # Interactive permission approval over the wire (deny on timeout).
     try:
         from jaeger_os.core.safety.permissions import (
-            AllowAllProvider, current_policy, install_confirmation_provider)
+            AllowAllProvider,
+            current_policy,
+            install_confirmation_provider,
+        )
+
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
             install_confirmation_provider(BridgeConfirmationProvider(proto, ctx))
@@ -595,6 +770,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     # prefilled and message #1 starts decoding immediately.
     try:
         from jaeger_ai.main import prewarm_session
+
         prewarm_session(boot.client, session_key="desktop-app")
     except Exception:  # noqa: BLE001 — an optimization, never a boot failure
         pass
@@ -618,41 +794,59 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
             _emit_state(proto, ctx, True, session)
             try:
                 from jaeger_ai.main import run_for_voice
+
                 result = run_for_voice(ctx.client, prompt, session_key=session)
                 text = result.get("text") or ""
-                _emit(proto, protocol.reply_frame(
-                    text, result.get("error"), session,
-                    elapsed_s=result.get("elapsed_s")))
+                _emit(
+                    proto,
+                    protocol.reply_frame(
+                        text,
+                        result.get("error"),
+                        session,
+                        elapsed_s=result.get("elapsed_s"),
+                    ),
+                )
                 # Speak a fired reminder when the instance voices its
                 # replies and the turn didn't already speak via a tool.
                 if text and not result.get("spoke_via_tool"):
                     try:
                         from jaeger_ai.main import _pipeline
+
                         cfg = _pipeline.get("config")
                         if cfg is not None and cfg.voice.speak_replies:
                             from jaeger_agent.tools.speak import speak
+
                             speak(text=text)
                     except Exception as exc:  # noqa: BLE001 — TTS is best-effort
-                        print(f"[bridge] cron speak failed: {exc}",
-                              file=sys.stderr, flush=True)
+                        print(
+                            f"[bridge] cron speak failed: {exc}",
+                            file=sys.stderr,
+                            flush=True,
+                        )
             finally:
                 _emit_state(proto, ctx, False, session)
         except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
-            print(f"[bridge] cron turn failed: {exc}",
-                  file=sys.stderr, flush=True)
+            print(f"[bridge] cron turn failed: {exc}", file=sys.stderr, flush=True)
 
     try:
         from jaeger_agent.background.cron_runner import CronRunner
+
         ctx.cron = CronRunner(_cron_cb, llm_lock=None)
         ctx.cron.start()
     except Exception as exc:  # noqa: BLE001 — no cron is degraded, not fatal
-        print(f"[bridge] cron runner skipped: {exc}",
-              file=sys.stderr, flush=True)
+        print(f"[bridge] cron runner skipped: {exc}", file=sys.stderr, flush=True)
 
     name, icon = _active_character(boot)
-    _emit(proto, protocol.agent_state_frame(
-        "ready", model=_model_name(boot), character=name, icon=icon,
-        agent_name=_agent_name(boot)))
+    _emit(
+        proto,
+        protocol.agent_state_frame(
+            "ready",
+            model=_model_name(boot),
+            character=name,
+            icon=icon,
+            agent_name=_agent_name(boot),
+        ),
+    )
     ctx.booted.set()
 
 
@@ -663,8 +857,18 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 # frames; anything conversational (goal / deepthink dialogs, model picker)
 # and anything needing the live TUI (reboot, instance hot-switch) stays
 # TUI-only and reports as such.
-_SLASH_SAFE = ("help", "tools", "skills", "facts", "plugins",
-               "instance", "instances", "models", "board", "config")
+_SLASH_SAFE = (
+    "help",
+    "tools",
+    "skills",
+    "facts",
+    "plugins",
+    "instance",
+    "instances",
+    "models",
+    "board",
+    "config",
+)
 
 
 def _run_slash(text: str, ctx: "_Ctx") -> str:
@@ -677,13 +881,21 @@ def _run_slash(text: str, ctx: "_Ctx") -> str:
     name = (text.lstrip("/").split(None, 1) or [""])[0].lower()
     known = name in sc._BY_NAME  # noqa: SLF001 — same package family
     if known and name not in _SLASH_SAFE:
-        return (f"/{name} needs the terminal TUI — it isn't available over "
-                "the app bridge.\nAvailable here: "
-                + "  ".join("/" + n for n in _SLASH_SAFE))
+        return (
+            f"/{name} needs the terminal TUI — it isn't available over "
+            "the app bridge.\nAvailable here: "
+            + "  ".join("/" + n for n in _SLASH_SAFE)
+        )
     # Capture the handler's Rich output as plain text (no ANSI, no markup).
     import io as _io
-    console = Console(file=_io.StringIO(), record=True, width=88,
-                      force_terminal=False, highlight=False)
+
+    console = Console(
+        file=_io.StringIO(),
+        record=True,
+        width=88,
+        force_terminal=False,
+        highlight=False,
+    )
     root = getattr(ctx.layout, "root", None)
     sctx = sc.SlashContext(console=console, instance_dir=root)
     result = sc.dispatch(text, sctx)
@@ -701,6 +913,7 @@ def _ctx_usage(session: str) -> tuple[int | None, int | None]:
     used = mx = None
     try:
         from jaeger_ai.main import _pipeline, last_ctx_snapshot
+
         snap = last_ctx_snapshot(session)
         if snap:
             used = int(snap["tokens"])
@@ -714,16 +927,21 @@ def _ctx_usage(session: str) -> tuple[int | None, int | None]:
     return used, mx
 
 
-def _turn_worker(proto: TextIO, ctx: _Ctx,
-                 turns: "_queue.Queue[dict[str, Any] | None]") -> None:
+def _turn_worker(
+    proto: TextIO,
+    ctx: _Ctx,
+    turns: "_queue.Queue[dict[str, Any] | tuple[dict[str, Any], TextIO] | None]",
+) -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
     completion — old clients that chat right after ``ready`` just wait,
     exactly as they did when ``ready`` meant model-loaded."""
     from jaeger_os.contract import protocol
+
     while True:
-        req = turns.get()
-        if req is None:
+        queued = turns.get()
+        if queued is None:
             return
+        req, reply_out = queued if isinstance(queued, tuple) else (queued, proto)
         text = (req.get("text") or "").strip()
         session = req.get("session") or "desktop-app"
         # This request is no longer "waiting" — it's about to run. Mirrors
@@ -737,33 +955,299 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         # ``/`` is a command, never a prompt for the model. Runs before
         # the boot wait so ``/help`` answers even while the model loads.
         if text.startswith("/"):
-            _emit_state(proto, ctx, True, session)
+            _emit_state(reply_out, ctx, True, session)
             try:
                 reply = _run_slash(text, ctx)
-                _emit(proto, protocol.reply_frame(reply, None, session))
+                _emit(reply_out, _reply_frame(protocol, req, reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
-                _emit(proto, protocol.reply_frame("", str(exc), session))
+                _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
             finally:
-                _emit_state(proto, ctx, False, session)
+                _emit_state(reply_out, ctx, False, session)
             continue
         ctx.booted.wait()
         if ctx.client is None:
-            _emit(proto, protocol.reply_frame(
-                "", ctx.boot_error or "agent failed to boot", session))
+            _emit(
+                reply_out,
+                _reply_frame(
+                    protocol, req, "", ctx.boot_error or "agent failed to boot", session
+                ),
+            )
             continue
-        _emit_state(proto, ctx, True, session)
+        _emit_state(reply_out, ctx, True, session)
         try:
-            from jaeger_ai.main import run_for_voice
-            result = run_for_voice(ctx.client, text, session_key=session)
+            content = req.get("content", text)
+            system_prompt = str(req.get("system_prompt") or "")
+            if not isinstance(content, str):
+                # Image attachments from Chat/Avatar use the same projector
+                # and shared Llama as the Multimodal face.
+                _configure_attached_vision(ctx, True)
+            if req.get("agentic_tools", True):
+                if content != text or system_prompt:
+                    result = ctx.runtime.run_multimodal_turn(
+                        content,
+                        text=text,
+                        system_prompt=system_prompt,
+                        session_key=session,
+                    )
+                else:
+                    result = ctx.runtime.run_turn(text, session_key=session)
+            else:
+                result = ctx.runtime.run_chatbot_multimodal_turn(
+                    content,
+                    text=text,
+                    system_prompt=system_prompt,
+                    session_key=session,
+                )
             used, mx = _ctx_usage(session)
-            _emit(proto, protocol.reply_frame(
-                result.get("text") or "", result.get("error"), session,
-                elapsed_s=result.get("elapsed_s"),
-                ctx_used=used, ctx_max=mx))
+            _emit(
+                reply_out,
+                _reply_frame(
+                    protocol,
+                    req,
+                    result.get("text") or "",
+                    result.get("error"),
+                    session,
+                    elapsed_s=result.get("elapsed_s"),
+                    ctx_used=used,
+                    ctx_max=mx,
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            _emit(proto, protocol.reply_frame("", str(exc), session))
+            _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
         finally:
-            _emit_state(proto, ctx, False, session)
+            _emit_state(reply_out, ctx, False, session)
+
+
+def _configure_attached_vision(ctx: _Ctx, enabled: bool) -> dict[str, Any]:
+    """Configure mmproj in the bridge process that owns the shared Llama."""
+    ctx.booted.wait()
+    if ctx.runtime is None:
+        raise RuntimeError(ctx.boot_error or "agent failed to boot")
+    if not enabled:
+        ctx.runtime.configure_vision(None)
+        if ctx.vision_node is not None:
+            ctx.vision_node.close()
+            ctx.vision_node = None
+        return {"enabled": False, "ready": False}
+    if ctx.vision_node is None:
+        from jaeger_agent.core.config import MultimodalConfig
+        from jaeger_agent.core.engine import vis_mod
+
+        node = vis_mod.build()
+        handler = node.load(
+            True,
+            lambda message: print(f"[bridge] {message}", file=sys.stderr, flush=True),
+            model_path=MultimodalConfig().vision_mmproj_path,
+        )
+        ctx.vision_node = node
+        ctx.runtime.configure_vision(handler)
+    return {
+        "enabled": True,
+        "ready": bool(getattr(ctx.vision_node, "ready", False)),
+    }
+
+
+class _AttachedFaceServer:
+    """Private local IPC for UI faces borrowing the bridge-owned brain."""
+
+    def __init__(self, ctx: _Ctx, turns: Any) -> None:
+        self.ctx = ctx
+        self.turns = turns
+        self.path = attached_face_socket_path(ctx.layout.root)
+        self._stop = threading.Event()
+        self._socket: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.unlink(missing_ok=True)
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(self.path))
+        os.chmod(self.path, 0o600)
+        server.listen(2)
+        server.settimeout(0.1)
+        self._socket = server
+        self._thread = threading.Thread(
+            target=self._accept_loop, name="bridge-attached-faces", daemon=True
+        )
+        self._thread.start()
+
+    def _accept_loop(self) -> None:
+        assert self._socket is not None
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._socket.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            threading.Thread(
+                target=self._serve, args=(conn,), name="bridge-face", daemon=True
+            ).start()
+
+    def _serve(self, conn: socket.socket) -> None:
+        reader = conn.makefile("r", encoding="utf-8")
+        writer = conn.makefile("w", encoding="utf-8")
+        self.ctx.outputs.add(writer)
+        try:
+            _emit(
+                writer,
+                {
+                    "type": "attached",
+                    "ok": True,
+                    "agent": "ready"
+                    if self.ctx.booted.is_set() and self.ctx.client
+                    else "booting",
+                },
+            )
+            for raw in reader:
+                try:
+                    req = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(req, dict):
+                    continue
+                op = req.get("op")
+                if op == "close":
+                    return
+                if op == "turn":
+                    self.turns.put((req, writer))
+                    continue
+                if op in {"stt", "tts"}:
+                    threading.Thread(
+                        target=self._serve_neural_audio,
+                        args=(writer, req),
+                        name=f"bridge-face-{op}",
+                        daemon=True,
+                    ).start()
+                    continue
+                try:
+                    if op == "health":
+                        self.ctx.booted.wait()
+                        data = self.ctx.runtime.health() if self.ctx.runtime else {}
+                    elif op == "vision":
+                        data = _configure_attached_vision(
+                            self.ctx, bool(req.get("enabled", True))
+                        )
+                    elif op == "clear":
+                        self.ctx.booted.wait()
+                        session = str(req.get("session") or "multimodal")
+                        if bool(req.get("agentic_tools", True)):
+                            self.ctx.runtime.clear_session(session)
+                        else:
+                            self.ctx.runtime.clear_chatbot_session(session)
+                        data = {"session": session}
+                    else:
+                        raise ValueError(f"unsupported attached-face operation: {op!r}")
+                    _emit(
+                        writer,
+                        {
+                            "type": "result",
+                            "id": req.get("id"),
+                            "ok": True,
+                            "data": data,
+                            "error": None,
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001 — one bad request cannot kill bridge
+                    _emit(
+                        writer,
+                        {
+                            "type": "result",
+                            "id": req.get("id"),
+                            "ok": False,
+                            "data": None,
+                            "error": str(exc),
+                        },
+                    )
+        except (BrokenPipeError, ConnectionError, OSError, ValueError):
+            pass
+        finally:
+            self.ctx.outputs.discard(writer)
+            try:
+                reader.close()
+                writer.close()
+                conn.close()
+            except OSError:
+                pass
+
+    def _serve_neural_audio(self, writer: TextIO, req: dict[str, Any]) -> None:
+        """Run shared Whisper/Kokoro without blocking the face socket reader."""
+        try:
+            self.ctx.booted.wait()
+            if self.ctx.runtime is None:
+                raise RuntimeError(self.ctx.boot_error or "agent failed to boot")
+            op = req.get("op")
+            if op == "stt":
+                import numpy as np
+
+                from jaeger_agent.core.policy import STT_MODEL
+                from jaeger_agent.tools.listen import transcribe_samples
+
+                raw = base64.b64decode(str(req.get("pcm") or ""), validate=True)
+                audio = np.frombuffer(raw, dtype="<f4")
+                model = str(req.get("model") or STT_MODEL)
+                data = {"text": transcribe_samples(audio, model=model), "model": model}
+            elif op == "tts":
+                import numpy as np
+
+                from jaeger_os.nodes import runtime as node_runtime
+
+                text = str(req.get("text") or "").strip()
+                with self.ctx.tts_render_lock:
+                    synth = node_runtime.get_synth()
+                    if synth is None:
+                        node_runtime.ensure_tts_node(warm=True)
+                        synth = node_runtime.get_synth()
+                    if synth is None:
+                        raise RuntimeError(
+                            "the bridge-owned Kokoro node is unavailable"
+                        )
+                    audio = synth.render(text)
+                pcm = np.asarray(
+                    audio if audio is not None else [], dtype="<f4"
+                ).reshape(-1)
+                data = {
+                    "pcm": base64.b64encode(pcm.tobytes()).decode("ascii"),
+                    "sample_rate": 24000,
+                }
+            else:  # defensive: caller dispatches only these two operations
+                raise ValueError(f"unsupported neural-audio operation: {op!r}")
+            _emit(
+                writer,
+                {
+                    "type": "result",
+                    "id": req.get("id"),
+                    "ok": True,
+                    "data": data,
+                    "error": None,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — keep the bridge alive
+            try:
+                _emit(
+                    writer,
+                    {
+                        "type": "result",
+                        "id": req.get("id"),
+                        "ok": False,
+                        "data": None,
+                        "error": str(exc),
+                    },
+                )
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._socket is not None:
+            try:
+                self._socket.close()
+            except OSError:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        self.path.unlink(missing_ok=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -781,12 +1265,16 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout = sys.stderr
 
     from jaeger_ai.core.instance.instance import (
-        InstanceLayout, default_instance_name, resolve_instance_dir)
+        InstanceLayout,
+        default_instance_name,
+        resolve_instance_dir,
+    )
     from jaeger_os.contract import protocol
 
     instance = (argv[0] if argv else None) or default_instance_name()
 
     ctx = _Ctx()
+    ctx.outputs.add(proto)
     # Cheap layout resolve — queries/commands work from here, no model needed.
     try:
         ctx.layout = InstanceLayout(resolve_instance_dir(instance))
@@ -796,8 +1284,12 @@ def main(argv: list[str] | None = None) -> int:
     # FAST READY: the transport is usable now; the agent streams in behind.
     # Carry the agent's name (identity.yaml, on disk pre-boot) from the very
     # first frame so the tray/header never flashes the character name.
-    _emit(proto, protocol.ready_frame(instance, None, agent="booting",
-                                      agent_name=_agent_name(ctx)))
+    _emit(
+        proto,
+        protocol.ready_frame(
+            instance, None, agent="booting", agent_name=_agent_name(ctx)
+        ),
+    )
 
     # FIRST-RUN GUARD: with no instance on disk, ``boot_for_tui`` would
     # auto-fire the INTERACTIVE CLI wizard, whose ``input()`` reads
@@ -807,26 +1299,44 @@ def main(argv: list[str] | None = None) -> int:
     # queries/commands still work pre-instance, which is exactly what
     # the native app's onboarding flow runs on.
     if ctx.layout is None or not ctx.layout.exists():
-        msg = (f"no instance named {instance!r} exists yet — "
-               "first-run setup required")
+        msg = f"no instance named {instance!r} exists yet — first-run setup required"
         ctx.boot_error = msg
         _emit(proto, protocol.agent_state_frame("failed", error=msg))
-        _emit(proto, protocol.fatal_frame(
-            msg, kind="no_instance",
-            suggested_name=_suggested_name(instance)))
+        _emit(
+            proto,
+            protocol.fatal_frame(
+                msg, kind="no_instance", suggested_name=_suggested_name(instance)
+            ),
+        )
         ctx.booted.set()
     else:
         _emit(proto, protocol.agent_state_frame("booting"))
         booter = threading.Thread(
-            target=_boot_agent, args=(proto, ctx, instance),
-            name="bridge-boot", daemon=True)
+            target=_boot_agent,
+            args=(proto, ctx, instance),
+            name="bridge-boot",
+            daemon=True,
+        )
         booter.start()
 
-    turns: "_queue.Queue[dict[str, Any] | None]" = _queue.Queue()
+    turns: "_queue.Queue[dict[str, Any] | tuple[dict[str, Any], TextIO] | None]" = (
+        _queue.Queue()
+    )
     worker = threading.Thread(
-        target=_turn_worker, args=(proto, ctx, turns),
-        name="bridge-turns", daemon=True)
+        target=_turn_worker, args=(proto, ctx, turns), name="bridge-turns", daemon=True
+    )
     worker.start()
+    if ctx.layout is not None and ctx.layout.exists():
+        try:
+            ctx.sidecar = _AttachedFaceServer(ctx, turns)
+            ctx.sidecar.start()
+        except Exception as exc:  # noqa: BLE001 — native chat remains usable
+            ctx.sidecar = None
+            print(
+                f"[bridge] attached-face endpoint unavailable: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # Queries need a layout-shaped object; before boot completes we hand
     # them a stub carrying just the layout (that's all _query reads).
@@ -840,8 +1350,9 @@ def main(argv: list[str] | None = None) -> int:
         ctx.boot_error = None
         ctx.booted.clear()
         _emit(proto, protocol.agent_state_frame("booting"))
-        threading.Thread(target=_boot_agent, args=(proto, ctx, inst),
-                         name="bridge-boot", daemon=True).start()
+        threading.Thread(
+            target=_boot_agent, args=(proto, ctx, inst), name="bridge-boot", daemon=True
+        ).start()
 
     def _create_instance(args: dict[str, Any]) -> tuple[bool, Any, str | None]:
         """The ``create_instance`` command — first-run onboarding's write.
@@ -850,6 +1361,7 @@ def main(argv: list[str] | None = None) -> int:
         fresh instance so ``agent_state`` streams booting → ready as the
         client's live "creating your Jaeger" progress."""
         from jaeger_ai.core.instance.setup_wizard import create_instance
+
         cid = str(args.get("character_id") or "").strip()
         if not cid:
             return False, None, "character_id is required"
@@ -906,16 +1418,27 @@ def main(argv: list[str] | None = None) -> int:
                 a = req.get("args") or {}
                 try:
                     from jaeger_ai.core.settings.catalog import set_value
-                    res = set_value(ctx.layout, str(a.get("path") or ""),
-                                    a.get("value"))
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"),
-                        data={"restart_required": res["restart_required"],
-                              "path": res["path"], "value": res["value"]},
-                        ok=True))
+
+                    res = set_value(
+                        ctx.layout, str(a.get("path") or ""), a.get("value")
+                    )
+                    _emit(
+                        proto,
+                        protocol.result_frame(
+                            req.get("id"),
+                            data={
+                                "restart_required": res["restart_required"],
+                                "path": res["path"],
+                                "value": res["value"],
+                            },
+                            ok=True,
+                        ),
+                    )
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False, error=str(exc)))
+                    _emit(
+                        proto,
+                        protocol.result_frame(req.get("id"), ok=False, error=str(exc)),
+                    )
                 continue
             if op == "command" and (req.get("cmd") or "") == "run_update":
                 # In-app updates (0.8): shells out to `jaeger update`
@@ -927,23 +1450,38 @@ def main(argv: list[str] | None = None) -> int:
                 # is in flight (ctx.busy) — an update mid-turn would race
                 # the turn's file/model reads against the product swap.
                 if ctx.busy:
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False,
-                        error="a turn is in flight — try again once it finishes"))
+                    _emit(
+                        proto,
+                        protocol.result_frame(
+                            req.get("id"),
+                            ok=False,
+                            error="a turn is in flight — try again once it finishes",
+                        ),
+                    )
                     continue
                 a = req.get("args") or {}
                 try:
                     from jaeger_ai.cli.verbs.update_verb import run_update_subprocess
+
                     res = run_update_subprocess(ref=(a.get("ref") or None))
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"),
-                        data={"restart_required": res["restart_required"],
-                              "returncode": res["returncode"],
-                              "output": res["output"]},
-                        ok=res["ok"], error=res.get("error")))
+                    _emit(
+                        proto,
+                        protocol.result_frame(
+                            req.get("id"),
+                            data={
+                                "restart_required": res["restart_required"],
+                                "returncode": res["returncode"],
+                                "output": res["output"],
+                            },
+                            ok=res["ok"],
+                            error=res.get("error"),
+                        ),
+                    )
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False, error=str(exc)))
+                    _emit(
+                        proto,
+                        protocol.result_frame(req.get("id"), ok=False, error=str(exc)),
+                    )
                 continue
             if op == "command" and (req.get("cmd") or "") == "new_session":
                 # Runway item 4: the native "New Chat" button. Handled
@@ -957,6 +1495,7 @@ def main(argv: list[str] | None = None) -> int:
                 # never break the new session.
                 import uuid
                 from jaeger_ai.main import evict_session
+
                 a = req.get("args") or {}
                 old_id = str(a.get("old_id") or "").strip()
                 if old_id:
@@ -965,8 +1504,10 @@ def main(argv: list[str] | None = None) -> int:
                     except Exception:  # noqa: BLE001 — cleanup only
                         pass
                 new_id = uuid.uuid4().hex[:8]
-                _emit(proto, protocol.result_frame(
-                    req.get("id"), data={"id": new_id}, ok=True))
+                _emit(
+                    proto,
+                    protocol.result_frame(req.get("id"), data={"id": new_id}, ok=True),
+                )
                 continue
             if op == "command" and (req.get("cmd") or "") == "create_instance":
                 # Handled here (not in _command): it needs ctx + proto to
@@ -974,8 +1515,10 @@ def main(argv: list[str] | None = None) -> int:
                 # result goes out FIRST so the client sees ok before the
                 # agent_state booting → ready progress starts streaming.
                 ok, data, err = _create_instance(req.get("args") or {})
-                _emit(proto, protocol.result_frame(
-                    req.get("id"), data=data, ok=ok, error=err))
+                _emit(
+                    proto,
+                    protocol.result_frame(req.get("id"), data=data, ok=ok, error=err),
+                )
                 if ok:
                     _start_boot(data["instance"])
                 continue
@@ -983,13 +1526,21 @@ def main(argv: list[str] | None = None) -> int:
                 target = ctx.boot if ctx.boot is not None else _LayoutOnly(ctx.layout)
                 if op == "query":
                     try:
-                        data = _query(req.get("what") or "", req.get("args") or {}, target)
+                        data = _query(
+                            req.get("what") or "", req.get("args") or {}, target
+                        )
                         _emit(proto, protocol.result_frame(req.get("id"), data=data))
                     except Exception as exc:  # noqa: BLE001
-                        _emit(proto, protocol.result_frame(
-                            req.get("id"), ok=False, error=str(exc)))
+                        _emit(
+                            proto,
+                            protocol.result_frame(
+                                req.get("id"), ok=False, error=str(exc)
+                            ),
+                        )
                 else:
-                    ok, err = _command(req.get("cmd") or "", req.get("args") or {}, target)
+                    ok, err = _command(
+                        req.get("cmd") or "", req.get("args") or {}, target
+                    )
                     _emit(proto, protocol.result_frame(req.get("id"), ok=ok, error=err))
                 continue
             # ``{"op":"send","text":...}`` (protocol) or legacy ``{"text":...}``.
@@ -1006,9 +1557,13 @@ def main(argv: list[str] | None = None) -> int:
                 # v1-additive ack so a client can render a pending state.
                 session = req.get("session") or "desktop-app"
                 if ctx.busy:
-                    ctx.session_pending[session] = ctx.session_pending.get(session, 0) + 1
-                    _emit(proto, protocol.queued_frame(
-                        session, ctx.session_pending[session]))
+                    ctx.session_pending[session] = (
+                        ctx.session_pending.get(session, 0) + 1
+                    )
+                    _emit(
+                        proto,
+                        protocol.queued_frame(session, ctx.session_pending[session]),
+                    )
                 turns.put(req)
     finally:
         # Orderly shutdown: let the boot settle (can't clean up a
@@ -1016,6 +1571,8 @@ def main(argv: list[str] | None = None) -> int:
         # clean, then leave through os._exit if the Metal runtime is
         # loaded (its C++ static destructors abort — F1).
         ctx.booted.wait(timeout=180)
+        if ctx.sidecar is not None:
+            ctx.sidecar.stop()
         # Stop the scheduled-prompt thread before tearing down the agent
         # it fires turns against.
         if ctx.cron is not None:
@@ -1025,6 +1582,18 @@ def main(argv: list[str] | None = None) -> int:
                 pass
         turns.put(None)
         worker.join(timeout=30)
+        if ctx.runtime is not None:
+            # The runtime is a borrowing adapter; detach its handler without
+            # calling close(), which would tear down bridge-owned ``boot``.
+            try:
+                ctx.runtime.configure_vision(None)
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
+        if ctx.vision_node is not None:
+            try:
+                ctx.vision_node.close()
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
         if ctx.boot_error:
             rc = 1
         boot = ctx.boot

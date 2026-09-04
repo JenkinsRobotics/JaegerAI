@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from jaeger_ai.core.runtime import hermes_worker
+from jaeger_ai.plugins import hermes_delegate as hermes_worker
 
 
 class HermesDelegateWorkerTests(unittest.TestCase):

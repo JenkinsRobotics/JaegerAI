@@ -1,10 +1,10 @@
-# Dedicated JaegerAI multimodal face. The same surface is available from the
-# normal windowed app's tray; this manifest makes it the main Qt surface for
-# `python -m jaeger_ai.interfaces.pyside6.multimodal` and CLI audio flags.
+# Isolated Jaeger AI multimodal reference runtime. The product UI attaches its
+# face to the native app's one bridge-owned agent; this manifest is used only
+# by the explicit `--standalone` benchmark/development mode.
 
 [app]
 id = "org.jenkinsrobotics.app.jaeger-ai.multimodal"
-name = "jros-multimodal"
+name = "jaeger-ai-multimodal-reference"
 type = "application"
 version = "0.12.0"
 requires_framework = ">=0.1"

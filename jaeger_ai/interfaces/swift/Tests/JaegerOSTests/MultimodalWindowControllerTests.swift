@@ -6,7 +6,7 @@ final class MultimodalWindowControllerTests: XCTestCase {
     func testLaunchesCanonicalMultimodalFace() {
         XCTAssertEqual(
             MultimodalWindowController.launchArguments,
-            ["multimodal", "--audio", "structured"]
+            ["multimodal", "--attach", "--audio", "structured"]
         )
     }
 

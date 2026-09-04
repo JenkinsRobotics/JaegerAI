@@ -61,9 +61,10 @@ machine.
   additive extensions, and the loader retains compatibility with legacy `id`
   plus flat asset entries.
 - `jaeger_ai/characters/` is also the direct character-library root; the
-  redundant `personality/characters/` nesting is gone. The Hermes delegation
-  helper moved from package root into `core/runtime/`, leaving only application
-  and discovery entrypoint seams beside `main.py`.
+  redundant `personality/characters/` nesting is gone. Optional Hermes
+  delegation now lives at `plugins/hermes_delegate/`, and ARES discovery and
+  launch behavior lives at `plugins/ares/`; neither is an alternate core agent
+  pipeline.
 - A Mochi structure comparison confirmed that Jaeger AI already has the same
   `characters/`, `modules/`, `nodes/`, `interfaces/`, and `core/` ownership
   boundaries. They remain inside the installable `jaeger_ai` package rather
