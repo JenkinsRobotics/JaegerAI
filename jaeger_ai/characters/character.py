@@ -1,10 +1,11 @@
 """Character — a library preset on top of :class:`Personality`.
 
-``personality/`` IS the character logic: :mod:`schema` holds the trait model
+``characters/`` owns the character library and its logic: :mod:`schema` holds
+the trait model
 (HEXACO/SPECIAL/Expression/Domains + custom_instructions) and :mod:`compose`
 renders it into the system prompt. A *character* is just that ``Personality``
 plus the library extras — identity (role/voice), backstory, and assets
-(card/avatar) — stored as a folder ``personality/characters/<id>/``.
+(card/avatar) — stored as a folder ``characters/<id>/``.
 
 The folder manifest follows the ecosystem ``character/v1`` package shape used
 by Mochi and JaegerAnimation.  Jaeger AI owns the speaking/agentic half and
@@ -24,7 +25,7 @@ from typing import Any
 import msgspec
 import yaml
 
-from jaeger_ai.personality.schema import (
+from jaeger_ai.characters.schema import (
     HEXACO,
     SPECIAL,
     Domains,
@@ -138,7 +139,7 @@ class Character:
         prompt), so this runs on edit, not per turn. Main agent only — a
         sub-agent gets no persona (its preamble is its whole identity).
         See dev/docs/reality/persona_compiler.md."""
-        from jaeger_ai.personality.compose import (
+        from jaeger_ai.characters.compose import (
             PERSONA_BOUNDARY,
             domain_lens,
             expression_clauses,
@@ -183,7 +184,7 @@ class Character:
 
     def asset(self, role: str) -> Path | None:
         """Resolve a manifest asset by ROLE (e.g. 'model', 'idle', 'sprites') —
-        the character's own ``assets/`` first, then the shared jaeger_os/assets/
+        the character's own ``assets/`` first, then the shared jaeger_ai/assets/
         library. Returns a Path or None. Nodes call this so they never hardcode
         a filename: ``character.asset('idle')``."""
         rel = _asset_reference(self.assets.get(role))
@@ -279,15 +280,15 @@ def load_character(folder: Path) -> Character:
 
 
 def shared_assets_dir() -> Path:
-    """The shared asset library — ``jaeger_os/assets/``. A character's own assets
+    """The shared asset library — ``jaeger_ai/assets/``. A character's own assets
     win; this is the fallback so common/generic assets aren't copied per
     character (mirrors the avatar tool's character-first resolution)."""
     return Path(__file__).resolve().parent.parent / "assets"
 
 
 def characters_root() -> Path:
-    """The bundled character library — ``personality/characters/``."""
-    return Path(__file__).resolve().parent / "characters"
+    """The bundled character library — ``characters/``."""
+    return Path(__file__).resolve().parent
 
 
 def list_characters(root: Path | None = None) -> list[Character]:
@@ -377,7 +378,7 @@ def set_active_character(instance_root: Path, cid: str) -> None:
 
 def active_character(instance_root: Path) -> Character | None:
     """The character this instance plays — the agent's real persona; its prompt
-    REPLACES the instance persona files (see agent/prompts/assemble.py). Falls
+    REPLACES the instance persona files (see jaeger_agent/prompts/). Falls
     back to the default character if the picked one is missing or broken, so a
     running agent always has a persona. None only if no character loads at all."""
     for cid in (active_character_id(instance_root), DEFAULT_CHARACTER_ID):

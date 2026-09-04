@@ -97,7 +97,7 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
 
 def _pick_character():
     """Pick the CHARACTER this instance plays — characters ARE the persona
-    now (jaeger_os/personality/characters/).  Returns ``(id, shim)`` where the
+    now (jaeger_ai/characters/).  Returns ``(id, shim)`` where the
     shim mirrors the persona-identity fields Step 1 prefills from, so the
     instance's identity.yaml + active_character both reflect the character.
     The operator picks a character instead of authoring a prompt by hand.
@@ -120,7 +120,7 @@ def _character_rows() -> list[tuple[str, str, str, str, str]]:
     the interactive picker and the non-interactive ``create_instance``
     (the bridge's onboarding path). A broken sheet is skipped."""
     import yaml
-    from jaeger_ai.personality.character import characters_root
+    from jaeger_ai.characters.character import characters_root
 
     rows: list[tuple[str, str, str, str, str]] = []
     root = characters_root()
@@ -952,7 +952,7 @@ def create_instance(
     dump_json(layout.manifest_path, manifest)
     # Characters are the persona — wire the instance to the chosen one
     # so the running agent plays it (identity / soul / traits / voice).
-    from jaeger_ai.personality.character import set_active_character
+    from jaeger_ai.characters.character import set_active_character
     set_active_character(layout.root, character_id)
     # INST-3: record install provenance per instance. ``jaeger update``
     # rewrites ``last_updated_with_framework``; ``jaeger restore``

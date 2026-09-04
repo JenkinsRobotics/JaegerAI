@@ -105,7 +105,7 @@ def _agent_name() -> str:
         from jaeger_ai.main import _pipeline
         layout = _pipeline.get("layout")
         if layout is not None:
-            from jaeger_ai.personality.character import active_character
+            from jaeger_ai.characters.character import active_character
             ch = active_character(layout.root)
             if ch is not None and ch.name:
                 return str(ch.name)

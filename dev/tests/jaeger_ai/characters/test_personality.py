@@ -11,7 +11,7 @@ from pathlib import Path
 import msgspec
 import pytest
 
-from jaeger_ai.personality import (
+from jaeger_ai.characters import (
     Domains,
     Expression,
     HEXACO,
@@ -111,7 +111,7 @@ def test_defaults_yield_a_neutral_persona() -> None:
 def test_band_wording_is_pinned(value: float, expected: str) -> None:
     """If anyone moves a threshold, this test fails — the wording
     is the contract the brain has been trained against."""
-    from jaeger_ai.personality.compose import _band
+    from jaeger_ai.characters.compose import _band
     assert _band(value) == expected
 
 

@@ -86,7 +86,7 @@ def _active_character(boot: Any) -> tuple[str | None, str | None]:
     (see ``_effective_icon``) — for the native client's tray/header. Best-effort;
     a miss is cosmetic."""
     try:
-        from jaeger_ai.personality.character import active_character
+        from jaeger_ai.characters.character import active_character
         root = getattr(getattr(boot, "layout", None), "root", None)
         if root is not None:
             c = active_character(root)
@@ -156,7 +156,7 @@ def _suggested_name(instance: str | None) -> str | None:
 
 
 def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
-    from jaeger_ai.personality.character import layer_items
+    from jaeger_ai.characters.character import layer_items
     stats: list[dict[str, Any]] = []
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -171,7 +171,7 @@ def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
 
 
 def _char_detail(c: Any) -> dict[str, Any]:
-    from jaeger_ai.personality.character import layer_items
+    from jaeger_ai.characters.character import layer_items
     traits: dict[str, dict[str, float]] = {}
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -188,7 +188,7 @@ def _char_detail(c: Any) -> dict[str, Any]:
 def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
-    from jaeger_ai.personality.character import (
+    from jaeger_ai.characters.character import (
         active_character, active_character_id, bound_character_id, list_characters,
     )
     root = _instance_root(boot)
@@ -316,7 +316,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
     try:
-        import jaeger_ai.personality.character as ch
+        import jaeger_ai.characters.character as ch
         if cmd == "select_character":
             ch.set_active_character(root, args["id"]); return True, None
         if cmd == "make_default":

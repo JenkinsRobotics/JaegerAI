@@ -3,7 +3,7 @@
 Jaeger AI stores each playable personality as a self-contained character pack:
 
 ```text
-personality/characters/<character>/
+jaeger_ai/characters/<character>/
   character.yaml
   card.png
   assets/
@@ -30,4 +30,3 @@ using them for persona compilation, progression, and live editing.
 Older operator-created manifests remain readable. The loader accepts legacy
 `id` and flat asset strings, but new files and bundled packs are always written
 with `character` and typed assets.
-

@@ -1201,7 +1201,7 @@ _delegate_depth = threading.local()
 
 def _hermes_delegate_enabled() -> bool:
     """Whether Jaeger should use Hermes for delegated subtasks only."""
-    from jaeger_ai.hermes_worker import enabled
+    from jaeger_ai.core.runtime.hermes_worker import enabled
 
     return enabled()
 
@@ -1212,7 +1212,7 @@ def _delegate_to_hermes(subtask: str, depth: int) -> dict[str, Any]:
     This deliberately uses one-shot stdio. It never connects to a Hermes
     WebUI/backend port and ARES never imports the worker's session database.
     """
-    from jaeger_ai.hermes_worker import run
+    from jaeger_ai.core.runtime.hermes_worker import run
 
     return run(subtask, depth)
 
@@ -2200,7 +2200,7 @@ def _apply_persona_filter(answer: str) -> str:
         pconf = getattr(config, "persona", None)
         if pconf is None or not pconf.output_filter or pconf.max_chars <= 0:
             return answer
-        from jaeger_ai.personality.character import active_character
+        from jaeger_ai.characters.character import active_character
         character = active_character(layout.root)
         if character is None:
             return answer
@@ -2889,7 +2889,7 @@ def _run_turn_via_jaeger_agent(
         # path.
         if (content is None and _persona_mode() == "persona_first"
                 and _persona_lane_aux_available(client)):
-            from jaeger_ai.personality.character import active_character
+            from jaeger_ai.characters.character import active_character
             layout = _pipeline.get("layout")
             character = active_character(layout.root) if layout is not None else None
             if character is not None:
@@ -3118,7 +3118,7 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
     (no restart). Cheap — rebuilds only on an actual change."""
     try:
         from jaeger_agent.prompts.prompts import build_system_prompt
-        from jaeger_ai.personality.character import active_character_signature
+        from jaeger_ai.characters.character import active_character_signature
         layout = _pipeline.get("layout")
         if layout is None:
             return

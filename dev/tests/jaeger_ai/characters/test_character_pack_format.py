@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from jaeger_ai.personality import character as characters
+from jaeger_ai.characters import character as characters
 
 
 def _write(path: Path, text: str) -> Path:
@@ -18,7 +18,10 @@ def _write(path: Path, text: str) -> Path:
 
 
 def test_every_bundled_pack_is_a_portable_static_character() -> None:
-    packs = sorted(characters.characters_root().glob("*/character.yaml"))
+    root = characters.characters_root()
+    assert root.name == "characters"
+    assert not (root / "characters").exists()
+    packs = sorted(root.glob("*/character.yaml"))
     assert len(packs) == 15
     for manifest in packs:
         doc = yaml.safe_load(manifest.read_text(encoding="utf-8"))
@@ -134,4 +137,3 @@ revision: 1.0
     assert doc["render"] == {"adapter": "image", "asset": "card.png"}
     assert doc["expressions"] == {"idle": {"clips": "card.png"}}
     assert doc["revision"] == 1.1
-

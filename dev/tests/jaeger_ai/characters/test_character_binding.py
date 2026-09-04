@@ -7,7 +7,7 @@ bind_character moves the binding (the deliberate, verified rebind).
 
 import json
 
-from jaeger_ai.personality.character import (
+from jaeger_ai.characters.character import (
     active_character_id, bind_character, bound_character_id, set_active_character,
 )
 

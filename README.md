@@ -31,23 +31,26 @@ robot with no display) is a **config** of JaegerAI, not a fork of it.
 the reusable brain other projects embed. It owns the engine-neutral agent
 loop, provider adapters, message schemas, context management, bus bridge, and
 `slot: mind` node. JaegerAI imports that package and supplies its product tool
-bundle, prompts, skills, memory, personality system, interfaces, installer,
-and defaults through explicit host hooks.
+selection, instance layout, persona, interfaces, installer, and defaults
+through explicit host hooks. JaegerAgent remains the owner of agent memory,
+tools, skills, and the multimodal turn loop.
 
 It pins [JaegerOS](https://github.com/JenkinsRobotics/JaegerOS) (the
 framework tier — bus, nodes, modules/slots, supervisor, safety, wire
 contract, capability layer) and builds everything agentic on top:
 
-- **`agent/`** — JaegerAI's product integration for JaegerAgent: toolsets,
-  availability gates, prompts, skills, safety policy, and the
-  **`persona_first`** pipeline (default since 0.8.0): an id/ego split
+- **`modules/`** — provider-named application integrations for JaegerAgent,
+  JaegerKokoroTTS, and JaegerWhisperSTT. These state how this app uses an
+  imported module; engine implementation stays in its provider package.
+- **`core/`** — Jaeger AI's application lifecycle, instance integration,
+  policy, diagnostics, and the **`persona_first`** pipeline: an id/ego split
   where a persona lane speaks to the user directly, in character, and
   has exactly one tool — `perform_task(request)` — which runs the full
   clean inner agentic loop (persona-off, all tools, hardened prompt).
   The safety property in one line: *the id never touches reality
   directly.*
-- **`personality/`** — characters (14 shipped) own identity + soul +
-  traits + lore as **State** (HEXACO/SPECIAL/Expression sliders),
+- **`characters/`** — 15 portable `character/v1` packs own identity + soul +
+  traits + lore + assets as **State** (HEXACO/SPECIAL/Expression sliders),
   compiled on change — never per turn — into a **View** the model
   actually sees. An instance just *plays* a character; the character
   isn't the instance.
@@ -57,15 +60,15 @@ contract, capability layer) and builds everything agentic on top:
   the agent researches, writes, smoke-tests, benchmarks, and versions
   its own skills.
 - **Its own faces** — the Swift app (default windowed UI), the TUI
-  (`jaeger_os/interfaces/tui/`, the 0.1.0-lineage terminal surface,
+  (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
   (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
   PySide6 Multimodal face. The Multimodal window is a renderer and device
   pump over `jaeger_agent`; the agent package owns its audio
   pipeline, turn policy, vision transport, and speech. All faces are clients
   of one protocol.
-- **The client protocol** — `jaeger_ai/contract` (vendored from
-  JaegerOS) + `jaeger_ai/interfaces/client.py` (`JrosClient`), a
+- **The client protocol** — JaegerOS's versioned contract plus
+  `jaeger_ai/interfaces/client.py` (`JrosClient`), a
   versioned NDJSON wire contract any surface — including third-party
   ones — speaks over `jaeger bridge`.
 - **`cli/`** — the `jaeger` command (every real verb: `status`, `config`,

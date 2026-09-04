@@ -35,7 +35,7 @@ in this repo:
     tools/persona.py is six-for-six coupled to this repo precisely
     because that content lives here.
   - `pipelines/persona_pipeline.md` — character → system prompt. Character
-    lives in THIS repo (`jaeger_ai/personality/`), so this is app-side.
+    lives in THIS repo (`jaeger_ai/characters/`), so this is app-side.
   - `pipelines/voice_pipeline.md`, `transport_pipeline.md`, everything
     under `audio/` — application concerns.
   - `core/agent_refactor_phase_*.md` — the history of extracting the agent

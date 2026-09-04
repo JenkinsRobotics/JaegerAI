@@ -1,6 +1,6 @@
 # JaegerAI 0.12.0 / JaegerAgent 1.2.0 release-readiness report
 
-Date: 2026-09-03
+Date: 2026-09-04
 
 ## Result
 
@@ -55,11 +55,19 @@ machine.
   are bounded subprocesses and cannot hang the launcher.
 - `jaeger_ai/interfaces/pyside6/multimodal/window.py`: camera enumeration is
   asynchronous, so opening the multimodal window cannot block indefinitely.
-- `jaeger_ai/personality/`: all 15 bundled personalities are now portable
+- `jaeger_ai/characters/`: all 15 bundled personalities are now portable
   `character/v1` packs using the Mochi/JaegerAnimation identity, provenance,
   typed-asset, and render fields. Jaeger-only traits and progression remain
   additive extensions, and the loader retains compatibility with legacy `id`
   plus flat asset entries.
+- `jaeger_ai/characters/` is also the direct character-library root; the
+  redundant `personality/characters/` nesting is gone. The Hermes delegation
+  helper moved from package root into `core/runtime/`, leaving only application
+  and discovery entrypoint seams beside `main.py`.
+- A Mochi structure comparison confirmed that Jaeger AI already has the same
+  `characters/`, `modules/`, `nodes/`, `interfaces/`, and `core/` ownership
+  boundaries. They remain inside the installable `jaeger_ai` package rather
+  than being copied to generic repository-root folders.
 - `jaeger_ai/cli/verbs/launcher_verb.py:22-146`: the installed launcher is now
   `Jaeger AI.app`, carries the product icon, and removes the legacy launcher on
   uninstall.
@@ -84,12 +92,12 @@ machine.
 
 - JaegerAI canonical all-tier command:
   `dev/scripts/run_tests.sh --all -- --timeout=60 --timeout-method=thread`
-  -> **2674 passed, 10 skipped** in 34.51 s on the final tree. The new tests
+  -> **2674 passed, 10 skipped** in 35.81 s on the final tree. The new tests
   execute legacy-home migration, its live-process safety gate, product-vs-
   development update routing, and character-pack compatibility.
 - JaegerAgent full suite:
   `python -m pytest -q --timeout=60 --timeout-method=thread`
-  -> **468 passed** in 15.37 s on the final tree.
+  -> **468 passed** in 14.92 s on the final tree.
 - JaegerOS full suite:
   `python -m pytest -q -n 4 --timeout=60 --timeout-method=thread`
   -> **561 passed** in 43.46 s.
@@ -114,7 +122,7 @@ selftest commands passed 23 and 11 contract checks, and Agent selfcheck passed
   `.pyc`, zero local neural weights, and zero Swift `.build` entries. The wheel
   contains the application core and multimodal GUI. A fresh 0.12.0 wheel check
   also found all **15** character manifests, all **15** card images, and the
-  personality format guide.
+  character format guide, with zero legacy `jaeger_ai/personality/` entries.
 - JaegerAnimation's strict `character/v1` loader accepted **15/15** bundled
   Jaeger AI packs, proving they can cross the app boundary without conversion.
 - JaegerAgent wheel is 3.0 MB and sdist is 2.6 MB. Both ship all **6**

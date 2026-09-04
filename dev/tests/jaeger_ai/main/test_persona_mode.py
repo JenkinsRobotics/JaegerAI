@@ -671,7 +671,7 @@ def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe
     built), and Station 3's output filter — a no-op without a character —
     leaves the answer untouched."""
     import jaeger_ai.main as main_mod
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.characters.character as character_mod
     from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")
