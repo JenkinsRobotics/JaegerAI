@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_ai.core.runtime import container_service as cs
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
@@ -29,7 +28,13 @@ def container(
       - ``status``  — inspect container state, IP, ports, and recent logs (needs ``name``)
       - ``delete``  — delete a container tool from disk (needs ``name``)
       - ``create``  — create a new container tool (needs ``name`` + ``image``)
+
+    The container service belongs to the host application, so it is bound
+    here rather than at module scope: a robot that installed jaeger-agent
+    without JaegerAI still imports the package, and loses only this tool.
     """
+    from jaeger_ai.core.runtime import container_service as cs
+
     act = (action or "").strip().lower()
     if act in ("list", "ls", "ps"):
         containers = cs.list_containers(all=True)
