@@ -38,9 +38,9 @@ def test_list_installed_uses_which_and_extra_dirs(monkeypatch):
         _fake_which({
             "claude": "/opt/homebrew/bin/claude",
             "codex": "/opt/homebrew/bin/codex",
-            "grok": "/Users/matthewjenkins/.grok/bin/grok",
+            "grok": "/Users/dev/.grok/bin/grok",
             "gemini": "/opt/homebrew/bin/gemini",
-            "hermes": "/Users/matthewjenkins/bin/hermes",
+            "hermes": "/Users/dev/bin/hermes",
             "ollama": "/usr/local/bin/ollama",
         }),
     )
