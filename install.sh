@@ -53,6 +53,14 @@ echo "JaegerAI local install"
 echo "  repo: $REPO_ROOT"
 echo
 
+# The primary browser UI is a pinned submodule. A normal `git clone` does not
+# populate it, so make the supported installer repair that automatically.
+if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
+  echo "→ Initializing pinned WebUI source..."
+  git -C "$REPO_ROOT" submodule sync --recursive --quiet
+  git -C "$REPO_ROOT" submodule update --init --recursive --quiet
+fi
+
 # 1. Verify Python version. Respect a ``PY`` exported by the curl-side
 # installer (scripts/install.sh) — it already did the explicit-version
 # search and we don't want to disagree. Fall back to our own search

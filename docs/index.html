@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="JaegerAI — the universal turnkey agentic agent: local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind.">
-<meta property="og:title" content="JaegerAI — the Mind of the Jaeger ecosystem">
-<meta property="og:description" content="The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. Runs on JaegerAI; headless is a config, not a fork.">
+<meta name="description" content="JaegerAI — a general-purpose AI assistant platform with local and hosted models, tools, skills, memory, automation, delegation, and native interfaces.">
+<meta property="og:title" content="JaegerAI — general-purpose AI assistant platform">
+<meta property="og:description" content="Run a capable AI assistant on a desktop, server, or device with local or hosted models, persistent memory, automation, delegation, and extensible tools.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0d1117">
-<title>JaegerAI — the Mind of the Jaeger ecosystem</title>
+<title>JaegerAI — general-purpose AI assistant platform</title>
 <link rel="icon" type="image/png" href="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png">
 <style>
   :root {
@@ -291,7 +291,7 @@
     <div class="dot e"></div>
   </div>
   <div class="wrap">
-    <div class="badge"><span class="dot"></span> 0.9.0 · the Mind · Apache-2.0</div>
+    <div class="badge"><span class="dot"></span> 0.11.0 · assistant platform · Apache-2.0</div>
 
     <div class="hero-logo" aria-hidden="true">
       <img class="hero-mark" src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png"
@@ -299,11 +299,11 @@
       <div class="wordmark">JaegerAI</div>
     </div>
 
-    <p class="slogan">// the universal turnkey agentic agent</p>
+    <p class="slogan">// your assistant, your models, your environment</p>
 
-    <h1>Local inference, tools, memory, and a persona pipeline —<span class="grad"> the Mind, ready to run.</span></h1>
+    <h1>Models, tools, memory, and automation —<span class="grad"> one assistant platform.</span></h1>
 
-    <p class="lede">Local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol — one product. Runs on JaegerAI; headless is a config, not a fork.</p>
+    <p class="lede">Use local, hosted, or CLI-backed models with tools, skills, persistent memory, permissions, automation, and delegation across desktop, web, terminal, voice, and headless interfaces.</p>
 
     <div class="hero-cta">
       <a class="btn primary" href="#install">Get started →</a>
@@ -333,8 +333,8 @@
 <section id="what">
   <div class="wrap">
     <div class="eyebrow">// what it is</div>
-    <h2 class="h">The turnkey product, not a headless library.</h2>
-    <p class="sub">JaegerAI ships the complete universal agentic agent (Hermes lineage): loop, tools, skills, memory, persona, local inference, AND its own faces — chat app, TUI, voice, the protocol it serves. Headless (robots) is a config of JaegerAI, not a fork.</p>
+    <h2 class="h">A complete assistant platform, from runtime to interface.</h2>
+    <p class="sub">JaegerAI combines an agent loop, tools, skills, memory, permissions, automation, delegation, and model routing with desktop, browser, terminal, voice, and protocol interfaces. Headless and hardware deployments use the same product with different capabilities enabled.</p>
 
     <p class="sub" style="margin-top: 18px;">
       Built on <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>
@@ -365,14 +365,14 @@
   <div class="wrap">
     <div class="center">
       <div class="eyebrow">// capabilities</div>
-      <h2 class="h">What ships in the Mind</h2>
+      <h2 class="h">What ships in JaegerAI</h2>
       <p class="sub">Real, shipped capabilities — not aspirational ones. See <code class="inline">CHANGELOG.md</code> for the full release history.</p>
     </div>
 
     <div class="feature-grid">
       <div class="feature">
         <h3>persona_first — the id/ego pipeline</h3>
-        <p>Default since 0.8.0: a persona lane speaks to the user directly, in character, and has exactly one tool — <code class="inline">perform_task(request)</code> — which runs the full clean inner agentic loop. The id never touches reality directly.</p>
+        <p>Default since 0.8.0: an optional persona lane handles conversation and has exactly one tool — <code class="inline">perform_task(request)</code> — which runs the full inner agentic loop. Conversational style remains separated from tool execution.</p>
         <span class="pill">agent</span>
       </div>
 
@@ -406,9 +406,9 @@
 <section id="architecture">
   <div class="wrap">
     <div class="eyebrow">// architecture</div>
-    <h2 class="h">The Mind — pinned to JaegerAI, never forked from it.</h2>
+    <h2 class="h">Layered for applications, interfaces, and deployments.</h2>
     <p class="sub">
-      JaegerAI is the second tier in the Jaeger ecosystem's four-tier map.
+      JaegerAI builds the complete assistant product on reusable runtime and agent-engine layers.
       See <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md" target="_blank" rel="noopener">JAEGER_ECOSYSTEM.md</a>
       for the full whole-ecosystem rundown and
       <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md" target="_blank" rel="noopener">THREE_TIER_STRUCTURE.md</a>
@@ -418,13 +418,13 @@
     <div class="arch">
       <div class="arch-box">
         <h4>// this repo</h4>
-        <h3>JaegerAI — the Mind</h3>
-        <p>Loop, tools, skills, memory, persona (id/ego), local inference, and its own faces. Registers its module roots (agent, nodes, plugins) through the <code class="inline">jaeger_os.module_roots</code> entry-point group — JaegerAI discovers it without ever naming it.</p>
+        <h3>JaegerAI — assistant platform</h3>
+        <p>Models, tools, skills, memory, permissions, automation, delegation, optional personality, and native interfaces. It registers modules through the <code class="inline">jaeger_os.module_roots</code> entry-point group.</p>
       </div>
       <div class="arch-box">
-        <h4>// pinned framework</h4>
-        <h3>JaegerAI</h3>
-        <p>Bus · Node · modules/slots · supervisor · safety · contract · capability layer. This repo builds on a pinned release; JaegerAI itself is never edited to make this repo work.</p>
+        <h4>// runtime foundation</h4>
+        <h3>JaegerOS + JaegerAgent</h3>
+        <p>Capability bus · nodes · supervision · safety · contracts · model adapters · agent loop. The product composes these reusable layers without restricting the deployment to a particular device.</p>
       </div>
     </div>
   </div>
@@ -450,7 +450,7 @@
       <div class="step">
         <span class="n">2</span>
         <h3>Voice extras (optional)</h3>
-        <p>A robot body can run JaegerAI text-only; pull in an engine module when you want speech.</p>
+        <p>Every deployment can run text-only; install the speech engines when you want a voice interface.</p>
         <pre><span class="pmt">$</span> pip install -e '.[kokoro_tts]'   <span class="cm"># speak</span>
 <span class="pmt">$</span> pip install -e '.[whisper_stt]'  <span class="cm"># listen</span></pre>
       </div>
@@ -465,11 +465,11 @@
     </div>
 
     <p class="sub" style="margin-top: 28px; max-width: 100%;">
-      The from-scratch flow (a clean machine, no prior checkout) is
-      <strong>being finalized for the 0.9 release</strong> — the checkout
-      path above (steps 1–3) is the verified one.
-      <code class="inline">pip install jaeger-ai</code> from PyPI is
-      <strong>(planned, 1.0)</strong> — not available yet.
+      The repository installer and one-line installer are the supported
+      release paths. They create an isolated environment, install the bundled
+      packages, and preserve instance state across upgrades. Direct
+      <code class="inline">pip install jaeger-ai</code> from PyPI is not
+      currently the release path.
     </p>
   </div>
 </section>
@@ -488,9 +488,9 @@
       </div>
 
       <div class="milestone next">
-        <h4>0.9.0 — Next</h4>
-        <h3>Standing on its own as a repo</h3>
-        <p>Split out of the JaegerAI monorepo with history preserved: the CI dependency rule enforced, the <code class="inline">jaeger_os</code> → <code class="inline">jaeger_ai</code> package rename, discovery-driven engine resolution, cross-install proven against JaegerAI + both engine repos in one venv.</p>
+        <h4>0.11.x — Current</h4>
+        <h3>A complete local assistant platform</h3>
+        <p>One Jaeger WebUI, optional private Tailscale access, schema-driven settings, local and external model choices, tools, skills, memory, automation, delegation, voice, and native interfaces.</p>
       </div>
 
       <div class="milestone">
@@ -512,8 +512,8 @@
         <div class="foot-line">JaegerAI · Apache-2.0</div>
         <div class="foot-sub">
           A <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">Jenkins Robotics</a>
-          project — the Mind of the Jaeger ecosystem, built on
-          <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">JaegerAI</a>.
+          project — a general-purpose assistant platform built on reusable
+          JaegerOS and JaegerAgent layers.
         </div>
         <div class="foot-motto">&ldquo;Engineering the future, one robot at a time.&rdquo;</div>
       </div>

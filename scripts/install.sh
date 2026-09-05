@@ -130,6 +130,8 @@ if [[ -d "$JAEGER_HOME/.git" ]]; then
   git -C "$JAEGER_HOME" fetch origin --tags --quiet
   git -C "$JAEGER_HOME" checkout "$JAEGER_REF" --quiet
   git -C "$JAEGER_HOME" pull --ff-only origin "$JAEGER_REF" --quiet 2>/dev/null || true
+  git -C "$JAEGER_HOME" submodule sync --recursive --quiet
+  git -C "$JAEGER_HOME" submodule update --init --recursive --quiet
 else
   if [[ -e "$JAEGER_HOME" ]]; then
     echo "✗ $JAEGER_HOME exists but is not a git repo — move it aside or set JAEGER_HOME" >&2
@@ -137,7 +139,7 @@ else
   fi
   echo "→ cloning JaegerAI into $JAEGER_HOME"
   mkdir -p "$(dirname "$JAEGER_HOME")"
-  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_HOME" --quiet
+  git clone --recurse-submodules --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_HOME" --quiet
 fi
 
 # 3. Run the in-repo installer (.venv + deps incl. the git-resolved

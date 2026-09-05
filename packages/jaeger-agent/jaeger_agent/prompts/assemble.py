@@ -134,10 +134,10 @@ def _identity_name(ctx: FragmentContext) -> str:
 
     The active character NEVER supplies the name: a character is a persona
     (voice + mannerisms, applied by the output filter), while identity.yaml
-    is the unique robot the operator named at instance creation — "I might
-    want a robot like Jarvis but I will name him Ted; the character prompt
-    gives the personality but the unique instance info isn't overwritten"
-    (operator, 2026-07-05). The character prompt must never overwrite it.
+    is the unique assistant the operator named at instance creation. A
+    character can inspire its personality, but must never overwrite the
+    configured assistant identity. The character prompt must never overwrite
+    it.
 
     Name ONLY: soul/traits/voice stay out of the worker prompt (station 3,
     dev/docs/reality/agentic_runners.md — the measured ~7-point execution tax); the

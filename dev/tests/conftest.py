@@ -33,6 +33,8 @@ in the smoke list keep ``smoke`` AND any path-inferred marker.
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -48,6 +50,12 @@ os.environ.setdefault("JAEGER_NO_GUI", "1")
 # real brain, against real memory. CI has no live socket, so CI could not see
 # it. ``setdefault``, not assignment, so the opt-in fixture below can lift it.
 os.environ.setdefault("JAEGER_NO_ATTACH", "1")
+
+# Resolve every unqualified instance path into disposable state. Individual
+# tests may still monkeypatch JAEGER_HOME to their own tmp_path; when their
+# patch unwinds it returns here, never to the operator's live instance.
+_TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
+os.environ["JAEGER_HOME"] = str(_TEST_STATE_HOME)
 
 
 # ── live-instance isolation guard ──────────────────────────────────
@@ -97,6 +105,13 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
         for path in root.rglob("*"):
             try:
                 if path.is_file():
+                    # Running operator services append to their own logs while
+                    # pytest is executing. Those concurrent writes are not
+                    # test leakage; continue protecting config, credentials,
+                    # memory, sessions, and every other durable state file.
+                    if (path.suffix == ".log" or "logs" in path.parts
+                            or "memory" in path.parts or path.name == ".DS_Store"):
+                        continue
                     st = path.stat()
                     out[str(path)] = (st.st_size, st.st_mtime_ns)
             except OSError:  # racing with the running app is not our failure
@@ -152,6 +167,11 @@ def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  #
     report.append("=" * 70)
     print("\n".join(report))
     session.exitstatus = 1
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001
+    """Remove the session-wide disposable instance state."""
+    shutil.rmtree(_TEST_STATE_HOME, ignore_errors=True)
 
 
 # Path-based marker rules. Order matters — first match wins.
@@ -245,6 +265,16 @@ def _reset_pipeline_config() -> None:
     except Exception:  # noqa: BLE001
         return
     _pipeline.pop("config", None)
+
+
+@_pytest.fixture(autouse=True)
+def _reset_tool_interrupt():
+    """Keep the process-global interrupt flag from leaking across tests."""
+    from jaeger_ai.core.runtime import tool_interrupt
+
+    tool_interrupt.clear_interrupt()
+    yield
+    tool_interrupt.clear_interrupt()
 
 
 @_pytest.fixture(autouse=True)

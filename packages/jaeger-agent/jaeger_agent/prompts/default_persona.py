@@ -18,10 +18,10 @@ projects import makes it a compatibility burden before it is right. An
 application with real characters passes its own block and this file is
 never touched.
 
-Why the default is deliberately plain: it is the fallback for a robot
-that never picked a personality, and a fallback that arrives in
-character is worse than one that does not. No roleplay, no catchphrases,
-no backstory.
+Why the default is deliberately plain: it is the fallback for any assistant
+whose operator did not select a personality. A neutral default must work for
+personal, professional, team, server, and device deployments. No roleplay, no
+catchphrases, no backstory.
 """
 
 from __future__ import annotations

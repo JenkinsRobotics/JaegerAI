@@ -2,8 +2,8 @@
 
 JaegerAgent is the reusable, headless agent-brain module for JaegerOS.
 
-It is the piece an application or robot imports when it needs a working
-agent — not a loop you then have to furnish. A bare install brings its own
+It is the piece an application, service, or device imports when it needs a
+working agent — not a loop you then have to furnish. A bare install brings its own
 tool surface, skill corpus, prompt assembly, workspace sandbox and local
 inference. It does not own a desktop window, installer, default character,
 or complete product experience; those belong to applications such as
@@ -30,9 +30,9 @@ len(get_tools())                  # 96
 | Type | `module` |
 | JaegerOS slot / kind | `mind` / `mind` |
 
-JaegerAgent sits beside universal modules such as JaegerKokoroTTS and
-JaegerWhisperSTT. The difference is its slot: it provides the brain rather
-than one speech engine.
+JaegerAgent sits beside optional modules such as JaegerKokoroTTS and
+JaegerWhisperSTT. Its slot provides the agent runtime rather than a particular
+interface or speech engine.
 
 ## What belongs here
 
@@ -105,8 +105,8 @@ print(agent.run_turn("Inspect the available tools and report system health."))
 ```
 
 `llama-cpp-python` is a BASE dependency, not an extra, because
-`provider = "llama_cpp"` is the default — a robot that pip-installs this
-gets a brain that runs on its own hardware with no server and no account:
+`provider = "llama_cpp"` is the default — an application that installs this
+gets an agent that runs on its host with no server and no account:
 
 ```python
 from jaeger_agent.runtime import create_runtime

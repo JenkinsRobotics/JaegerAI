@@ -1,7 +1,7 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <em>The universal turnkey agentic agent — local inference, tools, skills, memory, the id/ego persona pipeline, chat/voice/TUI faces, and the client protocol. The Mind. Runs on JaegerAI; headless is a config, not a fork.</em>
+  <em>A general-purpose AI assistant platform — local or hosted models, tools, skills, memory, automation, delegation, and native chat, web, terminal, and voice experiences.</em>
 </p>
 
 <p align="center">
@@ -18,25 +18,56 @@
 
 ## What it is
 
-JaegerAI is a complete **application** built on JaegerAI — the turnkey
-agentic product and module host, not an embeddable library. It currently
-ships a complete universal agentic experience (Hermes lineage) by combining
-the reusable JaegerAgent loop with its tools, skills, memory, the
-id/ego persona pipeline, local inference, **and its own faces** — chat
-app, TUI, voice, and the protocol it serves. Headless (running on a
-robot with no display) is a **config** of JaegerAI, not a fork of it.
+JaegerAI is a complete, general-purpose assistant platform. It can answer
+questions, work with files and code, browse and research, manage personal
+information, run scheduled and background work, use external services, and
+delegate larger jobs to other agent runtimes. It supports local, hosted, and
+CLI-backed models and provides native desktop, web, terminal, voice, and
+headless experiences.
 
-**0.10 split complete:** the separately packaged
+JaegerAI combines the reusable JaegerAgent runtime with a broad tool surface,
+skills, persistent memory, permissions, automation, model routing, and an
+optional personality system. Voice, avatars, and physical-device capabilities
+are extensions of the same assistant—not requirements and not its defining
+scope. A laptop assistant, a private server, and a hardware deployment all run
+the same product with different capabilities enabled.
+
+### What it can do
+
+- **Work across your computer** — inspect and edit files, run code and shell
+  commands, use the clipboard, control supported applications, and analyze
+  images and documents under explicit permission policy.
+- **Research and communicate** — browse and extract web sources and work with
+  email, calendars, and contacts. Optional messaging plugins remain available
+  for deployments that need them, but are not required for remote access.
+- **Remember and organize** — maintain attributed persistent memory, search
+  prior sessions, manage tasks and Kanban work, and keep a knowledge library.
+- **Run ongoing work** — schedule jobs, execute background tasks, monitor
+  heartbeats, and delegate bounded work to installed agent runtimes.
+- **Use the model you choose** — run llama.cpp or MLX locally, connect to
+  hosted APIs and OpenAI-compatible servers, or use installed Claude, Codex,
+  Gemini, Grok, or Hermes CLIs as the active model.
+- **Use it locally or remotely** — use the native desktop app, Jaeger WebUI,
+  TUI, or voice loop locally; publish only the WebUI through Tailscale for
+  private remote access.
+
+Capabilities are discovered at runtime. Jaeger does not assume that a channel,
+device, model, or credential exists simply because the platform supports it.
+Permissions and availability gates determine what each assistant instance may
+actually use.
+
+The separately installable
 [JaegerAgent](https://github.com/JenkinsRobotics/jaeger-agent) mind module is
 the reusable brain other projects embed. It owns the engine-neutral agent
 loop, provider adapters, message schemas, context management, bus bridge, and
 `slot: mind` node. JaegerAI imports that package and supplies its product tool
 bundle, prompts, skills, memory, personality system, interfaces, installer,
-and defaults through explicit host hooks.
+and defaults through explicit host hooks. The release repository vendors the
+coordinated source packages under `packages/` so one checkout is sufficient.
 
-It pins [JaegerAI](https://github.com/JenkinsRobotics/JaegerAI) (the
-framework tier — bus, nodes, modules/slots, supervisor, safety, wire
-contract, capability layer) and builds everything agentic on top:
+It includes JaegerOS (the runtime foundation: bus, nodes, modules, supervisor,
+safety, wire contract, and capability layer) and builds the assistant platform
+on top:
 
 - **`agent/`** — JaegerAI's product integration for JaegerAgent: toolsets,
   availability gates, prompts, skills, safety policy, and the
@@ -44,8 +75,8 @@ contract, capability layer) and builds everything agentic on top:
   where a persona lane speaks to the user directly, in character, and
   has exactly one tool — `perform_task(request)` — which runs the full
   clean inner agentic loop (persona-off, all tools, hardened prompt).
-  The safety property in one line: *the id never touches reality
-  directly.*
+  The safety property in one line: *the conversational persona never executes
+  tools directly.*
 - **`personality/`** — characters (14 shipped) own identity + soul +
   traits + lore as **State** (HEXACO/SPECIAL/Expression sliders),
   compiled on change — never per turn — into a **View** the model
@@ -57,7 +88,7 @@ contract, capability layer) and builds everything agentic on top:
   the agent researches, writes, smoke-tests, benchmarks, and versions
   its own skills.
 - **Its own faces** — the Swift app (default windowed UI), the TUI
-  (`jaeger_os/interfaces/tui/`, the 0.1.0-lineage terminal surface,
+  (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
   (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
   frozen PySide6 shipping set. All faces are clients of one protocol.
@@ -67,12 +98,12 @@ contract, capability layer) and builds everything agentic on top:
   ones — speaks over `jaeger bridge`.
 - **`cli/`** — the `jaeger` command (every real verb: `status`, `config`,
   `runtime`, `agent create/list/use/inspect/delete`, `update`, …).
-  JaegerAI ships no CLI at all — this repo is where it lives.
+  JaegerAgent ships no product CLI — this application repo is where it lives.
 
 Engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
 [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
-are **optional extras** — each its own repo, pinning JaegerAI only, so a
-robot body can run without the AI product installed at all.
+are independently usable components. They allow deployments to add speech
+without coupling the underlying runtime to the complete assistant product.
 
 ## Install
 
@@ -94,13 +125,11 @@ otherwise. JaegerAI installs **editable** (PEP 660), same model as
 JaegerAI: the code stays writable in place because the agent
 self-modifies its own skills.
 
-**The from-scratch flow (a clean machine with no prior checkout) is
-being finalized for the 0.9 release** — `install.sh` still carries some
-pre-split assumptions (e.g. its curl-side fallback clones the old
-monorepo URL) that haven't been re-walked end-to-end since the split;
-the in-checkout `./install.sh` path above is the verified one.
-`pip install jaeger-ai` from PyPI is **(planned, 1.0)** — not available
-yet.
+The supported install is the repository installer above (or the one-line
+installer in [`scripts/install.sh`](scripts/install.sh)). It creates an
+isolated environment, installs the in-repository packages, builds the native
+app when Swift is available, and preserves instance state across upgrades.
+Direct `pip install jaeger-ai` from PyPI is not currently the release path.
 
 Voice is optional — pull in the engine extras when you want speech:
 
@@ -130,19 +159,20 @@ deployed AI that plays one, with its own memory + config:
 `jaeger` is the one operator command — installed on `PATH` after
 `install.sh`, or run as `./jaeger` from the clone.
 
-### Hermes WebUI adapter
+### Jaeger WebUI
 
-Jaeger pins its attributed Hermes WebUI fork at `vendor/hermes-webui`. Clone
-JaegerAI with `--recurse-submodules` (or run `git submodule update --init`) and
-start the loopback adapter separately from the browser server:
+Jaeger's browser interface is its attributed, Jaeger-branded Hermes WebUI fork
+at `vendor/hermes-webui`. Hermes supplies the frontend lineage; Jaeger owns the
+runtime, sessions, tools, approvals, memory, models, heartbeat, and scheduled
+work. Clone with `--recurse-submodules` (or run `git submodule update --init`),
+then start the loopback adapter and browser server with one command:
 
 ```bash
-./jaeger hermes-webui-adapter --host 127.0.0.1 --port 8791 --instance <agent-name>
+./jaeger webui start --instance <agent-name>
 ```
 
-Configure the pinned WebUI with `HERMES_WEBUI_RUNTIME_ADAPTER=runner-local` and
-`HERMES_WEBUI_RUNNER_BASE_URL=http://127.0.0.1:8791`. Hermes WebUI can then
-serve the browser on port `8790`, while Jaeger remains the runtime owner for
+The launcher configures the pinned WebUI to use the loopback adapter. Jaeger
+WebUI serves the browser on port `8790`, while Jaeger remains the runtime owner for
 sessions, streamed chat and reasoning, model selection, tools, approvals,
 heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
 launch path runs `vendor/hermes-webui/server.py` directly: it does not discover,
@@ -150,16 +180,15 @@ run, or import Hermes Agent and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
 `jaeger_ai/interfaces/hermes_webui_adapter/THIRD_PARTY_NOTICES.md`.
 
-#### Temporary WebUI via Apple container (settings toggle)
+#### Alternative containerized WebUI
 
-To use the existing Hermes WebUI Apple container as Jaeger's temporary browser
-UI (plugin-style settings surface on the existing catalog — not a second
-system):
+The Apple-container version remains available as an alternative development
+surface. It is not required for the primary Jaeger WebUI path:
 
 ```bash
 ./jaeger settings set containers.use_hermes_webui true
-./jaeger webui start
-open "$(./jaeger webui url)"   # http://127.0.0.1:8787/
+./jaeger webui start --container
+open http://127.0.0.1:8787/
 ```
 
 Port map (defaults chosen to avoid clashes):
@@ -189,15 +218,14 @@ jaeger gateway start       # 8811 MCP + 8812 A2A, targeting those Jaeger backend
 
 The ARES Agentgateway plist and `~/.ares/gateway` config are archive. Do not start them.
 
-Remote access stays disabled by default. For previous-style browser access,
-keep both services on loopback and publish only Hermes WebUI through Tailscale
-Serve:
+Remote access stays disabled by default. Start both services on loopback and
+publish only Jaeger WebUI through Tailscale Serve with:
 
 ```bash
-tailscale serve --bg http://127.0.0.1:8790
+./jaeger webui start --instance <agent-name> --tailscale
 ```
 
-Hermes WebUI continues to call the Jaeger adapter on loopback, so the adapter
+Jaeger WebUI continues to call the runtime adapter on loopback, so the adapter
 is not exposed to the tailnet. To expose the adapter API itself, set a strong
 bearer token and explicitly opt in:
 
@@ -268,39 +296,36 @@ export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 
 ## Architecture
 
-JaegerAI is the **Mind** tier — the second layer in the Jaeger ecosystem's
-four-tier map, pinning JaegerAI and pinned in turn by nothing:
+JaegerAI separates the reusable runtime, agent engine, optional engines, and
+complete product so each layer can evolve without forcing a particular user
+interface or deployment shape:
 
 ```
-JaegerAI      ← the framework this repo pins. Never forked, never edited.
-
-JaegerAI      ← YOU ARE HERE. The Mind — loop, tools, skills, memory,
-                persona, local inference, and its own faces. Ships the
-                jaeger CLI (JaegerAI ships none).
-
-Modules       ← engine modules this repo can optionally install:
+JaegerOS      ← runtime, capability bus, nodes, supervision, and safety
+JaegerAgent   ← reusable agent loop, tools, skills, and model adapters
+JaegerAI      ← complete assistant product, policy, memory, and interfaces
+Modules       ← optional engines this product can install:
                 JaegerKokoroTTS (tts), JaegerWhisperSTT (stt).
-
-Projects      ← the assembled things that install JaegerAI: JP01 (the
-                robot, headless config), a desktop companion.
+Deployments   ← desktop, server, team, embedded, or hardware configurations
 ```
 
 The connection rule (from
-[`JAEGER_ECOSYSTEM.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/JAEGER_ECOSYSTEM.md)):
-**bodies provide capabilities · the Mind consumes them · the runtime is
-where they meet · the protocol is how outside apps reach in.** See
-[`THREE_TIER_STRUCTURE.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/dev/docs/vision/THREE_TIER_STRUCTURE.md)
+[`JAEGER_ECOSYSTEM.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/packages/jaeger-os/dev/docs/vision/JAEGER_ECOSYSTEM.md)):
+**hosts expose capabilities · the assistant uses them through policy · the
+runtime coordinates execution · protocols connect external clients.** See
+[`THREE_TIER_STRUCTURE.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/packages/jaeger-os/dev/docs/vision/THREE_TIER_STRUCTURE.md)
 for the full tier-map reasoning this repo is built against.
 
 ## Ecosystem
 
 | Repo | Tier | What |
 |---|---|---|
-| [JaegerAI](https://github.com/JenkinsRobotics/JaegerAI) | Framework | Bus, node, modules/slots, supervisor, safety, contract, capability layer. This repo pins it. |
-| **JaegerAI** | Mind (product) | This repo — the turnkey agentic product and its faces. |
+| JaegerOS (`packages/jaeger-os`) | Runtime | Bus, nodes, modules, supervisor, safety, contracts, and capabilities. |
+| JaegerAgent (`packages/jaeger-agent`) | Agent engine | Model adapters, agent loop, tools, skills, context, and delegation. |
+| **JaegerAI** | Assistant platform | This repository: the complete product, policy, memory, automation, and interfaces. |
 | [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS) | Engine module (`tts` slot) | Streaming Kokoro speech synthesis. Optional extra of this repo. |
 | [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Optional extra of this repo. |
-| JP01 | Project (Body) | The reference hardware Jaeger — installs this repo headless. |
+| JP01 | Example deployment | A hardware deployment that runs the same assistant headlessly. |
 
 Two more repos round out the ecosystem without being part of the tier map
 themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)

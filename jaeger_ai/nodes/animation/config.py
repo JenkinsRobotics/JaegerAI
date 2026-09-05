@@ -29,6 +29,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+from jaeger_os.core.instance.setting_meta import _setting
 
 
 class AvatarConfig(BaseModel):
@@ -48,12 +49,12 @@ class AvatarConfig(BaseModel):
     ``./launch --no-avatar`` also forces it off regardless of config.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
-    bridge_host: str = "127.0.0.1"
-    bridge_port: int = Field(ANIMATION_BRIDGE_DEFAULT_PORT, ge=1024, le=65535)
+    enabled: bool = Field(False, json_schema_extra=_setting("avatar", restart=True))
+    bridge_host: str = Field("127.0.0.1", json_schema_extra=_setting("avatar", restart=True, advanced=True))
+    bridge_port: int = Field(ANIMATION_BRIDGE_DEFAULT_PORT, ge=1024, le=65535, json_schema_extra=_setting("avatar", restart=True, advanced=True))
     # Default emotion the wizard suggests; AnimationNode will publish
     # this on boot when set_avatar_state hasn't been called yet.
-    default_emotion: str = "neutral"
+    default_emotion: str = Field("neutral", json_schema_extra=_setting("avatar", advanced=True))
 
 
 __all__ = ["AvatarConfig"]

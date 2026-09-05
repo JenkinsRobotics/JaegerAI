@@ -1,6 +1,6 @@
 """Instance directory: path resolution, layout, lockfile, manifest.
 
-An *instance* is a writable per-robot directory that holds identity, config,
+An *instance* is a writable per-assistant directory that holds identity, config,
 memory, logs, skills, and (M2) credentials. Resolution order:
 
   1. JAEGER_INSTANCE_DIR env var, if set

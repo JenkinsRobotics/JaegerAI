@@ -30,7 +30,7 @@ def test_default_config_targets_jaeger_not_archive_ports(tmp_path: Path) -> None
         for route in listener["routes"]
         for backend in route["backends"]
     ]
-    assert backends == [f"127.0.0.1:{A2A_BACKEND_PORT}", f"127.0.0.1:{A2A_BACKEND_PORT}"]
+    assert backends == [f"127.0.0.1:{A2A_BACKEND_PORT}"] * 3
 
 
 def test_ensure_config_writes_token_file_without_embedding_it(tmp_path: Path) -> None:

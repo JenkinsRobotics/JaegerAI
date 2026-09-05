@@ -658,7 +658,7 @@ def run_wizard(
         "Choose",
         [
             ("confirm", "Ask me before each action  (recommended)"),
-            ("allow", "Auto-allow everything  (trusted, unattended robot)"),
+            ("allow", "Auto-allow everything  (trusted, unattended deployment)"),
         ],
         default=0,
     )

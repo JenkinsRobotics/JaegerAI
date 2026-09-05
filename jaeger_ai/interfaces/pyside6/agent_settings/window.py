@@ -23,9 +23,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSlider, QSpinBox,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from jaeger_ai.interfaces.avatar_player.window import (
@@ -76,6 +76,8 @@ _ICONS = {
     "traits": '<path d="M4 20V10M10 20V4M16 20v-8M22 20V7"/>',
     "app": ('<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/>'
             '<path d="M1 14h6M9 8h6M17 16h6"/>'),
+    "settings": ('<circle cx="12" cy="12" r="3"/>'
+                 '<path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/>'),
     "permissions": '<path d="M12 3l8 3v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/>',
     "studio": ('<path d="M9 15l6-6"/><path d="M10.5 6.5 12 5a4 4 0 0 1 6 6l-1.5 1.5"/>'
                '<path d="M13.5 17.5 12 19a4 4 0 0 1-6-6l1.5-1.5"/>'),
@@ -273,7 +275,8 @@ def _traits(character: Any) -> list[tuple[str, float]]:
 
 class AgentSettingsWindow(QWidget):
     NAV = [("home", "Home"), ("library", "Library"), ("character", "Character"),
-           ("traits", "Traits"), ("app", "App Settings"), ("permissions", "Permissions"),
+           ("traits", "Traits"), ("app", "App Settings"), ("settings", "All Settings"),
+           ("permissions", "Permissions"),
            ("ares", "ARES & Plugins")]
 
     def __init__(self, ctx: Any = None) -> None:
@@ -288,6 +291,7 @@ class AgentSettingsWindow(QWidget):
         self._name = agent_name(ctx)
         self._studio: Any = None
         self._trait_sliders: dict[tuple[str, str], QSlider] = {}
+        self._catalog_controls: dict[str, tuple[dict[str, Any], QWidget]] = {}
 
         self.setObjectName("AgentSettings")
         self.setWindowTitle(f"JaegerAI — {self._name} · settings")
@@ -331,7 +335,8 @@ class AgentSettingsWindow(QWidget):
         builders = {
             "home": self._home_page, "library": self._library_page,
             "character": self._character_page, "traits": self._traits_page,
-            "app": self._app_page, "permissions": self._permissions_page,
+            "app": self._app_page, "settings": self._all_settings_page,
+            "permissions": self._permissions_page,
             "ares": self._ares_page,
         }
         self._index = {}
@@ -742,6 +747,95 @@ class AgentSettingsWindow(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._toast(self._app_status, f"Invalid: {exc}", error=True)
 
+    # ── Complete schema-derived settings catalog ──
+    def _all_settings_page(self) -> QWidget:
+        from jaeger_ai.core.settings.catalog import catalog
+        page, v = self._page("All Settings")
+        self._catalog_controls = {}
+        intro = QLabel("Every configurable Jaeger feature, generated from the schema. "
+                       "Structured values use JSON; changes are validated before saving.")
+        intro.setObjectName("Note")
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+        for group, settings in catalog(self._inst_layout(), advanced=True).items():
+            v.addSpacing(10)
+            v.addWidget(self._section(group.replace("_", " ").title()))
+            for setting in settings:
+                control = self._catalog_control(setting)
+                self._catalog_controls[setting["path"]] = (setting, control)
+                v.addWidget(self._field(setting["label"], control))
+                if setting["description"]:
+                    desc = QLabel(setting["description"])
+                    desc.setObjectName("Note")
+                    desc.setWordWrap(True)
+                    v.addWidget(desc)
+        save, self._catalog_status = self._save_row(
+            "Save all settings", self._save_all_settings)
+        v.addLayout(save)
+        v.addStretch(1)
+        return self._scroll(page)
+
+    def _catalog_control(self, setting: dict[str, Any]) -> QWidget:
+        kind, current = setting["type"], setting["current"]
+        if kind == "bool":
+            widget = QCheckBox()
+            widget.setChecked(bool(current))
+            return widget
+        if kind == "enum":
+            widget = QComboBox()
+            widget.addItems([str(v) for v in setting.get("choices") or []])
+            widget.setCurrentText(str(current))
+            return widget
+        validation = setting.get("validation") or {}
+        if kind == "int" and current is not None:
+            widget = QSpinBox()
+            widget.setRange(int(validation.get("min", -2_147_483_648)),
+                            int(validation.get("max", 2_147_483_647)))
+            widget.setValue(int(current))
+            return widget
+        if kind == "float" and current is not None:
+            widget = QDoubleSpinBox()
+            widget.setDecimals(3)
+            widget.setRange(float(validation.get("min", -1e9)),
+                            float(validation.get("max", 1e9)))
+            widget.setValue(float(current))
+            return widget
+        if kind == "json":
+            widget = QPlainTextEdit("" if current is None else str(current))
+            widget.setMinimumHeight(90)
+            return widget
+        widget = QLineEdit("" if current is None else str(current))
+        if kind == "secret":
+            widget.setEchoMode(QLineEdit.EchoMode.Password)
+            if setting.get("configured"):
+                widget.setPlaceholderText("Configured — leave blank to keep")
+            return widget
+        widget.setPlaceholderText("default" if current is None else "")
+        return widget
+
+    def _save_all_settings(self) -> None:
+        from jaeger_ai.core.settings.catalog import set_value
+        try:
+            for path, (setting, widget) in self._catalog_controls.items():
+                if isinstance(widget, QCheckBox):
+                    value: Any = widget.isChecked()
+                elif isinstance(widget, QComboBox):
+                    value = widget.currentText()
+                elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                    value = widget.value()
+                elif isinstance(widget, QPlainTextEdit):
+                    value = widget.toPlainText().strip()
+                else:
+                    text = widget.text().strip()  # type: ignore[attr-defined]
+                    if setting["type"] == "secret" and not text:
+                        continue
+                    value = None if not text and setting["current"] is None else text
+                if value != setting["current"]:
+                    set_value(self._inst_layout(), path, value)
+            self._toast(self._catalog_status, "Saved ✓")
+        except Exception as exc:  # noqa: BLE001
+            self._toast(self._catalog_status, f"Invalid: {exc}", error=True)
+
     # ── Permissions (mode + per-skill grants) ──
     def _permissions_page(self) -> QWidget:
         from jaeger_ai.core.instance.schemas import Config, load_yaml
@@ -825,10 +919,10 @@ class AgentSettingsWindow(QWidget):
                          or InstanceLayout(root=resolve_instance_dir()))
         return self._lay
 
-    # ── ARES & Extensions Suite ──
+    # ── Jaeger surfaces ──
     def _ares_page(self) -> QWidget:
-        page, v = self._page("ARES & Extensions Suite")
-        sub = QLabel("Connect JaegerAI runtime capabilities to ARES product surfaces.")
+        page, v = self._page("Jaeger surfaces")
+        sub = QLabel("Jaeger owns the control plane, browser UI, and optional integrations.")
         sub.setObjectName("Sub")
         v.addWidget(sub)
         v.addSpacing(10)
@@ -840,7 +934,7 @@ class AgentSettingsWindow(QWidget):
         sc_v.setContentsMargins(16, 14, 16, 14)
         sc_v.setSpacing(10)
 
-        sc_title = QLabel("ARES CONTROLLER ENGINE")
+        sc_title = QLabel("JAEGER CONTROL PLANE")
         sc_title.setObjectName("Section")
         sc_v.addWidget(sc_title)
 
@@ -848,14 +942,14 @@ class AgentSettingsWindow(QWidget):
         is_online = False
         try:
             import urllib.request
-            req = urllib.request.Request("http://127.0.0.1:8788/health")
+            req = urllib.request.Request("http://127.0.0.1:8791/health")
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 if resp.status == 200:
                     is_online = True
         except Exception:
             pass
 
-        st_lbl = QLabel(f"Status: {'● ONLINE (Port 8788)' if is_online else '○ OFFLINE (Port 8788)'}")
+        st_lbl = QLabel(f"Status: {'● ONLINE (adapter :8791)' if is_online else '○ OFFLINE (adapter :8791)'}")
         st_lbl.setStyleSheet(f"color: {'#43E08A' if is_online else '#FF6B6B'}; font-weight: 700; font-size: 13px;")
         sc_v.addWidget(st_lbl)
 
@@ -863,21 +957,21 @@ class AgentSettingsWindow(QWidget):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        btn_web = QPushButton("🌐 Open ARES WebUI")
+        btn_web = QPushButton("🌐 Open Jaeger WebUI")
         btn_web.setObjectName("SaveBtn")
         btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_web():
             import webbrowser
-            webbrowser.open("http://127.0.0.1:8788")
+            webbrowser.open("http://127.0.0.1:8787")
         btn_web.clicked.connect(_open_web)
         btn_row.addWidget(btn_web)
 
-        btn_mac = QPushButton("🚀 Open ARES Mac App")
+        btn_mac = QPushButton("🚀 Open Jaeger app")
         btn_mac.setStyleSheet("background: #1e293b; color: #43E08A; border: 1px solid #2e4438; border-radius: 9px; padding: 8px 14px; font-weight: 700;")
         btn_mac.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_mac():
             import subprocess
-            subprocess.Popen(["open", "-a", "ARES"])
+            subprocess.Popen(["open", "-a", "JaegerAI"])
         btn_mac.clicked.connect(_open_mac)
         btn_row.addWidget(btn_mac)
 

@@ -11,14 +11,17 @@ from it. These tests pin that derivation.
 from __future__ import annotations
 
 import pathlib
-import tempfile
 
 import pytest
 
-from jaeger_ai.core.instance.schemas import (
-    Config, ModelConfig, dump_yaml, load_yaml)
+from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml, load_yaml
 from jaeger_ai.core.settings.catalog import (
-    catalog, describe, get_value, groups, set_value)
+    catalog,
+    describe,
+    get_value,
+    groups,
+    set_value,
+)
 
 
 class _Layout:
@@ -44,26 +47,17 @@ def test_all_eight_spec_groups_are_live(layout):
 
 def test_group_output_is_page_ordered(layout):
     order = [g["name"] for g in groups(layout)]
-    # model leads, interaction trails the NAMED eight-group page order —
-    # spill-over groups an engine-module contributes (0.8 M1: "kokoro_tts"
-    # nested at Config.kokoro_tts; 0.8 M2b: "whisper_stt" nested at
-    # Config.whisper_stt; persona Mode C: "persona" at Config.persona.mode)
-    # sort alphabetically after it, per GROUP_ORDER's own "eight spec
-    # groups, then any spill-over" contract.
+    # User-facing groups follow the complete settings-page order.
     assert order.index("model") < order.index("display") < order.index("voice")
-    spillover = {"kokoro_tts", "whisper_stt", "persona", "security"}
-    named_order = [g for g in order if g not in spillover]
-    assert named_order.index("interaction") == len(named_order) - 1
+    assert order.index("interaction") < order.index("webui")
+    assert order.index("webui") < order.index("containers")
     assert "kokoro_tts" in order
     assert "whisper_stt" in order
     assert "security" in order
     assert order.index("kokoro_tts") > order.index("interaction")
     assert order.index("whisper_stt") > order.index("interaction")
-    # alphabetical among the spill-over groups themselves
-    assert (
-        order.index("kokoro_tts") < order.index("persona")
-        < order.index("security") < order.index("whisper_stt")
-    )
+    assert order.index("persona") < order.index("skills")
+    assert order.index("security") < order.index("avatar")
 
 
 def test_kokoro_tts_engine_module_group_is_live(layout):
@@ -123,14 +117,39 @@ def test_advanced_flag_and_filtering(layout):
     assert "voice.speak_replies" in paths
 
 
-def test_unexposed_fields_are_absent(layout):
-    # Identity key, model weights path (a Path), and deferred blocks
-    # (avatar/hardware/plugins/external_model) carry no _setting metadata.
+def test_structured_path_and_secret_fields_are_exposed_safely(layout):
     all_paths = {d["path"] for grp in catalog(layout).values() for d in grp}
-    for hidden in ("instance_name", "model.model_path", "avatar.enabled",
-                   "hardware.package", "external_model.enabled",
-                   "plugins.autostart"):
-        assert hidden not in all_paths
+    assert "instance_name" not in all_paths  # immutable instance identity
+    for exposed in ("model.model_path", "model.extra_gguf_dirs",
+                    "hooks.pre_tool_call", "external_model.fallback",
+                    "plugins.autostart", "webhooks.secret",
+                    "avatar.enabled", "hardware.package",
+                    "external_model.enabled", "containers.jaeger_webui_port",
+                    "containers.tailscale_publish"):
+        assert exposed in all_paths
+    assert describe(layout, "model.model_path")["type"] == "str"
+    assert describe(layout, "hooks.pre_tool_call")["type"] == "json"
+    secret = describe(layout, "webhooks.secret")
+    assert secret["type"] == "secret"
+    assert secret["current"] == ""
+
+
+def test_json_setting_round_trip(layout):
+    result = set_value(layout, "skills.enabled_base_skills", '["web", "files"]')
+    assert result["value"] == ["web", "files"]
+    assert load_yaml(layout.config_path, Config).skills.enabled_base_skills == ["web", "files"]
+    assert describe(layout, "skills.enabled_base_skills")["current"] == '[\n  "web",\n  "files"\n]'
+    with pytest.raises(ValueError, match="invalid JSON"):
+        set_value(layout, "skills.enabled_base_skills", "not-json")
+
+
+def test_secret_setting_is_never_returned_by_catalog_or_set(layout):
+    result = set_value(layout, "webhooks.secret", "private-value")
+    assert result["value"] == ""
+    assert load_yaml(layout.config_path, Config).webhooks.secret == "private-value"
+    desc = describe(layout, "webhooks.secret")
+    assert desc["current"] == ""
+    assert desc["configured"] is True
 
 
 def test_current_reflects_loaded_value(layout):

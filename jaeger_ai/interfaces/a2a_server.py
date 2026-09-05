@@ -31,11 +31,13 @@ from a2a.types import (
     TaskState,
 )
 from starlette.applications import Starlette
+from starlette.responses import RedirectResponse
+from starlette.routing import Route
 
 A2A_PROTOCOL_VERSION = "0.3"
 A2A_HOST = "127.0.0.1"
 A2A_PORT = 8796
-A2A_PUBLIC_URL = "http://127.0.0.1:8812"
+A2A_PUBLIC_URL = "http://192.168.64.1:8812"
 
 
 def build_agent_card() -> AgentCard:
@@ -158,8 +160,11 @@ def build_app(client: Any | None = None, executor: AgentExecutor | None = None) 
         task_store=InMemoryTaskStore(),
         agent_card=card,
     )
+    card_routes = create_agent_card_routes(card)
     routes = []
-    routes.extend(create_agent_card_routes(card))
+    if card_routes:
+        routes.append(Route("/.well-known/agent.json", card_routes[0].endpoint, methods=["GET"]))
+    routes.extend(card_routes)
     routes.extend(create_jsonrpc_routes(handler, "/", enable_v0_3_compat=True))
     return Starlette(routes=routes)
 

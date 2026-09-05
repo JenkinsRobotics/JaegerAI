@@ -1,15 +1,11 @@
-"""``jaeger webui ...`` — Hermes WebUI temporary browser UI surface.
-
-Uses the existing settings catalog toggle ``containers.use_hermes_webui``
-(plugin-style enablement) plus the Apple container + hermes-webui-adapter.
-"""
+"""``jaeger webui ...`` — Jaeger's browser interface and private access."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from jaeger_ai.cli import _common as c
 
@@ -19,19 +15,19 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
         print(
             "usage: jaeger webui <verb> [args...]\n"
             "\n"
-            "Hermes WebUI as Jaeger's temporary browser UI.\n"
-            "Enable:  jaeger settings set containers.use_hermes_webui true\n"
+            "Jaeger WebUI with optional private Tailscale publishing.\n"
             "\n"
             "verbs:\n"
-            "  start [--force] [--instance NAME]   start container + adapter\n"
+            "  start [--tailscale] [-i NAME]       start Jaeger WebUI + adapter\n"
+            "  start --container [--force]         use legacy container UI\n"
             "  stop  [--keep-container] [-i NAME]  stop adapter (+ container)\n"
             "  status [--json] [-i NAME]           toggle, ports, health\n"
             "  url [-i NAME]                       print browser URL\n"
             "\n"
             "ports:\n"
-            "  container UI  http://127.0.0.1:8787/   (Apple container)\n"
+            "  Jaeger WebUI  http://127.0.0.1:8790/   (primary)\n"
             "  adapter       http://127.0.0.1:8791/   (runner-local)\n"
-            "  vendor UI     http://127.0.0.1:8790/   (scripts/run-jaeger-webui.sh)\n"
+            "  container UI  http://127.0.0.1:8787/   (legacy alternative)\n"
             "  webhooks      127.0.0.1:8793           (no longer clashes with adapter)\n",
             file=sys.stderr,
         )
@@ -63,10 +59,25 @@ def _webui_start(argv: list[str]) -> int:
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui start")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--container", action="store_true")
+    parser.add_argument("--tailscale", action="store_true")
     args = parser.parse_args(rest)
     svc = HermesWebUIService(base.instance)
+    if not args.container:
+        print(f"Starting Jaeger WebUI for instance {svc.instance!r}...")
+        res = svc.start_vendor(publish_tailscale=True if args.tailscale else None)
+        if not res.get("ok"):
+            print(c.red(f"✗ {res.get('error') or res}"), file=sys.stderr)
+            return 1
+        print(c.green("✓ Jaeger WebUI is up."))
+        print(f"  Local:   {res['open']}")
+        if args.tailscale:
+            output = (res.get("tailscale") or {}).get("output")
+            print(f"  Tailnet: {output or 'published through Tailscale Serve'}")
+        return 0
+
     print(
-        f"Starting Hermes WebUI for instance {svc.instance!r} "
+        f"Starting container WebUI for instance {svc.instance!r} "
         f"(toggle={'on' if svc.enabled else 'off'})..."
     )
     res = svc.start(force=args.force)
@@ -78,10 +89,10 @@ def _webui_start(argv: list[str]) -> int:
             print(c.red(f"  adapter: {res['adapter'].get('error')}"), file=sys.stderr)
         return 1
     urls = svc.urls()
-    print(c.green("✓ Hermes WebUI stack is up."))
+    print(c.green("✓ Container WebUI stack is up."))
     print(f"  Open:    {urls.container_ui}")
     print(f"  Adapter: {urls.adapter}")
-    print(f"  Vendor:  {urls.vendor_ui}  (optional: ./scripts/run-jaeger-webui.sh)")
+    print(f"  Jaeger:  {urls.vendor_ui}  (use without --container)")
     return 0
 
 
@@ -97,7 +108,7 @@ def _webui_stop(argv: list[str]) -> int:
     if not res.get("ok"):
         print(c.red(f"✗ stop failed: {res}"), file=sys.stderr)
         return 1
-    print(c.green("✓ Hermes WebUI stack stopped."))
+    print(c.green("✓ Jaeger WebUI stack stopped."))
     return 0
 
 
@@ -114,7 +125,7 @@ def _webui_status(argv: list[str]) -> int:
         print(json.dumps(status, indent=2, default=str))
         return 0
     enabled = c.green("on") if status["enabled"] else c.dim("off")
-    print(f"Hermes WebUI toggle: {enabled}  (containers.use_hermes_webui)")
+    print(f"Container UI toggle: {enabled}  (containers.use_hermes_webui)")
     print(f"Instance:            {status['instance']}")
     ctn = status["container"]
     state = ctn.get("state")
@@ -127,6 +138,11 @@ def _webui_status(argv: list[str]) -> int:
     print(f"Adapter:             {ad_s}  pid={ad.get('pid')}")
     print(f"  URL:               {ad['url']}")
     print(f"  Health:            {ad['health']}")
+    vd = status["vendor"]
+    vd_s = c.green("running") if vd.get("running") else c.dim("stopped")
+    print(f"Jaeger WebUI:         {vd_s}  pid={vd.get('pid')}")
+    print(f"  URL:               {vd['url']}")
+    print(f"  Health:            {vd['health']}")
     ports = status["ports"]
     print(
         "Ports:               "
@@ -143,5 +159,5 @@ def _webui_url(argv: list[str]) -> int:
 
     base, _rest = _parse_instance(argv)
     svc = HermesWebUIService(base.instance)
-    print(svc.urls().container_ui)
+    print(svc.urls().vendor_ui)
     return 0

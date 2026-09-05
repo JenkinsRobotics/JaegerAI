@@ -1417,7 +1417,7 @@ class JaegerAgent:
         self.last_activity_ts = time.time()
         self.last_activity_desc = desc
 
-    def _accumulate_usage(self, raw: Any) -> int:
+    def _accumulate_usage(self, raw: Any, adapter: Any = None) -> int:
         """Extract token usage from an adapter's raw response and add
         to the per-turn counters. Returns THIS call's prompt-token
         count (0 when unavailable) so the context guard can calibrate
@@ -1483,6 +1483,26 @@ class JaegerAgent:
             )
         except (TypeError, ValueError):
             return 0
+        # Persist exact provider totals when available. OpenAI-compatible
+        # Ollama reports cached prompt tokens as a subset of prompt_tokens,
+        # so retain them separately rather than adding them twice.
+        if adapter is not None:
+            try:
+                details = _get("prompt_tokens_details")
+                if isinstance(details, dict):
+                    cached = details.get("cached_tokens", 0)
+                else:
+                    cached = getattr(details, "cached_tokens", 0) if details else 0
+                from jaeger_ai.core.runtime.usage_stats import record_model_usage
+                record_model_usage(
+                    str(getattr(adapter, "provider", "") or "unknown"),
+                    str(getattr(adapter, "model", "") or "unknown"),
+                    prompt_tokens=per_call_prompt,
+                    cached_prompt_tokens=int(cached or 0),
+                    completion_tokens=int(c or 0),
+                )
+            except Exception:  # noqa: BLE001 — telemetry is best-effort
+                pass
         return per_call_prompt
 
     # ── stale-call timeout (Phase-8) ───────────────────────────────
@@ -1597,7 +1617,7 @@ class JaegerAgent:
                         adapter_ttft = getattr(adapter, "last_ttft_s", None)
                         if adapter_ttft:
                             self.last_ttft_s = float(adapter_ttft)
-                    per_call_prompt = self._accumulate_usage(raw)
+                    per_call_prompt = self._accumulate_usage(raw, adapter)
                     if self.context_guard is not None and per_call_prompt:
                         try:
                             self.context_guard.observed_call(

@@ -18,16 +18,20 @@ config schema.
 
 from __future__ import annotations
 
+import json
 import types
 import typing
+from pathlib import Path
 from typing import Any
 
 from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
 # Page order for grouped output — the eight spec groups, then any spill-over.
 GROUP_ORDER = [
-    "model", "display", "voice", "tts", "autonomy", "containers",
-    "permissions", "retention", "interaction", "general",
+    "model", "display", "interaction", "webui", "voice", "tts",
+    "kokoro_tts", "whisper_stt", "persona", "skills", "autonomy",
+    "warmup", "workspace", "webhooks", "containers", "permissions",
+    "security", "avatar", "hardware", "retention", "general",
 ]
 
 
@@ -46,8 +50,8 @@ def _unwrap_optional(ann: Any) -> Any:
 
 def _kind_and_choices(ann: Any) -> tuple[str | None, list[Any] | None]:
     """Map a leaf annotation to (catalog type, choices). Returns
-    ``(None, None)`` for types the catalog can't render (Path, list, …) —
-    those leaves are simply skipped."""
+    ``json`` is used for structured lists/dicts so every schema setting can
+    still be edited without teaching each UI about every nested model."""
     ann = _unwrap_optional(ann)
     if typing.get_origin(ann) is typing.Literal:
         return "enum", list(typing.get_args(ann))
@@ -59,7 +63,27 @@ def _kind_and_choices(ann: Any) -> tuple[str | None, list[Any] | None]:
         return "float", None
     if ann is str:
         return "str", None
+    if ann is Path:
+        return "str", None
+    if typing.get_origin(ann) in (list, dict):
+        return "json", None
     return None, None
+
+
+def _display_value(value: Any, kind: str) -> Any:
+    """Return a JSON-ready value suitable for every settings frontend."""
+    if value is None:
+        return None
+    if kind == "json":
+        return json.dumps(
+            value,
+            default=lambda item: item.model_dump() if hasattr(item, "model_dump") else str(item),
+            indent=2,
+            sort_keys=True,
+        )
+    if isinstance(value, Path):
+        return str(value)
+    return value
 
 
 def _validation(field_info: Any) -> dict[str, Any]:
@@ -114,19 +138,23 @@ def _walk(model_cls: type, instance: Any, prefix: str,
         kind, choices = _kind_and_choices(field_info.annotation)
         if kind is None:
             continue  # unrenderable type (Path, list) — skip, don't fabricate
-        default = field_info.get_default(call_default_factory=False)
+        default = (None if field_info.is_required()
+                   else field_info.get_default(call_default_factory=True))
+        secret = bool(extra.get("secret", False))
         desc: dict[str, Any] = {
             "path": path,
             "label": _label(path),
             "group": extra.get("group") or "general",
-            "type": kind,
-            "default": default,
-            "current": value,
+            "type": "secret" if secret else kind,
+            "default": "" if secret else _display_value(default, kind),
+            "current": "" if secret else _display_value(value, kind),
             "description": (field_info.description or "").strip(),
             "restart": bool(extra.get("restart", False)),
             "advanced": bool(extra.get("advanced", False)),
             "validation": _validation(field_info),
         }
+        if secret:
+            desc["configured"] = bool(value)
         if choices is not None:
             desc["choices"] = choices
         out.append(desc)
@@ -206,6 +234,11 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
     desc = describe(layout, path)
     if desc is None:
         raise ValueError(f"unknown setting: {path!r}")
+    if desc["type"] == "json" and isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON for {path}: {exc.msg}") from exc
     cfg = _load(layout)
     data = cfg.model_dump()
     _assign(data, path.split("."), value)
@@ -214,8 +247,11 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
     except ValidationError as exc:
         raise ValueError(_fmt_validation_error(path, exc)) from exc
     dump_yaml(layout.config_path, new)
+    saved = _read_path(new, path)
+    if desc["type"] == "secret":
+        saved = ""
     return {"ok": True, "restart_required": desc["restart"],
-            "path": path, "value": _read_path(new, path)}
+            "path": path, "value": saved}
 
 
 def _ordered_groups(names: Any) -> list[str]:

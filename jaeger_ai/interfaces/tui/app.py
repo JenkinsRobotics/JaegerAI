@@ -1400,7 +1400,7 @@ class JaegerTUI:
         # ── swap in the coder model ──
         self.console.print(
             "[bold yellow]◎ entering Deep Think[/] — swapping to the "
-            "coder model. The robot won't be conversational until it "
+            "coder model. The assistant won't be conversational until it "
             "swaps back. [dim](Ctrl-C interrupts.)[/]"
         )
         self._client = None  # drop ref so the old model frees before reload

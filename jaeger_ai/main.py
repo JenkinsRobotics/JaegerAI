@@ -3829,6 +3829,8 @@ def _run_turn_via_jaeger_agent(
     from jaeger_agent import trace as _trace
     _trace.trace_begin(key, user_text)
     persona_handled = False
+    prev_active_agent = _pipeline.get("active_jaeger_agent")
+    prev_session = _pipeline.get("current_session")
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
@@ -3886,7 +3888,8 @@ def _run_turn_via_jaeger_agent(
                     persona_handled = True
 
         if result is None:
-            if lock is not None:
+            parent_holds_lock = bool(getattr(_llm_lock_held, "value", False))
+            if lock is not None and not parent_holds_lock:
                 with lock:
                     _llm_lock_held.value = True
                     try:
@@ -3914,8 +3917,10 @@ def _run_turn_via_jaeger_agent(
                 "spoke_via_tool": False, "elapsed_s": elapsed, "report": report,
                 "halt_reason": halt}
     finally:
-        if _pipeline.get("active_jaeger_agent") is jaeger_agent:
-            _pipeline["active_jaeger_agent"] = None
+        _pipeline["active_jaeger_agent"] = prev_active_agent
+        _pipeline["current_session"] = prev_session
+        if prev_session:
+            _context.set_current_session(prev_session)
 
     answer = (result["answer"] or "").strip()
     tool_activity = result["tool_activity"]

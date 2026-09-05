@@ -1,0 +1,11 @@
+# Incremental deployment atop the currently validated dependency image.
+# For a clean dependency build, use the staged upstream Dockerfile instead.
+ARG BASE_IMAGE=hermes-webui:jaeger-profile-gateway-20260904
+FROM ${BASE_IMAGE}
+COPY jaeger-overlay.tar.gz /tmp/jaeger-overlay.tar.gz
+RUN tar -xzf /tmp/jaeger-overlay.tar.gz -C /apptoo && \
+    cp /apptoo/docker_init.bash /hermeswebui_init.bash
+RUN chmod +x /hermeswebui_init.bash && \
+    test -f /apptoo/api/jaeger_ollama.py && \
+    python -c "from pathlib import Path; assert '_load_yaml_config_file(Path(profile_home)' in Path('/apptoo/api/gateway_chat.py').read_text()"
+LABEL org.jaeger.integration="profile-isolation-ollama-hosts-sse-v2"
