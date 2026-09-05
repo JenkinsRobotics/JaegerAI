@@ -50,6 +50,9 @@ def test_agent_card_route_uses_official_a2a_sdk():
     assert body["supportedInterfaces"][0]["url"] == A2A_PUBLIC_URL
     skill_ids = {skill["id"] for skill in body["skills"]}
     assert skill_ids == {"chat", "delegate"}
+    legacy_response = client.get("/.well-known/agent.json")
+    assert legacy_response.status_code == 200
+    assert legacy_response.json() == body
 
 
 def test_executor_drives_bridge_turn_without_a_model():

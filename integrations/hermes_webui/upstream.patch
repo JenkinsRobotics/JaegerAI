@@ -1,0 +1,389 @@
+diff --git a/api/commands.py b/api/commands.py
+index 36d85920..6c093f24 100644
+--- a/api/commands.py
++++ b/api/commands.py
+@@ -128,6 +128,37 @@ def list_commands(_registry=None) -> list[dict[str, Any]]:
+             })
+     except Exception:
+         pass
++
++    # Roundtable modes are interpreted by the profile gateway, not by the
++    # Hermes CLI registry. Publish them here so the composer autocomplete is
++    # a complete, discoverable description of that profile's controls.
++    try:
++        from api.profiles import get_active_profile_name
++        active_profile = str(get_active_profile_name() or "").strip().lower()
++    except Exception:
++        active_profile = ""
++    if active_profile == "roundtable":
++        existing_names = {c["name"] for c in out}
++        roundtable_modes = (
++            ("ask", "Everyone answers independently, then discusses and reaches a decision."),
++            ("collaborate", "Members divide the work, report results, and combine them."),
++            ("quick", "Route the request to one best-suited member."),
++            ("review", "One proposal is reviewed and challenged by the selected members."),
++            ("vote", "Collect independent recommendations and an explicit ballot."),
++            ("incident", "Assign diagnostics, evidence gathering, and remediation separately."),
++        )
++        for name, description in roundtable_modes:
++            if name not in existing_names:
++                out.append({
++                    "name": name,
++                    "description": description,
++                    "category": "Roundtable",
++                    "aliases": [],
++                    "args_hint": "[@member|@all] request",
++                    "subcommands": [],
++                    "cli_only": False,
++                    "gateway_only": False,
++                })
+     return out
+ 
+ 
+diff --git a/api/config.py b/api/config.py
+index de37e22d..dc43f5cf 100644
+--- a/api/config.py
++++ b/api/config.py
+@@ -2567,6 +2567,9 @@ def _parse_provider_qualified_model_id(model_id: str) -> tuple[str, str] | None:
+     if not candidate.startswith("@") or ":" not in candidate:
+         return None
+     inner = candidate[1:]
++    if inner.startswith(("ollama:", "ollama-")) or inner == "custom:" + str(cfg.get("model", {}).get("default", "")):
++        provider_hint, bare_model = inner.split(":", 1)
++        return bare_model, provider_hint
+     provider_hint, bare_model = inner.rsplit(":", 1)
+     if provider_hint.startswith("custom:") and provider_hint.count(":") >= 2:
+         _slug_rest = provider_hint[len("custom:"):]
+@@ -2823,6 +2826,10 @@ def resolve_model_provider(model_id: str, *, explicitly_picked: bool = False) ->
+     legacy redundant-prefix strip so it keeps routing when cold. Warm provenance
+     (endpoint-advertised ids) always takes precedence over this flag.
+     """
++    from api.jaeger_ollama import resolve as resolve_ollama_host
++    host_route = resolve_ollama_host(model_id, cfg)
++    if host_route is not None:
++        return host_route
+     config_provider = None
+     config_base_url = None
+     model_cfg = cfg.get("model", {})
+@@ -6925,6 +6932,10 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
+     mtime_stale = _current_mtime != _cfg_mtime
+     if path_changed or (mtime_stale and not _cfg_has_in_memory_overrides()):
+         reload_config_if_stale()
++    from api.jaeger_ollama import catalog as ollama_host_catalog
++    host_catalog = ollama_host_catalog(cfg, refresh=force_refresh, cached_only=prefer_cache)
++    if host_catalog is not None:
++        return host_catalog
+     # ── COLD PATH helper ─────────────────────────────────────────────────────
+     # Extracted so it runs inside _available_models_cache_lock (RLock) to
+     # prevent thundering-herd: only one thread rebuilds while others wait.
+diff --git a/api/gateway_chat.py b/api/gateway_chat.py
+index 6ee388cf..4a8fa1ca 100644
+--- a/api/gateway_chat.py
++++ b/api/gateway_chat.py
+@@ -988,9 +988,19 @@ def _run_gateway_chat_streaming(
+     usage = {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+     try:
+         s = get_session(session_id)
+-        from api.config import get_config  # imported lazily to avoid config-cycle churn
+-
+-        cfg = get_config()
++        from api.config import _load_yaml_config_file, _apply_config_defaults
++        from api.profiles import get_hermes_home_for_profile
++
++        # This runs on a detached worker.  Reading ambient get_config() here
++        # silently selected the process-wide root profile (and therefore the
++        # fallback 127.0.0.1:8642 gateway) for named-profile sessions. Resolve
++        # configuration from the persisted session owner explicitly instead.
++        profile_home = get_hermes_home_for_profile(getattr(s, "profile", None) or "default")
++        # Never use get_config() here, even when thread-local home matches.
++        # Its global cache can be replaced by a simultaneous tab/profile request.
++        from pathlib import Path
++        cfg = _load_yaml_config_file(Path(profile_home) / "config.yaml")
++        _apply_config_defaults(cfg)
+         reasoning_effort = _gateway_reasoning_effort_for_request(
+             cfg,
+             model=model,
+diff --git a/api/profiles.py b/api/profiles.py
+index f5e8432a..a0ac1f41 100644
+--- a/api/profiles.py
++++ b/api/profiles.py
+@@ -2002,6 +2002,7 @@ def _build_profile_rows_fast() -> list | None:
+         enabled_count, total_count = _get_profile_skills_stats(home)
+         return {
+             'name': name,
++            'display_name': _profile_display_name_from_meta(home, name),
+             'path': str(home),
+             'is_default': is_default,
+             'is_active': False,  # filled in by caller (cheap, varies per request)
+@@ -2135,6 +2136,7 @@ def list_profiles_api() -> list:
+             enabled_count, total_count = _get_profile_skills_stats(p.path)
+             result.append({
+                 'name': p.name,
++                'display_name': _profile_display_name_from_meta(p.path, p.name),
+                 'path': str(p.path),
+                 'is_default': p.is_default,
+                 'is_active': p.name == active,
+@@ -2168,11 +2170,23 @@ def _profile_visible_from_meta(profile_path: Path) -> bool:
+     return visible is not False
+ 
+ 
++def _profile_display_name_from_meta(profile_path: Path, fallback: str) -> str:
++    """Return the user-editable label without changing the routing profile id."""
++    try:
++        meta_path = Path(profile_path) / 'profile.yaml'
++        data = yaml.safe_load(meta_path.read_text(encoding='utf-8')) if meta_path.exists() else {}
++        value = data.get('display_name') if isinstance(data, dict) else None
++        return str(value).strip() or fallback
++    except Exception:
++        return fallback
++
++
+ def _default_profile_dict() -> dict:
+     """Fallback profile dict when hermes_cli is not importable."""
+     enabled_count, compatible_count = _get_profile_skills_stats(_DEFAULT_HERMES_HOME)
+     return {
+         'name': 'default',
++        'display_name': _profile_display_name_from_meta(_DEFAULT_HERMES_HOME, 'default'),
+         'path': str(_DEFAULT_HERMES_HOME),
+         'is_default': True,
+         'is_active': True,
+diff --git a/api/routes.py b/api/routes.py
+index 220e8e99..853ec270 100644
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -23091,6 +23091,19 @@ def _agent_runtime_barrier_response(
+     return None
+ 
+ 
++def _run_profile_scoped_gateway_chat_streaming(*args, **kwargs):
++    """Bind the persisted session profile in the detached gateway worker."""
++    session_id = args[0]
++    session = get_session(session_id)
++    profile_name = str(getattr(session, "profile", "") or "").strip()
++    with profile_scope_for_detached_worker(
++        profile_name,
++        "gateway chat streaming",
++        logger_override=logger,
++    ):
++        return _run_gateway_chat_streaming(*args, **kwargs)
++
++
+ def _start_chat_stream_for_session(
+     s,
+     *,
+@@ -23249,7 +23262,11 @@ def _start_chat_stream_for_session(
+     if goal_related:
+         STREAM_GOAL_RELATED[stream_id] = True
+     diag.stage("worker_thread_start") if diag else None
+-    worker_target = _run_gateway_chat_streaming if backend_is_gateway else _run_agent_streaming
++    worker_target = (
++        _run_profile_scoped_gateway_chat_streaming
++        if backend_is_gateway
++        else _run_agent_streaming
++    )
+     worker_kwargs = {"model_provider": model_provider, "goal_related": goal_related}
+     if moa_config and not backend_is_gateway:
+         worker_kwargs["moa_config"] = moa_config
+diff --git a/docker_init.bash b/docker_init.bash
+index 947c9498..78b711c1 100644
+--- a/docker_init.bash
++++ b/docker_init.bash
+@@ -217,8 +217,13 @@ chown_home_hermeswebui() {
+   # source — prune the entire hermes-agent path from the chown walk so a
+   # read-only or partially-read-only mount doesn't break the rest of the home
+   # ownership alignment.
++  # Apple Container's VirtioFS bind mounts expose the host ownership correctly
++  # but reject chown(2), including on the mount root.  The configured runtime
++  # UID/GID already matches that host owner, so pruning the state mount is both
++  # sufficient and avoids aborting an otherwise valid local deployment.
+   find /home/hermeswebui \
+-    -path "/home/hermeswebui/.hermes/hermes-agent" -prune \
++    -path "/home/hermeswebui/.hermes" -prune \
++    -o -path "/home/hermeswebui/.hermes/hermes-agent" -prune \
+     -o -name ".git" -prune \
+     -o -exec chown -h "${WANTED_UID}:${WANTED_GID}" {} +
+ }
+@@ -417,6 +422,19 @@ ensure_hindsight_client_docker_dependency() {
+   fi
+ }
+ 
++ensure_honcho_client_docker_dependency() {
++  # Honcho is an optional hermes-agent extra. Keep it outside the cached
++  # dependency guard so existing WebUI containers gain/self-heal the provider.
++  _honcho_client_requirement="honcho-ai==2.2.0"
++  echo ""; echo "== Checking Honcho memory provider dependency"
++  if uv pip show honcho-ai >/dev/null 2>&1; then
++    echo "-- honcho-ai already installed"
++  else
++    echo "-- Installing ${_honcho_client_requirement} for Honcho memory provider support"
++    uv pip install "${_honcho_client_requirement}" --trusted-host pypi.org --trusted-host files.pythonhosted.org || error_exit "Failed to install honcho-ai"
++  fi
++}
++
+ if [ -f /app/venv/.deps_installed ]; then
+   echo ""; echo "== Dependencies already installed — skipping (fast restart)"
+ else
+@@ -511,6 +529,7 @@ else
+ fi
+ 
+ ensure_hindsight_client_docker_dependency
++ensure_honcho_client_docker_dependency
+ 
+ echo ""; echo "== Running hermes-webui"
+ cd /app; python server.py || error_exit "hermes-webui failed or exited with an error"
+diff --git a/static/boot.js b/static/boot.js
+index 526caa24..6ce194df 100644
+--- a/static/boot.js
++++ b/static/boot.js
+@@ -3617,9 +3617,9 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
+   applyBotName();
+   // Update profile chip label immediately
+   const profileLabel=$('profileChipLabel');
+-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
++  if(profileLabel) profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
+   const titleLabel=$('titlebarProfileLabel');
+-  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
++  if(titleLabel) titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
+   const profileIntent=(typeof _profileQueryIntentFromLocation==='function')?_profileQueryIntentFromLocation():null;
+   const _savedLocalBeforeProfileSwitch=localStorage.getItem('hermes-webui-session');
+   const _profileSwitchProfileBefore=S.activeProfile||'default';
+diff --git a/static/panels.js b/static/panels.js
+index 0b6fda6b..5f330895 100644
+--- a/static/panels.js
++++ b/static/panels.js
+@@ -6699,7 +6699,7 @@ async function loadProfilesPanel() {
+       card.innerHTML = `
+         <div class="profile-card-header">
+           <div style="min-width:0;flex:1">
+-            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
++            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.display_name||p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
+             ${meta.length ? `<div class="profile-card-meta">${esc(meta.join(' \u00b7 '))}</div>` : `<div class="profile-card-meta">${esc(t('profile_no_configuration'))}</div>`}
+           </div>
+         </div>`;
+@@ -6871,7 +6871,7 @@ function renderProfileDropdown(data) {
+     const gwDot = `<span class="profile-opt-badge ${p.gateway_running ? 'running' : 'stopped'}"></span>`;
+     const checkmark = p.name === active ? ' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--link)" stroke-width="3" style="vertical-align:-1px"><polyline points="20 6 9 17 4 12"/></svg>' : '';
+     const defaultBadge = p.is_default ? ` <span style="opacity:.5;font-weight:400">${esc(t('profile_default_label'))}</span>` : '';
+-    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.name)}${defaultBadge}${checkmark}</div>` +
++    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.display_name||p.name)}${defaultBadge}${checkmark}</div>` +
+       (meta.length ? `<div class="profile-opt-meta">${esc(meta.join(' \u00b7 '))}</div>` : '');
+     opt.onclick = async () => {
+       closeProfileDropdown();
+diff --git a/static/sessions.js b/static/sessions.js
+index b7a59359..40386360 100644
+--- a/static/sessions.js
++++ b/static/sessions.js
+@@ -632,6 +632,19 @@ function _cronProfileNameIsRootAlias(name) {
+   return false;
+ }
+ 
++// Profile ids remain stable routing keys (notably "default" for ~/.hermes),
++// while profile.yaml display_name is the label the user chose.
++function profileDisplayName(name) {
++  if (typeof _profilesCache !== 'undefined' && _profilesCache
++    && Array.isArray(_profilesCache.profiles)) {
++    const entry = _profilesCache.profiles.find((p) => p && p.name === name);
++    if (entry && typeof entry.display_name === 'string' && entry.display_name.trim()) {
++      return entry.display_name.trim();
++    }
++  }
++  return name || 'default';
++}
++
+ // default/renamed-root equivalence for cron-marker ownership (mirrors server
+ // _profiles_match enough for the active surface: literal 'default' ↔ root).
+ function _cronMarkerProfileMatchesActive(origin, activeProfile) {
+diff --git a/static/style.css b/static/style.css
+index 98f6b7f0..f3cf729a 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -3400,18 +3400,18 @@
+ .profile-card.active .profile-card-meta{color:var(--accent-text);opacity:.8;}
+ .profile-card-actions{display:flex;gap:4px;flex-shrink:0;}
+ /* ── Slash command autocomplete dropdown ── */
+-.cmd-dropdown{display:none;position:absolute;left:0;right:0;bottom:calc(100% + 4px);width:auto;max-width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -8px 24px rgba(0,0,0,.4);z-index:200;max-height:240px;overflow-y:auto;}
++.cmd-dropdown{display:none;position:absolute;left:0;right:0;bottom:calc(100% + 4px);width:auto;max-width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -8px 24px rgba(0,0,0,.4);z-index:200;max-height:240px;overflow-x:hidden;overflow-y:auto;}
+ .cmd-dropdown.open{display:block;}
+-.cmd-item{padding:8px 14px;cursor:pointer;transition:background .12s;}
++.cmd-item{min-width:0;padding:8px 14px;cursor:pointer;transition:background .12s;}
+ .cmd-item:hover{background:rgba(255,255,255,.07);}
+ .cmd-item.selected{background:var(--accent-bg);outline:1px solid var(--accent-bg-strong);}
+ .cmd-item-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+-.cmd-item-name{font-size:13px;color:var(--text);font-weight:500;}
++.cmd-item-name{min-width:0;font-size:13px;color:var(--text);font-weight:500;overflow-wrap:anywhere;}
+ .cmd-item-parent{color:var(--muted);font-weight:400;}
+ .cmd-item-subarg{font-weight:600;}
+ .cmd-item-path-value{font-family:var(--font-mono);font-size:12px;}
+ .cmd-item-arg{color:var(--muted);font-weight:400;font-style:italic;}
+-.cmd-item-desc{font-size:11px;color:var(--muted);margin-top:1px;}
++.cmd-item-desc{min-width:0;font-size:11px;color:var(--muted);margin-top:1px;white-space:normal;overflow-wrap:anywhere;}
+ .cmd-item-badge{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--hover-bg);}
+ .cmd-item-badge-skill{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent-bg-strong);}
+ .ws-action-btn.danger:hover{background:rgba(239,83,80,.1);color:var(--error);border-color:var(--error);}
+diff --git a/static/ui.js b/static/ui.js
+index 56af87da..877d8647 100644
+--- a/static/ui.js
++++ b/static/ui.js
+@@ -11005,9 +11005,9 @@ function syncTopbar(){
+     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
+     // Update profile chip even when no session is active (e.g. right after profile switch)
+     const _profileLabel=$('profileChipLabel');
+-    if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
++    if(_profileLabel) _profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
+     const _titleLabel=$('titlebarProfileLabel');
+-    if(_titleLabel) _titleLabel.textContent=S.activeProfile||'default';
++    if(_titleLabel) _titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
+     return;
+   }
+   const sessionTitle=S.session.title||t('untitled');
+@@ -11132,9 +11132,9 @@ function syncTopbar(){
+   // scoping project/session operations to the session's own profile — is
+   // unaffected by this line.
+   const profileLabel=$('profileChipLabel');
+-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
++  if(profileLabel) profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
+   const titleLabel=$('titlebarProfileLabel');
+-  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
++  if(titleLabel) titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
+ }
+ 
+ function msgContent(m){
+diff --git a/tests/test_issue3957_profile_providers_models.py b/tests/test_issue3957_profile_providers_models.py
+index 27c2d179..1bcad4bb 100644
+--- a/tests/test_issue3957_profile_providers_models.py
++++ b/tests/test_issue3957_profile_providers_models.py
+@@ -702,6 +702,29 @@ def test_detached_worker_scope_installs_secret_scope(monkeypatch, tmp_path):
+     assert call_log.get("reset_called") is True
+ 
+ 
++def test_gateway_worker_binds_persisted_session_profile(monkeypatch, tmp_path):
++    """Gateway URL/config resolution must use the session's named profile."""
++    from api import routes
++
++    session = types.SimpleNamespace(profile="openclaw")
++    observed = {}
++    profile_home = tmp_path / ".hermes" / "profiles" / "openclaw"
++    profile_home.mkdir(parents=True)
++    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", tmp_path / ".hermes")
++    monkeypatch.setattr(routes, "get_session", lambda _session_id: session)
++
++    def fake_gateway_worker(*_args, **_kwargs):
++        observed["profile"] = profiles.get_active_profile_name()
++
++    monkeypatch.setattr(routes, "_run_gateway_chat_streaming", fake_gateway_worker)
++    routes._run_profile_scoped_gateway_chat_streaming(
++        "session-id", "hello", "model", "/workspace", "stream-id"
++    )
++
++    assert observed["profile"] == "openclaw"
++    assert profiles.get_active_profile_name() == "default"
++
++
+ def test_account_usage_subprocess_env_strips_bedrock_keys(monkeypatch, tmp_path):
+     """Quota probes must not inherit AWS/Bedrock keys when block_process_env_fallback is set."""
+     from api.providers import _account_usage_subprocess_env
+@@ -912,4 +935,3 @@ def test_expand_env_vars_does_not_leak_process_env_under_block_scope(monkeypatch
+             config._thread_ctx.env = {}
+         else:
+             config._thread_ctx.env = prev_env
+-

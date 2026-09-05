@@ -304,6 +304,8 @@ def discover_all(ollama_cloud_key: str = "") -> dict[str, Any]:
 # user's typed picks (recorded via core.external_model_history) override
 # this; this is the catalog floor.
 OLLAMA_CLOUD_CURATED: tuple[str, ...] = (
+    "glm-5.3:cloud",
+    "glm-5.3-flash:cloud",
     "qwen3.5:397b",
     "qwen3-coder:480b",
     "gpt-oss:120b",

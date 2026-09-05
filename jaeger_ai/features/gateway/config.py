@@ -91,6 +91,15 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                 "backends": [{"host": a2a_backend}],
                             },
                             {
+                                # Compatibility for older clients. The A2A
+                                # standard path above remains canonical.
+                                "matches": [
+                                    {"path": {"exact": "/.well-known/agent.json"}}
+                                ],
+                                "policies": {"a2a": {}},
+                                "backends": [{"host": a2a_backend}],
+                            },
+                            {
                                 "policies": {
                                     "cors": {
                                         "allowOrigins": ["*"],

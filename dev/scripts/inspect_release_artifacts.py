@@ -14,6 +14,13 @@ FORBIDDEN = re.compile(
     r"|\.(?:py[co]|db|sqlite(?:3)?|log)$|(^|/)\.DS_Store$"
 )
 
+JAEGER_AI_REQUIRED_SUFFIXES = (
+    "jaeger_ai/core/instance/schemas.py",
+    "jaeger_ai/core/settings/catalog.py",
+    "jaeger_ai/core/runtime/agent_controller.py",
+    "jaeger_ai/features/hermes_webui/service.py",
+)
+
 
 def members(path: Path) -> list[str]:
     if path.suffix == ".whl" or zipfile.is_zipfile(path):
@@ -34,7 +41,8 @@ def main() -> int:
         parser.error("no release artifacts found")
     failed = False
     for artifact in artifacts:
-        bad = [name for name in members(artifact) if FORBIDDEN.search(name)]
+        names = members(artifact)
+        bad = [name for name in names if FORBIDDEN.search(name)]
         if bad:
             failed = True
             print(f"{artifact}: forbidden members")
@@ -42,6 +50,16 @@ def main() -> int:
                 print(f"  {name}")
         else:
             print(f"{artifact}: clean")
+        if artifact.name.startswith("jaeger_ai-"):
+            missing = [
+                suffix for suffix in JAEGER_AI_REQUIRED_SUFFIXES
+                if not any(name.endswith(suffix) for name in names)
+            ]
+            if missing:
+                failed = True
+                print(f"{artifact}: missing required runtime members")
+                for name in missing:
+                    print(f"  {name}")
     return int(failed)
 
 

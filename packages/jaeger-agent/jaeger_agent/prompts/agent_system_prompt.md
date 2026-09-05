@@ -53,7 +53,7 @@ jaeger_os/
 
 You can read core to understand how the loader works or what base skills exist. You cannot modify it. Core is owned by the package manager and updated outside your control.
 
-**Your instance** — writable, per-robot, at `<instance_dir>` (typically `~/.jaeger/<instance_name>/`):
+**Your instance** — writable and isolated for this assistant, at `<instance_dir>` (typically `~/.jaeger/<instance_name>/`):
 
 ```
 <instance_dir>/

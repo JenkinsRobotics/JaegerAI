@@ -28,18 +28,18 @@ MCP_HTTP_PORT = 8792
 MCP_HTTP_PATH = "/mcp"
 
 
-def _run_chat(run_turn: TurnFn, client: Any, message: str) -> str:
+def _run_chat(run_turn: TurnFn, client: Any, message: str, session_key: str = "mcp") -> str:
     """Drive one turn for the ``chat`` MCP tool. Agent/tool/model output is
     forced to stderr so it never corrupts the MCP JSON-RPC stdout stream."""
     with contextlib.redirect_stdout(sys.stderr):
-        out = run_turn(client, message, session_key="mcp")
+        out = run_turn(client, message, session_key=session_key or "mcp")
     if out.get("error"):
         return f"(agent error: {out['error']})"
     return out.get("text") or ""
 
 
-def _bridge_chat(bridge: Any, message: str) -> str:
-    out = bridge.turn(message, session="mcp")
+def _bridge_chat(bridge: Any, message: str, session: str = "mcp") -> str:
+    out = bridge.turn(message, session=session or "mcp")
     if isinstance(out, dict) and out.get("error"):
         return f"(agent error: {out['error']})"
     if isinstance(out, dict):
@@ -86,6 +86,7 @@ def build_server(client: Any, instance: str, model: str | None,
     and do not boot a second model.
     """
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.transport_security import TransportSecuritySettings
 
     if run_turn is None and bridge is None:
         from jaeger_ai.main import run_for_voice as run_turn  # noqa: PLW0127
@@ -95,17 +96,37 @@ def build_server(client: Any, instance: str, model: str | None,
         host=host,
         port=port,
         streamable_http_path=MCP_HTTP_PATH,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[
+                "localhost:*",
+                "127.0.0.1:*",
+                "[::1]:*",
+                "100.74.2.15:*",
+                "192.168.64.1:*",
+            ],
+            allowed_origins=[
+                "http://localhost:*",
+                "http://127.0.0.1:*",
+                "http://100.74.2.15:*",
+                "http://192.168.64.1:*",
+            ],
+        ),
     )
 
     @mcp.tool()
-    def chat(message: str) -> str:
+    def chat(message: str, session_id: str = "") -> str:
         """Send a message to the local JaegerAI agent and return its reply.
 
         The agent has its own tools, memory, and skills; this drives a full
-        turn (it may take a while for a complex request)."""
+        turn (it may take a while for a complex request). ``session_id``
+        isolates Roundtable members and other concurrent callers so they
+        do not collide on the default ``mcp`` session.
+        """
+        session = (session_id or "").strip() or "mcp"
         if bridge is not None:
-            return _bridge_chat(bridge, message)
-        return _run_chat(run_turn, client, message)
+            return _bridge_chat(bridge, message, session=session)
+        return _run_chat(run_turn, client, message, session_key=session)
 
     @mcp.tool()
     def agent_info() -> dict:

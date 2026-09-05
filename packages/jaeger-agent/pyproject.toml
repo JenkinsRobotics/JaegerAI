@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-agent"
-description = "Reusable, headless agent framework for AI applications and robots."
+description = "Reusable agent runtime with model adapters, tools, skills, memory, automation, delegation, and headless operation."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dynamic = ["version"]

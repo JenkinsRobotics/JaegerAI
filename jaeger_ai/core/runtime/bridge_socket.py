@@ -36,7 +36,10 @@ def candidate_paths(*, home: str | os.PathLike[str] | None,
             name = active.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-    if not name:
+    # A caller-supplied home is an isolated installation root. Do not let the
+    # current operator's unrelated global sticky selection change which
+    # instance that installation probes.
+    if not name and not home:
         active = Path.home() / ".jaeger" / "active_instance"
         try:
             name = active.read_text(encoding="utf-8").strip()

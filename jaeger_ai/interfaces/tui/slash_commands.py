@@ -2397,6 +2397,19 @@ def _usage(ctx: SlashContext, args: str) -> SlashResult:  # noqa: ARG001
             ctx.console.print(
                 f"  {r['name']:22s} {calls:4d} call(s)"
                 f"  [dim]{r.get('total_s', 0)}s[/]{fail_note}")
+    try:
+        from jaeger_ai.core.runtime.usage_stats import model_usage_snapshot
+        models = model_usage_snapshot()
+    except Exception:  # noqa: BLE001
+        models = {}
+    if models:
+        ctx.console.print("\n[bold]Model tokens[/] [dim]· provider reported[/]")
+        for key, row in sorted(models.items()):
+            ctx.console.print(
+                f"  {key}  input {int(row.get('prompt_tokens', 0)):,}"
+                f"  cached {int(row.get('cached_prompt_tokens', 0)):,}"
+                f"  output {int(row.get('completion_tokens', 0)):,}"
+            )
     return SlashResult()
 
 

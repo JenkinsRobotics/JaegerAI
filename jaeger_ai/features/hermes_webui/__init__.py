@@ -1,4 +1,4 @@
-"""Hermes WebUI feature — temporary browser UI via Apple container + adapter."""
+"""Jaeger WebUI feature, powered by the bundled Hermes WebUI fork and adapter."""
 
 from .service import HermesWebUIService, hermes_webui_urls
 

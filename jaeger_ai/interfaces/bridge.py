@@ -999,6 +999,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "usage_available": True,
             "skills": skills,
             "tools": tools,
+            "models": usage_stats.model_usage_snapshot(),
             "total_skill_views": sum(
                 int(v.get("views") or 0) for v in skills.values() if isinstance(v, dict)
             ),

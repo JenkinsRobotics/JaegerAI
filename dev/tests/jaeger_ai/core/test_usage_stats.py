@@ -55,6 +55,24 @@ def test_counters_persist_to_disk(bound) -> None:
     assert usage_stats.snapshot()["tools"]["terminal"]["calls"] == 1
 
 
+def test_model_usage_accumulates_and_persists(bound) -> None:
+    usage_stats.record_model_usage(
+        "ollama", "glm-5.3-flash:cloud",
+        prompt_tokens=100, cached_prompt_tokens=80, completion_tokens=25,
+    )
+    usage_stats.record_model_usage(
+        "ollama", "glm-5.3-flash:cloud",
+        prompt_tokens=20, cached_prompt_tokens=0, completion_tokens=5,
+    )
+    usage_stats._stats = None
+    row = usage_stats.model_usage_snapshot()["ollama:glm-5.3-flash:cloud"]
+    assert row["calls"] == 2
+    assert row["prompt_tokens"] == 120
+    assert row["cached_prompt_tokens"] == 80
+    assert row["completion_tokens"] == 30
+    assert row["last_used"]
+
+
 def test_reset_clears_counters(bound) -> None:
     usage_stats.record_tool("x")
     usage_stats.reset()

@@ -45,7 +45,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-ai"
-description = "JaegerAI — the turnkey agentic-AI product (the Mind): loop, tools, skills, memory, persona, local inference, and its own faces (chat app, TUI, voice, protocol)."
+description = "A general-purpose AI assistant platform with local and hosted models, tools, skills, memory, automation, delegation, and native chat, web, terminal, and voice interfaces."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
@@ -81,7 +81,11 @@ dependencies = {file = ["requirements.txt"]}
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
 exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
-namespaces = false
+# Much of JaegerAI intentionally uses PEP 420 namespace directories (notably
+# core/, core/instance/, pyside6/, and nodes/). Disabling namespace discovery
+# made editable installs work while silently omitting those modules from a
+# built wheel.
+namespaces = true
 
 [tool.setuptools.package-data]
 # Non-.py assets under the package (module.yaml/plugin.yaml, character

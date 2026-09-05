@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from jaeger_ai.interfaces.mcp_server import (
     RequireBearer,
+    _bridge_chat,
     _run_chat,
     build_server,
     http_app,
@@ -30,6 +31,14 @@ def test_chat_surfaces_errors():
         return {"text": "", "error": "model exploded"}
 
     assert "agent error: model exploded" in _run_chat(boom, object(), "x")
+
+
+def test_chat_uses_explicit_session():
+    def fake(client, message, session_key=None):
+        assert session_key == "roundtable-jaeger"
+        return {"text": f"reply:{message}", "error": None}
+
+    assert _run_chat(fake, object(), "hello", session_key="roundtable-jaeger") == "reply:hello"
 
 
 def test_build_server_registers_tools():
@@ -57,6 +66,21 @@ class _FakeBridge:
 
     def turn(self, text, session):
         return {"text": f"bridge:{text}:{session}", "error": None}
+
+
+def test_bridge_chat_uses_session():
+    assert _bridge_chat(_FakeBridge(), "hi", session="table-1") == "bridge:hi:table-1"
+
+
+def test_chat_tool_declares_session_id():
+    server = build_server(None, "jaeger-dev", "gemma", bridge=_FakeBridge())
+    tools = asyncio.run(server.list_tools())
+    chat = next(tool for tool in tools if tool.name == "chat")
+    schema = getattr(chat, "inputSchema", None) or getattr(chat, "input_schema", None)
+    assert schema is not None
+    properties = schema.get("properties") or {}
+    assert "message" in properties
+    assert "session_id" in properties
 
 
 def test_http_tool_list_includes_bridge_tools():

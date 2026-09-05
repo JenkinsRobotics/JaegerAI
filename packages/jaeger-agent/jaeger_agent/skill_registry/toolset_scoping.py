@@ -55,6 +55,7 @@ def _scoping_enabled() -> bool:
 _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move)\b",),
     "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package)\b",),
+    "containers": (r"\b(container|containers|containerized)\b",),
     "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
     "web": (r"\b(weather|forecast)\b",),
     "sessions": (r"\b(conversation|session|chat history)\b",),
@@ -196,6 +197,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "run_in_venv", "terminal", "remote_terminal",
         "install_package", "list_venv_packages",
     }),
+    "containers": frozenset({"container"}),
     "media": frozenset({
         "text_to_speech", "listen", "vision_analyze", "image_generate",
         # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart

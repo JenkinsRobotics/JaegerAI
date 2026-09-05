@@ -147,7 +147,7 @@ struct Setting: Codable, Identifiable, Equatable {
     let path: String
     let label: String
     let group: String
-    let type: String            // bool | int | float | str | enum
+    let type: String            // bool | int | float | str | enum | json | secret
     let choices: [String]?      // present for enum
     let defaultValue: SettingValue
     let current: SettingValue
@@ -223,8 +223,10 @@ final class SettingsStore: ObservableObject {
 
     /// Page order mirrors ``catalog.GROUP_ORDER`` on the Python side.
     private static let groupOrder = [
-        "model", "display", "voice", "tts", "autonomy",
-        "permissions", "retention", "interaction", "general",
+        "model", "display", "interaction", "webui", "voice", "tts",
+        "kokoro_tts", "whisper_stt", "persona", "skills", "autonomy",
+        "warmup", "workspace", "webhooks", "containers", "permissions",
+        "security", "avatar", "hardware", "retention", "general",
     ]
 
     init(agent: AgentBridge) { self.agent = agent }
