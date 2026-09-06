@@ -22,6 +22,7 @@ Local logical commits are authorized; no push or public release requested.
 | Test isolation | Supervisor honors isolated JAEGER_HOME; guard excludes exact background health snapshot | Full root suite passing with live supervisor | Supervisor left running | Continue isolated integration coverage |
 | OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
+| Native durable admission | Private transactional ownership registry; unknown executions retain session lock across restart | Concurrent registries, restart, failed transport and confirmed completion tested | Pending deployment | Native reconciliation workflow; durable UI route pins and event storage |
 | Roundtable lifecycle/control/auth | Not complete | Pending | Legacy remains live | Shared durable Runs, native stop/approval/retry |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
@@ -70,6 +71,22 @@ Local logical commits are authorized; no push or public release requested.
   pending response. Native permission errors are now categorized separately from
   transport failures. This remains an explicit release gate, not a passing test.
 - Control/failure focused tests after these changes: 42 passed in 1.97s.
+- Native Runs now reserves session ownership transactionally before worker start,
+  imports unreconciled legacy receipts, and retains ownership after ambiguous
+  transport failure or adapter restart. Proven native completion/cancellation or
+  pre-dispatch rejection releases the owner. Native session/run IDs and execution
+  uncertainty are recorded; cancellation intent survives a control-send failure.
+  Tests reproduce the previous duplicate-admission failure across restarts and
+  independent registry instances. Native reconciliation of uncertain owners is
+  still required before deployment; there is intentionally no blind unlock/replay.
+  Combined native/workspace/supervisor focused suite: 51 passed in 1.80s.
+- Full root regression after durable admission/workspace diagnostics/supervisor
+  fixes: **3,630 passed, 11 skipped**, one audioop deprecation, 104.40s, seed
+  `20260906`. Live post-rollback Hermes native recall passed (6.64s/1.06s);
+  OpenClaw native README tool passed (3.68s) and confirmed abort passed (0.23s).
+  OpenClaw's read-only `agent.wait` reported the completed probe as `ok`, but
+  reported the aborted probe as `timeout`; absence from this lookup is not
+  accepted as evidence of cancellation/completion for future reconciliation.
 - Supervisor repair commands now require an immediate readiness recheck before
   being reported successful, including the explicit repair CLI's exit status.
   Failed probes/repairs are isolated per component; exact container inspection

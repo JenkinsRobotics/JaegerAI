@@ -15,6 +15,7 @@ import uuid
 from urllib.parse import parse_qs, urlsplit
 
 from .resilience import failure_category, timeout_setting
+from .run_ownership import Ownership
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
@@ -30,14 +31,17 @@ def profile_key(profile):
 
 
 class Run:
-    def __init__(self, root, session, message):
+    def __init__(self, root, session, message, *, run_id=None):
         self.root = root
-        self.id = uuid.uuid4().hex
+        self.id = run_id or uuid.uuid4().hex
         self.session = session
         self.message = message
         self.condition = threading.Condition(threading.RLock())
         self.cancelled = threading.Event()
         self.cancel_confirmed = False
+        self.execution_unknown = False
+        self.worker_active = False
+        self.native = {}
         self.cancel_native = None
         self.status = "running"
         self.events = []
@@ -51,6 +55,8 @@ class Run:
                     "status": self.status, "output": self.output,
                     "cancellation_requested": self.cancelled.is_set(),
                     "cancellation_confirmed": self.cancel_confirmed,
+                    "execution_unknown": self.execution_unknown,
+                    "native": self.native,
                     "pending_approval_ids": list(self.pending),
                     "last_event_id": f"{self.id}:{len(self.events)}"}
 
@@ -117,11 +123,20 @@ class Run:
             self.status = "cancelling"
             self.condition.notify_all()
             callback = self.cancel_native
-        if callback:
-            callback()  # Do not claim success if the native control fails.
-        with self.condition:
-            self.persist()
+        try:
+            if callback:
+                callback()  # Do not claim success if the native control fails.
+        finally:
+            with self.condition:
+                self.persist()
         return True
+
+    def dispatch(self, *, session_id, run_id):
+        """Record ownership before sending, including an ambiguous lost ACK."""
+        with self.condition:
+            self.execution_unknown = True
+            self.native = {'session_id': session_id, 'run_id': run_id}
+            self.persist()
 
 
 class Runs:
@@ -131,16 +146,30 @@ class Runs:
         self.backend = backend
         self.lock = threading.RLock()
         self.runs = {}
+        self.ownership = Ownership(root)
 
     def start(self, session, message, workspace=None):
-        if not session or not isinstance(message, str) or not message.strip():
+        if not isinstance(session, str) or not session or not isinstance(message, str) or not message.strip():
             raise ValueError("A session_id and non-empty text input are required")
         with self.lock:
             if any(r.session == session and r.status not in TERMINAL for r in self.runs.values()):
                 raise RuntimeError("session_busy: native work is still active; observe or stop it first")
-            run = Run(self.root, session, message)
+            run_id = uuid.uuid4().hex
+            self.ownership.claim(session, run_id)
+            try:
+                run = Run(self.root, session, message, run_id=run_id)
+            except Exception:
+                self.ownership.release(run_id)  # No worker/native dispatch exists.
+                raise
             self.runs[run.id] = run
-        threading.Thread(target=self._worker, args=(run, workspace), daemon=True).start()
+        run.worker_active = True
+        try:
+            threading.Thread(target=self._worker, args=(run, workspace), daemon=True).start()
+        except Exception:
+            run.worker_active = False
+            run.emit('run.failed', error_category='dispatch_not_started', error='Worker did not start')
+            self.ownership.release(run.id)
+            raise
         return run.snapshot()
 
     def _worker(self, run, workspace):
@@ -149,7 +178,10 @@ class Runs:
                 run.cancel_confirmed = True  # No native dispatch took place.
                 run.emit("run.cancelled")
                 return
+            run.execution_unknown = True  # Conservative default for other backends.
+            run.persist()
             answer = self.backend(run, workspace)
+            run.execution_unknown = False
             if run.cancel_confirmed:
                 run.emit("run.cancelled")
             else:
@@ -161,6 +193,12 @@ class Runs:
             # A disconnect is not proof the native runtime stopped, even if a
             # cancel was requested. Keep that distinction in the failure.
             run.emit("run.failed", error=str(exc), error_category=failure_category(exc))
+        finally:
+            try:
+                if not run.execution_unknown:
+                    self.ownership.release(run.id)
+            finally:
+                run.worker_active = False
 
     def get(self, run_id):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
@@ -172,10 +210,12 @@ class Runs:
         if not path.exists():
             raise KeyError("Run not found")
         saved = json.loads(path.read_text())
+        saved.setdefault('execution_unknown', saved['status'] not in {'completed', 'cancelled'})
         # Never restart native work after an adapter restart. Preserve the
         # receipt and report ambiguity, rather than inventing completion.
         if saved["status"] not in TERMINAL:
             saved["status"] = "interrupted"
+            saved["execution_unknown"] = True
             saved["events"].append({"event": "run.failed", "run_id": run_id,
                 "seq": len(saved["events"]) + 1, "error_category": "adapter_restarted",
                 "error": "Adapter restarted; native execution state is unknown. Inspect the native session before retrying."})
@@ -285,6 +325,7 @@ class RunsHTTP:
 
 def jaeger_turn(run, workspace=None):
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    run.execution_unknown = False
     bridge = BridgeClient("jaeger")
     if workspace:
         workspace = host_workspace(workspace)
@@ -319,7 +360,9 @@ def jaeger_turn(run, workspace=None):
         return run.request_approval(frame.get("prompt", "Tool approval required"),
                                     choices=tuple(frame.get("options") or ["once", "deny"]))
 
+    run.dispatch(session_id=run.session, run_id=run.id)
     result = bridge.turn(run.message, run.session, event, approval, turn_id=run.id, workspace=workspace)
+    run.execution_unknown = False  # Native bridge returned its terminal result.
     run.cancel_confirmed = bool(result.get("cancelled"))
     if result.get("error") and not run.cancel_confirmed:
         raise RuntimeError(result["error"])
