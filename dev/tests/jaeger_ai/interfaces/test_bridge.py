@@ -448,20 +448,34 @@ def test_mid_turn_send_queues_with_ack_and_both_complete_in_order(monkeypatch):
     send as a normal turn once the worker freed up — this pins that AND the
     new ``queued`` ack frame that gives a client visibility into it."""
     order: list[str] = []
+    import threading
+    entered, queued_ack = threading.Event(), threading.Event()
+    original_emit = bridge._emit
+
+    def record_emit(out, frame):
+        original_emit(out, frame)
+        if frame.get("type") == "queued":
+            queued_ack.set()
+
+    monkeypatch.setattr(bridge, "_emit", record_emit)
 
     def run_fn(client, text, session_key=None):
         order.append(text)
         if text == "first":
-            time.sleep(0.15)
+            entered.set()
+            assert queued_ack.wait(3), "Second send never received a queue acknowledgement"
         return {"text": f"echo:{text}", "error": None}
 
     stdin = ('{"op":"send","text":"first","session":"s1"}\n'
              '{"op":"send","text":"second","session":"s1"}\n'
              '{"op":"quit"}\n')
-    # Delay yielding line index 1 ("second") just long enough that the
-    # worker thread has already picked up "first" and flipped ctx.busy —
-    # deterministically landing the send mid-turn instead of racing it.
-    stdin_obj = _LineDelayStdin(stdin, before_index=1, delay=0.05)
+    # Synchronize on actual worker/queue state, not scheduler-dependent sleeps.
+    class DuringTurnStdin(_LineDelayStdin):
+        def __next__(self):
+            if self._i == 1:
+                assert entered.wait(3), "First turn never entered"
+            return super().__next__()
+    stdin_obj = DuringTurnStdin(stdin, before_index=1, delay=0)
     rc, frames, _ = _run(monkeypatch, stdin, run_fn=run_fn, stdin_obj=stdin_obj)
 
     assert rc == 0

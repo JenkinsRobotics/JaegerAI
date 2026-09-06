@@ -74,7 +74,8 @@ class BridgeClient:
                     continue
                 kind = frame.get("type")
                 if kind == "reply":
-                    return {"text": frame.get("text") or "", "error": frame.get("error")}
+                    return {"text": frame.get("text") or "", "error": frame.get("error"),
+                            **({"cancelled": bool(frame["cancelled"])} if "cancelled" in frame else {})}
                 if kind == "request":
                     answer = on_request(frame) if on_request is not None else "deny"
                     self._write(rx, {"op": "respond", "id": str(frame.get("id") or ""), "answer": answer or "deny"})

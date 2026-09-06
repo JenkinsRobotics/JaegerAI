@@ -24,7 +24,8 @@ FAILURE_THRESHOLD = 3
 REPAIR_COOLDOWN_S = 120
 POLL_INTERVAL_S = 20
 REPO_ROOT = Path(__file__).resolve().parents[3]
-JAEGER_RUNTIME_ROOT = REPO_ROOT / ".jaeger_ai" / "shared"
+JAEGER_RUNTIME_ROOT = (Path(os.environ["JAEGER_HOME"]) / "shared" if os.environ.get("JAEGER_HOME")
+                       else REPO_ROOT / ".jaeger_ai" / "shared")
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 
 

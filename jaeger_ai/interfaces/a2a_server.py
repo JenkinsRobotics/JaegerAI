@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import threading
+import uuid
 from typing import Any
 
 from a2a.helpers import (
@@ -90,6 +92,8 @@ class JaegerBridgeExecutor(AgentExecutor):
 
     def __init__(self, client: Any | None = None) -> None:
         self._client = client
+        self._active: dict[str, dict[str, Any]] = {}
+        self._active_lock = threading.RLock()
 
     def _bridge(self) -> Any:
         if self._client is not None:
@@ -118,18 +122,40 @@ class JaegerBridgeExecutor(AgentExecutor):
             state=TaskState.TASK_STATE_WORKING,
             message=new_text_message("Jaeger is working the A2A task over the live bridge."),
         )
-        session = f"a2a:{task.id}"
+        session = f"a2a:{task.context_id or task.id}"
+        control = {"turn_id": uuid.uuid4().hex, "accepted": False, "cancel_requested": False}
+        with self._active_lock:
+            if task.id in self._active:
+                raise ValueError("A2A task is already active")
+            self._active[task.id] = control
+
+        def event(frame):
+            if frame.get("type") in {"queued", "state"}:
+                with self._active_lock:
+                    control["accepted"] = True
+                    cancel = control["cancel_requested"]
+                if cancel:
+                    self._bridge().control("cancel", turn_id=control["turn_id"])
+
         try:
-            result = await asyncio.to_thread(self._bridge().turn, objective, session)
+            result = await asyncio.to_thread(self._bridge().turn, objective, session,
+                                            on_event=event, turn_id=control["turn_id"])
         except Exception as exc:  # noqa: BLE001
             await updater.update_status(
                 state=TaskState.TASK_STATE_FAILED,
                 message=new_text_message(f"Jaeger bridge could not complete the task: {exc}"),
             )
             return
+        finally:
+            with self._active_lock:
+                self._active.pop(task.id, None)
 
         text = str((result or {}).get("text") or "")
         error = (result or {}).get("error")
+        if result.get("cancelled"):
+            await updater.update_status(state=TaskState.TASK_STATE_CANCELED,
+                                        message=new_text_message("Jaeger confirmed native cancellation."))
+            return
         await updater.add_artifact(
             parts=[new_text_part(text=text or str(error or "No result text was returned."), media_type="text/plain")],
             name=f"Jaeger turn {session}",
@@ -142,12 +168,21 @@ class JaegerBridgeExecutor(AgentExecutor):
             return
         await updater.update_status(
             state=TaskState.TASK_STATE_COMPLETED,
-            message=new_text_message("Jaeger completed the A2A task."),
+            message=new_text_message("Jaeger completed before cancellation was confirmed." if control["cancel_requested"]
+                                     else "Jaeger completed the A2A task."),
         )
 
     async def cancel(self, context: RequestContext, _event_queue: EventQueue) -> None:
+        task = context.current_task
+        with self._active_lock:
+            control = self._active.get(task.id) if task else None
+            if control is None:
+                raise ValueError("A2A task has no active native execution to cancel")
+            control["cancel_requested"] = True
+            accepted = control["accepted"]
         try:
-            self._bridge().control("cancel")
+            if accepted:
+                await asyncio.to_thread(self._bridge().control, "cancel", turn_id=control["turn_id"])
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Jaeger bridge could not cancel the task: {exc}") from exc
 

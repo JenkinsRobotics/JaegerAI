@@ -112,6 +112,12 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     if (path.suffix == ".log" or "logs" in path.parts
                             or "memory" in path.parts or path.name == ".DS_Store"):
                         continue
+                    # The independent production supervisor rewrites this
+                    # non-sensitive liveness snapshot every 20 seconds. Its
+                    # concurrent heartbeat is not a test write. Supervisor
+                    # tests must still use an isolated JAEGER_HOME root.
+                    if path == root / "shared/health/agent-fabric.json":
+                        continue
                     st = path.stat()
                     out[str(path)] = (st.st_size, st.st_mtime_ns)
             except OSError:  # racing with the running app is not our failure
