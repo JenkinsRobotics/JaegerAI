@@ -71,6 +71,16 @@ Local logical commits are authorized; no push or public release requested.
   pending response. Native permission errors are now categorized separately from
   transport failures. This remains an explicit release gate, not a passing test.
 - Control/failure focused tests after these changes: 42 passed in 1.97s.
+- A further bridge race test reproduced false cancellation confirmation when
+  the native turn completed normally after receiving Stop. Scoped replies now
+  confirm only an actual native `interrupted` halt or skipped dispatch. Bridge
+  and native Runs focused suites: 110 passed in 4.72s. Not yet deployed.
+- Four-profile live WebUI check: Hermes/default (`9970fce7951f`), Jaeger
+  (`aff87f9072c9`), and OpenClaw (`5f02ecb65346`) passed two-turn recall.
+  Roundtable (`b250936ef21a`) failed: all three initial answers passed, but
+  Hermes' discussion CLI invocation returned only a resume notice and an error.
+  Native Hermes Runs recall works independently; replacing the Roundtable CLI
+  path while preserving its existing native session is the next repair.
 - Native Runs now reserves session ownership transactionally before worker start,
   imports unreconciled legacy receipts, and retains ownership after ambiguous
   transport failure or adapter restart. Proven native completion/cancellation or

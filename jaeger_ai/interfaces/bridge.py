@@ -2028,7 +2028,8 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             while True:
                 with ctx.turn_control_lock:
                     if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
-                        result = {"text": "", "error": "Cancelled before execution"}
+                        result = {"text": "", "error": "Cancelled before execution",
+                                  "halt_reason": "interrupted"}
                         break
                 deltas = _DeltaStream(out, session)
                 with _turn_workspace(ctx, req.get("workspace")):
@@ -2094,8 +2095,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
 
             final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
             used, mx = _ctx_usage(session)
-            with ctx.turn_control_lock:
-                cancelled = ctx.turn_controls.get(turn_id) == "cancelled"
+            # A delivered cancel request may lose the race with completion.
+            # Only the native loop's halt result (or skipped dispatch above)
+            # confirms interruption; the control flag alone is merely intent.
+            cancelled = result.get("halt_reason") == "interrupted"
             _emit(out, {**protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),

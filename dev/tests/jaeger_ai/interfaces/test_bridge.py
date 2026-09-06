@@ -873,6 +873,28 @@ def test_scoped_cancel_skips_queued_native_work(monkeypatch):
     assert any(f.get("error") == "Cancelled before execution" for f in frames)
 
 
+@pytest.mark.parametrize('halt_reason,confirmed', [(None, False), ('interrupted', True)])
+def test_scoped_cancel_confirmation_requires_native_halt(monkeypatch, halt_reason, confirmed):
+    entered, requested = threading.Event(), threading.Event()
+    monkeypatch.setattr('jaeger_ai.main.request_turn_cancel', lambda **kwargs: requested.set())
+    def native_turn(*args, **kwargs):
+        entered.set()
+        assert requested.wait(3)
+        return {'text': 'native result', 'error': None, 'halt_reason': halt_reason}
+    stdin = ('{"op":"send","text":"test","turn_id":"own","session":"s"}\n'
+             '{"op":"cancel","turn_id":"own"}\n{"op":"quit"}\n')
+    class DuringTurnStdin(_LineDelayStdin):
+        def __next__(self):
+            if self._i == 1:
+                assert entered.wait(3)
+            return super().__next__()
+    _, frames, _ = _run(monkeypatch, stdin, run_fn=native_turn,
+                         stdin_obj=DuringTurnStdin(stdin, before_index=1, delay=0))
+    reply = next(frame for frame in frames if frame['type'] == 'reply')
+    assert reply['cancelled'] is confirmed
+    assert reply['text'] == 'native result'
+
+
 def test_permission_request_timeout_denies(monkeypatch):
     """No ``respond`` within the timeout ⇒ deny, fail-safe. The turn never
     hangs — a short fuse proves the wait actually bounds, not just that a
