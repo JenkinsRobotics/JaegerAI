@@ -1792,6 +1792,7 @@ class JaegerAgent:
         via a duplicate marker, same as the sequential path.
         """
         from concurrent.futures import ThreadPoolExecutor
+        from contextvars import copy_context
 
         preps = [self._prepare_dispatch(tc) for tc in tool_calls]
         first_by_sig: dict[str, int] = {}
@@ -1807,7 +1808,7 @@ class JaegerAgent:
             thread_name_prefix="jaeger-tool",
         ) as pool:
             futures = {
-                i: pool.submit(self._execute_prepared, preps[i])
+                i: pool.submit(copy_context().run, self._execute_prepared, preps[i])
                 for i in unique_idx
             }
             for i, fut in futures.items():
