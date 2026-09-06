@@ -16,7 +16,8 @@ import re
 import threading
 import time
 import uuid
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
+from .ingress import ProfileHTTPServer
 from typing import Any
 import urllib.request
 import urllib.error
@@ -248,6 +249,8 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
                 "approval": False,
             })
         elif re.match(r"^/v1/runs/([\w-]+)(?:/events)?$", self.path):
+            if not self.profile_authorized():
+                return
             run_id = re.match(r"^/v1/runs/([\w-]+)", self.path).group(1)
             self._handle_get_events(run_id)
         else:
@@ -256,25 +259,24 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
     def do_POST(self):
         if os.environ.get("JAEGERS_ADAPTER_NATIVE_RUNS", "true").lower() in {"1", "true"} and self.native_route("POST"):
             return
+        if not self.legacy_post_authorized():
+            return
         if self.path == "/v1/runs":
             self._handle_create_run()
         elif self.path == "/v1/chat/completions":
             self._handle_chat_completions()
-        elif re.match(r"^/v1/runs/([\w-]+)/cancel$", self.path):
+        elif re.match(r"^/v1/runs/([\w-]+)/(?:cancel|stop)$", self.path):
             run_id = self.path.split("/")[-2]
             with _runs_lock:
-                if run_id in _runs:
-                    _runs[run_id]["status"] = "cancelled"
-            self._send_json(200, {"run_id": run_id, "status": "cancelled"})
+                exists = run_id in _runs
+            self._send_json(501 if exists else 404, {
+                'error': 'Legacy Jaeger cannot confirm native cancellation; work may still be running.' if exists else 'Run not found',
+                'error_category': 'unsupported_control' if exists else 'not_found'})
         else:
             self._send_json(404, {"error": "not found"})
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Hermes-Session-Id, X-Hermes-Session-Key")
-        self.end_headers()
+        self.native_json(403, {'error': 'Use the authenticated WebUI server proxy'})
 
     def _handle_chat_completions(self):
         """OpenAI-compatible chat endpoint, honoring the requested stream mode."""
@@ -290,8 +292,10 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
                     pass
 
     def _write_chat_completion(self) -> bool:
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        body = getattr(self, '_request_body', None)
+        if body is None:  # Direct internal callers; HTTP ingress already parsed.
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
         messages = body.get("messages", [])
         # Extract the last user message
@@ -371,7 +375,6 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.close_connection = True
         try:
@@ -417,8 +420,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         return True
 
     def _handle_create_run(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        body = self._request_body
 
         message = body.get("input") or body.get("message") or ""
         if isinstance(message, list):
@@ -503,7 +505,6 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
     def _send_json(self, code: int, data: dict):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         body = json.dumps(data).encode("utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -514,7 +515,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("0.0.0.0", ADAPTER_PORT), RunHandler)
+    server = ProfileHTTPServer(("0.0.0.0", ADAPTER_PORT), RunHandler)
     print(f"[jaeger-bridge] REST adapter listening on :{ADAPTER_PORT}")
     print(f"[jaeger-bridge] MCP gateway: {MCP_GATEWAY_URL}")
     print(f"[jaeger-bridge] Endpoints: /v1/runs, /v1/chat/completions, /health")

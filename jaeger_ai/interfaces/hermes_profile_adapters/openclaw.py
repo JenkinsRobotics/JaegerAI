@@ -12,7 +12,8 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from .ingress import ProfileHTTPServer
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting, failure_category
 from .native_runs import Runs, RunsHTTP, profile_key
@@ -98,12 +99,16 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
             return
         match = re.match(r"^/v1/runs/([\w-]+)(?:/events)?$", self.path)
         if match:
+            if not self.profile_authorized():
+                return
             self.send_events(match.group(1))
             return
         self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
         if self.native_enabled() and self.native_route("POST"):
+            return
+        if not self.legacy_post_authorized():
             return
         if self.path == "/v1/chat/completions":
             self.create_chat_completion()
@@ -114,16 +119,22 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
         match = re.match(r"^/v1/runs/([\w-]+)/(?:cancel|stop)$", self.path)
         if match:
             with _runs_lock:
-                if match.group(1) in _runs:
-                    _runs[match.group(1)]["status"] = "cancelled"
-            self.send_json(200, {"run_id": match.group(1), "status": "cancelled"})
+                exists = match.group(1) in _runs
+            self.send_json(501 if exists else 404, {
+                'error': 'Legacy OpenClaw cannot confirm native cancellation; work may still be running.' if exists else 'Run not found',
+                'error_category': 'unsupported_control' if exists else 'not_found'})
             return
         self.send_json(404, {"error": "not found"})
 
+    def do_OPTIONS(self):
+        self.native_json(403, {'error': 'Use the authenticated WebUI server proxy'})
+
     def create_chat_completion(self):
         """Serve Hermes' OpenAI-compatible fallback over the OpenClaw agent."""
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        body = getattr(self, '_request_body', None)
+        if body is None:  # Direct internal callers; HTTP ingress already parsed.
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length)) if length else {}
         messages = body.get("messages") or []
         # The native session already contains earlier turns. Re-inserting the
         # entire WebUI transcript duplicates work and grows context each turn.
@@ -224,8 +235,7 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
             disconnected.set()
 
     def create_run(self):
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        body = self._request_body
         message = body.get("input") or body.get("message") or ""
         if isinstance(message, list):
             message = "\n".join(
@@ -295,4 +305,4 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"[openclaw-adapter] listening on {ADAPTER_HOST}:{ADAPTER_PORT}", flush=True)
-    ThreadingHTTPServer((ADAPTER_HOST, ADAPTER_PORT), Handler).serve_forever()
+    ProfileHTTPServer((ADAPTER_HOST, ADAPTER_PORT), Handler).serve_forever()

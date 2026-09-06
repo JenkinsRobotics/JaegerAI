@@ -4,6 +4,22 @@ Checked against official documentation on 2026-09-06. Research findings below
 are not proof that every native adapter implements these capabilities yet.
 No account, subscription, provider default, or installed runtime was changed.
 
+## Installed-version evidence
+
+Read-only live checks on 2026-09-06:
+
+- Configured Rack endpoint `10.15.0.239:11434/api/version`: **0.33.3**.
+- Configured Mac endpoint `192.168.64.1:11434/api/version`: **0.33.2**.
+- Mac CLI and Homebrew installation also report **0.33.2**. The selected CLI is
+  `/usr/local/bin/ollama`; a Homebrew binary is also present. Resolve both launch
+  paths before upgrading so the daemon and selected CLI cannot silently diverge.
+- Mac loopback `127.0.0.1:11434` refused the connection, but it is not this
+  deployment's configured host URL. That result is not an Ollama outage.
+
+The official latest release resolves to **v0.33.3**, which includes cached-prompt
+token reporting. Rack matches it; Mac needs a tested, idle-aware patch update.
+[Official release](https://github.com/ollama/ollama/releases/tag/v0.33.3)
+
 ## Current documented contract
 
 - `glm-5.3-flash:cloud` remains the requested default. The model has always-on
