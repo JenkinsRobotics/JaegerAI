@@ -70,6 +70,13 @@ Local logical commits are authorized; no push or public release requested.
   pending response. Native permission errors are now categorized separately from
   transport failures. This remains an explicit release gate, not a passing test.
 - Control/failure focused tests after these changes: 42 passed in 1.97s.
+- Supervisor repair commands now require an immediate readiness recheck before
+  being reported successful, including the explicit repair CLI's exit status.
+  Failed probes/repairs are isolated per component; exact container inspection
+  has a five-second bound, unknown state fails closed, and a failed stop cannot
+  fall through to start. Nine focused supervisor tests pass. Layered dependency
+  health and active-work maintenance guards remain pending; this is not complete
+  recovery certification. These source changes have not yet been deployed.
 - Workspace expansion `6c4400f` failed its actual-user access gate and automatically
   restored both original containers, the manifest, configuration, and monitoring.
   The failed `jaeger-hermes-workspaces` replacement is retained stopped; it must
