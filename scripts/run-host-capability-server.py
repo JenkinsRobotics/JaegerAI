@@ -208,6 +208,151 @@ except Exception as e:
     sys.stderr.write(f"[host-capability-launcher] Note: calendar_list patch skipped: {e}\n")
 
 
+# --- Jaeger-owned service restart (allowlisted, approval-gated, health-verified) ---
+# Deliberately excludes the host-tools gateway itself: a mid-call gateway restart
+# would sever the MCP connection carrying the request. Gateway restarts are a
+# human or Jaeger-side operation, not an agent capability.
+import subprocess as _subprocess
+
+_RESTARTABLE_SERVICES = {
+    # name -> launchd label
+    "jaeger": "com.jenkinsrobotics.jaeger",
+    "n8n": "com.jenkinsrobotics.n8n",
+    "ollama": "com.jenkinsrobotics.ollama",
+}
+
+_SERVICE_HEALTH_URLS = {
+    "jaeger": "http://127.0.0.1:8791/health",
+    "n8n": "http://127.0.0.1:5678/healthz",
+    "ollama": "http://127.0.0.1:11434/api/tags",
+}
+
+
+@host_capability_mcp_server.mcp.tool()
+def service_restart(service: str, approval_id: str = "") -> dict:
+    """Preview or restart one allowlisted service (jaeger, n8n, ollama) after one-shot ARES approval.
+
+    Kicks the service's launchd agent, then polls its health endpoint and
+    reports whether it came back ready. The gateway and capability server
+    are NOT restartable through this tool by design.
+    """
+    name = str(service or "").strip().lower()
+    label = _RESTARTABLE_SERVICES.get(name)
+    capability = "service.restart"
+    if not label:
+        host_capability_mcp_server._audit(capability, outcome="denied", requested_service=name)
+        return {
+            "error": f"service '{name}' is not restartable; allowed: {sorted(_RESTARTABLE_SERVICES)}",
+        }
+    values = {"service": name, "label": label}
+    pending = host_capability_mcp_server._authorize_effect(
+        capability, values, approval_id,
+        reason=f"Restart the {name} service via launchctl kickstart.",
+        benefit=f"Recovers a wedged or stopped {name} service without human round-trip.",
+        risks=[
+            "In-flight requests to this service may be dropped.",
+            "Service may fail to come back up and need human intervention.",
+        ],
+        scope=f"launchd label {label} only",
+        reversible="Yes; launchd KeepAlive restarts it, or human can bootout/bootstrap manually.",
+        safer_alternative="Run service_status first and restart only if actually unhealthy.",
+        data_destination="local Mac services",
+    )
+    if pending:
+        return pending
+    domain = f"gui/{os.getuid()}"
+    try:
+        kick = _subprocess.run(
+            ["/bin/launchctl", "kickstart", "-k", f"{domain}/{label}"],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if kick.returncode != 0:
+            host_capability_mcp_server._audit(
+                capability, outcome="failed", service=name,
+                exit_code=kick.returncode, stderr=(kick.stderr or "")[:500],
+            )
+            return {"restarted": False, "service": name, "error": (kick.stderr or kick.stdout or "").strip() or f"exit {kick.returncode}"}
+    except Exception as exc:
+        host_capability_mcp_server._audit(capability, outcome="error", service=name, error=str(exc))
+        return {"restarted": False, "service": name, "error": str(exc)}
+
+    # Health poll: up to ~30s for the service to come back ready.
+    url = _SERVICE_HEALTH_URLS[name]
+    healthy = False
+    last_status: object = None
+    import urllib.error as _ue
+    for _ in range(15):
+        time.sleep(2)
+        try:
+            with urllib.request.urlopen(url, timeout=3) as resp:
+                resp.read(4096)
+                last_status = resp.status
+                healthy = True
+                break
+        except _ue.HTTPError as exc:
+            last_status = exc.code
+            healthy = True
+            break
+        except Exception:
+            continue
+    host_capability_mcp_server._audit(
+        capability, outcome="allowed" if healthy else "degraded",
+        service=name, healthy=healthy,
+    )
+    return {
+        "restarted": True,
+        "service": name,
+        "healthy": healthy,
+        "http_status": last_status,
+        "detail": "service kicked and responded to health check" if healthy
+        else "service kicked but health check did not pass within 30s; inspect logs",
+    }
+
+
+# --- Jaeger-owned workspace delete (single item, approval-gated, roots-scoped) ---
+
+
+@host_capability_mcp_server.mcp.tool()
+def workspace_delete(path: str, approval_id: str = "") -> dict:
+    """Preview or delete exactly one file or empty directory within approved roots after one-shot ARES approval.
+
+    Refuses non-empty directories; refuses anything outside approved roots.
+    """
+    capability = "workspace.delete"
+    _require = host_capability_mcp_server._require
+    _require(capability)
+    target = host_capability_mcp_server._resolve(path, must_exist=True, capability=capability)
+    if target.is_dir() and any(target.iterdir()):
+        host_capability_mcp_server._audit(
+            capability, outcome="denied", path=target,
+            error="directory not empty; delete files individually",
+        )
+        raise ValueError("directory is not empty; delete its files individually")
+    values = {"path": str(target)}
+    pending = host_capability_mcp_server._authorize_effect(
+        capability, values, approval_id,
+        reason=f"Delete '{target.name}' from the approved workspace.",
+        benefit="Removes a stale, duplicate, or unwanted file the caller identifies.",
+        risks=["The file is unrecoverable once deleted (no Trash)."],
+        scope=f"One item: {target}",
+        reversible="No. Restore is only possible from a backup if one exists.",
+        safer_alternative="Move the item aside with workspace_move instead of deleting.",
+        data_destination="none (local deletion)",
+    )
+    if pending:
+        return pending
+    try:
+        if target.is_dir():
+            target.rmdir()
+        else:
+            target.unlink()
+        host_capability_mcp_server._audit(capability, outcome="allowed", path=target)
+        return {"deleted": True, "path": str(target)}
+    except Exception as exc:
+        host_capability_mcp_server._audit(capability, outcome="denied", path=target, error=type(exc).__name__)
+        raise
+
+
 def main() -> None:
     host_capability_mcp_server.mcp.run()
 
