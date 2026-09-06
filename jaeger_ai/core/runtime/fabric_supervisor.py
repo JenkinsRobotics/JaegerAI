@@ -69,11 +69,19 @@ def _kickstart(label: str) -> bool:
 def _restart_container(name: str) -> bool:
     # ``start`` preserves the container's external session/config mounts.  If
     # already running, use a bounded stop/start instead of deleting state.
-    listing = subprocess.run(
-        ["/opt/homebrew/bin/container", "list"], capture_output=True, text=True,
-    ).stdout
-    if name in listing:
-        _run(["/opt/homebrew/bin/container", "stop", "--time", "10", name])
+    try:
+        raw = subprocess.check_output(
+            ["/opt/homebrew/bin/container", "inspect", name], timeout=5,
+        )
+        state = json.loads(raw)[0]['status']['state']
+    except (OSError, subprocess.SubprocessError, KeyError, IndexError, ValueError):
+        return False  # Unknown state is not authorization for a blind restart.
+    if state not in ('running', 'stopped'):
+        return False
+    if state == 'running' and not _run([
+        "/opt/homebrew/bin/container", "stop", "--time", "10", name,
+    ]):
+        return False
     return _run(["/opt/homebrew/bin/container", "start", name], timeout=60)
 
 
@@ -157,10 +165,11 @@ class Supervisor:
         now = time.time() if now is None else now
         result: dict[str, dict[str, object]] = {}
         for item in self.items:
-            healthy = item.probe()
+            healthy = _safe_check(item.probe)
             self.failures[item.name] = 0 if healthy else self.failures[item.name] + 1
             repaired = False
             repair_ok: bool | None = None
+            repair_command_ok: bool | None = None
             eligible = (
                 not healthy
                 and self.failures[item.name] >= FAILURE_THRESHOLD
@@ -168,8 +177,10 @@ class Supervisor:
             )
             if eligible:
                 repaired = True
-                repair_ok = item.repair()
+                repair_command_ok = _safe_check(item.repair)
                 self.last_repair[item.name] = now
+                healthy = _safe_check(item.probe)
+                repair_ok = repair_command_ok and healthy
                 if repair_ok:
                     self.failures[item.name] = 0
             result[item.name] = {
@@ -177,8 +188,17 @@ class Supervisor:
                 "consecutive_failures": self.failures[item.name],
                 "repair_attempted": repaired,
                 "repair_ok": repair_ok,
+                "repair_command_ok": repair_command_ok,
             }
         return result
+
+
+def _safe_check(callback: Callable[[], bool]) -> bool:
+    """One dependency failure must not terminate monitoring of the others."""
+    try:
+        return bool(callback())
+    except Exception:
+        return False
 
 
 def _state_path() -> Path:
@@ -210,13 +230,16 @@ def main(argv: list[str] | None = None) -> int:
     supervisor = Supervisor()
     if args.repair:
         item = next(item for item in supervisor.items if item.name == args.repair)
-        ok = item.repair()
+        command_ok = _safe_check(item.repair)
+        healthy = _safe_check(item.probe)
+        ok = command_ok and healthy
         write_state({
             args.repair: {
-                "healthy": item.probe() if ok else False,
+                "healthy": healthy,
                 "consecutive_failures": 0,
                 "repair_attempted": True,
                 "repair_ok": ok,
+                "repair_command_ok": command_ok,
             },
         })
         return 0 if ok else 1
