@@ -159,12 +159,16 @@ def openclaw_turn(run, workspace=None):
     from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
     # Identical to the existing REST adapter's user=hermes:<session> mapping.
     session_key = native_session_key(run.session)
+    run.execution_unknown = False  # Authentication failure cannot execute a turn.
     with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE) as gateway:
         if run.cancelled.is_set():
+            run.cancel_confirmed = True
             return ""
+        run.dispatch(session_id=session_key, run_id=run.id)
         sent = gateway.request("chat.send", {"sessionKey": session_key, "message": run.message,
                                               "idempotencyKey": run.id})
         native_id = sent.get("runId") or run.id
+        run.dispatch(session_id=session_key, run_id=native_id)
         run.cancel_native = lambda: gateway.request("chat.abort", {"sessionKey": session_key, "runId": native_id})
         if run.cancelled.is_set():
             run.cancel_native()
@@ -205,10 +209,13 @@ def openclaw_turn(run, workspace=None):
                         continue
                     run.emit("message.delta", delta=payload.get("deltaText") or "")
                 elif state == "final":
+                    run.execution_unknown = False
                     return message_text(payload.get("message")) or run.output
                 elif state == "aborted":
+                    run.execution_unknown = False
                     run.cancelled.set()
                     run.cancel_confirmed = True
                     return run.output
                 elif state == "error":
+                    run.execution_unknown = False
                     raise RuntimeError(payload.get("errorMessage") or "OpenClaw native run failed")

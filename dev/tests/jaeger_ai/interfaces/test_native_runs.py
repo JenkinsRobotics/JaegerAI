@@ -96,6 +96,94 @@ def test_restart_keeps_receipt_never_replays_work(tmp_path):
     assert (tmp_path / f"{run.id}.json").stat().st_mode & 0o777 == 0o600
 
 
+def test_restart_rejects_new_work_for_unreconciled_native_session(tmp_path):
+    Run(tmp_path, 'session', 'in progress')
+    recovered = Runs(tmp_path, lambda *a: 'must not run')
+    with pytest.raises(RuntimeError, match='session_busy'):
+        recovered.start('session', 'duplicate')
+
+
+def test_transport_failure_retains_ownership_across_restart(tmp_path):
+    def backend(*args): raise ConnectionError('observer lost')
+    runs = Runs(tmp_path, backend)
+    run = runs.get(runs.start('session', 'hello')['run_id'])
+    wait_for(lambda: run.status == 'failed')
+    assert run.snapshot()['execution_unknown'] is True
+    with pytest.raises(RuntimeError, match='session_busy'):
+        Runs(tmp_path, backend).start('session', 'duplicate')
+
+
+def test_separate_registry_instances_exclude_the_same_native_session(tmp_path):
+    release = threading.Event()
+    def backend(*args):
+        release.wait(3)
+        return 'done'
+    first, second = Runs(tmp_path, backend), Runs(tmp_path, backend)
+    run = first.get(first.start('session', 'hello')['run_id'])
+    try:
+        with pytest.raises(RuntimeError, match='session_busy'):
+            second.start('session', 'duplicate')
+    finally:
+        release.set()
+        wait_for(lambda: not run.worker_active)
+
+
+def test_confirmed_completion_releases_durable_ownership(tmp_path):
+    runs = Runs(tmp_path, lambda *a: 'done')
+    first = runs.get(runs.start('session', 'one')['run_id'])
+    wait_for(lambda: first.status == 'completed')
+    # Wait for worker finalization, not merely its last event notification.
+    wait_for(lambda: not first.worker_active)
+    recovered = Runs(tmp_path, lambda *a: 'two')
+    second = recovered.get(recovered.start('session', 'two')['run_id'])
+    wait_for(lambda: second.status == 'completed')
+    assert second.output == 'two'
+    wait_for(lambda: not second.worker_active)
+
+
+def test_admission_is_atomic_across_independent_registry_connections(tmp_path):
+    from jaeger_ai.interfaces.hermes_profile_adapters.run_ownership import Ownership
+    first, second = Ownership(tmp_path), Ownership(tmp_path)
+    ready = threading.Barrier(2)
+    results = []
+    def claim(store, run_id):
+        ready.wait(2)
+        try:
+            store.claim('session', run_id)
+            results.append('accepted')
+        except RuntimeError:
+            results.append('busy')
+    threads = [threading.Thread(target=claim, args=(store, str(i))) for i, store in enumerate((first, second))]
+    for thread in threads: thread.start()
+    for thread in threads: thread.join(3)
+    assert sorted(results) == ['accepted', 'busy']
+    assert (tmp_path / 'ownership.sqlite3').stat().st_mode & 0o777 == 0o600
+
+
+def test_proven_no_dispatch_failure_allows_retry(tmp_path):
+    def rejected(run, workspace):
+        run.execution_unknown = False
+        raise ValueError('rejected before native send')
+    runs = Runs(tmp_path, rejected)
+    run = runs.get(runs.start('session', 'hello')['run_id'])
+    wait_for(lambda: not run.worker_active)
+    assert run.status == 'failed'
+    assert run.snapshot()['execution_unknown'] is False
+    recovered = Runs(tmp_path, lambda *a: 'retry succeeded')
+    retry = recovered.get(recovered.start('session', 'retry')['run_id'])
+    wait_for(lambda: not retry.worker_active)
+    assert retry.status == 'completed'
+
+
+def test_cancel_intent_is_durable_even_when_native_control_raises(tmp_path):
+    run = Run(tmp_path, 'session', 'hello')
+    run.cancel_native = lambda: (_ for _ in ()).throw(ConnectionError('lost control'))
+    with pytest.raises(ConnectionError): run.cancel()
+    saved = json.loads((tmp_path / f'{run.id}.json').read_text())
+    assert saved['cancellation_requested']
+    assert not saved['cancellation_confirmed']
+
+
 def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monkeypatch):
     controls = []
     class Bridge:
