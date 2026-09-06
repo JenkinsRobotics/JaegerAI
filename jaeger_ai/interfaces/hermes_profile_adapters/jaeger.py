@@ -22,7 +22,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting
-from .native_runs import Runs, RunsHTTP, jaeger_turn, profile_key
+from .native_runs import Runs, RunsHTTP, jaeger_turn, jaeger_reconcile, profile_key
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -233,7 +233,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         with _native_lock:
             if _native_runs is None:
                 root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/jaeger"
-                _native_runs = Runs(root, jaeger_turn)
+                _native_runs = Runs(root, jaeger_turn, reconciler=jaeger_reconcile)
             return _native_runs
 
     def do_GET(self):

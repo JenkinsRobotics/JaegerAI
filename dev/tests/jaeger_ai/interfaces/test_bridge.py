@@ -316,7 +316,8 @@ def test_integration_contract_is_versioned_and_self_describing():
     # v12 added the ``cron`` query — in-flight scheduled jobs for host
     # sidebars that otherwise treat a mid-run cron session as completed.
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
-    assert contract["contract_version"] == 13
+    assert contract["contract_version"] == 14
+    assert 'turn_status' in contract['operations']['queries']
     assert "board" in contract["operations"]["queries"]
     assert "heartbeat" in contract["operations"]["queries"]
     assert "cron" in contract["operations"]["queries"]
@@ -871,6 +872,42 @@ def test_scoped_cancel_skips_queued_native_work(monkeypatch):
         boot_delay=.15, run_fn=run)
     assert not calls
     assert any(f.get("error") == "Cancelled before execution" for f in frames)
+
+
+def test_scoped_reply_is_durable_before_transport_and_duplicate_never_dispatches(monkeypatch, _instance_on_disk):
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    store = NativeTurns(InstanceLayout(_instance_on_disk).run_dir)
+    calls, seen = [], []
+    original = bridge._emit
+    def emit(out, frame):
+        if frame.get('type') == 'reply' and frame.get('text') == 'native answer':
+            seen.append(store.get('durable', 's')['reply']['text'])
+        original(out, frame)
+    monkeypatch.setattr(bridge, '_emit', emit)
+    def native(*args, **kwargs):
+        calls.append(1)
+        return {'text': 'native answer'}
+    request = '{"op":"send","text":"hello","turn_id":"durable","session":"s"}\n'
+    _run(monkeypatch, request + request + '{"op":"quit"}\n', run_fn=native)
+    assert calls == [1]
+    assert seen == ['native answer']
+    boot = type('Boot', (), {'layout': InstanceLayout(_instance_on_disk)})()
+    assert bridge._query('turn_status', {'turn_id': 'durable', 'session_id': 's'}, boot)['status'] == 'completed'
+    assert bridge._query('turn_status', {'turn_id': 'durable', 'session_id': 'other'}, boot)['execution_unknown']
+
+
+def test_receipt_storage_failure_cannot_report_known_completion(monkeypatch):
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    def fail(*args):
+        raise OSError('disk unavailable')
+    monkeypatch.setattr(NativeTurns, 'finish', fail)
+    _, frames, _ = _run(monkeypatch,
+        '{"op":"send","text":"hello","turn_id":"receipt-failed","session":"s"}\n'
+        '{"op":"quit"}\n')
+    reply = next(frame for frame in frames if frame['type'] == 'reply')
+    assert reply['execution_unknown'] is True
+    assert 'durable receipt' in reply['error']
 
 
 @pytest.mark.parametrize('halt_reason,confirmed', [(None, False), ('interrupted', True)])

@@ -5,6 +5,7 @@ An uncertain owner is deliberately retained until native reconciliation exists.
 """
 from contextlib import contextmanager
 import json
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -63,3 +64,23 @@ class Ownership:
         """Call only after a native terminal result or proven no dispatch."""
         with self.transaction() as db:
             db.execute('DELETE FROM owners WHERE run_id=?', (run_id,))
+
+    def observer_lease(self, run_id):
+        """Exclude recovery while any process still observes/writes this run.
+
+        The kernel releases this lease on process exit. It says nothing about
+        native execution: a separate native terminal receipt is still required.
+        """
+        if not re.fullmatch(r'[0-9a-f]{32}', run_id):
+            raise ValueError('Invalid observer identity')
+        path = self.path.parent / f'{run_id}.observer'
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise RuntimeError('observer_busy: the native run still has a live observer') from None
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd

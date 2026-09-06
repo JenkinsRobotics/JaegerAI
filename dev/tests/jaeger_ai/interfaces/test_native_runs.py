@@ -184,6 +184,83 @@ def test_cancel_intent_is_durable_even_when_native_control_raises(tmp_path):
     assert not saved['cancellation_confirmed']
 
 
+@pytest.mark.parametrize('status', ['completed', 'failed', 'cancelled'])
+def test_reconciliation_requires_native_terminal_and_never_replays(tmp_path, status):
+    calls = []
+    def disconnected(run, workspace):
+        calls.append(run.message)
+        run.dispatch(session_id=run.session, run_id='native-original')
+        run.emit('message.delta', delta='partial')
+        raise ConnectionError('observer lost')
+    first = Runs(tmp_path, disconnected)
+    run = first.get(first.start('session', 'one side effect')['run_id'])
+    wait_for(lambda: not run.worker_active)
+    queries = []
+    def native_receipt(native):
+        queries.append(native)
+        return {**native, 'status': status, 'execution_unknown': False,
+                'output': 'actual native result', 'source': 'test native receipt'}
+    recovered = Runs(tmp_path, disconnected, reconciler=native_receipt)
+    result = recovered.reconcile(run.id)
+    assert result['status'] == status
+    assert result['output'] == 'actual native result'
+    assert result['cancellation_confirmed'] == (status == 'cancelled')
+    assert not result['execution_unknown']
+    assert calls == ['one side effect']
+    assert queries == [{'session_id': 'session', 'run_id': 'native-original'}]
+    assert recovered.get(run.id)['events'][-1]['event'] == 'run.reconciled'
+    assert recovered.reconcile(run.id) == result  # Idempotent; no second query.
+    assert len(queries) == 1
+    recovered.ownership.claim('session', 'f' * 32)  # Only now can a new turn enter.
+
+
+@pytest.mark.parametrize('change', [
+    {'execution_unknown': True}, {'session_id': 'other'}, {'run_id': 'other'},
+    {'status': 'running'}, {'status': 'unknown'}, {'execution_unknown': None},
+])
+def test_untrusted_or_incomplete_reconciliation_retains_ownership(tmp_path, change):
+    run = Run(tmp_path, 'session', 'hello')
+    run.dispatch(session_id='session', run_id='native-original')
+    runs = Runs(tmp_path, lambda *a: pytest.fail('replay'), reconciler=lambda native: {
+        **native, 'status': 'completed', 'execution_unknown': False, **change})
+    with pytest.raises(RuntimeError, match='remains unknown'):
+        runs.reconcile(run.id)
+    with pytest.raises(RuntimeError, match='session_busy'):
+        runs.start('session', 'duplicate')
+
+
+def test_reconcile_excludes_live_observer_in_another_registry(tmp_path):
+    entered, release = threading.Event(), threading.Event()
+    def backend(run, workspace):
+        run.dispatch(session_id=run.session, run_id=run.id)
+        entered.set()
+        release.wait(3)
+        return 'done'
+    first = Runs(tmp_path, backend)
+    run = first.get(first.start('session', 'hello')['run_id'])
+    assert entered.wait(2)
+    second = Runs(tmp_path, backend, reconciler=lambda _: pytest.fail('live observer'))
+    try:
+        for registry in (first, second):
+            with pytest.raises(RuntimeError, match='observer_busy'):
+                registry.reconcile(run.id)
+    finally:
+        release.set()
+        wait_for(lambda: not run.worker_active)
+
+
+def test_jaeger_preserves_unknown_native_receipt(tmp_path, monkeypatch):
+    class Bridge:
+        def __init__(self, *args): pass
+        def turn(self, *args, **kwargs):
+            return {'text': 'partial', 'execution_unknown': True}
+    monkeypatch.setattr('jaeger_ai.interfaces.hermes_webui_adapter.bridge_client.BridgeClient', Bridge)
+    run = Run(tmp_path, 'session', 'hello')
+    with pytest.raises(RuntimeError, match='uncertain'):
+        jaeger_turn(run)
+    assert run.execution_unknown
+
+
 def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monkeypatch):
     controls = []
     class Bridge:
@@ -242,6 +319,16 @@ def test_http_runs_approval_replay_and_missing_run(tmp_path):
         assert '"event": "run.completed"' in text
         with request(f"/v1/runs/{rid}") as response:
             assert json.load(response)["status"] == "completed"
+        wait_for(lambda: not run.worker_active)
+        with request(f"/v1/runs/{rid}/reconcile", {}) as response:
+            assert json.load(response)['status'] == 'completed'
+        with pytest.raises(HTTPError) as exc:
+            request(f'/v1/runs/{rid}/reconcile', {}, headers={'Authorization': 'Bearer wrong'})
+        assert exc.value.code == 401
+        with pytest.raises(HTTPError) as exc:
+            request('/v1/runs', {'session_id': 'other', 'input': 'blocked'},
+                    headers={'Origin': 'https://untrusted.invalid'})
+        assert exc.value.code == 403
         with pytest.raises(HTTPError) as exc:
             request("/v1/runs/doesnotexist/events")
         assert exc.value.code == 404

@@ -31,7 +31,9 @@ historical live tests below do not establish complete native feature parity.
   distinguishes cancellation intent from native confirmation. A native completion
   winning the race remains a completion. The latest bridge race correction is
   staged, not yet deployed. Durable admission keeps uncertain sessions locked
-  across adapter restart; native reconciliation of those locks remains pending.
+  across adapter restart. Staged Jaeger reconciliation queries a native durable
+  receipt instead of replaying work; Hermes/OpenClaw reconciliation remains
+  pending. Unknown native outcomes still retain their locks.
 - Native tool progress is routed to its originating session. Text, reasoning,
   and interaction callbacks are execution-context-local, preventing background
   board/cron output from appearing in a foreground WebUI conversation.

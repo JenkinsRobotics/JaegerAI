@@ -45,8 +45,8 @@ class BridgeClient:
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "instance": self.instance, "error": str(exc)}
 
-    def query(self, what: str, args: dict[str, Any] | None = None) -> Any:
-        return self._request({"op": "query", "what": what, "args": args or {}})
+    def query(self, what: str, args: dict[str, Any] | None = None, *, timeout_s: float | None = None) -> Any:
+        return self._request({"op": "query", "what": what, "args": args or {}}, timeout_s=timeout_s)
 
     def command(self, command: str, args: dict[str, Any] | None = None) -> Any:
         return self._request({"op": "command", "cmd": command, "args": args or {}})
@@ -75,6 +75,8 @@ class BridgeClient:
                 kind = frame.get("type")
                 if kind == "reply":
                     return {"text": frame.get("text") or "", "error": frame.get("error"),
+                            **({"execution_unknown": frame["execution_unknown"] is not False}
+                               if "execution_unknown" in frame else {}),
                             **({"cancelled": bool(frame["cancelled"])} if "cancelled" in frame else {})}
                 if kind == "request":
                     answer = on_request(frame) if on_request is not None else "deny"
@@ -86,9 +88,11 @@ class BridgeClient:
                     raise HermesWebUIAdapterBridgeError(str(frame.get("error") or "bridge failed"))
         raise HermesWebUIAdapterBridgeError("bridge closed before replying")
 
-    def _request(self, payload: dict[str, Any]) -> Any:
+    def _request(self, payload: dict[str, Any], *, timeout_s: float | None = None) -> Any:
         request_id = uuid.uuid4().hex
         with self._connection() as (_sock, rx):
+            if timeout_s is not None:
+                _sock.settimeout(timeout_s)
             self._ready(rx)
             self._write(rx, {**payload, "id": request_id})
             for line in rx:

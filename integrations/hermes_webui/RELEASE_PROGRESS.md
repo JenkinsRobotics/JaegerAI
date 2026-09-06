@@ -22,7 +22,7 @@ Local logical commits are authorized; no push or public release requested.
 | Test isolation | Supervisor honors isolated JAEGER_HOME; guard excludes exact background health snapshot | Full root suite passing with live supervisor | Supervisor left running | Continue isolated integration coverage |
 | OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
-| Native durable admission | Private transactional ownership registry; unknown executions retain session lock across restart | Concurrent registries, restart, failed transport and confirmed completion tested | Pending deployment | Native reconciliation workflow; durable UI route pins and event storage |
+| Native durable admission | Private ownership registry; staged native Jaeger receipts and authenticated reconciliation | Concurrent observers/registries, wrong identities, unknown results and terminal recovery tested | Pending deployment | Hermes/OpenClaw reconciliation; durable UI route pins, bounded event storage and retention |
 | Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Native Hermes path and ingress guard deployed; four-profile chat checks pass | Shared durable Runs, native stop/approval/retry |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
@@ -158,6 +158,38 @@ Local logical commits are authorized; no push or public release requested.
   this is not an upstream/browser/release certification.
 
 ## Deployment boundary
+
+### Staged native Jaeger recovery
+
+Bridge contract 14 adds instance-owned private SQLite turn receipts. A scoped
+turn ID is admitted once; its terminal result is saved before the transport
+reply. Duplicate IDs cannot execute again. Missing receipts, receipts belonging
+to another session, and unfinished work from an earlier bridge process remain
+unknown. The pending scoped-turn capacity is 256; this is not yet comprehensive
+retention or admission control for legacy/unscoped traffic.
+
+The Jaeger adapter now offers authenticated `POST /v1/runs/<id>/reconcile` with
+an empty JSON body. It queries the original native turn/session, never sends a
+new prompt. Only matching native terminal evidence releases the session lock.
+Recovery preserves the previous failure event and appends `run.reconciled`,
+restoring the native final output when available. A per-run kernel file lock
+excludes recovery while another process still observes or writes that run.
+The query has a ten-second socket wait; missing/unsupported/ambiguous results
+retain ownership. No user-facing retry/recovery button is implemented yet.
+
+Focused bridge/native receipt/adapter tests: **131 passed**; three additional
+bridge-client contract tests pass for uncertainty propagation and query timeout.
+The full regression initially caught an omitted desktop surface classification
+for the new query. After classifying it honestly as bridge-only, the full root
+suite passed: **3,680 passed, 11 skipped**, one audioop deprecation, 106.81s,
+seed `20260906`. This run predates the next legacy-ingress regression tests.
+Live restart/disconnect recovery is not verified and these changes are not
+deployed. Hermes/OpenClaw need their own trusted reconciliation implementations;
+OpenClaw lookup timeout must not be interpreted as confirmed cancellation.
+Native Runs ingress additionally rejects browser Origins, transfer encoding,
+duplicate Content-Length and oversized bodies, with a bounded body-read wait.
+
+### Current running services
 
 Roundtable fixes through `d53b0f5` are deployed, including its native Hermes
 client, authenticated legacy ingress and truthful unsupported cancellation.
