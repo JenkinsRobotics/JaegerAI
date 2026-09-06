@@ -88,7 +88,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", choices=("hermes", "openclaw"), required=True)
     parser.add_argument("--write-probe", action="store_true")
+    parser.add_argument("--all-workspaces", action="store_true", help="With --write-probe, test the explicit authorized personal/NAS mounts too")
     args = parser.parse_args()
+    if args.all_workspaces and not args.write_probe:
+        parser.error("--all-workspaces requires explicit --write-probe")
     output = {"role": args.role, "container_os": platform.system(), "uid": os.getuid(), "checks": {}}
     checks = {
         "canonical_source": lambda: {"path": str(REPO), "sha256": hashlib.sha256((REPO / "jaeger_ai/interfaces/hermes_profile_adapters/roundtable.py").read_bytes()).hexdigest()},
@@ -99,6 +102,9 @@ def main():
     }
     if args.write_probe:
         checks["write"] = write_probe
+        if args.all_workspaces:
+            for root in ("/mnt/host/Desktop", "/mnt/host/Documents", "/mnt/nas/Jenkins_Robotics", "/mnt/nas/Personal-Drive"):
+                checks[f"write:{root}"] = lambda root=root: write_probe(Path(root))
     for name, fn in checks.items():
         start = time.monotonic()
         try:

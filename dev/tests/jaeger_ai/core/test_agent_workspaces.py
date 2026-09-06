@@ -56,6 +56,71 @@ def test_unknown_privileges_fail_closed():
         aw.create_arguments(config, "hermes")
 
 
+def test_expansion_preserves_existing_github_mount_and_original_container(monkeypatch, tmp_path):
+    github, personal = tmp_path/'github', tmp_path/'documents'
+    github.mkdir(); personal.mkdir()
+    config = configuration()
+    config['id'] = aw.MANAGED_CONTAINERS['hermes']
+    config['mounts'].append({'type':{'virtiofs':{}}, 'source':str(github), 'destination':'/mnt/host/GitHub', 'options':[]})
+    monkeypatch.setattr(aw, 'workspace_mounts', lambda home, **kw: [(github,'/mnt/host/GitHub'),(personal,'/mnt/host/Documents')])
+    args = aw.create_arguments(config, 'hermes', include_personal=True, expand=True)
+    assert args[args.index('--name')+1] == aw.EXPANDED_CONTAINERS['hermes']
+    assert args.count(f'{github}:/mnt/host/GitHub') == 1
+    assert f'{personal}:/mnt/host/Documents' in args
+    assert config['id'] == aw.MANAGED_CONTAINERS['hermes']
+    config['mounts'][-1]['options'] = ['ro']
+    with pytest.raises(ValueError, match='Conflicting'):
+        aw.create_arguments(config, 'hermes', include_personal=True, expand=True)
+
+
+def test_expanded_container_manifest_is_role_scoped(monkeypatch, tmp_path):
+    path = tmp_path/'state.json'
+    monkeypatch.setattr(aw, 'STATE_PATH', path)
+    path.write_text(json.dumps({'containers':aw.EXPANDED_CONTAINERS}))
+    assert aw.container_name('hermes') == aw.EXPANDED_CONTAINERS['hermes']
+    path.write_text(json.dumps({'containers':{'hermes':aw.EXPANDED_CONTAINERS['openclaw']}}))
+    with pytest.raises(ValueError): aw.container_name('hermes')
+
+
+@pytest.mark.parametrize('failure', ['verify', 'publish'])
+def test_expansion_transaction_restores_originals_on_failure(failure):
+    installer = script('expand-agent-workspaces')
+    calls, restored = [], []
+    plans = {role:['create','--name',name] for role,name in aw.EXPANDED_CONTAINERS.items()}
+    def verify(role,name):
+        calls.append(('verified',name))
+        if failure == 'verify' and role == 'openclaw': raise RuntimeError('probe failed')
+    def publish():
+        calls.append(('publish',))
+        if failure == 'publish': raise RuntimeError('write failed')
+    with pytest.raises(RuntimeError, match='restored'):
+        installer.transition(plans,aw.MANAGED_CONTAINERS,invoke=lambda *args:calls.append(args),
+                             verify=verify,publish=publish,restore=lambda:restored.append(True))
+    assert restored == [True]
+    for name in aw.MANAGED_CONTAINERS.values(): assert ('start',name) in calls
+    for name in aw.EXPANDED_CONTAINERS.values(): assert ('stop','--time','10',name) in calls
+    assert not any(call[0] in ('delete','rm','prune') for call in calls)
+
+
+def test_expansion_publishes_only_after_both_replacements_verify():
+    installer = script('expand-agent-workspaces')
+    calls=[]
+    plans={role:['create','--name',name] for role,name in aw.EXPANDED_CONTAINERS.items()}
+    installer.transition(plans,aw.MANAGED_CONTAINERS,invoke=lambda *args:calls.append(args),
+                         verify=lambda role,name:calls.append(('verified',role)),
+                         publish=lambda:calls.append(('publish',)), restore=lambda:pytest.fail('Unexpected rollback'))
+    assert calls[-2:] == [('verified','openclaw'),('publish',)]
+
+
+def test_expansion_refuses_active_or_unknown_work():
+    installer=script('expand-agent-workspaces')
+    idle={'active_runs':0,'active_streams':0}
+    installer.ensure_idle(idle,{'tasks':{'active':0}})
+    for webui,native in [({},{}),(idle,{}),(idle,{'tasks':{'active':1}}),({'active_runs':1,'active_streams':0},{'tasks':{'active':0}})]:
+        with pytest.raises(RuntimeError,match='work'):
+            installer.ensure_idle(webui,native)
+
+
 def test_manifest_fallback_and_role_isolation(monkeypatch, tmp_path):
     path = tmp_path / "state.json"
     monkeypatch.setattr(aw, "STATE_PATH", path)
