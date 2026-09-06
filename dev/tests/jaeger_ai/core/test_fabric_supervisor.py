@@ -12,7 +12,9 @@ from jaeger_ai.core.runtime.fabric_supervisor import (
 
 
 def test_supervisor_state_lives_inside_repository():
-    assert JAEGER_RUNTIME_ROOT == REPO_ROOT / ".jaeger_ai" / "shared"
+    import os
+    from pathlib import Path
+    assert JAEGER_RUNTIME_ROOT == Path(os.environ["JAEGER_HOME"]) / "shared"
     assert _state_path() == JAEGER_RUNTIME_ROOT / "health" / "agent-fabric.json"
 
 

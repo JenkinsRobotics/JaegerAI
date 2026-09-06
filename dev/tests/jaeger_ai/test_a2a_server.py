@@ -19,7 +19,7 @@ class _FakeBridge:
         self.turns: list[tuple[str, str]] = []
         self.cancelled = False
 
-    def turn(self, text, session):
+    def turn(self, text, session, **kwargs):
         self.turns.append((text, session))
         return {"text": f"echo:{text}", "error": None}
 

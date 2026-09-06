@@ -85,7 +85,7 @@ def _turn_plan(message: str) -> dict:
 
     mentioned = []
     lowered = text.lower()
-    if "@all" in lowered:
+    if re.search(r"(?<![\w@])@all\b", lowered):
         mentioned = list(AGENT_ORDER)
     else:
         mention_patterns = {
@@ -96,7 +96,7 @@ def _turn_plan(message: str) -> dict:
         mentioned = [agent for agent in AGENT_ORDER if re.search(mention_patterns[agent], lowered)]
     participants = tuple(mentioned or AGENT_ORDER)
     if mode == "quick" and len(participants) > 1:
-        participants = (_best_member(text),)
+        participants = (_best_member(text, participants),)
     return {
         "mode": mode,
         "message": text,
@@ -105,13 +105,13 @@ def _turn_plan(message: str) -> dict:
     }
 
 
-def _best_member(message: str) -> str:
+def _best_member(message: str, eligible: tuple[str, ...] = AGENT_ORDER) -> str:
     lowered = message.lower()
-    if re.search(r"\b(?:openclaw|linux|ollama|messaging)\b", lowered):
+    if "openclaw" in eligible and re.search(r"\b(?:openclaw|linux|ollama|messaging)\b", lowered):
         return "openclaw"
-    if re.search(r"\b(?:hermes|container|coding|code)\b", lowered):
+    if "hermes" in eligible and re.search(r"\b(?:hermes|container|coding|code)\b", lowered):
         return "hermes"
-    return "jaeger"
+    return "jaeger" if "jaeger" in eligible else eligible[0]
 
 
 def _member_prompt(plan: dict, agent: str) -> str:
@@ -154,9 +154,10 @@ def _is_failed_answer(answer: str) -> bool:
 
 
 class MemberAnswer(str):
-    def __new__(cls, text, error_category=""):
+    def __new__(cls, text, error_category="", partial=""):
         value = super().__new__(cls, text)
         value.error_category = error_category
+        value.partial = partial
         return value
 
 
@@ -184,7 +185,9 @@ def _choose_chair(participants: tuple[str, ...], session_id: str, message: str) 
     return participants[digest[0] % len(participants)]
 
 def _member_session_id(roundtable_session_id: str, agent: str) -> str:
-    owner = roundtable_session_id or "anonymous"
+    if not roundtable_session_id:
+        raise ValueError("A Roundtable session identity is required")
+    owner = roundtable_session_id
     return uuid.uuid5(uuid.NAMESPACE_URL, f"jaeger-roundtable:{owner}:{agent}").hex
 
 # ── Hermes client ────────────────────────────────────────────────────────────
@@ -266,6 +269,7 @@ def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str 
     )
     chunks = []
     open_kwargs = {} if MEMBER_TIMEOUT is None else {"timeout": MEMBER_TIMEOUT}
+    complete = False
     with urllib.request.urlopen(request, **open_kwargs) as response:
         for raw in response:
             line = raw.decode("utf-8", errors="replace").strip()
@@ -273,12 +277,20 @@ def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str 
                 continue
             data = line[5:].strip()
             if data == "[DONE]":
+                complete = True
                 break
             payload = json.loads(data)
+            if payload.get("error") or payload.get("event") in {"run.failed", "run.cancelled"}:
+                error = payload.get("error") or {}
+                category = str(error.get("type") or error.get("category") or "upstream_error") if isinstance(error, dict) else "upstream_error"
+                return MemberAnswer(f"[{label} error: {category}: {error}]", category, "".join(chunks))
             choice = (payload.get("choices") or [{}])[0]
             delta = (choice.get("delta") or {}).get("content")
             if delta:
                 chunks.append(str(delta))
+    if not complete:
+        return MemberAnswer(f"[{label} error: incomplete_stream: native execution state is unknown]",
+                            "incomplete_stream", "".join(chunks))
     return "".join(chunks) or f"[{label}: no response]"
 
 
@@ -342,6 +354,9 @@ def _parallel_turns(
 
 def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
     """Stream a mode-aware group turn followed by strict consensus."""
+    # Direct callers without an identity get an isolated table, never a shared
+    # anonymous native session. HTTP clients should supply their durable ID.
+    session_id = session_id or uuid.uuid4().hex
     plan = _turn_plan(user_message)
     participants = plan["participants"]
     participant_labels = ", ".join(AGENT_LABELS[agent] for agent in participants)

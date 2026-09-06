@@ -1974,7 +1974,8 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         with ctx.turn_control_lock:
             if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
                 ctx.turn_controls.pop(turn_id, None)
-                _emit(out, protocol.reply_frame("", "Cancelled before execution", session))
+                _emit(out, {**protocol.reply_frame("", "Cancelled before execution", session),
+                            "cancelled": True})
                 continue
             if turn_id:
                 ctx.turn_controls[turn_id] = "active"
@@ -2093,11 +2094,13 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
 
             final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
             used, mx = _ctx_usage(session)
-            _emit(out, protocol.reply_frame(
+            with ctx.turn_control_lock:
+                cancelled = ctx.turn_controls.get(turn_id) == "cancelled"
+            _emit(out, {**protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx,
-                halt_reason=result.get("halt_reason")))
+                halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(out, protocol.reply_frame("", str(exc), session))
         finally:
