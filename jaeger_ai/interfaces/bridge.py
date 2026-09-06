@@ -314,7 +314,8 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # can keep those sessions marked running until the callback returns.
 # 13: ``model_picker`` query — Hermes-style two-stage catalog for the
 # windowed ``/model`` overlay (clickable, not a transcript dump).
-INTEGRATION_CONTRACT_VERSION = 13
+# 14: native turn receipts support observation/reconciliation without replay.
+INTEGRATION_CONTRACT_VERSION = 14
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -323,7 +324,7 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
-    "board", "heartbeat", "cron", "list_schedules",
+    "board", "heartbeat", "cron", "list_schedules", "turn_status",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -708,6 +709,11 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     lay = getattr(boot, "layout", None)
     if what == "contract":
         return _integration_contract()
+    if what == 'turn_status':
+        from jaeger_ai.core.runtime.native_turns import NativeTurns
+        if lay is None:
+            raise ValueError('Native instance is unavailable')
+        return NativeTurns(lay.run_dir).get(args.get('turn_id'), args.get('session_id'))
     if what == "list_skills":
         from jaeger_ai.core.skills.service import list_skills
 
@@ -1932,10 +1938,24 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         session = normalize_session_key(
             req.get("session"), default="desktop-app",
         )
+        def reply(frame):
+            turn_id = str(req.get('turn_id') or '')
+            if turn_id and req.get('_native_accepted'):
+                from jaeger_ai.core.runtime.native_turns import NativeTurns
+                try:
+                    NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
+                except Exception:
+                    # Native work returned, but the durable attestation failed.
+                    # Do not authorize automatic recovery based on a lost receipt.
+                    frame = {**frame, 'execution_unknown': True,
+                             'error': 'Native turn ended but its durable receipt could not be stored'}
+                with ctx.turn_control_lock:
+                    ctx.turn_controls.pop(turn_id, None)
+            _emit(out, frame)
         from jaeger_ai.core.runtime.work_ledger import bind_session
         bind_session(session)
         if prompt_error:
-            _emit(out, protocol.reply_frame("", prompt_error, session))
+            reply(protocol.reply_frame("", prompt_error, session))
             continue
         if session not in _SYNTHETIC_SESSIONS:
             ctx.last_user_at = time.monotonic()
@@ -1956,10 +1976,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         if text.startswith("/") and goal_text is None:
             _emit_state(out, ctx, True, session)
             try:
-                reply = _windowed_control_slash(text) or _run_slash(text, ctx)
-                _emit(out, protocol.reply_frame(reply, None, session))
+                slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
+                reply(protocol.reply_frame(slash_reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
-                _emit(out, protocol.reply_frame("", str(exc), session))
+                reply(protocol.reply_frame("", str(exc), session))
             finally:
                 _emit_state(out, ctx, False, session)
             continue
@@ -1967,14 +1987,14 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             text = goal_text
         ctx.booted.wait()
         if ctx.client is None:
-            _emit(out, protocol.reply_frame(
+            reply(protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
         turn_id = str(req.get("turn_id") or "")
         with ctx.turn_control_lock:
             if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
                 ctx.turn_controls.pop(turn_id, None)
-                _emit(out, {**protocol.reply_frame("", "Cancelled before execution", session),
+                reply({**protocol.reply_frame("", "Cancelled before execution", session),
                             "cancelled": True})
                 continue
             if turn_id:
@@ -2099,13 +2119,13 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             # Only the native loop's halt result (or skipped dispatch above)
             # confirms interruption; the control flag alone is merely intent.
             cancelled = result.get("halt_reason") == "interrupted"
-            _emit(out, {**protocol.reply_frame(
+            reply({**protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx,
                 halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            _emit(out, protocol.reply_frame("", str(exc), session))
+            reply(protocol.reply_frame("", str(exc), session))
         finally:
             with ctx.turn_control_lock:
                 ctx.turn_controls.pop(turn_id, None)
@@ -2811,13 +2831,23 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # meant "nowhere to put this" and dropped the text itself —
                 # see ChatViewModel.send's isSending guard). Emit a small
                 # v1-additive ack so a client can render a pending state.
-                session = req.get("session") or "desktop-app"
+                from jaeger_ai.core.runtime.dispatch import normalize_session_key
+                session = normalize_session_key(req.get('session'), default='desktop-app')
+                turn_id = str(req.get('turn_id') or '')
+                if turn_id:
+                    from jaeger_ai.core.runtime.native_turns import NativeTurns
+                    try:
+                        NativeTurns(ctx.layout.run_dir).accept(turn_id, session)
+                    except Exception as exc:
+                        _emit(proto, {**protocol.reply_frame('', str(exc), session),
+                                      'execution_unknown': True})
+                        continue
+                    req['_native_accepted'] = True
                 if ctx.busy:
                     ctx.session_pending[session] = ctx.session_pending.get(session, 0) + 1
                     _emit(proto, protocol.queued_frame(
                         session, ctx.session_pending[session]))
                 req["_out"] = proto
-                turn_id = str(req.get("turn_id") or "")
                 if turn_id:
                     with ctx.turn_control_lock:
                         if turn_id in ctx.turn_controls:

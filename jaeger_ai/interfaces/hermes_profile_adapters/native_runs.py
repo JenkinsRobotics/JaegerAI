@@ -140,10 +140,11 @@ class Run:
 
 
 class Runs:
-    def __init__(self, root: Path, backend):
+    def __init__(self, root: Path, backend, *, reconciler=None):
         self.root = root
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.backend = backend
+        self.reconciler = reconciler
         self.lock = threading.RLock()
         self.runs = {}
         self.ownership = Ownership(root)
@@ -156,23 +157,28 @@ class Runs:
                 raise RuntimeError("session_busy: native work is still active; observe or stop it first")
             run_id = uuid.uuid4().hex
             self.ownership.claim(session, run_id)
+            lease = None
             try:
+                lease = self.ownership.observer_lease(run_id)
                 run = Run(self.root, session, message, run_id=run_id)
             except Exception:
+                if lease is not None:
+                    os.close(lease)
                 self.ownership.release(run_id)  # No worker/native dispatch exists.
                 raise
             self.runs[run.id] = run
-        run.worker_active = True
+            run.worker_active = True
         try:
-            threading.Thread(target=self._worker, args=(run, workspace), daemon=True).start()
+            threading.Thread(target=self._worker, args=(run, workspace, lease), daemon=True).start()
         except Exception:
+            os.close(lease)
             run.worker_active = False
             run.emit('run.failed', error_category='dispatch_not_started', error='Worker did not start')
             self.ownership.release(run.id)
             raise
         return run.snapshot()
 
-    def _worker(self, run, workspace):
+    def _worker(self, run, workspace, lease=None):
         try:
             if run.cancelled.is_set():
                 run.cancel_confirmed = True  # No native dispatch took place.
@@ -198,6 +204,8 @@ class Runs:
                 if not run.execution_unknown:
                     self.ownership.release(run.id)
             finally:
+                if lease is not None:
+                    os.close(lease)
                 run.worker_active = False
 
     def get(self, run_id):
@@ -221,6 +229,62 @@ class Runs:
                 "error": "Adapter restarted; native execution state is unknown. Inspect the native session before retrying."})
         return saved
 
+    def reconcile(self, run_id):
+        """Observe the original native execution. Never redispatch or infer an abort."""
+        with self.lock:
+            run = self.get(run_id)
+            if isinstance(run, Run) and run.worker_active:
+                raise RuntimeError('observer_busy: wait for the current observer to finish')
+            lease = self.ownership.observer_lease(run_id)
+            try:
+                # Read after acquiring the lease: another observer may just have
+                # persisted its terminal result. Other processes cannot overwrite
+                # recovery while this lease is held.
+                self.runs.pop(run_id, None)
+                run = self.get(run_id)
+                saved = {**run.snapshot(), 'events': list(run.events)} if isinstance(run, Run) else run
+                if saved['execution_unknown']:
+                    if self.reconciler is None:
+                        raise RuntimeError('Native reconciliation is not supported by this adapter yet')
+                    native = saved.get('native') or {}
+                    if not native.get('session_id') or not native.get('run_id'):
+                        raise RuntimeError('Native identity is unknown; no safe automatic reconciliation is possible')
+                    evidence = self.reconciler(dict(native))
+                    if (not isinstance(evidence, dict)
+                            or evidence.get('session_id') != native['session_id']
+                            or evidence.get('run_id') != native['run_id']
+                            or evidence.get('execution_unknown') is not False
+                            or evidence.get('status') not in {'completed', 'failed', 'cancelled'}):
+                        raise RuntimeError('Native execution remains unknown; session ownership is retained')
+                    saved.update(status=evidence['status'], execution_unknown=False,
+                                 cancellation_confirmed=evidence['status'] == 'cancelled',
+                                 pending_approval_ids=[], reconciliation=evidence)
+                    if 'output' in evidence:
+                        saved['output'] = evidence['output']
+                    saved['events'].append({'event': 'run.reconciled', 'run_id': run_id,
+                        'seq': len(saved['events']) + 1, 'native_status': evidence['status'],
+                        'source': evidence.get('source'), 'output': saved['output']})
+                    saved['last_event_id'] = f"{run_id}:{len(saved['events'])}"
+                    path = self.root / f'{run_id}.json'
+                    fd = os.open(path.with_suffix('.tmp'), os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+                    with os.fdopen(fd, 'w') as output:
+                        json.dump(saved, output)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(path.with_suffix('.tmp'), path)
+                    directory = os.open(self.root, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                    # Invalidate the finished in-memory observer; reads now use
+                    # the durable receipt including the reconciliation event.
+                    self.runs.pop(run_id, None)
+                self.ownership.release(run_id)
+                return {k: v for k, v in saved.items() if k != 'events'}
+            finally:
+                os.close(lease)
+
 
 class RunsHTTP:
     """Mixin for existing profile servers; preserves legacy completion clients."""
@@ -234,8 +298,13 @@ class RunsHTTP:
             return True
         if not parsed.path.startswith("/v1/runs"):
             return False
+        if self.headers.get('Origin'):
+            self.close_connection = True
+            self.native_json(403, {'error': 'Use the authenticated WebUI server proxy'})
+            return True
         expected = self.native_key()
         if not expected or not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + expected):
+            self.close_connection = True
             self.native_json(401, {"error": "Native run access requires the profile gateway credential"})
             return True
         try:
@@ -244,11 +313,16 @@ class RunsHTTP:
             if parts[:2] != ["v1", "runs"]:
                 raise KeyError("Route not found")
             if method == "POST":
+                if self.headers.get('Transfer-Encoding'):
+                    raise ValueError('Transfer-Encoding is not supported')
+                if len(self.headers.get_all('Content-Length', [])) != 1:
+                    raise ValueError('Exactly one Content-Length is required')
                 if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
                     raise ValueError("Content-Type must be application/json")
                 length = int(self.headers.get("Content-Length", 0))
                 if not 0 < length <= 1_000_000:
                     raise ValueError("Invalid request size")
+                self.connection.settimeout(15)
                 body = json.loads(self.rfile.read(length))
                 if not isinstance(body, dict):
                     raise ValueError("Request must be a JSON object")
@@ -260,7 +334,9 @@ class RunsHTTP:
             if len(parts) not in (3, 4):
                 raise KeyError("Route not found")
             run = runs.get(parts[2])
-            if method == "GET" and len(parts) == 3:
+            if method == 'POST' and len(parts) == 4 and parts[3] == 'reconcile':
+                self.native_json(200, runs.reconcile(parts[2]))
+            elif method == "GET" and len(parts) == 3:
                 self.native_json(200, run.snapshot() if isinstance(run, Run) else {k:v for k,v in run.items() if k != "events"})
             elif method == "GET" and len(parts) == 4 and parts[3] == "events":
                 cursor = parse_qs(parsed.query).get("after_seq", [self.headers.get("Last-Event-ID", "0")])[0]
@@ -278,6 +354,7 @@ class RunsHTTP:
             else:
                 raise KeyError("Route not found")
         except (KeyError, ValueError, RuntimeError) as exc:
+            self.close_connection = True
             self.native_json(404 if isinstance(exc, KeyError) else 409 if isinstance(exc, RuntimeError) else 400, {"error": str(exc)})
         except OSError as exc:
             self.native_json(502, {"error": str(exc), "error_category": failure_category(exc)})
@@ -323,6 +400,16 @@ class RunsHTTP:
             pass  # Observer disconnect is not permission to retry the work.
 
 
+def jaeger_reconcile(native):
+    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    receipt = BridgeClient('jaeger').query('turn_status', {
+        'turn_id': native['run_id'], 'session_id': native['session_id']}, timeout_s=10)
+    if not isinstance(receipt, dict):
+        raise RuntimeError('Invalid native turn receipt')
+    return {**receipt, 'run_id': receipt.get('turn_id'),
+            'output': (receipt.get('reply') or {}).get('text', '')}
+
+
 def jaeger_turn(run, workspace=None):
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
     run.execution_unknown = False
@@ -362,7 +449,9 @@ def jaeger_turn(run, workspace=None):
 
     run.dispatch(session_id=run.session, run_id=run.id)
     result = bridge.turn(run.message, run.session, event, approval, turn_id=run.id, workspace=workspace)
-    run.execution_unknown = False  # Native bridge returned its terminal result.
+    run.execution_unknown = result.get("execution_unknown", False) is not False
+    if run.execution_unknown:
+        raise RuntimeError(result.get("error") or "Native terminal receipt is uncertain; reconcile before retrying")
     run.cancel_confirmed = bool(result.get("cancelled"))
     if result.get("error") and not run.cancel_confirmed:
         raise RuntimeError(result["error"])
