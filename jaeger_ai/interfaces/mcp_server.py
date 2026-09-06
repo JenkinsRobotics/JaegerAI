@@ -18,6 +18,8 @@ import hmac
 import json
 import os
 import sys
+import functools
+import anyio
 from typing import Any, Callable
 
 # Turn fn: (client, message, session_key=...) -> {"text": str, "error": str|None}
@@ -26,6 +28,14 @@ TurnFn = Callable[..., dict]
 MCP_HTTP_HOST = "127.0.0.1"
 MCP_HTTP_PORT = 8792
 MCP_HTTP_PATH = "/mcp"
+
+
+def _off_event_loop(fn):
+    """Keep the MCP transport responsive while synchronous bridge work waits."""
+    @functools.wraps(fn)
+    async def invoke(*args, **kwargs):
+        return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+    return invoke
 
 
 def _run_chat(run_turn: TurnFn, client: Any, message: str, session_key: str = "mcp") -> str:
@@ -115,6 +125,7 @@ def build_server(client: Any, instance: str, model: str | None,
     )
 
     @mcp.tool()
+    @_off_event_loop
     def chat(message: str, session_id: str = "") -> str:
         """Send a message to the local JaegerAI agent and return its reply.
 
@@ -129,6 +140,7 @@ def build_server(client: Any, instance: str, model: str | None,
         return _run_chat(run_turn, client, message, session_key=session)
 
     @mcp.tool()
+    @_off_event_loop
     def agent_info() -> dict:
         """Return the JaegerAI agent's instance name and loaded model."""
         info: dict[str, Any] = {"instance": instance, "model": model or "unknown"}
@@ -145,21 +157,25 @@ def build_server(client: Any, instance: str, model: str | None,
 
     if bridge is not None:
         @mcp.tool()
+        @_off_event_loop
         def bridge_health() -> dict:
             """Health of the live Jaeger instance bridge (no model boot)."""
             return dict(bridge.health())
 
         @mcp.tool()
+        @_off_event_loop
         def bridge_query(what: str, args_json: str = "{}") -> Any:
             """Run a bridge query against the live instance (list/config/identity/...)."""
             return bridge.query(what, _json_args(args_json))
 
         @mcp.tool()
+        @_off_event_loop
         def bridge_command(command: str, args_json: str = "{}") -> Any:
             """Run a bridge command against the live instance."""
             return bridge.command(command, _json_args(args_json))
 
         @mcp.tool()
+        @_off_event_loop
         def list_delegates() -> dict:
             """Delegate catalog: builtin runtimes plus any delegate_* bridge tools."""
             names: list[str] = []

@@ -7,13 +7,12 @@ Flow:
   3. Each agent gets the other two responses and gives a rebuttal (Round 2)
   4. Full debate streamed back via /v1/chat/completions SSE
 
-OpenClaw uses WebSocket v4 protocol (not REST).
+Native member adapters preserve each member's resumable session.
 """
 
 from __future__ import annotations
 
 import hashlib
-import http.client
 import json
 import os
 import queue
@@ -26,12 +25,16 @@ import uuid
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from .resilience import timeout_setting, failure_category
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
 ADAPTER_PORT = int(os.environ.get("ROUNDTABLE_PORT", "8643"))
-_timeout_setting = os.environ.get("ROUNDTABLE_MEMBER_TIMEOUT", "").strip()
-MEMBER_TIMEOUT = float(_timeout_setting) if _timeout_setting else None
+MEMBER_TIMEOUT = timeout_setting("ROUNDTABLE_MEMBER_TIMEOUT")
+SHARED_CONTEXT_CHARS = 18000
+_inflight_members: set[str] = set()
+_inflight_lock = threading.Lock()
 OPENCLAW_ADAPTER_URL = os.environ.get(
     "ROUNDTABLE_OPENCLAW_ADAPTER_URL", "http://192.168.64.1:8644"
 ).rstrip("/")
@@ -51,11 +54,13 @@ _OPERATIONAL_WORDS = re.compile(
     r"network|config|file|repository|repo|deploy|install|tool|access|status|health)\w*\b",
     re.IGNORECASE,
 )
-_DEPLOYMENT_CONTEXT = """Canonical deployment facts supplied by the Roundtable orchestrator:
-- The live Roundtable source is /Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/interfaces/hermes_profile_adapters/roundtable.py.
+_DEPLOYMENT_CONTEXT = f"""Canonical deployment facts supplied by the Roundtable orchestrator:
+- The live Roundtable source is {Path(__file__).resolve()}.
 - Jaeger is native on macOS. Hermes WebUI and OpenClaw run in separate Apple containers.
 - The active adapters are JaegerAI Python modules on ports 8642, 8643, and 8644.
 - Files such as ~/workspace/roundtable-adapter.py are historical artifacts, not deployed source.
+- A container's /workspace/GitHub/JaegerAI mirror is not the host checkout. Inspect the canonical
+  Mac path using authorized host workspace tools; a search in the mirror cannot verify host files.
 When auditing the installation, verify the canonical file or live health endpoint. Never label a claim
 [Verified] when it came from memory, another member, an old transcript, or a similarly named file."""
 
@@ -137,10 +142,40 @@ def _member_prompt(plan: dict, agent: str) -> str:
 
 
 def _is_failed_answer(answer: str) -> bool:
-    lowered = str(answer or "").lower()
-    return (not lowered.strip() or " error:" in lowered or
-            lowered.startswith("[") and "error:" in lowered or "no response" in lowered or
-            lowered.strip() in {"llm request timed out.", "llm request timed out"})
+    if isinstance(answer, MemberAnswer):
+        return bool(answer.error_category)
+    text = str(answer or "").strip()
+    return not text or bool(re.match(
+        r"^(?:⚠️\s*)?(?:\[?(?:(?:jaeger|hermes|openclaw|agent)\s+)?error:|"
+        r"\(agent error:|(?:\[(?:jaeger|hermes|openclaw):\s*)?no response\b|"
+        r"llm request timed out\.?$)", text, re.IGNORECASE,
+    ))
+
+
+class MemberAnswer(str):
+    def __new__(cls, text, error_category=""):
+        value = super().__new__(cls, text)
+        value.error_category = error_category
+        return value
+
+
+def _peer_transcript(answers):
+    if not answers:
+        return "No responses."
+    allowance = max(1, SHARED_CONTEXT_CHARS // len(answers) - 200)
+    parts = []
+    for agent, answer in answers.items():
+        text = str(answer)
+        if len(text) > allowance:
+            text = text[:allowance] + "\n[Peer answer truncated; omitted text cannot establish agreement.]"
+        parts.append(f"{AGENT_LABELS[agent]}:\n{text}")
+    return "\n\n".join(parts)
+
+
+def _request_context(message):
+    if len(message) <= 12000:
+        return message
+    return message[:12000] + "\n[User request abbreviated for discussion; consult your native session for the full request.]"
 
 
 def _choose_chair(participants: tuple[str, ...], session_id: str, message: str) -> str:
@@ -203,34 +238,14 @@ def chat_jaeger(message: str, session_id: str = "") -> str:
     return _chat_adapter("Jaeger", JAEGER_ADAPTER_URL, message, session_id)
 
 
-def _is_transient_member_error(exc: BaseException) -> bool:
-    if isinstance(exc, (
-        ConnectionError,
-        TimeoutError,
-        http.client.IncompleteRead,
-        http.client.RemoteDisconnected,
-        http.client.BadStatusLine,
-    )):
-        return True
-    if isinstance(exc, urllib.error.HTTPError):
-        return exc.code in {502, 503, 504}
-    if isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, BaseException):
-        return _is_transient_member_error(exc.reason)
-    return isinstance(exc, urllib.error.URLError)
-
-
 def _chat_adapter(label: str, base_url: str, message: str, session_id: str = "") -> str:
-    last_error: Exception | None = None
-    attempts = 3
-    for attempt in range(attempts):
-        try:
-            return _chat_adapter_once(label, base_url, message, session_id)
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            if not _is_transient_member_error(exc) or attempt == attempts - 1:
-                return f"[{label} error: {exc}]"
-            time.sleep(0.4 * (attempt + 1))
-    return f"[{label} error: {last_error}]"
+    try:
+        return _chat_adapter_once(label, base_url, message, session_id)
+    except Exception as exc:  # noqa: BLE001
+        # The upstream may have executed tools before dropping its response.
+        # Automatic replay here can duplicate writes, purchases, or messages.
+        category = failure_category(exc)
+        return MemberAnswer(f"[{label} error: {category}: {exc}]", category)
 
 
 def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str = "") -> str:
@@ -275,18 +290,31 @@ def _parallel_turns(
     callers = {"hermes": chat_hermes, "jaeger": chat_jaeger, "openclaw": chat_openclaw}
     results: dict[str, str] = {}
     lock = threading.Lock()
+    closed = False
     emit(f"\n## {heading}\n\n")
 
     def ask(agent: str) -> None:
+        member_session = _member_session_id(roundtable_session_id, agent)
+        with _inflight_lock:
+            busy = member_session in _inflight_members
+            if not busy:
+                _inflight_members.add(member_session)
         try:
-            answer = callers[agent](
-                prompts[agent], _member_session_id(roundtable_session_id, agent)
-            )
+            if busy:
+                answer = MemberAnswer("[Agent error: previous turn still running in this session]", "busy")
+            else:
+                answer = callers[agent](prompts[agent], member_session)
         except Exception as exc:
-            answer = f"⚠️ Error: {exc}"
+            answer = MemberAnswer(f"[Agent error: {failure_category(exc)}: {exc}]", failure_category(exc))
+        finally:
+            if not busy:
+                with _inflight_lock:
+                    _inflight_members.discard(member_session)
         with lock:
+            if closed:
+                return  # Never inject a late answer into the next round/summary.
             results[agent] = answer
-        emit(f"### {AGENT_LABELS[agent]}\n\n{answer}\n\n")
+            emit(f"### {AGENT_LABELS[agent]}\n\n{answer}\n\n")
 
     active_callers = {agent: callers[agent] for agent in prompts}
     threads = [threading.Thread(target=ask, args=(agent,), daemon=True) for agent in active_callers]
@@ -299,11 +327,16 @@ def _parallel_turns(
         deadline = time.monotonic() + MEMBER_TIMEOUT
         for thread in threads:
             thread.join(timeout=max(0, deadline - time.monotonic()))
-    for agent in active_callers:
-        if agent not in results:
-            results[agent] = "⚠️ No response (timeout)"
-            emit(f"### {AGENT_LABELS[agent]}\n\n{results[agent]}\n\n")
-    return results
+    with lock:
+        closed = True
+        for agent in active_callers:
+            if agent not in results:
+                results[agent] = MemberAnswer(
+                    f"[Agent error: timeout after {MEMBER_TIMEOUT:g}s waiting; native work may still be running. This is not an outage diagnosis.]",
+                    "timeout",
+                )
+                emit(f"### {AGENT_LABELS[agent]}\n\n{results[agent]}\n\n")
+        return dict(results)
 
 
 def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
@@ -321,9 +354,7 @@ def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
     )
     if plan["mode"] == "quick":
         return
-    transcript = "\n\n".join(
-        f"{AGENT_LABELS[agent]}:\n{answer}" for agent, answer in round1.items()
-    )
+    transcript = _peer_transcript(round1)
     discussion_instruction = {
         "ask": "Respond to peers, correct errors, and seek common ground.",
         "collaborate": "Coordinate ownership, compare evidence, and propose the next executable action.",
@@ -332,7 +363,7 @@ def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
         "incident": "Compare diagnostic evidence and assign a remediation owner. Flag unverified causes.",
     }[plan["mode"]]
     discussion_prompt = (
-        f"{_DEPLOYMENT_CONTEXT}\n\nCurrent user request: {plan['message']}\n\n"
+        f"{_DEPLOYMENT_CONTEXT}\n\nCurrent user request: {_request_context(plan['message'])}\n\n"
         f"Current-round answers:\n{transcript}\n\n"
         f"One group discussion round: {discussion_instruction} Be concise. Do not claim "
         "another member agrees unless their text explicitly says so."
@@ -341,11 +372,8 @@ def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
         {agent: discussion_prompt for agent in participants if not _is_failed_answer(round1.get(agent, ""))}, emit,
         "Round 2 — Group Discussion", session_id,
     )
-    discussion = "\n\n".join(
-        f"{AGENT_LABELS[agent]}:\n{answer}" for agent, answer in round2.items()
-    )
+    discussion = _peer_transcript(round2)
     emit("\n## 🤝 Decision Summary\n\n")
-    callers = {"hermes": chat_hermes, "jaeger": chat_jaeger, "openclaw": chat_openclaw}
     responsive = [agent for agent in participants if not _is_failed_answer(round2.get(agent, ""))]
     if not responsive:
         emit("No successful discussion answers. No consensus was reached; native sessions are preserved.\n")
@@ -353,25 +381,28 @@ def run_debate_stream(user_message: str, emit, session_id: str = "") -> None:
     chair = _choose_chair(tuple(responsive), session_id, plan["message"])
     consensus_prompt = (
         f"{_DEPLOYMENT_CONTEXT}\n\nYou are the neutral Roundtable chair. Mode: {plan['mode']}.\n"
-        f"User request: {plan['message']}\n\nInitial answers:\n{transcript}\n\n"
+        f"User request: {_request_context(plan['message'])}\n\nInitial answers:\n{transcript}\n\n"
         f"Discussion:\n{discussion}\n\nThere are {len(participants)} participants and "
         f"{len(responsive)} responsive discussion answers. Produce exactly these sections: "
         "Unanimous agreement; Majority position; Minority objections; Evidence ledger; "
         "Unknown or unverified; Recommended next action and owner. A claim is unanimous only "
         "when every selected participant explicitly supports it. A failed or absent participant "
-        "prevents unanimous agreement. Never infer service outage "
-        "from timeout. Never say tools were used unless a member reports a concrete tool result."
+        "prevents unanimous agreement. Never infer service outage from timeout "
+        "or a majority from a minority of selected participants. Claims from peers are "
+        "[Reported], not personally [Verified] by the chair. "
+        "Never say tools were used unless a member reports a concrete tool result."
     )
-    consensus = callers[chair](
-        consensus_prompt, _member_session_id(session_id, chair)
-    )
+    def synthesize(member):
+        # Apply the same wait budget and late-result isolation to the chair.
+        return _parallel_turns({member: consensus_prompt}, lambda text: None,
+                               "Synthesis", session_id)[member]
+
+    consensus = synthesize(chair)
     if _is_failed_answer(consensus):
         for fallback in responsive:
             if fallback == chair:
                 continue
-            consensus = callers[fallback](
-                consensus_prompt, _member_session_id(session_id, fallback)
-            )
+            consensus = synthesize(fallback)
             if not _is_failed_answer(consensus):
                 chair = fallback
                 break

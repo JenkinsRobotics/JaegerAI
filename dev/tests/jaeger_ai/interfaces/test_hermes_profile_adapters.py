@@ -72,7 +72,7 @@ def test_roundtable_streams_group_chat_and_consensus(monkeypatch):
     assert "**Chair:**" in output
 
 
-def test_chat_adapter_retries_remote_disconnect(monkeypatch):
+def test_chat_adapter_does_not_replay_ambiguous_remote_disconnect(monkeypatch):
     from http.client import RemoteDisconnected
 
     calls = {"n": 0}
@@ -101,8 +101,8 @@ def test_chat_adapter_retries_remote_disconnect(monkeypatch):
     monkeypatch.setattr(roundtable.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(roundtable.time, "sleep", lambda _seconds: None)
 
-    assert roundtable.chat_jaeger("hi", "session-1") == "recovered"
-    assert calls["n"] == 3
+    assert roundtable._is_failed_answer(roundtable.chat_jaeger("hi", "session-1"))
+    assert calls["n"] == 1
 
 
 def test_jaeger_chat_returns_json_when_body_is_invalid():

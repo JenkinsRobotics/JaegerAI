@@ -16,7 +16,8 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ARES_CONTROLLER = Path("/Users/matthewjenkins/GitHub/ARES/services/controller")
+ARES_ROOT = REPO_ROOT.parent / "ARES"
+ARES_CONTROLLER = ARES_ROOT / "services" / "controller"
 
 if ARES_CONTROLLER.exists() and str(ARES_CONTROLLER) not in sys.path:
     sys.path.insert(0, str(ARES_CONTROLLER))
@@ -121,7 +122,7 @@ try:
 
     _controller_integrations = importlib.import_module("integrations")
     if not hasattr(_controller_integrations, "hardware"):
-        _donor_dir = "/Users/matthewjenkins/GitHub/ARES/integrations/hardware"
+        _donor_dir = str(ARES_ROOT / "integrations" / "hardware")
         _spec = importlib.util.spec_from_file_location(
             "integrations.hardware",
             _donor_dir + "/__init__.py",
