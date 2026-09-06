@@ -195,6 +195,8 @@ def openclaw_turn(run, workspace=None):
                 continue
             if payload.get("runId") != native_id:
                 continue
+            if event == 'agent' and payload.get('stream') == 'lifecycle' and (payload.get('data') or {}).get('phase') == 'start':
+                run.emit('native.state', state='running')
             if event == "agent" and payload.get("stream") == "tool":
                 data = payload.get("data") or {}
                 done = data.get("phase") in {"result", "error"}

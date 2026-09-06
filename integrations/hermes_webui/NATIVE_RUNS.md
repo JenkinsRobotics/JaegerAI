@@ -29,14 +29,17 @@ historical live tests below do not establish complete native feature parity.
 - Cancellation addresses a native turn ID, including queued work. It does not
   cancel whichever unrelated conversation happens to be running. The adapter
   distinguishes cancellation intent from native confirmation. A native completion
-  winning the race remains a completion. The latest bridge race correction is
-  staged, not yet deployed. Durable admission keeps uncertain sessions locked
-  across adapter restart. Staged Jaeger reconciliation queries a native durable
+  winning the race remains a completion. The bridge correction and native
+  receipts are deployed; final live control/restart verification is still pending.
+  Durable admission keeps uncertain sessions locked across adapter restart.
+  Staged Jaeger adapter reconciliation queries a native durable
   receipt instead of replaying work; Hermes/OpenClaw reconciliation remains
   pending. Unknown native outcomes still retain their locks.
 - Native tool progress is routed to its originating session. Text, reasoning,
   and interaction callbacks are execution-context-local, preventing background
   board/cron output from appearing in a foreground WebUI conversation.
+  Native model and parallel-tool workers explicitly inherit a fresh context copy;
+  the live native Roundtable test verified Jaeger partials before completion.
 - The reused Jaeger bridge thread selects a session-specific ledger. Unfinished
   ledger pointers survive restart; completed tasks do not become another user's
   acceptance contract. Existing ledger files are retained.
@@ -52,10 +55,16 @@ historical live tests below do not establish complete native feature parity.
 | Profile/path | Native session | Live tool cards | WebUI approvals | Native Stop |
 |---|---|---|---|---|
 | Hermes default WebUI | Existing Hermes runtime | Existing Hermes runtime | Existing Hermes runtime | Existing Hermes runtime |
-| Jaeger WebUI Runs API | Preserved | Implemented and live-tested | Implemented; automated relay/deny tests | Race correction staged; final end-to-end verification pending |
+| Jaeger WebUI Runs API | Preserved | Implemented and live-tested | Implemented; automated relay/deny tests | Bridge race correction loaded; final end-to-end verification pending |
 | OpenClaw HTTP fallback | Preserved | Not exposed by this transport | Not supported | Not advertised as reliable |
 | OpenClaw native WS adapter | Same REST session-key mapping | Implemented behind opt-in | Implemented behind opt-in | Implemented behind opt-in |
 | Roundtable | Existing member sessions; Hermes now native Runs | Existing member-level presentation | Legacy caller denies unpresentable requests | Legacy cancel reports unsupported; never invents native confirmation |
+
+An opt-in native Roundtable backend now relays individual member events and
+coordinates durable native Runs, workflows, ballots and ledgers. Live native
+streaming and second-turn recall passed for all three members. It is NOT enabled
+in the WebUI; browser controls, restart recovery, bounded storage and live
+permission tests remain gates. See [ROUNDTABLE_NATIVE.md](ROUNDTABLE_NATIVE.md).
 
 OpenClaw protocol-4 authentication was tested against the running gateway. A
 token-only connection receives no operator scopes. The existing local device

@@ -66,6 +66,8 @@ def hermes_turn(run, workspace=None):
                 raise ClassifiedError('invalid_response', 'Hermes event belongs to another native run')
             if kind == 'message.delta':
                 run.emit(kind, delta=str(event.get('delta') or ''))
+            elif kind in {'run.started', 'run.queued', 'run.running'}:
+                run.emit('native.state', state='queued' if kind == 'run.queued' else 'running')
             elif kind in {'tool.started', 'tool.completed', 'reasoning.available', 'usage'}:
                 run.emit(kind, **{k:v for k,v in event.items() if k not in {'event', 'run_id', 'seq'}})
             elif kind == 'approval.request':
@@ -79,7 +81,7 @@ def hermes_turn(run, workspace=None):
                     answer.read()
             elif kind == 'run.completed':
                 run.execution_unknown = False
-                return run.output
+                return event.get('output') if isinstance(event.get('output'), str) else run.output
             elif kind == 'run.cancelled':
                 run.execution_unknown = False
                 run.cancel_confirmed = True

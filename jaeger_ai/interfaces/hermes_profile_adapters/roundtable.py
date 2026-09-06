@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler
 from .ingress import ProfileHTTPServer
 from pathlib import Path
 from .resilience import timeout_setting, failure_category
+from .native_runs import RunsHTTP
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -486,11 +487,68 @@ def run_debate(user_message: str, session_id: str = "") -> str:
 
 _runs: dict[str, dict] = {}
 _runs_lock = threading.Lock()
+_native_table = None
+_native_table_lock = threading.Lock()
 
 
-class RoundtableHandler(BaseHTTPRequestHandler):
+class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
+
+    def native_enabled(self):
+        return os.environ.get('ROUNDTABLE_NATIVE_RUNS', '').lower() in {'1', 'true'}
+
+    def native_key(self):
+        from .native_runs import profile_key
+        return profile_key('roundtable')
+
+    def native_runs(self):
+        global _native_table
+        with _native_table_lock:
+            if _native_table is None:
+                from .roundtable_native import TableService
+                _native_table = TableService(Path(__file__).resolve().parents[3] / '.jaeger_ai/shared/roundtable')
+            return _native_table
+
+    def create_native_run(self, body):
+        return self.native_runs().start(str(body.get('session_id') or self.headers.get('X-Hermes-Session-Id') or ''),
+            body.get('input') or body.get('message'), body.get('workspace'), options=body.get('roundtable'))
+
+    def native_capabilities(self):
+        from .roundtable_policy import registry
+        value = super().native_capabilities()
+        value['features'].update(member_events=True, member_stop=True, member_retry=True,
+                                 decision_ledger=True, workspace_override=False, control_recovery=False)
+        value['roundtable'] = registry()
+        return value
+
+    def native_route(self, method):
+        match = re.fullmatch(r'/v1/runs/([0-9a-f]{32})/(?:members/([0-9a-f]{32})/(stop|retry)|ledger)', self.path)
+        if not match:
+            return super().native_route(method)
+        if not self.profile_authorized():
+            return True
+        turn, attempt, control = match.groups()
+        try:
+            service = self.native_runs()
+            if method == 'GET' and attempt is None:
+                self.native_json(200, service.store.ledger(turn))
+            elif method == 'POST' and attempt is not None:
+                self.read_json_body()
+                result = ({'accepted': service.stop_member(turn, attempt)} if control == 'stop'
+                          else service.retry_member(turn, attempt))
+                self.native_json(200, result)
+            else:
+                self.native_json(405, {'error': 'Method not supported'})
+        except (KeyError, ValueError, RuntimeError) as exc:
+            self.close_connection = True
+            self.native_json(404 if isinstance(exc, KeyError) else 400 if isinstance(exc, ValueError) else 409, {'error': str(exc)})
+        except TimeoutError as exc:
+            self.close_connection = True
+            self.native_json(408, {'error': str(exc), 'error_category': 'request_body_timeout'})
+        except OSError as exc:
+            self.native_json(502, {'error': str(exc), 'error_category': failure_category(exc)})
+        return True
 
     def _authorized(self):
         from .native_runs import profile_key
@@ -507,6 +565,8 @@ class RoundtableHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        if self.native_enabled() and self.native_route('GET'):
+            return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
             self._send_json(200, {"ok": True, "status": "ready", "agents": list(AGENT_LABELS.keys())})
         elif self.path == "/v1/capabilities":
@@ -520,6 +580,8 @@ class RoundtableHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.native_enabled() and self.native_route('POST'):
+            return
         if not self._authorized():
             return
         try:
