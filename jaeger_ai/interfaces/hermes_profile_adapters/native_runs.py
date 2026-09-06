@@ -6,7 +6,6 @@ Disconnecting an observer does not replay a turn or discard its pending approval
 from __future__ import annotations
 
 import json
-import hmac
 import os
 from pathlib import Path
 import threading
@@ -16,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .resilience import failure_category, timeout_setting
 from .run_ownership import Ownership
+from .ingress import BodyReadTimeout, ProfileIngress
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
@@ -286,7 +286,7 @@ class Runs:
                 os.close(lease)
 
 
-class RunsHTTP:
+class RunsHTTP(ProfileIngress):
     """Mixin for existing profile servers; preserves legacy completion clients."""
     def native_route(self, method):
         parsed = urlsplit(self.path)
@@ -298,14 +298,7 @@ class RunsHTTP:
             return True
         if not parsed.path.startswith("/v1/runs"):
             return False
-        if self.headers.get('Origin'):
-            self.close_connection = True
-            self.native_json(403, {'error': 'Use the authenticated WebUI server proxy'})
-            return True
-        expected = self.native_key()
-        if not expected or not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + expected):
-            self.close_connection = True
-            self.native_json(401, {"error": "Native run access requires the profile gateway credential"})
+        if not self.profile_authorized():
             return True
         try:
             runs = self.native_runs()
@@ -313,19 +306,7 @@ class RunsHTTP:
             if parts[:2] != ["v1", "runs"]:
                 raise KeyError("Route not found")
             if method == "POST":
-                if self.headers.get('Transfer-Encoding'):
-                    raise ValueError('Transfer-Encoding is not supported')
-                if len(self.headers.get_all('Content-Length', [])) != 1:
-                    raise ValueError('Exactly one Content-Length is required')
-                if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
-                    raise ValueError("Content-Type must be application/json")
-                length = int(self.headers.get("Content-Length", 0))
-                if not 0 < length <= 1_000_000:
-                    raise ValueError("Invalid request size")
-                self.connection.settimeout(15)
-                body = json.loads(self.rfile.read(length))
-                if not isinstance(body, dict):
-                    raise ValueError("Request must be a JSON object")
+                body = self.read_json_body()
                 if parts == ["v1", "runs"]:
                     result = runs.start(str(body.get("session_id") or self.headers.get("X-Hermes-Session-Id") or ""),
                                         body.get("input") or body.get("message"), body.get("workspace"))
@@ -356,6 +337,9 @@ class RunsHTTP:
         except (KeyError, ValueError, RuntimeError) as exc:
             self.close_connection = True
             self.native_json(404 if isinstance(exc, KeyError) else 409 if isinstance(exc, RuntimeError) else 400, {"error": str(exc)})
+        except BodyReadTimeout as exc:
+            self.close_connection = True
+            self.native_json(408, {'error': str(exc), 'error_category': 'request_body_timeout'})
         except OSError as exc:
             self.native_json(502, {"error": str(exc), "error_category": failure_category(exc)})
         return True

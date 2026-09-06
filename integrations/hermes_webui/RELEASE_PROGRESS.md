@@ -24,10 +24,11 @@ Local logical commits are authorized; no push or public release requested.
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
 | Native durable admission | Private ownership registry; staged native Jaeger receipts and authenticated reconciliation | Concurrent observers/registries, wrong identities, unknown results and terminal recovery tested | Pending deployment | Hermes/OpenClaw reconciliation; durable UI route pins, bounded event storage and retention |
 | Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Native Hermes path and ingress guard deployed; four-profile chat checks pass | Shared durable Runs, native stop/approval/retry |
+| Legacy Jaeger/OpenClaw ingress | Shared credential/origin/body guards; truthful unsupported Stop; bounded connection server | Unauthorized request reproduced before fix; 122 focused tests pass | Not deployed | Coordinated sender-first rollout and live negative/positive checks |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
 | Group-chat UI/controls | Not complete | Pending | Existing Markdown presentation | Partial member events, selectors, browser tests |
-| Provider/thinking/usage | Not complete | Pending | Existing defaults preserved | Native session-local overrides, current-doc verification |
+| Provider/thinking/usage | Not complete; official contract/pricing research recorded in OLLAMA_VERIFICATION.md | Pending | Existing defaults preserved | Native session-local overrides, installed-version checks, attributed usage |
 | Workspace/private NAS access | Reversible expansion implemented | 19 focused tests passing | Rolled back: local roots pass; NAS checks fail | Resolve NAS filesystem semantics before retry; originals running |
 | Honcho per-agent verification | Not complete | Pending | Not retested | Isolated LAN write/retrieve receipts |
 | Recovery/deployment/CI | Not complete | Pending | Supervisor active | Layered readiness, verified repairs, overlay CI/build/rollback |
@@ -156,6 +157,20 @@ Local logical commits are authorized; no push or public release requested.
   deprecation, 109.88s, seed `20260906`. Monitoring remained active. The added NAS
   helper subsequently passed its focused target/identity guards and live checks;
   this is not an upstream/browser/release certification.
+- Later non-regression live WebUI check (no services restarted): Hermes/default
+  `1e09212cda6f` passed two turns in 9.0s; Jaeger `2de5fbd1bd43` in 13.2s;
+  OpenClaw `3ace4d9a8aab` in 6.8s; Roundtable `eb3ab43c2d67` in 29.1s.
+  The first table turn checked all member answers and one discussion; the second
+  used `/quick @jaeger`. This verifies the existing deployed baseline, not the
+  staged ingress/recovery changes or full provider/control parity.
+  This live check overlapped a root test run: all 3,718 tests passed, but the
+  live-file isolation guard correctly failed because the verification generated
+  native receipts. Do not accept that run as a clean regression gate. Repeat
+  serially after live checks finish, without changing the guard or deleting
+  verification/native session evidence.
+- Clean serial rerun after that live check: **3,718 passed, 11 skipped**, one
+  audioop deprecation, **109.24s**, seed `20260906`, exit 0. The isolation guard
+  remained enabled; no service or monitoring restart was needed.
 
 ## Deployment boundary
 
@@ -190,6 +205,20 @@ Native Runs ingress additionally rejects browser Origins, transfer encoding,
 duplicate Content-Length and oversized bodies, with a bounded body-read wait.
 
 ### Current running services
+
+Legacy ingress hardening is staged: Jaeger/OpenClaw now share native-route
+credential/origin/body validation even when native mode is disabled. Legacy
+Stop returns unsupported for a known run and does not mutate its native status.
+All three profile servers use a 64-connection bound, with a 15-second idle/header
+wait and an explicit pre-dispatch 503 when full. This bounds request observers,
+not all background execution or historical event storage; those gates remain.
+
+Deployment order matters: restart the updated Roundtable sender first (it now
+sends the selected member's existing gateway credential), then deploy enforcing
+Jaeger/OpenClaw adapters after idle/rollback checks. All three profile credentials
+were checked for presence without printing them. Do not enforce member ingress
+before its currently-running Roundtable sender has been upgraded. Existing
+individual WebUI gateways already have profile credentials. No secret was rotated.
 
 Roundtable fixes through `d53b0f5` are deployed, including its native Hermes
 client, authenticated legacy ingress and truthful unsupported cancellation.

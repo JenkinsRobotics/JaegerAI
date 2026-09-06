@@ -25,7 +25,8 @@ import time
 import uuid
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
+from .ingress import ProfileHTTPServer
 from pathlib import Path
 from .resilience import timeout_setting, failure_category
 
@@ -300,6 +301,7 @@ def _chat_adapter(label: str, base_url: str, message: str, session_id: str = "")
 
 
 def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str = "") -> str:
+    from .native_runs import profile_key
     body = json.dumps({
         "model": label.lower(),
         "stream": True,
@@ -311,6 +313,7 @@ def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str 
         headers={
             "Content-Type": "application/json",
             "X-Hermes-Session-Id": session_id,
+            "Authorization": 'Bearer ' + profile_key(label.lower()),
         },
         method="POST",
     )
@@ -697,7 +700,7 @@ if __name__ == "__main__":
     print("[roundtable] Hermes: Jaeger delegate registry")
     print(f"[roundtable] Jaeger adapter: {JAEGER_ADAPTER_URL}")
     print(f"[roundtable] OpenClaw adapter: {OPENCLAW_ADAPTER_URL}")
-    server = ThreadingHTTPServer(("0.0.0.0", ADAPTER_PORT), RoundtableHandler)
+    server = ProfileHTTPServer(("0.0.0.0", ADAPTER_PORT), RoundtableHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

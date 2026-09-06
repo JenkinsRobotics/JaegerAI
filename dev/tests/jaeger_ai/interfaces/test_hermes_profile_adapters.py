@@ -15,6 +15,7 @@ def test_runs_protocol_matches_webui_and_closes_connection(monkeypatch):
     from http.server import ThreadingHTTPServer
     from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
     monkeypatch.setattr('jaeger_ai.interfaces.hermes_profile_adapters.native_runs.profile_key', lambda profile: 'test-key')
+    monkeypatch.setattr(openclaw, 'profile_key', lambda profile: 'test-key')
 
     # Jaeger's durable/native Runs API is exercised by test_native_runs.py;
     # these two adapters still support their legacy in-memory run records.
