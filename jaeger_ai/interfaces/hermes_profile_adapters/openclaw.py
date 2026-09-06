@@ -13,6 +13,7 @@ import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from .resilience import CircuitBreaker, timeout_setting, failure_category
 
 OPENCLAW_BASE_URL = os.environ.get("OPENCLAW_ADAPTER_BASE_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN_FILE = Path(os.environ.get(
@@ -21,14 +22,15 @@ OPENCLAW_TOKEN_FILE = Path(os.environ.get(
 ))
 ADAPTER_HOST = os.environ.get("OPENCLAW_ADAPTER_HOST", "192.168.64.1")
 ADAPTER_PORT = int(os.environ.get("OPENCLAW_ADAPTER_PORT", "8644"))
-_request_timeout_setting = os.environ.get("OPENCLAW_ADAPTER_REQUEST_TIMEOUT", "").strip()
-REQUEST_TIMEOUT = float(_request_timeout_setting) if _request_timeout_setting else None
+REQUEST_TIMEOUT = timeout_setting("OPENCLAW_ADAPTER_REQUEST_TIMEOUT")
+_circuit = CircuitBreaker()
 
 _runs: dict[str, dict] = {}
 _runs_lock = threading.Lock()
 
 
 def chat_openclaw(message: str, session_id: str = "") -> str:
+    _circuit.check()
     token = OPENCLAW_TOKEN_FILE.read_text(encoding="utf-8").strip()
     body = {
         "model": "openclaw/default",
@@ -47,8 +49,14 @@ def chat_openclaw(message: str, session_id: str = "") -> str:
         method="POST",
     )
     open_kwargs = {} if REQUEST_TIMEOUT is None else {"timeout": REQUEST_TIMEOUT}
-    with urllib.request.urlopen(request, **open_kwargs) as response:
-        payload = json.loads(response.read())
+    try:
+        with urllib.request.urlopen(request, **open_kwargs) as response:
+            payload = json.loads(response.read())
+    except (OSError, TimeoutError) as exc:
+        if not isinstance(exc, urllib.error.HTTPError) or exc.code >= 500:
+            _circuit.failure()
+        raise  # A failed response is not authorization to execute the turn twice.
+    _circuit.success()
     choices = payload.get("choices") or []
     if not choices:
         raise RuntimeError("OpenClaw returned no choices")
@@ -106,7 +114,9 @@ class Handler(BaseHTTPRequestHandler):
             detail = str(exc)
             if isinstance(exc, urllib.error.HTTPError):
                 detail = f"HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}"
-            self.send_json(502, {"error": {"message": detail}})
+            category = failure_category(exc)
+            self.send_json(504 if category == "timeout" else 502,
+                           {"error": {"message": detail, "type": category}})
             return
         if body.get("stream"):
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"

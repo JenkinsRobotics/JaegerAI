@@ -21,6 +21,7 @@ from typing import Any
 import urllib.request
 import urllib.error
 from pathlib import Path
+from .resilience import CircuitBreaker, timeout_setting
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -44,8 +45,7 @@ def _profile_secret(name: str) -> str:
 MCP_API_KEY = os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret("MCP_ARES_HOST_API_KEY")
 MCP_HOST_HEADER = os.environ.get("JAEGERS_MCP_HOST", "127.0.0.1:8811")
 ADAPTER_PORT = int(os.environ.get("JAEGERS_ADAPTER_PORT", "8642"))
-_request_timeout_setting = os.environ.get("JAEGERS_ADAPTER_REQUEST_TIMEOUT", "").strip()
-REQUEST_TIMEOUT = float(_request_timeout_setting) if _request_timeout_setting else None
+REQUEST_TIMEOUT = timeout_setting("JAEGERS_ADAPTER_REQUEST_TIMEOUT")
 
 
 def _is_transient_http(exc: BaseException) -> bool:
@@ -77,6 +77,7 @@ class MCPClient:
         self._session_id: str | None = None
         self._lock = threading.RLock()
         self._req_id = 0
+        self._circuit = CircuitBreaker()
 
     def _next_id(self) -> int:
         self._req_id += 1
@@ -96,6 +97,8 @@ class MCPClient:
         return h
 
     def _parse_sse(self, raw: bytes) -> list[dict]:
+        if raw.lstrip().startswith(b"{"):
+            return [json.loads(raw)]
         results = []
         for line in raw.decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -139,20 +142,19 @@ class MCPClient:
             data = resp.read()
             results = self._parse_sse(data)
             if results:
+                if results[0].get("error"):
+                    raise RuntimeError(f"MCP error: {results[0]['error']}")
                 return results[0].get("result", results[0])
-            return {"error": "no response from MCP server"}
+            raise RuntimeError("MCP returned no response")
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict:
         with self._lock:
             if not self._session_id:
-                try:
-                    self.initialize()
-                except Exception as e:
-                    print(f"[jaeger-bridge] MCP initial init attempt failed: {e}")
+                self.initialize()
             try:
                 return self._execute_call(name, arguments)
             except urllib.error.HTTPError as err:
-                if err.code in (400, 404):
+                if err.code == 404:
                     print(f"[jaeger-bridge] MCP session error ({err.code}), re-initializing session...")
                     self._session_id = None
                     try:
@@ -174,17 +176,28 @@ class MCPClient:
         if session_id:
             args["session_id"] = session_id
         last_error: Exception | None = None
+        self._circuit.check()
         for attempt in range(3):
             worker = MCPClient(self.base_url, self.api_key, self.host_header)
             try:
                 worker.initialize()
-                return worker._execute_call("chat", args)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 if not _is_transient_http(exc) or attempt == 2:
+                    self._circuit.failure()
                     raise
-                print(f"[jaeger-bridge] MCP chat attempt {attempt + 1} failed ({exc}); retrying")
+                print(f"[jaeger-bridge] MCP handshake attempt {attempt + 1} failed ({exc}); retrying")
                 time.sleep(0.4 * (attempt + 1))
+                continue
+            try:
+                result = worker._execute_call("chat", args)
+                self._circuit.success()
+                return result
+            except Exception as exc:
+                if _is_transient_http(exc):
+                    self._circuit.failure()
+                # Once dispatched, a timeout/disconnect is ambiguous: no replay.
+                raise
         raise last_error or RuntimeError("MCP chat failed")
 
     def agent_info(self) -> dict:
