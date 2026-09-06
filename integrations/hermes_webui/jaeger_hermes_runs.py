@@ -7,6 +7,8 @@ peer transcripts or client-provided history. The native agent still owns its
 durable turn lease, compression, tool messages and persistence.
 """
 from functools import wraps
+import re
+import uuid
 
 
 def resumable_adapter(base):
@@ -17,6 +19,13 @@ def resumable_adapter(base):
             if session and db is None:
                 raise RuntimeError("Native session database unavailable; refusing a contextless turn")
             if db is not None:
+                if re.fullmatch(r'roundtable-hermes:[0-9a-f]{32}', session):
+                    member_id = session.split(':', 1)[1]
+                    legacy_id = uuid.uuid5(uuid.NAMESPACE_URL, f'jaeger-roundtable:{member_id}:hermes').hex
+                    # The previous CLI used this exact title, including the
+                    # second deterministic hash. Keep that native lineage.
+                    legacy = db.resolve_session_by_title(f'Roundtable {legacy_id[:12]} — Hermes')
+                    session = legacy or session
                 session = db.resolve_resume_session_id(session) or session
                 kwargs["session_id"] = session
             agent = super()._create_agent(*args, **kwargs)
