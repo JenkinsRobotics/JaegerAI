@@ -89,3 +89,30 @@ def test_service_shim_discovers_active_container_without_starting_legacy_one(mon
     args = runpy.run_path(str(root/'scripts/hermes-native-api-service.py'))['command']()
     assert args[:5] == ['/opt/homebrew/bin/container', 'exec', '--user', 'hermeswebui', 'jaeger-hermes-webui']
     assert 'start' not in args and '--token' not in args
+
+
+def test_roundtable_native_api_resumes_existing_named_cli_lineage():
+    from types import SimpleNamespace
+    import uuid
+    member = 'a' * 32
+    legacy = uuid.uuid5(uuid.NAMESPACE_URL, f'jaeger-roundtable:{member}:hermes').hex
+    calls = []
+    class DB:
+        def resolve_session_by_title(self, title):
+            calls.append(title)
+            return 'original-cli-session'
+        def resolve_resume_session_id(self, sid):
+            assert sid == 'original-cli-session'
+            return 'compressed-child'
+        def get_messages_as_conversation(self, sid):
+            assert sid == 'compressed-child'
+            return [{'role': 'user', 'content': 'old context'}]
+    class Base:
+        def _ensure_session_db(self): return DB()
+        def _create_agent(self, **kwargs):
+            return SimpleNamespace(session_id=kwargs['session_id'], run_conversation=lambda **kw: kw)
+    path = Path(__file__).resolve().parents[4] / 'integrations/hermes_webui/jaeger_hermes_runs.py'
+    agent = runpy.run_path(str(path))['resumable_adapter'](Base)()._create_agent(session_id=f'roundtable-hermes:{member}')
+    assert agent.session_id == 'compressed-child'
+    assert calls == [f'Roundtable {legacy[:12]} — Hermes']
+    assert agent.run_conversation()['conversation_history'][0]['content'] == 'old context'

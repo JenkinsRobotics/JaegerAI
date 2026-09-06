@@ -208,6 +208,7 @@ def test_member_session_ids_are_stable_and_isolated():
 
 
 def test_hermes_uses_same_native_named_session_on_separate_turns(monkeypatch):
+    monkeypatch.setenv('ROUNDTABLE_HERMES_NATIVE', '0')
     monkeypatch.setattr(roundtable.shutil, "which", lambda _name: "/bin/hermes")
     commands = []
 

@@ -192,7 +192,53 @@ def _member_session_id(roundtable_session_id: str, agent: str) -> str:
 
 # ── Hermes client ────────────────────────────────────────────────────────────
 
+_hermes_runs = None
+_hermes_runs_lock = threading.Lock()
+
+
+def _native_hermes_runs():
+    global _hermes_runs
+    with _hermes_runs_lock:
+        if _hermes_runs is None:
+            from .native_runs import Runs
+            from .hermes_native import hermes_turn
+            root = Path(__file__).resolve().parents[3] / '.jaeger_ai/shared/roundtable/hermes-runs'
+            _hermes_runs = Runs(root, hermes_turn)
+        return _hermes_runs
+
 def chat_hermes(message: str, session_id: str = "") -> str:
+    if os.environ.get('ROUNDTABLE_HERMES_NATIVE', '1') == '0':
+        return _chat_hermes_cli(message, session_id)
+    if not session_id:
+        return MemberAnswer('[Hermes error: session identity is required]', 'invalid_request')
+    try:
+        from .native_runs import TERMINAL
+        runs = _native_hermes_runs()
+        run = runs.get(runs.start('roundtable-hermes:' + session_id, message)['run_id'])
+        denied = False
+        with run.condition:
+            while run.status not in TERMINAL:
+                for approval_id in list(run.pending):
+                    if run.pending[approval_id]['answer'] is None:
+                        run.approve(approval_id, 'deny')
+                        denied = True
+                run.condition.wait(.1)
+            while run.worker_active:
+                run.condition.wait(.01)
+        if denied:
+            return MemberAnswer('[Hermes error: approval_required: legacy Roundtable cannot display native approvals; tool request denied]',
+                                'approval_required', run.output)
+        if run.status != 'completed':
+            last = run.events[-1]
+            category = last.get('error_category') or run.status
+            return MemberAnswer(f'[Hermes error: {category}: {last.get("error", "Native run did not complete")}]', category, run.output)
+        return MemberAnswer(run.output) if run.output else MemberAnswer('[Hermes: no response]', 'empty_response')
+    except Exception as exc:
+        category = failure_category(exc)
+        return MemberAnswer(f'[Hermes error: {category}: {exc}]', category)
+
+
+def _chat_hermes_cli(message: str, session_id: str = "") -> str:
     """Send one turn to a real, named, natively resumable Hermes session."""
     executable = os.environ.get("ROUNDTABLE_HERMES_BIN") or shutil.which("hermes")
     if not executable:
