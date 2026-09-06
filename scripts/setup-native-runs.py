@@ -5,6 +5,7 @@ Preserves all existing provider/model/session settings and profile comments.
 The WebUI overlay must be deployed before restarting the native adapters.
 """
 import os
+import argparse
 from pathlib import Path
 import re
 import secrets
@@ -13,9 +14,11 @@ import shutil
 import yaml
 
 
-def configure(home=None):
+def configure(home=None, profiles=("jaeger", "openclaw")):
     home = Path(home or Path.home())
-    for profile in ("jaeger", "openclaw"):
+    for profile in profiles:
+        if profile not in {'jaeger', 'openclaw', 'roundtable'}:
+            raise ValueError('Unsupported profile')
         path = home / ".hermes/profiles" / profile / "config.yaml"
         text = path.read_text()
         config = yaml.safe_load(text) or {}
@@ -40,4 +43,6 @@ def configure(home=None):
 
 
 if __name__ == "__main__":
-    configure()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--profiles', nargs='+', choices=('jaeger', 'openclaw', 'roundtable'), default=['jaeger', 'openclaw'])
+    configure(profiles=parser.parse_args().profiles)

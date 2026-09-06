@@ -23,7 +23,7 @@ Local logical commits are authorized; no push or public release requested.
 | OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
 | Native durable admission | Private transactional ownership registry; unknown executions retain session lock across restart | Concurrent registries, restart, failed transport and confirmed completion tested | Pending deployment | Native reconciliation workflow; durable UI route pins and event storage |
-| Roundtable lifecycle/control/auth | Not complete | Pending | Legacy remains live | Shared durable Runs, native stop/approval/retry |
+| Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Hermes native transport deployed; ingress guard pending | Shared durable Runs, native stop/approval/retry |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
 | Group-chat UI/controls | Not complete | Pending | Existing Markdown presentation | Partial member events, selectors, browser tests |
@@ -81,6 +81,15 @@ Local logical commits are authorized; no push or public release requested.
   Hermes' discussion CLI invocation returned only a resume notice and an error.
   Native Hermes Runs recall works independently; replacing the Roundtable CLI
   path while preserving its existing native session is the next repair.
+- Hermes Roundtable path repaired in `da1402e`: authenticated native Runs instead
+  of CLI, with exact legacy named-session/continuation lookup. Canary recovered
+  `ROUNDTABLE-b25093` from the previously failing session. Reloaded only the
+  isolated native API and Roundtable adapter after idle checks. WebUI session
+  `5fadef7a8b6b` then passed all three initial answers, all three discussion
+  answers, and follow-up recall (43.5s/48.0s cumulative). Individual profiles
+  were not restarted. Legacy Markdown cannot relay approvals: any such request
+  is denied and reported as `approval_required`, never auto-approved or counted
+  as a successful answer. Structured approval UI remains a release gate.
 - Native Runs now reserves session ownership transactionally before worker start,
   imports unreconciled legacy receipts, and retains ownership after ambiguous
   transport failure or adapter restart. Proven native completion/cancellation or

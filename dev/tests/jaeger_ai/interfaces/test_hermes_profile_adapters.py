@@ -9,11 +9,12 @@ from jaeger_ai.interfaces.hermes_profile_adapters import jaeger
 from jaeger_ai.interfaces.hermes_profile_adapters import setup
 
 
-def test_runs_protocol_matches_webui_and_closes_connection():
+def test_runs_protocol_matches_webui_and_closes_connection(monkeypatch):
     import threading
     import urllib.request
     from http.server import ThreadingHTTPServer
     from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
+    monkeypatch.setattr('jaeger_ai.interfaces.hermes_profile_adapters.native_runs.profile_key', lambda profile: 'test-key')
 
     # Jaeger's durable/native Runs API is exercised by test_native_runs.py;
     # these two adapters still support their legacy in-memory run records.
@@ -26,7 +27,9 @@ def test_runs_protocol_matches_webui_and_closes_connection():
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/v1/runs/{run_id}/events", timeout=2) as response:
+            request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/v1/runs/{run_id}/events",
+                                             headers={'Authorization': 'Bearer test-key'})
+            with urllib.request.urlopen(request, timeout=2) as response:
                 text = response.read().decode()  # Must reach EOF, not hang until timeout.
             events = [json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:")]
             assert events[0] == {"event": "message.delta", "delta": "READY"}

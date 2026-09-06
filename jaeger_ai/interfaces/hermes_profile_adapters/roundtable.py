@@ -13,6 +13,7 @@ Native member adapters preserve each member's resumable session.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import queue
@@ -488,18 +489,54 @@ class RoundtableHandler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
 
+    def _authorized(self):
+        from .native_runs import profile_key
+        expected = profile_key('roundtable')
+        origin = self.headers.get('Origin')
+        if origin:
+            self.close_connection = True
+            self._send_json(403, {'error': 'Origin is not allowed'})
+            return False
+        if not expected or not hmac.compare_digest(self.headers.get('Authorization', ''), 'Bearer ' + expected):
+            self.close_connection = True
+            self._send_json(401, {'error': 'Roundtable requires its profile gateway credential'})
+            return False
+        return True
+
     def do_GET(self):
         if self.path in ("/health", "/v1/health", "/health/detailed"):
             self._send_json(200, {"ok": True, "status": "ready", "agents": list(AGENT_LABELS.keys())})
         elif self.path == "/v1/capabilities":
             self._send_json(200, {"streaming": True, "models": [{"id": "roundtable", "name": "Roundtable Debate", "provider": "roundtable"}], "approval": False})
         elif re.match(r"^/v1/runs/([\w-]+)(?:/events)?$", self.path):
+            if not self._authorized():
+                return
             run_id = re.match(r"^/v1/runs/([\w-]+)", self.path).group(1)
             self._handle_get_events(run_id)
         else:
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._authorized():
+            return
+        try:
+            self.connection.settimeout(15)  # Bound incomplete-body/slow-reader clients.
+            length = int(self.headers.get('Content-Length', 0))
+            if self.headers.get('Transfer-Encoding') or not 0 < length <= 1_000_000:
+                raise ValueError('Request must have a bounded Content-Length (1..1000000 bytes)')
+            if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                raise ValueError('Content-Type must be application/json')
+            self._request_body = json.loads(self.rfile.read(length))
+            if not isinstance(self._request_body, dict):
+                raise ValueError('Request must be a JSON object')
+        except (ValueError, UnicodeError) as exc:
+            self.close_connection = True
+            self._send_json(400, {'error': str(exc)})
+            return
+        except TimeoutError:
+            self.close_connection = True
+            self._send_json(408, {'error': 'Request body timed out'})
+            return
         if self.path == "/v1/runs":
             self._handle_create_run()
         elif self.path == "/v1/chat/completions":
@@ -513,15 +550,12 @@ class RoundtableHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_OPTIONS(self):
-        self.send_response(200)
-        for h in [("Access-Control-Allow-Origin", "*"), ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
-                   ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Hermes-Session-Id, X-Hermes-Session-Key")]:
-            self.send_header(h[0], h[1])
-        self.end_headers()
+        # Browser calls use the same-origin WebUI proxy. No blanket network API
+        # permission is advertised; direct browser ingress must be configured.
+        self._send_json(403, {'error': 'Use the authenticated same-origin WebUI proxy'})
 
     def _handle_chat_completions(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        body = self._request_body
         messages = body.get("messages", [])
         session_id = str(
             self.headers.get("X-Hermes-Session-Id")
@@ -539,7 +573,6 @@ class RoundtableHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.close_connection = True
 
@@ -579,8 +612,7 @@ class RoundtableHandler(BaseHTTPRequestHandler):
             return
 
     def _handle_create_run(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_length)) if content_length else {}
+        body = self._request_body
         message = body.get("input") or body.get("message") or ""
         session_id = str(
             body.get("session_id")
@@ -648,7 +680,6 @@ class RoundtableHandler(BaseHTTPRequestHandler):
     def _send_json(self, code: int, data: dict):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
         body = json.dumps(data).encode("utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
