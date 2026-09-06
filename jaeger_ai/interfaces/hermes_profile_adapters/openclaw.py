@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import threading
 import time
@@ -14,6 +15,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting, failure_category
+from .native_runs import Runs, RunsHTTP, profile_key
 
 OPENCLAW_BASE_URL = os.environ.get("OPENCLAW_ADAPTER_BASE_URL", "http://127.0.0.1:18789")
 OPENCLAW_TOKEN_FILE = Path(os.environ.get(
@@ -27,6 +29,8 @@ _circuit = CircuitBreaker()
 
 _runs: dict[str, dict] = {}
 _runs_lock = threading.Lock()
+_native_runs = None
+_native_lock = threading.Lock()
 
 
 def chat_openclaw(message: str, session_id: str = "") -> str:
@@ -63,8 +67,25 @@ def chat_openclaw(message: str, session_id: str = "") -> str:
     return (choices[0].get("message") or {}).get("content") or ""
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(RunsHTTP, BaseHTTPRequestHandler):
+    def native_key(self):
+        return profile_key("openclaw")
+
+    def native_runs(self):
+        global _native_runs
+        from .openclaw_native import openclaw_turn
+        with _native_lock:
+            if _native_runs is None:
+                root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/openclaw"
+                _native_runs = Runs(root, openclaw_turn)
+            return _native_runs
+
+    def native_enabled(self):
+        return os.environ.get("OPENCLAW_ADAPTER_NATIVE_RUNS", "").lower() in {"1", "true"}
+
     def do_GET(self):
+        if self.native_enabled() and self.native_route("GET"):
+            return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
             self.send_json(200, {"ok": True, "status": "ready"})
             return
@@ -82,6 +103,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.native_enabled() and self.native_route("POST"):
+            return
         if self.path == "/v1/chat/completions":
             self.create_chat_completion()
             return
@@ -102,12 +125,14 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
         messages = body.get("messages") or []
-        message = "\n".join(
-            str(item.get("content", "")) if isinstance(item, dict) else str(item)
-            for item in messages
-            if not isinstance(item, dict) or item.get("role") != "system"
-        )
+        # The native session already contains earlier turns. Re-inserting the
+        # entire WebUI transcript duplicates work and grows context each turn.
+        message = next((item.get("content", "") for item in reversed(messages)
+                        if isinstance(item, dict) and item.get("role") == "user"), "")
         session_id = str(self.headers.get("X-Hermes-Session-Id") or body.get("user") or "")
+        if body.get("stream"):
+            self.stream_chat_completion(message, session_id)
+            return
         try:
             result = chat_openclaw(message, session_id)
         except Exception as exc:
@@ -118,30 +143,85 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(504 if category == "timeout" else 502,
                            {"error": {"message": detail, "type": category}})
             return
-        if body.get("stream"):
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.write_event({
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "choices": [{"index": 0, "delta": {"content": result}, "finish_reason": None}],
-            })
-            self.write_event({
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-            })
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.wfile.flush()
-            return
         self.send_json(200, {
             "id": f"chatcmpl-{uuid.uuid4().hex}",
             "object": "chat.completion",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": result}, "finish_reason": "stop"}],
         })
+
+    def stream_chat_completion(self, message, session_id):
+        """Relay actual upstream deltas, with prompt heartbeat and typed errors.
+
+        This fallback deliberately does not advertise approvals. Native gateway
+        pairing is required for that capability; an HTTP stream cannot supply it.
+        """
+        events = queue.Queue(maxsize=256)
+        disconnected = threading.Event()
+
+        def enqueue(value):
+            while not disconnected.is_set():
+                try:
+                    events.put(value, timeout=.2)
+                    return
+                except queue.Full:
+                    pass
+
+        def read_upstream():
+            try:
+                _circuit.check()
+                token = OPENCLAW_TOKEN_FILE.read_text().strip()
+                request = urllib.request.Request(
+                    f"{OPENCLAW_BASE_URL.rstrip('/')}/v1/chat/completions",
+                    data=json.dumps({"model": "openclaw/default", "stream": True,
+                        "messages": [{"role": "user", "content": message}],
+                        **({"user": f"hermes:{session_id}"} if session_id else {})}).encode(),
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+                with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+                    complete = False
+                    for line in response:
+                        if disconnected.is_set():
+                            return
+                        if not line.startswith(b"data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == b"[DONE]":
+                            complete = True
+                            break
+                        data = json.loads(payload)
+                        enqueue(data)
+                    if not complete:
+                        raise ConnectionError("OpenClaw stream ended without completion; native state may be unknown")
+                _circuit.success()
+            except Exception as exc:
+                _circuit.failure()
+                enqueue({"error": {"message": str(exc), "type": failure_category(exc)}})
+            finally:
+                enqueue(None)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        threading.Thread(target=read_upstream, daemon=True).start()
+        try:
+            while True:
+                try:
+                    event = events.get(timeout=1)
+                except queue.Empty:
+                    self.wfile.write(b": upstream pending\n\n")
+                    self.wfile.flush()
+                    continue
+                if event is None:
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
+                    break
+                self.write_event(event)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            disconnected.set()
 
     def create_run(self):
         length = int(self.headers.get("Content-Length", 0))

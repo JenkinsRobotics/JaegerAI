@@ -51,6 +51,7 @@ ddgs>=9.0
 # --- animation/media faces (nodes/animation, nodes/media — product-shipped
 # modules, one consumer each per THREE_TIER_STRUCTURE.md's split triggers) ---
 websockets>=13.0
+cryptography>=43.0
 pyyaml>=6.0
 
 # macOS accessibility frameworks (pyobjc) — macOS only. The core

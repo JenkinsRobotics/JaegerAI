@@ -838,6 +838,27 @@ def test_steer_control_reaches_active_turn_immediately(monkeypatch):
     assert rc == 0
 
 
+def test_scoped_cancel_cannot_interrupt_another_turn(monkeypatch):
+    calls = []
+    monkeypatch.setattr("jaeger_ai.main.request_turn_cancel", lambda: calls.append("cancel"))
+    rc, _, _ = _run(monkeypatch, '{"op":"cancel","turn_id":"not-active"}\n{"op":"quit"}\n')
+    assert rc == 0
+    assert not calls
+
+
+def test_scoped_cancel_skips_queued_native_work(monkeypatch):
+    calls = []
+    def run(*args, **kwargs):
+        calls.append(args)
+        return {"text": "should not execute"}
+    _, frames, _ = _run(monkeypatch,
+        '{"op":"send","text":"queued","turn_id":"queued-1","session":"s"}\n'
+        '{"op":"cancel","turn_id":"queued-1"}\n{"op":"quit"}\n',
+        boot_delay=.15, run_fn=run)
+    assert not calls
+    assert any(f.get("error") == "Cancelled before execution" for f in frames)
+
+
 def test_permission_request_timeout_denies(monkeypatch):
     """No ``respond`` within the timeout ⇒ deny, fail-safe. The turn never
     hangs — a short fuse proves the wait actually bounds, not just that a
@@ -1952,14 +1973,14 @@ def test_the_sink_is_turn_scoped():
 
 def test_nested_sinks_restore_the_outer_listener():
     """A cron turn firing mid-session must not strand the outer sink."""
-    from jaeger_ai.main import _pipeline, stream_delta_sink
+    from jaeger_ai.main import current_turn_sink, stream_delta_sink
 
     outer: list[str] = []
     inner: list[str] = []
     with stream_delta_sink(outer.append):
         with stream_delta_sink(inner.append):
-            _pipeline["stream_delta_sink"]("inner-text")
-        _pipeline["stream_delta_sink"]("outer-text")
+            current_turn_sink("stream_delta_sink")("inner-text")
+        current_turn_sink("stream_delta_sink")("outer-text")
     assert inner == ["inner-text"]
     assert outer == ["outer-text"]
 
@@ -1969,8 +1990,8 @@ def test_a_turn_streams_deltas_before_its_reply(monkeypatch):
     the turn runs, and the authoritative ``reply`` still lands last."""
 
     def streaming_run(client, text, session_key=None, display_text=None):
-        from jaeger_ai.main import _pipeline
-        sink = _pipeline.get("stream_delta_sink")
+        from jaeger_ai.main import current_turn_sink
+        sink = current_turn_sink("stream_delta_sink")
         assert sink is not None, "the bridge must install a sink for the turn"
         sink("Hel")          # first chunk — emitted immediately
         sink("lo")           # under the coalescer threshold — rides the flush
@@ -2003,8 +2024,8 @@ def test_the_sink_is_gone_once_the_turn_returns(monkeypatch):
     captured = {}
 
     def streaming_run(client, text, session_key=None, display_text=None):
-        from jaeger_ai.main import _pipeline
-        captured["during"] = _pipeline.get("stream_delta_sink")
+        from jaeger_ai.main import current_turn_sink
+        captured["during"] = current_turn_sink("stream_delta_sink")
         return {"text": "done", "error": None}
 
     _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n', run_fn=streaming_run)

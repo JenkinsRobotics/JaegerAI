@@ -1264,6 +1264,10 @@ class _Ctx:
         # frames' busy flag; kept on ctx too since state frames are
         # fire-and-forget, not queryable.
         self.busy = False
+        self.turn_controls: dict[str, str] = {}
+        self.turn_control_lock = threading.RLock()
+        self.tool_output: Any = None
+        self.tool_session: str | None = None
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
         # ── one instance → at most one authoritative bridge ───────────
@@ -1510,7 +1514,9 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                     detail=str(payload.get("detail", "")))
                 if isinstance(payload.get("args"), dict):
                     frame["args"] = payload["args"]
-                _emit(proto, frame)
+                frame["session"] = str(payload.get("session") or "")
+                target = ctx.tool_output if payload.get("session") == ctx.tool_session else proto
+                _emit(target or proto, frame)
 
     try:
         from jaeger_ai.main import _pipeline
@@ -1926,6 +1932,8 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         session = normalize_session_key(
             req.get("session"), default="desktop-app",
         )
+        from jaeger_ai.core.runtime.work_ledger import bind_session
+        bind_session(session)
         if prompt_error:
             _emit(out, protocol.reply_frame("", prompt_error, session))
             continue
@@ -1962,6 +1970,16 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             _emit(out, protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
+        turn_id = str(req.get("turn_id") or "")
+        with ctx.turn_control_lock:
+            if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                ctx.turn_controls.pop(turn_id, None)
+                _emit(out, protocol.reply_frame("", "Cancelled before execution", session))
+                continue
+            if turn_id:
+                ctx.turn_controls[turn_id] = "active"
+            ctx.tool_output = out
+            ctx.tool_session = session
         # Approval requests must return on the same transport that originated
         # this turn.  The provider is installed during boot on owner stdio,
         # while ``out`` may be an attached Unix-socket client.
@@ -1971,6 +1989,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             confirmation = current_policy().confirmation
             if isinstance(confirmation, BridgeConfirmationProvider):
                 confirmation.bind_output(out)
+                confirmation.current_session = session
         except Exception:  # noqa: BLE001 — routing must not block a turn
             pass
         try:
@@ -2006,6 +2025,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             result: dict[str, Any] = {}
 
             while True:
+                with ctx.turn_control_lock:
+                    if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                        result = {"text": "", "error": "Cancelled before execution"}
+                        break
                 deltas = _DeltaStream(out, session)
                 with _turn_workspace(ctx, req.get("workspace")):
                     display_text = req.get("display_text") if step == 0 else None
@@ -2078,6 +2101,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             _emit(out, protocol.reply_frame("", str(exc), session))
         finally:
+            with ctx.turn_control_lock:
+                ctx.turn_controls.pop(turn_id, None)
+                ctx.tool_output = None
+                ctx.tool_session = None
             try:
                 from jaeger_ai.core.sessions import get_store
 
@@ -2449,7 +2476,14 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # a second client thread can interrupt without competing to
                 # read a control acknowledgement from stdout.
                 from jaeger_ai.main import request_turn_cancel
-                request_turn_cancel()
+                turn_id = str(req.get("turn_id") or "")
+                with ctx.turn_control_lock:
+                    if not turn_id:
+                        request_turn_cancel()  # Legacy owner UI control.
+                    elif turn_id in ctx.turn_controls:
+                        if ctx.turn_controls[turn_id] == "active":
+                            request_turn_cancel(session_key=ctx.tool_session)
+                        ctx.turn_controls[turn_id] = "cancelled"
                 continue
             if op == "steer":
                 # Steering is likewise delivered directly to the active agent
@@ -2777,7 +2811,16 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     _emit(proto, protocol.queued_frame(
                         session, ctx.session_pending[session]))
                 req["_out"] = proto
+                turn_id = str(req.get("turn_id") or "")
+                if turn_id:
+                    with ctx.turn_control_lock:
+                        if turn_id in ctx.turn_controls:
+                            _emit(proto, protocol.reply_frame("", "Duplicate turn id", session))
+                            continue
+                        ctx.turn_controls[turn_id] = "queued"
                 turns.put(req)
+                if turn_id and not ctx.busy:
+                    _emit(proto, protocol.queued_frame(session, 0))
     finally:
         # Deregister before anything else: the os._exit below skips normal
         # cleanup, so a late release would leave a stale pid file behind.

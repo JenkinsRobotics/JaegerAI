@@ -338,6 +338,16 @@ def _parse_toolsets_env() -> frozenset[str] | None:
     return names
 _MAX_HISTORY_MESSAGES = 20
 
+from contextvars import ContextVar
+
+_turn_sinks: ContextVar[dict[str, Any]] = ContextVar("jaeger_turn_sinks", default={})
+
+
+def current_turn_sink(name: str):
+    """A background/cron turn must never write into another session's UI."""
+    return _turn_sinks.get().get(name)
+
+
 _pipeline: dict[str, Any] = {
     "layout": None,
     "config": None,
@@ -1248,7 +1258,7 @@ def _register_builtins(client: Any) -> None:
     @register_tool_from_function
     def clarify(question: str) -> dict:
         """Ask the user a clarifying question instead of guessing."""
-        sink = _pipeline.get("interaction_request_sink")
+        sink = current_turn_sink("interaction_request_sink")
         if callable(sink):
             answer = str(sink("clarify", question, ()) or "").strip()
             return {"asked": True, "question": question, "answer": answer}
@@ -1262,7 +1272,7 @@ def _register_builtins(client: Any) -> None:
         masked input control and returns the value only to this tool call.
         Never echo the returned ``secret`` in the final answer.
         """
-        sink = _pipeline.get("interaction_request_sink")
+        sink = current_turn_sink("interaction_request_sink")
         if not callable(sink):
             return {"received": False, "name": name,
                     "error": "no secure interactive surface is connected"}
@@ -2275,12 +2285,13 @@ def begin_turn_cancel_scope() -> "threading.Event":
     return ev
 
 
-def request_turn_cancel() -> None:
+def request_turn_cancel(session_key: str | None = None) -> None:
     """Ask the in-flight turn to stop. No-op when no turn scope is open."""
-    ev = _pipeline.get("cancel_event")
+    ev = _pipeline.get("cancel_event") if session_key is None or _pipeline.get("current_session") == session_key else None
     if ev is not None:
         ev.set()
-    agent = _pipeline.get("active_jaeger_agent")
+    agent = (_jaeger_agents_by_session.get(session_key) if session_key is not None
+             else _pipeline.get("active_jaeger_agent"))
     if agent is not None and hasattr(agent, "interrupt"):
         try:
             agent.interrupt()
@@ -3426,7 +3437,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             bus = _pipeline.get("event_bus")
             if bus is not None:
                 try:
-                    payload: dict[str, Any] = {"name": name, "phase": phase}
+                    payload: dict[str, Any] = {"name": name, "phase": phase, "session": key}
                     if isinstance(data, dict):
                         # Only ship JSON-able scalars; the full data
                         # dict can hold non-serializable references.
@@ -3549,7 +3560,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             # dict lookup per chunk and nothing else. The adapters are
             # streaming either way — this only decides whether anyone
             # downstream hears it.
-            sink = _pipeline.get("stream_delta_sink")
+            sink = current_turn_sink("stream_delta_sink")
             if sink is None:
                 return
             try:
@@ -3561,7 +3572,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             # MODEL deliberation, routed to whichever surface registered a
             # sink for THIS turn. Same shape as _stream_delta above and the
             # same guarantee: no sink means a dict lookup and nothing else.
-            sink = _pipeline.get("stream_reasoning_sink")
+            sink = current_turn_sink("stream_reasoning_sink")
             if sink is None:
                 return
             try:
@@ -4163,12 +4174,11 @@ def stream_delta_sink(sink: Any):
     callback swallows exceptions anyway, but a slow sink slows the decode
     loop it runs on, so keep it to a buffer append.
     """
-    previous = _pipeline.get("stream_delta_sink")
-    _pipeline["stream_delta_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "stream_delta_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["stream_delta_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 @contextmanager
@@ -4179,28 +4189,26 @@ def stream_reasoning_sink(sink: Any):
     :func:`stream_delta_sink`: the session agent is cached and shared, so a
     sink installed at construction would outlive the surface that wanted it.
     """
-    previous = _pipeline.get("stream_reasoning_sink")
-    _pipeline["stream_reasoning_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "stream_reasoning_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["stream_reasoning_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 @contextmanager
 def interaction_request_sink(sink: Any):
     """Route clarify/secret tool requests through the active UI transport."""
-    previous = _pipeline.get("interaction_request_sink")
-    _pipeline["interaction_request_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "interaction_request_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["interaction_request_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 def stream_delta_listening() -> bool:
     """True while a surface is consuming this turn's token stream."""
-    return _pipeline.get("stream_delta_sink") is not None
+    return current_turn_sink("stream_delta_sink") is not None
 
 
 def build_system_prompt(layout: Any) -> str:
