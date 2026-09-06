@@ -121,6 +121,31 @@ def test_expansion_refuses_active_or_unknown_work():
             installer.ensure_idle(webui,native)
 
 
+def test_failed_access_probe_retains_private_receipt(monkeypatch, tmp_path):
+    installer = script('expand-agent-workspaces')
+    import subprocess
+    receipt = {'checks': {'write:/mnt/host/Documents': {'ok': False, 'error': 'PermissionError'}}}
+    monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(
+        a, 1, json.dumps(receipt), 'private diagnostic'))
+    destination = tmp_path / 'probe.json'
+    with pytest.raises(RuntimeError, match='write:/mnt/host/Documents'):
+        installer.access_probe('hermes', 'test-container', destination)
+    saved = json.loads(destination.read_text())
+    assert saved['receipt'] == receipt
+    assert saved['exit_code'] == 1
+    assert destination.stat().st_mode & 0o777 == 0o600
+
+
+def test_access_probe_does_not_print_private_stderr(monkeypatch, tmp_path):
+    installer = script('expand-agent-workspaces')
+    import subprocess
+    monkeypatch.setattr(installer.subprocess, 'run', lambda *a, **kw: subprocess.CompletedProcess(
+        a, 1, '', 'PRIVATE-SECRET'))
+    with pytest.raises(RuntimeError) as error:
+        installer.access_probe('hermes', 'test-container', tmp_path / 'probe.json')
+    assert 'PRIVATE-SECRET' not in str(error.value)
+
+
 def test_manifest_fallback_and_role_isolation(monkeypatch, tmp_path):
     path = tmp_path / "state.json"
     monkeypatch.setattr(aw, "STATE_PATH", path)
@@ -177,6 +202,37 @@ def test_write_probe_removes_only_its_own_files(tmp_path):
     assert checker.write_probe(tmp_path)["ok"]
     assert list(tmp_path.iterdir()) == [sentinel]
     assert sentinel.read_text() == "preserve"
+
+
+def test_write_probe_retries_transient_network_directory_cleanup(monkeypatch, tmp_path):
+    import errno
+    checker = script('agent-mac-check')
+    original = Path.rmdir
+    attempts = []
+    def delayed_rmdir(path):
+        attempts.append(path)
+        if len(attempts) < 3:
+            raise OSError(errno.ENOTEMPTY, 'SMB deferred unlink')
+        return original(path)
+    monkeypatch.setattr(Path, 'rmdir', delayed_rmdir)
+    monkeypatch.setattr(checker.time, 'sleep', lambda _: None)
+    assert checker.write_probe(tmp_path)['ok']
+    assert len(attempts) == 3
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_probe_cleanup_does_not_mask_failed_operation(monkeypatch, tmp_path):
+    import errno
+    checker = script('agent-mac-check')
+    monkeypatch.setattr(Path, 'read_text', lambda *a, **kw: (_ for _ in ()).throw(
+        FileNotFoundError(errno.ENOENT, 'renamed file absent')))
+    monkeypatch.setattr(Path, 'rmdir', lambda *a: (_ for _ in ()).throw(
+        OSError(errno.ENOTEMPTY, 'cleanup failed')))
+    monkeypatch.setattr(checker.time, 'sleep', lambda _: None)
+    with pytest.raises(FileNotFoundError) as error:
+        checker.write_probe(tmp_path)
+    assert error.value.probe_stage == 'read_after_rename'
+    assert error.value.cleanup_error == 'OSError'
 
 
 def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):

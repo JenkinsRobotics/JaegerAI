@@ -27,7 +27,7 @@ Local logical commits are authorized; no push or public release requested.
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
 | Group-chat UI/controls | Not complete | Pending | Existing Markdown presentation | Partial member events, selectors, browser tests |
 | Provider/thinking/usage | Not complete | Pending | Existing defaults preserved | Native session-local overrides, current-doc verification |
-| Workspace/private NAS access | Authorized; directories exist | Existing GitHub tests only | Extra mounts not yet changed | Managed-container update with rollback and real-user probes |
+| Workspace/private NAS access | Reversible expansion implemented | 19 focused tests passing | Rolled back: local roots pass; NAS checks fail | Resolve NAS filesystem semantics before retry; originals running |
 | Honcho per-agent verification | Not complete | Pending | Not retested | Isolated LAN write/retrieve receipts |
 | Recovery/deployment/CI | Not complete | Pending | Supervisor active | Layered readiness, verified repairs, overlay CI/build/rollback |
 
@@ -70,6 +70,19 @@ Local logical commits are authorized; no push or public release requested.
   pending response. Native permission errors are now categorized separately from
   transport failures. This remains an explicit release gate, not a passing test.
 - Control/failure focused tests after these changes: 42 passed in 1.97s.
+- Workspace expansion `6c4400f` failed its actual-user access gate and automatically
+  restored both original containers, the manifest, configuration, and monitoring.
+  The failed `jaeger-hermes-workspaces` replacement is retained stopped; it must
+  not be started alongside the original (same published port/shared state).
+- Isolated image probes as Hermes UID 501 passed GitHub, Desktop, Documents,
+  authenticated host MCP, Jaeger/Roundtable health and the A2A card. Both SMB NAS
+  roots failed cleanup with ENOTEMPTY. An isolated Jenkins_Robotics file test
+  also failed with ENOENT when reading after a successful rename. Cleanup can mask
+  earlier failures. Bounded cleanup retries did not resolve
+  the live failure. Mount startup is therefore not accepted as proof of RW access.
+  Probe diagnostics now retain the first failed operation, and deployment keeps
+  failure receipts privately instead of discarding nonzero probe output.
+  No share permissions, NAS configuration, or kernel settings were changed.
 
 ## Deployment boundary
 

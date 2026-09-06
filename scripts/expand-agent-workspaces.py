@@ -60,7 +60,31 @@ def transition(plans, originals, *, invoke, verify, publish, restore):
         raise RuntimeError('Workspace update failed; original containers and configuration restored') from original
 
 
-def verify(role, name):
+def access_probe(role, name, receipt_path):
+    """Retain failure diagnostics privately before raising; never echo secrets."""
+    command = [helpers['ENGINE'], 'exec', '--user', 'hermeswebui' if role == 'hermes' else 'node',
+               name, '/app/venv/bin/python' if role == 'hermes' else 'python3',
+               '/mnt/host/GitHub/JaegerAI/scripts/agent-mac-check.py', '--role', role,
+               '--write-probe', '--all-workspaces']
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=45)
+    except subprocess.TimeoutExpired:
+        atomic_write(receipt_path, json.dumps({'error': 'timeout', 'role': role}))
+        raise RuntimeError(f'{role} access probe timed out; private receipt retained') from None
+    try:
+        receipt = json.loads(result.stdout)
+    except ValueError:
+        receipt = {}
+    atomic_write(receipt_path, json.dumps({'exit_code': result.returncode, 'receipt': receipt,
+                                         'stdout': result.stdout, 'stderr': result.stderr}, indent=2))
+    checks = receipt.get('checks', {})
+    failed = [key for key, value in checks.items() if not value.get('ok')]
+    if result.returncode or not checks or failed:
+        raise RuntimeError(f'{role} access probe failed: {", ".join(failed) or "invalid probe result"}; private receipt retained')
+    return receipt
+
+
+def verify(role, name, receipt_path):
     deadline = time.monotonic()+60
     while True:
         if time.monotonic() >= deadline:
@@ -73,14 +97,7 @@ def verify(role, name):
         except Exception:
             pass
         time.sleep(.5)
-    python = '/app/venv/bin/python' if role == 'hermes' else 'python3'
-    raw = run('exec', '--user', 'hermeswebui' if role=='hermes' else 'node', name, python,
-              '/mnt/host/GitHub/JaegerAI/scripts/agent-mac-check.py', '--role', role,
-              '--write-probe', '--all-workspaces', timeout=45)
-    receipt = json.loads(raw)
-    if not all(check['ok'] for check in receipt['checks'].values()):
-        raise RuntimeError(f'{role} workspace/access checks failed')
-    return receipt
+    return access_probe(role, name, receipt_path)
 
 
 def prepare():
@@ -137,7 +154,7 @@ def deploy():
         _set_yaml_section_value(native_config,'containers','hermes_webui_container',aw.EXPANDED_CONTAINERS['hermes'])
         _configure_webui_workspaces(home)
     receipts = {}
-    def verify_and_record(role,name): receipts[role]=verify(role,name)
+    def verify_and_record(role,name): receipts[role]=verify(role,name,backup/f'{role}-probe.json')
     domain=f'gui/{os.getuid()}'
     paused=[]
     try:
