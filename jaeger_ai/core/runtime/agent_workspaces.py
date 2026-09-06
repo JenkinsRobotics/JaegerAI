@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 STATE_PATH = REPO_ROOT / ".jaeger_ai/shared/container-workspaces.json"
 LEGACY_CONTAINERS = {"hermes": "hermes-webui-hermes-webui", "openclaw": "ares-openclaw"}
 MANAGED_CONTAINERS = {"hermes": "jaeger-hermes-webui", "openclaw": "jaeger-openclaw"}
-HERMES_IMAGE = "hermes-webui:jaeger-mac-workspaces-20260906"
+HERMES_IMAGE = "hermes-webui:jaeger-native-runs-20260906"
 
 
 def container_name(role: str) -> str:

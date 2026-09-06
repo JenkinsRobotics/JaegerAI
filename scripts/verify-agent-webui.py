@@ -3,6 +3,7 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -12,6 +13,18 @@ def request(base, profile, path, payload=None):
     headers = {"Cookie": f"hermes_profile={profile}", "Content-Type": "application/json"}
     data = None if payload is None else json.dumps(payload).encode()
     return urllib.request.urlopen(urllib.request.Request(base + path, data=data, headers=headers), timeout=180)
+
+
+def check_roundtable_answers(text, checkword, first_turn):
+    """The echoed question is not evidence that any member answered it."""
+    round1 = text.split("## Round 2", 1)[0]
+    expected = ("Jaeger", "Hermes", "OpenClaw") if first_turn else ("Jaeger",)
+    for member in expected:
+        match = re.search(r"^### [^\n]*\b" + member + r"\s*\n(.*?)(?=^### |\Z)", round1, re.M | re.S)
+        if not match or checkword not in match.group(1):
+            raise RuntimeError(f"Roundtable: {member} did not return the expected check word")
+    if re.search(r"^\[(?:Agent|Hermes|Jaeger|OpenClaw) error:", text, re.M):
+        raise RuntimeError("Roundtable contains a member failure; inspect the verification session")
 
 
 def verify(base, profile):
@@ -64,6 +77,8 @@ def verify(base, profile):
                           "saved": bool(saved)}), flush=True)
         if checkword not in text:
             raise RuntimeError(f"{profile}: missing expected answer, inspect session {session}")
+        if profile == "roundtable":
+            check_roundtable_answers(text, checkword, first_turn=number == 1)
         if profile != "roundtable" and "Round 1 — Everyone Answers" in text:
             raise RuntimeError(f"{profile}: misrouted to Roundtable")
 

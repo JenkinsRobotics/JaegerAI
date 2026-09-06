@@ -11,7 +11,7 @@ script checks patch applicability before applying it. Build that directory's
 Dockerfile for a fresh image. Do not build an unpatched donor checkout.
 
 For the incremental dependency image, build from the printed staging directory:
-`container build -f Containerfile.jaeger -t hermes-webui:jaeger-mac-workspaces-20260906 .`
+`container build -f Containerfile.jaeger -t hermes-webui:jaeger-native-runs-20260906 .`
 The tar overlay and build-time assertions guard against incomplete directory
 copies in the Apple Container build context. Compare hashes in the resulting
 image before replacing a running container. The live container also has this
@@ -35,13 +35,20 @@ containers, tests, rollback, and remaining macOS privacy approvals.
   and Roundtable; the earlier concurrent run exposed incorrect cross-profile
   routing, now fixed by reading gateway config independently for each worker.
 
+## Native runtime follow-up
+
+See [native profile hardening](NATIVE_RUNS.md) for the new Jaeger streaming,
+tool/approval/cancellation path, session isolation fixes, verified boundaries,
+OpenClaw pairing gate, and rollback instructions.
+
 ## Remaining limitations
 
 - The model picker routes Hermes requests to the selected Ollama host. Native
   Jaeger/OpenClaw gateway adapters still use their configured runtime models;
   per-chat picker overrides are not wired into their native session APIs yet.
 - Roundtable streams member-level results as they arrive, not every model token.
-- Cancellation does not yet reliably stop already-dispatched native tool work.
+- Jaeger WebUI native-run cancellation is now routed to the owning turn.
+  Roundtable and OpenClaw's unpaired HTTP fallback still have control gaps.
 - Supervisor health is a transport check, not proof that an LLM turn succeeds.
 
 Runtime profile config has `model.provider: ollama`, the selected daemon's

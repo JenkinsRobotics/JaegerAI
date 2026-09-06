@@ -21,6 +21,7 @@ def prepare():
     subprocess.run(["git", "apply", str(overlay / "upstream.patch")], cwd=destination, check=True)
     shutil.copy2(overlay / "jaeger_ollama.py", destination / "api/jaeger_ollama.py")
     shutil.copy2(overlay / "jaeger_agent_compat.py", destination / "api/jaeger_agent_compat.py")
+    shutil.copy2(overlay / "jaeger_gateway_routes.py", destination / "api/jaeger_gateway_routes.py")
     # Package explicitly: some Apple Container builders drop nested context
     # updates during incremental directory COPY. The build validates contents.
     with tarfile.open(destination / "jaeger-overlay.tar.gz", "w:gz") as tar:

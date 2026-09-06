@@ -15,8 +15,9 @@ def test_runs_protocol_matches_webui_and_closes_connection():
     from http.server import ThreadingHTTPServer
     from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
 
-    for module, handler_type in ((jaeger, jaeger.RunHandler),
-                                 (roundtable, roundtable.RoundtableHandler),
+    # Jaeger's durable/native Runs API is exercised by test_native_runs.py;
+    # these two adapters still support their legacy in-memory run records.
+    for module, handler_type in ((roundtable, roundtable.RoundtableHandler),
                                  (openclaw, openclaw.Handler)):
         run_id = "protocol-test"
         with module._runs_lock:

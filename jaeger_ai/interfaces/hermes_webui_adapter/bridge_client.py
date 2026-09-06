@@ -61,10 +61,13 @@ class BridgeClient:
 
     def turn(self, text: str, session: str,
              on_event: Callable[[dict[str, Any]], None] | None = None,
-             on_request: Callable[[dict[str, Any]], str] | None = None) -> dict[str, Any]:
+             on_request: Callable[[dict[str, Any]], str] | None = None,
+             *, turn_id: str | None = None, workspace: str | None = None) -> dict[str, Any]:
         with self._connection() as (_sock, rx):
             self._ready(rx)
-            self._write(rx, {"op": "send", "text": text, "session": session})
+            self._write(rx, {"op": "send", "text": text, "session": session,
+                             **({"turn_id": turn_id} if turn_id else {}),
+                             **({"workspace": workspace} if workspace else {})})
             for line in rx:
                 frame = protocol.parse(line)
                 if frame is None:

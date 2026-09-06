@@ -172,6 +172,50 @@ def _tls_completion() -> dict[str, Any] | None:
 
 def _set_tls_active(ledger: WorkLedger | None) -> None:
     _tls.active = ledger
+    session = getattr(_tls, "session", None)
+    if session is not None:
+        path = _session_pointer(session)
+        if path is not None:
+            with _lock:
+                try:
+                    _atomic_write(path, json.dumps({"task_id": ledger.task_id if ledger else None}))
+                except OSError:
+                    pass
+
+
+def _session_pointer(session: str) -> Path | None:
+    root = _layout_run_dir()
+    if root is None:
+        return None
+    return root / f"ledger-session-{hashlib.sha256(session.encode()).hexdigest()}.json"
+
+
+def bind_session(session: str) -> None:
+    """Select a session's ledger on a reused bridge worker thread.
+
+    Thread-local is not session-local: the bridge handles many conversations
+    on one thread. Keep native ledgers resumable without injecting one table's
+    acceptance contract or completion marker into another conversation.
+    """
+    if getattr(_tls, "session", None) == session:
+        _tls.completion = None
+        if _tls_active() is not None and _tls_active().completed:
+            _set_tls_active(None)
+        return
+    _tls.session = session
+    _tls.active = None
+    _tls.completion = None
+    path = _session_pointer(session)
+    if path is None:
+        return
+    try:
+        task_id = json.loads(path.read_text()).get("task_id")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(task_id, str) and task_id:
+        restored = get_ledger(task_id)
+        if restored is not None and not restored.completed:
+            _tls.active = restored
 
 
 def _set_tls_completion(payload: dict[str, Any] | None) -> None:
@@ -316,6 +360,7 @@ def reset() -> None:
     global _completion_verifier
     _set_tls_active(None)
     _set_tls_completion(None)
+    _tls.session = None
     _completion_verifier = None
     with _lock:
         _by_id.clear()

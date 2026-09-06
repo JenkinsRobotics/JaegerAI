@@ -22,6 +22,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting
+from .native_runs import Runs, RunsHTTP, jaeger_turn, profile_key
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,8 @@ _runs: dict[str, dict] = {}
 _runs_lock = threading.Lock()
 
 mcp_client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
+_native_runs = None
+_native_lock = threading.Lock()
 
 # Initialize on demand. A stopped MCP backend must not prevent the adapter
 # from starting its HTTP listener or recovering when the backend returns.
@@ -217,12 +220,25 @@ mcp_client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
 
 # ── REST API Server ────────────────────────────────────────────────────────
 
-class RunHandler(BaseHTTPRequestHandler):
+class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
     """Handles REST API that Hermes WebUI gateway mode expects."""
 
     protocol_version = "HTTP/1.1"
 
+    def native_key(self):
+        return profile_key("jaeger")
+
+    def native_runs(self):
+        global _native_runs
+        with _native_lock:
+            if _native_runs is None:
+                root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/jaeger"
+                _native_runs = Runs(root, jaeger_turn)
+            return _native_runs
+
     def do_GET(self):
+        if os.environ.get("JAEGERS_ADAPTER_NATIVE_RUNS", "true").lower() in {"1", "true"} and self.native_route("GET"):
+            return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
             self._send_json(200, {"ok": True, "status": "ready"})
         elif self.path == "/v1/capabilities":
@@ -238,6 +254,8 @@ class RunHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        if os.environ.get("JAEGERS_ADAPTER_NATIVE_RUNS", "true").lower() in {"1", "true"} and self.native_route("POST"):
+            return
         if self.path == "/v1/runs":
             self._handle_create_run()
         elif self.path == "/v1/chat/completions":
