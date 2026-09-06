@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""Host Hermes CLI entrypoint; implementation stays in the JaegerAI repo."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parents[1]
+state_path = root / ".jaeger_ai/shared/container-workspaces.json"
+state = json.loads(state_path.read_text()) if state_path.exists() else {}
+name = state.get("containers", {}).get("hermes", "hermes-webui-hermes-webui")
+if name not in {"hermes-webui-hermes-webui", "jaeger-hermes-webui"}:
+    raise SystemExit("Invalid managed Hermes container")
+engine = "/opt/homebrew/bin/container"
+if name not in subprocess.check_output([engine, "list", "--quiet"], text=True).splitlines():
+    subprocess.run([engine, "start", name], check=True, timeout=60, stdout=sys.stderr)
+args = [engine, "exec", "--interactive", "--user", "hermeswebui",
+        "--env", "HOME=/home/hermeswebui", "--workdir", "/workspace"]
+if sys.stdin.isatty() and sys.stdout.isatty():
+    args.append("--tty")
+os.execv(engine, [*args, name, "/app/venv/bin/hermes", *sys.argv[1:]])

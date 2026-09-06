@@ -1,3 +1,15 @@
+diff --git a/api/agent_runtime.py b/api/agent_runtime.py
+--- a/api/agent_runtime.py
++++ b/api/agent_runtime.py
+@@ -148,6 +148,8 @@ def require_ai_agent_class():
+     ensure_agent_runtime_current()
+     from run_agent import AIAgent  # noqa: PLC0415
+
++    from api.jaeger_agent_compat import install
++    install(AIAgent)
+     _capture_loaded_agent_revision()
+     return AIAgent
+
 diff --git a/api/commands.py b/api/commands.py
 index 36d85920..6c093f24 100644
 --- a/api/commands.py

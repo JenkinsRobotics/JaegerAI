@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
+from .agent_workspaces import container_name
 
 FAILURE_THRESHOLD = 3
 REPAIR_COOLDOWN_S = 120
@@ -110,13 +111,13 @@ def components() -> tuple[Component, ...]:
         ),
         Component(
             "hermes",
-            lambda: _container_http("hermes-webui-hermes-webui", 8787),
-            lambda: _restart_container("hermes-webui-hermes-webui"),
+            lambda: _container_http(container_name("hermes"), 8787),
+            lambda: _restart_container(container_name("hermes")),
         ),
         Component(
             "openclaw",
             lambda: _http(f"http://{bridge}:8644/v1/health") and _tcp("127.0.0.1", 18789),
-            lambda: _restart_container("ares-openclaw")
+            lambda: _restart_container(container_name("openclaw"))
             and _kickstart("com.jenkinsrobotics.openclaw-hermes-adapter"),
         ),
         Component(

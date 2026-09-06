@@ -59,8 +59,9 @@ _DEPLOYMENT_CONTEXT = f"""Canonical deployment facts supplied by the Roundtable 
 - Jaeger is native on macOS. Hermes WebUI and OpenClaw run in separate Apple containers.
 - The active adapters are JaegerAI Python modules on ports 8642, 8643, and 8644.
 - Files such as ~/workspace/roundtable-adapter.py are historical artifacts, not deployed source.
-- A container's /workspace/GitHub/JaegerAI mirror is not the host checkout. Inspect the canonical
-  Mac path using authorized host workspace tools; a search in the mirror cannot verify host files.
+- Managed containers use /mnt/host/GitHub/JaegerAI for the live read/write Mac checkout.
+  Verify that mount before editing, or use authorized host workspace tools. A similarly named
+  /workspace/GitHub/JaegerAI artifact or mirror cannot establish the state of the host checkout.
 When auditing the installation, verify the canonical file or live health endpoint. Never label a claim
 [Verified] when it came from memory, another member, an old transcript, or a similarly named file."""
 
