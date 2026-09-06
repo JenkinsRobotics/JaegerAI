@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextvars import copy_context
 from typing import Any, Callable, TypeVar
 
 
@@ -157,10 +158,15 @@ def interruptible_call(
     """
 
     box: dict[str, Any] = {}
+    context = copy_context()
 
     def _worker() -> None:
         try:
-            box["value"] = fn()
+            # Stream, approval and session sinks are turn-scoped ContextVars.
+            # A new/reused worker does not inherit them automatically on Python
+            # 3.11. Enter a fresh copy per call, never retain a previous turn's
+            # destinations on a persistent model executor.
+            box["value"] = context.run(fn)
         except BaseException as exc:  # noqa: BLE001 — re-raised below
             box["error"] = exc
 
