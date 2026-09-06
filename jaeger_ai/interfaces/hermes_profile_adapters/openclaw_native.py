@@ -13,9 +13,22 @@ import time
 import uuid
 from pathlib import Path
 
-from .resilience import timeout_setting
+from .resilience import timeout_setting, ClassifiedError
 
 SCOPES = ["operator.read", "operator.write", "operator.approvals"]
+
+
+def gateway_error(error):
+    code = str(error.get("code") or "request_failed")
+    message = str(error.get("message") or "connection rejected")
+    category = "native_error"
+    if code == "NOT_PAIRED":
+        category = "pairing_required"
+    elif "missing scope:" in message or code in {"FORBIDDEN", "UNAUTHORIZED"}:
+        category = "permission_denied"
+    elif code == "INVALID_REQUEST":
+        category = "invalid_request"
+    return ClassifiedError(category, f"OpenClaw {code}: {message}")
 
 
 def connect_params(challenge, token, identity):
@@ -62,10 +75,10 @@ class NativeGateway:
             reply = json.loads(self.ws.recv(timeout=10))
             if not reply.get("ok"):
                 error = reply.get("error") or {}
-                raise RuntimeError(f"OpenClaw {error.get('code', 'connect_failed')}: {error.get('message', 'connection rejected')}")
+                raise gateway_error(error)
             granted = reply.get("payload", {}).get("auth", {}).get("scopes", [])
             if not set(SCOPES).issubset(granted):
-                raise RuntimeError("OpenClaw pairing lacks native chat/approval permissions; no turn dispatched")
+                raise ClassifiedError("permission_denied", "OpenClaw pairing lacks native chat/approval permissions; no turn dispatched")
             self.reader = threading.Thread(target=self._read, daemon=True)
             self.reader.start()
             return self
@@ -108,7 +121,7 @@ class NativeGateway:
                         raise TimeoutError(f"OpenClaw {method} acknowledgement timed out; request not replayed")
             if not reply.get("ok"):
                 error = reply.get("error") or {}
-                raise RuntimeError(f"OpenClaw {error.get('code', 'request_failed')}: {error.get('message', '')}")
+                raise gateway_error(error)
             return reply.get("payload") or {}
         finally:
             with self.lock:
@@ -138,10 +151,14 @@ def message_text(message):
     return "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
 
 
+def native_session_key(session):
+    return f"agent:main:openai-user:hermes:{session}"
+
+
 def openclaw_turn(run, workspace=None):
     from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
     # Identical to the existing REST adapter's user=hermes:<session> mapping.
-    session_key = f"agent:main:openai-user:hermes:{run.session}"
+    session_key = native_session_key(run.session)
     with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE) as gateway:
         if run.cancelled.is_set():
             return ""
@@ -191,6 +208,7 @@ def openclaw_turn(run, workspace=None):
                     return message_text(payload.get("message")) or run.output
                 elif state == "aborted":
                     run.cancelled.set()
+                    run.cancel_confirmed = True
                     return run.output
                 elif state == "error":
                     raise RuntimeError(payload.get("errorMessage") or "OpenClaw native run failed")

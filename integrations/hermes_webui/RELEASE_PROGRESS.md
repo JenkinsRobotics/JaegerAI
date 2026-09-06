@@ -20,7 +20,7 @@ Local logical commits are authorized; no push or public release requested.
 | Anonymous member-session collision | Reject missing member ID; isolated anonymous table for direct callers | Passing | Pending | Durable table contract |
 | A2A scoped cancel | Task-owned IDs; cancellation confirmation in bridge reply; context-scoped sessions | Concurrent A/B cancellation test passing | Pending deploy | Durable task store/restart tests |
 | Test isolation | Supervisor honors isolated JAEGER_HOME; guard excludes exact background health snapshot | Full root suite passing with live supervisor | Supervisor left running | Continue isolated integration coverage |
-| OpenClaw pairing | Approved existing identity with requested scopes only | Existing signature/translation tests | Authorized native connection and streamed chat passed | Native WebUI tool/approval/abort tests, then enable |
+| OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
 | Roundtable lifecycle/control/auth | Not complete | Pending | Legacy remains live | Shared durable Runs, native stop/approval/retry |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
@@ -57,6 +57,19 @@ Local logical commits are authorized; no push or public release requested.
   and Personal-Drive during preflight, then exited and was automatically removed.
   This verifies mount startup, not actual-user read/write. Working container
   mounts remain unchanged until the managed update and access probes pass.
+- OpenClaw native file tool returned the real README first line in 3.44s, with
+  `tool.started` and `tool.completed` events. Confirmed abort probe
+  `346a39f6dd104142ab02f850ab1ebd20` completed in 0.16s, with an explicit native
+  cancellation confirmation. Local cancellation intent is now separate from
+  confirmation; a native completion that wins the race is reported completed.
+- Approval-denial probing did not pass: harmless print commands ran under the
+  existing native policy without prompting. Tightening only a new verification
+  session to Guarded was rejected by the installed gateway with
+  `missing scope: operator.admin`. The normal adapter's scopes were not expanded.
+  A separate temporary admin verification identity was requested from the user;
+  pending response. Native permission errors are now categorized separately from
+  transport failures. This remains an explicit release gate, not a passing test.
+- Control/failure focused tests after these changes: 42 passed in 1.97s.
 
 ## Deployment boundary
 

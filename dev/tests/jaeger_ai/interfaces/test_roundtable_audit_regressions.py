@@ -89,3 +89,10 @@ def test_a2a_cancel_owns_native_turn_and_preserves_other_task():
             await asyncio.gather(*tasks.values())
     asyncio.run(check())
     assert controls == [('cancel', {'turn_id': turn_ids['A']})]
+
+
+def test_native_permission_failures_are_not_transport_outages():
+    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import gateway_error
+    from jaeger_ai.interfaces.hermes_profile_adapters.resilience import failure_category
+    assert failure_category(gateway_error({'code':'INVALID_REQUEST','message':'missing scope: operator.admin'})) == 'permission_denied'
+    assert failure_category(gateway_error({'code':'NOT_PAIRED','message':'pairing required'})) == 'pairing_required'
