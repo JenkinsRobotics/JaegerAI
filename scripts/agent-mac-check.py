@@ -5,6 +5,7 @@ Uses only the standard library, and never prints or forwards credentials to a
 caller-selected URL. Run as the actual agent user, not container root.
 """
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -70,16 +71,47 @@ def host_tools(role):
 def write_probe(root=REPO):
     """Only touches an exclusively created temporary directory; no git changes."""
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix=".agent-write-probe-", dir=root) as directory:
-        path = Path(directory) / "probe.txt"
+    directory = Path(tempfile.mkdtemp(prefix=".agent-write-probe-", dir=root))
+    path = directory / "probe.txt"
+    renamed = directory / "renamed.txt"
+    failure = None
+    stage = "create"
+    try:
         with path.open("x") as handle:
             handle.write("created\n")
+        stage = "edit"
         with path.open("a") as handle:
             handle.write("edited\n")
-        renamed = path.with_name("renamed.txt")
+        stage = "rename"
         path.rename(renamed)
+        stage = "read_after_rename"
         assert renamed.read_text() == "created\nedited\n"
         digest = hashlib.sha256(renamed.read_bytes()).hexdigest()
+    except Exception as exc:
+        failure = exc
+        failure.probe_stage = stage
+    finally:
+        # Never recursively remove contents: only our two known probe files.
+        # SMB may defer an unlink briefly, reporting ENOTEMPTY for an empty dir.
+        try:
+            path.unlink(missing_ok=True)
+            renamed.unlink(missing_ok=True)
+            for attempt in range(11):
+                try:
+                    directory.rmdir()
+                    break
+                except OSError as exc:
+                    if exc.errno not in (errno.ENOTEMPTY, errno.EBUSY) or attempt == 10:
+                        raise
+                    time.sleep(.1)
+        except Exception as exc:
+            if failure is None:
+                failure = exc
+                failure.probe_stage = "cleanup"
+            else:
+                failure.cleanup_error = type(exc).__name__
+    if failure is not None:
+        raise failure
     return {"ok": True, "seconds": round(time.monotonic()-started, 4), "sha256": digest,
             "operations": ["create", "edit", "read", "rename", "remove own probe"]}
 
@@ -111,6 +143,11 @@ def main():
             output["checks"][name] = {"ok": True, "result": fn(), "seconds": round(time.monotonic()-start, 4)}
         except Exception as exc:
             output["checks"][name] = {"ok": False, "error": type(exc).__name__, "seconds": round(time.monotonic()-start, 4)}
+            if isinstance(exc, OSError):
+                output["checks"][name]["errno"] = exc.errno
+            for attribute in ("probe_stage", "cleanup_error"):
+                if hasattr(exc, attribute):
+                    output["checks"][name][attribute] = getattr(exc, attribute)
     print(json.dumps(output, indent=2))
     return 0 if all(v["ok"] for v in output["checks"].values()) else 1
 
