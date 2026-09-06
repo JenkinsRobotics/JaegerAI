@@ -64,11 +64,13 @@ class Run:
         with self.condition:
             if self.status in TERMINAL:
                 return
-            row = {"event": event, "run_id": self.id,
-                   "seq": len(self.events) + 1, **payload}
+            row = {**payload, "event": event, "run_id": self.id,
+                   "seq": len(self.events) + 1}
             self.events.append(row)
             if event == "message.delta":
                 self.output += str(payload.get("delta") or "")
+            elif event == 'message.replaced':
+                self.output = str(payload.get('text') or '')
             if event.startswith("run.") and event[4:] in TERMINAL:
                 self.status = event[4:]
                 self.pending.clear()
@@ -119,6 +121,8 @@ class Run:
         with self.condition:
             if self.status in TERMINAL:
                 return False
+            if self.cancelled.is_set():
+                return True  # Repeat Stop observes existing intent; never resend it.
             self.cancelled.set()
             self.status = "cancelling"
             self.condition.notify_all()
@@ -140,31 +144,39 @@ class Run:
 
 
 class Runs:
-    def __init__(self, root: Path, backend, *, reconciler=None):
+    def __init__(self, root: Path, backend, *, reconciler=None, run_type=Run):
         self.root = root
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.backend = backend
         self.reconciler = reconciler
+        self.run_type = run_type
         self.lock = threading.RLock()
         self.runs = {}
         self.ownership = Ownership(root)
 
-    def start(self, session, message, workspace=None):
+    def start(self, session, message, workspace=None, *, run_id=None, on_admitted=None):
         if not isinstance(session, str) or not session or not isinstance(message, str) or not message.strip():
             raise ValueError("A session_id and non-empty text input are required")
         with self.lock:
             if any(r.session == session and r.status not in TERMINAL for r in self.runs.values()):
                 raise RuntimeError("session_busy: native work is still active; observe or stop it first")
-            run_id = uuid.uuid4().hex
+            run_id = run_id or uuid.uuid4().hex
+            if not isinstance(run_id, str) or len(run_id) != 32 or any(c not in '0123456789abcdef' for c in run_id):
+                raise ValueError('Invalid run identity')
             self.ownership.claim(session, run_id)
             lease = None
+            run = None
             try:
                 lease = self.ownership.observer_lease(run_id)
-                run = Run(self.root, session, message, run_id=run_id)
+                run = self.run_type(self.root, session, message, run_id=run_id)
+                if on_admitted is not None:
+                    on_admitted(run)  # Persist child/control ownership before dispatch.
             except Exception:
                 if lease is not None:
                     os.close(lease)
                 self.ownership.release(run_id)  # No worker/native dispatch exists.
+                if run is not None:
+                    run.emit('run.failed', error_category='dispatch_not_started', error='Admission did not complete')
                 raise
             self.runs[run.id] = run
             run.worker_active = True
@@ -193,6 +205,8 @@ class Runs:
             else:
                 if answer and not run.output:
                     run.emit("message.delta", delta=answer)
+                elif answer is not None and answer != run.output:
+                    run.emit('message.replaced', text=answer)
                 run.emit("run.completed", output=answer or run.output,
                          cancellation_requested=run.cancelled.is_set(), cancellation_confirmed=False)
         except Exception as exc:
@@ -288,13 +302,20 @@ class Runs:
 
 class RunsHTTP(ProfileIngress):
     """Mixin for existing profile servers; preserves legacy completion clients."""
+    def create_native_run(self, body):
+        return self.native_runs().start(str(body.get('session_id') or self.headers.get('X-Hermes-Session-Id') or ''),
+            body.get('input') or body.get('message'), body.get('workspace'))
+
+    def native_capabilities(self):
+        return {"streaming": True, "features": {
+            "approval_events": True, "run_approval_response": True,
+            "approval_identity_v1": True, "tool_events": True,
+            "cancellation": True, "event_replay": True}}
+
     def native_route(self, method):
         parsed = urlsplit(self.path)
         if parsed.path == "/v1/capabilities":
-            self.native_json(200, {"streaming": True, "features": {
-                "approval_events": True, "run_approval_response": True,
-                "approval_identity_v1": True, "tool_events": True,
-                "cancellation": True, "event_replay": True}})
+            self.native_json(200, self.native_capabilities())
             return True
         if not parsed.path.startswith("/v1/runs"):
             return False
@@ -308,8 +329,7 @@ class RunsHTTP(ProfileIngress):
             if method == "POST":
                 body = self.read_json_body()
                 if parts == ["v1", "runs"]:
-                    result = runs.start(str(body.get("session_id") or self.headers.get("X-Hermes-Session-Id") or ""),
-                                        body.get("input") or body.get("message"), body.get("workspace"))
+                    result = self.create_native_run(body)
                     self.native_json(200, result)
                     return True
             if len(parts) not in (3, 4):
@@ -412,6 +432,8 @@ def jaeger_turn(run, workspace=None):
         kind = frame.get("type")
         if kind in {"queued", "state"}:
             accepted.set()
+            if kind == 'queued' or frame.get('busy') is True:
+                run.emit('native.state', state='queued' if kind == 'queued' else 'running')
             if run.cancelled.is_set():
                 cancel()
         if kind == "delta":

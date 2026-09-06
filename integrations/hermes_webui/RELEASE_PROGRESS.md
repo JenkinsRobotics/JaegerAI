@@ -22,11 +22,11 @@ Local logical commits are authorized; no push or public release requested.
 | Test isolation | Supervisor honors isolated JAEGER_HOME; guard excludes exact background health snapshot | Full root suite passing with live supervisor | Supervisor left running | Continue isolated integration coverage |
 | OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
-| Native durable admission | Private ownership registry; staged native Jaeger receipts and authenticated reconciliation | Concurrent observers/registries, wrong identities, unknown results and terminal recovery tested | Pending deployment | Hermes/OpenClaw reconciliation; durable UI route pins, bounded event storage and retention |
-| Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Native Hermes path and ingress guard deployed; four-profile chat checks pass | Shared durable Runs, native stop/approval/retry |
+| Native durable admission | Private ownership registry; Jaeger receipts and authenticated reconciliation | Concurrent observers/registries, wrong identities, unknown results and terminal recovery tested | Bridge contract 14 deployed; adapter recovery still staged | Hermes/OpenClaw reconciliation; durable UI route pins, bounded event storage and retention |
+| Roundtable lifecycle/control/auth | Opt-in native member Runs, durable table ledger, scoped Stop/approval/retry | 24 isolated Roundtable tests pass | Native backend two-turn streaming/recall passes; WebUI remains legacy | UI integration and live control/fault/restart tests |
 | Legacy Jaeger/OpenClaw ingress | Shared credential/origin/body guards; truthful unsupported Stop; bounded connection server | Unauthorized request reproduced before fix; 122 focused tests pass | Not deployed | Coordinated sender-first rollout and live negative/positive checks |
-| Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
-| Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
+| Timeout layers | Native table has separate queue/idle/tool/approval and optional overall total | Virtual-clock progress, heartbeat and stall tests pass | Existing legacy 90-second setting remains | Upstream transport layers and real long-running control tests |
+| Coordination/evidence/consensus/ledger | Six native workflows, explicit ballots, attributed tool receipts, durable tasks/decisions and chair rotation | Isolated workflow/ballot/assignment/rotation tests pass | Native ask/discussion/recall passes in isolated table; legacy UI still live | Actual task delegation and UI evidence/decision display |
 | Group-chat UI/controls | Not complete | Pending | Existing Markdown presentation | Partial member events, selectors, browser tests |
 | Provider/thinking/usage | Not complete; official contract/pricing research recorded in OLLAMA_VERIFICATION.md | Pending | Existing defaults preserved | Native session-local overrides, installed-version checks, attributed usage |
 | Workspace/private NAS access | Reversible expansion implemented | 19 focused tests passing | Rolled back: local roots pass; NAS checks fail | Resolve NAS filesystem semantics before retry; originals running |
@@ -174,7 +174,7 @@ Local logical commits are authorized; no push or public release requested.
 
 ## Deployment boundary
 
-### Staged native Jaeger recovery
+### Native Jaeger recovery
 
 Bridge contract 14 adds instance-owned private SQLite turn receipts. A scoped
 turn ID is admitted once; its terminal result is saved before the transport
@@ -198,8 +198,9 @@ The full regression initially caught an omitted desktop surface classification
 for the new query. After classifying it honestly as bridge-only, the full root
 suite passed: **3,680 passed, 11 skipped**, one audioop deprecation, 106.81s,
 seed `20260906`. This run predates the next legacy-ingress regression tests.
-Live restart/disconnect recovery is not verified and these changes are not
-deployed. Hermes/OpenClaw need their own trusted reconciliation implementations;
+The bridge portion was subsequently deployed with the worker-context fix below;
+the adapter recovery endpoint and live restart/disconnect recovery remain staged
+or unverified. Hermes/OpenClaw need their own trusted reconciliation implementations;
 OpenClaw lookup timeout must not be interpreted as confirmed cancellation.
 Native Runs ingress additionally rejects browser Origins, transfer encoding,
 duplicate Content-Length and oversized bodies, with a bounded body-read wait.
@@ -222,8 +223,9 @@ individual WebUI gateways already have profile credentials. No secret was rotate
 
 Roundtable fixes through `d53b0f5` are deployed, including its native Hermes
 client, authenticated legacy ingress and truthful unsupported cancellation.
-The scoped bridge/A2A fixes and remaining Jaeger/OpenClaw adapter changes are
-committed but not deployed. Supervisor source fixes are also staged, not loaded.
+The scoped bridge fixes through `43ba728` are now loaded. A2A and remaining
+Jaeger/OpenClaw adapter changes are committed but not deployed. Supervisor source
+fixes are also staged, not loaded.
 The Hermes native API service is live inside the existing container on port 8645,
 authenticated by a private credential and without a published Mac host port.
 OpenClaw pairing is live; its native WebUI feature flag remains disabled pending
@@ -235,3 +237,66 @@ Before deployment: record the active commit/image/config backups; verify no
 wanted run is active; use explicit service targets; preserve rollback containers;
 restore any paused monitoring; test all four profiles and native controls.
 Do not mark the goal complete while required matrix cells remain unverified.
+
+### Native Roundtable and genuine Jaeger streaming
+
+The new opt-in `TableService` coordinates native member Runs and persists table
+preferences, dispatch intents, bounded current-round prompts, decisions, task
+owners, and evidence separately from native chat history. Modes now have
+distinct workflows. Strict ballot validation retains failed/missing/minority
+votes; truncation cannot establish consensus. Per-member retry preserves the
+native session and does not rerun everybody. Progress budgets do not treat
+heartbeats as useful work or impose an implicit overall deadline. See
+`ROUNDTABLE_NATIVE.md` for the staged API and limitations.
+
+The first real native table test found that Jaeger only emitted final text.
+Reproductions showed that both fresh/reused model workers and parallel tool
+workers lost turn-scoped ContextVars. Fix `43ba728` enters a fresh copied context
+per worker invocation. The three reproductions pass after failing before the
+fix; combined bridge/adapter suites passed **149 tests**, and native package/
+neighbor suites passed **99 tests**. Persistent workers do not retain a previous
+turn's stream destination.
+
+After confirming WebUI had zero active runs/streams, all 50 native sessions were
+idle, and no cron jobs were running, restarted only
+`com.jenkinsrobotics.jaeger-bridge`. Source rollback archives for baseline
+`737935d` and target `43ba728` are retained privately under
+`.jaeger_ai/shared/deployments/bridge-20260906-stream-context/`.
+Ready handshake and contract 14 passed. No provider/profile/mount/grant settings
+changed and neither agent container was restarted. Old cognition ledger rows
+still marked active are not treated as evidence of running native chat workers;
+ledger lifecycle cleanup remains a separate audit concern.
+
+Live native table `verification-roundtable-native-3d77a22ad56941c8a6b25d75e6b46494`
+passed: all three first answers streamed before their native workers finished,
+all three performed one discussion, and all three recalled the check word on the
+second turn with identical native session keys. That turn's initial prompts
+contained neither the check word nor a copied shared summary. Total turn times
+were **32.49s and 59.07s**, including synthesis. No tools or approval grants were
+used. Native receipts are in the private verification directory
+`/var/folders/fk/gjrpb6d55td2y2ffmsrsv76c0000gn/T/jaeger-roundtable-native-jcn9i1mz`.
+Subsequent source review replaced random per-turn chair choice with actual
+persisted rotation; its restart/rotation test passes, but that refinement was
+not part of the preceding live run.
+
+Post-bridge-deploy existing WebUI two-turn recall passed for Hermes/default
+`527af225af9b` (9.0s), Jaeger `b045ae9251fa` (10.4s), OpenClaw `2517689f5e04`
+(4.1s), and Roundtable `5b9aa06f3986` (21.0s; all first-round members and
+discussion, then `/quick @jaeger`). These checks preserve the current profile
+paths; they do not certify all provider overrides or tool/control parity.
+
+The native Roundtable flag stays OFF. Browser rendering/selectors, final-text
+replacement handling, durable route/control recovery, bounded event storage,
+native permission/failure tests and remaining acceptance-matrix gates must pass
+before activation. Both engine and ledger remain staged, not advertised as
+completed group-chat UI features.
+
+The first full regression of this phase passed **3,745 tests, 11 skipped** in
+111.36s with seed `20260906`, with the isolation guard enabled and all live probes
+finished before the run. Final review then reproduced explicit run-ID reuse
+overwriting a completed receipt and dispatching again, even after restart or
+under a different session. Admission now retains single-use ID tombstones and
+rejects existing receipts; releasing an active owner does not release its ID.
+Two before-fix failures now pass, with a separate pre-dispatch tombstone test.
+These are control receipts, not native session/history changes. Comprehensive
+storage retention remains pending.

@@ -84,6 +84,33 @@ def test_same_session_busy_until_native_turn_exits(tmp_path):
     assert run.output == "done"  # Native completion won; do not invent an abort.
 
 
+@pytest.mark.parametrize('second_session', ['session', 'another-session'])
+def test_explicit_run_identity_cannot_overwrite_or_reexecute_completed_work(tmp_path, second_session):
+    calls = []
+    def backend(run, workspace):
+        calls.append(run.id)
+        return 'original result'
+    service = Runs(tmp_path, backend)
+    identity = 'e' * 32
+    run = service.get(service.start('session', 'original', run_id=identity)['run_id'])
+    wait_for(lambda: not run.worker_active)
+    original = (tmp_path / f'{identity}.json').read_bytes()
+    recovered = Runs(tmp_path, backend)
+    with pytest.raises(RuntimeError, match='identity'):
+        recovered.start(second_session, 'must not execute', run_id=identity)
+    assert calls == [identity]
+    assert (tmp_path / f'{identity}.json').read_bytes() == original
+
+
+def test_pre_dispatch_run_identity_remains_reserved_after_owner_release(tmp_path):
+    from jaeger_ai.interfaces.hermes_profile_adapters.run_ownership import Ownership
+    original = Ownership(tmp_path)
+    original.claim('session', 'a' * 32)
+    original.release('a' * 32)
+    with pytest.raises(RuntimeError, match='identity'):
+        Ownership(tmp_path).claim('another-session', 'a' * 32)
+
+
 def test_restart_keeps_receipt_never_replays_work(tmp_path):
     run = Run(tmp_path, "session", "hello")
     run.emit("message.delta", delta="partial")

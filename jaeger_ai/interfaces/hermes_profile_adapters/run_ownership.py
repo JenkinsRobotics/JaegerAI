@@ -22,6 +22,7 @@ class Ownership:
         self.path.chmod(0o600)
         with self.transaction() as db:
             db.execute('CREATE TABLE IF NOT EXISTS owners (run_id TEXT PRIMARY KEY, session TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS issued (run_id TEXT PRIMARY KEY)')
             db.execute('CREATE INDEX IF NOT EXISTS owners_session ON owners(session)')
             db.execute('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY)')
             if not db.execute("SELECT 1 FROM metadata WHERE key='receipts_imported'").fetchone():
@@ -56,9 +57,16 @@ class Ownership:
 
     def claim(self, session, run_id):
         with self.transaction() as db:
+            # Explicit table-child IDs are single use, even after completion or
+            # pre-dispatch rejection. Keep a tombstone when releasing the active
+            # owner; a new observer must never overwrite the old control receipt.
+            if (db.execute('SELECT 1 FROM issued WHERE run_id=?', (run_id,)).fetchone()
+                    or (self.path.parent / f'{run_id}.json').exists()):
+                raise RuntimeError('run_identity_used: observe the original receipt or use a new run identity')
             if db.execute('SELECT 1 FROM owners WHERE session=?', (session,)).fetchone():
                 raise RuntimeError('session_busy: native work is active or its execution state is unknown; reconcile the native run before retrying')
             db.execute('INSERT INTO owners VALUES (?, ?)', (run_id, session))
+            db.execute('INSERT INTO issued VALUES (?)', (run_id,))
 
     def release(self, run_id):
         """Call only after a native terminal result or proven no dispatch."""
