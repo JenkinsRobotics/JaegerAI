@@ -108,6 +108,95 @@ except Exception as e:
     sys.stderr.write(f"[host-capability-launcher] Note: service_status patch skipped: {e}\n")
 
 
+# --- Graft the donor hardware package onto the controller's `integrations` namespace ---
+# The controller has its own top-level `integrations` package (providers, workers),
+# which shadows the ARES repo-root `integrations` package where
+# `integrations.hardware` (Insta360 camera adapter) lives. Reordering sys.path would
+# break the controller's own imports, so we load the donor package by explicit file
+# location and attach it as an attribute of the already-imported controller package.
+# Donor code stays untouched.
+try:
+    import importlib
+    import importlib.util
+
+    _controller_integrations = importlib.import_module("integrations")
+    if not hasattr(_controller_integrations, "hardware"):
+        _donor_dir = "/Users/matthewjenkins/GitHub/ARES/integrations/hardware"
+        _spec = importlib.util.spec_from_file_location(
+            "integrations.hardware",
+            _donor_dir + "/__init__.py",
+            submodule_search_locations=[_donor_dir],
+        )
+        _donor_hw = importlib.util.module_from_spec(_spec)
+        sys.modules["integrations.hardware"] = _donor_hw
+        _spec.loader.exec_module(_donor_hw)
+        _controller_integrations.hardware = _donor_hw
+except Exception as e:
+    sys.stderr.write(f"[host-capability-launcher] Note: hardware graft skipped: {e}\n")
+
+
+# --- Replace calendar_list with an EventKit-backed implementation ---
+# The donor's JXA program enumerates every event of every calendar through the
+# Apple Events bridge (~500+ events x several round-trips each) and reliably
+# exceeds the 30s _run_jxa timeout. EventKit reads the same store natively in
+# well under a second. Returns the same {exit_code, data, error} shape as
+# _run_jxa so callers see an identical contract.
+try:
+    import EventKit  # PyObjC
+    from Foundation import NSDate
+    from datetime import datetime, timezone
+
+    def _iso(nsdate) -> str:
+        return datetime.fromtimestamp(nsdate.timeIntervalSince1970(), tz=timezone.utc).isoformat()
+
+    def _calendar_list_eventkit(days: int = 7, limit: int = 100) -> dict:
+        capability = "calendar.list"
+        host_capability_mcp_server._require(capability)
+        days = max(1, min(int(days), 31))
+        limit = max(1, min(int(limit), 500))
+        status = EventKit.EKEventStore.authorizationStatusForEntityType_(0)
+        if status != 3:  # 3 = fullAccess granted (Sonoma+)
+            return {
+                "exit_code": 1,
+                "data": None,
+                "error": (
+                    f"EventKit not authorized (status {status}). Approve the "
+                    "calendar prompt once, or grant Full Calendar Access to the "
+                    "host process in System Settings > Privacy & Security > "
+                    "Calendars, then retry."
+                ),
+            }
+        store = EventKit.EKEventStore.alloc().init()
+        now = NSDate.dateWithTimeIntervalSinceNow_(0)
+        end = NSDate.dateWithTimeIntervalSinceNow_(days * 86400)
+        pred = store.predicateForEventsBetweenStartDate_endDate_(now, end)
+        events = store.eventsMatchingPredicate_(pred)
+        rows = []
+        n = min(events.count(), limit)
+        for i in range(n):
+            e = events.objectAtIndex_(i)
+            cal = e.calendar()
+            rows.append({
+                "id": str(e.eventIdentifier()),
+                "calendar": str(cal.title()) if cal else "",
+                "summary": str(e.title() or ""),
+                "start": _iso(e.startDate()),
+                "end": _iso(e.endDate()),
+                "location": str(e.location() or ""),
+            })
+        rows.sort(key=lambda r: r["start"])
+        host_capability_mcp_server._audit(capability, outcome="allowed", count=len(rows))
+        return {"exit_code": 0, "data": rows, "error": ""}
+
+    host_capability_mcp_server.calendar_list = _calendar_list_eventkit
+    if hasattr(host_capability_mcp_server, "mcp") and hasattr(host_capability_mcp_server.mcp, "_tool_manager"):
+        tm = host_capability_mcp_server.mcp._tool_manager
+        if hasattr(tm, "_tools") and "calendar_list" in tm._tools:
+            tm._tools["calendar_list"].fn = _calendar_list_eventkit
+except Exception as e:
+    sys.stderr.write(f"[host-capability-launcher] Note: calendar_list patch skipped: {e}\n")
+
+
 def main() -> None:
     host_capability_mcp_server.mcp.run()
 
