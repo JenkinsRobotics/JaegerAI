@@ -23,7 +23,7 @@ Local logical commits are authorized; no push or public release requested.
 | OpenClaw pairing | Approved existing identity with requested scopes only | Signature/translation/cancellation tests | Native stream, real file tool and confirmed abort passed | Actual approval denial blocked on native test-session admin; WebUI flag still off |
 | Hermes native API | Native API launcher, structured SessionDB resumption, separate launchd supervision | Six focused tests passing | Streamed first turn and random-code recall passed after restart | Roundtable integration and native control tests |
 | Native durable admission | Private transactional ownership registry; unknown executions retain session lock across restart | Concurrent registries, restart, failed transport and confirmed completion tested | Pending deployment | Native reconciliation workflow; durable UI route pins and event storage |
-| Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Hermes native transport deployed; ingress guard pending | Shared durable Runs, native stop/approval/retry |
+| Roundtable lifecycle/control/auth | Hermes native transport; legacy credential/body/origin guards | Focused tests passing | Native Hermes path and ingress guard deployed; four-profile chat checks pass | Shared durable Runs, native stop/approval/retry |
 | Timeout layers | Not complete | Pending | Existing 90-second setting remains | Separate progress/idle/queue/tool/approval/total policy |
 | Coordination/evidence/consensus/ledger | Not complete | Pending | Prompt-based legacy remains live | Typed workflows, deterministic validation, durable ledger |
 | Group-chat UI/controls | Not complete | Pending | Existing Markdown presentation | Partial member events, selectors, browser tests |
@@ -79,8 +79,8 @@ Local logical commits are authorized; no push or public release requested.
   (`aff87f9072c9`), and OpenClaw (`5f02ecb65346`) passed two-turn recall.
   Roundtable (`b250936ef21a`) failed: all three initial answers passed, but
   Hermes' discussion CLI invocation returned only a resume notice and an error.
-  Native Hermes Runs recall works independently; replacing the Roundtable CLI
-  path while preserving its existing native session is the next repair.
+  Native Hermes Runs recall worked independently; the following repair replaced
+  the CLI path while preserving its existing native session.
 - Hermes Roundtable path repaired in `da1402e`: authenticated native Runs instead
   of CLI, with exact legacy named-session/continuation lookup. Canary recovered
   `ROUNDTABLE-b25093` from the previously failing session. Reloaded only the
@@ -90,6 +90,15 @@ Local logical commits are authorized; no push or public release requested.
   were not restarted. Legacy Markdown cannot relay approvals: any such request
   is denied and reported as `approval_required`, never auto-approved or counted
   as a successful answer. Structured approval UI remains a release gate.
+- Provisioned only Roundtable's missing profile gateway credential (private,
+  preserved model/provider/comments, no rotation of Jaeger/OpenClaw keys).
+  Deployed its authenticated ingress: a real credential-free execution request
+  now returns HTTP 401. Legacy cancel no longer falsely claims that native work
+  stopped; it returns unsupported-control, or 404 for an unknown run.
+  Post-deploy four-profile WebUI two-turn tests all passed: Hermes/default
+  `7908ba06eedb`, Jaeger `6c1d3aebb07e`, OpenClaw `3667b73c3640`, and Roundtable
+  `44aabc9f0911` (all three answer/discussion members, then recall; 20.8s total).
+  Native control, UI, long-running/failure and release gates are still incomplete.
 - Native Runs now reserves session ownership transactionally before worker start,
   imports unreconciled legacy receipts, and retains ownership after ambiguous
   transport failure or adapter restart. Proven native completion/cancellation or
@@ -97,7 +106,8 @@ Local logical commits are authorized; no push or public release requested.
   uncertainty are recorded; cancellation intent survives a control-send failure.
   Tests reproduce the previous duplicate-admission failure across restarts and
   independent registry instances. Native reconciliation of uncertain owners is
-  still required before deployment; there is intentionally no blind unlock/replay.
+  still required before deploying the remaining adapters; the Roundtable Hermes
+  guard is live and deliberately retains uncertain owners without blind replay.
   Combined native/workspace/supervisor focused suite: 51 passed in 1.80s.
 - Full root regression after durable admission/workspace diagnostics/supervisor
   fixes: **3,630 passed, 11 skipped**, one audioop deprecation, 104.40s, seed
@@ -126,15 +136,39 @@ Local logical commits are authorized; no push or public release requested.
   Probe diagnostics now retain the first failed operation, and deployment keeps
   failure receipts privately instead of discarding nonzero probe output.
   No share permissions, NAS configuration, or kernel settings were changed.
+- OpenClaw-image UID 1000 probes independently passed Desktop/Documents (2ms
+  each) but reproduced ENOENT after rename and ENOTEMPTY cleanup on BOTH NAS
+  roots (25/31ms to failure). The identical file lifecycle passes directly on
+  macOS (34/40ms), isolating the failure to the container/host SMB mount path.
+  All identified empty probe directories were removed from the host; no user
+  files were deleted. Installed Apple Container CLI 1.3.1 has no SMB driver flag;
+  direct guest SMB remains an upstream feature request:
+  https://github.com/apple/container/issues/1911 . Do not change kernels or NAS
+  security settings as an unreviewed workaround.
+- Actual container-side authenticated host-tool probes passed create/read/edit/read
+  on both NAS shares for both agents (0.23–0.31s). Temporary files/directories
+  were cleaned up on the Mac; no user files changed. Host tools therefore offer
+  a working NAS path while direct mounts remain unsafe. OpenClaw's current
+  credential resolves to effective host identity `hermes`, confirming the
+  previously documented alias debt; distinct identity/grant routing still needs
+  repair. `scripts/verify-host-nas.py` reports that distinction explicitly.
+- Latest full root regression: **3,651 passed, 11 skipped**, one audioop
+  deprecation, 109.88s, seed `20260906`. Monitoring remained active. The added NAS
+  helper subsequently passed its focused target/identity guards and live checks;
+  this is not an upstream/browser/release certification.
 
 ## Deployment boundary
 
-First-phase adapter/bridge fixes are committed as `d7ef098` but not deployed yet.
+Roundtable fixes through `d53b0f5` are deployed, including its native Hermes
+client, authenticated legacy ingress and truthful unsupported cancellation.
+The scoped bridge/A2A fixes and remaining Jaeger/OpenClaw adapter changes are
+committed but not deployed. Supervisor source fixes are also staged, not loaded.
 The Hermes native API service is live inside the existing container on port 8645,
 authenticated by a private credential and without a published Mac host port.
-The OpenClaw pairing state is live, but its native WebUI feature flag remains unchanged. Do not claim the
-current WebUI has received the staged fixes until restart/deploy tests pass.
-No private workspace mounts or existing sessions were changed in this phase.
+OpenClaw pairing is live; its native WebUI feature flag remains disabled pending
+approval verification. Workspace expansion rolled back; originals retain their
+GitHub-only managed mount additions. Existing user conversations were not
+rewritten; live tests created labeled verification sessions.
 
 Before deployment: record the active commit/image/config backups; verify no
 wanted run is active; use explicit service targets; preserve rollback containers;
