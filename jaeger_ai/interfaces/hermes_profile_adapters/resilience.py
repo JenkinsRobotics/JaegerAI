@@ -4,6 +4,14 @@ import math
 import threading
 import time
 import urllib.error
+import subprocess
+
+
+class ClassifiedError(RuntimeError):
+    """An adapter-owned outcome category, distinct from response prose."""
+    def __init__(self, category, message):
+        super().__init__(message)
+        self.error_category = category
 
 
 def timeout_setting(name, default=300.0):
@@ -15,6 +23,10 @@ def timeout_setting(name, default=300.0):
 
 
 def failure_category(exc):
+    if isinstance(exc, ClassifiedError):
+        return exc.error_category
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "timeout"
     if isinstance(exc, urllib.error.HTTPError):
         return f"http_{exc.code}"
     if isinstance(exc, urllib.error.URLError):

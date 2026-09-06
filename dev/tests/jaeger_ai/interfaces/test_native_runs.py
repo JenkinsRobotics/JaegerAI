@@ -49,6 +49,7 @@ def test_cancellation_unblocks_approval_and_does_not_complete_late(tmp_path):
     answers = []
     def backend(run, workspace):
         answers.append(run.request_approval("test"))
+        run.cancel_confirmed = True
         return "Late answer"
     runs = Runs(tmp_path, backend)
     info = runs.start("session", "hello")
@@ -78,7 +79,9 @@ def test_same_session_busy_until_native_turn_exits(tmp_path):
         assert run.status == "cancelling"
     finally:
         release.set()
-    wait_for(lambda: run.status == "cancelled")
+    wait_for(lambda: run.status == "completed")
+    assert not run.snapshot()["cancellation_confirmed"]
+    assert run.output == "done"  # Native completion won; do not invent an abort.
 
 
 def test_restart_keeps_receipt_never_replays_work(tmp_path):

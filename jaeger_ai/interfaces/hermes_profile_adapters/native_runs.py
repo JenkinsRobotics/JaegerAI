@@ -37,6 +37,7 @@ class Run:
         self.message = message
         self.condition = threading.Condition(threading.RLock())
         self.cancelled = threading.Event()
+        self.cancel_confirmed = False
         self.cancel_native = None
         self.status = "running"
         self.events = []
@@ -48,6 +49,8 @@ class Run:
         with self.condition:
             return {"run_id": self.id, "session_id": self.session,
                     "status": self.status, "output": self.output,
+                    "cancellation_requested": self.cancelled.is_set(),
+                    "cancellation_confirmed": self.cancel_confirmed,
                     "pending_approval_ids": list(self.pending),
                     "last_event_id": f"{self.id}:{len(self.events)}"}
 
@@ -143,15 +146,17 @@ class Runs:
     def _worker(self, run, workspace):
         try:
             if run.cancelled.is_set():
+                run.cancel_confirmed = True  # No native dispatch took place.
                 run.emit("run.cancelled")
                 return
             answer = self.backend(run, workspace)
-            if run.cancelled.is_set():
+            if run.cancel_confirmed:
                 run.emit("run.cancelled")
             else:
                 if answer and not run.output:
                     run.emit("message.delta", delta=answer)
-                run.emit("run.completed", output=answer or run.output)
+                run.emit("run.completed", output=answer or run.output,
+                         cancellation_requested=run.cancelled.is_set(), cancellation_confirmed=False)
         except Exception as exc:
             # A disconnect is not proof the native runtime stopped, even if a
             # cancel was requested. Keep that distinction in the failure.
@@ -315,7 +320,8 @@ def jaeger_turn(run, workspace=None):
                                     choices=tuple(frame.get("options") or ["once", "deny"]))
 
     result = bridge.turn(run.message, run.session, event, approval, turn_id=run.id, workspace=workspace)
-    if result.get("error") and not run.cancelled.is_set():
+    run.cancel_confirmed = bool(result.get("cancelled"))
+    if result.get("error") and not run.cancel_confirmed:
         raise RuntimeError(result["error"])
     return result.get("text") or ""
 
