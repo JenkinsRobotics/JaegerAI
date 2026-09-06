@@ -95,3 +95,20 @@ def test_provision_roundtable_preserves_model_comments_and_existing_key(tmp_path
     setup['configure'](tmp_path, profiles=['roundtable'])
     assert config.read_text() == first
     assert config.with_name('config.before-native-runs.yaml').read_text() == original
+
+
+@pytest.mark.parametrize('exists,code', [(True, 501), (False, 404)])
+def test_legacy_cancel_never_claims_native_work_stopped(api, exists, code):
+    base, _ = api
+    rid = 'cancel-verification'
+    if exists:
+        with roundtable._runs_lock:
+            roundtable._runs[rid] = {'status': 'running'}
+    try:
+        request = Request(base + f'/v1/runs/{rid}/cancel', data=b'{}', headers={
+            'Authorization': 'Bearer roundtable-secret', 'Content-Type': 'application/json'})
+        with pytest.raises(HTTPError) as error: urlopen(request, timeout=3)
+        assert error.value.code == code
+        if exists: assert roundtable._runs[rid]['status'] == 'running'
+    finally:
+        with roundtable._runs_lock: roundtable._runs.pop(rid, None)

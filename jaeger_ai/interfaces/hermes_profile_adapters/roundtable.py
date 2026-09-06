@@ -544,8 +544,11 @@ class RoundtableHandler(BaseHTTPRequestHandler):
         elif re.match(r"^/v1/runs/([\w-]+)/cancel$", self.path):
             run_id = self.path.split("/")[-2]
             with _runs_lock:
-                if run_id in _runs: _runs[run_id]["status"] = "cancelled"
-            self._send_json(200, {"run_id": run_id, "status": "cancelled"})
+                exists = run_id in _runs
+            self._send_json(501 if exists else 404, {
+                'error': 'Legacy Roundtable cannot confirm native cancellation; members may still be running.' if exists else 'Run not found',
+                'error_category': 'unsupported_control' if exists else 'not_found',
+            })
         else:
             self._send_json(404, {"error": "not found"})
 
