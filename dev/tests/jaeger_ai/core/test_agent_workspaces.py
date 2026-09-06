@@ -235,6 +235,24 @@ def test_write_probe_cleanup_does_not_mask_failed_operation(monkeypatch, tmp_pat
     assert error.value.cleanup_error == 'OSError'
 
 
+@pytest.mark.parametrize('target', [
+    '/Volumes/Jenkins_Robotics', '/Users/matthewjenkins/Documents',
+    '/Volumes/Personal-Drive/.jaeger-mcp-probe-' + 'a' * 32 + '/../user-file',
+])
+def test_host_nas_probe_refuses_non_probe_targets(target):
+    with pytest.raises(ValueError): script('verify-host-nas').validate_path(target)
+
+
+def test_host_nas_probe_accepts_only_exact_scoped_directory():
+    target = '/Volumes/Jenkins_Robotics/.jaeger-mcp-probe-' + 'a' * 32
+    assert script('verify-host-nas').validate_path(target) == target
+
+
+def test_host_nas_probe_refuses_unknown_identity_before_reading_credentials():
+    with pytest.raises(ValueError, match='role'):
+        script('verify-host-nas').check('unknown', '/Volumes/Jenkins_Robotics/.jaeger-mcp-probe-' + 'a' * 32)
+
+
 def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):
     installer = script("setup-agent-workspaces")
     home, repo, backup = tmp_path / "home", tmp_path / "repo", tmp_path / "backup"
