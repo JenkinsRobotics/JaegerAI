@@ -17,7 +17,7 @@ metadata:
     - deep-think
     - writing-plans
     - subagent-driven-development
-    version: 1.0.0
+    version: 1.1.0
     platforms:
     - linux
     - macos
@@ -69,6 +69,20 @@ When a request mixes URGENT and LATER work:
 A card alone does NOT hand work to the strong model. For a big build/fix that
 needs the Deep Think coder model, ALSO call `propose_deep_think_task(description=…)`
 — that's the actual handoff; the board card just tracks it.
+
+## IDLE TICKS (the most common use — get this right)
+- If `board_view()` shows no `ready`/`in_progress` cards, the tick is DONE: reply
+  one line ("board clear — N backlog awaiting approval, M blocked on operator")
+  and STOP. Do NOT log a per-tick note, do NOT re-poll, and do NOT work `backlog`
+  cards awaiting operator approval — they are not pickup work.
+- Budget: an idle tick is 1-3 tool calls; a filing turn is one `board_add` per
+  card plus the confirmation. If a board turn is heading past ~6 calls, you are
+  doing work the board did not ask for.
+
+## LARGE BOARDS
+- `board_view()` returns FULL card text, including long notes/results — payloads
+  can reach hundreds of KB. Filter with `column=`/`tag=` first. If the result is
+  truncated, read the `artifact_path` from the hint instead of re-calling.
 
 ## ERROR HATCH
 - `board_move`/`board_update`/`board_delete` returns "no card <id>" -> you used a
