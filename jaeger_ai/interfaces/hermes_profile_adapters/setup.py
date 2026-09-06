@@ -41,6 +41,7 @@ WORKSPACE_IDENTITIES = ("jaeger", "hermes", "openclaw")
 
 WEBUI_WORKSPACES = (
     ("/workspace", "General"),
+    ("/mnt/host/GitHub/JaegerAI", "JaegerAI (live Mac repo)"),
     ("/mnt/host/GitHub", "GitHub"),
     ("/mnt/host/Desktop", "Desktop"),
     ("/mnt/host/Documents", "Documents"),
@@ -102,8 +103,12 @@ def _configure_webui_workspaces(home: Path | None = None) -> list[Path]:
     """Publish the shared container paths in every profile's workspace tab."""
     home = (home or Path.home()).expanduser().resolve()
     written: list[Path] = []
-    for profile in SERVICES:
-        path = home / ".hermes" / "profiles" / profile / "webui_state" / "workspaces.json"
+    profile_homes = [home / ".hermes"] + [home / ".hermes" / "profiles" / profile for profile in SERVICES]
+    for profile_home in profile_homes:
+        # This deployment sets HERMES_WEBUI_STATE_DIR to the default home.
+        # Only named profiles use a webui_state subdirectory.
+        state_dir = profile_home if profile_home == home / ".hermes" else profile_home / "webui_state"
+        path = state_dir / "workspaces.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
         if not isinstance(existing, list):

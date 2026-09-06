@@ -1,5 +1,10 @@
 # Roundtable / native adapter repair — 2026-09-06
 
+Follow-up: [live container workspaces and Mac connectivity](integrations/agent_workspaces/README.md)
+now provides direct read/write GitHub mounts and authenticated live host inventory
+to Hermes and OpenClaw. The earlier container-mirror limitation below is superseded
+for `/mnt/host/GitHub/JaegerAI`; see the follow-up for remaining privacy approvals.
+
 Scope: defects reproduced from WebUI session `d51f19429096` and its attached
 repair prompt. All implementation changes are in this repository. No model
 selections, credentials, profile names, ports, container mounts, or launchd

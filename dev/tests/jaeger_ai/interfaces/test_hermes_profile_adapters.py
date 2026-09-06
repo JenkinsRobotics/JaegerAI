@@ -294,7 +294,7 @@ def test_setup_adds_shared_workspace_roots_without_erasing_existing_grants(tmp_p
 def test_setup_publishes_same_workspace_tab_catalog_for_every_profile(tmp_path):
     paths = setup._configure_webui_workspaces(tmp_path)
 
-    assert len(paths) == 3
+    assert len(paths) == 4
     expected = [
         {"path": path, "name": name}
         for path, name in setup.WEBUI_WORKSPACES

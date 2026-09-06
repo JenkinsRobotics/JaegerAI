@@ -11,12 +11,19 @@ script checks patch applicability before applying it. Build that directory's
 Dockerfile for a fresh image. Do not build an unpatched donor checkout.
 
 For the incremental dependency image, build from the printed staging directory:
-`container build -f Containerfile.jaeger -t hermes-webui:jaeger-ollama-hosts-verified-20260904 .`
+`container build -f Containerfile.jaeger -t hermes-webui:jaeger-mac-workspaces-20260906 .`
 The tar overlay and build-time assertions guard against incomplete directory
 copies in the Apple Container build context. Compare hashes in the resulting
 image before replacing a running container. The live container also has this
 overlay in `/apptoo`; stop/start preserves it, but recreation must use the
 verified image or reapply the overlay.
+
+The September 6 overlay also installs `jaeger_agent_compat.py` for WebUI-created
+Hermes agents. It prevents the Ollama GLM cloud lane from misclassifying complete
+unpunctuated/list answers as truncated and replaying them four times. Genuine
+provider `length` responses retain the existing recovery behavior. See
+[Mac/workspace deployment notes](../agent_workspaces/README.md) for the active
+containers, tests, rollback, and remaining macOS privacy approvals.
 
 ## Verified September 4, 2026
 

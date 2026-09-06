@@ -46,6 +46,16 @@ except Exception as e:
 # 2. Import the donor capability MCP server
 import host_capability_mcp_server
 
+
+@host_capability_mcp_server.mcp.tool()
+def host_environment() -> dict:
+    """Read live Mac identity, canonical repo mapping, and caller workspace grants."""
+    from jaeger_ai.core.runtime.host_environment import snapshot
+    grant = host_capability_mcp_server._require("capabilities.inspect")
+    result = snapshot([str(root) for root in host_capability_mcp_server._roots(grant)])
+    host_capability_mcp_server._audit("capabilities.inspect", outcome="allowed")
+    return result
+
 # 3. Wrap service_status to probe configured network Ollama and report clean errors
 try:
     _original_service_status = host_capability_mcp_server.service_status
