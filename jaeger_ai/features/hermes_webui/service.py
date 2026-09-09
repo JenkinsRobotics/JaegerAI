@@ -70,6 +70,7 @@ def _load_containers_config(instance: str | None = None) -> dict[str, Any]:
     layout = InstanceLayout(root=resolve_instance_dir(name))
     if not layout.exists():
         return {
+            "engine": cs.DEFAULT_CONTAINER_CLI,
             "use_hermes_webui": False,
             "hermes_webui_container": DEFAULT_CONTAINER,
             "hermes_webui_port": DEFAULT_WEBUI_PORT,
@@ -83,6 +84,7 @@ def _load_containers_config(instance: str | None = None) -> dict[str, Any]:
     cfg = load_yaml(layout.config_path, Config)
     containers = getattr(cfg, "containers", None)
     return {
+        "engine": str(getattr(containers, "engine", cs.DEFAULT_CONTAINER_CLI)),
         "use_hermes_webui": bool(getattr(containers, "use_hermes_webui", False)),
         "hermes_webui_container": str(
             getattr(containers, "hermes_webui_container", DEFAULT_CONTAINER)
@@ -190,6 +192,41 @@ class HermesWebUIService:
             vendor_webui_port=self.vendor_webui_port,
         )
 
+    def browser_url(self) -> str:
+        """Resolve the selected instance's configured deployment on each call.
+
+        Container ports in settings are published host ports; inspection maps
+        them to the current private IP and container port. No discovered IP is
+        persisted, so a container recreation cannot leave a stale URL behind.
+        """
+        if not self.enabled:
+            return self.urls().vendor_ui
+        binary = os.environ.get("CONTAINER_CLI") or self._cfg.get("engine") or cs.resolve_container_cli()
+        try:
+            proc = subprocess.run(
+                [binary, "inspect", self.container_name],
+                capture_output=True, text=True, timeout=5,
+            )
+            if proc.returncode == 0:
+                info = json.loads(proc.stdout)[0]
+                status = info["status"]
+                if cs.normalize_state(status.get("state")) == "running":
+                    from ipaddress import ip_interface
+                    port = self.webui_port
+                    for published in info.get("configuration", {}).get("publishedPorts", []):
+                        if published.get("hostPort") == port and published.get("proto", "tcp") == "tcp":
+                            port = int(published["containerPort"])
+                            break
+                    for network in status.get("networks", []):
+                        if network.get("ipv4Address"):
+                            address = ip_interface(network["ipv4Address"]).ip
+                            return f"http://{address}:{port}/"
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
+            pass
+        # Remain in configured container mode if it is stopped/unavailable.
+        # Health checks will report that honestly, rather than switching UIs.
+        return self.urls().container_ui
+
     def status(self) -> dict[str, Any]:
         urls = self.urls()
         container_info = cs.container_status(self.container_name)
@@ -202,7 +239,8 @@ class HermesWebUIService:
             )
         adapter = self._adapter_status()
         vendor = self._vendor_status()
-        container_health = _http_ok(urls.container_ui.rstrip("/") + "/", timeout=5.0)
+        container_url = self.browser_url() if self.enabled else urls.container_ui
+        container_health = _http_ok(container_url, timeout=5.0)
         adapter_health = _http_ok(urls.adapter.rstrip("/") + "/api/health")
         if not adapter_health.get("ok"):
             adapter_health = _http_ok(urls.adapter)
@@ -213,7 +251,7 @@ class HermesWebUIService:
                 "id": self.container_name,
                 "found": bool(container_info.get("found")),
                 "state": container_state,
-                "url": urls.container_ui,
+                "url": container_url,
                 "health": container_health,
             },
             "adapter": {

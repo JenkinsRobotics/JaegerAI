@@ -21,6 +21,9 @@ SWIFT_QUERY_SUPPORT = {
     "list_credentials": "bridge_only", "skill_usage": "bridge_only",
     "board": "dedicated", "heartbeat": "bridge_only", "cron": "bridge_only",
     "list_schedules": "bridge_only", "turn_status": "bridge_only",
+    "dispatcher_memory": "bridge_only",
+    "dispatcher_connection": "dedicated",
+    "dispatcher_conversation": "bridge_only",
 }
 
 SWIFT_COMMAND_SUPPORT = {

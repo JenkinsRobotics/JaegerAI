@@ -34,6 +34,8 @@ import os
 import queue
 import sys
 import threading
+import time
+from collections import deque
 from ctypes import POINTER, byref, c_int, c_uint32, c_void_p, sizeof
 from typing import Any, Optional
 
@@ -199,6 +201,9 @@ class PersistentKokoroPlayer:
                 f"unknown audio backend {backend!r}; "
                 f"expected one of {self.SUPPORTED_BACKENDS}"
             )
+        self._amplitude = 0.0
+        self._envelope = deque()
+        self._envelope_lock = threading.Lock()
         self.backend = backend
         self.samplerate = int(samplerate)
         self.channels = int(channels)
@@ -323,6 +328,7 @@ class PersistentKokoroPlayer:
         """Stop + close the stream.  Idempotent.  Safe to call at any
         point on the main thread; the audio callback won't fire after
         ``stop()`` returns."""
+        self._clear_amplitude()
         if self.backend == "avaudio":
             self._close_avaudio()
             return
@@ -352,6 +358,7 @@ class PersistentKokoroPlayer:
         with ``play()`` so the next enqueue can schedule cleanly without
         cycling the engine.
         """
+        self._clear_amplitude()
         if self.backend == "avaudio":
             if self._player is not None:
                 try:
@@ -386,7 +393,27 @@ class PersistentKokoroPlayer:
 
     # ── callback ──────────────────────────────────────────────────────
 
+    @property
+    def amplitude(self) -> float:
+        """Output RMS; AVAudio uses the scheduled PCM envelope (~30 Hz)."""
+        if self.backend != "avaudio":
+            return self._amplitude
+        now = time.monotonic()
+        with self._envelope_lock:
+            while self._envelope and self._envelope[0][1] <= now:
+                self._envelope.popleft()
+            return self._envelope[0][2] if self._envelope else 0.0
+
+    def _clear_amplitude(self) -> None:
+        self._amplitude = 0.0
+        with self._envelope_lock:
+            self._envelope.clear()
+
     def _cb(self, outdata, frames: int, _t, _s) -> None:
+        self._fill_output(outdata, frames, _t, _s)
+        self._amplitude = float(np.sqrt(np.mean(np.square(outdata)))) if outdata.size else 0.0
+
+    def _fill_output(self, outdata, frames: int, _t, _s) -> None:
         """Audio thread: pull samples from the queue, write to
         ``outdata``.  Fills remainder with silence on underrun so the
         stream stays alive and ready for the next ``enqueue``."""
@@ -478,6 +505,15 @@ class PersistentKokoroPlayer:
                     pass
                 if self._drained_count >= self._scheduled_count:
                     self._drained.set()
+
+        with self._envelope_lock:
+            cursor = max(time.monotonic(), self._envelope[-1][1] if self._envelope else 0.0)
+            step = max(1, self.samplerate // 30)
+            for offset in range(0, n, step):
+                window = audio[offset:offset + step]
+                end = cursor + len(window) / self.samplerate
+                self._envelope.append((cursor, end, float(np.sqrt(np.mean(np.square(window))))))
+                cursor = end
 
         self._pending_callbacks.append(_on_done)
         try:

@@ -31,36 +31,57 @@ def sanitize_fts_query(query: str) -> str:
     return " AND ".join(f'"{t}"*' for t in tokens)
 
 
+def _source(conn: sqlite3.Connection) -> tuple[str, str]:
+    """Return the source table and its normalized message projection."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='episodic'").fetchone():
+        return "episodic", (
+            "SELECT id * 2 AS rowid, session_key AS session_id, 'user' AS role, "
+            "user AS content FROM episodic WHERE user IS NOT NULL UNION ALL "
+            "SELECT id * 2 + 1 AS rowid, session_key AS session_id, 'assistant' AS role, "
+            "answer AS content FROM episodic WHERE answer IS NOT NULL"
+        )
+    return "turns", "SELECT rowid, session_id, role, content FROM turns"
+
+
 def ensure_fts5_schema(conn: sqlite3.Connection) -> bool:
-    """Initialize SQLite FTS5 virtual table and triggers on state.db if supported."""
+    """Index real conversation storage, including edits and retention deletes.
+
+    The index is derived data. Build once, then maintain it transactionally
+    with the source rows. A savepoint avoids committing the caller's writes.
+    """
+    table, projection = _source(conn)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+        return False
+    conn.execute("SAVEPOINT jaeger_fts_init")
     try:
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
-                session_id UNINDEXED,
-                role,
-                content,
-                tokenize='unicode61'
-            );
-        """)
-        # Triggers to keep FTS table in sync with primary turns table if present
-        conn.execute("""
-            CREATE TRIGGER IF NOT EXISTS trg_turns_ai_fts AFTER INSERT ON turns BEGIN
-                INSERT INTO turns_fts(rowid, session_id, role, content)
-                VALUES (new.rowid, new.session_id, new.role, new.content);
-            END;
-        """)
-        # Populate FTS index from existing turns if any exist
-        try:
-            conn.execute("""
-                INSERT OR IGNORE INTO turns_fts(rowid, session_id, role, content)
-                SELECT rowid, session_id, role, content FROM turns;
-            """)
-        except sqlite3.Error:
-            pass
-        conn.commit()
+        conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5("
+                     "session_id UNINDEXED, role, content, tokenize='unicode61')")
+        marker = f"trg_{table}_ad_fts_v2"
+        ready = conn.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?", (marker,)).fetchone()
+        if not ready:
+            conn.execute("DROP TRIGGER IF EXISTS trg_turns_ai_fts")
+            if table == "episodic":
+                insert = (
+                    "INSERT INTO turns_fts(rowid, session_id, role, content) "
+                    "SELECT new.id*2, new.session_key, 'user', new.user WHERE new.user IS NOT NULL; "
+                    "INSERT INTO turns_fts(rowid, session_id, role, content) "
+                    "SELECT new.id*2+1, new.session_key, 'assistant', new.answer WHERE new.answer IS NOT NULL;"
+                )
+                delete = "DELETE FROM turns_fts WHERE rowid IN (old.id*2, old.id*2+1);"
+            else:
+                insert = ("INSERT INTO turns_fts(rowid, session_id, role, content) "
+                          "VALUES(new.rowid, new.session_id, new.role, new.content);")
+                delete = "DELETE FROM turns_fts WHERE rowid=old.rowid;"
+            for suffix, event, body in (("ai", "INSERT", insert), ("au", "UPDATE", delete+insert), ("ad", "DELETE", delete)):
+                conn.execute(f"CREATE TRIGGER trg_{table}_{suffix}_fts_v2 AFTER {event} ON {table} BEGIN {body} END")
+            conn.execute("DELETE FROM turns_fts")
+            conn.execute("INSERT INTO turns_fts(rowid, session_id, role, content) " + projection)
+        conn.execute("RELEASE jaeger_fts_init")
         return True
-    except sqlite3.Error as e:
-        logger.warning(f"FTS5 initialization notice (may not be supported in host sqlite): {e}")
+    except sqlite3.Error as exc:
+        conn.execute("ROLLBACK TO jaeger_fts_init")
+        conn.execute("RELEASE jaeger_fts_init")
+        logger.warning("Full-text index unavailable; using conversation scan: %s", exc)
         return False
 
 
@@ -113,18 +134,19 @@ class SQLiteSearchEngine:
                 logger.warning(f"FTS5 MATCH query failed, falling back to LIKE: {e}")
 
         # Fallback LIKE search if FTS5 not enabled or MATCH fails
+        _, projection = _source(self.conn)
         like_pattern = f"%{query}%"
         if session_id:
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(f"""
                 SELECT rowid, session_id, role, content
-                FROM turns
+                FROM ({projection})
                 WHERE content LIKE ? AND session_id = ?
                 LIMIT ?
             """, (like_pattern, session_id, limit))
         else:
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(f"""
                 SELECT rowid, session_id, role, content
-                FROM turns
+                FROM ({projection})
                 WHERE content LIKE ?
                 LIMIT ?
             """, (like_pattern, limit))

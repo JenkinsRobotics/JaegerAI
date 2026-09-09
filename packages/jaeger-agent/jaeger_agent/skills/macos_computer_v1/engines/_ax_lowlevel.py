@@ -61,13 +61,13 @@ def is_available() -> tuple[bool, str]:
     """``(ready, detail)`` — PyObjC importable *and* Accessibility granted.
 
     PyObjC is an optional backend registered with
-    :mod:`jaeger_os.core.models.lazy_deps` as ``macos.background``. When
+    :mod:`jaeger_agent.util.lazy_deps` as ``macos.background``. When
     ``security.allow_lazy_installs`` is on, a missing PyObjC is installed
     automatically on first use; otherwise ``detail`` carries the exact
     ``pip install`` to run. The Accessibility-permission check cannot be
     automated — only the user can grant it."""
     try:
-        from jaeger_ai.core.models import lazy_deps
+        from jaeger_agent.util import lazy_deps
         lazy_deps.ensure("macos.background")
     except Exception as exc:  # noqa: BLE001 — FeatureUnavailable or import path
         return False, str(exc)

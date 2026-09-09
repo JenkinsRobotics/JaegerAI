@@ -62,6 +62,9 @@ def test_each_native_member_streams_before_finishing_and_has_exactly_one_discuss
         release.set()
         finished(service, parent.id)
     assert parent.status == 'completed'
+    assert '## Round 1 — Everyone Answers' in parent.output
+    assert all('### ' + name in parent.output for name in ('Jaeger', 'Hermes', 'OpenClaw'))
+    assert '## Round 2 — Discussion' in parent.output
     attempts = service.store.attempts(parent.id)
     assert [a['phase'] for a in attempts].count('discussion') == 3
     assert [a['phase'] for a in attempts].count('synthesis') == 1

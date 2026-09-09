@@ -225,6 +225,129 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    @Published private(set) var dispatcherConnected = false
+    @Published private(set) var dispatcherStatus = "Connecting to Dispatcher…"
+    @Published private(set) var dispatcherApproval: BridgeRequest?
+    @Published private(set) var dispatcherReports: [DispatcherClient.Report] = []
+    @Published private(set) var dispatcherRun: DispatcherClient.Run?
+    private var dispatcherClient: DispatcherClient?
+    private var messageIDs: [String: UUID] = [:]
+    private var answeringApprovalID: String?
+    private var dispatcherSending = false
+    private var uncertainDispatcherRequest: (text: String, id: String)?
+    private var dispatcherRefreshing = false
+
+    private func connectedDispatcher() async throws -> DispatcherClient {
+        if !agent.isConnected { await agent.tryConnect() }
+        if let client = dispatcherClient { return client }
+        let result = await agent.query("dispatcher_connection")
+        guard result.ok, let data = result.json,
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: String],
+              let base = object["base_url"], let url = URL(string: base),
+              let key = object["api_key"] else {
+            throw DispatcherClient.Failure(message: "Connect the Jaeger instance and its profile gateway first")
+        }
+        let client = DispatcherClient(baseURL: url, apiKey: key)
+        dispatcherClient = client
+        return client
+    }
+
+    func refreshDispatcher() async {
+        guard sessionKey == "dispatcher", !dispatcherRefreshing else { return }
+        dispatcherRefreshing = true
+        defer { dispatcherRefreshing = false }
+        do {
+            let client = try await connectedDispatcher()
+            let snapshot = try await client.snapshot()
+            guard sessionKey == "dispatcher" else { return }
+            dispatcherRun = snapshot.run
+            dispatcherReports = snapshot.reports ?? []
+            dispatcherConnected = true
+            if let run = snapshot.run, run.status != "completed" {
+                dispatcherStatus = "Dispatcher — " + run.status + (run.error.map { ": " + $0 } ?? "")
+            } else { dispatcherStatus = "Dispatcher · synced with WebUI" }
+            var rows = snapshot.messages.map { row -> ChatMessage in
+                let id = messageIDs[row.id] ?? UUID()
+                messageIDs[row.id] = id
+                return ChatMessage(id: id, author: row.role == "user" ? .user : .assistant,
+                                   timestamp: Date(timeIntervalSince1970: row.ts), text: row.text)
+            }
+            if let run = snapshot.run, run.active == true, !run.output.isEmpty {
+                let key = "run-" + run.run_id
+                let id = messageIDs[key] ?? UUID(); messageIDs[key] = id
+                rows.append(ChatMessage(id: id, author: .assistant, text: run.output, isStreaming: true))
+            }
+            messages = rows
+            if let request = snapshot.run?.approvals?.first, request.approval_id != answeringApprovalID {
+                dispatcherApproval = BridgeRequest(id: request.approval_id, kind: "approval",
+                                                   prompt: request.description, options: request.choices)
+            } else { dispatcherApproval = nil }
+        } catch {
+            guard sessionKey == "dispatcher" else { return }
+            dispatcherClient = nil
+            dispatcherConnected = false
+            dispatcherStatus = "Connection unavailable — \(error.localizedDescription)"
+        }
+    }
+
+    func controlDispatcher(_ action: String, approval: BridgeRequest? = nil, choice: String? = nil) {
+        guard let run = dispatcherRun else { return }
+        if let approval, action == "approval" {
+            guard answeringApprovalID != approval.id else { return }
+            answeringApprovalID = approval.id
+            dispatcherApproval = nil // Dismissing the sheet must not send a second "deny".
+        }
+        Task {
+            defer { if action == "approval" { answeringApprovalID = nil } }
+            do {
+                let client = try await connectedDispatcher()
+                var body = ["run_id": run.run_id]
+                if let approval { body["approval_id"] = approval.id; body["choice"] = choice }
+                _ = try await client.request(action, body: body)
+                await refreshDispatcher()
+            } catch { dispatcherStatus = error.localizedDescription }
+        }
+    }
+
+    private func sendDispatcher(_ text: String) async -> Bool {
+        guard !dispatcherSending else { return false }
+        dispatcherSending = true
+        isSending = true
+        defer { dispatcherSending = false; isSending = false }
+        let requestID = uncertainDispatcherRequest?.text == text
+            ? uncertainDispatcherRequest!.id
+            : UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        uncertainDispatcherRequest = (text, requestID)
+        do {
+            let client = try await connectedDispatcher()
+            let run = try await client.send(text, requestID: requestID)
+            uncertainDispatcherRequest = nil
+            if ["completed", "failed", "cancelled", "interrupted"].contains(run.status) {
+                await refreshDispatcher()
+                return run.status == "completed"
+            }
+            repeat {
+                await refreshDispatcher()
+                if dispatcherRun?.run_id == run.run_id, dispatcherRun?.active != true { break }
+                if dispatcherStatus.hasPrefix("Connection unavailable") {
+                    dispatcherStatus += ". Work was not resubmitted; reconnect to observe it."
+                    return false
+                }
+                try await Task.sleep(for: .seconds(1))
+            } while sessionKey == "dispatcher"
+            let completed = dispatcherRun?.status == "completed"
+            if completed, TTSManager.shared.autoSpeakEnabled,
+               let output = dispatcherRun?.output, !output.isEmpty {
+                TTSManager.shared.speak(output)
+            }
+            return completed
+        } catch {
+            if composerText.isEmpty { composerText = text }
+            dispatcherStatus = "Send was not confirmed: \(error.localizedDescription). Reconnect to check history before retrying."
+            return false
+        }
+    }
+
     private let agent: AgentBridge
     private var eventToken: UUID?
 
@@ -244,7 +367,7 @@ final class ChatViewModel: ObservableObject {
             .lowercased().prefix(8).description
     }
 
-    init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey()) {
+    init(agent: AgentBridge, sessionKey: String = "dispatcher") {
         self.agent = agent
         self.sessionKey = sessionKey
         // Subscribe to agent events so we can show thinking + tool
@@ -257,6 +380,13 @@ final class ChatViewModel: ObservableObject {
         // Pull the instance's display prefs (activity_trace + separators)
         // once the transport is up. Best-effort — defaults stand on a miss.
         Task { [weak self] in await self?.loadDisplayConfig() }
+        Task { [weak self] in
+            while !Task.isCancelled {
+                guard self != nil else { return }
+                await self?.refreshDispatcher()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     /// True once a config query has answered — used to retry the read on
@@ -380,6 +510,7 @@ final class ChatViewModel: ObservableObject {
     /// names get pretty chips; unknowns fall through silently (they
     /// still show up in NSLog for diagnostics).
     private func handle(event: Event) {
+        guard sessionKey != "dispatcher" else { return }
         switch event.name {
         case "subscribed":
             // The "we're listening now" handshake.  Don't display.
@@ -483,7 +614,8 @@ final class ChatViewModel: ObservableObject {
             await newChat()
             return
         case .stop:
-            agent.cancelTurn()
+            if sessionKey == "dispatcher" { controlDispatcher("cancel") }
+            else { agent.cancelTurn() }
             appendSystem("stop requested")
             return
         case .steer(let guidance):
@@ -502,13 +634,19 @@ final class ChatViewModel: ObservableObject {
 
     /// Queue behind an in-flight turn, or run immediately.
     private func enqueueOrRun(_ prompt: String, display: String) async {
+        if isSending && sessionKey == "dispatcher" {
+            if composerText.isEmpty { composerText = display }
+            dispatcherStatus = "Dispatcher is working — wait or use Stop; your draft is retained"
+            return
+        }
         if isSending {
             pendingSends.append(prompt)
             messages.append(ChatMessage(
                 author: .user, timestamp: Date(), text: display))
             return
         }
-        _ = await runTurn(prompt, appendUserBubble: true, displayText: display)
+        let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display)
+        if sessionKey == "dispatcher" && !succeeded { pendingSends.removeAll(); return }
         while !pendingSends.isEmpty {
             let next = pendingSends.removeFirst()
             _ = await runTurn(next, appendUserBubble: false)
@@ -534,6 +672,7 @@ final class ChatViewModel: ObservableObject {
     private func runTurn(_ trimmed: String, appendUserBubble: Bool,
                          displayText: String? = nil) async -> Bool {
         if !displayConfigLoaded { await loadDisplayConfig() }
+        if sessionKey == "dispatcher" { return await sendDispatcher(trimmed) }
 
         let turnStarted = Date()
         if appendUserBubble {
@@ -604,23 +743,13 @@ final class ChatViewModel: ObservableObject {
 
     // MARK: - New Chat / History
 
-    /// "New Chat": mint a fresh session id, evict the old one on the
-    /// Python side (best-effort — a failed command just means the old
-    /// key's in-memory state lingers, harmless), and reset the local
-    /// transcript. Always leaves the view model on a NEW key, even if
-    /// the bridge call fails — the operator's "new chat" intent must not
-    /// silently no-op just because the pipe hiccuped.
+    /// Start a separate native chat without evicting the Dispatcher or any
+    /// previously loaded conversation. History remains available for return.
     func newChat() async {
         isSwitchingSession = true
         defer { isSwitchingSession = false }
-        let result = await agent.command("new_session", args: ["old_id": sessionKey])
-        var newKey = Self.mintSessionKey()
-        if result.ok, let data = result.json,
-           let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-           let id = obj["id"] as? String, !id.isEmpty {
-            newKey = id
-        }
-        sessionKey = newKey
+        sessionKey = Self.mintSessionKey()
+        dispatcherApproval = nil
         messages.removeAll()
         contextUsage = nil
     }
@@ -642,6 +771,11 @@ final class ChatViewModel: ObservableObject {
     /// untouched) on a bridge failure.
     @discardableResult
     func loadSession(_ id: String) async -> Bool {
+        if id == "dispatcher" {
+            sessionKey = id
+            await refreshDispatcher()
+            return true
+        }
         guard id != sessionKey else { return true }   // already viewing it
         isSwitchingSession = true
         defer { isSwitchingSession = false }

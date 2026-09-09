@@ -27,12 +27,12 @@ def check_roundtable_answers(text, checkword, first_turn):
         raise RuntimeError("Roundtable contains a member failure; inspect the verification session")
 
 
-def verify(base, profile):
+def verify(base, profile, model=None):
     started = time.monotonic()
-    with request(base, profile, "/api/session/new", {
-        "workspace": "/workspace", "profile": profile, "worktree": False,
-        "model": "@ollama-rack:glm-5.3-flash:cloud",
-    }) as response:
+    body = {"workspace": "/workspace", "profile": profile, "worktree": False}
+    if model:
+        body["model"] = model
+    with request(base, profile, "/api/session/new", body) as response:
         session = json.load(response)["session"]["session_id"]
     checkword = f"{profile.upper()}-{session[:6]}"
     with request(base, profile, "/api/session/rename", {
@@ -86,7 +86,8 @@ def verify(base, profile):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
+    parser.add_argument("--model", help="Optional model override; otherwise preserve each profile's default")
     parser.add_argument("--profiles", nargs="+", default=["default", "jaeger", "openclaw", "roundtable"])
     args = parser.parse_args()
     with ThreadPoolExecutor(max_workers=len(args.profiles)) as pool:
-        list(pool.map(lambda profile: verify(args.url, profile), args.profiles))
+        list(pool.map(lambda profile: verify(args.url, profile, args.model), args.profiles))

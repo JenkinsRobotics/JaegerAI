@@ -1068,15 +1068,13 @@ def create_instance(
     # without memorising the path.
     _write_env_file(layout.root, name)
     if user_name or custom_prime_directive:
-        try:
-            from jaeger_ai.core.memory.facts import FactsStore
-            fdb = FactsStore(layout.memory_dir / "facts.db")
-            if user_name and user_name.strip():
-                fdb.add(f"The operator's name is {user_name.strip()}.")
-            if custom_prime_directive and custom_prime_directive.strip():
-                fdb.add(f"Custom Prime Directive: {custom_prime_directive.strip()}.")
-        except Exception:
-            pass
+        from jaeger_agent.memory.sqlite_store import seed_facts
+        facts = {}
+        if user_name and user_name.strip():
+            facts["name"] = user_name.strip()
+        if custom_prime_directive and custom_prime_directive.strip():
+            facts["custom_prime_directive"] = custom_prime_directive.strip()
+        seed_facts(layout, facts)
     if make_default:
         from jaeger_ai.core.instance.instance import write_active_instance
         write_active_instance(name)

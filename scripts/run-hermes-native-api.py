@@ -70,13 +70,43 @@ async def serve(options: dict) -> int:
         await adapter.disconnect()
 
 
+def stop_servers(key_file: Path, port: int) -> int:
+    """Gracefully stop only this user's exact native-API launcher in Linux.
+
+    Apple Container's exec signal forwarding can fail on host termination.
+    Send SIGTERM from inside the container, where the server's asyncio signal
+    handler can close active runs and the listener normally.
+    """
+    script = str(Path(__file__).resolve())
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit() or int(proc.name) == os.getpid():
+            continue
+        try:
+            if proc.stat().st_uid != os.getuid():
+                continue
+            args = (proc / "cmdline").read_bytes().decode().split("\0")
+            if script not in args or "--stop" in args:
+                continue
+            if args[args.index("--port") + 1] != str(port):
+                continue
+            if args[args.index("--key-file") + 1] != str(key_file):
+                continue
+            os.kill(int(proc.name), signal.SIGTERM)
+        except (OSError, ValueError, IndexError, UnicodeError):
+            continue
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--key-file", type=Path, required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8645)
     parser.add_argument("--provision-key", action="store_true", help="Create a private credential, without starting a server")
+    parser.add_argument("--stop", action="store_true", help="Stop this native API inside its container")
     args = parser.parse_args()
+    if args.stop:
+        return stop_servers(args.key_file, args.port)
     if args.provision_key:
         provision_key(args.key_file)
         print("Hermes native API credential ready (not displayed)")

@@ -315,7 +315,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # 13: ``model_picker`` query — Hermes-style two-stage catalog for the
 # windowed ``/model`` overlay (clickable, not a transcript dump).
 # 14: native turn receipts support observation/reconciliation without replay.
-INTEGRATION_CONTRACT_VERSION = 14
+INTEGRATION_CONTRACT_VERSION = 15
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -324,7 +324,8 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
-    "board", "heartbeat", "cron", "list_schedules", "turn_status",
+    "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory",
+    "dispatcher_connection", "dispatcher_conversation",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -461,7 +462,7 @@ def _integration_contract() -> dict[str, Any]:
             "credentials": {"available": True, "owner": "jaeger", "mutable": True,
                             "values_readable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
-            "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
+            "runtime_memory": {"available": True, "owner": "jaeger", "mutable": False},
         },
     }
 
@@ -718,6 +719,21 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         from jaeger_ai.core.skills.service import list_skills
 
         return list_skills(lay)
+    if what == 'dispatcher_memory':
+        from jaeger_agent.memory.memory import list_facts
+        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+        return {'owner': 'jaeger', 'facts': list_facts(),
+                'board': _query('board', {}, boot),
+                'dispatcher': DispatcherStore(lay).overview()}
+    if what == 'dispatcher_conversation':
+        from jaeger_ai.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            raise ValueError('Conversation storage is unavailable')
+        return store.conversation_snapshot('dispatcher')
+    if what == 'dispatcher_connection':
+        from jaeger_ai.interfaces.hermes_profile_adapters.conversation import local_connection
+        return local_connection(lay)
     if what == "get_skill":
         from jaeger_ai.core.skills.service import get_skill
 
@@ -1271,6 +1287,7 @@ class _Ctx:
         # fire-and-forget, not queryable.
         self.busy = False
         self.turn_controls: dict[str, str] = {}
+        self.queued_requests: dict[str, dict[str, Any]] = {}
         self.turn_control_lock = threading.RLock()
         self.tool_output: Any = None
         self.tool_session: str | None = None
@@ -1532,10 +1549,16 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     # Interactive permission approval over the wire (deny on timeout).
     try:
-        from jaeger_os.core.safety.permissions import AllowAllProvider, current_policy
+        from dataclasses import replace
+        from jaeger_os.core.safety.permissions import (
+            AllowAllProvider, current_policy, install_policy,
+        )
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
-            policy.confirmation = BridgeConfirmationProvider(proto, ctx)
+            # The fallback policy is shared by every unbound execution
+            # context. Never turn its deny provider into this connection's
+            # interactive provider: other callers would wait on a dead UI.
+            install_policy(replace(policy, confirmation=BridgeConfirmationProvider(proto, ctx)))
     except Exception:  # noqa: BLE001
         pass
 
@@ -1922,6 +1945,32 @@ def _start_idle_supervisor(proto: TextIO, ctx: _Ctx) -> None:
     ).start()
 
 
+def _cancel_queued_turn(ctx: _Ctx, turn_id: str) -> bool:
+    """Withdraw only work that the bridge worker has not acquired.
+
+    Both dequeue and withdrawal use turn_control_lock. The queued tombstone
+    stays in the queue, but the worker skips it before any slash/tool/model
+    dispatch. Persist the native terminal receipt before acknowledging Stop.
+    """
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    from jaeger_os.contract import protocol
+    with ctx.turn_control_lock:
+        req = ctx.queued_requests.get(turn_id)
+        if req is None or ctx.turn_controls.get(turn_id) != "queued":
+            return False
+        from jaeger_ai.core.runtime.dispatch import normalize_session_key
+        session = normalize_session_key(req.get("session"), default="desktop-app")
+        frame = {**protocol.reply_frame("", "Cancelled before execution", session),
+                 "cancelled": True, "execution_unknown": False}
+        NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
+        req["_cancelled_before_execution"] = True
+        ctx.queued_requests.pop(turn_id, None)
+        ctx.turn_controls.pop(turn_id, None)
+        ctx.session_pending[session] = max(0, ctx.session_pending.get(session, 0) - 1)
+        _emit(req["_out"], frame)
+        return True
+
+
 def _turn_worker(proto: TextIO, ctx: _Ctx,
                  turns: _queue.Queue[dict[str, Any] | None]) -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
@@ -1932,6 +1981,13 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         req = turns.get()
         if req is None:
             return
+        with ctx.turn_control_lock:
+            if req.get("_cancelled_before_execution"):
+                continue
+            acquired_id = str(req.get("turn_id") or "")
+            ctx.queued_requests.pop(acquired_id, None)
+            if acquired_id:
+                ctx.turn_controls[acquired_id] = "active"
         out = req.pop("_out", None) or proto
         text, prompt_error = _request_text(req)
         from jaeger_ai.core.runtime.dispatch import normalize_session_key
@@ -2055,6 +2111,9 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                 with _turn_workspace(ctx, req.get("workspace")):
                     display_text = req.get("display_text") if step == 0 else None
                     voice_kwargs: dict[str, Any] = {"session_key": session}
+                    for field in ("model", "provider"):
+                        if req.get(field):
+                            voice_kwargs[field] = req[field]
                     if display_text is not None:
                         voice_kwargs["display_text"] = str(display_text)
                     def _emit_reasoning(chunk: str, _session: str = session) -> None:
@@ -2119,6 +2178,12 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             # Only the native loop's halt result (or skipped dispatch above)
             # confirms interruption; the control flag alone is merely intent.
             cancelled = result.get("halt_reason") == "interrupted"
+            if session.startswith('focus:') and turn_id:
+                from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+                # Publish from the native runtime before its terminal receipt,
+                # not from a WebUI observer that may disconnect or restart.
+                DispatcherStore(ctx.layout).report(
+                    turn_id, session, final_text, result.get('error'), cancelled=cancelled)
             reply({**protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
@@ -2287,13 +2352,16 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     False, because there ``os._exit`` would take down a host process that
     has its own work left to do.
     """
-    argv = sys.argv[1:] if argv is None else argv
+    argv = list(sys.argv[1:] if argv is None else argv)
+    attach = "--attach" in argv
+    if attach:
+        argv.remove("--attach")
 
     # This module is also probed by installers and integration inventories.
     # Treat help flags as flags, not as instance names; the old behavior
     # silently created an on-disk instance literally named ``--help``.
     if argv and argv[0] in {"-h", "--help"}:
-        print("usage: python -m jaeger_ai.interfaces.bridge [INSTANCE]")
+        print("usage: python -m jaeger_ai.interfaces.bridge [INSTANCE] [--attach]")
         return 0
 
     # The protocol stream is the REAL stdout.  Repoint sys.stdout at
@@ -2330,6 +2398,10 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         try:
             _pids.enter_context(pidfile.acquire(ctx.layout))
         except pidfile.AlreadyRunning as exc:
+            if attach:
+                from jaeger_ai.interfaces.bridge_attach import relay
+
+                return relay(ctx.layout, sys.stdin, proto)
             # kind="locked" is the established contract for "another process
             # holds this instance" — BridgeProcess.swift maps it to
             # .locked and offers attach-or-pick. A novel kind would
@@ -2506,6 +2578,8 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 with ctx.turn_control_lock:
                     if not turn_id:
                         request_turn_cancel()  # Legacy owner UI control.
+                    elif _cancel_queued_turn(ctx, turn_id):
+                        pass
                     elif turn_id in ctx.turn_controls:
                         if ctx.turn_controls[turn_id] == "active":
                             request_turn_cancel(session_key=ctx.tool_session)
@@ -2854,6 +2928,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                             _emit(proto, protocol.reply_frame("", "Duplicate turn id", session))
                             continue
                         ctx.turn_controls[turn_id] = "queued"
+                        ctx.queued_requests[turn_id] = req
                 turns.put(req)
                 if turn_id and not ctx.busy:
                     _emit(proto, protocol.queued_frame(session, 0))

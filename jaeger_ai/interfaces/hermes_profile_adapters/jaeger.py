@@ -215,6 +215,15 @@ mcp_client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
 _native_runs = None
 _native_lock = threading.Lock()
 
+
+def dispatcher_turn(run, workspace=None):
+    from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    store = DispatcherStore(BridgeClient('jaeger').layout)
+    store.repair_projections()
+    run.native_session = store.route(run.session, run.message)
+    return jaeger_turn(run, workspace)
+
 # Initialize on demand. A stopped MCP backend must not prevent the adapter
 # from starting its HTTP listener or recovering when the backend returns.
 
@@ -229,12 +238,84 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
     def native_key(self):
         return profile_key("jaeger")
 
+    def create_native_run(self, body):
+        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        binding = DispatcherStore(BridgeClient('jaeger').layout).overview()['dispatcher_session']
+        if binding and (body.get('session_id') or self.headers.get('X-Hermes-Session-Id')) == binding:
+            body = {**body, 'session_id': 'dispatcher'}
+        return super().create_native_run(body)
+
+    def native_capabilities(self):
+        value = super().native_capabilities()
+        value['features'].update(model_override=True, workspace_override=True,
+                                 structured_input=True, dispatcher=True, focus_sessions=True,
+                                 memory_read=True, skill_inventory=True)
+        return value
+
+    def native_route(self, method):
+        from urllib.parse import urlsplit
+        path = urlsplit(self.path).path
+        if path.startswith('/v1/dispatcher/conversation'):
+            if not self.profile_authorized():
+                return True
+            from .conversation import Conversation
+            from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+            from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+            try:
+                bridge = BridgeClient('jaeger')
+                conversation = Conversation(DispatcherStore(bridge.layout), self.native_runs(),
+                    lambda: bridge.query('dispatcher_conversation', timeout_s=10))
+                action = path.removeprefix('/v1/dispatcher/conversation').strip('/')
+                if method == 'GET' and not action:
+                    result = conversation.snapshot()
+                elif method == 'POST' and action in {'bind', 'send', 'cancel', 'approval', 'reconcile'}:
+                    body = self.read_json_body()
+                    if action == 'bind':
+                        result = {'session_id': conversation.store.bind_dispatcher(body.get('session_id'))}
+                    else:
+                        result = conversation.start(body) if action == 'send' else conversation.control(action, body)
+                else:
+                    raise KeyError('Route not found')
+                self.native_json(200, result)
+            except (KeyError, ValueError, RuntimeError, OSError) as exc:
+                self.native_json(404 if isinstance(exc, KeyError) else 400 if isinstance(exc, ValueError)
+                                 else 409 if isinstance(exc, RuntimeError) else 503, {'error': str(exc)})
+            return True
+        queries = {'/v1/dispatcher/skills': 'list_skills',
+                   '/v1/dispatcher/memory': 'dispatcher_memory',
+                   '/v1/dispatcher/models': 'model_picker'}
+        if path != '/v1/dispatcher' and path != '/v1/dispatcher/bind' and path not in queries:
+            return super().native_route(method)
+        if not self.profile_authorized():
+            return True
+        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        try:
+            bridge = BridgeClient('jaeger')
+            store = DispatcherStore(bridge.layout)
+            if method == 'GET' and path in queries:
+                result = bridge.query(queries[path], timeout_s=10)
+            elif method == 'GET' and path == '/v1/dispatcher':
+                result = store.overview()
+            elif method == 'POST' and path == '/v1/dispatcher/bind':
+                result = {'session_id': store.bind_dispatcher(self.read_json_body().get('session_id'))}
+            else:
+                self.native_json(405, {'error': 'Method not supported'})
+                return True
+            self.native_json(200, result)
+        except ValueError as exc:
+            self.native_json(400, {'error': str(exc)})
+        except (OSError, RuntimeError) as exc:
+            self.native_json(503, {'error': str(exc)})
+        return True
+
     def native_runs(self):
         global _native_runs
         with _native_lock:
             if _native_runs is None:
                 root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/jaeger"
-                _native_runs = Runs(root, jaeger_turn, reconciler=jaeger_reconcile)
+                _native_runs = Runs(root, dispatcher_turn, reconciler=jaeger_reconcile)
             return _native_runs
 
     def do_GET(self):

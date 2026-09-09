@@ -46,9 +46,11 @@ def test_summary_does_not_claim_fully_operational_when_undetermined():
     assert "could not" in report.lower() or "undetermined" in report.lower()
 
 
-def test_all_green_still_reports_fully_operational():
-    """The honest case must keep working — no false alarms."""
-    assert "fully operational" in format_report([_green(), _green("osascript")])
+def test_all_green_reports_preflight_success_without_claiming_runtime_proof():
+    report = format_report([_green(), _green("osascript")])
+    assert "All preflight checks passed" in report
+    assert "fully operational" not in report
+    assert "live turn" in report
 
 
 def test_unknown_is_not_counted_as_a_failure():

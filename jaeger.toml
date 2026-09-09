@@ -159,22 +159,7 @@ restart = "on_failure"
 config_key = "audio_session"
 enabled = false   # TUI path has no chassis boot root yet — see header
 
-# ── Surfaces ──────────────────────────────────────────────────────
-# JaegerAI's existing surfaces — the TUI is the main; tray is additional.
-# Format 0.1's chassis dispatches event_loop = "qt" only for surface
-# rendering; the TUI is JaegerAI's own Rich loop launched directly by
-# launch.py, and the tray runs as its own
-# `python -m jaeger_ai.interfaces.pyside6.tray.macos` subprocess. The factory
-# stubs (J5A) raise NotImplementedError if the chassis ever tries to
-# invoke them; enabled = false keeps that from happening.
-
-[[surface]]
-id = "tui"
-main = true
-factory = "jaeger_ai.interfaces.tui:run_surface"
-enabled = false   # JaegerAI owns the TUI loop; chassis can't host it
-
-[[surface]]
-id = "tray"
-factory = "jaeger_ai.interfaces.pyside6.tray.macos:run_surface"
-enabled = false   # tray runs as its own subprocess
+# Terminal and tray entry points own their event loops and are launched via
+# `python -m jaeger_ai.interfaces.tui` and
+# `python -m jaeger_ai.interfaces.pyside6.tray.macos` respectively.
+# They are not Qt chassis surfaces; no inactive factory declarations are needed.

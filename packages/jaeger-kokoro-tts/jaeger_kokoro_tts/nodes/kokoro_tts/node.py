@@ -202,10 +202,7 @@ class TTSNode(Node):
     def _handle(self, msg: topics.SpeechCommand) -> None:
         t0 = time.perf_counter()
         self._active_correlation_id = msg.correlation_id
-        # 0.5 lip-sync proxy: emit /sense/tts_chunk events at ~30 Hz
-        # while the synthesizer runs.  Amplitude is a sin-wave
-        # placeholder; real RMS sampling is a 0.5.x followup once
-        # Kokoro exposes streaming audio.
+        # Publish measured speech amplitude while playback runs.
         amp_stop = threading.Event()
         cid_for_chunks = msg.correlation_id or ""
         amp_thread = threading.Thread(
@@ -257,25 +254,10 @@ class TTSNode(Node):
         stop_event: threading.Event,
         correlation_id: str,
     ) -> None:
-        """Emit ``/sense/tts_chunk`` events at ~30 Hz with a sin
-        amplitude shape until ``stop_event`` is set.
-
-        0.5.0 lip-sync proxy: not real audio sampling, but a
-        believable mouth-open/close cycle so Lilith looks like
-        she's saying something rather than staring blankly.  The
-        sin frequency (~5 Hz) approximates syllable rate; the
-        small jitter keeps it from looking mechanical.
-        """
-        import math
-        import random
+        """Publish real output RMS at 30 Hz; missing telemetry means silence."""
         interval_s = 1.0 / 30.0
-        t0 = time.perf_counter()
         while not stop_event.is_set():
-            t = time.perf_counter() - t0
-            # Sin pulse with a small noise floor + jitter.
-            base = (math.sin(2 * math.pi * 5.0 * t) + 1.0) / 2.0
-            jitter = random.uniform(-0.1, 0.1)
-            amplitude = max(0.0, min(1.0, base * 0.7 + 0.15 + jitter))
+            amplitude = max(0.0, min(1.0, float(getattr(self.synthesizer, "amplitude", 0.0))))
             try:
                 self.bus.publish(topics.TtsChunk(
                     amplitude=amplitude,

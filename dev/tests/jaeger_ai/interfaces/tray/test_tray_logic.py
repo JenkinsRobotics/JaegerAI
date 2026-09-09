@@ -115,13 +115,11 @@ def test_menu_labels_say_jaeger_os_not_daemon():
         f"{labels}"
 
 
-def test_open_web_is_disabled_until_web_dashboard_ships():
-    """The web dashboard URL is a placeholder right now (ReactPy track
-    not built yet). Disabling the menu item until it exists prevents
-    a Safari-opens-a-404 confusion."""
+def test_shipped_gui_and_web_surfaces_are_enabled():
     for state in TrayState:
         items = {i.action: i for i in menu_items_for(state) if i.action}
-        assert items["open_web"].enabled is False
+        assert items["open_web"].enabled is True
+        assert items["open_gui"].enabled is True
 
 
 # ── model: status snapshot → state transition ──────────────────────

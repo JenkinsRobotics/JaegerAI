@@ -36,6 +36,7 @@ class Run:
         self.id = run_id or uuid.uuid4().hex
         self.session = session
         self.message = message
+        self.created_at = time.time()
         self.condition = threading.Condition(threading.RLock())
         self.cancelled = threading.Event()
         self.cancel_confirmed = False
@@ -53,6 +54,7 @@ class Run:
         with self.condition:
             return {"run_id": self.id, "session_id": self.session,
                     "status": self.status, "output": self.output,
+                    "created_at": self.created_at, "input": self.message,
                     "cancellation_requested": self.cancelled.is_set(),
                     "cancellation_confirmed": self.cancel_confirmed,
                     "execution_unknown": self.execution_unknown,
@@ -154,8 +156,13 @@ class Runs:
         self.runs = {}
         self.ownership = Ownership(root)
 
-    def start(self, session, message, workspace=None, *, run_id=None, on_admitted=None):
-        if not isinstance(session, str) or not session or not isinstance(message, str) or not message.strip():
+    def start(self, session, message, workspace=None, *, run_id=None, on_admitted=None, model=None, provider=None):
+        from .run_input import normalize_input, attachment_prompt
+        message, attachments = normalize_input(message)
+        for label, value in (("model", model), ("provider", provider)):
+            if value is not None and (not isinstance(value, str) or len(value) > 512):
+                raise ValueError(f"Invalid {label} override")
+        if not isinstance(session, str) or not session:
             raise ValueError("A session_id and non-empty text input are required")
         with self.lock:
             if any(r.session == session and r.status not in TERMINAL for r in self.runs.values()):
@@ -168,7 +175,10 @@ class Runs:
             run = None
             try:
                 lease = self.ownership.observer_lease(run_id)
+                message = attachment_prompt(self.root, run_id, message, attachments)
                 run = self.run_type(self.root, session, message, run_id=run_id)
+                run.model = model if model != "default" else None
+                run.provider = provider
                 if on_admitted is not None:
                     on_admitted(run)  # Persist child/control ownership before dispatch.
             except Exception:
@@ -220,7 +230,9 @@ class Runs:
             finally:
                 if lease is not None:
                     os.close(lease)
-                run.worker_active = False
+                with run.condition:
+                    run.worker_active = False
+                    run.condition.notify_all()
 
     def get(self, run_id):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
@@ -242,6 +254,17 @@ class Runs:
                 "seq": len(saved["events"]) + 1, "error_category": "adapter_restarted",
                 "error": "Adapter restarted; native execution state is unknown. Inspect the native session before retrying."})
         return saved
+
+    def latest(self, sessions):
+        """Find a session's latest control receipt, including after restart."""
+        # Receipts are atomically replaced; the directory is already private.
+        for path in sorted(self.root.glob('*.json'), key=lambda p: p.stat().st_mtime, reverse=True):
+            if len(path.stem) != 32:
+                continue
+            saved = json.loads(path.read_text())
+            if saved.get('session_id') in sessions:
+                return self.get(path.stem)
+        return None
 
     def reconcile(self, run_id):
         """Observe the original native execution. Never redispatch or infer an abort."""
@@ -304,7 +327,8 @@ class RunsHTTP(ProfileIngress):
     """Mixin for existing profile servers; preserves legacy completion clients."""
     def create_native_run(self, body):
         return self.native_runs().start(str(body.get('session_id') or self.headers.get('X-Hermes-Session-Id') or ''),
-            body.get('input') or body.get('message'), body.get('workspace'))
+            body.get('input') or body.get('message'), body.get('workspace'),
+            model=body.get('model'), provider=body.get('provider') or body.get('model_provider'))
 
     def native_capabilities(self):
         return {"streaming": True, "features": {
@@ -346,6 +370,12 @@ class RunsHTTP(ProfileIngress):
             elif method == "POST" and len(parts) == 4 and isinstance(run, Run):
                 if parts[3] in {"cancel", "stop"}:
                     accepted = run.cancel()
+                    deadline = time.monotonic() + 2.0
+                    with run.condition:
+                        while run.worker_active and time.monotonic() < deadline:
+                            run.condition.wait(max(0.001, deadline - time.monotonic()))
+                    self.native_json(200, {"ok": accepted, **run.snapshot()})
+                    return True
                 elif parts[3] == "approval":
                     run.approve(str(body.get("approval_id") or ""), str(body.get("choice") or ""))
                     accepted = True
@@ -368,6 +398,7 @@ class RunsHTTP(ProfileIngress):
         payload = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -453,8 +484,10 @@ def jaeger_turn(run, workspace=None):
         return run.request_approval(frame.get("prompt", "Tool approval required"),
                                     choices=tuple(frame.get("options") or ["once", "deny"]))
 
-    run.dispatch(session_id=run.session, run_id=run.id)
-    result = bridge.turn(run.message, run.session, event, approval, turn_id=run.id, workspace=workspace)
+    native_session = getattr(run, 'native_session', run.session)
+    run.dispatch(session_id=native_session, run_id=run.id)
+    overrides = {key: getattr(run, key) for key in ("model", "provider") if getattr(run, key, None)}
+    result = bridge.turn(run.message, native_session, event, approval, turn_id=run.id, workspace=workspace, **overrides)
     run.execution_unknown = result.get("execution_unknown", False) is not False
     if run.execution_unknown:
         raise RuntimeError(result.get("error") or "Native terminal receipt is uncertain; reconcile before retrying")

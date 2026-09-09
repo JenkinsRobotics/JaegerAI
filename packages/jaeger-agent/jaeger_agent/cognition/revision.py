@@ -11,6 +11,18 @@ from collections.abc import Iterable
 
 from jaeger_agent.memory.models import Belief, BeliefStatus, Claim, ProvenanceKind, utc_now_iso
 
+# These predicates describe events, not single-valued properties. Two things
+# said on different turns are not conflicting answers to the same question.
+# Keep their claims as history without concatenating that history into a new
+# belief (and another complete evidence list) on every conversational turn.
+EVENT_PREDICATES = frozenset({'said', 'responded', 'tool_result', 'mentioned_person'})
+
+
+def same_projection(left: Belief, right: Belief) -> bool:
+    fields = ('subject', 'predicate', 'value', 'confidence', 'status', 'valid_from', 'valid_until')
+    return (all(getattr(left, field) == getattr(right, field) for field in fields)
+            and set(left.evidence_ids) == set(right.evidence_ids))
+
 
 # Higher wins. SYSTEM configuration outranks observation, which outranks
 # what someone said, which outranks inference and forecasts.
@@ -33,7 +45,7 @@ def _rank(claim: Claim) -> int:
 
 def revise_group(claims: Iterable[Claim]) -> Belief | None:
     """One belief for one (subject, predicate). None if no valid claims."""
-    valid = [c for c in claims if c.status == "valid"]
+    valid = [c for c in claims if c.status == "valid" and c.predicate not in EVENT_PREDICATES]
     if not valid:
         return None
     subject, predicate = valid[0].subject, valid[0].predicate
@@ -88,6 +100,8 @@ def revise_group(claims: Iterable[Claim]) -> Belief | None:
 def revise_all(claims: Iterable[Claim]) -> list[Belief]:
     grouped: dict[tuple[str, str], list[Claim]] = {}
     for claim in claims:
+        if claim.predicate in EVENT_PREDICATES:
+            continue
         grouped.setdefault((claim.subject, claim.predicate), []).append(claim)
     out: list[Belief] = []
     for group in grouped.values():

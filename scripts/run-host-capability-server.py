@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -276,25 +277,28 @@ def service_restart(service: str, approval_id: str = "") -> dict:
         host_capability_mcp_server._audit(capability, outcome="error", service=name, error=str(exc))
         return {"restarted": False, "service": name, "error": str(exc)}
 
-    # Health poll: up to ~30s for the service to come back ready.
+    # Bound total wall time, including slow probes. HTTP errors prove that a
+    # server answered, not that the intended service recovered successfully.
     url = _SERVICE_HEALTH_URLS[name]
     healthy = False
     last_status: object = None
     import urllib.error as _ue
-    for _ in range(15):
-        time.sleep(2)
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url, timeout=min(3, deadline - time.monotonic())) as resp:
                 resp.read(4096)
                 last_status = resp.status
-                healthy = True
-                break
+                if resp.status == 200:
+                    healthy = True
+                    break
         except _ue.HTTPError as exc:
             last_status = exc.code
-            healthy = True
-            break
         except Exception:
-            continue
+            pass
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(2, remaining))
     host_capability_mcp_server._audit(
         capability, outcome="allowed" if healthy else "degraded",
         service=name, healthy=healthy,

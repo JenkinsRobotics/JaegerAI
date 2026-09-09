@@ -47,9 +47,12 @@ class KnowledgeRetriever(CognitiveRetriever):
         predicate: str | None = None,
     ) -> list[dict[str, Any]]:
         """Identify conflicting claims or disputed assertions for a given subject and predicate."""
+        from jaeger_agent.cognition.revision import EVENT_PREDICATES
         claims = self.store.list_claims(subject=subject, predicate=predicate, status="valid")
         grouped: dict[tuple[str, str], list[Claim]] = {}
         for c in claims:
+            if c.predicate in EVENT_PREDICATES:
+                continue
             grouped.setdefault((c.subject, c.predicate), []).append(c)
 
         contradictions: list[dict[str, Any]] = []

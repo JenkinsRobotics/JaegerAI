@@ -44,6 +44,8 @@ include = ["jaeger_os*"]
 jaeger_os = ["contract/*.json"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
+addopts = ["--import-mode=importlib"]
 testpaths = ["dev/tests"]
 markers = [
     "slow: tests that fork real processes or do real network I/O.",

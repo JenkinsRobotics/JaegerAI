@@ -10,12 +10,14 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-def check(base, profile, message):
+def check(base, profile, message, model=None):
     def request(path, body=None):
         return urlopen(Request(base + path, data=json.dumps(body).encode() if body is not None else None,
             headers={"Cookie": f"hermes_profile={profile}", "Content-Type": "application/json"}), timeout=150)
-    with request("/api/session/new", {"workspace": "/mnt/host/GitHub/JaegerAI", "profile": profile,
-        "worktree": False, "model": "@ollama-rack:glm-5.3-flash:cloud"}) as response:
+    body = {"workspace": "/mnt/host/GitHub/JaegerAI", "profile": profile, "worktree": False}
+    if model:
+        body["model"] = model
+    with request("/api/session/new", body) as response:
         sid = json.load(response)["session"]["session_id"]
     with request("/api/session/rename", {"session_id": sid, "title": "Verification — native tools and approval denial"}) as response:
         response.read()
@@ -63,6 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--profile", default="jaeger")
+    parser.add_argument("--model", help="Optional model override; otherwise preserve the profile default")
     parser.add_argument("--message", default="Read the first line of README.md in the current JaegerAI repository using a file tool and quote that line. Do not modify files or use network tools. Keep the answer short.")
     args = parser.parse_args()
-    check(args.url.rstrip("/"), args.profile, args.message)
+    check(args.url.rstrip("/"), args.profile, args.message, args.model)

@@ -420,6 +420,17 @@ class SessionStore:
             rows.append(row)
         return rows
 
+    def conversation_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Stable persisted message identities for reconnecting interfaces."""
+        session_id = canonical_session_id(session_id)
+        with self._lock:
+            rows = self._conn.execute(
+                'SELECT id, role, text, ts FROM messages WHERE session_id=? ORDER BY id',
+                (session_id,)).fetchall()
+        messages = [dict(id=str(row[0]), role=row[1], text=row[2], ts=row[3]) for row in rows]
+        return {'session_id': session_id, 'messages': messages,
+                'revision': messages[-1]['id'] if messages else '0'}
+
     def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
         """Recent sessions (most-active first) with preview + turn count.
         Ties on ``last_active`` (two turns landing in the same wall-clock
@@ -638,7 +649,7 @@ class SessionStore:
             return 0
         with self._lock, self._conn:
             cur = self._conn.execute(
-                "SELECT id FROM sessions ORDER BY last_active DESC, "
+                "SELECT id FROM sessions WHERE id != 'dispatcher' ORDER BY last_active DESC, "
                 "rowid DESC LIMIT -1 OFFSET ?", (keep,))
             stale = [row[0] for row in cur.fetchall()]
             if not stale:

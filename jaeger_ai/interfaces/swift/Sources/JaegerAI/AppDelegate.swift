@@ -97,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await splash.finish(AgentBridge.shared.isConnected
                                 ? "All systems online"
                                 : "Offline shell ready")
+            if ProcessInfo.processInfo.arguments.contains("--chat") {
+                ChatWindowController.show(agent: AgentBridge.shared)
+            }
         }
 
         // In-app updates (0.8): a silent check on launch, then every ~6h —

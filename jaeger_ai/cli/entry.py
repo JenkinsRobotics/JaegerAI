@@ -26,7 +26,7 @@ from pathlib import Path
 # (0.9.6: "instances" removed — `jaeger agent` is the one management
 # surface; it rides the run path's verb dispatch, not this console.)
 _CONSOLE = (
-    "skills", "personality", "status",
+    "skills", "personality",
     "roadmap", "avatar", "prompt", "config",
     "runtime", "backends",
 )
@@ -70,7 +70,7 @@ def _route(argv: list[str], py: str) -> list[str]:
         # markers next to this package — a pip install has neither.
         _repo = Path(__file__).resolve().parents[2]
         if (_repo / "pyproject.toml").exists() and (_repo / ".git").exists():
-            return [py, "-m", "jaeger_ai.cli.devtools", "--update"]
+            return [py, "-m", "jaeger_ai.cli.devtools", "--update", *rest]
         return [py, "-m", "jaeger_ai.cli.run", "update", *rest]
     if cmd in ("--dev", "dev"):
         # Developer toolbox (dev TUI, dev-state app build/run, health,

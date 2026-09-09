@@ -159,5 +159,5 @@ def _webui_url(argv: list[str]) -> int:
 
     base, _rest = _parse_instance(argv)
     svc = HermesWebUIService(base.instance)
-    print(svc.urls().vendor_ui)
+    print(svc.browser_url())
     return 0

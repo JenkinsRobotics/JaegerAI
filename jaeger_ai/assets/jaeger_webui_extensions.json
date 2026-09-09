@@ -1,0 +1,15 @@
+{
+  "extensions": [
+    {
+      "id": "jaeger-dispatcher",
+      "name": "Jaeger Dispatcher and Focus",
+      "scripts": ["jaeger_webui_branding.js", "jaeger_dispatcher.js"],
+      "sidecar": {
+        "type": "loopback",
+        "origin": "http://127.0.0.1:8646",
+        "health_path": "/health",
+        "proxy_auth": "token-v1"
+      }
+    }
+  ]
+}

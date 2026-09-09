@@ -30,6 +30,7 @@ from typing import Sequence
 # ``jaeger`` (or any flag-first argv) is NOT here — it falls through to
 # ``main.py``'s legacy path and boots the in-process TUI.
 SUBCOMMANDS: frozenset[str] = frozenset({
+    "start", "stop", "restart", "status",
     "bench",
     "agent", "setup", "migrate",
     "backup", "restore", "update", "reinstall", "uninstall",
@@ -52,6 +53,20 @@ def dispatch(argv: Sequence[str]) -> int:
     if not argv:
         _print_usage()
         return 2
+    # Lifecycle management verbs
+    if argv[0] == "start":
+        from jaeger_ai.cli.verbs.lifecycle_verbs import _cmd_start_argv
+        return _cmd_start_argv(list(argv[1:]))
+    if argv[0] == "stop":
+        from jaeger_ai.cli.verbs.lifecycle_verbs import _cmd_stop_argv
+        return _cmd_stop_argv(list(argv[1:]))
+    if argv[0] == "restart":
+        from jaeger_ai.cli.verbs.lifecycle_verbs import _cmd_restart_argv
+        return _cmd_restart_argv(list(argv[1:]))
+    if argv[0] == "status":
+        from jaeger_ai.cli.verbs.lifecycle_verbs import _cmd_status_argv
+        return _cmd_status_argv(list(argv[1:]))
+
     # ``bench`` has its own sub-verbs (run/timing/compare/history) and flags.
     if argv[0] == "bench":
         return _cmd_bench(list(argv[1:]))
@@ -190,9 +205,13 @@ def _repo_root() -> Path:
 
 def _print_usage() -> None:
     print(
-        "Usage: jaeger {bench|agent|migrate|backup|restore|update|"
-        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|health} [args]\n"
+        "Usage: jaeger {start|stop|restart|status|bench|agent|migrate|backup|restore|update|"
+        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate} [args]\n"
         "\n"
+        "  start    Cold boot the full Jaeger AI multi-agent stack (services, containers, app).\n"
+        "  stop     Cleanly stop the full Jaeger AI stack (quits app, services, and containers).\n"
+        "  restart  Restart the full Jaeger AI multi-agent stack.\n"
+        "  status   Display live multi-agent fabric dashboard (services, containers, substrates).\n"
         "  bench    Run a JaegerAI benchmark — `jaeger bench run|timing|compare|history`.\n"
         "  agent    Create / manage agents — create | list | use | inspect |\n"
         "           delete | clear. (`setup` + `instance` remain as aliases.)\n"
