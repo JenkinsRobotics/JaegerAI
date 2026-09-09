@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import time
@@ -27,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 JAEGER_RUNTIME_ROOT = (Path(os.environ["JAEGER_HOME"]) / "shared" if os.environ.get("JAEGER_HOME")
                        else REPO_ROOT / ".jaeger_ai" / "shared")
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
+MAC_OLLAMA_URL = "http://192.168.64.1:11434"
 
 
 @dataclass(frozen=True)
@@ -60,15 +62,90 @@ def _run(command: list[str], *, timeout: int = 30) -> bool:
 
 
 def _kickstart(label: str) -> bool:
-    return _run([
-        "/bin/launchctl", "kickstart", "-k",
-        f"gui/{os.getuid()}/{label}",
-    ])
+    """Start a missing worker; never kill a live worker after a failed probe.
+
+    A slow model, pending approval or network failure does not establish that
+    a running process is safe to terminate. Explicit operator restart remains
+    available through the lifecycle command.
+    """
+    domain = f"gui/{os.getuid()}"
+    target = f"{domain}/{label}"
+    try:
+        result = subprocess.run(
+            ["/bin/launchctl", "print", target], capture_output=True,
+            text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode == 0:
+        if re.search(r"(?m)^\s*pid = [1-9][0-9]*\s*$", result.stdout):
+            return False
+        return _run(["/bin/launchctl", "kickstart", target])
+    # A failed inspection may mean launchd itself is inaccessible. Only its
+    # explicit missing-service response permits bootstrapping an installed job.
+    if "Could not find service" not in result.stderr:
+        return False
+    path = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+    return path.is_file() and _run(["/bin/launchctl", "bootstrap", domain, str(path)])
+
+
+def _bridge_ready() -> bool:
+    try:
+        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        result = BridgeClient("jaeger").health()
+        return bool(result.get("ok") and result.get("ready", {}).get("agent") == "ready")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _start_jaeger_gateway() -> bool:
+    """Restore Jaeger's own MCP/A2A proxy, never the ARES host-tools proxy."""
+    try:
+        from jaeger_ai.features.gateway.service import start, status
+        current = status()
+        if current.get("running") and not (_tcp("127.0.0.1", 8811) and _tcp("127.0.0.1", 8812)):
+            # A half-responsive gateway may still own an in-flight MCP/A2A
+            # request.  Automatic recovery must not kill ambiguous work.  An
+            # operator can explicitly stop it after checking the run ledger.
+            return False
+        start()
+        return _tcp("127.0.0.1", 8811) and _tcp("127.0.0.1", 8812)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _repair_jaeger() -> bool:
+    # Preserve healthy dependencies when only one endpoint has failed.
+    bridge = _bridge_ready() or _kickstart("com.jenkinsrobotics.jaeger-bridge")
+    mcp = _tcp("127.0.0.1", 8792) or _kickstart("com.jenkinsrobotics.jaeger-mcp-http")
+    adapter = _http("http://192.168.64.1:8642/v1/health") or _kickstart("com.jenkinsrobotics.jaeger-hermes-adapter")
+    gateway = _start_jaeger_gateway()
+    return bridge and mcp and adapter and gateway
+
+
+def _repair_a2a() -> bool:
+    backend = (_http("http://127.0.0.1:8796/.well-known/agent-card.json")
+               or _kickstart("com.jenkinsrobotics.jaeger-a2a"))
+    gateway = _start_jaeger_gateway()
+    return backend and gateway
+
+
+def _repair_openclaw() -> bool:
+    native = _tcp("127.0.0.1", 18789) or _restart_container(container_name("openclaw"))
+    adapter = (_http("http://192.168.64.1:8644/v1/health")
+               or _kickstart("com.jenkinsrobotics.openclaw-hermes-adapter"))
+    return native and adapter
+
+
+def _rack_enabled() -> bool:
+    """The rack is optional until it has headless services, not a boot dependency."""
+    return os.environ.get("JAEGER_RACK_SERVICES", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _restart_container(name: str) -> bool:
-    # ``start`` preserves the container's external session/config mounts.  If
-    # already running, use a bounded stop/start instead of deleting state.
+    # ``start`` preserves the container's external session/config mounts.  A
+    # running-but-unhealthy container may still own a tool call, so the
+    # supervisor fails closed instead of blindly interrupting it.
     try:
         raw = subprocess.check_output(
             ["/opt/homebrew/bin/container", "inspect", name], timeout=5,
@@ -76,11 +153,7 @@ def _restart_container(name: str) -> bool:
         state = json.loads(raw)[0]['status']['state']
     except (OSError, subprocess.SubprocessError, KeyError, IndexError, ValueError):
         return False  # Unknown state is not authorization for a blind restart.
-    if state not in ('running', 'stopped'):
-        return False
-    if state == 'running' and not _run([
-        "/opt/homebrew/bin/container", "stop", "--time", "10", name,
-    ]):
+    if state != 'stopped':
         return False
     return _run(["/opt/homebrew/bin/container", "start", name], timeout=60)
 
@@ -111,12 +184,12 @@ def _restart_honcho_on_rack() -> bool:
 
 def components() -> tuple[Component, ...]:
     bridge = "192.168.64.1"
-    return (
+    local = [
         Component(
             "jaeger",
-            lambda: _http(f"http://{bridge}:8642/v1/health") and _tcp("127.0.0.1", 8811),
-            lambda: _kickstart("com.jenkinsrobotics.jaeger-hermes-adapter")
-            and _kickstart("com.jenkinsrobotics.jaeger-mcp-http"),
+            lambda: _bridge_ready() and _http(f"http://{bridge}:8642/v1/health")
+            and _tcp("127.0.0.1", 8792) and _tcp("127.0.0.1", 8811),
+            _repair_jaeger,
         ),
         Component(
             "hermes",
@@ -126,8 +199,7 @@ def components() -> tuple[Component, ...]:
         Component(
             "openclaw",
             lambda: _http(f"http://{bridge}:8644/v1/health") and _tcp("127.0.0.1", 18789),
-            lambda: _restart_container(container_name("openclaw"))
-            and _kickstart("com.jenkinsrobotics.openclaw-hermes-adapter"),
+            _repair_openclaw,
         ),
         Component(
             "roundtable",
@@ -136,23 +208,23 @@ def components() -> tuple[Component, ...]:
         ),
         Component(
             "a2a",
-            lambda: _http("http://127.0.0.1:8796/.well-known/agent-card.json"),
-            lambda: _kickstart("com.jenkinsrobotics.jaeger-a2a"),
-        ),
-        Component(
-            "honcho",
-            lambda: _http(f"{HONCHO_LAN_URL}/health"),
-            _restart_honcho_on_rack,
+            lambda: _http("http://127.0.0.1:8796/.well-known/agent-card.json")
+            and _http("http://127.0.0.1:8812/.well-known/agent-card.json"),
+            _repair_a2a,
         ),
         Component(
             "ollama",
-            lambda: _http("http://10.15.0.239:11434/api/version"),
-            lambda: _run([
-                "/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-                "rackpc001-3", "schtasks", "/Run", "/TN", "Ollama Serve",
-            ]),
+            lambda: _http(f"{MAC_OLLAMA_URL}/api/version"),
+            lambda: _kickstart("com.jenkinsrobotics.ares-ollama"),
         ),
-    )
+    ]
+    if _rack_enabled():
+        local.append(Component(
+            "honcho",
+            lambda: _http(f"{HONCHO_LAN_URL}/health"),
+            _restart_honcho_on_rack,
+        ))
+    return tuple(local)
 
 
 class Supervisor:
@@ -229,7 +301,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     supervisor = Supervisor()
     if args.repair:
-        item = next(item for item in supervisor.items if item.name == args.repair)
+        item = next((item for item in supervisor.items if item.name == args.repair), None)
+        if item is None:
+            # Honcho is deliberately absent while rack services are paused.
+            # Do not raise StopIteration or silently enable a remote substrate.
+            return 2
         command_ok = _safe_check(item.repair)
         healthy = _safe_check(item.probe)
         ok = command_ok and healthy

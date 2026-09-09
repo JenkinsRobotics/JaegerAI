@@ -518,7 +518,7 @@ class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
         from .roundtable_policy import registry
         value = super().native_capabilities()
         value['features'].update(member_events=True, member_stop=True, member_retry=True,
-                                 decision_ledger=True, workspace_override=False, control_recovery=False)
+                                 decision_ledger=True, workspace_override=False, model_override=False, control_recovery=False)
         value['roundtable'] = registry()
         return value
 

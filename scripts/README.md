@@ -1,29 +1,60 @@
-# scripts/ — the frozen curl-install target
+# Operator and integration scripts
 
-This directory holds exactly one thing: **`install.sh`**, the script the public
-one-line installer pipes into bash.
+This directory contains the public installer and the entry points used to deploy,
+run, and verify the shared agent stack. Developer-only tooling is indexed in
+[dev/scripts/README.md](../dev/scripts/README.md).
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/master/scripts/install.sh | bash
-```
+## Installation and running services
 
-## Do not move or rename `scripts/install.sh`
+| Script | Purpose |
+| --- | --- |
+| `install.sh` | Public curl bootstrap; invokes the root local installer |
+| `run-jaeger-webui.sh` | Launch the pinned standalone Jaeger WebUI |
+| `prepare-hermes-webui.py` | Assemble the pinned WebUI plus Jaeger container overlay |
+| `run-host-tools-gateway.sh` | Launch the existing host-tools gateway |
+| `run-host-capability-server.py` | Host capability service compatibility launcher |
+| `run-hermes-native-api.py` | Start Hermes' native API inside its container |
+| `hermes-native-api-service.py` | Host launcher for that container API |
+| `hermes-container` | Convenience wrapper for the deployment-selected Hermes container |
 
-That raw URL is **baked into documentation, the README, and existing operator
-muscle memory**. The path `scripts/install.sh` on the `master` branch is a
-public contract — moving or renaming it is a breaking change that 404s every
-copy of the install command in the wild. It stays here, with this name, forever.
+## Setup and migration
 
-What `scripts/install.sh` does: detect Python 3.11/3.12, clone the repo into the
-install root (`$JAEGER_HOME`, default `~/jaeger`), copy the product allowlist,
-and run the in-repo `./install.sh` (which makes the `.venv` and does
-`uv pip install -e .`). It never touches `.venv/` or `.jaeger_ai/` on a re-run.
+| Script | Purpose |
+| --- | --- |
+| `setup-agent-workspaces.py` | Managed container/workspace migration |
+| `expand-agent-workspaces.py` | Explicit expanded workspace migration |
+| `setup-hermes-native-api.py` | Install the native API service |
+| `setup-native-runs.py` | Configure native Runs integration |
 
-## Not to be confused with…
+Setup scripts can change deployment state. Read the corresponding
+[integration instructions](../integrations/hermes_webui/README.md) and
+[workspace migration notes](../integrations/agent_workspaces/README.md) before
+using them. Ordinary startup does not require rerunning setup.
 
-- **`/install.sh`** (repo root) — the *local* installer the curl script calls
-  once the repo is on disk; it builds the venv + editable-installs JaegerAI. Run it
-  yourself after a manual `git clone`.
-- **`dev/scripts/`** — internal developer tooling (`dev_env.sh`,
-  `run_tests.sh`, generators). Never shipped to an end-user install, free to
-  move/rename.
+## Verification
+
+| Script | Purpose |
+| --- | --- |
+| `agent-mac-check.py` | Host/workspace connectivity diagnostics; write probes are explicit |
+| `verify-agent-webui.py` | Live profile routing and two-turn recall |
+| `verify-native-webui.py` | Live tool events and approval-denial handling |
+| `verify-hermes-native.py` | Direct native Hermes verification |
+| `verify-openclaw-native.py` | Direct native OpenClaw verification |
+| `verify-roundtable-native.py` | Native Roundtable verification |
+| `verify-agent-workspaces.py` | Cross-agent workspace verification |
+| `verify-host-nas.py` | NAS filesystem diagnostics |
+
+Live checks may create labeled sessions, consume model tokens, or perform
+explicit filesystem probes. Use the deployed endpoint and configured model
+selection; inspect each script before execution. These scripts are distinct
+checks, not interchangeable copies. The structural audit found no byte-identical
+scripts and retained even manual scripts without direct code callers.
+
+## Stable entry points
+
+Do not move `scripts/install.sh`: its raw URL is a public installation contract.
+Root `install.sh` installs an existing checkout; root `run.sh` and `jaeger`
+launch the runtime/CLI. Installed launchd services, container commands, tests,
+and integration documentation reference other paths in this directory, so path
+changes require coordinated updates. See the
+[repository triage](../dev/docs/reality/REPOSITORY_TRIAGE_2026_09_08.md) for evidence.

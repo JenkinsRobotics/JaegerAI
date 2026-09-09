@@ -399,6 +399,8 @@ def _plist(label: str, module: str) -> bytes:
         "RunAtLoad": True,
         "KeepAlive": True,
         "EnvironmentVariables": {
+            "OPENCLAW_ADAPTER_NATIVE_RUNS": "1",
+            "ROUNDTABLE_NATIVE_RUNS": "1",
             "PATH": f"{Path.home()}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         },
         "StandardOutPath": str(logs / f"{label}.log"),

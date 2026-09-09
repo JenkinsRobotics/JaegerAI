@@ -69,8 +69,12 @@ class TableService:
         # per-session workspace negotiation. The UI must omit unsupported values.
         if workspace is not None:
             raise ValueError('Native Roundtable workspace override is not negotiated yet')
-        selected = plan(message, options, self.store.preferences(session))
+        from .run_input import normalize_input
+        text, attachments = normalize_input(message)
+        preferences = self.store.preferences(session)
+        plan(text or 'Inspect the attached files.', options, preferences)
         def admitted(run):
+            selected = plan(run.message, options, preferences)
             self.store.create_turn(run, selected)
             run.table = {key: selected[key] for key in ('mode', 'participants', 'chair', 'budgets')}
             run.persist()
@@ -194,6 +198,14 @@ class TableService:
                     outcome = {**snapshot, 'member_run_id': child.id}
                     if snapshot['status'] == 'failed':
                         outcome.update({k: child.events[-1].get(k) for k in ('error', 'error_category')})
+                    label = {'jaeger': 'Jaeger', 'hermes': 'Hermes', 'openclaw': 'OpenClaw'}[member]
+                    text = snapshot.get('output') or ''
+                    if snapshot['status'] != 'completed':
+                        text += '\n[' + label + ' error: ' + str(outcome.get('error') or snapshot['status']) + ']'
+                    # Plain chat clients also need the actual member responses.
+                    # Keep native member events for richer clients, and publish
+                    # completed contributions as readable transcript sections.
+                    parent.emit('message.delta', delta='\n### ' + label + '\n' + text + '\n')
                     outcomes[member] = outcome
                     self.store.finish_attempt(child.id, outcome)
                     parent.emit('member.finished', member=member, phase=phase,
@@ -229,6 +241,10 @@ class TableService:
             f'\nCompact earlier decisions (reported): {history}\nCurrent user request:\n{selected["message"]}\n')
         all_results, involvement = {}, {m: 0 for m in MEMBERS}
         def phase(name, prompts):
+            heading = {'answer': 'Round 1 — Everyone Answers', 'discussion': 'Round 2 — Discussion',
+                       'synthesis': 'Summary', 'proposal': 'Proposal', 'volunteer': 'Volunteers',
+                       'contribution': 'Contributions', 'incident': 'Incident Findings', 'retry': 'Retry'}[name]
+            parent.emit('message.delta', delta='\n## ' + heading + '\n')
             policy = dict(selected['budgets'])
             if policy['total'] is not None:
                 policy['total'] -= time.monotonic() - started
@@ -336,4 +352,4 @@ class TableService:
         parent.cancel_confirmed = parent.cancelled.is_set() and (not all_results or any(
             r.get('cancellation_confirmed') for r in all_results.values()))
         parent.emit('table.summary', text=summary, consensus=decision.get('consensus', False))
-        return summary
+        return parent.output or summary

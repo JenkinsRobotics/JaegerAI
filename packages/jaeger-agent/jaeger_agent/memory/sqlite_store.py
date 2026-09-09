@@ -92,6 +92,8 @@ def bind(layout: Any) -> None:
     _state["conn"] = conn
     _state["vec_loaded"] = _try_load_vec(conn)
     _ensure_schema(conn)
+    from jaeger_agent.memory.sqlite_search import ensure_fts5_schema
+    ensure_fts5_schema(conn)
 
 
 def close() -> None:
@@ -126,13 +128,6 @@ def _open(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
-
-    # Initialize FTS5 full-text search schema adapted from Hermes
-    try:
-        from jaeger_agent.memory.sqlite_search import ensure_fts5_schema
-        ensure_fts5_schema(conn)
-    except Exception:
-        pass
 
     return conn
 
@@ -967,3 +962,39 @@ __all__ = [
     "is_bound",
     "db_path",
 ]
+
+
+def seed_facts(layout: Any, facts: dict[str, str]) -> None:
+    """Persist operator-supplied setup facts without rebinding the active agent.
+
+    Existing facts win on repeated setup. Each newly inserted assertion gets
+    an audit-history row in the same transaction.
+    """
+    from datetime import datetime, timezone
+
+    path = layout.memory_dir / _DB_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = _open(path)
+    try:
+        _ensure_schema(conn)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        conn.execute("BEGIN IMMEDIATE")
+        for key, value in facts.items():
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO facts "
+                "(subject, key, value, category, source, note, created_at, updated_at) "
+                "VALUES ('user', ?, ?, 'personal', 'user', 'Instance setup', ?, ?)",
+                (key, value, now, now),
+            ).rowcount
+            if inserted:
+                conn.execute(
+                    "INSERT INTO fact_log (subject, key, value, category, source, note, ts) "
+                    "VALUES ('user', ?, ?, 'personal', 'user', 'Instance setup', ?)",
+                    (key, value, now),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

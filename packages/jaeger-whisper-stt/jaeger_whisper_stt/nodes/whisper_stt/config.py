@@ -55,8 +55,8 @@ class WhisperSTTConfig(BaseModel):
             "STT engine mode — the registry name flipped via "
             "jaeger_whisper_stt.nodes.whisper_stt.engine.registry.get() ('two_pass' "
             "= fast model gates, accurate model commits; 'continuous' = "
-            "single rolling model; 'local_agreement' is an unavailable "
-            "stub)."
+            "single rolling model; 'local_agreement' confirms partial captions "
+            "after two consecutive decodes agree)."
         ),
     )
     fast_model_name: str = Field(

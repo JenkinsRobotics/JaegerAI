@@ -124,13 +124,16 @@ def _default_synth_factory() -> Synthesizer:
     # resolution (Identity.voice_id wins, module config is the
     # fallback default) lives in ``core.voice.voice_resolution`` itself.
     lang = KokoroTTSConfig().lang
+    audio_backend = "sounddevice"
     try:
         layout = context_mod._require_layout()
         schemas_mod = _resolve_mind_module("core.instance.schemas")
-        lang = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config).kokoro_tts.lang
+        cfg = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config)
+        lang = cfg.kokoro_tts.lang
+        audio_backend = cfg.voice.audio_backend
     except Exception:  # noqa: BLE001 — fresh/unconfigured instance, or no Mind installed
         pass
-    return KokoroTTS(voice=_resolve_voice(), lang=lang)
+    return KokoroTTS(voice=_resolve_voice(), lang=lang, audio_backend=audio_backend)
 
 
 def _default_tts_node_factory(

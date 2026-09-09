@@ -24,6 +24,8 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import shlex
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -78,7 +80,7 @@ def _open_terminal_running(cmd: str) -> None:
     latter only opens the *app* — it doesn't carry a command to run.
     Terminal.app's AppleScript ``do script`` is the documented way to
     spawn a window with a command pre-typed."""
-    script = f'tell application "Terminal" to do script "{cmd}"'
+    script = f'tell application "Terminal" to do script {json.dumps(cmd)}'
     _spawn(["osascript", "-e", script])
 
 
@@ -115,17 +117,16 @@ def _existing_tui_pid_for(instance: str | None) -> int | None:
 def _make_actions(instance: str | None) -> TrayActions:
     """Build the six closures the menu fires. They're tiny — one
     subprocess each — so we just inline them here."""
-    inst_args = ["--instance", instance] if instance else []
     jaeger = _jaeger_executable()
 
     def start() -> None:
-        _spawn([*jaeger, "start", *inst_args])
+        _spawn([*jaeger, "start"])
 
     def stop() -> None:
-        _spawn([*jaeger, "stop", *inst_args])
+        _spawn([*jaeger, "stop"])
 
     def restart() -> None:
-        _spawn([*jaeger, "restart", *inst_args])
+        _spawn([*jaeger, "restart"])
 
     def open_tui() -> None:
         # Singleton: if a TUI is already running for this instance,
@@ -139,7 +140,7 @@ def _make_actions(instance: str | None) -> TrayActions:
         # ``jaeger`` standalone is the in-process TUI — same agent,
         # fresh process. (The Phase-2 "jaeger attach" verb was tied
         # to the daemon-arch plan dropped 2026-06-14.)
-        cmd = " ".join(jaeger + (["--instance", instance] if instance else []))
+        cmd = shlex.join(jaeger + (["--instance", instance] if instance else []))
         _open_terminal_running(cmd)
 
     def open_voice() -> None:
@@ -152,29 +153,21 @@ def _make_actions(instance: str | None) -> TrayActions:
         # the --attach optimization was removed 2026-06-14 with the
         # daemon-arch decision.
         cmd_parts = [
-            "python", "-m", "jaeger_ai.plugins.voice_loop",
+            sys.executable, "-m", "jaeger_ai.plugins.voice_loop",
             *( ["--instance", instance] if instance else [] ),
         ]
-        _open_terminal_running(" ".join(cmd_parts))
+        _open_terminal_running(shlex.join(cmd_parts))
 
     def open_gui() -> None:
-        # Placeholder until the PyQt6 floating chat lands. Wired to a
-        # no-op now so the dispatcher doesn't crash on a stray click
-        # (the menu entry is greyed in base.menu_items_for, but
-        # defence-in-depth).
-        pass
+        _spawn([*jaeger, "start"])
 
     def open_web() -> None:
-        # Disabled in the menu today; the handler is registered so the
-        # day it lights up we don't have to touch the wiring.
-        _spawn(["open", "http://127.0.0.1:9119/"])
+        from jaeger_ai.features.hermes_webui import HermesWebUIService
+        _spawn(["open", HermesWebUIService(instance).browser_url()])
 
     def about() -> None:
-        # rumps.alert is the obvious place for this, but importing
-        # rumps here would break the unit-testable module boundary.
-        # The MacosTray class below installs its own about callback
-        # via rumps directly when it builds the app.
-        pass
+        from jaeger_ai import __version__
+        print(f"JaegerAI {__version__}")
 
     def quit_tray() -> None:
         # The macOS adapter overrides this with rumps.quit_application
@@ -510,26 +503,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     return 0
-
-
-def run_surface(ctx, spec):  # noqa: ARG001 — chassis Surface contract
-    """Chassis Surface factory (jaeger.toml ``[[surface]] tray``).
-
-    J5A stub — declared so the format-0.1 manifest validator's
-    ``factory`` field resolves to a callable. The tray runs as its
-    own ``python -m jaeger_os.interfaces.pyside6.tray.macos`` subprocess
-    today and stays that way; this stub exists so the manifest
-    is complete. J5B keeps the tray-as-subprocess pattern (the
-    chassis only directly hosts in-shell Qt surfaces) and the
-    manifest surface entry just documents the contract.
-    """
-    raise NotImplementedError(
-        "JaegerAI tray runs as its own subprocess "
-        "(python -m jaeger_os.interfaces.pyside6.tray.macos); the chassis "
-        "doesn't host non-Qt surfaces in format 0.1. This stub "
-        "exists so jaeger.toml's [[surface]] tray factory resolves; "
-        "it is never invoked at boot."
-    )
 
 
 if __name__ == "__main__":  # pragma: no cover — GUI entry

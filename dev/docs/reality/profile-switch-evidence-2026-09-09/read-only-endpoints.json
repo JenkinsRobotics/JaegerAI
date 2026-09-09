@@ -1,0 +1,1100 @@
+[
+  {
+    "profile": "default",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 25,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 83
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 2
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 1
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 89
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 4
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 11,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 1
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 89
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 7,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 0
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 1
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 0
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 89
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 0
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "openclaw",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 7,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 78
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 1
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 0
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 94
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 0
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "roundtable",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 11,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 1
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 89
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 0
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "jaeger",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/profile/active",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "name",
+        "path",
+        "is_default",
+        "default_workspace"
+      ],
+      "counts": {}
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/sessions",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "sessions",
+        "sidebar_reference_sessions",
+        "cli_count",
+        "archived_count",
+        "archived_webui_count",
+        "archived_cli_count",
+        "include_archived",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count",
+        "server_time",
+        "server_tz",
+        "webui_session_count",
+        "cli_session_count"
+      ],
+      "counts": {
+        "sessions": 25,
+        "sidebar_reference_sessions": 0
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/skills",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "skills"
+      ],
+      "counts": {
+        "skills": 83
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/memory",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "memory",
+        "user",
+        "soul",
+        "project_context",
+        "memory_path",
+        "user_path",
+        "soul_path",
+        "project_context_path",
+        "project_context_name",
+        "project_context_workspace",
+        "memory_mtime",
+        "user_mtime",
+        "soul_mtime",
+        "project_context_mtime",
+        "project_context_shadowed",
+        "external_notes_enabled"
+      ],
+      "counts": {
+        "project_context_shadowed": 0
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/mcp/servers",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "servers",
+        "toggle_supported",
+        "reload_required"
+      ],
+      "counts": {
+        "servers": 2
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/mcp/tools",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "tools",
+        "total",
+        "source",
+        "inventory_scope",
+        "unavailable_servers"
+      ],
+      "counts": {
+        "tools": 50,
+        "unavailable_servers": 1
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/commands",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "commands"
+      ],
+      "counts": {
+        "commands": 89
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/crons",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "jobs",
+        "all_profiles",
+        "active_profile",
+        "other_profile_count"
+      ],
+      "counts": {
+        "jobs": 4
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/health/agent",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "alive",
+        "checked_at",
+        "details",
+        "gateway_chat"
+      ],
+      "counts": {
+        "details": 7,
+        "gateway_chat": 4
+      },
+      "gateway_chat": {
+        "enabled": false,
+        "backend": "legacy",
+        "base_url_configured": true,
+        "api_key_configured": false
+      }
+    }
+  },
+  {
+    "profile": "default",
+    "endpoint": "/api/models",
+    "status": 200,
+    "summary": {
+      "keys": [
+        "active_provider",
+        "default_model",
+        "groups"
+      ],
+      "counts": {
+        "groups": 2
+      },
+      "default_model": "@ollama-mac:glm-5.3-flash:cloud"
+    }
+  }
+]

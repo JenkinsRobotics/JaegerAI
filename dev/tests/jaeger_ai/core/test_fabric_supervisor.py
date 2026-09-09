@@ -93,14 +93,22 @@ def test_container_restart_refuses_unknown_state_and_has_bounded_inspection(monk
     assert supervisor._restart_container('jaeger-hermes-webui') is False
 
 
-def test_failed_container_stop_does_not_attempt_start(monkeypatch):
+def test_running_container_is_not_blindly_restarted(monkeypatch):
     from jaeger_ai.core.runtime import fabric_supervisor as supervisor
     monkeypatch.setattr(supervisor.subprocess, 'check_output', lambda *a, **kw: b'[{"status":{"state":"running"}}]')
     calls = []
     monkeypatch.setattr(supervisor, '_run', lambda command, **kw: calls.append(command) or False)
     assert supervisor._restart_container('jaeger-hermes-webui') is False
-    assert len(calls) == 1
-    assert 'stop' in calls[0]
+    assert calls == []
+
+
+def test_stopped_container_can_be_started_without_deleting_state(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    monkeypatch.setattr(supervisor.subprocess, 'check_output', lambda *a, **kw: b'[{"status":{"state":"stopped"}}]')
+    calls = []
+    monkeypatch.setattr(supervisor, '_run', lambda command, **kw: calls.append(command) or True)
+    assert supervisor._restart_container('jaeger-hermes-webui') is True
+    assert calls == [['/opt/homebrew/bin/container', 'start', 'jaeger-hermes-webui']]
 
 
 def test_explicit_repair_exits_unsuccessfully_when_not_ready(monkeypatch):
@@ -111,3 +119,68 @@ def test_explicit_repair_exits_unsuccessfully_when_not_ready(monkeypatch):
     assert supervisor.main(['--repair', 'jaeger']) == 1
     assert saved[0]['jaeger']['repair_command_ok'] is True
     assert saved[0]['jaeger']['repair_ok'] is False
+
+
+def test_rack_is_optional_and_mac_ollama_is_the_default(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    monkeypatch.delenv('JAEGER_RACK_SERVICES', raising=False)
+    names = [item.name for item in supervisor.components()]
+    assert 'ollama' in names and 'honcho' not in names
+    monkeypatch.setenv('JAEGER_RACK_SERVICES', 'true')
+    assert 'honcho' in [item.name for item in supervisor.components()]
+
+
+def test_explicit_honcho_repair_is_unavailable_while_rack_is_paused(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    monkeypatch.delenv('JAEGER_RACK_SERVICES', raising=False)
+    assert supervisor.main(['--repair', 'honcho']) == 2
+
+
+def test_degraded_running_gateway_is_not_blindly_stopped(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    import jaeger_ai.features.gateway.service as gateway_service
+    monkeypatch.setattr(gateway_service, 'status', lambda: {'running': True})
+    monkeypatch.setattr(supervisor, '_tcp', lambda *a, **kw: False)
+    monkeypatch.setattr(gateway_service, 'start', lambda: (_ for _ in ()).throw(AssertionError('must not restart')))
+    assert supervisor._start_jaeger_gateway() is False
+
+
+def test_jaeger_repair_restores_bridge_backend_adapter_and_owned_gateway(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    calls = []
+    monkeypatch.setattr(supervisor, '_bridge_ready', lambda: False)
+    monkeypatch.setattr(supervisor, '_tcp', lambda *a: False)
+    monkeypatch.setattr(supervisor, '_http', lambda *a: False)
+    monkeypatch.setattr(supervisor, '_kickstart', lambda label: calls.append(label) or True)
+    monkeypatch.setattr(supervisor, '_start_jaeger_gateway', lambda: calls.append('owned-gateway') or True)
+    assert supervisor._repair_jaeger()
+    assert calls == [
+        'com.jenkinsrobotics.jaeger-bridge',
+        'com.jenkinsrobotics.jaeger-mcp-http',
+        'com.jenkinsrobotics.jaeger-hermes-adapter',
+        'owned-gateway',
+    ]
+
+
+def test_a2a_health_requires_backend_and_public_gateway(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    requested = []
+    monkeypatch.setattr(supervisor, '_http', lambda url: requested.append(url) or '8812' not in url)
+    a2a = next(item for item in supervisor.components() if item.name == 'a2a')
+    assert not a2a.probe()
+    assert requested == [
+        'http://127.0.0.1:8796/.well-known/agent-card.json',
+        'http://127.0.0.1:8812/.well-known/agent-card.json',
+    ]
+
+
+def test_jaeger_health_checks_the_actual_mcp_listener_not_a_nonexistent_health_route(monkeypatch):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    urls, ports = [], []
+    monkeypatch.setattr(supervisor, '_bridge_ready', lambda: True)
+    monkeypatch.setattr(supervisor, '_http', lambda url: urls.append(url) or True)
+    monkeypatch.setattr(supervisor, '_tcp', lambda host, port: ports.append(port) or True)
+    jaeger = next(item for item in supervisor.components() if item.name == 'jaeger')
+    assert jaeger.probe()
+    assert urls == ['http://192.168.64.1:8642/v1/health']
+    assert ports == [8792, 8811]

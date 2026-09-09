@@ -116,3 +116,44 @@ def test_roundtable_native_api_resumes_existing_named_cli_lineage():
     assert agent.session_id == 'compressed-child'
     assert calls == [f'Roundtable {legacy[:12]} — Hermes']
     assert agent.run_conversation()['conversation_history'][0]['content'] == 'old context'
+
+
+def test_stop_targets_only_matching_api_processes(monkeypatch, tmp_path):
+    import os
+    import signal
+    module = runpy.run_path(str(Path(__file__).resolve().parents[4] / 'scripts/run-hermes-native-api.py'))
+    stop = module['stop_servers']
+    script = str(Path(module['__file__']).resolve())
+    for pid, port, key in [(222222, '8645', '/private/key'), (222223, '8646', '/private/key'), (222224, '8645', '/another/key')]:
+        proc = tmp_path / str(pid)
+        proc.mkdir()
+        (proc / 'cmdline').write_bytes('\0'.join(['python', script, '--port', port, '--key-file', key]).encode())
+    monkeypatch.setitem(stop.__globals__, 'Path', lambda value: tmp_path if value == '/proc' else Path(value))
+    calls = []
+    monkeypatch.setattr(os, 'kill', lambda pid, sig: calls.append((pid, sig)))
+    assert stop(Path('/private/key'), 8645) == 0
+    assert calls == [(222222, signal.SIGTERM)]
+
+
+def test_native_service_adopts_existing_listener_and_stops_inside_container(monkeypatch):
+    module = runpy.run_path(str(Path(__file__).resolve().parents[4] / 'scripts/hermes-native-api-service.py'))
+    main = module['main']
+
+    class StopAfterPoll:
+        stopped = False
+        def is_set(self):
+            return self.stopped
+        def set(self):
+            self.stopped = True
+        def wait(self, seconds):
+            self.set()
+
+    monkeypatch.setattr(module['threading'], 'Event', StopAfterPoll)
+    monkeypatch.setattr(module['signal'], 'signal', lambda *a: None)
+    monkeypatch.setitem(main.__globals__, 'ready', lambda: True)
+    monkeypatch.setattr(module['subprocess'], 'Popen', lambda *a, **k: pytest.fail('must adopt existing API'))
+    calls = []
+    monkeypatch.setattr(module['subprocess'], 'run', lambda args, **kwargs: calls.append(args))
+    assert main() == 0
+    assert len(calls) == 1 and calls[0][-1] == '--stop'
+    assert 'exec' in calls[0]

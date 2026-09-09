@@ -879,17 +879,18 @@ private struct PermissionsPage: View {
 
 private struct AresPage: View {
     @State private var isOnline: Bool = false
+    @State private var endpointError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HUD.section("Jaeger surfaces")
-            Text("Jaeger owns the control plane. Hermes WebUI is a face; ARES is archive.")
+            Text("Use the shared WebUI to access your configured agents.")
                 .font(.system(size: 13))
                 .foregroundStyle(HUD.inkDim)
 
             // Status Card
             VStack(alignment: .leading, spacing: 12) {
-                Text("JAEGER CONTROL PLANE")
+                Text("SHARED WEBUI")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(2)
                     .foregroundStyle(HUD.inkDim)
@@ -898,15 +899,21 @@ private struct AresPage: View {
                     Circle()
                         .fill(isOnline ? HUD.accent : Color.red)
                         .frame(width: 10, height: 10)
-                    Text(isOnline ? "ONLINE (adapter :8791)" : "OFFLINE (adapter :8791)")
+                    Text(isOnline ? "ONLINE" : "UNREACHABLE")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(isOnline ? HUD.accent : HUD.ink)
                 }
 
                 HStack(spacing: 10) {
                     Button {
-                        if let url = URL(string: "http://127.0.0.1:8787") {
-                            NSWorkspace.shared.open(url)
+                        Task {
+                            do {
+                                let url = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
+                                endpointError = nil
+                                NSWorkspace.shared.open(url)
+                            } catch {
+                                endpointError = error.localizedDescription
+                            }
                         }
                     } label: {
                         Text("🌐 Open Jaeger WebUI")
@@ -936,18 +943,21 @@ private struct AresPage: View {
                 RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
             ))
 
+            if let endpointError {
+                Text(endpointError).foregroundStyle(.red).font(.caption)
+            }
             Spacer()
         }
         .task {
-            if let url = URL(string: "http://127.0.0.1:8791/health") {
+            do {
+                let url = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
                 var req = URLRequest(url: url)
-                req.timeoutInterval = 1.5
-                do {
-                    let (_, resp) = try await URLSession.shared.data(for: req)
-                    if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
-                        isOnline = true
-                    }
-                } catch {}
+                req.timeoutInterval = 5
+                let (_, resp) = try await URLSession.shared.data(for: req)
+                isOnline = (resp as? HTTPURLResponse)?.statusCode == 200
+            } catch {
+                isOnline = false
+                endpointError = error.localizedDescription
             }
         }
     }

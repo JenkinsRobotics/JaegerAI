@@ -35,7 +35,7 @@ instance, one word now.)
 |---|---|
 | `jaeger skills …` | List / manage the agent's skills |
 | `jaeger personality …` | Persona / character settings |
-| `jaeger status` | Instance + runtime status |
+| `jaeger status [--json]` | Managed service processes, container state, and network listeners |
 | `jaeger roadmap` | Show the roadmap |
 | `jaeger avatar …` | Avatar controls |
 | `jaeger prompt …` | Prompt inspection |
@@ -52,6 +52,22 @@ instance, one word now.)
 | `jaeger delegate moa [-n N] <prompt>` | Mixture of Agents — ask several at once, compare answers |
 
 ## Install / maintain
+
+On the configured macOS multi-agent deployment, `jaeger start` starts missing
+services and preserves already-running agents. It reads the existing deployment
+manifest and installed launch agents; it does not reinstall profiles or change
+model settings. `jaeger stop` stops the managed stack, and `jaeger restart`
+performs a stop followed by a start only if shutdown succeeded.
+
+All three commands support `--dry-run`, `--no-app`, and `--no-containers`.
+Use `jaeger restart --dry-run` to preview maintenance. Unknown flags are rejected
+before any action. Failed service commands return a nonzero exit status; startup
+can report a service as not ready while it continues warming up. Status checks
+show process/listener availability, not proof that an agent can complete a task.
+
+The fabric supervisor starts stopped components but does not force-kill a live
+worker after a failed health check. A running but unresponsive agent needs an
+explicit operator restart after its active work has been checked.
 
 | Command | What it does |
 |---|---|

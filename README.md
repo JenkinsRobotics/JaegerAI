@@ -18,6 +18,9 @@
 
 ## What it is
 
+See the [documentation index](docs/README.md) for operator commands,
+architecture, developer tooling, and integration notes.
+
 JaegerAI is a complete, general-purpose assistant platform. It can answer
 questions, work with files and code, browse and research, manage personal
 information, run scheduled and background work, use external services, and

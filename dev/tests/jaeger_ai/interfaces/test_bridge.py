@@ -316,7 +316,9 @@ def test_integration_contract_is_versioned_and_self_describing():
     # v12 added the ``cron`` query — in-flight scheduled jobs for host
     # sidebars that otherwise treat a mid-run cron session as completed.
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
-    assert contract["contract_version"] == 14
+    # v15 adds the Dispatcher projection over native facts and board memory.
+    assert contract["contract_version"] == 15
+    assert 'dispatcher_memory' in contract['operations']['queries']
     assert 'turn_status' in contract['operations']['queries']
     assert "board" in contract["operations"]["queries"]
     assert "heartbeat" in contract["operations"]["queries"]
@@ -930,6 +932,32 @@ def test_scoped_cancel_confirmation_requires_native_halt(monkeypatch, halt_reaso
     reply = next(frame for frame in frames if frame['type'] == 'reply')
     assert reply['cancelled'] is confirmed
     assert reply['text'] == 'native result'
+
+
+@pytest.mark.parametrize('cancelled', [False, True])
+def test_focus_terminal_report_survives_board_failure(monkeypatch, _instance_on_disk, cancelled):
+    from types import SimpleNamespace
+    from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+    layout = SimpleNamespace(memory_dir=_instance_on_disk / 'memory')
+    store = DispatcherStore(layout)
+    session = store.route('durability', 'Read one file')
+    (layout.memory_dir / 'board.json').write_text('{broken')
+
+    def native_turn(*args, **kwargs):
+        return {'text': 'Read first file', 'error': None,
+                'halt_reason': 'interrupted' if cancelled else None}
+
+    stdin = json.dumps({'op': 'send', 'text': 'Read one file',
+                        'turn_id': 'focus-proof', 'session': session}) + '\n{"op":"quit"}\n'
+    _, frames, _ = _run(monkeypatch, stdin, run_fn=native_turn)
+    reply = next(frame for frame in frames if frame['type'] == 'reply')
+    assert reply['text'] == 'Read first file'
+    assert not reply.get('error')
+    assert reply['cancelled'] is cancelled
+    report = store.overview()['reports'][0]
+    assert report['status'] == ('cancelled' if cancelled else 'completed')
+    assert store.overview()['pending_board_reports'] == 1
+    assert (layout.memory_dir / 'board.json').read_text() == '{broken'
 
 
 def test_permission_request_timeout_denies(monkeypatch):
@@ -2125,3 +2153,17 @@ def test_cron_query_reports_in_flight_jobs():
     finally:
         bridge._mark_cron_done("morning")
     assert bridge._query("cron", {}, object())["running"] == {}
+
+
+def test_protocol_bridge_does_not_mutate_default_permission_provider(monkeypatch):
+    from jaeger_os.core.safety import permissions
+
+    before = permissions._DEFAULT_POLICY.confirmation
+    monkeypatch.setattr(permissions, '_installed_policy', None)
+    token = permissions._current_policy.set(permissions._DEFAULT_POLICY)
+    try:
+        rc, _frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
+        assert rc == 0
+        assert permissions._DEFAULT_POLICY.confirmation is before
+    finally:
+        permissions._current_policy.reset(token)

@@ -18,8 +18,12 @@ so it stays import-clean.
 from __future__ import annotations
 
 import json
+import fcntl
+import os
+import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,6 +31,10 @@ from typing import Any
 
 COLUMNS = ("backlog", "ready", "in_progress", "blocked", "done")
 PRIORITIES = ("low", "med", "high")
+
+
+class BoardStorageError(RuntimeError):
+    """Existing board data cannot be read safely; never overwrite it."""
 
 
 @dataclass
@@ -57,10 +65,9 @@ class Card:
     # Ported from hermes-agent's kanban schema (``tools/kanban_tools.py``,
     # MIT — Copyright (c) 2025 Nous Research). The donor keeps these in a
     # SQLite DB at ``~/.hermes/kanban.db``; Jaeger's board is a small JSON
-    # document per instance, so they live on the card instead. That choice
-    # is deliberate rather than lazy: the donor's own rationale for a DB is
-    # cross-process worker access, and Jaeger's workers run in-process
-    # against one instance, so a second storage engine would buy nothing.
+    # document per instance, so they live on the card instead. Mutations
+    # hold a cross-process lock so native workers and profile adapters can
+    # safely share the existing format without a storage migration.
     #
     # Every field defaults to empty, and ``from_dict`` drops unknown keys,
     # so a board.json written before this change loads unchanged.
@@ -102,23 +109,60 @@ class Board:
     # ── persistence ─────────────────────────────────────────────────
 
     def _load(self) -> list[Card]:
-        if not self.path.is_file():
-            return []
         try:
             doc = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001 — a corrupt board is an empty board
+            if not isinstance(doc, dict) or not isinstance(doc.get("cards"), list):
+                raise ValueError("Expected an object containing a cards list")
+            cards = []
+            seen = set()
+            for value in doc["cards"]:
+                if not isinstance(value, dict):
+                    raise ValueError("Every card must be an object")
+                if not isinstance(value.get("id"), str) or not value["id"]:
+                    raise ValueError("Every saved card must have an identity")
+                if value["id"] in seen:
+                    raise ValueError("Duplicate card identity")
+                seen.add(value["id"])
+                cards.append(Card.from_dict(value))
+            return cards
+        except FileNotFoundError:
             return []
-        return [Card.from_dict(c) for c in doc.get("cards", []) if isinstance(c, dict)]
+        except (OSError, ValueError, TypeError) as exc:
+            raise BoardStorageError(f"Cannot read task board {self.path}: {exc}. Existing data was preserved.") from exc
+
+    @contextmanager
+    def _transaction(self):
+        """Serialize the full read/change/write across threads and processes.
+
+        Lock a separate inode because the board itself is atomically replaced.
+        Each transaction opens its own descriptor; no nested transactions.
+        """
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
 
     def _save(self, cards: list[Card]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps({"cards": [c.to_dict() for c in cards]}, indent=2,
-                       ensure_ascii=False),
-            encoding="utf-8",
-        )
-        tmp.replace(self.path)
+        fd, name = tempfile.mkstemp(prefix=self.path.name + ".", suffix=".tmp", dir=self.path.parent)
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump({"cards": [c.to_dict() for c in cards]}, output,
+                          indent=2, ensure_ascii=False)
+                output.flush()
+                os.fsync(output.fileno())
+            tmp.replace(self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # ── operations ──────────────────────────────────────────────────
 
@@ -144,9 +188,10 @@ class Board:
             source=source, created_by=created_by, tags=list(tags or []),
             parent=parent, priority=priority,
         )
-        cards = self._load()
-        cards.append(card)
-        self._save(cards)
+        with self._transaction():
+            cards = self._load()
+            cards.append(card)
+            self._save(cards)
         return card
 
     def get(self, card_id: str) -> Card | None:
@@ -211,12 +256,13 @@ class Board:
         return self._mutate(card_id, lambda c: [setattr(c, k, v) for k, v in clean.items()])
 
     def remove(self, card_id: str) -> bool:
-        cards = self._load()
-        kept = [c for c in cards if c.id != card_id]
-        if len(kept) == len(cards):
-            return False
-        self._save(kept)
-        return True
+        with self._transaction():
+            cards = self._load()
+            kept = [c for c in cards if c.id != card_id]
+            if len(kept) == len(cards):
+                return False
+            self._save(kept)
+            return True
 
     def summary(self) -> dict[str, int]:
         """Card counts per column + total."""
@@ -317,16 +363,18 @@ class Board:
         """
         if parent_id == child_id:
             return False
-        cards = {c.id: c for c in self._load()}
-        if parent_id not in cards or child_id not in cards:
-            return False
-        if self._would_cycle(cards, parent_id, child_id):
-            return False
-
-        def _apply(c: Card) -> None:
-            if parent_id not in c.blocked_by:
-                c.blocked_by.append(parent_id)
-        return self._mutate(child_id, _apply) is not None
+        with self._transaction():
+            cards = {c.id: c for c in self._load()}
+            if parent_id not in cards or child_id not in cards:
+                return False
+            if self._would_cycle(cards, parent_id, child_id):
+                return False
+            child = cards[child_id]
+            if parent_id not in child.blocked_by:
+                child.blocked_by.append(parent_id)
+                child.updated_at = time.time()
+                self._save(list(cards.values()))
+            return True
 
     @staticmethod
     def _would_cycle(
@@ -379,14 +427,15 @@ class Board:
     # ── internals ───────────────────────────────────────────────────
 
     def _mutate(self, card_id: str, fn: Any) -> Card | None:
-        cards = self._load()
-        for c in cards:
-            if c.id == card_id:
-                fn(c)
-                c.updated_at = time.time()
-                self._save(cards)
-                return c
-        return None
+        with self._transaction():
+            cards = self._load()
+            for c in cards:
+                if c.id == card_id:
+                    fn(c)
+                    c.updated_at = time.time()
+                    self._save(cards)
+                    return c
+            return None
 
 
 def board_for_layout(layout: Any) -> Board:

@@ -84,6 +84,11 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
     def native_enabled(self):
         return os.environ.get("OPENCLAW_ADAPTER_NATIVE_RUNS", "").lower() in {"1", "true"}
 
+    def native_capabilities(self):
+        value = super().native_capabilities()
+        value['features'].update(workspace_override=False, model_override=True)
+        return value
+
     def do_GET(self):
         if self.native_enabled() and self.native_route("GET"):
             return

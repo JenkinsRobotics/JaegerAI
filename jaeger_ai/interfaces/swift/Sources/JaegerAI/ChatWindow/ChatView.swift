@@ -86,7 +86,8 @@ struct ChatView: View {
         // existed.
         .sheet(item: approvalRequest) { request in
             ApprovalSheetView(request: request) { answer in
-                agent.respond(to: request, answer: answer)
+                if chat.sessionKey == "dispatcher" { chat.controlDispatcher("approval", approval: request, choice: answer) }
+                else { agent.respond(to: request, answer: answer) }
             }
         }
         .sheet(isPresented: $chat.showModelPicker) {
@@ -151,10 +152,15 @@ struct ChatView: View {
     private var approvalRequest: Binding<BridgeRequest?> {
         Binding(
             get: {
+                if chat.sessionKey == "dispatcher" { return chat.dispatcherApproval }
                 guard let req = agent.pendingRequest, req.kind == "approval" else { return nil }
                 return req
             },
             set: { newValue in
+                if newValue == nil, let req = chat.dispatcherApproval, chat.sessionKey == "dispatcher" {
+                    chat.controlDispatcher("approval", approval: req, choice: "deny")
+                    return
+                }
                 if newValue == nil, let req = agent.pendingRequest, req.kind == "approval" {
                     agent.respond(to: req, answer: "deny")
                 }
@@ -184,13 +190,33 @@ struct ChatView: View {
     /// commands (interfaces/pyside6/rich_tui/window.py).
     private var chatToolbar: some View {
         HStack(spacing: 10) {
+            Button("Dispatcher") { Task { await chat.loadSession("dispatcher") } }
+                .disabled(chat.isSending)
+            if chat.sessionKey == "dispatcher" {
+                VStack(alignment: .leading) {
+                    Text(chat.dispatcherStatus).font(.caption).lineLimit(2)
+                    if chat.dispatcherRun?.active == true, let tool = chat.dispatcherRun?.tools?.last {
+                        Text((tool.tool ?? "Tool") + " · " + tool.event).font(.caption2)
+                    }
+                }
+                Menu("Focus reports") {
+                    ForEach(chat.dispatcherReports, id: \.run_id) { report in
+                        Text(report.status + ": " + report.summary)
+                    }
+                }.disabled(chat.dispatcherReports.isEmpty)
+                if chat.dispatcherRun?.active == true {
+                    Button(chat.dispatcherRun?.status == "interrupted" ? "Check status" : "Stop") {
+                        chat.controlDispatcher(chat.dispatcherRun?.status == "interrupted" ? "reconcile" : "cancel")
+                    }
+                }
+            }
             Button(action: startNewChat) {
                 Label("New Chat", systemImage: "square.and.pencil")
                     .font(.system(size: 11, design: .monospaced))
             }
             .buttonStyle(.plain)
             .foregroundColor(Term.inkDim)
-            .disabled(chat.isSwitchingSession)
+            .disabled(chat.isSwitchingSession || chat.isSending)
 
             Spacer()
 
@@ -200,7 +226,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(Term.inkDim)
-            .disabled(chat.isSwitchingSession)
+            .disabled(chat.isSwitchingSession || chat.isSending)
             .popover(isPresented: $showHistory, arrowEdge: .bottom) {
                 historyList
             }

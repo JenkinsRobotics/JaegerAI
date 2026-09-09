@@ -22,6 +22,6 @@ Run with the repo's venv (the deps live there):
 | `gui.py` | Surfaces | launch the dev surface gallery (Studio / players) | a display |
 | `plugins.py` | Plugins | health-check every plugin (libs + status + setup steps) | — |
 
-Status crib (full map in `docs/infographic/`): STT / TTS / 2D avatar = built;
+Status crib (full map in [dev/infographic](../infographic/README.md)): STT / TTS / 2D avatar = built;
 the media node streams (topics declared); 3D avatar + `local_agreement` STT =
 planned.

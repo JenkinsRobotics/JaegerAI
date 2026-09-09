@@ -62,3 +62,22 @@ Adapters must emit `message.delta` with `delta`, then `run.completed`,
 `run.failed`, or `run.cancelled`, and close the SSE connection. Transport
 heartbeats are not evidence that an LLM is progressing. Long work is not given
 a fixed total time limit; do not infer an outage from a slow model response.
+
+## Component-specific update labels
+
+`update-labels.patch` is applied after `upstream.patch`. The upstream update API
+has two targets: `agent` means **Hermes Agent**, and `webui` means **Hermes WebUI**.
+The banner, release links, settings results, and apply button use those names.
+The button derives its labels from the same target list used by the apply loop;
+manual-only updates are excluded. This updater does not check JaegerAI or OpenClaw,
+and the banner explicitly says so. No update to either product is implied by
+selecting a chat profile.
+
+Verify the assembled JavaScript without browser screenshots:
+`node dev/tests/hermes_webui/update_labels.cjs <staged-directory>/static/ui.js`.
+The live static assets were patched on September 9 without running an upgrade.
+Recreated containers must use a newly assembled overlay, as described above.
+
+`native-cancel-status.patch` requires terminal native cancellation evidence when
+an adapter supplies `cancellation_confirmed` and `execution_unknown`. An accepted
+Stop request with uncertain execution must not become a cancelled transcript.

@@ -119,7 +119,7 @@ final class AgentBridge: ObservableObject {
     /// Launch the bridge child and await its (fast) ready handshake.
     /// Settings/queries are usable on return; the model may still be
     /// booting — watch ``agentState``.
-    func connect(instance: String = defaultInstanceName) async throws {
+    func connect(instance: String? = explicitInstance) async throws {
         if state == .ready { return }
         if let inFlight = connectTask {          // join, don't double-spawn
             try await inFlight.value
@@ -131,7 +131,7 @@ final class AgentBridge: ObservableObject {
         try await task.value
     }
 
-    private func doConnect(instance: String) async throws {
+    private func doConnect(instance: String?) async throws {
         state = .connecting
         agentState = .booting
         let proc = BridgeProcess()
@@ -165,7 +165,7 @@ final class AgentBridge: ObservableObject {
             Task { @MainActor in self?.handleTermination(clean: clean) }
         }
         do {
-            let ready = try await proc.start(instance: Self.explicitInstance)
+            let ready = try await proc.start(instance: instance)
             if ready.proto != ProtocolV1.version {
                 await proc.stop()
                 throw BridgeError.bootFailed(
@@ -201,7 +201,7 @@ final class AgentBridge: ObservableObject {
     /// Connect without throwing — failures land on ``lastError``. The
     /// launch hook uses this (a missing bridge is the first-run state,
     /// not an exception).
-    func tryConnect(instance: String = defaultInstanceName) async {
+    func tryConnect(instance: String? = explicitInstance) async {
         do {
             try await connect(instance: instance)
             NSLog("[Bridge] connected — instance=\(status?.instance ?? "?")")

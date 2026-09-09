@@ -927,6 +927,8 @@ def evict_session(session_key: str) -> bool:
 
     Returns ``True`` if the session had any state to drop."""
     had_state = False
+    if _session_model_clients.pop(session_key, None) is not None:
+        had_state = True
     if _jaeger_agents_by_session.pop(session_key, None) is not None:
         had_state = True
     if _session_histories.pop(session_key, None) is not None:
@@ -3618,11 +3620,19 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # Session system prompt = base prompt + runtime identity + frozen
         # facts snapshot — see :func:`compose_session_prompt`.
         _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
+        from jaeger_ai.core.runtime.dispatcher import session_policy, context_note
+        _focus = session_policy(_layout, key)
+        _note = context_note(_layout, key) if key == 'dispatcher' or key.startswith('focus:') else ''
+        if _note:
+            _session_prompt += '\n\n' + _note
+        if _focus:
+            _ctx = min(_ctx or _focus['context'], _focus['context'])
+            _reserve = min(_reserve or 2048, _ctx // 4)
         from jaeger_ai.core.runtime.execution import inner_max as _inner_max
         _jaeger_agents_by_session[key] = build_jaeger_agent(
             client,
             system_prompt=_session_prompt,
-            toolsets=_pipeline.get("toolsets"),
+            toolsets=_focus['toolsets'] if _focus else _pipeline.get("toolsets"),
             skip_final_tools=SKIP_FINAL_TOOLS,
             callbacks=_status_cb,
             ctx_window=_ctx,
@@ -3655,6 +3665,11 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     try:
         _cfg = _pipeline.get("config")
         _active_ctx, _active_reserve = _context_budget_for(_cfg)
+        from jaeger_ai.core.runtime.dispatcher import session_policy
+        _focus = session_policy(_pipeline.get('layout'), key)
+        if _focus:
+            _active_ctx = min(_active_ctx or _focus['context'], _focus['context'])
+            _active_reserve = min(_active_reserve or 2048, _active_ctx // 4)
         if agent is not None and getattr(agent, "context_guard", None) is not None and _active_ctx:
             from jaeger_agent.util.context_guard import ContextBudget
             old_b = agent.context_guard.budget
@@ -4294,6 +4309,10 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
             # part of what build_system_prompt returns.
             jaeger_agent.system_prompt = compose_session_prompt(
                 _pipeline["system_prompt"])
+        key = next((key for key, agent in _jaeger_agents_by_session.items() if agent is jaeger_agent), '')
+        if key == 'dispatcher' or key.startswith('focus:'):
+            from jaeger_ai.core.runtime.dispatcher import context_note
+            jaeger_agent.system_prompt = compose_session_prompt(_pipeline['system_prompt']) + '\n\n' + context_note(layout, key)
     except Exception:  # noqa: BLE001
         pass
 
@@ -4387,12 +4406,17 @@ def apply_live_model() -> bool:
                 pass
 
 
+_session_model_clients: dict[str, tuple[Any, Any]] = {}
+
+
 def run_for_voice(
     client: Any,
     user_text: str,
     session_key: str | None = None,
     *,
     display_text: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
@@ -4403,6 +4427,20 @@ def run_for_voice(
     turn as a typed one; the dict just carries the text + tool activity
     for the voice consumer to speak."""
     session = session_key or "voice"
+    from jaeger_ai.core.models.session_selection import select_client
+    signature = (id(client), model or None, provider or None)
+    cached = _session_model_clients.get(session)
+    if cached is None or cached[0] != signature:
+        selected = select_client(client, _pipeline.get("config"), _pipeline.get("layout"), model, provider)
+        if cached is not None or selected is not client:
+            prior = list(getattr(_jaeger_agents_by_session.get(session), "messages", None) or [])
+            evict_session(session)
+            if prior:
+                _carried_session_messages[session] = prior
+        _session_model_clients[session] = (signature, selected)
+    client = _session_model_clients[session][1]
+    if session == 'dispatcher' and session not in _jaeger_agents_by_session:
+        resume_session_from_store(client, session, _pipeline.get('layout'))
     out = _run_turn(client, user_text, session_key=session)
     # Persist the turn so conversations survive app close + are listable.
     # ``preview`` (first user line, set by SessionStore.record) already
@@ -4428,6 +4466,9 @@ def run_for_voice(
             try:
                 from jaeger_ai.core.runtime.modes import serving_brain
                 brain = serving_brain()
+                if getattr(client, "model_name", None):
+                    brain = {**brain, "model": client.model_name,
+                             "provider": getattr(client, "provider", brain.get("provider"))}
                 if brain.get("model"):
                     store.stamp_brain(
                         session,

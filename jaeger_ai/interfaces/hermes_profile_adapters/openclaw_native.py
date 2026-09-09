@@ -31,19 +31,20 @@ def gateway_error(error):
     return ClassifiedError(category, f"OpenClaw {code}: {message}")
 
 
-def connect_params(challenge, token, identity):
+def connect_params(challenge, token, identity, scopes=None):
+    scopes = list(scopes or SCOPES)
     from cryptography.hazmat.primitives import serialization
     key = serialization.load_pem_private_key(identity["privateKeyPem"].encode(), password=None)
     signed_at = int(challenge.get("ts") or time.time() * 1000)
     nonce = challenge["nonce"]
     payload = "|".join(["v3", identity["deviceId"], "cli", "cli", "operator",
-                        ",".join(SCOPES), str(signed_at), token, nonce, "linux", ""])
+                        ",".join(scopes), str(signed_at), token, nonce, "linux", ""])
     def encode(value):
         return base64.urlsafe_b64encode(value).decode().rstrip("=")
     return {
         "minProtocol": 4, "maxProtocol": 4,
         "client": {"id": "cli", "version": "jaeger-webui-1", "platform": "linux", "mode": "cli"},
-        "role": "operator", "scopes": SCOPES, "caps": ["tool-events"],
+        "role": "operator", "scopes": scopes, "caps": ["tool-events"],
         "auth": {"token": token},
         "device": {"id": identity["deviceId"], "publicKey": encode(key.public_key().public_bytes(
             serialization.Encoding.Raw, serialization.PublicFormat.Raw)),
@@ -52,7 +53,8 @@ def connect_params(challenge, token, identity):
 
 
 class NativeGateway:
-    def __init__(self, url, token_file, identity_file=None):
+    def __init__(self, url, token_file, identity_file=None, *, scopes=None):
+        self.scopes = list(scopes or SCOPES)
         self.url = url.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
         self.token_file = token_file
         self.identity_file = identity_file or Path(token_file).parent / "identity/device.json"
@@ -70,14 +72,14 @@ class NativeGateway:
             if challenge.get("event") != "connect.challenge":
                 raise RuntimeError("OpenClaw did not send an authentication challenge")
             params = connect_params(challenge["payload"], Path(self.token_file).read_text().strip(),
-                                    json.loads(Path(self.identity_file).read_text()))
+                                    json.loads(Path(self.identity_file).read_text()), self.scopes)
             self.ws.send(json.dumps({"type": "req", "id": "connect", "method": "connect", "params": params}))
             reply = json.loads(self.ws.recv(timeout=10))
             if not reply.get("ok"):
                 error = reply.get("error") or {}
                 raise gateway_error(error)
             granted = reply.get("payload", {}).get("auth", {}).get("scopes", [])
-            if not set(SCOPES).issubset(granted):
+            if not set(self.scopes).issubset(granted):
                 raise ClassifiedError("permission_denied", "OpenClaw pairing lacks native chat/approval permissions; no turn dispatched")
             self.reader = threading.Thread(target=self._read, daemon=True)
             self.reader.start()
@@ -164,6 +166,26 @@ def openclaw_turn(run, workspace=None):
         if run.cancelled.is_set():
             run.cancel_confirmed = True
             return ""
+        model = getattr(run, "model", None)
+        if model:
+            catalog = gateway.request("models.list", {}).get("models", [])
+            matches = [row for row in catalog if model in {row.get("id"), str(row.get("provider")) + "/" + str(row.get("id"))}]
+            provider = getattr(run, "provider", None)
+            exact = [row for row in matches if row.get("provider") == provider]
+            if exact:
+                matches = exact
+            elif provider and provider not in {'ollama', 'ollama-mac', 'ollama-rack', 'ollama-cloud', 'ollama-local'}:
+                matches = []
+            if len(matches) != 1:
+                raise ValueError("Select an unambiguous model from OpenClaw's native model catalog")
+            chosen = matches[0]
+            inventory = gateway.request("sessions.list", {"limit": 1000})
+            current = next((row for row in inventory.get("sessions", []) if row.get("key") == session_key), inventory.get("defaults", {}))
+            if (current.get("modelProvider"), current.get("model")) != (chosen["provider"], chosen["id"]):
+                with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE,
+                                   scopes=[*SCOPES, "operator.admin"]) as settings:
+                    settings.request("sessions.patch", {"key": session_key,
+                        "model": chosen["provider"] + "/" + chosen["id"]})
         run.dispatch(session_id=session_key, run_id=run.id)
         sent = gateway.request("chat.send", {"sessionKey": session_key, "message": run.message,
                                               "idempotencyKey": run.id})

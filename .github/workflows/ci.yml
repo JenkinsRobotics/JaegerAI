@@ -7,6 +7,32 @@ env:
   JAEGER_TEST_HEADLESS: "1"
   PYTHONHASHSEED: "0"
 jobs:
+  webui-assembly:
+    name: Pinned WebUI and Jaeger overlay
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Assemble the shipped integration and check Python syntax
+        run: |
+          python - <<'PY'
+          import compileall
+          from pathlib import Path
+          import runpy
+          import shutil
+          prepare = runpy.run_path('scripts/prepare-hermes-webui.py')['prepare']
+          staged = prepare()
+          try:
+              if not compileall.compile_dir(Path(staged) / 'api', quiet=1):
+                  raise SystemExit('Assembled WebUI has invalid Python syntax')
+          finally:
+              shutil.rmtree(staged)
+          PY
   python:
     name: Python ${{ matrix.python }} / ${{ matrix.suite }}
     runs-on: ubuntu-latest
