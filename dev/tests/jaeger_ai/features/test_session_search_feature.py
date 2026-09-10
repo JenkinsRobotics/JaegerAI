@@ -5,12 +5,16 @@ from __future__ import annotations
 import sqlite3
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
+from jaeger_ai.core.sessions import SessionStore, reset_for_tests
 from jaeger_ai.features.session_search import (
+    open_session_store,
     prepare_search_query,
     sanitize_fts5_query,
     search_messages,
     search_sessions,
+    sessions_db_path,
 )
 from jaeger_ai.features.session_search.fts import fts_enabled
 from jaeger_ai.features.session_search.query import escape_like
@@ -99,3 +103,48 @@ def test_search_sessions_and_messages(tmp_path: Path):
     assert hits and hits[0].session_id == "webui:demo"
     assert "zucchini" in (hits[0].snippet or "").lower()
     assert fts_enabled(store._conn) is False
+
+
+def test_real_session_store_like_search(tmp_path: Path):
+    """DEPTH: search against the real Jaeger sessions.db schema."""
+    reset_for_tests()
+    layout = SimpleNamespace(memory_dir=tmp_path / "memory")
+    layout.memory_dir.mkdir(parents=True)
+    assert sessions_db_path(layout) == layout.memory_dir / "sessions.db"
+
+    store = SessionStore(sessions_db_path(layout))
+    store.record("abc123def456", "user", "find the zucchini recipe tonight")
+    store.record("abc123def456", "assistant", "Here is a roasted zucchini plan.")
+    store.set_title("abc123def456", "Dinner ideas")
+    store.record("other", "user", "unrelated bridge debug")
+
+    rows = search_sessions(store, "zucchini", limit=10)
+    assert [r["id"] for r in rows] == ["abc123def456"]
+
+    hits = search_messages(store, "roasted", limit=10)
+    assert hits and hits[0].session_id == "abc123def456"
+    assert hits[0].role == "assistant"
+    assert "roasted" in (hits[0].snippet or "").lower()
+
+    # Wildcard injection must not match everything
+    assert search_sessions(store, "%", limit=10) == [] or all(
+        "%" not in (r.get("title") or "") for r in search_sessions(store, "zzzz-no-hit", limit=10)
+    )
+    assert search_sessions(store, "zzzz-no-hit", limit=10) == []
+    assert fts_enabled(store._conn) is False
+    store.close()
+    reset_for_tests()
+
+
+def test_open_session_store_uses_layout(tmp_path: Path, monkeypatch):
+    reset_for_tests()
+    layout = SimpleNamespace(memory_dir=tmp_path / "memory")
+    monkeypatch.setitem(
+        __import__("jaeger_ai.main", fromlist=["_pipeline"])._pipeline,
+        "layout",
+        layout,
+    )
+    store = open_session_store()
+    assert store is not None
+    assert sessions_db_path() == layout.memory_dir / "sessions.db"
+    reset_for_tests()

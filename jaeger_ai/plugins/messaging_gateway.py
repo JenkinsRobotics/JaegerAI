@@ -124,6 +124,8 @@ def main() -> int:
     llm_lock = threading.Lock()
     _pipeline["llm_lock"] = llm_lock
 
+    from jaeger_ai.features.channels import register_plugin_bridge
+
     adapters: list[Any] = []
     if not args.no_discord and os.environ.get("DISCORD_BOT_TOKEN"):
         try:
@@ -131,6 +133,7 @@ def main() -> int:
             d = DiscordBridge(handler, llm_lock=llm_lock)
             d.start()
             adapters.append(d)
+            register_plugin_bridge("discord", d)
             print("[gateway] Discord plugin started", flush=True)
         except Exception as exc:
             print(f"[gateway] Discord plugin skipped: {exc}", flush=True)
@@ -143,6 +146,7 @@ def main() -> int:
             t = TelegramBridge(handler, llm_lock=llm_lock)
             t.start()
             adapters.append(t)
+            register_plugin_bridge("telegram", t)
             print("[gateway] Telegram plugin started", flush=True)
         except Exception as exc:
             print(f"[gateway] Telegram plugin skipped: {exc}", flush=True)
@@ -155,6 +159,7 @@ def main() -> int:
             im = IMessageBridge(handler, llm_lock=llm_lock)
             im.start()
             adapters.append(im)
+            register_plugin_bridge("imessage", im)
         except Exception as exc:
             print(f"[gateway] iMessage plugin skipped: {exc}", flush=True)
 

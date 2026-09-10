@@ -8,8 +8,10 @@ from jaeger_ai.features.channels import (
     ChannelAdapter,
     InboundMessage,
     OutboundMessage,
+    PluginBridgeAdapter,
     bundled_catalog,
     get_registry,
+    register_plugin_bridge,
 )
 from jaeger_ai.features.channels.catalog import lookup_channel
 from jaeger_ai.features.channels.registry import ChannelRegistry
@@ -60,3 +62,31 @@ def test_inbound_dataclass_and_global_registry_isolated():
     assert msg.text == "hi"
     # Global registry starts empty for this process unless something else registered.
     assert isinstance(get_registry().list_ids(), list)
+
+
+class _FakePluginBridge:
+    def __init__(self) -> None:
+        self.started = False
+        self.sent: list[tuple[str, str]] = []
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.started = False
+
+    def send(self, recipient: str, text: str) -> dict:
+        self.sent.append((recipient, text))
+        return {"sent": True, "channel_id": recipient}
+
+
+def test_plugin_bridge_adapter_registers_on_protocol():
+    reg = ChannelRegistry()
+    bridge = _FakePluginBridge()
+    adapter = register_plugin_bridge("discord", bridge, registry=reg)
+    assert isinstance(adapter, PluginBridgeAdapter)
+    assert isinstance(adapter, ChannelAdapter)
+    assert reg.list_ids() == ["discord"]
+    result = reg.send("discord", "99", "ping")
+    assert result["sent"] is True
+    assert bridge.sent == [("99", "ping")]
