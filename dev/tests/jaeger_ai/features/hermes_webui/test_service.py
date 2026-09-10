@@ -53,6 +53,9 @@ def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
             "layout": layout,
             "instance": "jaeger",
         },
+    ), patch(
+        "jaeger_ai.core.runtime.agent_workspaces.container_name",
+        lambda role: "hermes-webui-hermes-webui",
     ):
         svc = HermesWebUIService("jaeger")
         denied = svc.start()
@@ -96,6 +99,9 @@ def test_vendor_start_runs_adapter_then_webui_and_can_publish(tmp_path):
             "layout": layout,
             "instance": "jaeger",
         },
+    ), patch(
+        "jaeger_ai.features.hermes_webui.service.prepare_vendor_webui_home",
+        return_value={},
     ):
         svc = HermesWebUIService("jaeger")
         with patch.object(svc, "_start_adapter", return_value={"ok": True}), patch.object(

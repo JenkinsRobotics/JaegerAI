@@ -17,6 +17,21 @@ def wait_for(predicate):
     assert predicate()
 
 
+def test_structured_list_input_and_model_override(tmp_path):
+    runs = Runs(tmp_path, lambda run, workspace: f"model={run.model}")
+    info = runs.start(
+        "s1",
+        [{"type": "text", "text": "hello with a file"}],
+        model="glm-5.3-flash:cloud",
+        provider="ollama",
+    )
+    run = runs.get(info["run_id"])
+    wait_for(lambda: not run.worker_active)
+    assert run.model == "glm-5.3-flash:cloud"
+    assert run.provider == "ollama"
+    assert "hello with a file" in run.message
+
+
 def test_approval_is_run_scoped_and_single_use(tmp_path):
     run = Run(tmp_path, "session", "hello")
     other = Run(tmp_path, "other", "hello")

@@ -19,16 +19,16 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
             "\n"
             "verbs:\n"
             "  start [--tailscale] [-i NAME]       start Jaeger WebUI + adapter\n"
-            "  start --container [--force]         use legacy container UI\n"
+            "  start --container [--force]         start Hermes runtime container\n"
             "  stop  [--keep-container] [-i NAME]  stop adapter (+ container)\n"
             "  status [--json] [-i NAME]           toggle, ports, health\n"
             "  url [-i NAME]                       print browser URL\n"
             "\n"
             "ports:\n"
-            "  Jaeger WebUI  http://127.0.0.1:8790/   (primary)\n"
-            "  adapter       http://127.0.0.1:8791/   (runner-local)\n"
-            "  container UI  http://127.0.0.1:8787/   (legacy alternative)\n"
-            "  webhooks      127.0.0.1:8793           (no longer clashes with adapter)\n",
+            "  Jaeger WebUI     http://127.0.0.1:8790/   (canonical chat URL)\n"
+            "  adapter          http://127.0.0.1:8791/   (runner-local)\n"
+            "  Hermes runtime   http://127.0.0.1:8787/   (container; not a chat bookmark)\n"
+            "  webhooks         127.0.0.1:8793           (no longer clashes with adapter)\n",
             file=sys.stderr,
         )
         return 0 if argv else 2
@@ -90,9 +90,9 @@ def _webui_start(argv: list[str]) -> int:
         return 1
     urls = svc.urls()
     print(c.green("✓ Container WebUI stack is up."))
-    print(f"  Open:    {urls.container_ui}")
+    print(f"  Runtime: {urls.container_ui}  (Hermes container; not a chat bookmark)")
     print(f"  Adapter: {urls.adapter}")
-    print(f"  Jaeger:  {urls.vendor_ui}  (use without --container)")
+    print(f"  Chat:    {urls.vendor_ui}")
     return 0
 
 

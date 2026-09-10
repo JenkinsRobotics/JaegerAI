@@ -46,6 +46,61 @@ def _write_broken_skill(layout: InstanceLayout, *, name: str, missing_pkg: str) 
     )
 
 
+def test_webui_chat_url_fails_when_bookmark_is_8787(monkeypatch) -> None:
+    from jaeger_ai.core.diagnostics import doctor as doctor_mod
+
+    class Fake:
+        def browser_url(self):
+            return "http://127.0.0.1:8787/"
+
+        def hermes_runtime_url(self):
+            return "http://127.0.0.1:8787/"
+
+    monkeypatch.setattr(doctor_mod, "HermesWebUIService", Fake, raising=False)
+    monkeypatch.setattr(
+        "jaeger_ai.features.hermes_webui.service.HermesWebUIService", Fake
+    )
+    checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
+    assert checks["webui_chat_url"].ok is False
+
+
+def test_webui_chat_url_passes_for_8790(monkeypatch) -> None:
+    from jaeger_ai.core.diagnostics import doctor as doctor_mod
+
+    class Fake:
+        def browser_url(self):
+            return "http://100.74.2.15:8790/"
+
+        def hermes_runtime_url(self):
+            return None
+
+    monkeypatch.setattr(
+        "jaeger_ai.features.hermes_webui.service.HermesWebUIService", Fake
+    )
+    monkeypatch.setattr(
+        "jaeger_ai.core.runtime.agent_workspaces.container_name",
+        lambda role: "jaeger-hermes-webui",
+    )
+    monkeypatch.setattr(
+        "jaeger_ai.core.runtime.container_service.container_status",
+        lambda name: {"found": False, "details": {}},
+    )
+    checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
+    assert checks["webui_chat_url"].ok is True
+
+
+def test_jaeger_skills_route_is_dispatcher_not_hermes_home() -> None:
+    from pathlib import Path
+    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as jaeger_mod
+    import jaeger_ai.features.hermes_webui.dispatcher_sidecar as sidecar_mod
+    text = Path(jaeger_mod.__file__).read_text(encoding="utf-8")
+    assert "/v1/dispatcher/skills" in text
+    assert "list_skills" in text
+    side = Path(sidecar_mod.__file__).read_text(encoding="utf-8")
+    assert "/skills" in side
+    assert "webui_gateway_base_url" in side
+
+
 def test_doctor_renders_a_fabricated_failing_skill_with_a_pip_fix() -> None:
     layout = _fresh_layout()
     _write_broken_skill(layout, name="doctortestbroken", missing_pkg="totally_fake_doctor_pkg")

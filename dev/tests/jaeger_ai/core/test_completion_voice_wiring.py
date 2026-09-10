@@ -51,13 +51,18 @@ def test_webui_url_tracks_reassigned_container_ip(monkeypatch):
 
     ui = service.HermesWebUIService.__new__(service.HermesWebUIService)
     ui.webui_port = 8787
+    ui.vendor_webui_port = 8790
+    ui.adapter_port = 8791
+    ui.adapter_host = "127.0.0.1"
     ui.enabled = True
     ui.container_name = "configured-webui"
     ui._cfg = {"engine": "/configured/container"}
+    monkeypatch.setattr(service, '_tailscale_ipv4', lambda: None)
     monkeypatch.setattr(service.shutil, 'which', lambda _: '/usr/bin/container')
     monkeypatch.setattr(service.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(
         a, 0, json.dumps([{'status': {'state': 'running', 'networks': [{'ipv4Address': '192.168.64.99/24'}]}}])))
-    assert ui.browser_url() == 'http://192.168.64.99:8787/'
+    assert ui.hermes_runtime_url() == 'http://192.168.64.99:8787/'
+    assert ui.browser_url() == 'http://127.0.0.1:8790/'
 
 
 def test_tray_global_lifecycle_does_not_pass_unsupported_instance(monkeypatch):

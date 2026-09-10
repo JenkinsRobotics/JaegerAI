@@ -23,7 +23,7 @@ OPENCLAW_TOKEN_FILE = Path(os.environ.get(
     "OPENCLAW_ADAPTER_TOKEN_FILE",
     str(Path.home() / ".ares/openclaw/gateway.token"),
 ))
-ADAPTER_HOST = os.environ.get("OPENCLAW_ADAPTER_HOST", "192.168.64.1")
+ADAPTER_HOST = os.environ.get("OPENCLAW_ADAPTER_HOST", "0.0.0.0")
 ADAPTER_PORT = int(os.environ.get("OPENCLAW_ADAPTER_PORT", "8644"))
 REQUEST_TIMEOUT = timeout_setting("OPENCLAW_ADAPTER_REQUEST_TIMEOUT")
 _circuit = CircuitBreaker()

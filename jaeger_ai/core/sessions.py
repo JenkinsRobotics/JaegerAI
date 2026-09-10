@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS session_tombstones (
 );
 """
 
-SESSION_CONTRACT_VERSION = 3
+SESSION_CONTRACT_VERSION = 4
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$")
 _HEX_ID_RE = re.compile(r"^[0-9a-f]+$")
 
@@ -169,12 +169,19 @@ class SessionStore:
             )
         if "origin" not in session_cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN origin TEXT")
+        if "profile" not in session_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN profile TEXT")
+        if "ended_at" not in session_cols:
+            # Nullable; live Jaeger chats leave this NULL (Hermes state.db
+            # stamps ended_at on close — that gap is intentional).
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN ended_at REAL")
         message_cols = {
             row[1] for row in self._conn.execute("PRAGMA table_info(messages)")
         }
         if "metadata" not in message_cols:
             self._conn.execute("ALTER TABLE messages ADD COLUMN metadata TEXT")
         self._backfill_origins()
+        self._backfill_profiles()
 
     def _backfill_origins(self) -> None:
         rows = self._conn.execute(
@@ -198,6 +205,42 @@ class SessionStore:
             "SELECT origin FROM sessions WHERE id=?", (session_id,)
         ).fetchone()
         return str(row[0] if row and row[0] else origin)
+
+    def _backfill_profiles(self) -> None:
+        from jaeger_ai.features.hermes_webui.session_unify import infer_session_profile
+
+        rows = self._conn.execute(
+            "SELECT id, origin FROM sessions WHERE profile IS NULL OR profile=''"
+        ).fetchall()
+        if not rows:
+            return
+        self._conn.executemany(
+            "UPDATE sessions SET profile=? WHERE id=?",
+            [
+                (infer_session_profile(session_id, origin=origin), session_id)
+                for session_id, origin in rows
+            ],
+        )
+
+    def _stamp_profile_locked(
+        self,
+        session_id: str,
+        explicit: object = None,
+        *,
+        origin: object = None,
+    ) -> str:
+        """Set profile on first write only. Returns the durable key."""
+        from jaeger_ai.features.hermes_webui.session_unify import infer_session_profile
+
+        profile = infer_session_profile(session_id, explicit, origin=origin)
+        self._conn.execute(
+            "UPDATE sessions SET profile=? WHERE id=? AND (profile IS NULL OR profile='')",
+            (profile, session_id),
+        )
+        row = self._conn.execute(
+            "SELECT profile FROM sessions WHERE id=?", (session_id,)
+        ).fetchone()
+        return str(row[0] if row and row[0] else profile)
 
     def _redact_existing_messages(self) -> None:
         """One-way migration: remove credential-shaped values from history."""
@@ -242,9 +285,18 @@ class SessionStore:
         provider: str | None = None,
         metadata: dict[str, Any] | None = None,
         origin: str | None = None,
+        profile: str | None = None,
     ) -> None:
         """Append one message; upsert the session (first user line = preview)."""
         if not session_id or not text:
+            return
+        from jaeger_ai.features.hermes_webui.session_unify import (
+            infer_session_profile,
+            is_system_nudge,
+            title_from_text,
+        )
+
+        if role == "user" and is_system_nudge(text):
             return
         try:
             session_id = canonical_session_id(session_id)
@@ -256,13 +308,15 @@ class SessionStore:
         metadata = redact_value(metadata) if metadata else None
         now = time.time()
         stamped = infer_session_origin(session_id, origin)
+        stamped_profile = infer_session_profile(session_id, profile, origin=origin)
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):
                 return
             self._conn.execute(
-                "INSERT OR IGNORE INTO sessions(id, created_at, last_active, origin) "
-                "VALUES(?,?,?,?)", (session_id, now, now, stamped))
+                "INSERT OR IGNORE INTO sessions(id, created_at, last_active, origin, profile) "
+                "VALUES(?,?,?,?,?)", (session_id, now, now, stamped, stamped_profile))
             self._stamp_origin_locked(session_id, origin)
+            self._stamp_profile_locked(session_id, profile, origin=origin)
             self._conn.execute(
                 "INSERT INTO messages(session_id, role, text, ts, metadata) "
                 "VALUES(?,?,?,?,?)",
@@ -271,10 +325,12 @@ class SessionStore:
                     json.dumps(metadata, ensure_ascii=False) if metadata else None,
                 ))
             if role == "user":
+                title = title_from_text(text)
                 self._conn.execute(
                     "UPDATE sessions SET last_active=?, "
-                    "preview=COALESCE(preview, ?) WHERE id=?",
-                    (now, text[:100], session_id))
+                    "preview=COALESCE(preview, ?), "
+                    "title=COALESCE(title, ?) WHERE id=?",
+                    (now, text[:100], title or None, session_id))
             else:
                 self._conn.execute(
                     "UPDATE sessions SET last_active=? WHERE id=?",
@@ -299,6 +355,7 @@ class SessionStore:
         model: str = "",
         provider: str = "",
         origin: str = "unknown",
+        profile: str | None = None,
     ) -> dict[str, Any]:
         """Atomically import one external transcript exactly once.
 
@@ -333,6 +390,9 @@ class SessionStore:
         created_at = min(row[2] for row in clean)
         last_active = max(row[2] for row in clean)
         stamped = normalize_session_origin(origin)
+        from jaeger_ai.features.hermes_webui.session_unify import infer_session_profile
+
+        stamped_profile = infer_session_profile(session_id, profile, origin=stamped)
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):
                 return {"id": session_id, "created": False, "tombstoned": True}
@@ -343,8 +403,8 @@ class SessionStore:
             first_user = next((row[1] for row in clean if row[0] == "user"), clean[0][1])
             self._conn.execute(
                 "INSERT INTO sessions"
-                "(id,title,preview,created_at,last_active,model,provider,execution_state,origin) "
-                "VALUES(?,?,?,?,?,?,?,'idle',?)",
+                "(id,title,preview,created_at,last_active,model,provider,execution_state,origin,profile) "
+                "VALUES(?,?,?,?,?,?,?,'idle',?,?)",
                 (
                     session_id,
                     redact_text(title)[:500] or first_user[:100],
@@ -354,6 +414,7 @@ class SessionStore:
                     model or None,
                     provider or None,
                     stamped,
+                    stamped_profile,
                 ),
             )
             self._conn.executemany(
@@ -440,41 +501,68 @@ class SessionStore:
         cur = self._conn.execute(
             "SELECT s.id, s.title, s.preview, s.created_at, s.last_active, "
             "  (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.id), "
-            "  s.model, s.provider, s.execution_state, s.origin "
+            "  s.model, s.provider, s.execution_state, s.origin, "
+            "  s.profile, s.ended_at "
             "FROM sessions s ORDER BY s.last_active DESC, s.rowid DESC "
             "LIMIT ?", (limit,))
         rows = []
-        for i, ti, p, ca, la, n, model, provider, state, origin in cur.fetchall():
+        from jaeger_ai.features.hermes_webui.session_unify import (
+            infer_session_profile,
+            profile_badge_for_session,
+            title_from_text,
+        )
+
+        for i, ti, p, ca, la, n, model, provider, state, origin, profile, ended_at in cur.fetchall():
             tagged = origin or infer_session_origin(i)
+            profile_key = profile or infer_session_profile(i, origin=tagged)
             rows.append({
-                "id": i, "title": ti, "preview": p, "created_at": ca,
+                "id": i, "title": ti or title_from_text(p or ""), "preview": p, "created_at": ca,
                 "last_active": la, "messages": n, "model": model,
                 "provider": provider, "execution_state": state or "idle",
                 "origin": tagged, "source": tagged,
+                "profile": profile_key,
+                "profile_badge": profile_badge_for_session(
+                    i, profile=profile_key, origin=tagged, source=tagged,
+                ),
+                "ended_at": ended_at,
             })
         return rows
 
-    def create(self, session_id: str, origin: str | None = None) -> dict[str, Any]:
+    def create(
+        self,
+        session_id: str,
+        origin: str | None = None,
+        profile: str | None = None,
+    ) -> dict[str, Any]:
         """Idempotently create one transcript unless its id is tombstoned."""
+        from jaeger_ai.features.hermes_webui.session_unify import infer_session_profile
+
         session_id = canonical_session_id(session_id)
         now = time.time()
         stamped = infer_session_origin(session_id, origin)
+        stamped_profile = infer_session_profile(session_id, profile, origin=origin)
         with self._lock, self._conn:
             if self._is_tombstoned_locked(session_id):
-                return {"id": session_id, "created": False, "tombstoned": True,
-                        "origin": stamped}
+                return {
+                    "id": session_id, "created": False, "tombstoned": True,
+                    "origin": stamped, "profile": stamped_profile,
+                }
             existed = self._conn.execute(
                 "SELECT 1 FROM sessions WHERE id=?", (session_id,)
             ).fetchone() is not None
             self._conn.execute(
                 "INSERT OR IGNORE INTO sessions"
-                "(id, created_at, last_active, execution_state, origin) "
-                "VALUES(?,?,?,'idle',?)", (session_id, now, now, stamped),
+                "(id, created_at, last_active, execution_state, origin, profile) "
+                "VALUES(?,?,?,'idle',?,?)",
+                (session_id, now, now, stamped, stamped_profile),
             )
             tagged = self._stamp_origin_locked(session_id, origin)
+            tagged_profile = self._stamp_profile_locked(
+                session_id, profile, origin=origin,
+            )
         return {
             "id": session_id, "created": not existed, "tombstoned": False,
-            "origin": tagged,
+            "origin": tagged, "profile": tagged_profile,
         }
 
     def exists(self, session_id: str) -> bool:
