@@ -1,0 +1,32 @@
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -12865,6 +12865,9 @@
+ 
+ def handle_get(handler, parsed) -> bool:
+     """Handle all GET routes. Returns True if handled, False for 404."""
++    from api.jaeger_conversation import route as conversation_route
++    if conversation_route(handler, parsed, "GET"):
++        return True
+     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
+     if proxy_result is not False:
+         return proxy_result
+@@ -13898,6 +13901,8 @@
+                 )
+                 if revision:
+                     raw["regeneration_revision"] = revision
++            from api.jaeger_conversation import project_session
++            raw = project_session(raw, sid, load_messages, msg_limit, msg_before)
+             redact = redact_session_data(raw)
+             _t5 = _time.monotonic()
+             if _diag: _diag.stage("t5_after_redact")
+@@ -14979,6 +14984,10 @@
+         if diag:
+             diag.finish()
+         return proxy_result
++
++    from api.jaeger_conversation import route as conversation_route
++    if conversation_route(handler, parsed, "POST"):
++        return True
+ 
+     if parsed.path == "/api/shutdown":
+         return _handle_shutdown(handler)

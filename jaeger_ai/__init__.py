@@ -18,6 +18,12 @@ are configured instances of the platform, not forks of it.
 # transitive Obj-C touch. ``setdefault`` so an operator who has
 # their own opinion on the policy can override us.
 import os as _os
+import sys as _sys
+
+_sys.dont_write_bytecode = True
+_os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+_os.environ.setdefault("PYTHONPYCACHEPREFIX", _os.path.expanduser("~/.cache/jaeger/pycache"))
+
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 

@@ -93,9 +93,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+export PYTHONDONTWRITEBYTECODE="1"
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
+
 # ── pytest invocation ──────────────────────────────────────────────
 
-PYTEST=".venv/bin/pytest"
+PYTEST="${HOME}/.jaeger/venv/bin/pytest"
+if [ ! -x "$PYTEST" ]; then
+    PYTEST=".venv/bin/pytest"
+fi
 if [ ! -x "$PYTEST" ]; then
     PYTEST="pytest"
 fi

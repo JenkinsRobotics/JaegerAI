@@ -1,0 +1,27 @@
+--- a/api/config.py
++++ b/api/config.py
+@@ -9458,6 +9458,8 @@
+         features = body.get("features") if isinstance(body, dict) else {}
+         if not isinstance(features, dict):
+             features = {}
++        caps["workspace_override"] = features.get("workspace_override")
++        caps["model_override"] = features.get("model_override")
+         caps["approval_events"] = bool(features.get("approval_events"))
+         caps["run_approval_response"] = bool(features.get("run_approval_response"))
+         caps["approval_identity_v1"] = bool(features.get("approval_identity_v1"))
+--- a/api/gateway_chat.py
++++ b/api/gateway_chat.py
+@@ -627,6 +627,13 @@
+             "session_id": session_id,
+             "workspace": str(workspace),
+         }
++        from api.config import get_gateway_caps
++        native_caps = get_gateway_caps(base_url, api_key)
++        if native_caps.get("workspace_override") is False:
++            run_body.pop("workspace", None)
++        if native_caps.get("model_override") is False:
++            run_body.pop("model", None)
++            run_body.pop("provider", None)
+         if instructions_parts:
+             run_body["instructions"] = "\n\n".join(part for part in instructions_parts if part)
+         if conversation_history:

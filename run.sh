@@ -25,10 +25,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$REPO_ROOT/.venv"
+VENV="${HOME}/.jaeger/venv"
+if [[ ! -d "$VENV" ]]; then
+  VENV="$REPO_ROOT/.venv"
+fi
 
 if [[ ! -d "$VENV" ]]; then
-  echo "✗ .venv not found at $VENV" >&2
+  echo "✗ Python environment not found at ~/.jaeger/venv or $REPO_ROOT/.venv" >&2
   echo "  run ./install.sh first" >&2
   exit 1
 fi
@@ -44,18 +47,13 @@ case ":${PYTHONPATH:-}:" in
   *) export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" ;;
 esac
 
-# 0.2.6: the runtime resolves operator state at <install_root>/.jaeger_ai/
-# (instances, models, jaeger.env). install_root() defaults to the parent
-# of the framework package, but we set JAEGER_HOME explicitly so the
-# resolver gets a stable value regardless of how python computes
-# __file__ (matters when sandbox symlinks the framework dir).
-#
-# Respect a pre-set JAEGER_HOME (e.g. ``source scripts/dev_env.sh``
-# pointing at the in-repo sandbox) — only fall back to $REPO_ROOT when
-# nothing is set. Otherwise dev_env.sh's sandbox redirect would get
-# clobbered the moment ./run.sh started.
-: "${JAEGER_HOME:=$REPO_ROOT}"
+# 0.2.6: operator state lives in ~/.jaeger (or JAEGER_STATE_DIR), matching
+# OpenClaw standards. Never drop runtime state or caches in the repo tree.
+: "${JAEGER_HOME:=$HOME/.jaeger}"
 export JAEGER_HOME
+export JAEGER_STATE_DIR="$JAEGER_HOME"
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
 # 0.2.6: disable the macOS 26.x "xzone" nano-malloc allocator.
 #
