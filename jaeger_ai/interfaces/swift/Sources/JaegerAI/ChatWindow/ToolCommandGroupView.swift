@@ -47,67 +47,55 @@ struct ToolCommandGroupView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
-                HStack(spacing: 6) {
-                    Text(summaryTitle)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(Term.inkDim)
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Term.inkDim.opacity(0.8))
-                    if isStreaming {
-                        ProgressView().controlSize(.mini)
+        VStack(alignment: .leading, spacing: 8) {
+            // First 3 items or all if expanded
+            let visibleItems = isExpanded ? items : Array(items.prefix(3))
+            ForEach(visibleItems) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(cleanToolName(item.name))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(item.ok ? Term.ink : Color.red)
+                    if !item.detail.isEmpty {
+                        Text(item.detail)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Term.inkDim)
+                            .lineLimit(isExpanded ? 3 : 1)
                     }
                     Spacer()
-                }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(items) { item in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("⏵")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(item.ok ? Term.accent : Color.red)
-                            Text(cleanToolName(item.name))
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(Term.ink)
-                            if !item.detail.isEmpty {
-                                Text(item.detail)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(Term.inkDim)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if item.isStreaming {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Text(item.ok ? "✓" : "✗")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(item.ok ? Term.accent : Color.red)
-                                if item.elapsed_s > 0.05 {
-                                    Text(String(format: "%.1fs", item.elapsed_s))
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(Term.inkDim.opacity(0.8))
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Term.panel.opacity(0.6))
-                        )
+                    if item.isStreaming {
+                        ProgressView().controlSize(.mini)
+                    } else if item.elapsed_s > 0.05 {
+                        Text(String(format: "%.1fs", item.elapsed_s))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(Term.inkDim.opacity(0.8))
                     }
                 }
-                .padding(.leading, 12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if items.count > 3 || !items.isEmpty {
+                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Text(isExpanded ? "Show less" : "Show more")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Term.inkDim)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(Term.inkDim)
+                    }
+                    .padding(.top, 2)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.leading, 6)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(red: 0.05, green: 0.06, blue: 0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.vertical, 4)
     }
 }

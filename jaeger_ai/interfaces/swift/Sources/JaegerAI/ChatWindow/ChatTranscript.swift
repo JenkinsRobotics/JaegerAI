@@ -82,61 +82,89 @@ struct TranscriptRow: View {
     }
 
     private var userRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if showTurnRule {
                 Rectangle()
                     .fill(Term.rule)
                     .frame(height: 1)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 4)
             }
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 Text("❯")
-                    .font(Term.mono.weight(.bold))
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundColor(Term.accent)
+                    .padding(.top, 1)
                 Text(message.text)
-                    .font(Term.mono)
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundColor(Term.ink)
                     .textSelection(.enabled)
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.04))
+            )
         }
     }
 
     private var assistantRow: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 6) {
             if message.text.isEmpty && message.isStreaming {
                 ThinkingDots()
             } else {
-                // Markdown so **bold**, *italics*, `code` land formatted;
-                // permissive parser falls back to plain on malformed input.
                 markdownText
-                    .font(Term.mono)
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundColor(Term.ink)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Telemetry trail — the TUI's "replied in 3s" line, dimmed
-                // under the reply. Only exists when the core sent it.
-                if let meta = message.meta {
-                    Text(meta)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Term.inkDim.opacity(0.8))
-                }
-
-                // Manual "speak this" — finished rows only.  The agent's
-                // own Kokoro tool stays the primary TTS path.
+                // Reaction and action bar matching Image 1:
                 if !message.text.isEmpty {
-                    Button(action: { TTSManager.shared.speak(message.text) }) {
-                        Image(systemName: "speaker.wave.2")
-                            .font(.system(size: 11))
-                            .foregroundColor(Term.inkDim)
+                    HStack(spacing: 12) {
+                        if let meta = message.meta {
+                            Text(meta)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Term.inkDim.opacity(0.8))
+                        }
+                        Spacer()
+                        // Smile reaction
+                        Button(action: {}) {
+                            Image(systemName: "face.smiling")
+                                .font(.system(size: 11))
+                                .foregroundColor(Term.inkDim)
+                        }
+                        .buttonStyle(.plain)
+                        .help("React")
+
+                        // Copy reply
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.text, forType: .string)
+                        }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 11))
+                                .foregroundColor(Term.inkDim)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Copy")
+
+                        // Speak reply
+                        Button(action: { TTSManager.shared.speak(message.text) }) {
+                            Image(systemName: "speaker.wave.2")
+                                .font(.system(size: 11))
+                                .foregroundColor(Term.inkDim)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Speak this reply")
                     }
-                    .buttonStyle(.plain)
-                    .help("Speak this reply")
+                    .padding(.top, 4)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder

@@ -165,8 +165,7 @@ struct AskJaegerIntent: AppIntent {
         """
         Ask JaegerAI a question. The reply comes back from your local \
         Jaeger agent over the bridge.
-        """,
-        category: .information
+        """
     )
 
     /// Optional prompt — when omitted, Siri prompts the user live.
