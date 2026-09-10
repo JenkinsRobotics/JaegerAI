@@ -59,7 +59,7 @@ final class ChatWindowController {
         let hosting = NSHostingController(rootView: view)
 
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 680),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -78,7 +78,7 @@ final class ChatWindowController {
         win.contentViewController = hosting
         win.center()
         win.setFrameAutosaveName("JaegerChatWindow")
-        win.minSize = NSSize(width: 460, height: 480)
+        win.minSize = NSSize(width: 640, height: 500)
 
         window = win
         // Re-title live on character switches (status is @Published).
