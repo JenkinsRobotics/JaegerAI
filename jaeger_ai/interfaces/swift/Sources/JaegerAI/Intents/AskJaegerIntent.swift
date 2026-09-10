@@ -3,7 +3,7 @@
 //  JaegerAI / Intents
 //
 //  App Intents seam so Siri and Shortcuts can drive the JaegerAI macOS app
-//  (App Intents on macOS 14+). Ported from .claude/worktrees/ares-appintents.
+//  (iOS 26-style App Intents on macOS 14+; App Intents are cross-platform).
 //
 //  Design contract (matches the repo's Bridge seam):
 //    * Everything goes through AgentBridge (BridgeProcess child).
@@ -157,13 +157,16 @@ enum JaegerIntentSupport {
 // MARK: - AskJaegerIntent
 
 /// "Hey Siri, ask Jaeger …" — freeform question, answer spoken/shown.
+/// Uses Apple's newer `.prompt` pattern so Siri collects the query with
+/// its own UI, then we hand it to the agent.
 struct AskJaegerIntent: AppIntent {
     static let title: LocalizedStringResource = "Ask Jaeger"
     static let description = IntentDescription(
         """
         Ask JaegerAI a question. The reply comes back from your local \
         Jaeger agent over the bridge.
-        """
+        """,
+        category: .information
     )
 
     /// Optional prompt — when omitted, Siri prompts the user live.
@@ -189,7 +192,9 @@ struct AskJaegerIntent: AppIntent {
 
 // MARK: - JaegerShortcuts (phrase registration)
 
-/// Registers intents as Siri phrases and exposes them in Shortcuts / Spotlight.
+/// Registers the intents as Siri phrases and exposes them in
+/// Shortcuts / Spotlight / Action Button. Namespaces keep the app
+/// identifier unique on-device.
 struct JaegerShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

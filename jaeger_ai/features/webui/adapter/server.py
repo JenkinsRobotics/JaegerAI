@@ -125,6 +125,7 @@ class RunStore:
             "terminal_state": None,
             "active_controls": ["cancel", "approval"],
             "pending_approval_id": None,
+            "pending_clarify_id": None,
             "events": [],
             "created_at": now,
             "updated_at": now,
@@ -181,6 +182,7 @@ class RunStore:
                 "last_event_id": events[-1]["event_id"] if events else None,
                 "active_controls": list(record.get("active_controls") or []),
                 "pending_approval_id": record.get("pending_approval_id"),
+                "pending_clarify_id": record.get("pending_clarify_id"),
             }
 
     def records_for_session(self, session_id: str) -> list[dict[str, Any]]:
@@ -218,10 +220,19 @@ class RunStore:
 
 
 class RunnerBroker:
-    def __init__(self, bridge: BridgeClient, approvals: ApprovalBroker, store: RunStore) -> None:
+    def __init__(
+        self,
+        bridge: BridgeClient,
+        approvals: ApprovalBroker,
+        store: RunStore,
+        clarifications: Any | None = None,
+    ) -> None:
+        from jaeger_ai.features.webui.clarify_wire import ClarifyBroker
+
         self.bridge = bridge
         self.approvals = approvals
         self.store = store
+        self.clarifications = clarifications or ClarifyBroker()
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         text = str(request.get("message") or "").strip()
@@ -267,11 +278,39 @@ class RunnerBroker:
                     self.store.append(run_id, event, payload)
 
             def on_request(frame: dict[str, Any]) -> str:
-                approval_id = str(frame.get("id") or uuid.uuid4().hex)
-                self.store.set_state(run_id, pending_approval_id=approval_id)
+                req_kind = str(frame.get("kind") or "approval").strip().lower()
+                request_id = str(frame.get("id") or uuid.uuid4().hex)
+                if req_kind == "clarify":
+                    pending = self.clarifications.submit(
+                        session_key=session_id,
+                        question=str(frame.get("prompt") or frame.get("message") or ""),
+                        run_id=run_id,
+                        clarify_id=request_id,
+                        choices=list(frame.get("options") or []),
+                    )
+                    self.store.set_state(
+                        run_id,
+                        pending_clarify_id=pending["clarify_id"],
+                        active_controls=["cancel", "approval", "clarification"],
+                    )
+                    try:
+                        on_event({
+                            **frame,
+                            "id": pending["clarify_id"],
+                            "type": "request",
+                            "kind": "clarify",
+                        })
+                        return self.clarifications.wait(pending["clarify_id"])
+                    finally:
+                        self.store.set_state(
+                            run_id,
+                            pending_clarify_id=None,
+                            active_controls=["cancel", "approval"],
+                        )
+                self.store.set_state(run_id, pending_approval_id=request_id)
                 try:
-                    on_event({**frame, "id": approval_id, "type": "request"})
-                    return self.approvals.request({**frame, "id": approval_id, "run_id": run_id})
+                    on_event({**frame, "id": request_id, "type": "request", "kind": req_kind or "approval"})
+                    return self.approvals.request({**frame, "id": request_id, "run_id": run_id})
                 finally:
                     self.store.set_state(run_id, pending_approval_id=None)
 
@@ -389,11 +428,21 @@ class RunnerBroker:
                 "is_error": status in {"error", "failed"},
             }
         if kind == "request":
-            approval_id = str(frame.get("id") or "")
+            req_kind = str(frame.get("kind") or "approval").strip().lower()
+            request_id = str(frame.get("id") or "")
+            prompt = str(frame.get("prompt") or frame.get("message") or "")
+            if req_kind == "clarify":
+                return "clarification", {
+                    "clarify_id": request_id,
+                    "run_id": run_id,
+                    "question": prompt or "Clarification required",
+                    "choices": list(frame.get("options") or []),
+                    "session_id": session_id,
+                }
             return "approval", {
-                "approval_id": approval_id,
+                "approval_id": request_id,
                 "run_id": run_id,
-                "description": str(frame.get("prompt") or frame.get("message") or "Tool approval required"),
+                "description": prompt or "Tool approval required",
                 "command": str(frame.get("command") or ""),
                 "options": frame.get("options") or ["once", "always", "deny"],
                 "session_id": session_id,
@@ -416,6 +465,18 @@ class RunnerBroker:
             "ok": accepted,
             "status": "accepted" if accepted else "not-active",
             "message": None if accepted else "Approval is no longer active.",
+        }
+
+    def respond_clarify(self, run_id: str, clarify_id: str, response: str) -> dict[str, Any]:
+        """Unblock a mid-turn clarify waiting on this native run."""
+        self.store.status(run_id)  # raises KeyError if unknown
+        accepted = self.clarifications.respond(clarify_id, response)
+        return {
+            "ok": accepted,
+            "status": "accepted" if accepted else "not-active",
+            "message": None if accepted else "Clarification is no longer active.",
+            "clarify_id": clarify_id,
+            "run_id": run_id,
         }
 
 
@@ -759,12 +820,18 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
             if schedule_match:
                 job_id, action = schedule_match.groups()
                 return self._json(self.schedules.action(job_id, action))
-            if _CLARIFY_ROUTE.fullmatch(parsed.path):
-                return self._json({
-                    "ok": False,
-                    "status": "unsupported",
-                    "message": "Jaeger clarification relay is not implemented.",
-                }, HTTPStatus.CONFLICT)
+            clarify_match = _CLARIFY_ROUTE.fullmatch(parsed.path)
+            if clarify_match:
+                run_id, clarify_id = clarify_match.groups()
+                response = str(
+                    body.get("response")
+                    or body.get("answer")
+                    or body.get("text")
+                    or ""
+                )
+                return self._json(
+                    self.runner.respond_clarify(run_id, clarify_id, response)
+                )
             if _GOAL_ROUTE.fullmatch(parsed.path):
                 return self._json({
                     "ok": False,
@@ -895,10 +962,15 @@ class HermesWebUIAdapterServer(ThreadingHTTPServer):
         self.public_base_url = public_base_url
         self.bridge = BridgeClient(instance)
         bind_passkey_state_dir(self.bridge.layout.memory_dir / "passkeys")
+        from jaeger_ai.features.webui.clarify_wire import ClarifyBroker
+
         self.approvals = ApprovalBroker()
+        self.clarifications = ClarifyBroker()
         state_root = Path(run_dir) if run_dir is not None else self.bridge.layout.root / "run" / "hermes-webui-adapter"
         self.store = RunStore(state_root)
-        self.runner = RunnerBroker(self.bridge, self.approvals, self.store)
+        self.runner = RunnerBroker(
+            self.bridge, self.approvals, self.store, self.clarifications,
+        )
         self.schedules = ScheduleBroker(lambda: self.bridge, self.runner, self.store)
         self.chats = self.runner
 

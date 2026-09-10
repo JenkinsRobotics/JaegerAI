@@ -7,7 +7,7 @@
 //  action of a Shortcuts **Personal Automation** (Shortcuts app →
 //  Automation → Time of Day → 12:00 AM → Run: "Jaeger Evening Routine").
 //
-//  Ported from .claude/worktrees/ares-appintents.
+//  (iOS 26-style App Intents on macOS 14+; App Intents are cross-platform).
 //
 
 import AppIntents
