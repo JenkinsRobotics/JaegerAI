@@ -135,3 +135,115 @@ class MlxClient:
             generate, self._mlx_model, self._tokenizer, **kwargs,
         ).result()
         return _ChatResult(text=text or "", elapsed_s=time.perf_counter() - started)
+
+
+# ===========================================================================
+# Multimodal / Unified MLX Models (MlxVlmClient)
+# ===========================================================================
+
+class MlxVlmClient:
+    """Loads a multimodal/unified MLX model via ``mlx-vlm`` and exposes the
+    same client surface as :class:`MlxClient`. ``model_path`` is the
+    directory holding ``config.json`` + ``*.safetensors``."""
+
+    kind = "local"
+    is_vlm = True
+
+    def __init__(self, model_path: str | Path, *, warmup: bool = True) -> None:
+        try:
+            from mlx_vlm import load  # type: ignore[import-not-found]
+            from mlx_vlm.utils import load_config  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RuntimeError(
+                "MLX-VLM backend requires the mlx-vlm wheel — "
+                "`pip install mlx-vlm` (Apple Silicon)."
+            ) from exc
+
+        resolved = Path(str(model_path)).expanduser()
+        if not resolved.is_dir():
+            raise FileNotFoundError(
+                f"MLX model directory not found: {resolved}. MLX models "
+                "are directories holding config.json + *.safetensors."
+            )
+
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mlx-vlm",
+        )
+
+        self.model_name = resolved.name
+        print(f"[jaeger] loading MLX-VLM model {self.model_name}…", flush=True)
+        started = time.perf_counter()
+        self._mlx_model, self._processor = self._executor.submit(
+            load, str(resolved),
+        ).result()
+        self._config = load_config(str(resolved))
+        self._tokenizer = self._processor
+        print(
+            f"[jaeger] loaded in {time.perf_counter() - started:.1f}s.",
+            flush=True,
+        )
+        if warmup:
+            self._executor.submit(self._warmup).result()
+
+    def describe(self) -> str:
+        return f"local · mlx-vlm · {self.model_name}"
+
+    def unload(self) -> None:
+        """Drop the weights and clear MLX's buffer cache."""
+        from jaeger_ai.core.models.vram import release_local_client
+        release_local_client(self)
+
+    def _warmup(self) -> None:
+        """One tiny generation to prime mlx-vlm's compilation caches."""
+        try:
+            from mlx_vlm import generate
+            from mlx_vlm.prompt_utils import apply_chat_template
+            prompt = apply_chat_template(
+                self._processor, self._config, "hi", num_images=0,
+            )
+            generate(self._mlx_model, self._processor, prompt,
+                     max_tokens=1, verbose=False)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[jaeger] MLX-VLM warmup skipped: {exc}", flush=True)
+
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        top_p: float = 0.95,
+        stream: bool = False,
+        grammar: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> _ChatResult:
+        """Minimal text chat-completion — same shape as ``MlxClient.chat``."""
+        del stream, grammar, tools, top_p
+        from mlx_vlm import generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+        try:
+            prompt = apply_chat_template(
+                self._processor, self._config, messages, num_images=0,
+            )
+        except Exception:  # noqa: BLE001
+            prompt = "\n".join(
+                f"{m.get('role', '?')}: {m.get('content', '')}" for m in messages
+            )
+        kwargs: dict[str, Any] = {"max_tokens": max_tokens, "verbose": False}
+        if temperature > 0:
+            kwargs["temperature"] = temperature
+        started = time.perf_counter()
+        result = self._executor.submit(
+            generate, self._mlx_model, self._processor, prompt, **kwargs,
+        ).result()
+        text = getattr(result, "text", None)
+        if text is None:
+            text = result if isinstance(result, str) else str(result)
+        return _ChatResult(text=text or "", elapsed_s=time.perf_counter() - started)
+
+
+__all__ = [
+    "MlxClient",
+    "MlxVlmClient",
+]
+

@@ -4446,12 +4446,15 @@ def run_for_voice(
     # Runs before any cloud-bound model selection.
     try:
         from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
-        model, provider, _decision = apply_sensitivity_routing(
+        s_model, s_provider, _decision = apply_sensitivity_routing(
             user_text,
             config=_pipeline.get("config"),
             model=model,
             provider=provider,
         )
+        if _decision.classification == "private" or model:
+            model = s_model
+            provider = s_provider
     except Exception:  # noqa: BLE001 — gate must never break a turn
         pass
     signature = (id(client), model or None, provider or None)
@@ -4875,18 +4878,18 @@ def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
         # the live client — resolve the Mac daemon (or container→Mac bridge).
         provider = normalize_ollama_provider(str(getattr(ext, "provider", "") or ""))
         if provider == "ollama":
-            ext = ext.model_copy(deep=True)
-            ext.provider = "ollama"
             base = str(getattr(ext, "base_url", "") or "").strip().lower()
-            if (
-                not base
-                or "ollama.com" in base
-                or base.startswith("http://127.0.0.1:")
-                or base.startswith("http://localhost:")
-            ):
-                ext.base_url = resolve_ollama_base_url()
-            ext.api_key_credential = ""
-            ext.api_key_env = ""
+            if not ("ollama.com" in base):
+                ext = ext.model_copy(deep=True)
+                ext.provider = "ollama"
+                if (
+                    not base
+                    or base.startswith("http://127.0.0.1:")
+                    or base.startswith("http://localhost:")
+                ):
+                    ext.base_url = resolve_ollama_base_url()
+                ext.api_key_credential = ""
+                ext.api_key_env = ""
         reason = ""
         try:
             client = ExternalModelClient(ext, layout)

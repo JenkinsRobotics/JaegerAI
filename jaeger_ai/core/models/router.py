@@ -112,6 +112,19 @@ def normalize_ollama_provider(provider: str) -> str:
     return name
 
 
+class EndpointResolver:
+    """Convenience class for resolving model daemon endpoints."""
+
+    @staticmethod
+    def resolve_ollama(*, openai_compat: bool = True) -> str:
+        return resolve_ollama_base_url(openai_compat=openai_compat)
+
+    @staticmethod
+    def normalize_provider(provider: str) -> str:
+        return normalize_ollama_provider(provider)
+
+
+
 # ---------------------------------------------------------------------------
 # 2. Privacy & Sensitivity Governance Gate
 # ---------------------------------------------------------------------------
@@ -245,9 +258,10 @@ def decide(
             reason=reason,
             tokens_est=tokens,
         )
-    chosen_model = (model or "").strip() or _cloud_model(config)
-    chosen_provider = (provider or "").strip().lower() or "ollama"
-    chosen_provider = normalize_ollama_provider(chosen_provider) or "ollama"
+    chosen_model = (model or "").strip() or None
+    chosen_provider = (provider or "").strip().lower() or None
+    if chosen_provider:
+        chosen_provider = normalize_ollama_provider(chosen_provider)
     return SensitivityDecision(
         classification="public",
         model=chosen_model,
@@ -330,8 +344,60 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
     return ExternalModelClient(ext, layout)
 
 
+# ===========================================================================
+# 4. Object-Oriented Interfaces for New Framework Users
+# ===========================================================================
+
+class SensitivityGate:
+    """Privacy and sensitivity governance gate for prompt routing."""
+
+    @staticmethod
+    def classify(text: str) -> tuple[str, str]:
+        return classify(text)
+
+    @staticmethod
+    def decide(
+        text: str,
+        *,
+        config: Any | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+    ) -> SensitivityDecision:
+        return decide(text, config=config, model=model, provider=provider)
+
+    @staticmethod
+    def log_decision(decision: SensitivityDecision, *, text_preview: str = "") -> Path:
+        return log_decision(decision, text_preview=text_preview)
+
+
+class ModelRouter:
+    """Central router for endpoint resolution, sensitivity gating, and turn routing."""
+
+    @staticmethod
+    def resolve_endpoint(*, openai_compat: bool = True) -> str:
+        return resolve_ollama_base_url(openai_compat=openai_compat)
+
+    @staticmethod
+    def route_turn(
+        text: str,
+        *,
+        config: Any | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        log: bool = True,
+    ) -> tuple[str | None, str | None, SensitivityDecision]:
+        return apply_sensitivity_routing(text, config=config, model=model, provider=provider, log=log)
+
+    @staticmethod
+    def select_client(default: Any, config: Any, layout: Any, model: str | None = None, provider: str | None = None) -> Any:
+        return select_client(default, config, layout, model, provider)
+
+
 __all__ = [
+    "EndpointResolver",
+    "ModelRouter",
     "SensitivityDecision",
+    "SensitivityGate",
     "apply_sensitivity_routing",
     "classify",
     "decide",
@@ -341,3 +407,4 @@ __all__ = [
     "resolve_ollama_base_url",
     "select_client",
 ]
+

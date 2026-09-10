@@ -36,9 +36,11 @@ Security / local-first invariants:
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from jaeger_ai.core.instance.schemas import ExternalModelConfig
@@ -582,3 +584,60 @@ class ExternalModelClient:
                 "error_class": classify_exception(exc),
                 "latency_s": 0.0,
             }
+
+
+# ===========================================================================
+# Recently-used external models, per provider
+# ===========================================================================
+
+_HISTORY_FILE = "external_model_history.json"
+_MAX_PER_PROVIDER = 8
+
+
+def _history_path(layout: Any) -> Path:
+    return Path(getattr(layout, "memory_dir", ".")) / _HISTORY_FILE
+
+
+def load_history(layout: Any) -> dict[str, list[str]]:
+    """The full ``{provider: [model, …]}`` map, most-recent first.
+    Empty dict on missing file / parse failure (never raises)."""
+    path = _history_path(layout)
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k): [str(m) for m in v if isinstance(m, str) and m]
+        for k, v in raw.items() if isinstance(v, list)
+    }
+
+
+def recent_models(layout: Any, provider: str, *, limit: int = 5) -> list[str]:
+    """The N most recently-used models for ``provider`` (newest first)."""
+    return load_history(layout).get(provider, [])[: max(0, int(limit))]
+
+
+def record_use(layout: Any, provider: str, model: str) -> None:
+    """Push ``model`` to the front of ``provider``'s recent list. Dedupes
+    against existing entries and caps to ``_MAX_PER_PROVIDER``.
+    Best-effort — a write failure is swallowed so it never breaks a switch."""
+    if not provider or not model:
+        return
+    history = load_history(layout)
+    bucket = [m for m in history.get(provider, []) if m != model]
+    bucket.insert(0, model)
+    history[provider] = bucket[:_MAX_PER_PROVIDER]
+    try:
+        path = _history_path(layout)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(history, ensure_ascii=True, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
