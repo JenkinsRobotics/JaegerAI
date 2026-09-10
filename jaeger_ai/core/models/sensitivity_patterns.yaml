@@ -7,7 +7,9 @@ private_keywords:
   - secret
   - api key
   - apikey
+  - api_key
   - private key
+  - private_key
   - ssn
   - social security
   - credit card
