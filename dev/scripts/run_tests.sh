@@ -37,6 +37,9 @@ export LANG="C.UTF-8"
 export LC_ALL="C.UTF-8"
 # Repeatable dict / set ordering across runs.
 export PYTHONHASHSEED="0"
+# Never write bytecode or caches into the repo tree
+export PYTHONDONTWRITEBYTECODE="1"
+export PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/jaeger_pycache"
 # Headless: don't open Terminal.app / Safari windows during tests.
 export JAEGER_TEST_HEADLESS="1"
 # Never share the operator's RUNNING agent. ``create_runtime`` tries the
