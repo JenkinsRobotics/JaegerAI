@@ -880,6 +880,9 @@ private struct PermissionsPage: View {
 private struct AresPage: View {
     @State private var isOnline: Bool = false
     @State private var endpointError: String?
+    @State private var gatewayOnline: Bool = false
+    @State private var gatewayAgents: [GatewayClient.Agent] = []
+    @State private var gatewayNote: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -943,6 +946,43 @@ private struct AresPage: View {
                 RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
             ))
 
+            // Gateway :8810 persistence spine — list agents without rewriting the app.
+            VStack(alignment: .leading, spacing: 12) {
+                Text("GATEWAY AGENTS (:8810)")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(2)
+                    .foregroundStyle(HUD.inkDim)
+                HStack {
+                    Circle()
+                        .fill(gatewayOnline ? HUD.accent : Color.red)
+                        .frame(width: 10, height: 10)
+                    Text(gatewayOnline ? "GATEWAY ONLINE" : "GATEWAY STOPPED / UNREACHABLE")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(gatewayOnline ? HUD.accent : HUD.ink)
+                }
+                if gatewayAgents.isEmpty {
+                    Text(gatewayNote ?? "Start Jaeger Gateway to load /v1/agents.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HUD.inkDim)
+                } else {
+                    ForEach(gatewayAgents.prefix(8)) { agent in
+                        HStack {
+                            Text(agent.displayName)
+                                .font(.system(size: 13))
+                                .foregroundStyle(HUD.ink)
+                            Spacer()
+                            Text(agent.kind)
+                                .font(.system(size: 11))
+                                .foregroundStyle(HUD.inkDim)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 12).fill(HUD.panel).overlay(
+                RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
+            ))
+
             if let endpointError {
                 Text(endpointError).foregroundStyle(.red).font(.caption)
             }
@@ -958,6 +998,23 @@ private struct AresPage: View {
             } catch {
                 isOnline = false
                 endpointError = error.localizedDescription
+            }
+            // Best-effort gateway catalog — residual until full agent switch UI lands.
+            do {
+                let client = GatewayClient.fromEnvironment()
+                _ = try await client.health()
+                let catalog = try await client.listAgents()
+                var rows: [GatewayClient.Agent] = []
+                rows.append(contentsOf: catalog.jaeger_native ?? [])
+                rows.append(contentsOf: catalog.third_party ?? [])
+                rows.append(contentsOf: catalog.agents ?? [])
+                gatewayAgents = rows
+                gatewayOnline = true
+                gatewayNote = nil
+            } catch {
+                gatewayOnline = false
+                gatewayAgents = []
+                gatewayNote = "GatewayClient ready; start `jaeger gateway` / host service on :8810 to populate."
             }
         }
     }

@@ -1,0 +1,30 @@
+# Sensitivity gate — keyword/pattern stub (no ML).
+# private → force local model; public → allow cloud.
+# Matching is case-insensitive substring / regex (re=).
+
+private_keywords:
+  - password
+  - secret
+  - api key
+  - apikey
+  - private key
+  - ssn
+  - social security
+  - credit card
+  - bank account
+  - medical record
+  - passport
+  - confidential
+  - do not share
+  - internal only
+  - ~/.ssh
+  - id_rsa
+  - wallet seed
+  - mnemonic
+
+private_patterns:
+  - re:(?i)\b\d{3}-\d{2}-\d{4}\b          # SSN-shaped
+  - re:(?i)\b(?:sk|pk)-[a-z0-9]{16,}\b  # common API key prefixes
+  - re:(?i)\bAKIA[0-9A-Z]{16}\b         # AWS access key id
+
+# Anything not matched is public (cloud-eligible).

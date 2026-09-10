@@ -34,7 +34,11 @@ def profile_display_name(profile_id: str | None) -> str:
 
 
 def library_model() -> dict[str, Any]:
-    """One conversation library with profile/role badges — no empty second UI per profile."""
+    """One conversation library with profile/role badges — no empty second UI per profile.
+
+    Includes the AgentRegistry support model so WebUI can list/switch both
+    Jaeger-native agents and third-party adapter faces remotely.
+    """
     badges = [
         PROFILE_DISPLAY_NAMES["default"],
         PROFILE_DISPLAY_NAMES["jaeger"],
@@ -42,10 +46,27 @@ def library_model() -> dict[str, Any]:
         PROFILE_DISPLAY_NAMES["roundtable"],
         "ARES",
     ]
+    catalog: dict[str, Any] = {}
+    try:
+        from jaeger_ai.core.agent_registry import AgentRegistry
+
+        catalog = AgentRegistry().to_catalog()
+    except Exception:  # noqa: BLE001 — layout helpers must stay best-effort
+        catalog = {
+            "jaeger_native": [],
+            "third_party": [],
+            "fundamentals_fee_gated": False,
+        }
     return {
         "mode": "single_library",
         "empty_profile_uis": False,
         "badges": badges,
+        "support_model": {
+            "jaeger_native": True,
+            "third_party": True,
+            "fundamentals_fee_gated": False,
+        },
+        "agents": catalog,
     }
 
 

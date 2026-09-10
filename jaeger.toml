@@ -75,9 +75,10 @@ shell_quits_core = false      # WINDOWED APP: when JaegerAI flips to
                               # is informational — the chassis only
                               # consults it inside _run_qt().
 config = ""                   # JaegerAI uses per-instance configs in
-                              # sandbox/.jaeger_ai/instances/<name>/;
-                              # no root config.yaml. Empty string =
-                              # chassis skips its config loader.
+                              # ~/.jaeger/instances/<name>/ (or
+                              # $JAEGER_STATE_DIR); no root config.yaml.
+                              # Empty string = chassis skips its config
+                              # loader.
 
 # Bus — InProcBus for fused mode. JaegerAI today uses
 # jaeger_os/transport/inproc_bus.py; the chassis copy at
@@ -85,6 +86,16 @@ config = ""                   # JaegerAI uses per-instance configs in
 # unused until J5.
 [bus]
 backend = "inproc"
+
+# ── Brain assignment (operator doctrine; live values in instance config) ──
+# Persistent state lives outside the repo: ~/.jaeger/ (or $JAEGER_STATE_DIR).
+# Live instance: ~/.jaeger/instances/jaeger/config.yaml
+#   Dispatcher/brain primary : glm-5.3-flash:cloud  (via local Ollama daemon)
+#   Deep-think coder         : kimi-k2.7-code:cloud
+#   Local fallback           : gemma-4-26b:latest   (when cloud unreachable /
+#                                                    sensitivity_gate → private)
+# Cloud tags ride Matthew's Ollama Max subscription — no API keys in repo.
+# Do not put model weights, session DBs, or credentials in this tree.
 
 # ── Nodes ─────────────────────────────────────────────────────────
 # JaegerAI's four nodes (hardware_jp01, animation, tts, audio_session)

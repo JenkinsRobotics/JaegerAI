@@ -130,11 +130,34 @@ def _cmd_setup_argv(argv: list[str]) -> int:
     try:
         run_wizard(force=args.force, instance_name=args.name)
     except SystemExit as exc:
-        return int(exc.code or 0)
+        code = int(exc.code or 0)
+        if code == 0:
+            _register_created_agent(args.name)
+        return code
     except Exception as exc:  # noqa: BLE001
         print(f"[jaeger setup] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
+    _register_created_agent(args.name)
     return 0
+
+
+def _register_created_agent(name: str | None) -> None:
+    """Best-effort AgentRegistry sync after wizard create (gateway/WebUI catalog)."""
+    try:
+        from jaeger_ai.core.agent_registry import AgentRegistry
+        from jaeger_ai.core.instance.instance import default_instance_name
+
+        agent_name = (name or default_instance_name()).strip()
+        if not agent_name:
+            return
+        AgentRegistry().create_agent(
+            agent_name,
+            kind="jaeger_native",
+            display_name=agent_name,
+            scaffold_instance=False,
+        )
+    except Exception:  # noqa: BLE001 — CLI must not fail after a good wizard run
+        pass
 
 
 # ── ``jaeger migrate`` ─────────────────────────────────────────────

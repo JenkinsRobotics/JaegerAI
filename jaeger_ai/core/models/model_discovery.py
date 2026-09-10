@@ -21,7 +21,15 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
-OLLAMA_URL = "http://localhost:11434"
+def _default_ollama_url() -> str:
+    try:
+        from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+        return resolve_ollama_base_url(openai_compat=False)
+    except Exception:  # noqa: BLE001
+        return "http://localhost:11434"
+
+
+OLLAMA_URL = _default_ollama_url()
 LMSTUDIO_URL = "http://localhost:1234"
 _PROBE_TIMEOUT = 1.5
 
@@ -202,9 +210,10 @@ def _get_json(url: str) -> Any:
     return resp.json()
 
 
-def discover_ollama(base: str = OLLAMA_URL) -> dict[str, Any]:
+def discover_ollama(base: str | None = None) -> dict[str, Any]:
     """Installed Ollama models via ``/api/tags``. Returns
     ``{online, models, endpoint}`` — ``online: False`` if not running."""
+    base = base or _default_ollama_url()
     try:
         data = _get_json(f"{base.rstrip('/')}/api/tags")
     except Exception as exc:  # noqa: BLE001
