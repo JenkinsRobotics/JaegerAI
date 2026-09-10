@@ -270,7 +270,12 @@ class SqliteKnowledgeStore:
     # ── BeliefStore implementation ─────────────────────────────────
 
     def save_belief(self, belief: Belief) -> Belief:
-        conn = sqlite_store.connection()
+        with sqlite_store.writer() as conn:
+            self._write_belief(conn, belief)
+        return belief
+
+    @staticmethod
+    def _write_belief(conn: Any, belief: Belief) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO beliefs (
@@ -294,8 +299,6 @@ class SqliteKnowledgeStore:
                 belief.updated_at,
             ),
         )
-        conn.commit()
-        return belief
 
     def get_belief(self, belief_id: str) -> Belief | None:
         conn = sqlite_store.connection()
@@ -364,22 +367,38 @@ class SqliteKnowledgeStore:
 
     def rebuild_beliefs_from_claims(self, *, subject: str | None = None) -> list[Belief]:
         """Derived projection. Provenance rank, not last-write-wins."""
-        from jaeger_agent.cognition.revision import revise_all
+        from jaeger_agent.cognition.revision import EVENT_PREDICATES, revise_all, same_projection
 
-        valid_claims = self.list_claims(subject=subject, status="valid")
-        rebuilt = revise_all(valid_claims)
-        conn = sqlite_store.connection()
-        now = utc_now_iso()
-        for belief in rebuilt:
-            conn.execute(
-                "UPDATE beliefs SET status = 'superseded', updated_at = ? "
-                "WHERE subject = ? AND predicate = ? AND status = 'active'",
-                (now, belief.subject, belief.predicate),
-            )
-        conn.commit()
-        for belief in rebuilt:
-            self.save_belief(belief)
-        return rebuilt
+        # Exclude event history in SQL so daily conversation does not load
+        # every past utterance just to update a handful of user properties.
+        predicates = sorted(EVENT_PREDICATES)
+        query = "SELECT * FROM claims WHERE status = 'valid' AND predicate NOT IN (" + ','.join('?' for _ in predicates) + ')'
+        params: list[Any] = list(predicates)
+        if subject is not None:
+            query += ' AND subject = ?'
+            params.append(subject)
+        query += ' ORDER BY created_at, rowid'
+        out = []
+        with sqlite_store.writer() as conn:
+            rebuilt = revise_all(_claim_from_row(row) for row in conn.execute(query, params))
+            for belief in rebuilt:
+                row = conn.execute(
+                    "SELECT * FROM beliefs WHERE subject = ? AND predicate = ? "
+                    "AND status IN ('active', 'contradicted') ORDER BY rowid DESC LIMIT 1",
+                    (belief.subject, belief.predicate),
+                ).fetchone()
+                previous = _belief_from_row(row) if row else None
+                if previous is not None and same_projection(previous, belief):
+                    out.append(previous)
+                    continue
+                conn.execute(
+                    "UPDATE beliefs SET status = 'superseded', superseded_by = ?, updated_at = ? "
+                    "WHERE subject = ? AND predicate = ? AND status IN ('active', 'contradicted')",
+                    (belief.id, utc_now_iso(), belief.subject, belief.predicate),
+                )
+                self._write_belief(conn, belief)
+                out.append(belief)
+        return out
 
     # ── EntityStore implementation ─────────────────────────────────
 

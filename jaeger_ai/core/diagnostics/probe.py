@@ -337,9 +337,11 @@ def _check_agent_no_tool() -> tuple[bool, str]:
     proves the model loads, decodes, and produces a final answer.
     Cheap (~1-3s on a warm model)."""
     try:
-        from jaeger_ai.main import _pipeline, run_command
+        from jaeger_ai.main import _llm_lock_held, _pipeline, run_command
     except Exception as exc:  # noqa: BLE001
         return False, f"could not import agent: {exc}"
+    if getattr(_llm_lock_held, "value", False):
+        return True, "active (currently running inside a live agent turn)"
     client = _pipeline.get("client")
     if client is None:
         return False, "no booted client — start the TUI first"
@@ -348,10 +350,10 @@ def _check_agent_no_tool() -> tuple[bool, str]:
                           session_key="health_probe_no_tool")
     except Exception as exc:  # noqa: BLE001
         return False, f"agent raised: {type(exc).__name__}: {exc}"
-    text = (out.get("text") or "").strip().lower()
+    text = (out if isinstance(out, str) else (out.get("text") or "")).strip().lower()
     if not text:
         return False, "agent returned empty answer"
-    return True, f"answered in {out.get('elapsed_s', 0):.1f}s"
+    return True, f"answered: {text[:40]}"
 
 
 def _check_agent_read_tool() -> tuple[bool, str]:
@@ -359,9 +361,11 @@ def _check_agent_read_tool() -> tuple[bool, str]:
     is the cheapest: a wrong answer is a hard fail, a right answer
     proves dispatch + the post-call finalizer."""
     try:
-        from jaeger_ai.main import _pipeline, run_command
+        from jaeger_ai.main import _llm_lock_held, _pipeline, run_command
     except Exception as exc:  # noqa: BLE001
         return False, f"could not import agent: {exc}"
+    if getattr(_llm_lock_held, "value", False):
+        return True, "active (currently running inside a live agent turn)"
     client = _pipeline.get("client")
     if client is None:
         return False, "no booted client"
@@ -370,10 +374,10 @@ def _check_agent_read_tool() -> tuple[bool, str]:
                           session_key="health_probe_read")
     except Exception as exc:  # noqa: BLE001
         return False, f"agent raised: {type(exc).__name__}: {exc}"
-    text = (out.get("text") or "")
+    text = out if isinstance(out, str) else (out.get("text") or "")
     if "42" not in text:
         return False, f"calculate didn't return 42: {text[:80]!r}"
-    return True, f"calculate→42 in {out.get('elapsed_s', 0):.1f}s"
+    return True, "calculate→42 ok"
 
 
 def _check_agent_sandbox_write() -> tuple[bool, str]:
@@ -382,10 +386,12 @@ def _check_agent_sandbox_write() -> tuple[bool, str]:
     finalizer's "shortest possible reply" rule still surfaces the
     work."""
     try:
-        from jaeger_ai.main import _pipeline, run_command
+        from jaeger_ai.main import _llm_lock_held, _pipeline, run_command
         from jaeger_ai.core.context import _require_layout
     except Exception as exc:  # noqa: BLE001
         return False, f"could not import agent: {exc}"
+    if getattr(_llm_lock_held, "value", False):
+        return True, "active (currently running inside a live agent turn)"
     client = _pipeline.get("client")
     if client is None:
         return False, "no booted client"

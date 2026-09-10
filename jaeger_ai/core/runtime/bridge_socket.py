@@ -36,17 +36,28 @@ def candidate_paths(*, home: str | os.PathLike[str] | None,
             name = active.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-    if not name:
-        active = Path.home() / ".jaeger" / "active_instance"
-        try:
-            name = active.read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
+    # A caller-supplied home is an isolated installation root. Do not let the
+    if not name and not home:
+        for active_cand in (
+            Path(__file__).resolve().parents[3] / ".jaeger_ai" / "active_instance",
+            Path.home() / ".jaeger" / "active_instance",
+        ):
+            try:
+                name = active_cand.read_text(encoding="utf-8").strip()
+                if name:
+                    break
+            except OSError:
+                pass
     name = name or "default"
     out: list[Path] = []
     env_dir = os.environ.get("JAEGER_INSTANCE_DIR", "").strip()
     if env_dir:
         out.append(Path(env_dir).expanduser() / "run" / SOCKET_NAME)
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        out.append(repo_root / ".jaeger_ai" / "instances" / name / "run" / SOCKET_NAME)
+    except Exception:
+        pass
     if home:
         root = Path(str(home)).expanduser()
         out.append(root / ".jaeger_ai" / "instances" / name / "run" / SOCKET_NAME)

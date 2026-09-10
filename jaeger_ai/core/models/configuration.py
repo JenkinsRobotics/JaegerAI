@@ -16,6 +16,7 @@ _BASE_URLS = {
     "anthropic": "https://api.anthropic.com",
     "gemini": "https://generativelanguage.googleapis.com/v1beta",
     "xai": "https://api.x.ai/v1",
+    "cli": "",
 }
 _CREDENTIALS = {
     "ollama-cloud": "ollama_cloud_api_key",
@@ -109,6 +110,13 @@ def configure_model(
         raise ValueError("model is required")
     if selected_provider in {"huggingface", "hf", "in-process"}:
         selected_provider = "local"
+    try:
+        from jaeger_ai.features.cli_backends.service import normalize_cli_selection
+        cli_pair = normalize_cli_selection(selected_provider, selected_model)
+        if cli_pair is not None:
+            selected_provider, selected_model = cli_pair
+    except Exception:  # noqa: BLE001
+        pass
     if selected_provider not in {"local", *_BASE_URLS}:
         raise ValueError(f"unsupported Jaeger provider: {selected_provider!r}")
 

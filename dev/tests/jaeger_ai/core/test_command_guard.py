@@ -112,7 +112,7 @@ def test_run_shell_blocks_a_hardline_command_below_the_tier_prompt():
     assert "exit_code" not in out     # never reached the real implementation
 
 
-def test_run_shell_lets_a_safe_command_reach_the_tier_layer():
+def test_run_shell_lets_a_safe_command_reach_the_tier_layer(monkeypatch):
     """A safe command is not hardline-blocked — it proceeds to the tier
     check (approved here) and runs normally."""
     from jaeger_os.core.safety.permissions import (
@@ -120,10 +120,19 @@ def test_run_shell_lets_a_safe_command_reach_the_tier_layer():
         PermissionPolicy,
         use_policy,
     )
-    from jaeger_agent.tools.code import run_shell
+    from jaeger_agent import workspace
+    from jaeger_agent.tools import code
+
+    # This test is about hardline/tier flow, not persistence. Give it an
+    # explicit isolated audit boundary instead of inheriting whichever
+    # workspace a previous test happened to bind (which may already have been
+    # removed with that test's tmp_path).
+    monkeypatch.setattr(code, "_require_layout", lambda: object())
+    monkeypatch.setattr(code, "_audit", lambda event, payload: None)
+    monkeypatch.setattr(workspace, "get_project_root", lambda: None)
 
     with use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
-        out = run_shell(command="echo hello", timeout_s=10)
+        out = code.run_shell(command="echo hello", timeout_s=10)
     assert out.get("hardline_blocked") is None   # not blocked
     assert out["ok"] is True
     assert "hello" in out["stdout"]

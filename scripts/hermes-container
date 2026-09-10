@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Host Hermes CLI entrypoint; implementation stays in the JaegerAI repo."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root))
+from jaeger_ai.core.runtime.agent_workspaces import container_name
+name = container_name("hermes")
+engine = "/opt/homebrew/bin/container"
+if name not in subprocess.check_output([engine, "list", "--quiet"], text=True).splitlines():
+    subprocess.run([engine, "start", name], check=True, timeout=60, stdout=sys.stderr)
+args = [engine, "exec", "--interactive", "--user", "hermeswebui",
+        "--env", "HOME=/home/hermeswebui", "--workdir", "/workspace"]
+if sys.stdin.isatty() and sys.stdout.isatty():
+    args.append("--tty")
+os.execv(engine, [*args, name, "/app/venv/bin/hermes", *sys.argv[1:]])

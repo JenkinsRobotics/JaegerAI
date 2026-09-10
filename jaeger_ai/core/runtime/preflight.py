@@ -330,12 +330,10 @@ def _check_instance_config(layout: object) -> list[Check]:
 
 
 def _check_memory_integrity(layout: object) -> list[Check]:
-    """The on-disk memory files (facts.json, schedules.json,
-    board.json) drive most of the agent's behaviour. A corrupted
-    JSON file produces confusing mid-conversation errors; checking
-    them up front turns "agent fell over" into a one-line message."""
+    """Check authoritative SQLite stores and the board, plus legacy imports."""
     import json
     import pathlib
+    from contextlib import closing
     out: list[Check] = []
     memory_dir = getattr(layout, "memory_dir", None)
     if memory_dir is None:
@@ -349,18 +347,22 @@ def _check_memory_integrity(layout: object) -> list[Check]:
         if not path.is_file():
             out.append(Check(
                 f"memory/{name}", "memory", True,
-                "absent (fresh instance — will be created on first write)",
+                "absent (created on first board write)" if name == 'board.json'
+                else "absent (optional legacy import; native storage is state.db)",
             ))
             continue
         try:
-            with path.open("r", encoding="utf-8") as fh:
-                json.load(fh)
+            if name == 'board.json':
+                from jaeger_agent.background.board import Board
+                Board(path).list()
+            else:
+                with path.open("r", encoding="utf-8") as fh:
+                    json.load(fh)
         except Exception as exc:  # noqa: BLE001
             out.append(Check(
                 f"memory/{name}", "memory", False,
                 f"corrupted: {type(exc).__name__}: {exc}",
-                f"back up and recreate: cp {path} {path}.broken && "
-                f"echo '{{}}' > {path}",
+                "Preserve the existing file and restore a verified backup; do not reset it to an empty document.",
             ))
             continue
         size_kb = path.stat().st_size / 1024
@@ -368,6 +370,33 @@ def _check_memory_integrity(layout: object) -> list[Check]:
             f"memory/{name}", "memory", True,
             f"{size_kb:.1f} KB",
         ))
+    import sqlite3
+    import time
+    for name in ('state.db', 'dispatcher.sqlite3'):
+        path = pathlib.Path(memory_dir) / name
+        if not path.exists():
+            out.append(Check(f'memory/{name}', 'memory', True,
+                             'absent (not initialized yet)'))
+            continue
+        try:
+            # Do not bind a global memory store, migrate, or create a database
+            # while inspecting a different instance's health.
+            with closing(sqlite3.connect(
+                    path.resolve().as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
+                deadline = time.monotonic() + 2
+                db.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+                result = [row[0] for row in db.execute('PRAGMA quick_check')]
+            if result != ['ok']:
+                raise ValueError('; '.join(result))
+            out.append(Check(f'memory/{name}', 'memory', True, 'SQLite quick_check passed'))
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            if isinstance(exc, sqlite3.OperationalError) and str(exc) == 'interrupted':
+                out.append(Check(f'memory/{name}', 'memory', False,
+                                 'Full integrity scan exceeded the routine 2-second budget; not verified.',
+                                 unknown=True))
+                continue
+            out.append(Check(f'memory/{name}', 'memory', False, f'Integrity check failed: {exc}',
+                             'Preserve the database and its WAL files; inspect or restore a verified backup.'))
     return out
 
 
@@ -593,7 +622,7 @@ def format_report(checks: list[Check]) -> str:
     bad = missing(checks)
     unsure = [c for c in checks if c.unknown]
     if not bad and not unsure:
-        lines.append("  All dependencies present — the Jaeger is fully operational.")
+        lines.append("  All preflight checks passed. Use `jaeger status` and a live turn to verify runtime operation.")
     elif not bad:
         # Nothing is known-broken, but we cannot claim full health either.
         names = ", ".join(c.name for c in unsure)

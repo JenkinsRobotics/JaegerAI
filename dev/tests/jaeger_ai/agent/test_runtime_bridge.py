@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from jaeger_agent import (
     AnthropicAdapter,
+    CliBackendAdapter,
     LocalLlamaAdapter,
     OpenAIAdapter,
     ProviderAdapter,
@@ -367,3 +368,10 @@ def test_drive_one_turn_accumulates_history_across_turns():
     assert [m["role"] for m in agent.messages] == [
         "user", "assistant", "user", "assistant",
     ]
+
+
+def test_cli_provider_resolves_to_cli_backend_adapter():
+    client = _FakeExternalClient(provider="cli", model="claude")
+    adapter = _adapter_for_client(client)
+    assert isinstance(adapter, CliBackendAdapter)
+    assert adapter.backend_id == "claude"

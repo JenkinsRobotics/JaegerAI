@@ -442,6 +442,33 @@ def test_call_compat_providers_do_not_send_stream_options():
     assert "stream_options" not in client.last_kwargs
 
 
+@pytest.mark.parametrize("provider", ["ollama", "ollama-cloud"])
+def test_current_ollama_requests_streamed_usage(provider):
+    stream = _FakeStream([_mk_chunk(content="ok", finish_reason="stop")])
+    client = SimpleNamespace(chat=SimpleNamespace(completions=_FakeCompletions(stream)))
+    adapter = OpenAIAdapter(provider=provider, model="x", client=client)
+
+    adapter.call({"model": "x", "messages": []}, threading.Event())
+
+    assert client.chat.completions.last_kwargs["stream_options"] == {"include_usage": True}
+
+
+def test_parse_response_preserves_cached_prompt_tokens():
+    usage = SimpleNamespace(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=75),
+    )
+    raw = _mk_response("ok")
+    raw.usage = usage
+    adapter = OpenAIAdapter(provider="ollama", model="x", client=_FakeClient(raw))
+
+    adapter.parse_response(raw)
+
+    assert adapter.last_usage["cached_prompt_tokens"] == 75
+
+
 def test_call_interrupt_mid_stream_closes_and_raises():
     """An interrupt observed between chunks must close the HTTP stream
     (so the server stops generating) and surface AgentInterrupted."""

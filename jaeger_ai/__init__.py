@@ -1,10 +1,10 @@
-"""JaegerAI — the turnkey agentic-AI product (the Mind) of the Jaeger ecosystem.
+"""JaegerAI — a general-purpose AI assistant platform.
 
-JaegerAgent-powered tools, skills, memory, the id/ego persona pipeline, local
-inference, and its own faces (chat app, TUI, voice, protocol). Runs on
-device by default, on top of a pinned JaegerAI (the framework tier).
-Concrete agents (Lilith, ARES, …) are *instances* of this product, not
-forks of it.
+JaegerAI combines models, tools, skills, memory, automation, delegation,
+permissions, and native desktop, web, terminal, voice, and headless interfaces.
+Local execution, personality, and physical-device capabilities are supported
+deployment choices rather than limits on the product's scope. Named assistants
+are configured instances of the platform, not forks of it.
 """
 
 # macOS fork-safety: Apple's Objective-C runtime aborts a forked
@@ -18,6 +18,12 @@ forks of it.
 # transitive Obj-C touch. ``setdefault`` so an operator who has
 # their own opinion on the policy can override us.
 import os as _os
+import sys as _sys
+
+_sys.dont_write_bytecode = True
+_os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+_os.environ.setdefault("PYTHONPYCACHEPREFIX", _os.path.expanduser("~/.cache/jaeger/pycache"))
+
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 

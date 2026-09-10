@@ -51,7 +51,7 @@ def test_missing_returns_only_failures():
 
 def test_report_clean_when_all_ok():
     report = format_report([Check("a", "voice", ok=True, detail="installed")])
-    assert "fully operational" in report
+    assert "All preflight checks passed" in report
     assert boot_warning([Check("a", "voice", ok=True)]) == ""
 
 
@@ -177,6 +177,50 @@ def test_memory_integrity_passes_for_valid_json(tmp_path):
     out = _check_memory_integrity(_instance_layout(tmp_path))
     facts_rows = [c for c in out if c.name == "memory/facts.json"]
     assert facts_rows and facts_rows[0].ok is True
+
+
+def test_memory_integrity_checks_native_databases_without_creating_them(tmp_path):
+    import sqlite3
+    layout = _instance_layout(tmp_path)
+    mem = tmp_path / 'memory'
+    mem.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(mem / 'state.db') as db:
+        db.execute('CREATE TABLE facts (id INTEGER PRIMARY KEY)')
+    (mem / 'dispatcher.sqlite3').write_bytes(b'not a SQLite database')
+    rows = {c.name: c for c in _check_memory_integrity(layout)}
+    assert rows['memory/state.db'].ok
+    assert not rows['memory/dispatcher.sqlite3'].ok
+    assert 'legacy import' in rows['memory/facts.json'].detail
+    assert not (mem / 'facts.json').exists()
+
+
+def test_memory_integrity_rejects_valid_json_with_invalid_board_schema(tmp_path):
+    layout = _instance_layout(tmp_path)
+    mem = tmp_path / 'memory'
+    mem.mkdir(parents=True, exist_ok=True)
+    (mem / 'board.json').write_text('{}')
+    row = next(c for c in _check_memory_integrity(layout) if c.name == 'memory/board.json')
+    assert not row.ok
+    assert (mem / 'board.json').read_text() == '{}'
+
+
+def test_slow_sqlite_integrity_check_is_unknown_not_a_false_pass(tmp_path, monkeypatch):
+    import itertools
+    import sqlite3
+    import time
+    layout = _instance_layout(tmp_path)
+    mem = tmp_path / 'memory'
+    mem.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(mem / 'state.db') as db:
+        db.execute('CREATE TABLE items (value TEXT)')
+        db.executemany('INSERT INTO items VALUES (?)', [('sample',)] * 2000)
+    ticks = itertools.count(step=3)
+    with monkeypatch.context() as patch:
+        patch.setattr(time, 'monotonic', lambda: next(ticks))
+        rows = _check_memory_integrity(layout)
+    row = next(c for c in rows if c.name == 'memory/state.db')
+    assert row.unknown and not row.ok
+    assert 'not verified' in row.detail
 
 
 def test_tool_registry_check_no_agent_reports_skip(tmp_path):

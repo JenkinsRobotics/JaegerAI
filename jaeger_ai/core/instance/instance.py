@@ -1,6 +1,6 @@
 """Instance directory: path resolution, layout, lockfile, manifest.
 
-An *instance* is a writable per-robot directory that holds identity, config,
+An *instance* is a writable per-assistant directory that holds identity, config,
 memory, logs, skills, and (M2) credentials. Resolution order:
 
   1. JAEGER_INSTANCE_DIR env var, if set
@@ -100,12 +100,31 @@ def install_root() -> Path:
 
 
 def operator_state_root() -> Path:
-    """The ``.jaeger_ai/`` directory alongside the product package."""
-    root = install_root()
-    destination = root / OPERATOR_STATE_DIR_NAME
-    from .legacy_state import migrate_operator_state
+    """The operator state directory.
 
-    return migrate_operator_state(root, destination)
+    Standard matching OpenClaw: all persistent runtime state, instances,
+    databases, and caches default to ~/.jaeger (or JAEGER_STATE_DIR),
+    never polluting the git repository tree.
+
+    When JAEGER_HOME is explicitly set (e.g., in test fixtures or sandboxes),
+    state is isolated under that directory.
+    """
+    state_override = os.environ.get("JAEGER_STATE_DIR", "").strip()
+    if state_override:
+        path = Path(state_override).expanduser().resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    home_override = os.environ.get("JAEGER_HOME", "").strip()
+    if home_override:
+        root = Path(home_override).expanduser().resolve()
+        destination = root / OPERATOR_STATE_DIR_NAME
+        from .legacy_state import migrate_operator_state
+        return migrate_operator_state(root, destination)
+
+    home_dir = Path.home() / ".jaeger"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    return home_dir
 
 
 # Legacy alias kept for any internal call-site that still references it

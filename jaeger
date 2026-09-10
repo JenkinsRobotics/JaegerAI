@@ -28,12 +28,19 @@ while [ -L "$SELF" ]; do
   [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
-VENV_PY="$REPO_ROOT/.venv/bin/python"
+VENV_PY="${HOME}/.jaeger/venv/bin/python"
+if [ ! -x "$VENV_PY" ]; then
+  VENV_PY="$REPO_ROOT/.venv/bin/python"
+fi
 
 if [ ! -x "$VENV_PY" ]; then
-  echo "[jaeger] $VENV_PY not found — run ./install.sh first" >&2
+  echo "[jaeger] Python environment not found at ~/.jaeger/venv or $REPO_ROOT/.venv — run ./install.sh first" >&2
   exit 1
 fi
+
+# Keep repo completely clean of __pycache__ junk (mirroring OpenClaw standard)
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
 # Dispatch now lives in jaeger_ai.cli.entry — ONE routing table behind both
 # this wrapper and the installed `jaeger` console script. It re-execs the same

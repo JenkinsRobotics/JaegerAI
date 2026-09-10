@@ -44,16 +44,24 @@ def create_job(
     deliver: str | None = None,
     recipient: str | None = None,
 ) -> dict[str, Any]:
-    from jaeger_agent.tools.scheduling import schedule_prompt
+    # This is the explicit human-facing control plane, not an agent tool call.
+    # The HTTP route is the user's confirmation, so invoking the decorated
+    # ``schedule_prompt`` tool here would ask the headless bridge for a second
+    # confirmation it cannot provide and hang the request. Persist through the
+    # same memory owner directly; autonomous agent calls still use the
+    # permission-gated tool.
+    from jaeger_agent.memory import memory
 
-    result = schedule_prompt(
-        cron_expr=schedule,
-        prompt=prompt,
-        name=name,
-        at=at,
-    )
-    if not result.get("scheduled"):
-        raise ValueError(str(result.get("error") or "schedule failed"))
+    try:
+        row = memory.add_schedule(
+            cron_expr=schedule,
+            prompt=prompt,
+            name=name,
+            at=at,
+        )
+    except Exception as exc:
+        raise ValueError(str(exc)) from exc
+    result = {"scheduled": True, **row}
     if deliver:
         try:
             from jaeger_agent.workspace import get_layout
@@ -73,9 +81,12 @@ def create_job(
 
 
 def cancel_job(name: str) -> dict[str, Any]:
-    from jaeger_agent.tools.scheduling import cancel_schedule
+    # As in ``create_job``, this path represents a direct human UI action. The
+    # agent's cancel tool remains permission-gated; the controller calls the
+    # durable memory owner without a redundant headless approval prompt.
+    from jaeger_agent.memory import memory
 
-    return {"cancelled": bool(cancel_schedule(name)), "name": name}
+    return {"cancelled": bool(memory.cancel_schedule(name)), "name": name}
 
 
 def _set_status(name: str, status: str) -> bool:

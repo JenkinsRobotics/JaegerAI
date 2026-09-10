@@ -50,6 +50,9 @@ Sources/JaegerAI/
   Floating/             pill quick-input: panel · view · hotkey · bridge
   Voice/                VoiceRecorder + TTS/ (manager, Apple synth)
                         + STT/ (manager, Apple, Whisper)
+  Intents/              App Intents seam (Siri/Shortcuts): AskJaeger,
+                        EveningRoutine — both via AgentBridge, isolated
+                        sessions ("siri" / "routine")
   Splash/               boot progress window
   Theme/                Term — the terminal palette every dark surface uses
   Resources/            menu-bar icons, splash hero

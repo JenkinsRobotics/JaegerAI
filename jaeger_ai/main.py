@@ -338,6 +338,16 @@ def _parse_toolsets_env() -> frozenset[str] | None:
     return names
 _MAX_HISTORY_MESSAGES = 20
 
+from contextvars import ContextVar
+
+_turn_sinks: ContextVar[dict[str, Any]] = ContextVar("jaeger_turn_sinks", default={})
+
+
+def current_turn_sink(name: str):
+    """A background/cron turn must never write into another session's UI."""
+    return _turn_sinks.get().get(name)
+
+
 _pipeline: dict[str, Any] = {
     "layout": None,
     "config": None,
@@ -917,6 +927,8 @@ def evict_session(session_key: str) -> bool:
 
     Returns ``True`` if the session had any state to drop."""
     had_state = False
+    if _session_model_clients.pop(session_key, None) is not None:
+        had_state = True
     if _jaeger_agents_by_session.pop(session_key, None) is not None:
         had_state = True
     if _session_histories.pop(session_key, None) is not None:
@@ -1063,6 +1075,13 @@ def _register_builtins(client: Any) -> None:
     a higher version of the same name (last-write-wins in the registry).
     """
     t = jaeger_tools
+
+    # External agent runtimes are feature packages under
+    # jaeger_agent.delegates/<runtime>/. Registration is idempotent so a
+    # process-level tool refresh cannot duplicate or stale an adapter.
+    from jaeger_agent.delegates import register_builtin_delegates
+
+    register_builtin_delegates()
 
 
 
@@ -1241,7 +1260,7 @@ def _register_builtins(client: Any) -> None:
     @register_tool_from_function
     def clarify(question: str) -> dict:
         """Ask the user a clarifying question instead of guessing."""
-        sink = _pipeline.get("interaction_request_sink")
+        sink = current_turn_sink("interaction_request_sink")
         if callable(sink):
             answer = str(sink("clarify", question, ()) or "").strip()
             return {"asked": True, "question": question, "answer": answer}
@@ -1255,7 +1274,7 @@ def _register_builtins(client: Any) -> None:
         masked input control and returns the value only to this tool call.
         Never echo the returned ``secret`` in the final answer.
         """
-        sink = _pipeline.get("interaction_request_sink")
+        sink = current_turn_sink("interaction_request_sink")
         if not callable(sink):
             return {"received": False, "name": name,
                     "error": "no secure interactive surface is connected"}
@@ -1301,6 +1320,39 @@ def _register_builtins(client: Any) -> None:
 
 
     @register_tool_from_function
+    def list_delegate_runtimes() -> dict:
+        """List Claude, Codex, Grok, Gemini, Hermes, OpenClaw and other
+        external agent delegates, including live availability, locality and
+        capability information used by Jaeger's routing guard."""
+        from jaeger_agent.delegates import get_delegate_registry
+        from jaeger_agent.delegates.health import (
+            DelegateHealthService,
+            get_delegate_health_store,
+        )
+
+        async def _probe_all() -> list[dict[str, Any]]:
+            registry = get_delegate_registry()
+            health = get_delegate_health_store()
+            rows: list[dict[str, Any]] = []
+            probes = await DelegateHealthService(registry, health).check_all()
+            for probe in probes:
+                effectiveness = health.effectiveness(probe.runtime_id)
+                rows.append({
+                    "runtime": probe.runtime_id,
+                    "available": probe.status.available,
+                    "detail": probe.status.detail,
+                    "local": probe.status.local,
+                    "capabilities": sorted(probe.status.capabilities),
+                    "probe_latency_ms": probe.latency_ms,
+                    "effectiveness": asdict(effectiveness),
+                })
+            return rows
+
+        from dataclasses import asdict
+
+        return {"runtimes": _run_delegate_coroutine(_probe_all())}
+
+    @register_tool_from_function
     def delegate_task(
         subtasks: list[str] | None = None,
         background: bool = False,
@@ -1308,6 +1360,10 @@ def _register_builtins(client: Any) -> None:
         tasks: list | None = None,
         role: str = "leaf",
         context: str | None = None,
+        runtime: str | None = None,
+        required_capabilities: list[str] | None = None,
+        sensitivity: str = "personal",
+        estimated_cost_usd: float = 0.0,
     ) -> dict:
         """Hand focused subtasks to fresh sub-agents. Hermes-compatible.
 
@@ -1343,6 +1399,25 @@ def _register_builtins(client: Any) -> None:
         )
         if not clean:
             return {"delegated": False, "error": "no subtasks given"}
+        runtime_id = str(runtime or "").strip()
+        if runtime_id:
+            if background:
+                return {
+                    "delegated": False,
+                    "error": "external delegate background mode is not available yet",
+                }
+            if len(clean) != 1:
+                return {
+                    "delegated": False,
+                    "error": "external delegates currently accept exactly one task",
+                }
+            return _delegate_external(
+                runtime_id,
+                clean[0],
+                required_capabilities=required_capabilities,
+                sensitivity=sensitivity,
+                estimated_cost_usd=estimated_cost_usd,
+            )
         role_name = normalize_role(role)
         _delegate_role.value = role_name
         if background:
@@ -1363,6 +1438,22 @@ def _register_builtins(client: Any) -> None:
     # (JAEGER_KANBAN_TASK) or an explicitly loaded ``kanban`` toolset sees
     # them. Same import-registers pattern as messaging/email above.
     from jaeger_agent.tools import kanban as _kanban  # noqa: F401
+
+    # Durable mission/goal/plan facade over the cognitive commitment store.
+    from jaeger_ai.features.missions import tools as _mission_tools  # noqa: F401
+
+    # Idempotent import into the one canonical searchable session store.
+    from jaeger_ai.features.history_import import tools as _history_import_tools  # noqa: F401
+
+    from jaeger_ai.features.cost_tracking import tools as _cost_tools  # noqa: F401
+
+    from jaeger_ai.features.knowledge_library import tools as _library_tools  # noqa: F401
+
+    from jaeger_ai.features.caldav import tools as _caldav_tools  # noqa: F401
+
+    from jaeger_ai.features.insta360 import tools as _insta360_tools  # noqa: F401
+
+    from jaeger_ai.features.ares_migration import tools as _ares_migration_tools  # noqa: F401
 
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See
@@ -1475,6 +1566,178 @@ _delegate_role = threading.local()
 # Background workers run on a fresh thread and MUST acquire per turn so
 # the main session can keep talking between worker batches.
 _llm_lock_held = threading.local()
+
+
+def _run_delegate_coroutine(coroutine: Any) -> Any:
+    """Run an async delegate lifecycle from Jaeger's synchronous tool lane."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    # Tool calls normally run outside an event loop. Keep this safe for an
+    # embedding host that invokes Jaeger from one: a private thread owns the
+    # temporary loop instead of attempting nested ``run_until_complete``.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="delegate-runtime") as pool:
+        return pool.submit(asyncio.run, coroutine).result()
+
+
+def _delegate_external(
+    runtime_id: str,
+    task: str,
+    *,
+    required_capabilities: list[str] | None = None,
+    sensitivity: str = "personal",
+    estimated_cost_usd: float = 0.0,
+) -> dict[str, Any]:
+    """Dispatch one task through a registered external runtime.
+
+    Registration is plugin-owned. This function supplies durable Jaeger
+    commitment/run records and deliberately does not promote worker-proposed
+    memory candidates.
+    """
+    import os
+    import uuid
+    from dataclasses import asdict
+    from pathlib import Path
+
+    from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    from jaeger_agent.delegates import (
+        DelegateExecutor,
+        DelegateRequest,
+        get_delegate_registry,
+    )
+    from jaeger_agent.delegates.routing import DelegateRouter
+
+    registry = get_delegate_registry()
+    try:
+        estimated_cost = float(estimated_cost_usd)
+        if estimated_cost < 0:
+            raise ValueError("estimated_cost_usd cannot be negative")
+    except (TypeError, ValueError) as exc:
+        return {"delegated": False, "runtime": runtime_id, "error": str(exc)}
+    if sensitivity not in {"public", "personal", "sensitive", "private", "secret"}:
+        return {
+            "delegated": False,
+            "runtime": runtime_id,
+            "error": f"unknown delegate sensitivity: {sensitivity}",
+        }
+    if runtime_id == "auto":
+        try:
+            route = _run_delegate_coroutine(
+                DelegateRouter(registry).choose(
+                    required_capabilities=frozenset(required_capabilities or ()),
+                    sensitivity=sensitivity,
+                )
+            )
+            runtime_id = route.runtime_id
+        except Exception as exc:  # noqa: BLE001 - tool boundary
+            return {
+                "delegated": False,
+                "runtime": "auto",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+    elif registry.get(runtime_id) is None:
+        return {
+            "delegated": False,
+            "error": f"unknown external delegate runtime: {runtime_id}",
+            "available_runtimes": [item.runtime_id for item in registry.list()],
+        }
+
+    try:
+        from jaeger_agent import workspace
+
+        root = workspace.get_project_root()
+        workspace_path = Path(root).resolve() if root else None
+    except Exception:  # noqa: BLE001 - workspace is optional for delegates
+        workspace_path = None
+
+    cost_store = None
+    layout = _pipeline.get("layout")
+    if layout is not None:
+        from jaeger_ai.features.cost_tracking import CostStore
+
+        cost_store = CostStore(layout.memory_dir / "costs.db")
+        decision = cost_store.authorize(runtime_id, estimated_cost)
+        if not decision.allowed:
+            cost_store.close()
+            return {
+                "delegated": False,
+                "runtime": runtime_id,
+                "error": decision.reason,
+                "budget": asdict(decision),
+            }
+
+    commitments = SqliteCommitmentStore()
+    runs = SqliteRunStore()
+    commitment = commitments.create(
+        task,
+        kind="delegation",
+        payload={"runtime_id": runtime_id, "source": "delegate_task"},
+    )
+    commitments.transition(commitment.id, "active")
+    run = runs.create(
+        commitment.id,
+        provider=runtime_id,
+        owner_pid=os.getpid(),
+        payload={"runtime_id": runtime_id, "prompt": task},
+        relation="delegate",
+    )
+
+    request = DelegateRequest(
+        task_id=run.id,
+        prompt=task,
+        workspace=workspace_path,
+        required_capabilities=frozenset(required_capabilities or ()),
+        sensitivity=sensitivity,  # validated by DelegateRequest
+        idempotency_key=f"delegate:{commitment.id}:{uuid.uuid4().hex}",
+    )
+    try:
+        result = _run_delegate_coroutine(
+            DelegateExecutor(registry, runs).execute(runtime_id, request)
+        )
+    except Exception as exc:  # noqa: BLE001 - tool boundary returns structured failure
+        if cost_store is not None:
+            cost_store.close()
+        try:
+            commitments.transition(commitment.id, "blocked")
+        except Exception:  # noqa: BLE001 - preserve the originating failure
+            pass
+        return {
+            "delegated": False,
+            "runtime": runtime_id,
+            "task_id": run.id,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if cost_store is not None:
+        actual_cost = result.metadata.get("cost_usd", estimated_cost)
+        if isinstance(actual_cost, (int, float)) and actual_cost > 0:
+            cost_store.record(
+                runtime_id=runtime_id,
+                cost_usd=float(actual_cost),
+                task_id=run.id,
+            )
+        cost_store.close()
+
+    commitments.transition(
+        commitment.id,
+        "completed" if result.status == "completed" else "blocked",
+    )
+    payload = asdict(result)
+    payload.update({
+        "delegated": result.status == "completed",
+        "runtime": runtime_id,
+        "task_id": run.id,
+        "commitment_id": commitment.id,
+        "memory_candidates_trusted": False,
+    })
+    return payload
 
 
 def _wt_result(info: dict[str, Any] | None) -> dict[str, Any]:
@@ -2024,12 +2287,13 @@ def begin_turn_cancel_scope() -> "threading.Event":
     return ev
 
 
-def request_turn_cancel() -> None:
+def request_turn_cancel(session_key: str | None = None) -> None:
     """Ask the in-flight turn to stop. No-op when no turn scope is open."""
-    ev = _pipeline.get("cancel_event")
+    ev = _pipeline.get("cancel_event") if session_key is None or _pipeline.get("current_session") == session_key else None
     if ev is not None:
         ev.set()
-    agent = _pipeline.get("active_jaeger_agent")
+    agent = (_jaeger_agents_by_session.get(session_key) if session_key is not None
+             else _pipeline.get("active_jaeger_agent"))
     if agent is not None and hasattr(agent, "interrupt"):
         try:
             agent.interrupt()
@@ -3175,7 +3439,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             bus = _pipeline.get("event_bus")
             if bus is not None:
                 try:
-                    payload: dict[str, Any] = {"name": name, "phase": phase}
+                    payload: dict[str, Any] = {"name": name, "phase": phase, "session": key}
                     if isinstance(data, dict):
                         # Only ship JSON-able scalars; the full data
                         # dict can hold non-serializable references.
@@ -3298,7 +3562,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             # dict lookup per chunk and nothing else. The adapters are
             # streaming either way — this only decides whether anyone
             # downstream hears it.
-            sink = _pipeline.get("stream_delta_sink")
+            sink = current_turn_sink("stream_delta_sink")
             if sink is None:
                 return
             try:
@@ -3310,7 +3574,7 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
             # MODEL deliberation, routed to whichever surface registered a
             # sink for THIS turn. Same shape as _stream_delta above and the
             # same guarantee: no sink means a dict lookup and nothing else.
-            sink = _pipeline.get("stream_reasoning_sink")
+            sink = current_turn_sink("stream_reasoning_sink")
             if sink is None:
                 return
             try:
@@ -3356,11 +3620,19 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         # Session system prompt = base prompt + runtime identity + frozen
         # facts snapshot — see :func:`compose_session_prompt`.
         _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
+        from jaeger_ai.core.runtime.dispatcher import session_policy, context_note
+        _focus = session_policy(_layout, key)
+        _note = context_note(_layout, key) if key == 'dispatcher' or key.startswith('focus:') else ''
+        if _note:
+            _session_prompt += '\n\n' + _note
+        if _focus:
+            _ctx = min(_ctx or _focus['context'], _focus['context'])
+            _reserve = min(_reserve or 2048, _ctx // 4)
         from jaeger_ai.core.runtime.execution import inner_max as _inner_max
         _jaeger_agents_by_session[key] = build_jaeger_agent(
             client,
             system_prompt=_session_prompt,
-            toolsets=_pipeline.get("toolsets"),
+            toolsets=_focus['toolsets'] if _focus else _pipeline.get("toolsets"),
             skip_final_tools=SKIP_FINAL_TOOLS,
             callbacks=_status_cb,
             ctx_window=_ctx,
@@ -3393,6 +3665,11 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     try:
         _cfg = _pipeline.get("config")
         _active_ctx, _active_reserve = _context_budget_for(_cfg)
+        from jaeger_ai.core.runtime.dispatcher import session_policy
+        _focus = session_policy(_pipeline.get('layout'), key)
+        if _focus:
+            _active_ctx = min(_active_ctx or _focus['context'], _focus['context'])
+            _active_reserve = min(_active_reserve or 2048, _active_ctx // 4)
         if agent is not None and getattr(agent, "context_guard", None) is not None and _active_ctx:
             from jaeger_agent.util.context_guard import ContextBudget
             old_b = agent.context_guard.budget
@@ -3578,6 +3855,8 @@ def _run_turn_via_jaeger_agent(
     from jaeger_agent import trace as _trace
     _trace.trace_begin(key, user_text)
     persona_handled = False
+    prev_active_agent = _pipeline.get("active_jaeger_agent")
+    prev_session = _pipeline.get("current_session")
     try:
         _pipeline["active_jaeger_agent"] = jaeger_agent
         _pipeline["current_session"] = key   # for admin-gated tools (certify_admin)
@@ -3635,7 +3914,8 @@ def _run_turn_via_jaeger_agent(
                     persona_handled = True
 
         if result is None:
-            if lock is not None:
+            parent_holds_lock = bool(getattr(_llm_lock_held, "value", False))
+            if lock is not None and not parent_holds_lock:
                 with lock:
                     _llm_lock_held.value = True
                     try:
@@ -3663,8 +3943,10 @@ def _run_turn_via_jaeger_agent(
                 "spoke_via_tool": False, "elapsed_s": elapsed, "report": report,
                 "halt_reason": halt}
     finally:
-        if _pipeline.get("active_jaeger_agent") is jaeger_agent:
-            _pipeline["active_jaeger_agent"] = None
+        _pipeline["active_jaeger_agent"] = prev_active_agent
+        _pipeline["current_session"] = prev_session
+        if prev_session:
+            _context.set_current_session(prev_session)
 
     answer = (result["answer"] or "").strip()
     tool_activity = result["tool_activity"]
@@ -3907,12 +4189,11 @@ def stream_delta_sink(sink: Any):
     callback swallows exceptions anyway, but a slow sink slows the decode
     loop it runs on, so keep it to a buffer append.
     """
-    previous = _pipeline.get("stream_delta_sink")
-    _pipeline["stream_delta_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "stream_delta_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["stream_delta_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 @contextmanager
@@ -3923,28 +4204,26 @@ def stream_reasoning_sink(sink: Any):
     :func:`stream_delta_sink`: the session agent is cached and shared, so a
     sink installed at construction would outlive the surface that wanted it.
     """
-    previous = _pipeline.get("stream_reasoning_sink")
-    _pipeline["stream_reasoning_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "stream_reasoning_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["stream_reasoning_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 @contextmanager
 def interaction_request_sink(sink: Any):
     """Route clarify/secret tool requests through the active UI transport."""
-    previous = _pipeline.get("interaction_request_sink")
-    _pipeline["interaction_request_sink"] = sink
+    token = _turn_sinks.set({**_turn_sinks.get(), "interaction_request_sink": sink})
     try:
         yield sink
     finally:
-        _pipeline["interaction_request_sink"] = previous
+        _turn_sinks.reset(token)
 
 
 def stream_delta_listening() -> bool:
     """True while a surface is consuming this turn's token stream."""
-    return _pipeline.get("stream_delta_sink") is not None
+    return current_turn_sink("stream_delta_sink") is not None
 
 
 def build_system_prompt(layout: Any) -> str:
@@ -4030,6 +4309,10 @@ def _refresh_character_prompt(jaeger_agent: Any) -> None:
             # part of what build_system_prompt returns.
             jaeger_agent.system_prompt = compose_session_prompt(
                 _pipeline["system_prompt"])
+        key = next((key for key, agent in _jaeger_agents_by_session.items() if agent is jaeger_agent), '')
+        if key == 'dispatcher' or key.startswith('focus:'):
+            from jaeger_ai.core.runtime.dispatcher import context_note
+            jaeger_agent.system_prompt = compose_session_prompt(_pipeline['system_prompt']) + '\n\n' + context_note(layout, key)
     except Exception:  # noqa: BLE001
         pass
 
@@ -4123,12 +4406,17 @@ def apply_live_model() -> bool:
                 pass
 
 
+_session_model_clients: dict[str, tuple[Any, Any]] = {}
+
+
 def run_for_voice(
     client: Any,
     user_text: str,
     session_key: str | None = None,
     *,
     display_text: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
@@ -4139,6 +4427,20 @@ def run_for_voice(
     turn as a typed one; the dict just carries the text + tool activity
     for the voice consumer to speak."""
     session = session_key or "voice"
+    from jaeger_ai.core.models.session_selection import select_client
+    signature = (id(client), model or None, provider or None)
+    cached = _session_model_clients.get(session)
+    if cached is None or cached[0] != signature:
+        selected = select_client(client, _pipeline.get("config"), _pipeline.get("layout"), model, provider)
+        if cached is not None or selected is not client:
+            prior = list(getattr(_jaeger_agents_by_session.get(session), "messages", None) or [])
+            evict_session(session)
+            if prior:
+                _carried_session_messages[session] = prior
+        _session_model_clients[session] = (signature, selected)
+    client = _session_model_clients[session][1]
+    if session == 'dispatcher' and session not in _jaeger_agents_by_session:
+        resume_session_from_store(client, session, _pipeline.get('layout'))
     out = _run_turn(client, user_text, session_key=session)
     # Persist the turn so conversations survive app close + are listable.
     # ``preview`` (first user line, set by SessionStore.record) already
@@ -4164,6 +4466,9 @@ def run_for_voice(
             try:
                 from jaeger_ai.core.runtime.modes import serving_brain
                 brain = serving_brain()
+                if getattr(client, "model_name", None):
+                    brain = {**brain, "model": client.model_name,
+                             "provider": getattr(client, "provider", brain.get("provider"))}
                 if brain.get("model"):
                     store.stamp_brain(
                         session,

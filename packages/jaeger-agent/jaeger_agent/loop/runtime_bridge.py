@@ -33,6 +33,7 @@ from typing import Any
 from jaeger_agent import AgentCallbacks, JaegerAgent
 from jaeger_agent.adapters.anthropic import AnthropicAdapter
 from jaeger_agent.adapters.base import ProviderAdapter
+from jaeger_agent.adapters.cli_backend import CliBackendAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
 from jaeger_agent.schemas.message_types import Message
@@ -143,6 +144,11 @@ def _adapter_for_client(
         model = getattr(ext, "model", "")
         api_key = getattr(client, "_api_key", "") or ""
         timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0)
+        if provider == "cli":
+            return CliBackendAdapter(
+                backend_id=model,
+                timeout_s=timeout_s,
+            )
         if provider == "anthropic":
             return AnthropicAdapter(
                 api_key=api_key,
@@ -201,7 +207,11 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
             base_url = getattr(row, "base_url", None) or primary_base
         if not model or model == primary_model:
             continue
-        if provider == "anthropic":
+        if provider == "cli":
+            out.append(CliBackendAdapter(
+                backend_id=model, timeout_s=timeout_s,
+            ))
+        elif provider == "anthropic":
             out.append(AnthropicAdapter(
                 api_key=api_key, model=model, timeout_s=timeout_s,
             ))

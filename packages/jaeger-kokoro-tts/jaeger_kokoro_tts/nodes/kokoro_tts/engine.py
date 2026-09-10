@@ -293,6 +293,7 @@ class KokoroTTS:
         voice: str = KOKORO_VOICE,
         lang: str = KOKORO_LANG,
         reference_buffer: FarEndReference | None = None,
+        audio_backend: str = "sounddevice",
     ) -> None:
         self.voice = voice
         self.lang = lang
@@ -325,6 +326,12 @@ class KokoroTTS:
         # editing config.yaml.  Falls through to the config / "sounddevice"
         # default in :meth:`_resolve_backend`.
         self._backend_override = os.environ.get("JAEGER_AUDIO_BACKEND")
+        self.audio_backend = audio_backend
+
+    @property
+    def amplitude(self) -> float:
+        """RMS of the current output, or silence before the player opens."""
+        return self._player.amplitude if self._player is not None else 0.0
 
     def _resolve_backend(self) -> str:
         """Pick the audio backend for the persistent player.
@@ -332,19 +339,7 @@ class KokoroTTS:
         Resolution order: env override → instance config → default
         "sounddevice".  Validated against the supported set; an
         unknown name falls back to "sounddevice" with a warning."""
-        candidate = self._backend_override
-        if not candidate:
-            try:
-                from jaeger_os.core.context import _require_layout
-                from jaeger_os.core.instance.schemas import Config, load_yaml
-                layout = _require_layout()
-                cfg = load_yaml(layout.config_path, Config)
-                vc = getattr(cfg, "voice", None)
-                candidate = getattr(vc, "audio_backend", None) if vc else None
-            except Exception:  # noqa: BLE001 — config read is best-effort
-                candidate = None
-        if not candidate:
-            candidate = "sounddevice"
+        candidate = self._backend_override or self.audio_backend or "sounddevice"
         from .persistent_player import PersistentKokoroPlayer
         if candidate not in PersistentKokoroPlayer.SUPPORTED_BACKENDS:
             print(

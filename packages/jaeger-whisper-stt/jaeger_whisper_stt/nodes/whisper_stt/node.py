@@ -70,11 +70,20 @@ class AudioSessionNode(Node):
             # Older AudioSession (test fixture / pre-refactor build)
             # without the gate-decision API — skip silently.
             pass
+        adapter = getattr(self.session, "adapter", None)
+        if hasattr(adapter, "set_on_partial"):
+            adapter.set_on_partial(self._publish_partial)
         self.session.start()
         self._log(
             "audio session started; will publish "
             f"{topics.SENSE_TRANSCRIPT} + {topics.SENSE_USER_SPEECH_START}"
         )
+
+    def _publish_partial(self, text: str) -> None:
+        """Publish captions only; non-final transcripts never start agent turns."""
+        self.bus.publish(topics.Transcript(
+            text=text, is_final=False, language="en", node_id=self.name,
+        ))
 
     def tick(self) -> None:
         """Pull one committed phrase per tick and publish it as a
@@ -106,6 +115,9 @@ class AudioSessionNode(Node):
 
     def teardown(self) -> None:
         """Close the mic + stop STT.  Idempotent."""
+        adapter = getattr(self.session, "adapter", None)
+        if hasattr(adapter, "set_on_partial"):
+            adapter.set_on_partial(None)
         try:
             self.session.set_on_speech_detected(None)
         except Exception:  # noqa: BLE001

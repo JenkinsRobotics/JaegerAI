@@ -8,6 +8,7 @@ A small JSON sidecar at ``<instance>/logs/usage.json`` holds:
 
   • per tool  — ``{calls, failures, total_s, last_used}``
   • per skill — ``{views, last_used}``
+  • per model — provider-reported prompt, cached, and completion tokens
 
 It is best-effort: a telemetry write must never break a turn, so every
 path swallows its own errors. Surfaced through the ``skill`` tool's
@@ -43,7 +44,7 @@ def _load() -> dict[str, dict[str, Any]]:
     global _stats
     if _stats is not None:
         return _stats
-    _stats = {"tools": {}, "skills": {}, "skill_routing": {}}
+    _stats = {"tools": {}, "skills": {}, "skill_routing": {}, "models": {}}
     path = _path()
     if path is not None and path.exists():
         try:
@@ -52,6 +53,7 @@ def _load() -> dict[str, dict[str, Any]]:
                 _stats["tools"] = data.get("tools", {}) or {}
                 _stats["skills"] = data.get("skills", {}) or {}
                 _stats["skill_routing"] = data.get("skill_routing", {}) or {}
+                _stats["models"] = data.get("models", {}) or {}
         except Exception:  # noqa: BLE001
             pass
     return _stats
@@ -94,6 +96,45 @@ def record_skill(name: str) -> None:
         stats = _load()
         row = stats["skills"].setdefault(name, {"views": 0, "last_used": ""})
         row["views"] += 1
+        row["last_used"] = _now()
+        _flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def record_model_usage(
+    provider: str,
+    model: str,
+    *,
+    prompt_tokens: int = 0,
+    cached_prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> None:
+    """Persist provider-reported model tokens for this instance.
+
+    Completion totals may include hidden reasoning tokens. These counters are
+    operational telemetry, not an authoritative provider invoice.
+    """
+    if not provider or not model:
+        return
+    try:
+        key = f"{provider}:{model}"
+        row = _load()["models"].setdefault(
+            key,
+            {
+                "provider": provider,
+                "model": model,
+                "calls": 0,
+                "prompt_tokens": 0,
+                "cached_prompt_tokens": 0,
+                "completion_tokens": 0,
+                "last_used": "",
+            },
+        )
+        row["calls"] += 1
+        row["prompt_tokens"] += max(0, int(prompt_tokens or 0))
+        row["cached_prompt_tokens"] += max(0, int(cached_prompt_tokens or 0))
+        row["completion_tokens"] += max(0, int(completion_tokens or 0))
         row["last_used"] = _now()
         _flush()
     except Exception:  # noqa: BLE001
@@ -146,6 +187,11 @@ def skill_routing_snapshot() -> dict[str, Any]:
     return dict(_load()["skill_routing"])
 
 
+def model_usage_snapshot() -> dict[str, Any]:
+    """Provider-reported token totals, grouped by provider and model."""
+    return dict(_load()["models"])
+
+
 def top_tools(limit: int = 10) -> list[dict[str, Any]]:
     """Tools by call count, most-used first."""
     rows = [{"name": n, **r} for n, r in _load()["tools"].items()]
@@ -163,5 +209,5 @@ def top_skills(limit: int = 10) -> list[dict[str, Any]]:
 def reset() -> None:
     """Clear all counters (used by tests and a fresh session)."""
     global _stats
-    _stats = {"tools": {}, "skills": {}, "skill_routing": {}}
+    _stats = {"tools": {}, "skills": {}, "skill_routing": {}, "models": {}}
     _flush()

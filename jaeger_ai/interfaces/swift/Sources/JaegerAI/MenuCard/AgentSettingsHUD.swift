@@ -34,7 +34,7 @@ private enum Tab: String, CaseIterable, Identifiable {
     case home = "Home", instance = "Instance", library = "Library"
     case character = "Character", traits = "Traits"
     case app = "App Settings", permissions = "Permissions"
-    case ares = "ARES & Plugins"
+    case ares = "Jaeger surfaces"
     var id: String { rawValue }
     var symbol: String {
         switch self {
@@ -115,7 +115,7 @@ struct AgentSettingsHUD: View {
                     .frame(width: 44, height: 44)
                     .background(RoundedRectangle(cornerRadius: 14)
                         .fill(tab == .ares ? HUD.accent.opacity(0.16) : HUD.accent.opacity(0.12)))
-            }.buttonStyle(.plain).help("ARES Integration & Plugins")
+            }.buttonStyle(.plain).help("Jaeger WebUI and plugins")
         }
         .padding(.vertical, 16).padding(.horizontal, 9)
         .frame(width: 66).background(HUD.panel)
@@ -715,7 +715,8 @@ private struct UpdatesSection: View {
 }
 
 /// One catalog descriptor, rendered by its ``type``. bool→Toggle,
-/// enum→Picker(choices), int/float→numeric field, str→text field. Commits
+/// enum→Picker(choices), JSON→multiline editor, secret→secure field, and
+/// int/float/str→text field. Commits
 /// through ``store.setSetting`` (validated by the schema on the Python side).
 private struct SettingRow: View {
     let setting: Setting
@@ -766,6 +767,34 @@ private struct SettingRow: View {
                     ForEach(setting.choices ?? [], id: \.self) { Text($0).tag($0) }
                 }.labelsHidden().tint(HUD.accent).frame(maxWidth: 180)
             }
+        case "json":
+            VStack(alignment: .leading, spacing: 5) {
+                Text(setting.label).foregroundStyle(HUD.ink)
+                    .font(.system(size: 13))
+                TextEditor(text: $text)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(HUD.ink).scrollContentBackground(.hidden)
+                    .frame(minHeight: 82).padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(HUD.field))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(HUD.stroke, lineWidth: 1))
+                Button("Apply JSON") { commit(.string(text)) }
+                    .buttonStyle(.plain).foregroundStyle(HUD.accent)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+        case "secret":
+            HStack {
+                Text(setting.label).foregroundStyle(HUD.ink)
+                    .font(.system(size: 13))
+                Spacer()
+                SecureField("Enter replacement", text: $text, onCommit: commitText)
+                    .textFieldStyle(.plain).multilineTextAlignment(.trailing)
+                    .font(.system(size: 13)).foregroundStyle(HUD.ink)
+                    .frame(maxWidth: 180).padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(HUD.field))
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(HUD.stroke, lineWidth: 1))
+            }
         default:
             HStack {
                 Text(setting.label).foregroundStyle(HUD.ink)
@@ -789,6 +818,7 @@ private struct SettingRow: View {
     }
 
     private func commitText() {
+        if setting.type == "secret" && text.isEmpty { return }
         switch setting.type {
         case "int":
             if let i = Int(text.trimmingCharacters(in: .whitespaces)) {
@@ -845,21 +875,22 @@ private struct PermissionsPage: View {
     }
 }
 
-// MARK: - ARES & Extensions Page
+// MARK: - Jaeger surfaces page
 
 private struct AresPage: View {
     @State private var isOnline: Bool = false
+    @State private var endpointError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HUD.section("ARES & Extension Suite")
-            Text("Connect JaegerAI runtime capabilities to ARES product surfaces.")
+            HUD.section("Jaeger surfaces")
+            Text("Use the shared WebUI to access your configured agents.")
                 .font(.system(size: 13))
                 .foregroundStyle(HUD.inkDim)
 
             // Status Card
             VStack(alignment: .leading, spacing: 12) {
-                Text("ARES CONTROLLER ENGINE")
+                Text("SHARED WEBUI")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(2)
                     .foregroundStyle(HUD.inkDim)
@@ -868,18 +899,24 @@ private struct AresPage: View {
                     Circle()
                         .fill(isOnline ? HUD.accent : Color.red)
                         .frame(width: 10, height: 10)
-                    Text(isOnline ? "ONLINE (Port 8788)" : "ONLINE / READY (Port 8788)")
+                    Text(isOnline ? "ONLINE" : "UNREACHABLE")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(isOnline ? HUD.accent : HUD.ink)
                 }
 
                 HStack(spacing: 10) {
                     Button {
-                        if let url = URL(string: "http://127.0.0.1:8788") {
-                            NSWorkspace.shared.open(url)
+                        Task {
+                            do {
+                                let url = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
+                                endpointError = nil
+                                NSWorkspace.shared.open(url)
+                            } catch {
+                                endpointError = error.localizedDescription
+                            }
                         }
                     } label: {
-                        Text("🌐 Open ARES WebUI")
+                        Text("🌐 Open Jaeger WebUI")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(Color(red: 0.05, green: 0.1, blue: 0.08))
                             .padding(.vertical, 8).padding(.horizontal, 14)
@@ -888,11 +925,11 @@ private struct AresPage: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        if let fallback = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.jenkinsrobotics.ares") {
+                        if let fallback = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.jenkinsrobotics.JaegerAI") {
                             NSWorkspace.shared.open(fallback)
                         }
                     } label: {
-                        Text("🚀 Open ARES Mac App")
+                        Text("🚀 Open Jaeger app")
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(HUD.accent)
                             .padding(.vertical, 8).padding(.horizontal, 14)
@@ -906,18 +943,21 @@ private struct AresPage: View {
                 RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
             ))
 
+            if let endpointError {
+                Text(endpointError).foregroundStyle(.red).font(.caption)
+            }
             Spacer()
         }
         .task {
-            if let url = URL(string: "http://127.0.0.1:8788/health") {
+            do {
+                let url = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
                 var req = URLRequest(url: url)
-                req.timeoutInterval = 1.5
-                do {
-                    let (_, resp) = try await URLSession.shared.data(for: req)
-                    if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
-                        isOnline = true
-                    }
-                } catch {}
+                req.timeoutInterval = 5
+                let (_, resp) = try await URLSession.shared.data(for: req)
+                isOnline = (resp as? HTTPURLResponse)?.statusCode == 200
+            } catch {
+                isOnline = false
+                endpointError = error.localizedDescription
             }
         }
     }

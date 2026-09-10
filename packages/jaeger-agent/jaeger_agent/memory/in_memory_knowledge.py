@@ -178,18 +178,25 @@ class InMemoryKnowledgeStore:
 
     def rebuild_beliefs_from_claims(self, *, subject: str | None = None) -> list[Belief]:
         """Derived projection. Provenance rank, not last-write-wins."""
-        from jaeger_agent.cognition.revision import revise_all
+        from jaeger_agent.cognition.revision import revise_all, same_projection
 
         valid_claims = self.list_claims(subject=subject, status="valid")
         rebuilt = revise_all(valid_claims)
-        keys = {(b.subject, b.predicate) for b in rebuilt}
-        for b in list(self._beliefs.values()):
-            if (b.subject, b.predicate) in keys and b.status == BeliefStatus.ACTIVE:
-                b.status = BeliefStatus.SUPERSEDED
-                b.updated_at = utc_now_iso()
+        out = []
         for belief in rebuilt:
+            current = [b for b in self._beliefs.values()
+                       if (b.subject, b.predicate) == (belief.subject, belief.predicate)
+                       and b.status in {BeliefStatus.ACTIVE, BeliefStatus.CONTRADICTED}]
+            if current and same_projection(current[-1], belief):
+                out.append(current[-1])
+                continue
+            for previous in current:
+                previous.status = BeliefStatus.SUPERSEDED
+                previous.superseded_by = belief.id
+                previous.updated_at = utc_now_iso()
             self.save_belief(belief)
-        return rebuilt
+            out.append(belief)
+        return out
 
     # ── EntityStore implementation ─────────────────────────────────
 

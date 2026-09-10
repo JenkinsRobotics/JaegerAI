@@ -55,7 +55,9 @@ import os as _os
 import sys as _sys
 from pathlib import Path as _Path
 _REPO_ROOT = _Path(__file__).resolve().parents[2]
-_VENV_DIR = _REPO_ROOT / ".venv"
+_VENV_DIR = _Path.home() / ".jaeger" / "venv"
+if not _VENV_DIR.exists():
+    _VENV_DIR = _REPO_ROOT / ".venv"
 _VENV_PY = _VENV_DIR / "bin" / "python"
 if _VENV_PY.exists() and not _sys.executable.startswith(str(_VENV_DIR)):
     _os.execv(str(_VENV_PY), [str(_VENV_PY), __file__, *_sys.argv[1:]])
@@ -69,18 +71,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jaeger_ai.core.instance.instance import operator_state_root
+
 REPO = Path(__file__).resolve().parents[2]
-# The single dev instance, shared with `jaeger --dev`. Lives under the
-# repo's gitignored operator-state root (`.jaeger_ai/`), so it never
-# ships to end users. (Pre-2026-06-19 this was an isolated `sandbox/`
-# copy — removed; the two drifted, which only caused confusion.)
-DEV_INSTANCE = REPO / ".jaeger_ai" / "instances" / "jaeger-dev"
-VENV_PY = REPO / ".venv" / "bin" / "python"
+DEV_INSTANCE = operator_state_root() / "instances" / "jaeger-dev"
+VENV_PY = _VENV_PY
 INSTANCE_NAME = "jaeger-dev"
-# Legacy daemon pid-file (0.3.0 pre-pivot architecture).  Stays in tree
-# but the launcher no longer spawns it — if a previous --daemon run
-# left one lingering, cmd_boot stops it during the boot scroll so the
-# TUI can acquire the instance lock.
 LEGACY_DAEMON_PID = DEV_INSTANCE / "run" / "jaeger.pid"
 
 
@@ -274,7 +270,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_kokoro_tts.persistent_player import (
+        from jaeger_kokoro_tts.nodes.kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401

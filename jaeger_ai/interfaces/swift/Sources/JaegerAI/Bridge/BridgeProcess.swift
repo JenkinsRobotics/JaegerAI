@@ -235,7 +235,7 @@ actor BridgeProcess {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = instance.map { ["bridge", $0] } ?? ["bridge"]
+        proc.arguments = instance.map { ["bridge", $0, "--attach"] } ?? ["bridge", "--attach"]
         proc.currentDirectoryURL =
             URL(fileURLWithPath: (path as NSString).deletingLastPathComponent)
 

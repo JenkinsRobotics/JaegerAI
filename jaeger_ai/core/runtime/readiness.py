@@ -111,7 +111,7 @@ def _warm_vision() -> Any:
 
 
 def _warm_avatar() -> Any:
-    from jaeger_agent.tools.avatar import warm_avatar
+    from jaeger_ai.nodes.animation.tools import warm_avatar
     return warm_avatar()
 
 

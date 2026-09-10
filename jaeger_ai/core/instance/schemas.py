@@ -105,9 +105,11 @@ class ModelConfig(BaseModel):
     #   ``~/.lmstudio/models/mlx-community/Qwen3.5-9B-MLX-4bit/``).
     #   Dispatcher already routes to MlxClient in main.py; this
     #   Literal just makes the option config-visible.  Added 0.4.x.
-    backend: Literal["llama_cpp_python", "mlx_lm"] = "llama_cpp_python"
+    backend: Literal["llama_cpp_python", "mlx_lm"] = Field(
+        "llama_cpp_python", json_schema_extra=_setting("model", restart=True))
     model_path: Path = Field(
         ...,
+        json_schema_extra=_setting("model", restart=True),
         description=(
             "Absolute path to model weights.  For llama_cpp_python: "
             "the GGUF file.  For mlx_lm: the model directory "
@@ -139,11 +141,11 @@ class ModelConfig(BaseModel):
                     "the worker context and re-trigger full re-prefills). "
                     "Applies on restart.",
     )
-    gpu_layers: int = Field(-1, description="-1 = offload all, 0 = CPU-only")
-    n_batch: int = 512
-    n_ubatch: int = 512
-    flash_attn: bool = True
-    threads: int | None = None
+    gpu_layers: int = Field(-1, json_schema_extra=_setting("model", restart=True), description="-1 = offload all, 0 = CPU-only")
+    n_batch: int = Field(512, ge=1, json_schema_extra=_setting("model", restart=True, advanced=True))
+    n_ubatch: int = Field(512, ge=1, json_schema_extra=_setting("model", restart=True, advanced=True))
+    flash_attn: bool = Field(True, json_schema_extra=_setting("model", restart=True, advanced=True))
+    threads: int | None = Field(None, ge=1, json_schema_extra=_setting("model", restart=True, advanced=True))
     max_tokens: int = Field(
         4096, ge=16, le=32_768,
         json_schema_extra=_setting("model", restart=True),
@@ -160,6 +162,7 @@ class ModelConfig(BaseModel):
     )
     extra_gguf_dirs: list[str] = Field(
         default_factory=list,
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Extra directories to scan for local .gguf models, "
                     "beyond the repo models/, the JaegerAI cache, and LM "
                     "Studio. Add/remove with the model_location tool; "
@@ -168,6 +171,7 @@ class ModelConfig(BaseModel):
     )
     stall_timeout_s: float | None = Field(
         None,
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Wall-clock seconds before the agent declares the "
                     "model call stalled and surfaces a recoverable error "
                     "(``stalled`` halt reason). ``None`` uses the backend "
@@ -248,13 +252,16 @@ class RetentionConfig(BaseModel):
 class SkillsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled_base_skills: list[str] = Field(default_factory=list,
+        json_schema_extra=_setting("skills", advanced=True),
         description="Empty = enable all; otherwise allowlist by skill folder name.")
     disabled_playbooks: list[str] = Field(default_factory=list,
+        json_schema_extra=_setting("skills", advanced=True),
         description="Playbook-skill names to hide from discovery and the prompt index.")
-    hot_reload: bool = False
-    run_smoke_tests: bool = True
+    hot_reload: bool = Field(False, json_schema_extra=_setting("skills", advanced=True))
+    run_smoke_tests: bool = Field(True, json_schema_extra=_setting("skills", advanced=True))
     include_self_improvement_contract: bool = Field(
         default=False,
+        json_schema_extra=_setting("skills", advanced=True),
         description=(
             "Inject the full v2 self-improvement contract (skill versioning, "
             "smoke tests, rollback rules) into the system prompt. Off by "
@@ -308,6 +315,7 @@ class HeartbeatConfig(BaseModel):
     session: str = Field(
         "heartbeat",
         max_length=64,
+        json_schema_extra=_setting("autonomy", advanced=True),
         description="Session key synthetic heartbeat turns run under.",
     )
 
@@ -333,9 +341,10 @@ class TirithConfig(BaseModel):
     )
     path: str = Field(
         "", max_length=512,
+        json_schema_extra=_setting("security", advanced=True),
         description="Explicit path to the tirith binary. Empty = search PATH.",
     )
-    timeout_s: int = Field(5, ge=1, le=60)
+    timeout_s: int = Field(5, ge=1, le=60, json_schema_extra=_setting("security", advanced=True))
 
 
 class CheckpointsConfig(BaseModel):
@@ -393,14 +402,22 @@ class HooksConfig(BaseModel):
     )
     pre_tool_call: list[Any] = Field(
         default_factory=list,
+        json_schema_extra=_setting("autonomy", advanced=True),
         description="Hooks run BEFORE a tool call. Exit 2 blocks the call.",
     )
     post_tool_call: list[Any] = Field(
         default_factory=list,
+        json_schema_extra=_setting("autonomy", advanced=True),
         description="Hooks run AFTER a tool call. Cannot block.",
     )
-    on_session_start: list[Any] = Field(default_factory=list)
-    on_session_end: list[Any] = Field(default_factory=list)
+    on_session_start: list[Any] = Field(
+        default_factory=list,
+        json_schema_extra=_setting("autonomy", advanced=True),
+    )
+    on_session_end: list[Any] = Field(
+        default_factory=list,
+        json_schema_extra=_setting("autonomy", advanced=True),
+    )
 
 
 class AutomationConfig(BaseModel):
@@ -466,19 +483,21 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     gguf_engine: str = Field(
         "auto",
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Engine for GGUF models: 'auto' | 'llama-cpp-python'.",
     )
     mlx_engine: str = Field(
         "auto",
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Engine for MLX models: 'auto' | 'mlx-lm' | 'mlx-vlm'.",
     )
 
 
 class VoiceConfig(BaseModel):
-    """Always-on voice settings.
+    """Optional voice settings.
 
-    A Jaeger is embodied — like a person, it can always listen — but
-    the always-on mic without ``speexdsp`` for acoustic echo
+    Jaeger can provide a continuous voice interface, but an always-on mic
+    without ``speexdsp`` for acoustic echo
     cancellation picks up background podcast/youtube audio nearby and
     feeds it to the agent. VOICE-1 in docs/ROADMAP_0.2.0.md flips
     ``enabled`` to OFF by default so a fresh install doesn't surprise
@@ -614,7 +633,7 @@ class FallbackModel(BaseModel):
     provider: Literal[
         "local", "lmstudio", "ollama", "ollama-cloud",
         "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
@@ -629,10 +648,11 @@ class WebhookConfig(BaseModel):
         json_schema_extra=_setting("autonomy"),
         description="Listen on loopback for POST /hook and POST /github.",
     )
-    host: str = Field("127.0.0.1", max_length=64)
-    port: int = Field(8791, ge=1, le=65535)
+    host: str = Field("127.0.0.1", max_length=64, json_schema_extra=_setting("webhooks", restart=True, advanced=True))
+    port: int = Field(8793, ge=1, le=65535, json_schema_extra=_setting("webhooks", restart=True, advanced=True))
     secret: str = Field(
         "",
+        json_schema_extra=_setting("webhooks", restart=True, advanced=True, secret=True),
         description="Optional bearer/shared secret. Empty = loopback is enough.",
     )
 
@@ -655,6 +675,10 @@ class ExternalModelConfig(BaseModel):
       • ``groq``         — Groq LPU fast inference engine
       • ``deepseek``     — DeepSeek R1 / V3 API
       • ``vllm``         — High-throughput vLLM server
+      • ``cli``          — an installed agent CLI (claude/codex/grok/gemini/hermes)
+                           on PATH, used as the brain. Jaeger keeps the loop,
+                           tools, memory, and permissions. Delegates remain
+                           workers (``delegate_task``).
 
     ``lmstudio`` and ``ollama`` are both still on-device — a separate
     local server, used to A/B against the in-process model when
@@ -671,30 +695,34 @@ class ExternalModelConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = False
+    enabled: bool = Field(False, json_schema_extra=_setting("model", restart=True))
     provider: Literal[
         "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
-        "openrouter", "groq", "deepseek", "vllm", "together",
-    ] = "lmstudio"
+        "openrouter", "groq", "deepseek", "vllm", "together", "cli",
+    ] = Field("lmstudio", json_schema_extra=_setting("model", restart=True))
     base_url: str = Field(
         "http://localhost:1234/v1",
+        json_schema_extra=_setting("model", restart=True),
         description=("OpenAI-compatible endpoint (lmstudio / ollama / openai). "
                      "LM Studio: :1234/v1 · Ollama: :11434/v1. Ignored for anthropic."),
     )
     model: str = Field(
         "local-model",
+        json_schema_extra=_setting("model", restart=True),
         description="Model id the provider expects (a 'claude-…' id, or an LM Studio model name).",
     )
     api_key_credential: str = Field(
         "external_model_api_key",
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Credential name holding the API key (looked up in credentials/).",
     )
     api_key_env: str = Field(
         "",
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Env var to read the key from when the credential is absent.",
     )
-    max_tokens: int = Field(1024, ge=16, le=131_072)
-    timeout_s: float = Field(60.0, gt=0, le=600)
+    max_tokens: int = Field(1024, ge=16, le=131_072, json_schema_extra=_setting("model", restart=True))
+    timeout_s: float = Field(60.0, gt=0, le=600, json_schema_extra=_setting("model", restart=True, advanced=True))
     ctx: int = Field(
         0, ge=0, le=2_097_152,
         json_schema_extra=_setting("model", restart=True),
@@ -709,6 +737,7 @@ class ExternalModelConfig(BaseModel):
     )
     fallback: list[FallbackModel] = Field(
         default_factory=list,
+        json_schema_extra=_setting("model", restart=True, advanced=True),
         description="Ordered alternatives when the primary cannot serve "
                     "(connect/auth/missing-key). Timeouts, 429s, and "
                     "context-length errors do not walk this list.",
@@ -716,33 +745,36 @@ class ExternalModelConfig(BaseModel):
 
 
 class WarmupConfig(BaseModel):
-    """Boot-time warmup — pre-load the heavy plugins so a Jaeger is
+    """Boot-time warmup — pre-load selected plugins so a Jaeger is
     fully operational the moment boot finishes, not on first use.
 
-    A deployed robot runs TTS and STT constantly, so those default ON —
-    the first ``text_to_speech`` / ``listen`` should be instant, not a
-    cold model load mid-conversation. Vision pulls a multi-GB model, so
-    it defaults OFF — flip it on per-instance when the robot needs it.
-    Set a flag false to trim boot time on a dev box that won't use it.
+    Voice-capable installations benefit from warming TTS and STT so the first
+    ``text_to_speech`` / ``listen`` does not trigger a cold model load.
+    Vision pulls a multi-GB model, so it defaults OFF. Disable unused warmups
+    to reduce startup time and memory use.
     """
 
     model_config = ConfigDict(extra="forbid")
-    tts: bool = True       # warm Kokoro TTS at boot
-    stt: bool = True       # warm Whisper STT at boot
-    vision: bool = False   # warm the Moondream2 VLM — heavy, opt-in
+    tts: bool = Field(True, json_schema_extra=_setting("warmup", restart=True))
+    stt: bool = Field(True, json_schema_extra=_setting("warmup", restart=True))
+    vision: bool = Field(False, json_schema_extra=_setting("warmup", restart=True))
 
 
 class PluginsConfig(BaseModel):
-    """Messaging / integration plugins (telegram, discord, …).
+    """Optional integration plugins.
 
     ``autostart`` names the plugins to bring live in-process at boot. Only
     those whose credential is already in the instance store actually start
     (a missing credential is logged and skipped). Empty by default — auto-start
     is opt-in: otherwise a plugin goes live when the agent calls
     ``activate_plugin``, the operator clicks Activate in Studio, or a
-    ``/plugins activate <name>`` slash command."""
+    ``/plugins activate <name>`` slash command. Messaging plugins are not
+    needed for local use or private WebUI access through Tailscale."""
     model_config = ConfigDict(extra="forbid")
-    autostart: list[str] = Field(default_factory=list)
+    autostart: list[str] = Field(
+        default_factory=list,
+        json_schema_extra=_setting("general", restart=True, advanced=True),
+    )
 
 
 class PermissionsConfig(BaseModel):
@@ -751,7 +783,7 @@ class PermissionsConfig(BaseModel):
 
       • ``confirm`` — the agent asks before each tier-gated action.
       • ``allow``   — auto-approve; nothing prompts (a trusted,
-                      unattended robot).
+                      unattended deployment).
 
     Chosen during first-boot setup and persisted here, so the posture
     survives every restart. Change it any time by editing this field.
@@ -762,7 +794,7 @@ class PermissionsConfig(BaseModel):
     mode: Literal["confirm", "allow"] = Field(
         "confirm", json_schema_extra=_setting("permissions"),
         description="confirm — ask before each tier-gated action; "
-                    "allow — auto-approve everything (trusted robot).")
+                    "allow — auto-approve everything (trusted unattended deployment).")
 
 
 class SecurityConfig(BaseModel):
@@ -846,6 +878,7 @@ class WorkspaceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     location: str | None = Field(
         None, max_length=512,
+        json_schema_extra=_setting("workspace", restart=True),
         description=(
             "Override the default ``<instance>/workspace/`` location. "
             "Absolute path or ``~``-prefixed; null = default."
@@ -903,7 +936,7 @@ class HardwareConfig(BaseModel):
     """Hardware package selection (dev/docs/hardware/JaegerAI_HARDWARE_FRAMEWORK_PLAN.md).
 
     ``package`` names a directory under ``jaeger_os/hardware/packages/``
-    (e.g. ``"jp01"``); empty string = no robot attached (the default —
+    (e.g. ``"jp01"``); empty string = no hardware package attached (the default —
     JaegerAI boots exactly as before). When set, boot loads the package's
     topology, opens its links (simulated controllers get mock wires),
     runs its nodes on the bus, and registers its capability tools —
@@ -911,8 +944,8 @@ class HardwareConfig(BaseModel):
     until each capability is hardware-walked.
     """
     model_config = ConfigDict(extra="forbid")
-    enabled: bool = True
-    package: str = ""
+    enabled: bool = Field(True, json_schema_extra=_setting("hardware", restart=True, advanced=True))
+    package: str = Field("", json_schema_extra=_setting("hardware", restart=True, advanced=True))
 
 
 class PersonaConfig(BaseModel):
@@ -925,12 +958,14 @@ class PersonaConfig(BaseModel):
 
     output_filter: bool = Field(
         True,
+        json_schema_extra=_setting("persona"),
         description="Restyle final answers in the active character's voice "
                     "(one extra bounded model call per user-facing turn). "
                     "The execution loop always runs persona-free either way.",
     )
     max_chars: int = Field(
         1600, ge=0, le=20000,
+        json_schema_extra=_setting("persona", advanced=True),
         description="Answers longer than this pass through unstyled — "
                     "rewriting long reports risks mangling content and "
                     "doubles latency where it hurts most. 0 disables "
@@ -1044,6 +1079,79 @@ except ImportError:
         default_emotion: str = "neutral"
 
 
+class ContainersConfig(BaseModel):
+    """Configuration for Apple native container tools and services.
+
+    ``use_hermes_webui`` retains its compatibility name for existing config
+    files. It enables the bundled Hermes-derived container mode; the default
+    ``jaeger webui start`` path launches Jaeger's branded WebUI and adapter.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    engine: str = Field(
+        "/opt/homebrew/bin/container",
+        json_schema_extra=_setting("containers"),
+        description="Path to Apple container CLI binary.",
+    )
+    auto_start_system: bool = Field(
+        True,
+        json_schema_extra=_setting("containers"),
+        description="Automatically start the container system service when needed.",
+    )
+    use_hermes_webui: bool = Field(
+        False,
+        json_schema_extra=_setting("containers"),
+        description=(
+            "Run the Hermes Agent runtime container. This is not a second "
+            "chat URL; Jaeger WebUI on jaeger_webui_port remains the bookmark."
+        ),
+    )
+    hermes_webui_container: str = Field(
+        "hermes-webui-hermes-webui",
+        json_schema_extra=_setting("containers", advanced=True),
+        description="Apple container id that serves the Hermes WebUI.",
+    )
+    hermes_webui_port: int = Field(
+        8787,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("containers", advanced=True),
+        description=(
+            "Host port published by the Hermes WebUI container "
+            "(open http://127.0.0.1:<port>/)."
+        ),
+    )
+    adapter_port: int = Field(
+        8791,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("containers", advanced=True),
+        description=(
+            "Loopback port for `jaeger hermes-webui-adapter` "
+            "(HERMES_WEBUI_RUNNER_BASE_URL). Kept at 8791; webhooks use 8793."
+        ),
+    )
+    jaeger_webui_port: int = Field(
+        8790,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("webui", restart=True),
+        description="Loopback port for the primary Jaeger WebUI.",
+    )
+    tailscale_publish: bool = Field(
+        False,
+        json_schema_extra=_setting("webui"),
+        description="Publish Jaeger WebUI privately with Tailscale Serve when it starts.",
+    )
+    tailscale_https_port: int = Field(
+        8443,
+        ge=1,
+        le=65535,
+        json_schema_extra=_setting("webui", advanced=True),
+        description="Tailnet HTTPS port used by Tailscale Serve.",
+    )
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1073,6 +1181,7 @@ class Config(BaseModel):
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
+    containers: ContainersConfig = Field(default_factory=ContainersConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

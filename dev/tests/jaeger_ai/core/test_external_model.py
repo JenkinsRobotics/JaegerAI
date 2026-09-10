@@ -182,3 +182,8 @@ def test_merge_consecutive_collapses_same_role():
         {"role": "user", "content": "a\n\nb"},
         {"role": "assistant", "content": "c"},
     ]
+
+
+def test_validate_cli_provider_needs_no_api_key():
+    ext = ExternalModelConfig(enabled=True, provider="cli", model="claude")
+    assert validate_external_provider(ext, api_key="") == ""

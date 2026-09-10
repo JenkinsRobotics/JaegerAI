@@ -32,7 +32,7 @@ if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
   git clone "${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}" "$JAEGER_HOME"
   exec bash "$JAEGER_HOME/install.sh" "$@"
 fi
-VENV="$REPO_ROOT/.venv"
+VENV="${JAEGER_VENV:-$HOME/.jaeger/venv}"
 
 SKIP_DEPS=0
 PRODUCT_MODE=0
@@ -52,6 +52,14 @@ done
 echo "JaegerAI local install"
 echo "  repo: $REPO_ROOT"
 echo
+
+# The primary browser UI is a pinned submodule. A normal `git clone` does not
+# populate it, so make the supported installer repair that automatically.
+if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
+  echo "→ Initializing pinned WebUI source..."
+  git -C "$REPO_ROOT" submodule sync --recursive --quiet
+  git -C "$REPO_ROOT" submodule update --init --recursive --quiet
+fi
 
 # 1. Verify Python version. Respect a ``PY`` exported by the curl-side
 # installer (scripts/install.sh) — it already did the explicit-version
@@ -166,8 +174,9 @@ else
   echo "→ --skip-deps: leaving .venv untouched"
 fi
 
-# 4. Scaffold .jaeger_ai/ (idempotent) — operator state root
-mkdir -p "$REPO_ROOT/.jaeger_ai/instances"
+# 4. Scaffold ~/.jaeger/ (idempotent) — operator state root (OpenClaw standard)
+STATE_ROOT="${JAEGER_STATE_DIR:-$HOME/.jaeger}"
+mkdir -p "$STATE_ROOT/instances"
 
 # 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
 #    PRODUCT installs only — a dev checkout must never claim the global

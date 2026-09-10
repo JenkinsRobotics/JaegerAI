@@ -55,13 +55,23 @@ _emit_lock = threading.Lock()
 
 def _emit(out: TextIO, obj: dict[str, Any]) -> None:
     """Write one protocol line and flush — the client reads line-by-line.
-    Locked: the turn worker and the stdin thread share one stream."""
+    Locked: the turn worker and the stdin thread share one stream.
+
+    A detached Unix-socket client must not kill the instance-wide turn worker.
+    Owner stdio failures still propagate because they mean the bridge itself
+    has lost its controlling transport.
+    """
     with _emit_lock:
-        out.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        out.flush()
+        try:
+            out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            out.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError):
+            if getattr(out, "_jaeger_attach_stream", False):
+                return
+            raise
 
 
-def _emit_state(out: TextIO, ctx: "_Ctx", busy: bool, session: str = "") -> None:
+def _emit_state(out: TextIO, ctx: _Ctx, busy: bool, session: str = "") -> None:
     """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
     turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
     guard and the wire frame never drift apart."""
@@ -304,7 +314,8 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # can keep those sessions marked running until the callback returns.
 # 13: ``model_picker`` query — Hermes-style two-stage catalog for the
 # windowed ``/model`` overlay (clickable, not a transcript dump).
-INTEGRATION_CONTRACT_VERSION = 13
+# 14: native turn receipts support observation/reconciliation without replay.
+INTEGRATION_CONTRACT_VERSION = 15
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -313,7 +324,8 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
-    "board", "heartbeat", "cron", "list_schedules",
+    "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory",
+    "dispatcher_connection", "dispatcher_conversation",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -370,10 +382,12 @@ def _session_contract() -> dict[str, Any]:
 
 def _integration_contract() -> dict[str, Any]:
     """Return the authoritative feature contract for external surfaces."""
-    from jaeger_ai import __version__
     from jaeger_os.contract import protocol
+
+    from jaeger_ai import __version__
     from jaeger_ai.interfaces.surface_contract import (
-        SWIFT_COMMAND_SUPPORT, SWIFT_QUERY_SUPPORT,
+        SWIFT_COMMAND_SUPPORT,
+        SWIFT_QUERY_SUPPORT,
     )
 
     return {
@@ -448,7 +462,7 @@ def _integration_contract() -> dict[str, Any]:
             "credentials": {"available": True, "owner": "jaeger", "mutable": True,
                             "values_readable": False},
             "runtime_logs": {"available": False, "owner": "jaeger", "mutable": False},
-            "runtime_memory": {"available": False, "owner": "jaeger", "mutable": False},
+            "runtime_memory": {"available": True, "owner": "jaeger", "mutable": False},
         },
     }
 
@@ -542,7 +556,8 @@ def _display_name(boot: Any) -> str | None:
     falls back to ``agent_name``."""
     try:
         from jaeger_ai.personality.character import (
-            active_character, persona_display_name,
+            active_character,
+            persona_display_name,
         )
         root = _instance_root(boot)
         character = active_character(root) if root is not None else None
@@ -617,6 +632,7 @@ def _runtime_query_runs(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     return [asdict(run) for run in SqliteRunStore().list(
         commitment_id=args.get("commitment_id"),
@@ -628,6 +644,7 @@ def _runtime_query_commitments(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
     return [asdict(item) for item in SqliteCommitmentStore().list(
         state=args.get("state"),
@@ -638,6 +655,7 @@ def _runtime_query_effects(args: dict[str, Any]) -> list[dict[str, Any]]:
     if not _runtime_bound():
         return []
     from dataclasses import asdict
+
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
     status = args.get("status", "pending")
     return [asdict(item) for item in SqliteEffectLedger().list(status=status)]
@@ -683,16 +701,39 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
     from jaeger_ai.personality.character import (
-        active_character, active_character_id, bound_character_id, list_characters,
+        active_character,
+        active_character_id,
+        bound_character_id,
+        list_characters,
     )
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
     if what == "contract":
         return _integration_contract()
+    if what == 'turn_status':
+        from jaeger_ai.core.runtime.native_turns import NativeTurns
+        if lay is None:
+            raise ValueError('Native instance is unavailable')
+        return NativeTurns(lay.run_dir).get(args.get('turn_id'), args.get('session_id'))
     if what == "list_skills":
         from jaeger_ai.core.skills.service import list_skills
 
         return list_skills(lay)
+    if what == 'dispatcher_memory':
+        from jaeger_agent.memory.memory import list_facts
+        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+        return {'owner': 'jaeger', 'facts': list_facts(),
+                'board': _query('board', {}, boot),
+                'dispatcher': DispatcherStore(lay).overview()}
+    if what == 'dispatcher_conversation':
+        from jaeger_ai.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            raise ValueError('Conversation storage is unavailable')
+        return store.conversation_snapshot('dispatcher')
+    if what == 'dispatcher_connection':
+        from jaeger_ai.interfaces.hermes_profile_adapters.conversation import local_connection
+        return local_connection(lay)
     if what == "get_skill":
         from jaeger_ai.core.skills.service import get_skill
 
@@ -765,7 +806,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return _card_art(_effective_icon(boot, c), c.id)
     if what == "board":
         from jaeger_agent.background.board import (
-            board_digest, board_for_layout, has_actionable_work,
+            board_digest,
+            board_for_layout,
+            has_actionable_work,
         )
         if lay is None:
             return {"cards": [], "digest": "", "has_actionable": False}
@@ -866,7 +909,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
 
     if what == "model_catalog":
         """Canonical model inventory for external product surfaces."""
-        from jaeger_ai.core.models.model_resolver import list_registered_models, serving_model
+        from jaeger_ai.core.models.model_resolver import (
+            list_registered_models,
+            serving_model,
+        )
 
         raw_models = list_registered_models()
         models: list[dict[str, Any]] = []
@@ -877,8 +923,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             model_id = str(row.get("name") or row.get("filename") or "").strip()
             if not model_id:
                 continue
-            provider = str(row.get("provider") or "").strip() or None
+            route_provider = str(row.get("provider") or "").strip() or None
             location = str(row.get("location") or row.get("kind") or "unknown")
+            # The signed-in host Ollama daemon is the transport for both
+            # on-device and hosted models.  Keep that routing fact internal:
+            # product surfaces need the user-facing provider boundary, not
+            # the socket used to reach it.
+            provider = route_provider
+            if route_provider == "ollama":
+                provider = "ollama-cloud" if location == "cloud" else "ollama-local"
             # Same model id can exist on Ollama Cloud AND local Ollama.
             # The label has to say which, or a picker keyed by id alone
             # will start the local daemon for a cloud pick.
@@ -886,7 +939,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             if provider and provider not in label:
                 where = {
                     "ollama-cloud": "Ollama Cloud",
-                    "ollama": "Ollama (local)",
+                    "ollama-local": "Ollama Local",
                     "local": "on-device",
                     "mlx": "on-device",
                     "in-process": "on-device",
@@ -898,6 +951,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                 "label": label,
                 "location": location,
                 "provider": provider,
+                "route_provider": route_provider,
                 "in_use": bool(row.get("serving")),
                 "source": str(row.get("source") or "jaeger"),
                 "notes": str(row.get("description") or row.get("status") or ""),
@@ -909,11 +963,17 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
                     "status": "configured", "source": "jaeger",
                 })
         active = serving_model() or {}
+        active_provider = str(active.get("provider") or "").strip() or None
+        if active_provider == "ollama":
+            active_provider = (
+                "ollama-cloud" if active.get("location") == "cloud" else "ollama-local"
+            )
         return {
             "instance": getattr(boot, "instance_name", None),
             "serving": {
                 "model": active.get("name"),
-                "provider": active.get("provider"),
+                "provider": active_provider,
+                "route_provider": active.get("provider"),
                 "context_length": active.get("context_length"),
             } if active else {},
             "models": models,
@@ -961,6 +1021,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "usage_available": True,
             "skills": skills,
             "tools": tools,
+            "models": usage_stats.model_usage_snapshot(),
             "total_skill_views": sum(
                 int(v.get("views") or 0) for v in skills.values() if isinstance(v, dict)
             ),
@@ -969,8 +1030,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "top_tools": usage_stats.top_tools(10),
         }
     if what == "permissions":
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
         from jaeger_os.core.safety.permissions import PermissionGrants
+
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
         cfg = load_yaml(lay.config_path, Config)
         return {"mode": cfg.permissions.mode,
                 "granted": sorted(PermissionGrants.load(root).persistent)}
@@ -999,11 +1061,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return _session_contract()
     if what == "search_sessions":
         from jaeger_ai.core.sessions import get_store
+        from jaeger_ai.features.session_search import search_sessions
+
         store = get_store(lay)
         if store is None:
             return []
-        return store.search(
-            str(args.get("query") or ""), limit=int(args.get("limit") or 50)
+        return search_sessions(
+            store,
+            str(args.get("query") or ""),
+            limit=int(args.get("limit") or 50),
         )
     if what == "load_session":
         # resume False: display/search only — do not swap the live agent.
@@ -1085,8 +1151,8 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             # (never the character). An avatar source path is copied INTO the
             # instance dir so the picture travels with the instance; a
             # falsy/empty avatar clears it (→ fall back to the character card).
-            from pathlib import Path
             import shutil
+            from pathlib import Path
 
             from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
             data = load_yaml(lay.identity_path, Identity).model_dump()
@@ -1224,6 +1290,11 @@ class _Ctx:
         # frames' busy flag; kept on ctx too since state frames are
         # fire-and-forget, not queryable.
         self.busy = False
+        self.turn_controls: dict[str, str] = {}
+        self.queued_requests: dict[str, dict[str, Any]] = {}
+        self.turn_control_lock = threading.RLock()
+        self.tool_output: Any = None
+        self.tool_session: str | None = None
         self.boot_error: str | None = None
         self.booted = threading.Event()      # set on success OR failure
         # ── one instance → at most one authoritative bridge ───────────
@@ -1257,6 +1328,7 @@ class _Ctx:
 def _turn_workspace(ctx: _Ctx, requested: Any):
     """Temporarily bind file tools to the validated ARES session workspace."""
     from jaeger_agent import tools as jaeger_tools
+
     from jaeger_ai.main import _pipeline
 
     raw = str(requested or "").strip()
@@ -1372,7 +1444,6 @@ class BridgeConfirmationProvider:
             self._ctx.pending.pop(rid, None)
 
     def confirm(self, request: object) -> bool:
-        from jaeger_os.contract import protocol
         skill = getattr(request, "skill", "") or ""
         if self._grants.is_granted(skill):
             return True  # already approved (console "always", or ours) — no frame
@@ -1470,7 +1541,9 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                     detail=str(payload.get("detail", "")))
                 if isinstance(payload.get("args"), dict):
                     frame["args"] = payload["args"]
-                _emit(proto, frame)
+                frame["session"] = str(payload.get("session") or "")
+                target = ctx.tool_output if payload.get("session") == ctx.tool_session else proto
+                _emit(target or proto, frame)
 
     try:
         from jaeger_ai.main import _pipeline
@@ -1480,11 +1553,16 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     # Interactive permission approval over the wire (deny on timeout).
     try:
+        from dataclasses import replace
         from jaeger_os.core.safety.permissions import (
-            AllowAllProvider, current_policy)
+            AllowAllProvider, current_policy, install_policy,
+        )
         policy = current_policy()
         if not isinstance(policy.confirmation, AllowAllProvider):
-            policy.confirmation = BridgeConfirmationProvider(proto, ctx)
+            # The fallback policy is shared by every unbound execution
+            # context. Never turn its deny provider into this connection's
+            # interactive provider: other callers would wait on a dead UI.
+            install_policy(replace(policy, confirmation=BridgeConfirmationProvider(proto, ctx)))
     except Exception:  # noqa: BLE001
         pass
 
@@ -1571,7 +1649,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
               file=sys.stderr, flush=True)
 
     try:
-        from jaeger_ai.main import autostart_plugins, _pipeline
+        from jaeger_ai.main import _pipeline, autostart_plugins
         autostart_plugins(_pipeline.get("config"))
     except Exception as exc:  # noqa: BLE001
         print(f"[bridge] plugin autostart skipped: {exc}",
@@ -1658,18 +1736,19 @@ def _windowed_control_slash(text: str) -> str | None:
     return None
 
 
-def _run_slash(text: str, ctx: "_Ctx") -> str:
+def _run_slash(text: str, ctx: _Ctx) -> str:
     """Dispatch one slash line through the TUI's registry and return the
     rendered output as plain text. Python stays the single source of truth
     for slash behaviour — the client just displays what comes back."""
     from rich.console import Console
+
     from jaeger_ai.interfaces.tui import slash_commands as sc
 
     parts = text.lstrip("/").split(None, 1)
     name = (parts[0] if parts else "").lower()
     rest = parts[1] if len(parts) > 1 else ""
     rest_head = (rest.split()[:1] or [""])[0].lower()
-    known = name in sc._BY_NAME  # noqa: SLF001 — same package family
+    known = name in sc._BY_NAME
     # Bare /model and /models open a clickable overlay in the app. Never
     # print the catalogue into the chat — that's the bug this exists to
     # close. Typed ``/model use …`` is a direct switch and may run here.
@@ -1751,14 +1830,15 @@ def _heartbeat_config(ctx: _Ctx) -> tuple[bool, int, str]:
 
 def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
     """One supervisor tick. Never raises into the poll loop."""
-    from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
-    from jaeger_ai.core.runtime import heartbeat as hb
-    from jaeger_ai.core.runtime.completions import pending_count, next_completion_turn
-    from jaeger_ai.core.runtime.task_liveness import reclaim_stale
     from jaeger_agent.background.board import has_actionable_work
     from jaeger_agent.prompts import AUTO_BOARD_PROMPT
-    from jaeger_ai.main import _pipeline, run_for_voice, _run_turn
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.runtime import heartbeat as hb
+    from jaeger_ai.core.runtime.completions import next_completion_turn, pending_count
+    from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
+    from jaeger_ai.core.runtime.task_liveness import reclaim_stale
+    from jaeger_ai.main import _pipeline, _run_turn, run_for_voice
 
     layout = ctx.layout
     if layout is None or ctx.client is None or ctx.busy:
@@ -1869,8 +1949,34 @@ def _start_idle_supervisor(proto: TextIO, ctx: _Ctx) -> None:
     ).start()
 
 
+def _cancel_queued_turn(ctx: _Ctx, turn_id: str) -> bool:
+    """Withdraw only work that the bridge worker has not acquired.
+
+    Both dequeue and withdrawal use turn_control_lock. The queued tombstone
+    stays in the queue, but the worker skips it before any slash/tool/model
+    dispatch. Persist the native terminal receipt before acknowledging Stop.
+    """
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    from jaeger_os.contract import protocol
+    with ctx.turn_control_lock:
+        req = ctx.queued_requests.get(turn_id)
+        if req is None or ctx.turn_controls.get(turn_id) != "queued":
+            return False
+        from jaeger_ai.core.runtime.dispatch import normalize_session_key
+        session = normalize_session_key(req.get("session"), default="desktop-app")
+        frame = {**protocol.reply_frame("", "Cancelled before execution", session),
+                 "cancelled": True, "execution_unknown": False}
+        NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
+        req["_cancelled_before_execution"] = True
+        ctx.queued_requests.pop(turn_id, None)
+        ctx.turn_controls.pop(turn_id, None)
+        ctx.session_pending[session] = max(0, ctx.session_pending.get(session, 0) - 1)
+        _emit(req["_out"], frame)
+        return True
+
+
 def _turn_worker(proto: TextIO, ctx: _Ctx,
-                 turns: "_queue.Queue[dict[str, Any] | None]") -> None:
+                 turns: _queue.Queue[dict[str, Any] | None]) -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
     completion — old clients that chat right after ``ready`` just wait,
     exactly as they did when ``ready`` meant model-loaded."""
@@ -1879,14 +1985,37 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         req = turns.get()
         if req is None:
             return
+        with ctx.turn_control_lock:
+            if req.get("_cancelled_before_execution"):
+                continue
+            acquired_id = str(req.get("turn_id") or "")
+            ctx.queued_requests.pop(acquired_id, None)
+            if acquired_id:
+                ctx.turn_controls[acquired_id] = "active"
         out = req.pop("_out", None) or proto
         text, prompt_error = _request_text(req)
         from jaeger_ai.core.runtime.dispatch import normalize_session_key
         session = normalize_session_key(
             req.get("session"), default="desktop-app",
         )
+        def reply(frame):
+            turn_id = str(req.get('turn_id') or '')
+            if turn_id and req.get('_native_accepted'):
+                from jaeger_ai.core.runtime.native_turns import NativeTurns
+                try:
+                    NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
+                except Exception:
+                    # Native work returned, but the durable attestation failed.
+                    # Do not authorize automatic recovery based on a lost receipt.
+                    frame = {**frame, 'execution_unknown': True,
+                             'error': 'Native turn ended but its durable receipt could not be stored'}
+                with ctx.turn_control_lock:
+                    ctx.turn_controls.pop(turn_id, None)
+            _emit(out, frame)
+        from jaeger_ai.core.runtime.work_ledger import bind_session
+        bind_session(session)
         if prompt_error:
-            _emit(out, protocol.reply_frame("", prompt_error, session))
+            reply(protocol.reply_frame("", prompt_error, session))
             continue
         if session not in _SYNTHETIC_SESSIONS:
             ctx.last_user_at = time.monotonic()
@@ -1907,10 +2036,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         if text.startswith("/") and goal_text is None:
             _emit_state(out, ctx, True, session)
             try:
-                reply = _windowed_control_slash(text) or _run_slash(text, ctx)
-                _emit(out, protocol.reply_frame(reply, None, session))
+                slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
+                reply(protocol.reply_frame(slash_reply, None, session))
             except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
-                _emit(out, protocol.reply_frame("", str(exc), session))
+                reply(protocol.reply_frame("", str(exc), session))
             finally:
                 _emit_state(out, ctx, False, session)
             continue
@@ -1918,9 +2047,20 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             text = goal_text
         ctx.booted.wait()
         if ctx.client is None:
-            _emit(out, protocol.reply_frame(
+            reply(protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
             continue
+        turn_id = str(req.get("turn_id") or "")
+        with ctx.turn_control_lock:
+            if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                ctx.turn_controls.pop(turn_id, None)
+                reply({**protocol.reply_frame("", "Cancelled before execution", session),
+                            "cancelled": True})
+                continue
+            if turn_id:
+                ctx.turn_controls[turn_id] = "active"
+            ctx.tool_output = out
+            ctx.tool_session = session
         # Approval requests must return on the same transport that originated
         # this turn.  The provider is installed during boot on owner stdio,
         # while ``out`` may be an attached Unix-socket client.
@@ -1930,6 +2070,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             confirmation = current_policy().confirmation
             if isinstance(confirmation, BridgeConfirmationProvider):
                 confirmation.bind_output(out)
+                confirmation.current_session = session
         except Exception:  # noqa: BLE001 — routing must not block a turn
             pass
         try:
@@ -1946,14 +2087,17 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             pass
         _emit_state(out, ctx, True, session)
         try:
+            from jaeger_ai.core.runtime import continuation, execution
+            from jaeger_ai.core.runtime.autonomous_runner import (
+                ledger_open,
+                next_continuation_prompt,
+            )
             from jaeger_ai.main import (
                 interaction_request_sink,
                 run_for_voice,
                 stream_delta_sink,
                 stream_reasoning_sink,
             )
-            from jaeger_ai.core.runtime import continuation, execution
-            from jaeger_ai.core.runtime.autonomous_runner import ledger_open, next_continuation_prompt
 
             current_prompt = text
             max_continuations = execution.max_steps()
@@ -1962,10 +2106,18 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             result: dict[str, Any] = {}
 
             while True:
+                with ctx.turn_control_lock:
+                    if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                        result = {"text": "", "error": "Cancelled before execution",
+                                  "halt_reason": "interrupted"}
+                        break
                 deltas = _DeltaStream(out, session)
                 with _turn_workspace(ctx, req.get("workspace")):
                     display_text = req.get("display_text") if step == 0 else None
                     voice_kwargs: dict[str, Any] = {"session_key": session}
+                    for field in ("model", "provider"):
+                        if req.get(field):
+                            voice_kwargs[field] = req[field]
                     if display_text is not None:
                         voice_kwargs["display_text"] = str(display_text)
                     def _emit_reasoning(chunk: str, _session: str = session) -> None:
@@ -2026,14 +2178,28 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
 
             final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
             used, mx = _ctx_usage(session)
-            _emit(out, protocol.reply_frame(
+            # A delivered cancel request may lose the race with completion.
+            # Only the native loop's halt result (or skipped dispatch above)
+            # confirms interruption; the control flag alone is merely intent.
+            cancelled = result.get("halt_reason") == "interrupted"
+            if session.startswith('focus:') and turn_id:
+                from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+                # Publish from the native runtime before its terminal receipt,
+                # not from a WebUI observer that may disconnect or restart.
+                DispatcherStore(ctx.layout).report(
+                    turn_id, session, final_text, result.get('error'), cancelled=cancelled)
+            reply({**protocol.reply_frame(
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx,
-                halt_reason=result.get("halt_reason")))
+                halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            _emit(out, protocol.reply_frame("", str(exc), session))
+            reply(protocol.reply_frame("", str(exc), session))
         finally:
+            with ctx.turn_control_lock:
+                ctx.turn_controls.pop(turn_id, None)
+                ctx.tool_output = None
+                ctx.tool_session = None
             try:
                 from jaeger_ai.core.sessions import get_store
 
@@ -2082,12 +2248,13 @@ def _start_webhooks(ctx: _Ctx) -> None:
 
 def _start_bridge_socket(
     ctx: _Ctx,
-    inbound: "_queue.Queue[tuple[dict[str, Any], Any] | None]",
+    inbound: _queue.Queue[tuple[dict[str, Any], Any] | None],
     owner_out: TextIO,
 ) -> None:
     """Listen on the instance Unix socket so a second UI can attach."""
-    from jaeger_ai.core.runtime import bridge_socket as bsock
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.runtime import bridge_socket as bsock
 
     path = bsock.socket_path(ctx.layout)
     if path is None:
@@ -2119,6 +2286,7 @@ def _start_bridge_socket(
         try:
             f = conn.makefile("rwb", buffering=0)
             text = conn.makefile("rw", buffering=1, encoding="utf-8", newline="\n")
+            text._jaeger_attach_stream = True
             _emit(text, protocol.ready_frame(
                 getattr(getattr(ctx.layout, "root", None), "name", None) or "default",
                 _model_name(ctx.boot) if ctx.boot is not None else None,
@@ -2188,7 +2356,17 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     False, because there ``os._exit`` would take down a host process that
     has its own work left to do.
     """
-    argv = sys.argv[1:] if argv is None else argv
+    argv = list(sys.argv[1:] if argv is None else argv)
+    attach = "--attach" in argv
+    if attach:
+        argv.remove("--attach")
+
+    # This module is also probed by installers and integration inventories.
+    # Treat help flags as flags, not as instance names; the old behavior
+    # silently created an on-disk instance literally named ``--help``.
+    if argv and argv[0] in {"-h", "--help"}:
+        print("usage: python -m jaeger_ai.interfaces.bridge [INSTANCE] [--attach]")
+        return 0
 
     # The protocol stream is the REAL stdout.  Repoint sys.stdout at
     # stderr for the rest of the process so boot logs / stray prints land
@@ -2196,9 +2374,13 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     proto = sys.stdout
     sys.stdout = sys.stderr
 
-    from jaeger_ai.core.instance.instance import (
-        InstanceLayout, default_instance_name, resolve_instance_dir)
     from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.instance.instance import (
+        InstanceLayout,
+        default_instance_name,
+        resolve_instance_dir,
+    )
 
     instance = (argv[0] if argv else None) or default_instance_name()
 
@@ -2220,6 +2402,10 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         try:
             _pids.enter_context(pidfile.acquire(ctx.layout))
         except pidfile.AlreadyRunning as exc:
+            if attach:
+                from jaeger_ai.interfaces.bridge_attach import relay
+
+                return relay(ctx.layout, sys.stdin, proto)
             # kind="locked" is the established contract for "another process
             # holds this instance" — BridgeProcess.swift maps it to
             # .locked and offers attach-or-pick. A novel kind would
@@ -2259,7 +2445,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             name="bridge-boot", daemon=True)
         booter.start()
 
-    turns: "_queue.Queue[dict[str, Any] | None]" = _queue.Queue()
+    turns: _queue.Queue[dict[str, Any] | None] = _queue.Queue()
     worker = threading.Thread(
         target=_turn_worker, args=(proto, ctx, turns),
         name="bridge-turns", daemon=True)
@@ -2334,6 +2520,15 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 if isinstance(parsed, dict):
                     inbound.put((parsed, owner_out))
         finally:
+            # Socket attach (Hermes WebUI / other clients) is the live control
+            # plane. Stdin EOF from launchd/nohup must not kill that agent.
+            ctx.booted.wait(timeout=120)
+            deadline = time.monotonic() + 5.0
+            while ctx.bridge_sock is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if ctx.bridge_sock is not None:
+                print("[bridge] stdin closed; unix socket still serving", file=sys.stderr, flush=True)
+                return
             inbound.put(None)
 
     threading.Thread(target=_read_stdio, name="bridge-stdio", daemon=True).start()
@@ -2383,7 +2578,16 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # a second client thread can interrupt without competing to
                 # read a control acknowledgement from stdout.
                 from jaeger_ai.main import request_turn_cancel
-                request_turn_cancel()
+                turn_id = str(req.get("turn_id") or "")
+                with ctx.turn_control_lock:
+                    if not turn_id:
+                        request_turn_cancel()  # Legacy owner UI control.
+                    elif _cancel_queued_turn(ctx, turn_id):
+                        pass
+                    elif turn_id in ctx.turn_controls:
+                        if ctx.turn_controls[turn_id] == "active":
+                            request_turn_cancel(session_key=ctx.tool_session)
+                        ctx.turn_controls[turn_id] = "cancelled"
                 continue
             if op == "steer":
                 # Steering is likewise delivered directly to the active agent
@@ -2562,7 +2766,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 continue
             if op == "command" and (req.get("cmd") or "") == "configure_fallback_chain":
                 try:
-                    from jaeger_ai.core.models.configuration import configure_fallback_chain
+                    from jaeger_ai.core.models.configuration import (
+                        configure_fallback_chain,
+                    )
 
                     if ctx.layout is None:
                         raise RuntimeError("no Jaeger instance is selected")
@@ -2637,6 +2843,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # regardless, so a failure here would only leak state,
                 # never break the new session.
                 import uuid
+
                 from jaeger_ai.main import evict_session
                 a = req.get("args") or {}
                 old_id = str(a.get("old_id") or "").strip()
@@ -2702,13 +2909,33 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # meant "nowhere to put this" and dropped the text itself —
                 # see ChatViewModel.send's isSending guard). Emit a small
                 # v1-additive ack so a client can render a pending state.
-                session = req.get("session") or "desktop-app"
+                from jaeger_ai.core.runtime.dispatch import normalize_session_key
+                session = normalize_session_key(req.get('session'), default='desktop-app')
+                turn_id = str(req.get('turn_id') or '')
+                if turn_id:
+                    from jaeger_ai.core.runtime.native_turns import NativeTurns
+                    try:
+                        NativeTurns(ctx.layout.run_dir).accept(turn_id, session)
+                    except Exception as exc:
+                        _emit(proto, {**protocol.reply_frame('', str(exc), session),
+                                      'execution_unknown': True})
+                        continue
+                    req['_native_accepted'] = True
                 if ctx.busy:
                     ctx.session_pending[session] = ctx.session_pending.get(session, 0) + 1
                     _emit(proto, protocol.queued_frame(
                         session, ctx.session_pending[session]))
                 req["_out"] = proto
+                if turn_id:
+                    with ctx.turn_control_lock:
+                        if turn_id in ctx.turn_controls:
+                            _emit(proto, protocol.reply_frame("", "Duplicate turn id", session))
+                            continue
+                        ctx.turn_controls[turn_id] = "queued"
+                        ctx.queued_requests[turn_id] = req
                 turns.put(req)
+                if turn_id and not ctx.busy:
+                    _emit(proto, protocol.queued_frame(session, 0))
     finally:
         # Deregister before anything else: the os._exit below skips normal
         # cleanup, so a late release would leave a stale pid file behind.

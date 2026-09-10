@@ -128,6 +128,18 @@ def test_work_ledger_tool_rejects_truncated_raw_arguments():
     assert "truncated" in out["error"] or "unparsed" in out["error"]
 
 
+def test_registered_work_ledger_exposes_structured_progress_arguments():
+    from jaeger_os.core.tools.tool_registry import get_tool
+
+    from jaeger_ai.core.runtime.work_ledger import _t_work_ledger
+
+    registered = get_tool("work_ledger")
+    fields = registered.args_model.model_fields
+    assert registered.fn is _t_work_ledger
+    assert {"action", "completed_ids", "remaining_ids", "remaining_count"} <= set(fields)
+    assert "kwargs" not in fields
+
+
 def test_complete_task_succeeds_when_every_item_is_done():
     created = work_ledger(action="create", task_name="x", total_items=2)
     task_id = created["ledger"]["task_id"]

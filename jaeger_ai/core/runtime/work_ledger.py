@@ -19,19 +19,19 @@ raw tool JSON that produced it.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-
 
 LEDGER_TAG = "[Work Ledger]"
 
@@ -46,7 +46,7 @@ _by_id: dict[str, WorkLedger] = {}
 # Optional process-wide verifier. Tests and hosts can register a
 # callable ``(WorkLedger) -> error|None``. The ledger-attached
 # ``verify`` spec is the normal path; this is the escape hatch.
-_completion_verifier: Callable[["WorkLedger"], str | None] | None = None
+_completion_verifier: Callable[[WorkLedger], str | None] | None = None
 # Live UI progress. The boot path installs a publisher that forwards
 # ``tool.progress`` frames; tests capture the same dict. ``reset()``
 # does not clear this — /new must not silence the drawer.
@@ -172,6 +172,50 @@ def _tls_completion() -> dict[str, Any] | None:
 
 def _set_tls_active(ledger: WorkLedger | None) -> None:
     _tls.active = ledger
+    session = getattr(_tls, "session", None)
+    if session is not None:
+        path = _session_pointer(session)
+        if path is not None:
+            with _lock:
+                try:
+                    _atomic_write(path, json.dumps({"task_id": ledger.task_id if ledger else None}))
+                except OSError:
+                    pass
+
+
+def _session_pointer(session: str) -> Path | None:
+    root = _layout_run_dir()
+    if root is None:
+        return None
+    return root / f"ledger-session-{hashlib.sha256(session.encode()).hexdigest()}.json"
+
+
+def bind_session(session: str) -> None:
+    """Select a session's ledger on a reused bridge worker thread.
+
+    Thread-local is not session-local: the bridge handles many conversations
+    on one thread. Keep native ledgers resumable without injecting one table's
+    acceptance contract or completion marker into another conversation.
+    """
+    if getattr(_tls, "session", None) == session:
+        _tls.completion = None
+        if _tls_active() is not None and _tls_active().completed:
+            _set_tls_active(None)
+        return
+    _tls.session = session
+    _tls.active = None
+    _tls.completion = None
+    path = _session_pointer(session)
+    if path is None:
+        return
+    try:
+        task_id = json.loads(path.read_text()).get("task_id")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(task_id, str) and task_id:
+        restored = get_ledger(task_id)
+        if restored is not None and not restored.completed:
+            _tls.active = restored
 
 
 def _set_tls_completion(payload: dict[str, Any] | None) -> None:
@@ -316,6 +360,7 @@ def reset() -> None:
     global _completion_verifier
     _set_tls_active(None)
     _set_tls_completion(None)
+    _tls.session = None
     _completion_verifier = None
     with _lock:
         _by_id.clear()
@@ -677,7 +722,6 @@ def complete_task(
 # Importing this module registers the two tools — same pattern as
 # ``code_bridge_tool``. ``_register_builtins`` pulls the import so a
 # boot that never otherwise touches the ledger still has the tools.
-@register_tool_from_function(name="work_ledger", side_effect="write")
 def _reject_raw(kwargs: dict[str, Any]) -> dict[str, Any] | None:
     if "_raw_arguments" in kwargs:
         return {
@@ -688,6 +732,7 @@ def _reject_raw(kwargs: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+@register_tool_from_function(name="work_ledger", side_effect="write")
 def _t_work_ledger(
     action: str = "status",
     task_name: str = "",
@@ -745,14 +790,14 @@ __all__ = [
     "WorkLedger",
     "active_ledger",
     "all_ledgers",
-    "get_ledger",
-    "last_completion",
+    "complete_task",
     "consume_completion",
     "context_block",
+    "get_ledger",
+    "last_completion",
+    "progress_event",
     "reset",
     "set_completion_verifier",
     "set_progress_publisher",
-    "progress_event",
     "work_ledger",
-    "complete_task",
 ]

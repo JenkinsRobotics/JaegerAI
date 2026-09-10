@@ -3,8 +3,8 @@
 0.8 M2b: the second "engine-module" (kokoro_tts, M1, is the first) —
 the module IS the engine. This package owns everything Whisper STT:
 the bus-addressable ``AudioSessionNode`` (``node.py``), the real
-pywhispercpp-backed engine — two algorithmic modes (``two_pass``,
-``continuous``), a stubbed third (``local_agreement``), the shared
+pywhispercpp-backed engine — three algorithmic modes (``two_pass``,
+``continuous``, ``local_agreement``), the shared
 mic/VAD/wake-word helpers (``engine/_base.py``), and the method
 registry that is the STT-mode swap point (``engine/registry.py``) —
 plus its ``module.yaml`` manifest (module/slot/version/consumes/

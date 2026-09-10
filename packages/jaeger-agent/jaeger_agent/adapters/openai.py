@@ -373,12 +373,11 @@ class OpenAIAdapter(ProviderAdapter):
             )
 
         api_kwargs["stream"] = True
-        # ``stream_options`` is an OpenAI extension; compat servers
-        # (LM Studio, Ollama, Gemini-compat) may reject the unknown
-        # field, so only the real endpoint gets it. Without it the
-        # final usage block is absent and token accounting falls back
-        # to the loop's whitespace estimate — acceptable.
-        if self.provider == "openai" and "stream_options" not in api_kwargs:
+        # Current Ollama (0.32.6+) supports OpenAI's usage trailer too.
+        # Opt in so cloud billing uses the server's real token counts,
+        # including invisible reasoning tokens, rather than estimates.
+        # Other compatibility servers may still reject this extension.
+        if self.provider in {"openai", "ollama", "ollama-cloud"} and "stream_options" not in api_kwargs:
             api_kwargs["stream_options"] = {"include_usage": True}
         progress = progress or CallProgress()
         beacon = progress
@@ -452,6 +451,10 @@ class OpenAIAdapter(ProviderAdapter):
                 "completion_tokens": _get(usage, "completion_tokens"),
                 "total_tokens": _get(usage, "total_tokens"),
             }
+            details = _get(usage, "prompt_tokens_details")
+            cached = _get(details, "cached_tokens") if details is not None else None
+            if cached is not None:
+                self.last_usage["cached_prompt_tokens"] = cached
 
         finish_reason = getattr(choice, "finish_reason", None)
         if finish_reason is None and isinstance(choice, dict):

@@ -52,7 +52,14 @@ def _make_continuous(config, aec, reference_buffer, wake_phrases):
 
 def _make_local_agreement(config, aec, reference_buffer, wake_phrases):
     from .local_agreement import WhisperSTTLocalAgreement
-    return WhisperSTTLocalAgreement()  # raises NotImplementedError (stub)
+    return WhisperSTTLocalAgreement(
+        model_name=config.fast_model_name,
+        require_wake_word=config.require_wake_word,
+        wake_phrases=wake_phrases,
+        followup_window_s=config.followup_window_s,
+        aec=aec, far_end_buffer=reference_buffer,
+        audio_backend=config.audio_backend,
+    )
 
 
 # ── lazy bench wrappers (keep registry import light) ──
@@ -79,8 +86,8 @@ METHODS: dict[str, Method] = {
         "continuous", "single model + rolling re-transcription",
         _make_continuous, _bench_continuous, available=True),
     "local_agreement": Method(
-        "local_agreement", "LocalAgreement streaming (stub)",
-        _make_local_agreement, _bench_local_agreement, available=False),
+        "local_agreement", "single model + two-pass prefix agreement",
+        _make_local_agreement, _bench_local_agreement, available=True),
 }
 
 

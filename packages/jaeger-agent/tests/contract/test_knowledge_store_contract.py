@@ -45,6 +45,30 @@ def test_store_satisfies_protocol(store):
     assert isinstance(store, KnowledgeStore)
 
 
+def test_event_history_is_preserved_without_becoming_conflicting_beliefs(store):
+    for index in range(20):
+        for predicate in ('said', 'responded', 'tool_result', 'mentioned_person'):
+            store.add_claim(Claim.create('user', predicate, str(index), ProvenanceKind.TOLD))
+        assert store.rebuild_beliefs_from_claims(subject='user') == []
+    assert len(store.list_claims(subject='user')) == 80
+    assert store.list_beliefs() == []
+    assert KnowledgeRetriever(store).detect_contradictions('user') == []
+
+
+def test_unchanged_projection_keeps_identity_and_history_bounded(store):
+    store.add_claim(Claim.create('user', 'editor', 'vim', ProvenanceKind.TOLD))
+    first = store.rebuild_beliefs_from_claims(subject='user')[0]
+    for _ in range(10):
+        assert store.rebuild_beliefs_from_claims(subject='user')[0].id == first.id
+    store.add_claim(Claim.create('user', 'editor', 'emacs', ProvenanceKind.TOLD))
+    conflict = store.rebuild_beliefs_from_claims(subject='user')[0]
+    assert conflict.status == BeliefStatus.CONTRADICTED
+    for _ in range(10):
+        assert store.rebuild_beliefs_from_claims(subject='user')[0].id == conflict.id
+    assert len(store.list_beliefs(status=None)) == 2
+    assert store.get_belief(first.id).status == BeliefStatus.SUPERSEDED
+
+
 def test_provenance_invariants(store):
     # Invariant: "I observed X" != "I was told X" != "I infer X" != "I believe X" != "I predict X"
     assert ProvenanceKind.OBSERVED.value != ProvenanceKind.TOLD.value

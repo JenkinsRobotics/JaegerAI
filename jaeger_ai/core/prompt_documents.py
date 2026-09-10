@@ -281,7 +281,54 @@ def register_context_documents() -> bool:
                 break
     else:
         _insert_after(fragments, SOUL_FRAGMENT, cross_mem)
+
+    facts_frag = assemble.PromptFragment(
+        INSTANCE_FACTS_FRAGMENT, "instance", "instance/memory/state.db",
+        lambda ctx: load_instance_facts(ctx.layout),
+        assemble._non_subagent,  # noqa: SLF001
+        "verified facts and environment memory from instance state.db",
+    )
+    if INSTANCE_FACTS_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == INSTANCE_FACTS_FRAGMENT:
+                fragments[index] = facts_frag
+                break
+    else:
+        _insert_after(fragments, DIRECTIVES_FRAGMENT, facts_frag)
     return True
+
+
+INSTANCE_FACTS_FRAGMENT = "instance_facts"
+INSTANCE_FACTS_MAX_CHARS = 2_500
+
+
+def load_instance_facts(layout: Any, cap: int = INSTANCE_FACTS_MAX_CHARS) -> str:
+    """Load verified facts and learned environment memory from <instance>/memory/state.db.
+
+    Surfaces what the agent has previously learned, remembered, and verified about
+    the host, containers, network, and operator preferences into the prompt.
+    """
+    try:
+        from jaeger_agent.memory import memory as mem
+
+        mem.bind(layout)
+        by_cat = mem.list_facts_by_category()
+        if not by_cat:
+            return ""
+        lines = ["[LEARNED INSTANCE FACTS]"]
+        for cat, facts in sorted(by_cat.items()):
+            if not facts:
+                continue
+            cat_header = cat.upper() if cat else "GENERAL"
+            lines.append(f"{cat_header}:")
+            for k, v in sorted(facts.items()):
+                lines.append(f"  • {k}: {v}")
+        block = "\n".join(lines).strip()
+        if len(block) > cap:
+            block = block[:cap].rstrip() + "\n…(instance facts truncated)"
+        return block
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 __all__ = [
@@ -289,5 +336,6 @@ __all__ = [
     "SOUL_FRAGMENT", "SOUL_MAX_CHARS", "SOUL_NAMES",
     "SURFACES_FRAGMENT",
     "CROSS_AGENT_FRAGMENT", "load_cross_agent_memory",
+    "INSTANCE_FACTS_FRAGMENT", "INSTANCE_FACTS_MAX_CHARS", "load_instance_facts",
     "load_agent_directives", "load_soul", "register_context_documents",
 ]

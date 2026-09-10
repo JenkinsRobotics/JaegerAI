@@ -35,16 +35,39 @@ instance, one word now.)
 |---|---|
 | `jaeger skills …` | List / manage the agent's skills |
 | `jaeger personality …` | Persona / character settings |
-| `jaeger status` | Instance + runtime status |
+| `jaeger status [--json]` | Managed service processes, container state, and network listeners |
 | `jaeger roadmap` | Show the roadmap |
 | `jaeger avatar …` | Avatar controls |
 | `jaeger prompt …` | Prompt inspection |
 | `jaeger config …` | Config get/set |
+| `jaeger runtime …` | Inspect / select GGUF and MLX inference engines |
+| `jaeger backends` | List installed agent CLI backends (models, not delegates) |
 | `jaeger memory …` | Agent memory tools |
 | `jaeger settings …` | Runtime settings |
 | `jaeger skill …` | Single-skill operations |
+| `jaeger webui {start,stop,status,url}` | Jaeger WebUI + adapter, optional Tailscale publishing |
+| `jaeger container {list,start,stop,status,delete,create,system}` | Apple native container tools |
+| `jaeger delegate list` | Probe every external agent runtime (claude, codex, hermes, openclaw, …) |
+| `jaeger delegate run [--chain] [--to N] <prompt>` | Run a task on a delegate; `--chain` fails over down the ranked list |
+| `jaeger delegate moa [-n N] <prompt>` | Mixture of Agents — ask several at once, compare answers |
 
 ## Install / maintain
+
+On the configured macOS multi-agent deployment, `jaeger start` starts missing
+services and preserves already-running agents. It reads the existing deployment
+manifest and installed launch agents; it does not reinstall profiles or change
+model settings. `jaeger stop` stops the managed stack, and `jaeger restart`
+performs a stop followed by a start only if shutdown succeeded.
+
+All three commands support `--dry-run`, `--no-app`, and `--no-containers`.
+Use `jaeger restart --dry-run` to preview maintenance. Unknown flags are rejected
+before any action. Failed service commands return a nonzero exit status; startup
+can report a service as not ready while it continues warming up. Status checks
+show process/listener availability, not proof that an agent can complete a task.
+
+The fabric supervisor starts stopped components but does not force-kill a live
+worker after a failed health check. A running but unresponsive agent needs an
+explicit operator restart after its active work has been checked.
 
 | Command | What it does |
 |---|---|
@@ -56,7 +79,6 @@ instance, one word now.)
 | `jaeger uninstall` | Remove the install |
 | `jaeger autostart …` | Login-item autostart on/off |
 | `jaeger kill` | Stop a stuck agent process |
-| `jaeger stop` | Stop the running daemon |
 
 ## Developer (repo checkout)
 
@@ -67,7 +89,10 @@ instance, one word now.)
 | `jaeger dev --health` / `--status` / `--stop` | Dev toolbox verbs |
 | `jaeger bench …` | Benchmarks (`run` / `timing` / `compare` / `history`) |
 | `jaeger bridge` | Run the app bridge protocol on stdio |
-| `jaeger mcp` | Run the MCP server |
+| `jaeger mcp` | Run the MCP server (stdio)|
+| `jaeger mcp --http` | Streamable HTTP MCP on :8792 attached to the live bridge|
+| `jaeger a2a` | Official a2a-sdk JSON-RPC host on :8796|
+| `jaeger gateway {install,start,stop,status}` | Jaeger-owned Agentgateway (MCP :8811, A2A :8812) |
 | `jaeger launcher …` | Launcher plumbing |
 
 There is ONE app bundle: `JaegerAI.app`. Dev is a launch state

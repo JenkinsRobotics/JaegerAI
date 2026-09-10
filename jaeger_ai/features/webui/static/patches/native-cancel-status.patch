@@ -1,0 +1,18 @@
+--- a/api/gateway_chat.py
++++ b/api/gateway_chat.py
+@@ -808,7 +808,14 @@
+         with opener.open(req, timeout=10) as response:
+             final_url = str(getattr(response, "geturl", lambda: req.full_url)() or "")
+             status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
+-            return 200 <= status < 300 and final_url == req.full_url
++            if not (200 <= status < 300 and final_url == req.full_url):
++                return False
++            payload = json.loads(response.read() or b"{}")
++            if "cancellation_confirmed" in payload:
++                return (payload.get("status") == "cancelled"
++                        and payload.get("cancellation_confirmed") is True
++                        and payload.get("execution_unknown") is False)
++            return True
+     except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
+         logger.debug("Gateway stop failed for run %s", run_id, exc_info=True)
+         return False

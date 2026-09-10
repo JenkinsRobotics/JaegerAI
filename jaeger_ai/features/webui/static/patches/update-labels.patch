@@ -1,0 +1,121 @@
+--- a/static/ui.js
++++ b/static/ui.js
+@@ -10038,6 +10038,14 @@
+   } catch(e) { setStatus('Refresh failed: ' + e.message); }
+ }
+ // ── Update banner ──
++function _updateApplyTargets(data){
++  return ['agent','webui'].filter(key=>data?.[key]?.behind>0&&!data[key].manual_update);
++}
++function _updateApplyLabel(data){
++  const names={agent:'Hermes Agent',webui:'Hermes WebUI'};
++  const targets=_updateApplyTargets(data);
++  return targets.length?'Update '+targets.map(key=>names[key]).join(' + '):'No automatic updates';
++}
+ function _formatUpdateTargetStatus(label,info){
+   const manualNoGit=!!(info&&info.no_git&&info.manual_update&&info.behind>0);
+   if(!info||(info.no_git&&!manualNoGit)||!(info.behind>0)) return null;
+@@ -10078,8 +10086,8 @@
+ }
+ function _updateWhatsNewTargets(data){
+   const targets=[
+-    {key:'webui',label:'WebUI',info:data&&data.webui},
+-    {key:'agent',label:'Agent',info:data&&data.agent},
++    {key:'webui',label:'Hermes WebUI',info:data&&data.webui},
++    {key:'agent',label:'Hermes Agent',info:data&&data.agent},
+   ];
+   return targets.map((target)=>({
+     key:target.key,
+@@ -10204,8 +10212,8 @@
+ }
+ function _updateSummaryButtonLabel(target,data){
+   const labels=target.key==='webui'
+-    ? {generate:'Generate WebUI update summary',view:'View generated WebUI update summary',regenerate:'Re-generate WebUI update summary'}
+-    : {generate:'Generate Agent update summary',view:'View generated Agent update summary',regenerate:'Re-generate Agent update summary'};
++    ? {generate:'Generate Hermes WebUI update summary',view:'View generated Hermes WebUI update summary',regenerate:'Re-generate Hermes WebUI update summary'}
++    : {generate:'Generate Hermes Agent update summary',view:'View generated Hermes Agent update summary',regenerate:'Re-generate Hermes Agent update summary'};
+   const cache=_loadStoredUpdateSummaries()[target.key];
+   const signature=_updateSummarySignature(data&&data[target.key]);
+   if(cache&&cache.signature===signature&&cache.payload) return labels.view;
+@@ -10352,8 +10360,8 @@
+ }
+ function _showUpdateBanner(data){
+   const parts=[];
+-  const webuiPart=_formatUpdateTargetStatus('WebUI',data.webui);
+-  const agentPart=_formatUpdateTargetStatus('Agent',data.agent);
++  const webuiPart=_formatUpdateTargetStatus('Hermes WebUI',data.webui);
++  const agentPart=_formatUpdateTargetStatus('Hermes Agent',data.agent);
+   if(webuiPart) parts.push(webuiPart);
+   if(agentPart) parts.push(agentPart);
+   window._updateData=data;
+@@ -10363,6 +10371,7 @@
+     const webuiUpdatable=!!(data&&data.webui&&data.webui.behind>0&&!webuiManual);
+     const agentUpdatable=!!(data&&data.agent&&data.agent.behind>0);
+     const hasApplyTargets=webuiUpdatable||agentUpdatable;
++    btnApply.textContent=_updateApplyLabel(data);
+     btnApply.disabled=!hasApplyTargets;
+     btnApply.style.display=hasApplyTargets?'':'none';
+     if(webuiManual){
+@@ -10381,7 +10390,7 @@
+   const msg=$('updateMsg');
+   if(msg){
+     const manualInstruction=_formatManualUpdateInstruction(data&&data.webui);
+-    msg.textContent='\u2B06 '+parts.join(', ')+' available'+(manualInstruction?' · '+manualInstruction:'');
++    msg.textContent='\u2B06 '+parts.join(', ')+' available'+(manualInstruction?' · '+manualInstruction:'')+' — Checks Hermes Agent and Hermes WebUI only. JaegerAI and OpenClaw are not checked here.';
+   }
+   const banner=$('updateBanner');
+   if(banner) banner.classList.add('visible');
+@@ -10419,7 +10428,7 @@
+   const resetApplyButton=(delayMs)=>{
+     const reset=()=>{
+       window._updateApplyInFlight=false;
+-      if(btn){btn.disabled=false;btn.textContent=updateText('update_now','Update Now');}
++      if(btn){btn.disabled=false;btn.textContent=_updateApplyLabel(window._updateData||{});}
+     };
+     if(delayMs>0) setTimeout(reset,delayMs);
+     else reset();
+@@ -10431,9 +10440,7 @@
+   // retry starts clean (otherwise stale state points at the wrong target).
+   const forceBtnReset=$('btnForceUpdate');
+   if(forceBtnReset){forceBtnReset.style.display='none';forceBtnReset.dataset.target='';}
+-  const targets=[];
+-  if(window._updateData?.agent?.behind>0) targets.push('agent');
+-  if(window._updateData?.webui?.behind>0&&!window._updateData?.webui?.manual_update) targets.push('webui');
++  const targets=_updateApplyTargets(window._updateData||{});
+   if(!targets.length){
+     const msg=updateText('update_no_target','No update target selected. Refresh update status and retry.');
+     if(errEl){errEl.textContent=msg;errEl.style.display='block';}
+--- a/static/panels.js
++++ b/static/panels.js
+@@ -12202,16 +12202,16 @@
+       const formatUpdateError=(typeof _formatUpdateCheckError==='function')
+         ? _formatUpdateCheckError
+         : ((label,info)=>info&&info.error?label:null);
+-      const webuiError=formatUpdateError('WebUI',data.webui);
+-      const agentError=formatUpdateError('Agent',data.agent);
++      const webuiError=formatUpdateError('Hermes WebUI',data.webui);
++      const agentError=formatUpdateError('Hermes Agent',data.agent);
+       if(webuiError) errorParts.push(webuiError);
+       if(agentError) errorParts.push(agentError);
+       const parts=[];
+       const formatUpdatePart=(typeof _formatUpdateTargetStatus==='function')
+         ? _formatUpdateTargetStatus
+         : ((label,info)=>info&&info.behind>0?label+': '+info.behind:null);
+-      const webuiPart=formatUpdatePart('WebUI',data.webui);
+-      const agentPart=formatUpdatePart('Agent',data.agent);
++      const webuiPart=formatUpdatePart('Hermes WebUI',data.webui);
++      const agentPart=formatUpdatePart('Hermes Agent',data.agent);
+       if(webuiPart) parts.push(webuiPart);
+       if(agentPart) parts.push(agentPart);
+       const manualInstruction=(typeof _formatManualUpdateInstruction==='function')
+@@ -12221,8 +12221,8 @@
+       // checkout + one no-git install) never hides the "can't check" state
+       // behind an up-to-date summary (#4356).
+       const noGitParts=[];
+-      if(data.webui&&data.webui.no_git&&!data.webui.manual_update) noGitParts.push('WebUI');
+-      if(data.agent&&data.agent.no_git&&!data.agent.ignored) noGitParts.push('Agent');
++      if(data.webui&&data.webui.no_git&&!data.webui.manual_update) noGitParts.push('Hermes WebUI');
++      if(data.agent&&data.agent.no_git&&!data.agent.ignored) noGitParts.push('Hermes Agent');
+       if(parts.length){
+         let txt=t('settings_updates_available').replace('{count}',parts.join(', '));
+         if(manualInstruction) txt+=' · '+manualInstruction;

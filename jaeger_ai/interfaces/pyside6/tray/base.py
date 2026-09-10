@@ -183,14 +183,8 @@ def menu_items_for(state: TrayState) -> list[MenuItem]:
         # with the active instance pinned. Wake-word required, AEC
         # barge-in when speexdsp is available.
         MenuItem(label="Open Voice",        action="open_voice"),
-        # Floating chat window (PyQt6). Disabled placeholder until the
-        # GUI lands — see the 0.3.0 / GUI work in dev/docs/.
-        MenuItem(label="Open Chat (GUI)",   action="open_gui",
-                 enabled=False),
-        # Web dashboard — separate future surface (browser-based
-        # remote control). Not in active design yet.
-        MenuItem(label="Open Web Dashboard", action="open_web",
-                 enabled=False),
+        MenuItem(label="Open Chat (GUI)",   action="open_gui"),
+        MenuItem(label="Open Web Dashboard", action="open_web"),
         SEPARATOR,
         # Checks GitHub on click (not on every menu open — that would block
         # the menu on the network); the handler shows the result.
