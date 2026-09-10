@@ -1102,8 +1102,8 @@ class ContainersConfig(BaseModel):
         False,
         json_schema_extra=_setting("containers"),
         description=(
-            "Use the legacy Apple-container WebUI mode instead of Jaeger's "
-            "bundled local WebUI process."
+            "Run the Hermes Agent runtime container. This is not a second "
+            "chat URL; Jaeger WebUI on jaeger_webui_port remains the bookmark."
         ),
     )
     hermes_webui_container: str = Field(

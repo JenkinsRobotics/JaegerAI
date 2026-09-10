@@ -962,7 +962,7 @@ class AgentSettingsWindow(QWidget):
         btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
         def _open_web():
             import webbrowser
-            webbrowser.open("http://127.0.0.1:8787")
+            webbrowser.open("http://127.0.0.1:8790")
         btn_web.clicked.connect(_open_web)
         btn_row.addWidget(btn_web)
 

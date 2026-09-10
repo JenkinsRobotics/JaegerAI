@@ -262,6 +262,75 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
             checks.append(fda)
     except Exception:  # noqa: BLE001 — diagnostics never crash the doctor
         pass
+
+    try:
+        checks.extend(_webui_unification_checks())
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check(
+            name="webui_unification", category="webui", ok=False,
+            detail=f"webui check error: {type(exc).__name__}: {exc}",
+        ))
+    return checks
+
+
+def _webui_unification_checks() -> list[Any]:
+    """Fail if :8787 is advertised as the chat bookmark or the runtime image is stale while running."""
+    from jaeger_ai.core.runtime.preflight import Check
+    from jaeger_ai.features.hermes_webui.service import HermesWebUIService
+    from jaeger_ai.core.runtime.agent_workspaces import HERMES_IMAGE
+
+    checks: list[Any] = []
+    svc = HermesWebUIService()
+    url = svc.browser_url()
+    hostport = url.split("//", 1)[-1].rstrip("/")
+    chat_on_8787 = hostport.endswith(":8787")
+    checks.append(Check(
+        name="webui_chat_url",
+        category="webui",
+        ok=not chat_on_8787,
+        detail=(
+            f"chat bookmark is {url} — 8787 must not be advertised as chat"
+            if chat_on_8787 else f"chat bookmark {url}"
+        ),
+    ))
+    runtime = svc.hermes_runtime_url()
+    if runtime:
+        runtime_host = runtime.split("//", 1)[-1].rstrip("/")
+        dual = (not chat_on_8787) and runtime_host.endswith(":8787") and hostport.endswith(":8790")
+        checks.append(Check(
+            name="webui_dual_chat_urls",
+            category="webui",
+            ok=True if dual or not runtime_host.endswith(":8787") else not chat_on_8787,
+            detail=(
+                f"runtime {runtime} is not a chat URL"
+                if not chat_on_8787 else
+                f"both {url} and {runtime} advertised as chat"
+            ),
+        ))
+    try:
+        from jaeger_ai.core.runtime import container_service as cs
+        from jaeger_ai.core.runtime.agent_workspaces import container_name
+        name = container_name("hermes")
+        info = cs.container_status(name)
+        details = info.get("details") or {}
+        state = cs.normalize_state(details.get("state") or details.get("status"))
+        image = str(details.get("image") or details.get("imageName") or "")
+        stale = bool(image) and HERMES_IMAGE not in image and "jaeger-continuity" not in image
+        running_as_chat = state == "running" and chat_on_8787 and stale
+        checks.append(Check(
+            name="hermes_runtime_image",
+            category="webui",
+            ok=not running_as_chat,
+            detail=(
+                f"{name} {state} image={image or 'unknown'}; intended {HERMES_IMAGE}"
+                + ("; not the chat bookmark" if not chat_on_8787 else "")
+            ),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(Check(
+            name="hermes_runtime_image", category="webui", ok=True,
+            detail=f"image check skipped: {type(exc).__name__}",
+        ))
     return checks
 
 

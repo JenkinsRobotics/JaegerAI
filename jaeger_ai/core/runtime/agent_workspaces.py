@@ -15,6 +15,34 @@ MANAGED_CONTAINERS = {"hermes": "jaeger-hermes-webui", "openclaw": "jaeger-openc
 EXPANDED_CONTAINERS = {"hermes": "jaeger-hermes-workspaces", "openclaw": "jaeger-openclaw-workspaces"}
 HERMES_IMAGE = "hermes-webui:jaeger-continuity-20260909"
 
+# In-image agent checkout + venv. Host bind ~/.hermes/hermes-agent is often
+# not importable when WebUI runs hermes_cli/main.py with system Python.
+WORKING_HERMES_AGENT_DIR = "/app/hermes-agent-src"
+WORKING_HERMES_PYTHON = "/app/venv/bin/python"
+
+
+def normalize_hermes_webui_environment(environment: list[str]) -> list[str]:
+    """Point Hermes WebUI at the working in-image agent + venv Python."""
+    rewritten: list[str] = []
+    seen_agent = False
+    seen_python = False
+    for value in environment:
+        if value.startswith("HERMES_WEBUI_AGENT_DIR="):
+            rewritten.append(f"HERMES_WEBUI_AGENT_DIR={WORKING_HERMES_AGENT_DIR}")
+            seen_agent = True
+            continue
+        if value.startswith("HERMES_WEBUI_PYTHON="):
+            rewritten.append(f"HERMES_WEBUI_PYTHON={WORKING_HERMES_PYTHON}")
+            seen_python = True
+            continue
+        rewritten.append(value)
+    if not seen_agent:
+        rewritten.append(f"HERMES_WEBUI_AGENT_DIR={WORKING_HERMES_AGENT_DIR}")
+    if not seen_python:
+        rewritten.append(f"HERMES_WEBUI_PYTHON={WORKING_HERMES_PYTHON}")
+    return rewritten
+
+
 
 def container_name(role: str) -> str:
     if STATE_PATH.exists():
@@ -25,6 +53,21 @@ def container_name(role: str) -> str:
                 raise ValueError(f"Unexpected managed container for {role}")
             return name
     return LEGACY_CONTAINERS[role]
+
+
+def hermes_container_aliases() -> tuple[str, ...]:
+    """All known Hermes WebUI container identities (legacy → managed → expanded)."""
+    return (
+        LEGACY_CONTAINERS["hermes"],
+        MANAGED_CONTAINERS["hermes"],
+        EXPANDED_CONTAINERS["hermes"],
+    )
+
+
+def conflicting_hermes_containers(active: str | None = None) -> list[str]:
+    """Sibling Hermes containers that share the published WebUI host port."""
+    current = active or container_name("hermes")
+    return [name for name in hermes_container_aliases() if name != current]
 
 
 def workspace_mounts(home: Path | None = None, *, include_personal: bool = False) -> list[tuple[Path, str]]:
@@ -73,7 +116,10 @@ def create_arguments(config: dict, role: str, *, home: Path | None = None,
         args.append("--read-only")
     if config.get("useInit"):
         args.append("--init")
-    for value in process["environment"]:
+    environment = process["environment"]
+    if role == "hermes":
+        environment = normalize_hermes_webui_environment(list(environment))
+    for value in environment:
         args.extend(["--env", value])
     for network in config["networks"]:
         args.extend(["--network", f"{network['network']},mtu={network.get('options', {}).get('mtu', 1280)}"])

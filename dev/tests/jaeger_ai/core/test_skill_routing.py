@@ -18,6 +18,14 @@ def test_exact_task_phrase_selects_safari_bookmarks_skill(monkeypatch):
     assert "exact phrase" in reason
 
 
+def test_conversational_stop_does_not_auto_select_a_playbook():
+    skill, score, reason = playbook_skills.match_playbook(
+        "we are discussing stop. I just want to see the conversation."
+    )
+    assert skill is None
+    assert reason == "conversational-stop"
+
+
 def test_generic_chat_does_not_auto_select_a_skill():
     skill, score, reason = playbook_skills.match_playbook("What is the capital of France?")
     assert skill is None

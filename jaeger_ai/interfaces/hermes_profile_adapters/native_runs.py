@@ -20,9 +20,22 @@ from .ingress import BodyReadTimeout, ProfileIngress
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
 
+def _profile_config_path(profile):
+    """Resolve a Hermes WebUI profile config, including archived profiles.
+
+    OpenClaw/Roundtable may be moved under ~/.hermes/profiles/.archive/ so they
+    stay out of the WebUI picker while adapters can still authenticate.
+    """
+    root = Path.home() / ".hermes" / "profiles"
+    for candidate in (root / profile / "config.yaml", root / ".archive" / profile / "config.yaml"):
+        if candidate.is_file():
+            return candidate
+    return root / profile / "config.yaml"
+
+
 def profile_key(profile):
     import yaml
-    path = Path.home() / ".hermes/profiles" / profile / "config.yaml"
+    path = _profile_config_path(profile)
     try:
         config = yaml.safe_load(path.read_text()) or {}
         return str(config.get("webui_gateway_api_key") or "")
@@ -179,6 +192,14 @@ class Runs:
                 run = self.run_type(self.root, session, message, run_id=run_id)
                 run.model = model if model != "default" else None
                 run.provider = provider
+                if run.model or run.provider:
+                    try:
+                        from jaeger_ai.core.sessions import get_store
+                        store = get_store()
+                        if store is not None:
+                            store.stamp_brain(session, model=run.model, provider=run.provider)
+                    except Exception:
+                        pass
                 if on_admitted is not None:
                     on_admitted(run)  # Persist child/control ownership before dispatch.
             except Exception:
@@ -318,6 +339,12 @@ class Runs:
                     # the durable receipt including the reconciliation event.
                     self.runs.pop(run_id, None)
                 self.ownership.release(run_id)
+                if not saved.get('execution_unknown') and saved.get('status') in TERMINAL:
+                    try:
+                        from jaeger_ai.features.hermes_webui.session_unify import close_reconciled_webui_session
+                        close_reconciled_webui_session(str(saved.get('session_id') or ''))
+                    except Exception:
+                        pass
                 return {k: v for k, v in saved.items() if k != 'events'}
             finally:
                 os.close(lease)

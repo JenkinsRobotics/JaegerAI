@@ -28,6 +28,7 @@ def test_status_json_output(capsys, monkeypatch):
     data = json.loads(captured.out)
     assert data["app"]["running"] is True
     assert data["app"]["pids"] == [5678]
+    assert "webui" in data
     assert any(s["name"] == "Jaeger Bridge" and s["running"] is True for s in data["services"])
     assert any(c["name"] == "jaeger-hermes-webui" and c["state"] == "running" for c in data["containers"])
 
@@ -44,6 +45,7 @@ def test_status_terminal_output(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert "Jaeger AI Fabric Status" in captured.out
     assert "Desktop App:" in captured.out
+    assert "Web UI:" in captured.out
     assert "Host Services:" in captured.out
     assert "Linux Containers:" in captured.out
 
@@ -65,6 +67,7 @@ def test_stop_dry_run(capsys, monkeypatch):
     assert "Stopping Jaeger AI stack..." in captured.out
     assert "[dry-run]" in captured.out
     assert "Would terminate JaegerAI.app" in captured.out
+    assert "Would stop Jaeger WebUI" in captured.out
     assert f"Would bootout {lifecycle_verbs.SUPERVISOR_SERVICE}" in captured.out
 
 
@@ -74,6 +77,7 @@ def test_start_dry_run(capsys):
     captured = capsys.readouterr()
     assert "Starting Jaeger AI stack..." in captured.out
     assert "[dry-run]" in captured.out
+    assert "[dry-run] Would start Jaeger WebUI" in captured.out
 
 
 def test_status_checks_container_native_api_at_container_address(monkeypatch):
@@ -84,6 +88,45 @@ def test_status_checks_container_native_api_at_container_address(monkeypatch):
         "com.jenkinsrobotics.hermes-native-api", 8645, containers,
     ) is True
     assert calls == [("192.168.64.71", 8645)]
+
+
+def test_status_labels_container_as_runtime_not_chat(capsys, monkeypatch):
+    monkeypatch.setattr(lifecycle_verbs, "_get_launchd_jobs", lambda: {})
+    monkeypatch.setattr(lifecycle_verbs, "_find_app_pids", lambda: [])
+    monkeypatch.setattr(lifecycle_verbs, "_get_containers_state", lambda: {
+        "jaeger-hermes-webui": {"state": "running", "ip": "192.168.64.10", "image": "img"},
+    })
+    monkeypatch.setattr(lifecycle_verbs, "_is_port_open", lambda *a, **kw: False)
+
+    class FakeService:
+        enabled = True
+
+        def status(self):
+            return {
+                "vendor": {"running": True},
+                "container": {"state": "running"},
+            }
+
+        def hermes_runtime_url(self):
+            return "http://192.168.64.10:8787/"
+
+    monkeypatch.setattr(
+        "jaeger_ai.features.hermes_webui.HermesWebUIService",
+        FakeService,
+    )
+    monkeypatch.setattr(
+        "jaeger_ai.features.hermes_webui.service._tailscale_ipv4",
+        lambda: None,
+    )
+
+    rc = lifecycle_verbs._cmd_status_argv([])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Web UI:" in out
+    assert "http://127.0.0.1:8790/" in out
+    assert "Hermes runtime:" in out
+    assert "not a chat URL" in out
+    assert "Hermes UI:" not in out
 
 
 def test_start_does_not_rewrite_installed_profile_configuration(capsys):

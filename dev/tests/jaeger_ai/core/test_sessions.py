@@ -138,7 +138,7 @@ def test_session_contract_no_longer_advertises_migration_aliases():
     from jaeger_ai.interfaces.bridge import _session_contract
 
     identifier = _session_contract()["identifier"]
-    assert _session_contract()["version"] == 3
+    assert _session_contract()["version"] == 4
     assert identifier["format"] == "opaque"
     assert identifier["emits_namespaces"] is False
     assert "legacy_aliases_accepted" not in identifier
@@ -150,7 +150,7 @@ def test_delete_tombstone_is_idempotent_and_blocks_stale_reimport(tmp_path):
     try:
         assert store.create("shared-1") == {
             "id": "shared-1", "created": True, "tombstoned": False,
-            "origin": "unknown",
+            "origin": "unknown", "profile": "jaeger",
         }
         assert store.create("shared-1")["created"] is False
         store.record("shared-1", "user", "remove me")
@@ -363,3 +363,56 @@ def test_origin_backfill_on_existing_database(tmp_path):
         assert by_id["c3634ba2dbca"] == "webui"
     finally:
         store.close()
+
+
+def test_list_sessions_includes_profile_badge_and_null_ended_at(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        store.record("dispatcher", "user", "home chat")
+        store.record("roundtable-hermes:abc", "user", "table talk")
+        store.record("cli", "user", "tui chat", profile="openclaw")
+        by_id = {row["id"]: row for row in store.list_sessions()}
+        assert by_id["dispatcher"]["profile"] == "jaeger"
+        assert by_id["dispatcher"]["profile_badge"] == "Jaeger"
+        assert by_id["dispatcher"]["ended_at"] is None
+        assert by_id["roundtable-hermes:abc"]["profile_badge"] == "Roundtable"
+        assert by_id["cli"]["profile"] == "openclaw"
+        assert by_id["cli"]["profile_badge"] == "OpenClaw"
+        assert by_id["cli"]["origin"] == "tui"  # origin stays surface
+        assert by_id["cli"]["source"] == "tui"
+    finally:
+        store.close()
+
+
+def test_profile_first_writer_wins(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        created = store.create("aabbcc01", origin="app", profile="jaeger")
+        assert created["profile"] == "jaeger"
+        store.record("aabbcc01", "user", "later", profile="openclaw")
+        row = store.list_sessions()[0]
+        assert row["profile"] == "jaeger"
+        assert row["profile_badge"] == "Jaeger"
+        again = store.create("aabbcc01", profile="roundtable")
+        assert again["created"] is False
+        assert again["profile"] == "jaeger"
+    finally:
+        store.close()
+
+
+def test_import_transcript_stamps_profile(tmp_path):
+    store = SessionStore(tmp_path / "s.db")
+    try:
+        result = store.import_transcript(
+            "roundtable-hermes:imp",
+            [{"role": "user", "text": "hello", "ts": 1.0}],
+            origin="webui",
+        )
+        assert result["created"] is True
+        row = store.list_sessions()[0]
+        assert row["profile"] == "roundtable"
+        assert row["profile_badge"] == "Roundtable"
+        assert row["ended_at"] is None
+    finally:
+        store.close()
+

@@ -1,12 +1,13 @@
 """Lifecycle helpers for Jaeger's browser UI.
 
-Settings (``containers.use_hermes_webui`` and friends) are the compatibility
-configuration for the bundled Hermes WebUI fork. This module starts and stops
-the Jaeger-branded WebUI and its loopback adapter.
+The canonical chat URL is the host vendor WebUI on
+``containers.jaeger_webui_port`` (8790). The Hermes container on
+``containers.hermes_webui_port`` (8787) is the Hermes Agent runtime, not a
+second bookmark.
 
 Port map (coherent defaults):
-  * Hermes WebUI container (browser) — ``containers.hermes_webui_port`` (8787)
-  * Jaeger-branded vendor WebUI fork — ``containers.jaeger_webui_port`` (8790)
+  * Jaeger WebUI (browser) — ``containers.jaeger_webui_port`` (8790)
+  * Hermes runtime container — ``containers.hermes_webui_port`` (8787)
   * Hermes WebUI adapter (runner-local) — ``containers.adapter_port`` (8791)
   * Instance webhooks — 8793 (moved off 8791 to avoid clashing with the adapter)
 """
@@ -36,6 +37,11 @@ VENDOR_WEBUI_PORT = 8790
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VENDOR_WEBUI_SCRIPT = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
 
+from jaeger_ai.features.hermes_webui.profile_layout import (
+    ensure_webui_profile_layout,
+    prepare_vendor_webui_home,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class HermesWebUIUrls:
@@ -56,6 +62,42 @@ def hermes_webui_urls(
         adapter=f"http://{adapter_host}:{adapter_port}/",
         vendor_ui=f"http://127.0.0.1:{vendor_webui_port}/",
     )
+
+
+
+
+def _tailscale_ipv4() -> str | None:
+    binary = shutil.which("tailscale")
+    if not binary:
+        return None
+    try:
+        proc = subprocess.run(
+            [binary, "ip", "-4"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in (proc.stdout or "").splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def _ensure_vendor_shared_profiles(agent_home: Path) -> None:
+    """Expose ~/.hermes/profiles and a current-schema state.db to :8790."""
+    try:
+        prepare_vendor_webui_home(agent_home)
+    except Exception:
+        try:
+            ensure_webui_profile_layout()
+        except Exception:
+            pass
 
 
 def _load_containers_config(instance: str | None = None) -> dict[str, Any]:
@@ -175,7 +217,13 @@ class HermesWebUIService:
         self._cfg = _load_containers_config(instance)
         self.instance = str(self._cfg["instance"])
         self.enabled = bool(self._cfg["use_hermes_webui"])
-        self.container_name = str(self._cfg["hermes_webui_container"])
+        configured = str(self._cfg["hermes_webui_container"])
+        try:
+            from jaeger_ai.core.runtime.agent_workspaces import container_name as _aw_container_name
+            managed = _aw_container_name("hermes")
+        except Exception:
+            managed = configured
+        self.container_name = managed or configured
         self.webui_port = int(self._cfg["hermes_webui_port"])
         self.adapter_port = int(self._cfg["adapter_port"])
         self.adapter_host = DEFAULT_ADAPTER_HOST
@@ -192,15 +240,62 @@ class HermesWebUIService:
             vendor_webui_port=self.vendor_webui_port,
         )
 
-    def browser_url(self) -> str:
-        """Resolve the selected instance's configured deployment on each call.
+    def published_host_url(self) -> str | None:
+        """Host-published WebUI URL (Tailscale/loopback), if the container publishes one."""
+        binary = os.environ.get("CONTAINER_CLI") or self._cfg.get("engine") or cs.resolve_container_cli()
+        try:
+            proc = subprocess.run(
+                [binary, "inspect", self.container_name],
+                capture_output=True, text=True, timeout=5,
+            )
+            if proc.returncode != 0:
+                return None
+            info = json.loads(proc.stdout)[0]
+            status = info["status"]
+            if cs.normalize_state(status.get("state")) != "running":
+                return None
+            published_ports = info.get("configuration", {}).get("publishedPorts", []) or []
+            matches = [
+                p for p in published_ports
+                if int(p.get("hostPort") or 0) == self.webui_port and p.get("proto", "tcp") == "tcp"
+            ]
+            if not matches:
+                return None
+            ts_ip = _tailscale_ipv4()
+            # Prefer loopback, then this machine's Tailscale IP, then any hostAddress.
+            ranked: list[str] = []
+            for published in matches:
+                host = str(published.get("hostAddress") or "").strip() or "127.0.0.1"
+                url = f"http://{host}:{int(published['hostPort'])}/"
+                if host in {"127.0.0.1", "0.0.0.0", "::1"}:
+                    ranked.insert(0, f"http://127.0.0.1:{int(published['hostPort'])}/")
+                elif ts_ip and host == ts_ip:
+                    ranked.insert(0 if not ranked else min(1, len(ranked)), url)
+                else:
+                    ranked.append(url)
+            return ranked[0] if ranked else None
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
+            return None
 
-        Container ports in settings are published host ports; inspection maps
-        them to the current private IP and container port. No discovered IP is
-        persisted, so a container recreation cannot leave a stale URL behind.
+    def browser_url(self) -> str:
+        """Canonical chat URL: host Jaeger WebUI on :8790, never :8787.
+
+        Tailscale IPv4 is preferred when the vendor UI is published on the
+        tailnet; otherwise loopback. Container discovery belongs on
+        :meth:`hermes_runtime_url`.
         """
+        ts = _tailscale_ipv4()
+        if ts:
+            return f"http://{ts}:{self.vendor_webui_port}/"
+        return self.urls().vendor_ui
+
+    def hermes_runtime_url(self) -> str | None:
+        """Hermes Agent runtime address (container), not a chat bookmark."""
         if not self.enabled:
-            return self.urls().vendor_ui
+            return None
+        published = self.published_host_url()
+        if published:
+            return published
         binary = os.environ.get("CONTAINER_CLI") or self._cfg.get("engine") or cs.resolve_container_cli()
         try:
             proc = subprocess.run(
@@ -223,8 +318,6 @@ class HermesWebUIService:
                             return f"http://{address}:{port}/"
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
             pass
-        # Remain in configured container mode if it is stopped/unavailable.
-        # Health checks will report that honestly, rather than switching UIs.
         return self.urls().container_ui
 
     def status(self) -> dict[str, Any]:
@@ -239,8 +332,18 @@ class HermesWebUIService:
             )
         adapter = self._adapter_status()
         vendor = self._vendor_status()
-        container_url = self.browser_url() if self.enabled else urls.container_ui
+        container_url = self.hermes_runtime_url() or urls.container_ui
         container_health = _http_ok(container_url, timeout=5.0)
+        if self.enabled and not container_health.get("ok"):
+            # Container IP can fail while the Tailscale publish is healthy (and vice versa).
+            for candidate in filter(None, {self.published_host_url(), urls.container_ui}):
+                if candidate.rstrip("/") == container_url.rstrip("/"):
+                    continue
+                alt = _http_ok(candidate, timeout=5.0)
+                if alt.get("ok"):
+                    container_url = candidate
+                    container_health = alt
+                    break
         adapter_health = _http_ok(urls.adapter.rstrip("/") + "/api/health")
         if not adapter_health.get("ok"):
             adapter_health = _http_ok(urls.adapter)
@@ -265,6 +368,7 @@ class HermesWebUIService:
                 "health": _http_ok(urls.vendor_ui, timeout=5.0),
             },
             "vendor_ui_url": urls.vendor_ui,
+            "chat_url": self.browser_url(),
             "ports": {
                 "container_webui": self.webui_port,
                 "adapter": self.adapter_port,
@@ -286,6 +390,23 @@ class HermesWebUIService:
         if self.layout is None:
             return {"ok": False, "error": f"instance {self.instance!r} not found"}
 
+        try:
+            ensure_webui_profile_layout()
+        except Exception:
+            pass
+
+        # Managed and legacy Hermes containers publish the same host:8787.
+        # Stop siblings first so `container start` is not blocked by bind conflicts.
+        try:
+            from jaeger_ai.core.runtime.agent_workspaces import conflicting_hermes_containers
+            for sibling in conflicting_hermes_containers(self.container_name):
+                info = cs.container_status(sibling)
+                details = info.get("details") or {}
+                state = cs.normalize_state(details.get("state") or details.get("status"))
+                if info.get("found") and state == "running":
+                    cs.stop_container(sibling)
+        except Exception:
+            pass
         container_res = cs.start_container(self.container_name)
         adapter_res = self._start_adapter()
         status = self.status()
@@ -302,6 +423,10 @@ class HermesWebUIService:
         """Start Jaeger's branded WebUI and adapter without a container."""
         if self.layout is None:
             return {"ok": False, "error": f"instance {self.instance!r} not found"}
+        try:
+            prepare_vendor_webui_home()
+        except Exception:
+            pass
         adapter_res = self._start_adapter()
         if not adapter_res.get("ok"):
             return {"ok": False, "adapter": adapter_res}
@@ -388,13 +513,42 @@ class HermesWebUIService:
         current = self._vendor_status()
         if current.get("running"):
             return {"ok": True, "already_running": True, "pid": current.get("pid")}
+        # An orphaned WebUI can hold :8790 after a lost pid file. Reclaim it so
+        # profile-link / bind fixes actually take effect.
+        if _http_ok(self.urls().vendor_ui, timeout=1.0).get("ok"):
+            try:
+                import signal as _signal
+                proc = subprocess.run(
+                    ["lsof", "-nP", f"-iTCP:{self.vendor_webui_port}", "-sTCP:LISTEN", "-t"],
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                for raw in (proc.stdout or "").split():
+                    try:
+                        opid = int(raw)
+                    except ValueError:
+                        continue
+                    try:
+                        os.kill(opid, _signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and _http_ok(self.urls().vendor_ui, timeout=0.5).get("ok"):
+                    time.sleep(0.2)
+            except Exception:
+                pass
         if not VENDOR_WEBUI_SCRIPT.is_file():
             return {"ok": False, "error": f"WebUI launcher is missing: {VENDOR_WEBUI_SCRIPT}"}
+        agent_home = Path(
+            os.environ.get("JAEGER_WEBUI_AGENT_STATE")
+            or (Path.home() / ".jaeger_ai" / "hermes-webui-agent")
+        ).expanduser()
+        _ensure_vendor_shared_profiles(agent_home)
         log_path = _vendor_log_path(self.layout)
         pid_path = _vendor_pid_path(self.layout)
         env = os.environ.copy()
         env["JAEGER_RUNNER_BASE_URL"] = self.urls().adapter.rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.vendor_webui_port)
+        env["JAEGER_WEBUI_HOST"] = os.environ.get("JAEGER_WEBUI_HOST", "0.0.0.0")
         # Popen retains the descriptor after this method returns; explicit
         # lifecycle management is clearer than a context manager here.
         log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115

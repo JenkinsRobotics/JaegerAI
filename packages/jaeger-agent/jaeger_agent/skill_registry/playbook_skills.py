@@ -416,6 +416,12 @@ def match_playbook(
     and a clear margin over the runner-up, preventing a generic word such as
     ``file`` from silently loading an unrelated long recipe.
     """
+    blob = " ".join((query or "").lower().split())
+    if any(token in blob for token in (
+        "we are discussing", "just talk", "text discussion", "can you stop",
+        "i just want to see",
+    )) or blob.strip() in {"stop", "stop.", "we are discussing stop"}:
+        return None, 0.0, "conversational-stop"
     clean = " ".join(_ROUTE_WORD.findall((query or "").lower()))
     qtokens = _route_tokens(clean)
     if not clean or not qtokens:

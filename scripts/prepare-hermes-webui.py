@@ -42,7 +42,14 @@ def prepare():
     content = init.read_text()
     if content.count(marker) != 1:
         raise RuntimeError('Upstream WebUI startup changed; review Dispatcher sidecar startup')
-    content = content.replace(marker, '''export HERMES_WEBUI_EXTENSION_DIR=/apptoo/jaeger-extensions
+    content = content.replace(marker, '''# Prefer in-image hermes-agent + venv so gateway/AIAgent work.
+if [ -f /app/hermes-agent-src/run_agent.py ]; then
+  export HERMES_WEBUI_AGENT_DIR=/app/hermes-agent-src
+fi
+if [ -x /app/venv/bin/python ]; then
+  export HERMES_WEBUI_PYTHON=/app/venv/bin/python
+fi
+export HERMES_WEBUI_EXTENSION_DIR=/apptoo/jaeger-extensions
 export HERMES_WEBUI_EXTENSION_MANIFEST=jaeger_webui_extensions.json
 python /apptoo/jaeger_dispatcher_sidecar.py &
 jaeger_sidecar_pid=$!
