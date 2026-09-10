@@ -111,6 +111,7 @@ jaeger_ai = [
 ]
 
 [tool.pytest.ini_options]
+cache_dir = "~/.cache/pytest"
 pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent", "jaeger_ai"]
 testpaths = ["dev/tests"]
 addopts = ["--import-mode=importlib"]

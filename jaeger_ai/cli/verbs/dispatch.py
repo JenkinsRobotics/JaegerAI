@@ -1,5 +1,8 @@
 """``jaeger <verb>`` dispatch — the in-process CLI verb surface.
 
+NOTE: This is the CLI argument router (mapping sys.argv to verbs like start/stop/status).
+For the autonomous task/worker dispatcher, see `jaeger_ai.features.dispatcher`.
+
 ``main.py`` peels ``sys.argv[1]`` and calls :func:`dispatch` from here if
 the first word is a known verb; otherwise it falls through to the existing
 argparse + TUI/voice path so a bare ``jaeger`` keeps booting the in-process

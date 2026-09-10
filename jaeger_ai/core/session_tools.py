@@ -105,9 +105,11 @@ def session_search(
             "sessions": [],
         }
 
-    needle = str(query or "").strip()
+    from jaeger_ai.features.session_search import prepare_search_query, search_sessions
+
+    needle = prepare_search_query(str(query or ""))
     rows = (
-        store.search(needle, limit=bounded_limit)
+        search_sessions(store, needle, limit=bounded_limit)
         if needle
         else store.list_sessions(limit=bounded_limit)
     )

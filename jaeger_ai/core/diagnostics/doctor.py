@@ -229,20 +229,26 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
             ))
 
     # Runtime substrate probe — folded in as ``runtime``-category Checks
-    # so the renderer shows them in their own section. A probe failure is
-    # surfaced, never allowed to crash the doctor.
-    try:
-        from jaeger_ai.core.diagnostics.probe import run_health_checks
-        probe = run_health_checks(deep=deep)
-        for c in probe.get("checks", []):
+    # so the renderer shows them in their own section. Runs when an agent
+    # layout is bound.
+    if layout is not None:
+        try:
+            from jaeger_ai.core.diagnostics.probe import run_health_checks
+            probe = run_health_checks(deep=deep)
+            for c in probe.get("checks", []):
+                checks.append(Check(
+                    name=str(c.get("name", "?")), category="runtime",
+                    ok=bool(c.get("ok")), detail=str(c.get("detail", "")),
+                ))
+        except Exception as exc:  # noqa: BLE001
             checks.append(Check(
-                name=str(c.get("name", "?")), category="runtime",
-                ok=bool(c.get("ok")), detail=str(c.get("detail", "")),
+                name="runtime_probe", category="runtime", ok=False,
+                detail=f"probe error: {type(exc).__name__}: {exc}",
             ))
-    except Exception as exc:  # noqa: BLE001
+    else:
         checks.append(Check(
-            name="runtime_probe", category="runtime", ok=False,
-            detail=f"probe error: {type(exc).__name__}: {exc}",
+            name="agent_instance", category="runtime", ok=True,
+            detail="no agent configured yet (run `jaeger setup` to create one)",
         ))
 
     # Current-vs-latest readout — CLI doctor only (never the agent's

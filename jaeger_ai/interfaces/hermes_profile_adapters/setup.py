@@ -33,9 +33,11 @@ JAEGER_MCP_URL = "http://192.168.64.1:8811/mcp"
 JAEGER_A2A_URL = "http://192.168.64.1:8812"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 HONCHO_WORKSPACE = "jenkins-robotics"
+from jaeger_ai.core.instance.instance import operator_state_root
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
-JAEGER_RUNTIME_ROOT = REPO_ROOT / ".jaeger_ai" / "shared"
-JAEGER_INSTANCE_ROOT = REPO_ROOT / ".jaeger_ai" / "instances" / "jaeger"
+JAEGER_RUNTIME_ROOT = operator_state_root() / "shared"
+JAEGER_INSTANCE_ROOT = operator_state_root() / "instances" / "jaeger"
 
 WORKSPACE_IDENTITIES = ("jaeger", "hermes", "openclaw")
 

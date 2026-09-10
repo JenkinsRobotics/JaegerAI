@@ -1061,11 +1061,15 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return _session_contract()
     if what == "search_sessions":
         from jaeger_ai.core.sessions import get_store
+        from jaeger_ai.features.session_search import search_sessions
+
         store = get_store(lay)
         if store is None:
             return []
-        return store.search(
-            str(args.get("query") or ""), limit=int(args.get("limit") or 50)
+        return search_sessions(
+            store,
+            str(args.get("query") or ""),
+            limit=int(args.get("limit") or 50),
         )
     if what == "load_session":
         # resume False: display/search only — do not swap the live agent.

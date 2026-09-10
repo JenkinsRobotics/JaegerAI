@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SERVICES_ORDERED = (
     ("com.jenkinsrobotics.ares-agentgateway", "Agentgateway (ARES)", 8813),
+    ("com.jenkinsrobotics.jaeger-gateway", "Jaeger Gateway", 8810),
     # The bridge uses a Unix socket; :8791 may belong to the legacy webhook
     # service, so an open HTTP port is not evidence of bridge readiness.
     ("com.jenkinsrobotics.jaeger-bridge", "Jaeger Bridge", None),
