@@ -4,15 +4,19 @@ set -eu
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
 webui_root="$repo_root/vendor/hermes-webui"
-python_exe="${JAEGER_WEBUI_PYTHON:-$repo_root/.venv/bin/python}"
-jaeger_state_home="${JAEGER_STATE_HOME:-${HOME}/.jaeger_ai}"
+default_python="${HOME}/.jaeger/venv/bin/python"
+if [[ ! -x "$default_python" && -x "$repo_root/.venv/bin/python" ]]; then
+  default_python="$repo_root/.venv/bin/python"
+fi
+python_exe="${JAEGER_WEBUI_PYTHON:-$default_python}"
+jaeger_state_home="${JAEGER_STATE_HOME:-${HOME}/.jaeger}"
 
 if [[ ! -f "$webui_root/server.py" ]]; then
   print -u2 "Jaeger WebUI fork is missing. Run: git submodule update --init vendor/hermes-webui"
   exit 1
 fi
 if [[ ! -x "$python_exe" ]]; then
-  print -u2 "Jaeger Python is missing at $python_exe. Run the JaegerAI installer first."
+  print -u2 "Jaeger Python is missing at $python_exe (checked ~/.jaeger/venv and repo .venv). Run the JaegerAI installer first."
   exit 1
 fi
 
