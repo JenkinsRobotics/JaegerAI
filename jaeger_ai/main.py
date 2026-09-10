@@ -4119,8 +4119,22 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
     CLI, the cron runner, and the daemon. Returns the final answer text
     ("" on error) so callers like the Deep Think daemon can VERIFY the
     outcome instead of trusting that returning == succeeding."""
-    out = _run_turn(client, user_text,
-                    session_key=session_key or _DEFAULT_SESSION_KEY)
+    session = session_key or _DEFAULT_SESSION_KEY
+    try:
+        from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
+        from jaeger_ai.core.models.session_selection import select_client
+        model, provider, _decision = apply_sensitivity_routing(
+            user_text,
+            config=_pipeline.get("config"),
+        )
+        if _decision.classification == "private" or model:
+            client = select_client(
+                client, _pipeline.get("config"), _pipeline.get("layout"),
+                model, provider,
+            )
+    except Exception:  # noqa: BLE001 — gate must never break a turn
+        pass
+    out = _run_turn(client, user_text, session_key=session)
     if out["error"]:
         print(f"Jaeger agent failed: {out['error']}")
         if _pipeline.get("show_latency"):
@@ -4428,6 +4442,18 @@ def run_for_voice(
     for the voice consumer to speak."""
     session = session_key or "voice"
     from jaeger_ai.core.models.session_selection import select_client
+    # Sensitivity gate: private → local gemma; public → cloud flash.
+    # Runs before any cloud-bound model selection.
+    try:
+        from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
+        model, provider, _decision = apply_sensitivity_routing(
+            user_text,
+            config=_pipeline.get("config"),
+            model=model,
+            provider=provider,
+        )
+    except Exception:  # noqa: BLE001 — gate must never break a turn
+        pass
     signature = (id(client), model or None, provider or None)
     cached = _session_model_clients.get(session)
     if cached is None or cached[0] != signature:
@@ -4841,6 +4867,26 @@ def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
             ExternalModelSelectionError,
             selection_failure_message,
         )
+        from jaeger_ai.core.models.ollama_endpoint import (
+            normalize_ollama_provider,
+            resolve_ollama_base_url,
+        )
+        # Product lanes + baked loopback/ollama.com must not survive into
+        # the live client — resolve the Mac daemon (or container→Mac bridge).
+        provider = normalize_ollama_provider(str(getattr(ext, "provider", "") or ""))
+        if provider == "ollama":
+            ext = ext.model_copy(deep=True)
+            ext.provider = "ollama"
+            base = str(getattr(ext, "base_url", "") or "").strip().lower()
+            if (
+                not base
+                or "ollama.com" in base
+                or base.startswith("http://127.0.0.1:")
+                or base.startswith("http://localhost:")
+            ):
+                ext.base_url = resolve_ollama_base_url()
+            ext.api_key_credential = ""
+            ext.api_key_env = ""
         reason = ""
         try:
             client = ExternalModelClient(ext, layout)

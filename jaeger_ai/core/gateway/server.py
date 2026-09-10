@@ -40,6 +40,11 @@ class JaegerGatewayApp:
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
+        # Agent catalog — persistence spine for Mac app + WebUI clients.
+        self.app.router.add_get("/v1/agents", self.handle_list_agents)
+        self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
+        self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
@@ -52,9 +57,66 @@ class JaegerGatewayApp:
         return web.json_response({
             "status": "ok",
             "service": "jaeger-gateway",
-            "version": "0.3.0",
+            "version": "0.4.0",
             "architecture": "openclaw-parity",
+            "persistence_spine": True,
+            "agents_api": "/v1/agents",
+            "fundamentals_fee_gated": False,
         })
+
+    def _registry(self):
+        from jaeger_ai.core.agent_registry import AgentRegistry
+
+        return AgentRegistry()
+
+    async def handle_list_agents(self, request: web.Request) -> web.Response:
+        """List JaegerNativeAgent + ThirdPartyAgent for Mac app / WebUI."""
+        kind = request.query.get("kind")
+        registry = self._registry()
+        if kind:
+            agents = [a.to_dict() for a in registry.list_agents(kind=kind)]
+            return web.json_response({"agents": agents, "kind": kind})
+        return web.json_response(registry.to_catalog())
+
+    async def handle_create_agent(self, request: web.Request) -> web.Response:
+        body = await request.json() if request.can_read_body else {}
+        name = str(body.get("name") or "").strip()
+        if not name:
+            return web.json_response({"error": "name is required"}, status=400)
+        kind = str(body.get("kind") or "jaeger_native").strip()
+        try:
+            record = self._registry().create_agent(
+                name,
+                kind=kind,
+                display_name=(str(body["display_name"]) if body.get("display_name") else None),
+                adapter=(str(body["adapter"]) if body.get("adapter") else None),
+                profile_id=(str(body["profile_id"]) if body.get("profile_id") else None),
+                endpoint=(str(body["endpoint"]) if body.get("endpoint") else None),
+                port=(int(body["port"]) if body.get("port") is not None else None),
+                metadata=dict(body.get("metadata") or {}),
+                make_active=bool(body.get("make_active", False)),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        self.event_bus.publish("*", "agent.created", {"agent": record.to_dict()})
+        return web.json_response(record.to_dict(), status=201)
+
+    async def handle_get_agent(self, request: web.Request) -> web.Response:
+        agent_id = request.match_info["id"]
+        record = self._registry().get_agent(agent_id)
+        if record is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        return web.json_response(record.to_dict())
+
+    async def handle_activate_agent(self, request: web.Request) -> web.Response:
+        """Switch active agent — never fee-gated (fundamentals stay open)."""
+        agent_id = request.match_info["id"]
+        try:
+            record = self._registry().set_active(agent_id)
+        except KeyError:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        self.event_bus.publish("*", "agent.activated", {"agent": record.to_dict()})
+        return web.json_response(record.to_dict())
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")

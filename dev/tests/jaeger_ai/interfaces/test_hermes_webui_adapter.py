@@ -250,7 +250,7 @@ def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path)
 
     server.runner.bridge = CatalogBridge()
     assert server.runner._jaeger_provider("openai-api", "gemma-4-26b:latest") == "ollama"
-    assert server.runner._jaeger_provider("openai-api", "glm-5.2:cloud") == "ollama-cloud"
+    assert server.runner._jaeger_provider("openai-api", "glm-5.2:cloud") == "ollama"
     server.server_close()
 
 

@@ -8,7 +8,14 @@ from typing import Any
 from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
 
+def _ollama_base_url() -> str:
+    from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+    return resolve_ollama_base_url(openai_compat=True)
+
+
 _BASE_URLS = {
+    # ollama is resolved at call time via _ollama_base_url() — never bake
+    # 127.0.0.1 into a value that could leak into a remotely served template.
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
     "ollama-cloud": "https://ollama.com/v1",
@@ -110,6 +117,12 @@ def configure_model(
         raise ValueError("model is required")
     if selected_provider in {"huggingface", "hf", "in-process"}:
         selected_provider = "local"
+    # Product lanes (WebUI / ARES) split the Mac Ollama daemon into
+    # ollama-local vs ollama-cloud. Both still execute through that one
+    # daemon — :cloud tags ride the Ollama subscription, not a second
+    # https://ollama.com connection that demands an API key in-repo.
+    from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+    selected_provider = normalize_ollama_provider(selected_provider)
     try:
         from jaeger_ai.features.cli_backends.service import normalize_cli_selection
         cli_pair = normalize_cli_selection(selected_provider, selected_model)
@@ -137,9 +150,16 @@ def configure_model(
         updated.external_model.enabled = True
         updated.external_model.provider = selected_provider
         updated.external_model.model = selected_model
-        updated.external_model.base_url = str(base_url or _BASE_URLS[selected_provider]).strip()
-        updated.external_model.api_key_credential = _CREDENTIALS.get(selected_provider, "")
-        updated.external_model.api_key_env = ""
+        explicit = str(base_url or "").strip()
+        if selected_provider == "ollama":
+            updated.external_model.base_url = explicit or _ollama_base_url()
+            # Local daemon (including :cloud subscription tags) needs no key.
+            updated.external_model.api_key_credential = ""
+            updated.external_model.api_key_env = ""
+        else:
+            updated.external_model.base_url = explicit or _BASE_URLS[selected_provider]
+            updated.external_model.api_key_credential = _CREDENTIALS.get(selected_provider, "")
+            updated.external_model.api_key_env = ""
         if context_length:
             updated.external_model.ctx = int(context_length)
 
@@ -188,6 +208,8 @@ def configure_fallback_chain(
                 "local fallback is disabled — a selected cloud brain must "
                 "not load on-device weights"
             )
+        from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+        provider = normalize_ollama_provider(provider)
         _reject_cross_vendor_pair(provider, model)
         FallbackModel.model_validate({
             "provider": provider,

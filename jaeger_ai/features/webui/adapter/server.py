@@ -57,6 +57,9 @@ _GOAL_ROUTE = re.compile(r"^/v1/sessions/([^/]+)/goal$")
 _SCHEDULE_ACTION_ROUTE = re.compile(
     r"^/v1/schedules/([^/]+)/(pause|resume|cancel|run)$"
 )
+_AGENT_ACTIVATE_ROUTE = re.compile(
+    r"^/(?:v1|api)/agents/([^/]+)/activate$"
+)
 
 
 class ApprovalBroker:
@@ -347,6 +350,8 @@ class RunnerBroker:
 
     def _jaeger_provider(self, requested: str, model: str) -> str:
         """Translate a WebUI transport provider into Jaeger's model owner."""
+        from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+
         requested = requested.strip().lower()
         if requested in {"ollama-local", "ollama-cloud"}:
             # The genuine Hermes WebUI splits the Mac Ollama daemon's catalog
@@ -358,7 +363,7 @@ class RunnerBroker:
             "local", "ollama", "ollama-cloud", "lmstudio",
             "openai", "anthropic", "gemini", "xai",
         }:
-            return requested
+            return normalize_ollama_provider(requested) or requested
         catalog = self.bridge.query("model_catalog")
         rows = catalog.get("models") if isinstance(catalog, dict) else []
         for row in rows or []:
@@ -375,10 +380,14 @@ class RunnerBroker:
                     row.get("route_provider") or row.get("provider") or ""
                 ).strip().lower()
                 if owner:
-                    return owner
+                    return normalize_ollama_provider(owner) or owner
         # Hermes custom OpenAI-compatible providers commonly arrive as
         # ``openai-api``. Jaeger owns endpoint selection, so unresolved models
         # default to the Mac's local Ollama instead of inheriting Hermes state.
+        # :cloud tags without a catalog hit still ride the local daemon.
+        name = (model or "").strip().lower()
+        if name.endswith(":cloud") or name.endswith("-cloud"):
+            return "ollama"
         return "ollama"
 
     def _session_snapshot(self, session_id: str, prompt: str, answer: str) -> dict[str, Any]:
@@ -733,6 +742,19 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path in {"/health", "/api/health"}:
                 return self._json(self.bridge.health())
+            if parsed.path in {"/v1/agents", "/api/agents"}:
+                # Native + third-party catalog for remote WebUI list/switch.
+                from jaeger_ai.core.agent_registry import AgentRegistry
+
+                kind = str(parse_qs(parsed.query).get("kind", [""])[0] or "")
+                registry = AgentRegistry()
+                if kind:
+                    return self._json({
+                        "agents": [a.to_dict() for a in registry.list_agents(kind=kind)],
+                        "kind": kind,
+                        "fundamentals_fee_gated": False,
+                    })
+                return self._json(registry.to_catalog())
             if parsed.path == "/v1/scheduler/status":
                 return self._json(self.schedules.scheduler_status())
             if parsed.path == "/v1/schedules":
@@ -798,6 +820,35 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
                 return self._json(finish_passkey_registration(body, self), HTTPStatus.CREATED)
             if parsed.path == "/api/auth/passkey/delete":
                 return self._json(delete_passkey(str(body.get("id") or "")))
+            if parsed.path in {"/v1/agents", "/api/agents"}:
+                from jaeger_ai.core.agent_registry import AgentRegistry
+
+                body = self._body()
+                name = str(body.get("name") or "").strip()
+                if not name:
+                    raise ValueError("name is required")
+                record = AgentRegistry().create_agent(
+                    name,
+                    kind=str(body.get("kind") or "jaeger_native"),
+                    display_name=(str(body["display_name"]) if body.get("display_name") else None),
+                    adapter=(str(body["adapter"]) if body.get("adapter") else None),
+                    profile_id=(str(body["profile_id"]) if body.get("profile_id") else None),
+                    endpoint=(str(body["endpoint"]) if body.get("endpoint") else None),
+                    port=(int(body["port"]) if body.get("port") is not None else None),
+                    metadata=dict(body.get("metadata") or {}),
+                    make_active=bool(body.get("make_active", False)),
+                )
+                return self._json(record.to_dict(), HTTPStatus.CREATED)
+            activate_match = _AGENT_ACTIVATE_ROUTE.fullmatch(parsed.path)
+            if activate_match:
+                from jaeger_ai.core.agent_registry import AgentRegistry
+
+                agent_id = activate_match.group(1)
+                try:
+                    record = AgentRegistry().set_active(agent_id)
+                except KeyError as exc:
+                    raise KeyError(str(exc)) from exc
+                return self._json(record.to_dict())
             if parsed.path == "/v1/runs":
                 return self._json(self.runner.start(body), HTTPStatus.CREATED)
             if parsed.path == "/v1/schedules/create":

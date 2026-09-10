@@ -277,7 +277,7 @@ class DeepThinkConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     coder_model: str = Field(
-        "gemma-4-26b-a4b-it-qat-q4_0",
+        "kimi-k2.7-code:cloud",
         json_schema_extra=_setting("autonomy", advanced=True),
         description="Model swapped in for Deep Think skill authoring.",
     )

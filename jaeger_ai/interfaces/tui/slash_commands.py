@@ -962,10 +962,13 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
                 "trying it anyway[/]")
         cfg.external_model.enabled = True
         cfg.external_model.provider = provider
-        cfg.external_model.base_url = (
-            "http://localhost:11434/v1" if provider == "ollama"
-            else "http://localhost:1234/v1"
-        )
+        if provider == "ollama":
+            from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+            cfg.external_model.base_url = resolve_ollama_base_url()
+            cfg.external_model.api_key_credential = ""
+            cfg.external_model.api_key_env = ""
+        else:
+            cfg.external_model.base_url = "http://localhost:1234/v1"
         cfg.external_model.model = wanted
         summary = f"external · {provider} · {wanted}"
         if provider == "ollama":
@@ -1009,20 +1012,34 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
                 f"[dim]e.g. /model use {provider} "
                 f"{_CLOUD_EXAMPLE[provider]}[/]")
             return SlashResult()
-        cfg.external_model.enabled = True
-        cfg.external_model.provider = provider
-        cfg.external_model.base_url = _CLOUD_BASE_URL[provider]
-        # Each cloud provider keeps its key under its own credential
-        # name, so switching providers never overwrites another's key.
-        cfg.external_model.api_key_credential = _CLOUD_CRED[provider]
-        cfg.external_model.model = wanted
-        # A cloud endpoint needs a real API key — make sure one is on
-        # hand (prompting + storing it if not) before we reboot onto it.
-        if not _ensure_cloud_key(ctx, cfg, provider):
-            _restore()
-            return SlashResult()
-        summary = f"external · {provider} · {wanted}"
-        _autowrite_ollama_ctx(cfg)
+        if provider == "ollama-cloud":
+            # Match the WebUI ollama-cloud lane: :cloud tags ride the Mac
+            # Ollama daemon / subscription. Do not point at ollama.com or
+            # demand an API key in the repo.
+            from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+            cfg.external_model.enabled = True
+            cfg.external_model.provider = "ollama"
+            cfg.external_model.base_url = resolve_ollama_base_url()
+            cfg.external_model.api_key_credential = ""
+            cfg.external_model.api_key_env = ""
+            cfg.external_model.model = wanted
+            summary = f"external · ollama · {wanted} (cloud via local daemon)"
+            _autowrite_ollama_ctx(cfg)
+        else:
+            cfg.external_model.enabled = True
+            cfg.external_model.provider = provider
+            cfg.external_model.base_url = _CLOUD_BASE_URL[provider]
+            # Each cloud provider keeps its key under its own credential
+            # name, so switching providers never overwrites another's key.
+            cfg.external_model.api_key_credential = _CLOUD_CRED[provider]
+            cfg.external_model.model = wanted
+            # A cloud endpoint needs a real API key — make sure one is on
+            # hand (prompting + storing it if not) before we reboot onto it.
+            if not _ensure_cloud_key(ctx, cfg, provider):
+                _restore()
+                return SlashResult()
+            summary = f"external · {provider} · {wanted}"
+            _autowrite_ollama_ctx(cfg)
     else:
         ctx.console.print(
             f"[yellow]Unknown target {target!r}[/] — use local / mlx / "
