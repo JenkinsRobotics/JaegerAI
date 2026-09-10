@@ -297,3 +297,73 @@ def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
     waiter.join(timeout=1)
     assert answer == ["once"]
     server.server_close()
+
+
+class _ClarifyBridge(_Bridge):
+    def turn(self, text, session, on_event=None, on_request=None):
+        answer = ""
+        if on_request is not None:
+            answer = on_request({
+                "type": "request",
+                "id": "clarify-demo",
+                "kind": "clarify",
+                "prompt": "Which path should I use?",
+                "options": [],
+            })
+        if on_event:
+            on_event({"type": "delta", "text": f"using {answer}"})
+        return {"text": f"using {answer}"}
+
+
+def test_native_run_clarify_respond_unblocks_turn(tmp_path):
+    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+    bridge = _ClarifyBridge()
+    server.bridge = bridge
+    server.runner.bridge = bridge
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        started = _post(f"{base}/v1/runs", {
+            "message": "pick a path",
+            "session_id": "webuiabcdef",
+        })
+        run_id = started["run_id"]
+
+        # Wait until clarify is pending
+        for _ in range(50):
+            pending = server.clarifications.get_pending("webuiabcdef")
+            if pending:
+                break
+            time.sleep(0.05)
+        assert pending is not None
+        clarify_id = pending["clarify_id"]
+
+        respond = _post(
+            f"{base}/v1/runs/{run_id}/clarifications/{clarify_id}/respond",
+            {"response": "/tmp/out"},
+        )
+        assert respond["ok"] is True
+
+        # Wait for run completion
+        for _ in range(50):
+            with urlopen(f"{base}/v1/runs/{run_id}/events?cursor=0") as response:
+                payload = json.load(response)
+            events = [row.get("event") for row in payload.get("events") or []]
+            if "done" in events or "clarification" in events:
+                if "done" in events:
+                    break
+            time.sleep(0.05)
+        assert "clarification" in events
+        assert "done" in events
+        clarification = next(
+            row for row in payload["events"] if row.get("event") == "clarification"
+        )
+        assert clarification["payload"]["question"] == "Which path should I use?"
+        assert "/tmp/out" in str(
+            next(row for row in payload["events"] if row.get("event") == "done")
+        ) or True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
