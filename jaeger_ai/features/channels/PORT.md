@@ -9,6 +9,11 @@
 | openclaw | `extensions/{whatsapp,signal,matrix,feishu,line,irc,googlechat,msteams}/` | One platform at a time |
 | hermes-agent | `gateway/platforms/`, `plugins/platforms/`, `gateway/pairing.py` | Python-native pairing store if staying in-process |
 
+## Landed this depth pass
+
+- `PluginBridgeAdapter` + `register_plugin_bridge` wrap live Discord/Telegram/iMessage bridges
+- `messaging_gateway` registers started plugins onto `ChannelRegistry`
+
 ## First follow-up slices (do not block this commit)
 
 1. Pairing store (`features/channels/pairing/`) — DM allow codes; Hermes `pairing.py` + OpenClaw allow-from.
