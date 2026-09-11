@@ -184,6 +184,93 @@ def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
         conn.close()
 
 
+def ensure_vendor_config_yaml(agent_home: Path) -> dict[str, Any]:
+    """Ensure ``config.yaml`` exists under the vendor HERMES_HOME with a reachable Ollama URL.
+
+    Missing config leaves gateway_chat / model routing half-configured and is a
+    common overnight break after HERMES_HOME moved from ``~/.jaeger_ai`` to
+    ``~/.jaeger``. Prefer copying an existing home config, then rewrite dead
+    Tailscale / VM host IPs to loopback for the Mac-native WebUI.
+    """
+    agent_home = agent_home.expanduser()
+    agent_home.mkdir(parents=True, exist_ok=True)
+    dst = agent_home / "config.yaml"
+    home = Path.home()
+    candidates = [
+        home / ".hermes" / "config.yaml",
+        home / ".jaeger_ai" / "hermes-webui-agent" / "config.yaml",
+    ]
+    raw = dst.read_text(encoding="utf-8") if dst.exists() else ""
+    source = str(dst) if raw else None
+    if not raw:
+        for c in candidates:
+            if c.is_file():
+                raw = c.read_text(encoding="utf-8")
+                source = str(c)
+                break
+    if not raw:
+        raw = """model:
+  default: glm-5.3-flash:cloud
+  provider: ollama
+  base_url: http://192.168.64.1:11434/v1
+providers:
+  only_configured: false
+webui:
+  host: 0.0.0.0
+  port: 8790
+  session_save_mode: deferred
+"""
+        source = "builtin-default"
+    # Locked overnight spine: Ollama at http://192.168.64.1:11434 (Gateway health).
+    # Only rewrite known-dead hosts; never touch 192.168.64.1.
+    locked_ollama = "http://192.168.64.1:11434"
+    for bad in (
+        "http://100.78.245.49:11434",
+        "http://192.168.65.1:11434",
+    ):
+        raw = raw.replace(bad + "/v1", locked_ollama + "/v1")
+        raw = raw.replace(bad, locked_ollama)
+    if "webui:" not in raw:
+        raw += """
+webui:
+  host: 0.0.0.0
+  port: 8790
+  session_save_mode: deferred
+"""
+    dst.write_text(raw, encoding="utf-8")
+    try:
+        dst.chmod(0o600)
+    except OSError:
+        pass
+    return {"path": str(dst), "source": source, "bytes": dst.stat().st_size}
+
+
+def ensure_profile_state_schemas(agent_home: Path, shared_profiles: Path | None = None) -> dict[str, Any]:
+    """Ensure every profile ``state.db`` has the ``source`` column WebUI requires."""
+    fixed: list[str] = []
+    roots = [agent_home.expanduser()]
+    if shared_profiles is not None:
+        roots.append(shared_profiles.expanduser())
+    seen: set[Path] = set()
+    for root in roots:
+        dbs = [root / "state.db"]
+        profiles = root / "profiles"
+        if profiles.is_dir():
+            dbs.extend(sorted(profiles.glob("*/state.db")))
+        for db in dbs:
+            try:
+                real = db.resolve()
+            except OSError:
+                real = db
+            if real in seen or not db.exists():
+                continue
+            seen.add(real)
+            before = ensure_agent_state_schema(db.parent)
+            if before.get("added"):
+                fixed.append(str(db))
+    return {"fixed": fixed, "checked": len(seen)}
+
+
 def prepare_vendor_webui_home(
     agent_home: Path | None = None,
     *,
@@ -191,7 +278,7 @@ def prepare_vendor_webui_home(
 ) -> dict[str, Any]:
     """Ready the :8790 vendor HERMES_HOME: names, shared profile link, state.db schema.
 
-    ``HERMES_HOME`` for the host WebUI is ``~/.jaeger_ai/hermes-webui-agent``.
+    ``HERMES_HOME`` for the host WebUI is ``~/.jaeger/hermes-webui-agent``.
     That directory is the ``default`` profile, so it needs ``profile.yaml`` with
     ``display_name: Hermes Agent``. Named profiles live under the shared
     ``~/.hermes/profiles`` tree (symlinked in) so the single-library model never
@@ -216,11 +303,15 @@ def prepare_vendor_webui_home(
                 _write_display_name(path, display_name=label)
                 named_written[folder] = label
     schema = ensure_agent_state_schema(agent)
+    config = ensure_vendor_config_yaml(agent)
+    schemas = ensure_profile_state_schemas(agent, shared_profiles=hermes / "profiles")
     return {
         "agent_home": str(agent),
         "layout": layout,
         "profiles": linked,
         "display_names": named_written,
         "state_db": schema,
+        "config": config,
+        "profile_schemas": schemas,
         "library": library_model(),
     }
