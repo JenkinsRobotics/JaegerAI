@@ -24,8 +24,11 @@ from jaeger_ai.core.agent_registry.types import (
     BUILTIN_THIRD_PARTY,
     AgentKind,
     AgentRecord,
+    AgentRole,
+    default_role_for,
     is_native,
     is_third_party,
+    normalize_agent_role,
 )
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
@@ -115,6 +118,9 @@ class AgentRegistry:
                     kind=AgentKind.NATIVE,
                     display_name=display,
                     source="instance",
+                    role=default_role_for(
+                        kind=AgentKind.NATIVE, name=path.name, agent_id=agent_id
+                    ),
                     active=(path.name == active_name),
                     instance_name=path.name,
                     instance_path=str(path),
@@ -144,6 +150,7 @@ class AgentRegistry:
                     kind=AgentKind.THIRD_PARTY,
                     display_name=str(item["display_name"]),
                     source="adapter",
+                    role=AgentRole.SPECIALIST,
                     active=(active_id == agent_id),
                     adapter=str(item.get("adapter") or item["name"]),
                     profile_id=(str(item["profile_id"]) if item.get("profile_id") else None),
@@ -168,11 +175,26 @@ class AgentRegistry:
 
     # ── public API ────────────────────────────────────────────────
 
-    def list_agents(self, *, kind: AgentKind | str | None = None) -> list[AgentRecord]:
+    def list_agents(
+        self,
+        *,
+        kind: AgentKind | str | None = None,
+        role: AgentRole | str | None = None,
+    ) -> list[AgentRecord]:
         """Return merged catalog: discovered native + builtin/registered third-party."""
+        # Product shape: lead + standing specialists always present (idempotent).
+        try:
+            from jaeger_ai.core.agent_registry.specialists import ensure_standing_specialists
+
+            ensure_standing_specialists(self)
+        except Exception:
+            pass
         want: AgentKind | None = None
         if kind is not None:
             want = kind if isinstance(kind, AgentKind) else AgentKind(str(kind))
+        want_role: AgentRole | None = None
+        if role is not None and str(role).strip():
+            want_role = role if isinstance(role, AgentRole) else normalize_agent_role(role)
 
         by_id: dict[str, AgentRecord] = {}
         for record in self._discover_native():
@@ -197,7 +219,15 @@ class AgentRegistry:
         agents = list(by_id.values())
         if want is not None:
             agents = [a for a in agents if a.kind is want]
-        agents.sort(key=lambda a: (0 if a.kind is AgentKind.NATIVE else 1, a.display_name.lower()))
+        if want_role is not None:
+            agents = [a for a in agents if a.role is want_role]
+        agents.sort(
+            key=lambda a: (
+                0 if a.role is AgentRole.LEAD else 1 if a.role is AgentRole.SPECIALIST else 2,
+                0 if a.kind is AgentKind.NATIVE else 1,
+                a.display_name.lower(),
+            )
+        )
         return agents
 
     def get_agent(self, agent_id: str) -> AgentRecord | None:
@@ -214,6 +244,7 @@ class AgentRegistry:
         name: str,
         *,
         kind: AgentKind | str = AgentKind.NATIVE,
+        role: AgentRole | str | None = None,
         display_name: str | None = None,
         adapter: str | None = None,
         profile_id: str | None = None,
@@ -239,6 +270,22 @@ class AgentRegistry:
         label = (display_name or clean).strip() or clean
         meta = dict(metadata or {})
         meta["created_at"] = meta.get("created_at") or time.time()
+        adapter_hint = (adapter or clean) if kind_enum is AgentKind.THIRD_PARTY else None
+        provisional_id = (
+            f"native:{clean}" if kind_enum is AgentKind.NATIVE else f"tp:{(adapter or clean)}"
+        )
+        role_hint = role if role is not None else meta.get("role")
+        if role_hint is None and meta.get("specialist") is True:
+            role_hint = AgentRole.SPECIALIST.value
+        role_enum = normalize_agent_role(
+            role_hint,
+            default=default_role_for(
+                kind=kind_enum,
+                name=clean,
+                agent_id=provisional_id,
+                adapter=adapter_hint,
+            ),
+        )
 
         if kind_enum is AgentKind.NATIVE:
             agent_id = f"native:{clean}"
@@ -251,6 +298,7 @@ class AgentRegistry:
                 kind=AgentKind.NATIVE,
                 display_name=label,
                 source="registry",
+                role=role_enum,
                 active=False,
                 instance_name=clean,
                 instance_path=str(instance_dir),
@@ -266,6 +314,7 @@ class AgentRegistry:
                 kind=AgentKind.THIRD_PARTY,
                 display_name=label,
                 source="registry",
+                role=role_enum,
                 active=False,
                 adapter=adapter_name,
                 profile_id=profile_id or adapter_name,
@@ -283,6 +332,8 @@ class AgentRegistry:
                 prior.endpoint = endpoint
             if port is not None:
                 prior.port = port
+            if role is not None:
+                prior.role = role_enum
             record = prior
 
         self._data.setdefault("agents", {})[record.id] = record.to_dict()
@@ -344,20 +395,33 @@ class AgentRegistry:
         agents = self.list_agents()
         native = [a.to_dict() for a in agents if is_native(a)]
         third_party = [a.to_dict() for a in agents if is_third_party(a)]
+        specialists = [a.to_dict() for a in agents if a.role is AgentRole.SPECIALIST]
         active = next((a.to_dict() for a in agents if a.active), None)
+        lead_rec = next((a for a in agents if a.role is AgentRole.LEAD), None)
+        if lead_rec is None:
+            lead_rec = next(
+                (a for a in agents if a.id == "native:jaeger" or a.name == "jaeger"),
+                None,
+            )
+        lead = lead_rec.to_dict() if lead_rec is not None else active
         return {
             "model": "grok_bot_shape",
             "persistence_spine": "jaeger_gateway",
             "gateway_port": 8810,
             "fundamentals_fee_gated": False,
             "active": active,
+            "lead": lead,
             "agents": [a.to_dict() for a in agents],
             "jaeger_native": native,
             "third_party": third_party,
+            "specialists": specialists,
             "counts": {
                 "total": len(agents),
                 "jaeger_native": len(native),
                 "third_party": len(third_party),
+                "lead": 1 if lead else 0,
+                "specialist": len(specialists),
+                "runtime": sum(1 for a in agents if a.role is AgentRole.RUNTIME),
             },
         }
 

@@ -8,6 +8,7 @@ share sessions, and stream live events without process teardown.
 from __future__ import annotations
 
 import asyncio
+import time
 import json
 import logging
 import os
@@ -53,11 +54,14 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
+        self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
+        self.app.router.add_get("/v1/handoffs", self.handle_list_handoffs)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
+        self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
 
@@ -185,12 +189,25 @@ class JaegerGatewayApp:
         return AgentRegistry()
 
     async def handle_list_agents(self, request: web.Request) -> web.Response:
-        """List JaegerNativeAgent + ThirdPartyAgent for Mac app / WebUI."""
+        """List JaegerNativeAgent + ThirdPartyAgent for Mac app / WebUI.
+
+        Query: ``?kind=`` and/or ``?role=lead|specialist|runtime``.
+        Unfiltered response is the full catalog including ``lead``.
+        """
         kind = request.query.get("kind")
+        role = request.query.get("role")
         registry = self._registry()
-        if kind:
-            agents = [a.to_dict() for a in registry.list_agents(kind=kind)]
-            return web.json_response({"agents": agents, "kind": kind})
+        if kind or role:
+            agents = [
+                a.to_dict()
+                for a in registry.list_agents(kind=kind or None, role=role or None)
+            ]
+            payload: dict[str, Any] = {"agents": agents}
+            if kind:
+                payload["kind"] = kind
+            if role:
+                payload["role"] = role
+            return web.json_response(payload)
         return web.json_response(registry.to_catalog())
 
     async def handle_create_agent(self, request: web.Request) -> web.Response:
@@ -203,6 +220,7 @@ class JaegerGatewayApp:
             record = self._registry().create_agent(
                 name,
                 kind=kind,
+                role=(str(body["role"]) if body.get("role") else None),
                 display_name=(str(body["display_name"]) if body.get("display_name") else None),
                 adapter=(str(body["adapter"]) if body.get("adapter") else None),
                 profile_id=(str(body["profile_id"]) if body.get("profile_id") else None),
@@ -232,6 +250,60 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Agent not found"}, status=404)
         self.event_bus.publish("*", "agent.activated", {"agent": record.to_dict()})
         return web.json_response(record.to_dict())
+
+    async def handle_handoff_agent(self, request: web.Request) -> web.Response:
+        """Lead → specialist handoff stub (agents-as-tools).
+
+        Body: ``{task, from_agent_id?, require_approval?}``. Reuses Gateway
+        ``pending_approvals`` when approval is required. Does not run a live
+        multi-agent turn — returns a structured stub record.
+        """
+        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
+
+        to_agent_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        task = str(body.get("task") or "").strip()
+        if not task:
+            return web.json_response({"error": "task is required"}, status=400)
+        registry = self._registry()
+        target = registry.get_agent(to_agent_id)
+        if target is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        from_id = str(body.get("from_agent_id") or "native:jaeger").strip()
+        require_approval = bool(body.get("require_approval", True))
+        stub = get_handoff_stub()
+        record = stub.create(
+            from_agent_id=from_id,
+            to_agent_id=target.id,
+            task=task,
+            require_approval=require_approval,
+            metadata={"target_display": target.display_name, "target_role": (target.metadata or {}).get("role")},
+        )
+        if require_approval and record.approval_id:
+            loop = asyncio.get_running_loop()
+            self.pending_approvals[record.approval_id] = loop.create_future()
+            self.event_bus.publish(
+                "*",
+                "approval.request",
+                {
+                    "approval_id": record.approval_id,
+                    "handoff_id": record.id,
+                    "kind": "handoff",
+                    "from_agent_id": from_id,
+                    "to_agent_id": target.id,
+                    "task": task,
+                    "options": ["once", "deny"],
+                    "prompt": f"Allow handoff to {target.display_name}?",
+                },
+            )
+        self.event_bus.publish("*", "agent.handoff", {"handoff": record.to_dict()})
+        return web.json_response(record.to_dict(), status=202 if require_approval else 200)
+
+    async def handle_list_handoffs(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
+
+        records = [r.to_dict() for r in get_handoff_stub().list_records()]
+        return web.json_response({"handoffs": records, "count": len(records)})
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
@@ -270,6 +342,69 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Session not found"}, status=404)
         self.event_bus.publish(session_id, "session.deleted", {"session_id": session_id})
         return web.json_response({"deleted": True})
+
+    async def handle_session_handoff(self, request: web.Request) -> web.Response:
+        """Transfer a session to another agent (P6) — never fee-gated.
+
+        Body: ``{to_agent_id, reason?, keep_history?: true}``.
+        Updates session ``agent_id`` metadata; optionally clears transcript.
+        """
+        session_id = request.match_info["id"]
+        session = self.store.get_session(session_id)
+        if not session:
+            return web.json_response({"error": "Session not found"}, status=404)
+        body = await request.json() if request.can_read_body else {}
+        to_agent_id = str(body.get("to_agent_id") or "").strip()
+        if not to_agent_id:
+            return web.json_response({"error": "to_agent_id is required"}, status=400)
+        keep_history = bool(body.get("keep_history", True))
+        reason = str(body.get("reason") or "").strip() or None
+
+        registry = self._registry()
+        target = registry.get_agent(to_agent_id)
+        if target is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+
+        previous_agent_id = session.get("agent_id") or (session.get("metadata") or {}).get(
+            "agent_id"
+        )
+        if not keep_history:
+            self.store.clear_messages(session_id)
+
+        patch = {
+            "agent_id": target.id,
+            "previous_agent_id": previous_agent_id,
+            "handoff_reason": reason,
+            "handed_off_at": time.time(),
+        }
+        updated = self.store.update_metadata(session_id, patch)
+        if updated is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+
+        agent = target.to_dict()
+        self.event_bus.publish(
+            session_id,
+            "session.handoff",
+            {
+                "session_id": session_id,
+                "from_agent_id": previous_agent_id,
+                "to_agent_id": target.id,
+                "agent": agent,
+                "reason": reason,
+                "keep_history": keep_history,
+            },
+        )
+        return web.json_response(
+            {
+                "session_id": session_id,
+                "agent_id": target.id,
+                "previous_agent_id": previous_agent_id,
+                "agent": agent,
+                "session": updated,
+                "keep_history": keep_history,
+                "reason": reason,
+            }
+        )
 
     async def handle_send_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
@@ -360,6 +495,26 @@ class JaegerGatewayApp:
             })
 
     async def handle_stream_events(self, request: web.Request) -> web.StreamResponse:
+        """SSE for session + global (``*``) events.
+
+        Surfaces P8 — approval request payload on the stream::
+
+            event: approval.request
+            data: {
+              "approval_id": "approval_…",
+              "kind": "handoff" | "tool" | str,
+              "prompt": "Allow …?",
+              "options": ["once", "deny"],
+              "session_id": "…" | null,
+              "handoff_id": "…" | null,
+              "from_agent_id": "…" | null,
+              "to_agent_id": "…" | null,
+              "task": "…" | null
+            }
+
+        Resolve with ``POST /v1/approvals/{approval_id}`` body
+        ``{"approved": true|false}`` → emits ``approval.resolved``.
+        """
         session_id = request.match_info["id"]
         last_event_id = int(request.query.get("last_event_id") or 0)
 
@@ -400,11 +555,21 @@ class JaegerGatewayApp:
         if future and not future.done():
             future.set_result(approved)
 
+        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
+
+        handoff = get_handoff_stub().resolve_approval(approval_id, approved=approved)
+
         self.event_bus.publish("*", "approval.resolved", {
             "approval_id": approval_id,
             "approved": approved,
+            "handoff": handoff.to_dict() if handoff else None,
         })
-        return web.json_response({"approval_id": approval_id, "resolved": True})
+        return web.json_response({
+            "approval_id": approval_id,
+            "resolved": True,
+            "approved": approved,
+            "handoff": handoff.to_dict() if handoff else None,
+        })
 
 
 def create_gateway_server(

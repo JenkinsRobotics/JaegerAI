@@ -102,6 +102,7 @@ from .credentials import get_credential, list_credentials
 
 # Coordination / meta
 from .delegation import CAPABILITY_SUMMARY, ask_user, help_me
+from .call_agent import call_agent
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin
@@ -215,7 +216,7 @@ __all__ = [
     # credentials
     "get_credential", "list_credentials",
     # delegation
-    "ask_user", "help_me", "CAPABILITY_SUMMARY",
+    "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent",
     # plugins
     "list_plugins", "setup_plugin",
     # audio input

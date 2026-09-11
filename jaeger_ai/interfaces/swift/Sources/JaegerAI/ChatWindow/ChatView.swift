@@ -1383,9 +1383,17 @@ struct ChatView: View {
             var merged: [AgentRosterItem] = []
             for a in allLive {
                 guard seen.insert(a.id).inserted else { continue }
-                let color: Color = a.kind == "jaeger_native"
-                    ? Color(red: 0.96, green: 0.55, blue: 0.16)
-                    : Color(red: 0.20, green: 0.78, blue: 0.55)
+                // Lead amber; standing specialists cyan; third-party green.
+                let color: Color
+                if a.id == "native:jaeger" {
+                    color = Color(red: 0.96, green: 0.55, blue: 0.16)
+                } else if a.id.hasPrefix("native:surfaces") || a.id.hasPrefix("native:gateway") || a.id.hasPrefix("native:everyday") {
+                    color = Color(red: 0.23, green: 0.63, blue: 1.0) // Term.accent
+                } else if a.kind == "jaeger_native" {
+                    color = Color(red: 0.96, green: 0.55, blue: 0.16).opacity(0.85)
+                } else {
+                    color = Color(red: 0.20, green: 0.78, blue: 0.55)
+                }
                 merged.append(
                     AgentRosterItem(
                         id: a.id,

@@ -41,6 +41,7 @@ CAPABILITY_SUMMARY = (
     "  • macOS host control — open_on_host (URL / file / app)\n"
     "  • Credentials — get_credential, list_credentials (never echo values)\n"
     "  • Sub-agents — delegate_task(subtasks) for parallel/independent work\n"
+    "  • Specialists — call_agent(agent_id, task) handoff stub (Surfaces/Gateway/Everyday)\n"
     "  • Skill management — reload_skills (call after writing new skill files)\n"
     "  • Clarify — clarify\n"
     "Plus every skill registered from core skills/ and your instance's skills/.\n"
