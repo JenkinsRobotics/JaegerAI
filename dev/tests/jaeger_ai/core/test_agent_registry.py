@@ -269,6 +269,40 @@ class TestGatewayHandoffAPI(AioHTTPTestCase):
         body = await resp.json()
         assert body.get("error") == "Approval not found"
 
+    async def test_resolve_approval_twice_clean_404(self):
+        """Second resolve of the same approval_id → clean 404 (not corrupt)."""
+        resp = await self.client.request(
+            "POST",
+            "/v1/agents/native:gateway/handoff",
+            json={
+                "task": "double resolve",
+                "from_agent_id": "native:jaeger",
+                "require_approval": True,
+            },
+        )
+        assert resp.status == 202
+        approval_id = (await resp.json())["approval_id"]
+        assert approval_id
+
+        resp = await self.client.request(
+            "POST",
+            f"/v1/approvals/{approval_id}",
+            json={"approved": True},
+        )
+        assert resp.status == 200
+        first = await resp.json()
+        assert first["resolved"] is True
+        assert first["approved"] is True
+
+        resp = await self.client.request(
+            "POST",
+            f"/v1/approvals/{approval_id}",
+            json={"approved": False},
+        )
+        assert resp.status == 404
+        body = await resp.json()
+        assert body.get("error") == "Approval not found"
+
 
 def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
@@ -490,6 +524,85 @@ class TestGatewaySessionHandoff(AioHTTPTestCase):
         sess = self.temp_store.get_session("kh-clear")
         assert sess["messages"] == []
         assert sess["agent_id"] == "native:gateway"
+
+
+    async def test_session_handoff_empty_to_agent_id_400(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={"session_id": "empty-to", "title": "Empty"},
+        )
+        assert resp.status == 201
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/empty-to/handoff",
+            json={"to_agent_id": "", "reason": "blank"},
+        )
+        assert resp.status == 400
+        body = await resp.json()
+        assert "to_agent_id" in body.get("error", "")
+
+    async def test_get_session_includes_role_display_name_after_handoff(self):
+        """Chrome polls GET /v1/sessions/{id} without SSE — need identity fields."""
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "get-enrich",
+                "title": "Enrich",
+                "metadata": {"agent_id": "native:jaeger"},
+            },
+        )
+        assert resp.status == 201
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/get-enrich/handoff",
+            json={"to_agent_id": "native:gateway", "reason": "chrome"},
+        )
+        assert resp.status == 200
+
+        resp = await self.client.request("GET", "/v1/sessions/get-enrich")
+        assert resp.status == 200
+        sess = await resp.json()
+        assert sess["agent_id"] == "native:gateway"
+        assert sess["role"] == "specialist"
+        assert sess["display_name"] == "Gateway"
+        # agent_id must survive GET enrichment (no corruption)
+        assert sess["metadata"]["agent_id"] == "native:gateway"
+
+    async def test_concurrent_turn_while_running_409(self):
+        """Second turn while status=running → clean 409; agent_id intact."""
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "conc-turn",
+                "title": "Concurrent",
+                "metadata": {"agent_id": "native:gateway"},
+            },
+        )
+        assert resp.status == 201
+
+        # Force running without waiting on Ollama
+        self.temp_store.update_status("conc-turn", "running")
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/conc-turn/turns",
+            json={"text": "second while running"},
+        )
+        assert resp.status == 409
+        body = await resp.json()
+        assert body.get("error") == "Turn already in progress"
+        assert body.get("status") == "running"
+        assert body.get("agent_id") == "native:gateway"
+
+        sess = self.temp_store.get_session("conc-turn")
+        assert sess["status"] == "running"
+        assert sess["agent_id"] == "native:gateway"
+        # No user message appended for the rejected turn
+        assert sess["messages"] == []
+
 
 
 def test_system_prompt_for_session_agent_specialist():
