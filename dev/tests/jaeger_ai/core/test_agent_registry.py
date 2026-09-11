@@ -249,6 +249,27 @@ class TestGatewayHandoffAPI(AioHTTPTestCase):
         listing = await resp.json()
         assert listing["count"] >= 1
 
+    async def test_handoff_missing_agent_clean_404(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/agents/native:does-not-exist/handoff",
+            json={"task": "x", "require_approval": False},
+        )
+        assert resp.status == 404
+        body = await resp.json()
+        assert "error" in body
+
+    async def test_resolve_unknown_approval_clean_404(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/approvals/approval_nonexistent_xyz",
+            json={"approved": True},
+        )
+        assert resp.status == 404
+        body = await resp.json()
+        assert body.get("error") == "Approval not found"
+
+
 def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
     # Seed a native jaeger instance so discovery marks it lead.
@@ -335,6 +356,140 @@ class TestGatewaySessionHandoff(AioHTTPTestCase):
             json={"to_agent_id": to_id},
         )
         assert resp.status == 404
+
+    async def test_session_handoff_missing_agent_404(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={"session_id": "miss-agent", "title": "x"},
+        )
+        assert resp.status == 201
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/miss-agent/handoff",
+            json={"to_agent_id": "native:does-not-exist"},
+        )
+        assert resp.status == 404
+        body = await resp.json()
+        assert body.get("error") == "Agent not found"
+
+    async def test_handoff_to_lead_and_specialist_allowed(self):
+        resp = await self.client.request("GET", "/v1/agents")
+        catalog = await resp.json()
+        lead_id = catalog["lead"]["id"]
+        assert catalog["lead"]["role"] == "lead"
+
+        resp = await self.client.request("GET", "/v1/agents?role=lead")
+        leads = await resp.json()
+        assert all(a["role"] == "lead" for a in leads["agents"])
+        assert any(a["id"] == lead_id for a in leads["agents"])
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "lead-specialist",
+                "title": "roles",
+                "metadata": {"agent_id": lead_id},
+            },
+        )
+        assert resp.status == 201
+
+        resp = await self.client.request("GET", "/v1/agents?role=specialist")
+        specs = await resp.json()
+        specialist_id = next(
+            a["id"] for a in specs["agents"] if a["id"] == "native:gateway"
+        )
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/lead-specialist/handoff",
+            json={"to_agent_id": specialist_id, "reason": "to specialist"},
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["agent_id"] == specialist_id
+        assert body["previous_agent_id"] == lead_id
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/lead-specialist/handoff",
+            json={"to_agent_id": lead_id, "reason": "back to lead"},
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["agent_id"] == lead_id
+        assert body["previous_agent_id"] == specialist_id
+
+        resp = await self.client.request("GET", "/v1/agents")
+        catalog2 = await resp.json()
+        assert catalog2["lead"]["id"] == lead_id
+        assert catalog2["lead"]["role"] == "lead"
+
+    async def test_double_handoff_chain_keeps_agent_id(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "double-ho",
+                "title": "chain",
+                "metadata": {"agent_id": "native:jaeger"},
+            },
+        )
+        assert resp.status == 201
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/double-ho/handoff",
+            json={"to_agent_id": "native:gateway", "reason": "1"},
+        )
+        assert resp.status == 200
+        assert (await resp.json())["agent_id"] == "native:gateway"
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/double-ho/handoff",
+            json={"to_agent_id": "native:surfaces", "reason": "2"},
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["agent_id"] == "native:surfaces"
+        assert body["previous_agent_id"] == "native:gateway"
+
+        resp = await self.client.request("GET", "/v1/sessions/double-ho")
+        sess = await resp.json()
+        assert sess["agent_id"] == "native:surfaces"
+        assert sess["metadata"]["agent_id"] == "native:surfaces"
+        assert sess["metadata"]["previous_agent_id"] == "native:gateway"
+
+    async def test_keep_history_false_clears_messages(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={"session_id": "kh-clear", "title": "kh"},
+        )
+        assert resp.status == 201
+        self.temp_store.append_message("kh-clear", "user", "hello")
+        self.temp_store.append_message("kh-clear", "assistant", "hi")
+        sess = self.temp_store.get_session("kh-clear")
+        assert len(sess["messages"]) == 2
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/kh-clear/handoff",
+            json={
+                "to_agent_id": "native:gateway",
+                "reason": "wipe",
+                "keep_history": False,
+            },
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["keep_history"] is False
+        assert body["agent_id"] == "native:gateway"
+        sess = self.temp_store.get_session("kh-clear")
+        assert sess["messages"] == []
+        assert sess["agent_id"] == "native:gateway"
 
 
 def test_system_prompt_for_session_agent_specialist():
@@ -470,3 +625,103 @@ class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
         assert data.get("agent_id") == "native:gateway"
         assert data.get("display_name") == "Gateway"
         assert data.get("role") == "specialist"
+
+    async def test_double_handoff_then_turn_identity(self):
+        """After A→B→C handoffs, next turn.finish stamps C's identity."""
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "p6-double",
+                "title": "double",
+                "metadata": {"agent_id": "native:jaeger"},
+            },
+        )
+        assert resp.status == 201
+
+        for to_id, reason in (
+            ("native:gateway", "1"),
+            ("native:surfaces", "2"),
+        ):
+            resp = await self.client.request(
+                "POST",
+                "/v1/sessions/p6-double/handoff",
+                json={"to_agent_id": to_id, "reason": reason, "keep_history": True},
+            )
+            assert resp.status == 200
+            assert (await resp.json())["agent_id"] == to_id
+
+        captured: dict = {}
+
+        async def fake_chat(text: str, *, system_prompt: str | None = None) -> str:
+            captured["system_prompt"] = system_prompt
+            return "SPECIALIST:Surfaces"
+
+        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+
+        await self.gateway_app._execute_turn(
+            "p6-double",
+            "turn-double",
+            "Reply with exactly: SPECIALIST:<your display name>",
+        )
+
+        assert "You are Surfaces." in (captured.get("system_prompt") or "")
+        finishes = [
+            e
+            for e in self.gateway_app.event_bus.get_replay_events("p6-double")
+            if e.event == "turn.finish"
+        ]
+        assert finishes
+        data = finishes[-1].data
+        assert data.get("agent_id") == "native:surfaces"
+        assert data.get("display_name") == "Surfaces"
+        assert data.get("role") == "specialist"
+
+    async def test_keep_history_false_then_turn_still_works(self):
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "p6-kh",
+                "title": "kh",
+                "metadata": {"agent_id": "native:jaeger"},
+            },
+        )
+        assert resp.status == 201
+        self.temp_store.append_message("p6-kh", "user", "prior")
+        self.temp_store.append_message("p6-kh", "assistant", "prior-reply")
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/p6-kh/handoff",
+            json={
+                "to_agent_id": "native:gateway",
+                "reason": "wipe",
+                "keep_history": False,
+            },
+        )
+        assert resp.status == 200
+        assert self.temp_store.get_session("p6-kh")["messages"] == []
+
+        async def fake_chat(text: str, *, system_prompt: str | None = None) -> str:
+            return "ok-after-clear"
+
+        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+        await self.gateway_app._execute_turn("p6-kh", "turn-kh", "ping")
+
+        session = self.temp_store.get_session("p6-kh")
+        assert session["status"] == "idle"
+        assert session["agent_id"] == "native:gateway"
+        assert any(
+            m["role"] == "assistant" and m["content"] == "ok-after-clear"
+            for m in session["messages"]
+        )
+        finishes = [
+            e
+            for e in self.gateway_app.event_bus.get_replay_events("p6-kh")
+            if e.event == "turn.finish"
+        ]
+        data = finishes[-1].data
+        assert data.get("agent_id") == "native:gateway"
+        assert data.get("role") == "specialist"
+        assert data.get("display_name") == "Gateway"

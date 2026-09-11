@@ -363,7 +363,9 @@ class JaegerGatewayApp:
         registry = self._registry()
         target = registry.get_agent(to_agent_id)
         if target is None:
+            # Surfaces: missing agent must be a clean 404 (not 500 / empty body).
             return web.json_response({"error": "Agent not found"}, status=404)
+        # Lead ↔ specialist (and runtime) handoffs are all allowed; role is not gated.
 
         previous_agent_id = session.get("agent_id") or (session.get("metadata") or {}).get(
             "agent_id"
@@ -528,9 +530,17 @@ class JaegerGatewayApp:
 
     async def _execute_turn(self, session_id: str, turn_id: str, text: str) -> None:
         """Background turn executor: real Ollama HTTP, not mocks, not :8813."""
+        session = self.store.get_session(session_id)
+        session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
         system_prompt = self._system_prompt_for_agent(agent)
+        # Surfaces expect agent identity on turn.finish after handoff even if
+        # registry lookup soft-fails — always stamp the three keys when known.
         agent_fields: dict[str, Any] = {}
+        if session_agent_id:
+            agent_fields["agent_id"] = session_agent_id
+            agent_fields["role"] = None
+            agent_fields["display_name"] = None
         if agent is not None:
             role = getattr(agent, "role", None)
             agent_fields = {
@@ -619,17 +629,26 @@ class JaegerGatewayApp:
         return response
 
     async def handle_resolve_approval(self, request: web.Request) -> web.Response:
+        """Resolve a pending approval (handoff stub or tool).
+
+        Unknown ids → clean 404. Handoff stub path resolves without crashing
+        even when the Future was never awaited (Surfaces card POST).
+        """
         approval_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
         approved = bool(body.get("approved", True))
 
         future = self.pending_approvals.pop(approval_id, None)
-        if future and not future.done():
-            future.set_result(approved)
 
         from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
 
         handoff = get_handoff_stub().resolve_approval(approval_id, approved=approved)
+
+        if future is None and handoff is None:
+            return web.json_response({"error": "Approval not found"}, status=404)
+
+        if future is not None and not future.done():
+            future.set_result(approved)
 
         self.event_bus.publish("*", "approval.resolved", {
             "approval_id": approval_id,
