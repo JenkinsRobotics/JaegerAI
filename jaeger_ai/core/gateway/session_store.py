@@ -69,8 +69,10 @@ class GatewaySessionStore:
                 params.append(profile)
             query += " GROUP BY s.session_id ORDER BY s.updated_at DESC"
             rows = conn.execute(query, params).fetchall()
-            return [
-                {
+            out = []
+            for r in rows:
+                meta = json.loads(r["metadata_json"] or "{}")
+                row = {
                     "session_id": r["session_id"],
                     "title": r["title"],
                     "profile": r["profile"],
@@ -79,10 +81,11 @@ class GatewaySessionStore:
                     "updated_at": r["updated_at"],
                     "status": r["status"],
                     "message_count": r["message_count"],
-                    "metadata": json.loads(r["metadata_json"] or "{}"),
+                    "metadata": meta,
+                    "agent_id": meta.get("agent_id"),
                 }
-                for r in rows
-            ]
+                out.append(row)
+            return out
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
@@ -93,6 +96,7 @@ class GatewaySessionStore:
                 "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC",
                 (session_id,),
             ).fetchall()
+            meta = json.loads(row["metadata_json"] or "{}")
             return {
                 "session_id": row["session_id"],
                 "title": row["title"],
@@ -101,7 +105,8 @@ class GatewaySessionStore:
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
                 "status": row["status"],
-                "metadata": json.loads(row["metadata_json"] or "{}"),
+                "metadata": meta,
+                "agent_id": meta.get("agent_id"),
                 "messages": [
                     {
                         "id": m["id"],
@@ -126,12 +131,26 @@ class GatewaySessionStore:
         now = time.time()
         meta_str = json.dumps(metadata or {})
         with self._get_conn() as conn:
+            if metadata:
+                # Merge metadata keys when caller supplies them on ensure.
+                existing = conn.execute(
+                    "SELECT metadata_json FROM sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if existing:
+                    prior = json.loads(existing["metadata_json"] or "{}")
+                    prior.update(metadata)
+                    meta_str = json.dumps(prior)
             conn.execute(
                 """
                 INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
                 VALUES (?, ?, ?, ?, ?, ?, 'idle', ?)
                 ON CONFLICT(session_id) DO UPDATE SET
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    metadata_json = CASE
+                        WHEN excluded.metadata_json != '{}' THEN excluded.metadata_json
+                        ELSE sessions.metadata_json
+                    END
                 """,
                 (session_id, title, profile, workspace, now, now, meta_str),
             )
@@ -174,3 +193,33 @@ class GatewaySessionStore:
         with self._get_conn() as conn:
             res = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             return res.rowcount > 0
+
+    def update_metadata(self, session_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
+        """Merge ``patch`` into session metadata and return the updated session."""
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        meta = dict(session.get("metadata") or {})
+        meta.update(patch or {})
+        now = time.time()
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(meta), now, session_id),
+            )
+        return self.get_session(session_id)
+
+    def clear_messages(self, session_id: str) -> bool:
+        """Drop transcript messages; keep the session row (handoff keep_history=false)."""
+        with self._get_conn() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if not exists:
+                return False
+            conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
+                (time.time(), session_id),
+            )
+        return True

@@ -23,6 +23,60 @@ class AgentKind(str, Enum):
     THIRD_PARTY = "third_party"
 
 
+class AgentRole(str, Enum):
+    """Product role for Grok-shaped lead + specialists chrome.
+
+    Orthogonal to ``AgentKind`` (native vs third-party adapter face).
+    """
+
+    LEAD = "lead"
+    SPECIALIST = "specialist"
+    RUNTIME = "runtime"
+
+
+# Domain labels historically stuffed into metadata.role (surfaces/gateway/everyday).
+_SPECIALTY_ALIASES = frozenset({"surfaces", "gateway", "everyday", "specialist"})
+
+
+def normalize_agent_role(value: object | None, *, default: AgentRole = AgentRole.RUNTIME) -> AgentRole:
+    """Coerce role strings; specialty aliases map to ``specialist``."""
+    if isinstance(value, AgentRole):
+        return value
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return default
+    if raw in _SPECIALTY_ALIASES:
+        return AgentRole.SPECIALIST
+    try:
+        return AgentRole(raw)
+    except ValueError:
+        return default
+
+
+def default_role_for(
+    *,
+    kind: AgentKind | str,
+    name: str | None = None,
+    agent_id: str | None = None,
+    adapter: str | None = None,
+) -> AgentRole:
+    """Sensible defaults: sticky Assistant is lead; third-party faces are specialists."""
+    kind_enum = kind if isinstance(kind, AgentKind) else AgentKind(str(kind))
+    needle_name = (name or "").strip().lower()
+    needle_id = (agent_id or "").strip().lower()
+    if kind_enum is AgentKind.NATIVE:
+        if needle_name in {"jaeger", "assistant"} or needle_id in {"native:jaeger", "jaeger"}:
+            return AgentRole.LEAD
+        if needle_name in _SPECIALTY_ALIASES or needle_id.startswith("native:") and needle_name in {
+            "surfaces", "gateway", "everyday",
+        }:
+            return AgentRole.SPECIALIST
+        return AgentRole.RUNTIME
+    # Standing third-party adapter faces (Hermes/OpenClaw/Roundtable/…) → specialist.
+    _ = adapter  # reserved for future adapter-specific overrides
+    return AgentRole.SPECIALIST
+
+
 # Stable ids for built-in third-party faces (Hermes WebUI profile adapters).
 BUILTIN_THIRD_PARTY: tuple[dict[str, Any], ...] = (
     {
@@ -64,6 +118,7 @@ class AgentRecord:
     kind: AgentKind
     display_name: str
     source: str  # instance | adapter | registry
+    role: AgentRole = AgentRole.RUNTIME
     active: bool = False
     switchable: bool = True
     fundamentals_gated: bool = False
@@ -78,6 +133,7 @@ class AgentRecord:
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         raw["kind"] = self.kind.value
+        raw["role"] = self.role.value if isinstance(self.role, AgentRole) else str(self.role)
         # Invariant: fundamentals are never fee/feature gated.
         raw["fundamentals_gated"] = False
         raw["switchable"] = True if self.switchable or not self.fundamentals_gated else self.switchable
@@ -92,12 +148,29 @@ class AgentRecord:
             kind = AgentKind(str(kind_raw))
         except ValueError:
             kind = AgentKind.NATIVE
+        meta = dict(data.get("metadata") or {})
+        role_hint = data.get("role")
+        if role_hint is None:
+            if meta.get("specialist") is True or str(meta.get("role") or "") in _SPECIALTY_ALIASES:
+                role_hint = AgentRole.SPECIALIST.value
+            elif str(meta.get("role") or "") == "lead":
+                role_hint = AgentRole.LEAD.value
+        role = normalize_agent_role(
+            role_hint,
+            default=default_role_for(
+                kind=kind,
+                name=str(data.get("name") or ""),
+                agent_id=str(data.get("id") or ""),
+                adapter=(str(data["adapter"]) if data.get("adapter") else None),
+            ),
+        )
         return cls(
             id=str(data["id"]),
             name=str(data.get("name") or data["id"]),
             kind=kind,
             display_name=str(data.get("display_name") or data.get("name") or data["id"]),
             source=str(data.get("source") or "registry"),
+            role=role,
             active=bool(data.get("active", False)),
             switchable=True,  # never honor a fee lock from persisted state
             fundamentals_gated=False,

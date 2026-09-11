@@ -170,3 +170,169 @@ class TestGatewayAgentsAPI(AioHTTPTestCase):
         assert resp.status == 201
         tp = await resp.json()
         assert tp["kind"] == "third_party"
+
+
+def test_standing_specialists_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    registry = AgentRegistry(tmp_path)
+    agents = registry.list_agents()
+    by_id = {a.id: a for a in agents}
+    assert "native:jaeger" in by_id
+    assert by_id["native:jaeger"].display_name == "Assistant"
+    assert by_id["native:jaeger"].metadata.get("role") == "lead"
+    for name in ("surfaces", "gateway", "everyday"):
+        aid = f"native:{name}"
+        assert aid in by_id, aid
+        assert by_id[aid].metadata.get("specialist") is True
+        assert by_id[aid].metadata.get("role") == name
+    catalog = registry.to_catalog()
+    assert catalog["model"] == "grok_bot_shape"
+    assert catalog["counts"]["jaeger_native"] >= 4
+
+
+class TestGatewayHandoffAPI(AioHTTPTestCase):
+    async def get_application(self):
+        import os
+        import tempfile
+
+        self.state_root = Path(tempfile.mkdtemp())
+        os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
+        self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
+        self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        return self.gateway_app.app
+
+    async def tearDownAsync(self):
+        import os
+        import shutil
+
+        os.environ.pop("JAEGER_STATE_DIR", None)
+        if hasattr(self, "state_root") and self.state_root.exists():
+            shutil.rmtree(self.state_root, ignore_errors=True)
+        await super().tearDownAsync()
+
+    async def test_handoff_creates_approval_and_resolves(self):
+        # Ensure specialists exist via catalog
+        resp = await self.client.request("GET", "/v1/agents")
+        assert resp.status == 200
+        catalog = await resp.json()
+        ids = {a["id"] for a in catalog["agents"]}
+        assert "native:surfaces" in ids
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/agents/native:surfaces/handoff",
+            json={
+                "task": "Align WebUI agents chrome with Mac",
+                "from_agent_id": "native:jaeger",
+                "require_approval": True,
+            },
+        )
+        assert resp.status == 202
+        handoff = await resp.json()
+        assert handoff["status"] == "pending_approval"
+        assert handoff["to_agent_id"] == "native:surfaces"
+        approval_id = handoff["approval_id"]
+        assert approval_id
+
+        resp = await self.client.request(
+            "POST",
+            f"/v1/approvals/{approval_id}",
+            json={"approved": True},
+        )
+        assert resp.status == 200
+        resolved = await resp.json()
+        assert resolved["approved"] is True
+        assert resolved["handoff"]["status"] == "approved"
+
+        resp = await self.client.request("GET", "/v1/handoffs")
+        assert resp.status == 200
+        listing = await resp.json()
+        assert listing["count"] >= 1
+
+def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    # Seed a native jaeger instance so discovery marks it lead.
+    (tmp_path / "instances" / "jaeger").mkdir(parents=True)
+    (tmp_path / "instances" / "jaeger" / "identity.yaml").write_text(
+        "name: Assistant\n", encoding="utf-8"
+    )
+    (tmp_path / "instances" / "default").mkdir(parents=True)
+    registry = AgentRegistry(tmp_path)
+    agents = {a.id: a for a in registry.list_agents()}
+    assert agents["native:jaeger"].role.value == "lead"
+    assert agents["native:default"].role.value in {"runtime", "specialist"}
+    assert agents["tp:hermes"].role.value == "specialist"
+    specialists = registry.list_agents(role="specialist")
+    assert specialists
+    assert all(a.role.value == "specialist" for a in specialists)
+    catalog = registry.to_catalog()
+    assert catalog["lead"]["id"] == "native:jaeger"
+    assert catalog["lead"]["role"] == "lead"
+    assert catalog["counts"]["specialist"] >= 1
+
+
+class TestGatewaySessionHandoff(AioHTTPTestCase):
+    async def get_application(self):
+        import os
+        import tempfile
+
+        self.state_root = Path(tempfile.mkdtemp())
+        os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
+        (self.state_root / "instances" / "jaeger").mkdir(parents=True)
+        (self.state_root / "instances" / "jaeger" / "identity.yaml").write_text(
+            "name: Assistant\n", encoding="utf-8"
+        )
+        self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
+        self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        return self.gateway_app.app
+
+    async def tearDownAsync(self):
+        import os
+        import shutil
+
+        os.environ.pop("JAEGER_STATE_DIR", None)
+        if hasattr(self, "state_root") and self.state_root.exists():
+            shutil.rmtree(self.state_root, ignore_errors=True)
+        await super().tearDownAsync()
+
+    async def test_session_handoff_and_role_filter(self):
+        resp = await self.client.request("GET", "/v1/agents")
+        assert resp.status == 200
+        catalog = await resp.json()
+        assert catalog["lead"]["role"] == "lead"
+        assert "specialists" in catalog
+
+        resp = await self.client.request("GET", "/v1/agents?role=specialist")
+        assert resp.status == 200
+        filtered = await resp.json()
+        assert filtered["role"] == "specialist"
+        assert filtered["agents"]
+        assert all(a["role"] == "specialist" for a in filtered["agents"])
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={"session_id": "handoff-sess", "title": "Handoff", "profile": "jaeger"},
+        )
+        assert resp.status == 201
+
+        to_id = filtered["agents"][0]["id"]
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/handoff-sess/handoff",
+            json={"to_agent_id": to_id, "reason": "P6 probe", "keep_history": True},
+        )
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["session_id"] == "handoff-sess"
+        assert body["agent_id"] == to_id
+        assert body["session"]["agent_id"] == to_id
+        assert body["session"]["metadata"]["handoff_reason"] == "P6 probe"
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/missing/handoff",
+            json={"to_agent_id": to_id},
+        )
+        assert resp.status == 404
+
