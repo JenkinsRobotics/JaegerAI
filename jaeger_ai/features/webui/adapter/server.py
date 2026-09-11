@@ -18,7 +18,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from jaeger_ai.features.oidc import (
     OIDCAuthError,
@@ -843,7 +843,7 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
             if activate_match:
                 from jaeger_ai.core.agent_registry import AgentRegistry
 
-                agent_id = activate_match.group(1)
+                agent_id = unquote(activate_match.group(1))
                 try:
                     record = AgentRegistry().set_active(agent_id)
                 except KeyError as exc:
