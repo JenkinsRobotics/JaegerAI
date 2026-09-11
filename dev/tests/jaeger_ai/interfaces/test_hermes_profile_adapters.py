@@ -366,7 +366,35 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
         assert setup.JAEGER_MCP_URL in config
     document = json.loads(openclaw.read_text())
     assert document["mcp"]["servers"]["jaeger-host"]["url"].endswith(":8811/mcp")
+    assert "ares-system" not in document["mcp"]["servers"]
 
+
+
+def test_setup_removes_openclaw_ares_system_8813_default(tmp_path):
+    openclaw = tmp_path / ".ares" / "openclaw" / "openclaw.json"
+    openclaw.parent.mkdir(parents=True)
+    openclaw.write_text(json.dumps({
+        "mcp": {
+            "servers": {
+                "ares-system": {
+                    "url": "http://192.168.64.1:8813/mcp",
+                    "transport": "streamable-http",
+                }
+            }
+        }
+    }))
+    # Minimal hermes homes so connectivity walks profiles safely
+    for profile_home in [tmp_path / ".hermes"] + [
+        tmp_path / ".hermes" / "profiles" / profile for profile in setup.SERVICES
+    ]:
+        profile_home.mkdir(parents=True, exist_ok=True)
+        profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")
+
+    setup._configure_agent_connectivity(tmp_path)
+
+    document = json.loads(openclaw.read_text())
+    assert document["mcp"]["servers"]["jaeger-host"]["url"].endswith(":8811/mcp")
+    assert "ares-system" not in document["mcp"]["servers"]
 
 def test_setup_configures_profile_isolated_honcho_peers_on_lan(tmp_path):
     paths = setup._configure_honcho(tmp_path)

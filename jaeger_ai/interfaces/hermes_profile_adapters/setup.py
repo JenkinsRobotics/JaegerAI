@@ -196,29 +196,9 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
             "url": JAEGER_MCP_URL,
             "transport": "streamable-http",
         }
-        mcp_token_path = home / ".ares" / "openclaw" / "ares-mcp.token"
-        host_key = ""
-        if mcp_token_path.exists():
-            host_key = mcp_token_path.read_text(encoding="utf-8").strip()
-        else:
-            secret_path = home / ".hermes" / "profiles" / "openclaw" / ".env"
-            try:
-                for line in secret_path.read_text(encoding="utf-8").splitlines():
-                    key, separator, value = line.partition("=")
-                    if separator and key.strip() == "MCP_ARES_HOST_API_KEY":
-                        host_key = value.strip().strip("\"'")
-                        break
-            except OSError:
-                pass
-        if host_key:
-            servers["ares-system"] = {
-                "url": "http://192.168.64.1:8813/mcp",
-                "transport": "streamable-http",
-                "headers": {
-                    "Authorization": f"Bearer {host_key}",
-                    "Host": "127.0.0.1:8813",
-                },
-            }
+        # Do not default OpenClaw MCP to ares-agentgateway :8813 (M10).
+        # Chat spine uses JAEGER_MCP_URL (:8811) via jaeger-host only.
+        servers.pop("ares-system", None)
         temporary = openclaw_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         temporary.chmod(0o600)
