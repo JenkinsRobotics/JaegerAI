@@ -46,3 +46,7 @@ _None._
 
 - **P2 yellow:** primary chrome fixed; additional user-visible Hermes scrubbed. Remaining HTML `Hermes` hits (5): `X-Hermes-CSRF-Token`, `openHermesDashboard` handler name, `__HERMES_EXTENSION_CONFIG__` — vendor plumbing, not bookmark chrome.
 - **P5 yellow:** break log was missing — **this file**. P0 list empty.
+
+## S2 skip (2026-09-11 Surfaces)
+- **Skipped:** Marketplace-style Plugins + Bots sheet — no clear in-place Mac Settings / WebUI hook beyond existing vendor Settings → Plugins / Extensions tabs; inventing a Grok-like marketplace is out of small-scope polish.
+- **S3 landed:** WebUI roster clicks use `activateAgent` (commit on finish-alpha); Mac already activated via GatewayClient.activateAgent; approval card reserved for API `pending_approval`.
