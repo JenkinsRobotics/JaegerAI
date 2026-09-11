@@ -181,3 +181,95 @@ def test_heartbeat_ares_hook(temp_ares_env):
     result = tick_ares(layout)
     assert result is not None
     assert hasattr(result, "status")
+
+
+def test_system_transducer_blocks_dangerous_by_default():
+    async def _run():
+        from jaeger_ai.ares.transducers import SystemTransducer
+
+        t = SystemTransducer(allow_dangerous_actions=False)
+        intent = CognitiveIntent(
+            kind=IntentKind.SYSTEM_MAINTENANCE,
+            goal="Run tests",
+            salience=0.9,
+            target_medium=MediumType.SYSTEM,
+            payload={"action": "run_test_suite", "test_path": "dev/tests"},
+        )
+        result = await t.transduce(intent)
+        assert result.success is False
+        assert result.metadata.get("blocked") is True
+        assert "allow_dangerous_system_actions" in result.output
+
+    asyncio.run(_run())
+
+
+def test_system_transducer_clean_scratch_ok(tmp_path, monkeypatch):
+    async def _run():
+        from jaeger_ai.ares.transducers import SystemTransducer
+
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+        (scratch / "tmp.bin").write_bytes(b"x")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        # SystemTransducer expands ~/.jaeger/scratch via expanduser — point HOME
+        jaeger = tmp_path / ".jaeger" / "scratch"
+        jaeger.mkdir(parents=True)
+        (jaeger / "cache.tmp").write_text("junk", encoding="utf-8")
+
+        t = SystemTransducer(allow_dangerous_actions=False)
+        intent = CognitiveIntent(
+            kind=IntentKind.SYSTEM_MAINTENANCE,
+            goal="Clean caches",
+            salience=0.9,
+            target_medium=MediumType.SYSTEM,
+            payload={"action": "clean_scratch_caches"},
+        )
+        result = await t.transduce(intent)
+        assert result.success is True
+        assert result.metadata.get("cleaned_count", 0) >= 1
+        assert not (jaeger / "cache.tmp").exists()
+
+    asyncio.run(_run())
+
+
+def test_visual_notifications_gated(temp_ares_env):
+    async def _run():
+        _, data_dir = temp_ares_env
+        blocked = VisualTransducer(events_dir=data_dir, allow_notifications=False)
+        intent = CognitiveIntent(
+            kind=IntentKind.INSIGHT_BROADCAST,
+            goal="High salience alert",
+            salience=0.95,
+            emotional_valence="urgent",
+            target_medium=MediumType.VISUAL,
+        )
+        result = await blocked.transduce(intent)
+        assert result.success is True
+        assert result.metadata.get("macos_notification") is False
+        assert result.metadata.get("allow_notifications") is False
+
+    asyncio.run(_run())
+
+
+def test_ares_config_defaults_fail_closed():
+    cfg = ARESConfig()
+    assert cfg.allow_dangerous_system_actions is False
+    assert cfg.allow_notifications is False
+    assert cfg.allow_audio_play is False
+
+
+def test_honcho_down_does_not_crash_orient(temp_ares_env):
+    async def _run():
+        _, data_dir = temp_ares_env
+        ctx = EpistemicContext(cache_dir=data_dir)
+
+        class Boom:
+            def status(self):
+                raise RuntimeError("honcho down")
+
+        ctx._honcho = Boom()
+        snap = PerceptionSnapshot()
+        belief = await ctx.orient(snap)
+        assert isinstance(belief, BeliefState)
+
+    asyncio.run(_run())

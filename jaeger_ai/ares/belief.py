@@ -1,7 +1,8 @@
 """Unbroken epistemic context fabric for ARES.
 
-Maintains an enduring rolling belief state across sessions and turns,
-interfacing with Honcho shared memory and preventing latest-turn amnesia.
+Maintains an enduring rolling belief state across sessions and turns.
+Honcho shared memory is optional — never crash a tick if Honcho is down.
+Belief state persists under ``~/.jaeger/ares/`` (or JAEGER_STATE_DIR/ares/).
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from jaeger_ai.features.shared_memory.honcho_client import HonchoClient
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ class GoalRecord:
 class OperatorProfile:
     name: str = "Matthew Jenkins"
     communication_style: str = "concise, direct, high-agency"
-    frequent_projects: list[str] = field(default_factory=lambda: ["ARES", "JaegerAI", "Finances"])
+    frequent_projects: list[str] = field(default_factory=lambda: ["JaegerAI", "Finances"])
     learned_preferences: dict[str, Any] = field(default_factory=dict)
 
 
@@ -68,12 +67,26 @@ class EpistemicContext:
     """Maintains and updates the agent's enduring worldview without amnesia."""
 
     def __init__(self, cache_dir: Path | str | None = None) -> None:
-        default_base = os.environ.get("JAEGER_HOME") or os.path.expanduser("~/.jaeger")
+        default_base = (
+            os.environ.get("JAEGER_STATE_DIR")
+            or os.environ.get("JAEGER_HOME")
+            or os.path.expanduser("~/.jaeger")
+        )
         self.cache_dir = Path(cache_dir or Path(default_base) / "ares").resolve()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self.cache_dir / "belief_state.json"
-        self._honcho = HonchoClient()
+        self._honcho = self._maybe_honcho()
         self._state = self._load_local_state()
+
+    def _maybe_honcho(self) -> Any | None:
+        """Honcho is optional — import/connectivity failures never raise."""
+        try:
+            from jaeger_ai.features.shared_memory.honcho_client import HonchoClient
+
+            return HonchoClient()
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Honcho unavailable for ARES belief context: %s", type(exc).__name__)
+            return None
 
     @property
     def current(self) -> BeliefState:
@@ -87,12 +100,20 @@ class EpistemicContext:
             operator_data = data.get("operator", {})
             operator = OperatorProfile(
                 name=operator_data.get("name", "Matthew Jenkins"),
-                communication_style=operator_data.get("communication_style", "concise, direct"),
-                frequent_projects=operator_data.get("frequent_projects", ["ARES", "JaegerAI"]),
+                communication_style=operator_data.get(
+                    "communication_style", "concise, direct"
+                ),
+                frequent_projects=operator_data.get(
+                    "frequent_projects", ["JaegerAI", "Finances"]
+                ),
                 learned_preferences=operator_data.get("learned_preferences", {}),
             )
             goals = [
-                GoalRecord(id=g["id"], description=g["desc"], completed=g.get("completed", False))
+                GoalRecord(
+                    id=g["id"],
+                    description=g["desc"],
+                    completed=g.get("completed", False),
+                )
                 for g in data.get("active_goals", [])
             ]
             return BeliefState(
@@ -103,8 +124,11 @@ class EpistemicContext:
                 system_confidence=data.get("system_confidence", 0.95),
                 unbroken_narrative=data.get("unbroken_narrative", ""),
             )
-        except Exception as exc:
-            logger.warning("Failed to parse ARES belief state, resetting to clean state: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to parse ARES belief state, resetting to clean state: %s",
+                type(exc).__name__,
+            )
             return BeliefState()
 
     def persist(self) -> None:
@@ -114,26 +138,27 @@ class EpistemicContext:
                 json.dumps(self._state.to_dict(), indent=2),
                 encoding="utf-8",
             )
-        except Exception as exc:
-            logger.warning("Failed to persist ARES belief state: %s", exc)
+        except OSError as exc:
+            logger.warning("Failed to persist ARES belief state: %s", type(exc).__name__)
 
     async def orient(self, snapshot: Any) -> BeliefState:
-        """Update the belief state by integrating the latest perception into the permanent context."""
-        # Check Honcho memory for external updates
-        try:
-            honcho_status = self._honcho.status()
-            if honcho_status.get("status") == "healthy":
-                # Successfully reached Honcho server, sync preferences
-                pass
-        except Exception:
-            pass
+        """Update belief state; Honcho down must never crash the tick."""
+        if self._honcho is not None:
+            try:
+                honcho_status = self._honcho.status()
+                if isinstance(honcho_status, dict) and honcho_status.get("status") == "healthy":
+                    pass  # optional sync point — soft no-op today
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Honcho status probe failed (ignored): %s", type(exc).__name__)
 
-        # Update narrative based on repo drift & alerts
         narrative_parts = [
-            f"Active on {snapshot.repo.branch or 'workspace'} with {snapshot.repo.dirty_files_count} modified files."
+            f"Active on {snapshot.repo.branch or 'workspace'} with "
+            f"{snapshot.repo.dirty_files_count} modified files."
         ]
         if snapshot.active_alerts:
-            narrative_parts.append(f"Attention needed: {'; '.join(snapshot.active_alerts)}.")
+            narrative_parts.append(
+                f"Attention needed: {'; '.join(snapshot.active_alerts)}."
+            )
 
         self._state.unbroken_narrative = " ".join(narrative_parts)
         self.persist()

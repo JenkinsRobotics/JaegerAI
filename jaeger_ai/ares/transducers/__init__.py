@@ -1,4 +1,4 @@
-"""Transducers package for ARES."""
+"""Transducers package for ARES (experimental heartbeat cognition)."""
 
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ class TransducerRegistry:
     """Manages available medium transducers and dispatches intents."""
 
     def __init__(self) -> None:
+        # Defaults are fail-closed (no dangerous actions / notifications).
         self._transducers: dict[MediumType, MediumTransducer] = {
-            MediumType.SYSTEM: SystemTransducer(),
-            MediumType.VISUAL: VisualTransducer(),
-            MediumType.ACOUSTIC: AcousticTransducer(),
+            MediumType.SYSTEM: SystemTransducer(allow_dangerous_actions=False),
+            MediumType.VISUAL: VisualTransducer(allow_notifications=False),
+            MediumType.ACOUSTIC: AcousticTransducer(enable_audio_play=False),
         }
 
     def register(self, medium: MediumType, transducer: MediumTransducer) -> None:
@@ -27,7 +28,6 @@ class TransducerRegistry:
         results: list[TransductionResult] = []
 
         if intent.target_medium == MediumType.MULTI_MODAL:
-            # Broadcast to visual + acoustic + system
             for t in self._transducers.values():
                 results.append(await t.transduce(intent))
         elif intent.target_medium in self._transducers:
