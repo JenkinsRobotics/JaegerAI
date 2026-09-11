@@ -249,6 +249,53 @@ def test_midturn_overflow_halts_cleanly_instead_of_raising():
     assert agent.messages[-1]["role"] == "assistant"
 
 
+def test_overflow_slim_to_core_restores_tools_on_next_turn():
+    """Emergency CORE slim must not permanently freeze the tool map.
+
+    After context overflow, ``_slim_tools_to_core_for_overflow`` replaces
+    ``_all_tools`` with CORE and locks the filter for that turn. The next
+    ``run_turn`` must unlock the overflow lock and refresh the catalog so
+    non-CORE tools are visible/dispatchable again (container specialists
+    otherwise claim they have no tools).
+    """
+    clear_registry()
+
+    class _Args(BaseModel):
+        value: str = Field(default="x")
+
+    @register_tool("echo_extra", "Echo extra.", _Args)
+    def _echo(value: str = "x") -> dict:
+        return {"ok": True, "echoed": value}
+
+    @register_tool("get_time", "Clock.", _Args)
+    def _time(value: str = "x") -> dict:
+        return {"ok": True, "t": value}
+
+    adapter = _ScriptedAdapter([
+        {"role": "assistant", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ])
+    agent = JaegerAgent(
+        adapter=adapter,
+        tool_visibility=None,
+        toolset_resolver=None,
+        turn_start_hook=None,
+    )
+    before = {t.name for t in agent.tools}
+    assert "echo_extra" in before
+    assert agent._slim_tools_to_core_for_overflow() is True
+    assert agent._tools_filter_locked is True
+    assert agent._tools_filter_locked_reason == "overflow"
+    assert "echo_extra" not in {t.name for t in agent.tools}
+
+    agent.run_turn("next")
+    assert agent._tools_filter_locked is False
+    assert getattr(agent, "_tools_filter_locked_reason", None) is None
+    after = {t.name for t in agent.tools}
+    assert "echo_extra" in after
+    assert "echo_extra" in agent._dispatch_by_name
+
+
 # ── empty response ─────────────────────────────────────────────────
 
 

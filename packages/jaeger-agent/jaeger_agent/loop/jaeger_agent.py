@@ -1943,11 +1943,13 @@ class JaegerAgent:
         # counts.
         sig = call_signature(name, args)
         tool_def = dispatch_map.get(name)
-        # If overflow/allowlist froze the map, the model can still see
-        # freshly registered tools via describe_tool/load_tools while
-        # dispatch_map misses them. Resolve once from the live registry
-        # (availability-filtered) and cache the hit.
-        if tool_def is None:
+        # Overflow (and unlocked agents) can leave dispatch_map behind the
+        # live registry / describe_tool surface. Resolve once and cache.
+        # Explicit tools=[...] allowlists must stay closed.
+        if (
+            tool_def is None
+            and getattr(self, "_tools_filter_locked_reason", None) != "allowlist"
+        ):
             try:
                 _cands = _filter_available_tools(
                     [t for t in get_tools() if getattr(t, "name", None) == name]
