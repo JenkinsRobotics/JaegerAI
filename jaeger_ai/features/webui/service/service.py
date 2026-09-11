@@ -540,7 +540,7 @@ class HermesWebUIService:
             return {"ok": False, "error": f"WebUI launcher is missing: {VENDOR_WEBUI_SCRIPT}"}
         agent_home = Path(
             os.environ.get("JAEGER_WEBUI_AGENT_STATE")
-            or (Path.home() / ".jaeger_ai" / "hermes-webui-agent")
+            or (Path.home() / ".jaeger" / "hermes-webui-agent")
         ).expanduser()
         _ensure_vendor_shared_profiles(agent_home)
         log_path = _vendor_log_path(self.layout)
@@ -549,6 +549,17 @@ class HermesWebUIService:
         env["JAEGER_RUNNER_BASE_URL"] = self.urls().adapter.rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.vendor_webui_port)
         env["JAEGER_WEBUI_HOST"] = os.environ.get("JAEGER_WEBUI_HOST", "0.0.0.0")
+        hermes_agent_src = Path(
+            os.environ.get("JAEGER_HERMES_AGENT_SRC")
+            or (Path.home() / "GitHub" / "hermes-agent")
+        ).expanduser()
+        if hermes_agent_src.is_dir():
+            env["HERMES_WEBUI_AGENT_DIR"] = str(hermes_agent_src)
+            # Ensure hermes_cli imports resolve for profile listing/switch.
+            env["PYTHONPATH"] = str(hermes_agent_src) + (
+                (os.pathsep + env["PYTHONPATH"]) if env.get("PYTHONPATH") else ""
+            )
+        env["JAEGER_WEBUI_AGENT_STATE"] = str(agent_home)
         # Popen retains the descriptor after this method returns; explicit
         # lifecycle management is clearer than a context manager here.
         log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115

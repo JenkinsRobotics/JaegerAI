@@ -35,6 +35,7 @@ export HERMES_WEBUI_FOREGROUND=1
 # Profile listing/switching imports hermes_cli + agent.* from the hermes-agent checkout.
 hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-${HOME}/GitHub/hermes-agent}"
 if [[ -d "$hermes_agent_src" ]]; then
+  export HERMES_WEBUI_AGENT_DIR="${HERMES_WEBUI_AGENT_DIR:-$hermes_agent_src}"
   export PYTHONPATH="${hermes_agent_src}${PYTHONPATH:+:$PYTHONPATH}"
 fi
 
