@@ -309,13 +309,21 @@
     card.hidden = false;
   };
 
-  const requestSpecialistHandoff = async (id, displayName) => {
-    const task = `Help with current chat as ${displayName || id}`;
+  // Explicit gated handoff only — roster clicks must NOT call this.
+  // Approval card shows solely when API returns pending_approval.
+  const requestSpecialistHandoff = async (id, displayName, opts) => {
+    opts = opts || {};
+    const task = opts.task || `Help with current chat as ${displayName || id}`;
+    const requireApproval = !!opts.require_approval;
     try {
       const res = await fetch(`/api/agents/${encodeURIComponent(id)}/handoff`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ task, reason: "surfaces-ui", require_approval: true }),
+        body: JSON.stringify({
+          task,
+          reason: opts.reason || "surfaces-ui",
+          require_approval: requireApproval,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -324,12 +332,14 @@
       }
       if (data.status === "pending_approval" && data.approval_id) {
         showApprovalCard(data);
-        return;
+        return data;
       }
       await activateAgent(id);
+      return data;
     } catch (err) {
       console.warn("[jaeger] handoff error", err);
       await activateAgent(id);
+      return null;
     }
   };
 
@@ -353,13 +363,9 @@
       const btn = ev.target.closest("button.jaeger-agent-row");
       if (!btn) return;
       const id = btn.getAttribute("data-agent-id");
-      const role = btn.getAttribute("data-role") || "";
-      const name = (btn.querySelector(".jaeger-agent-name") || {}).textContent || id;
-      if (role === "specialist") {
-        requestSpecialistHandoff(id, name);
-      } else {
-        activateAgent(id);
-      }
+      // S3: simple roster activate/switch — never open approval loop.
+      // Reserve handoff+approval for gated tool pull-in / explicit pending_approval.
+      activateAgent(id);
     });
     loadAgentsCatalog();
     // Refresh periodically so Mac/WebUI stay aligned when either face switches.
@@ -557,8 +563,13 @@
     const roleEl = turn.querySelector(".msg-role.assistant");
     if (!roleEl) return;
     const nameEl = roleEl.querySelector(".msg-role-name");
+    const role = (identity.role || "").trim();
+    const label =
+      role && role !== "lead"
+        ? `${identity.display_name} · ${role}`
+        : identity.display_name;
     if (nameEl) {
-      nameEl.textContent = identity.display_name;
+      nameEl.textContent = label;
       nameEl.dataset.jaegerLabeled = "1";
       nameEl.title = [identity.display_name, identity.role, identity.agent_id]
         .filter(Boolean)
@@ -568,19 +579,9 @@
     if (icon && identity.display_name) {
       icon.textContent = identity.display_name.charAt(0).toUpperCase();
     }
-    let hint = roleEl.querySelector(".jaeger-turn-role-hint");
-    const role = (identity.role || "").trim();
-    if (role && role !== "lead") {
-      if (!hint) {
-        hint = document.createElement("span");
-        hint.className = "jaeger-turn-role-hint";
-        if (nameEl) nameEl.insertAdjacentElement("afterend", hint);
-        else roleEl.appendChild(hint);
-      }
-      hint.textContent = role;
-    } else if (hint) {
-      hint.remove();
-    }
+    // Mac parity: role rides in the name ("Name · role"); drop separate hint chip.
+    const hint = roleEl.querySelector(".jaeger-turn-role-hint");
+    if (hint) hint.remove();
   };
 
   const labelAssistantTurns = (opts) => {
