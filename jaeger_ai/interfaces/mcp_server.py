@@ -155,6 +155,20 @@ def build_server(client: Any, instance: str, model: str | None,
             info["instance"] = instance
         return info
 
+    @mcp.tool()
+    @_off_event_loop
+    def finance_summary() -> dict:
+        """Return net worth, liquid cash, credit debt, and balances from Monarch Money."""
+        from jaeger_ai.features.finance.tools import finance_summary as _fn_summary
+        return _fn_summary()
+
+    @mcp.tool()
+    @_off_event_loop
+    def finance_audit(days: int = 7) -> dict:
+        """Run budget pacing, anomaly detection, and spend velocity checks."""
+        from jaeger_ai.features.finance.tools import finance_audit as _fn_audit
+        return _fn_audit(days=days)
+
     if bridge is not None:
         @mcp.tool()
         @_off_event_loop
