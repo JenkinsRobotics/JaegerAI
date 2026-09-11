@@ -28,6 +28,9 @@ export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
 export HERMES_WEBUI_RUNTIME_ADAPTER=runner-local
 export HERMES_WEBUI_RUNNER_BASE_URL="${JAEGER_RUNNER_BASE_URL:-http://127.0.0.1:8791}"
+# Prefer Jaeger Gateway :8810 for /api/health/agent remote probe (falls back to runner).
+export HERMES_WEBUI_GATEWAY_BASE_URL="${HERMES_WEBUI_GATEWAY_BASE_URL:-${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}}"
+export JAEGER_GATEWAY_URL="${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1
