@@ -621,8 +621,16 @@ class JaegerGatewayApp:
         Returns ``(response_text, backend_label)`` on success, or ``None`` so
         the caller can soft-fail to locked Ollama without crashing :8810.
         Does not invent a parallel agent runtime — reuses hermes adapters.
+
+        Shared MCP chat session: literal ``dispatcher`` — same key Mac Chat /
+        WebUI / Hermes adapter bind via DispatcherStore (see
+        hermes_profile_adapters/jaeger.py rewrite to session_id='dispatcher',
+        features/webui/service/session_unify.py, features/dispatcher/store.py
+        DISPATCHER). Gateway /v1/sessions UUID stays separate for SSE/store;
+        only the MCP chat session_id is shared so one self / one transcript.
         """
-        mcp_session = f"gateway:{session_id}"
+        # Shared with Mac/WebUI live chat — NOT gateway:{uuid} (that isolated transcripts).
+        mcp_session = "dispatcher"
 
         def _blocking_chat() -> tuple[str, str]:
             from urllib.parse import urlparse
@@ -637,6 +645,10 @@ class JaegerGatewayApp:
             # Reuse Hermes MCPClient transport. Agentgateway (:8811) exposes
             # the target as ``jaeger_chat``; direct MCP HTTP (:8792) uses ``chat``.
             args = {"message": text, "session_id": mcp_session}
+            logger.info(
+                "native lead MCP chat session_id=%s (shared Mac/WebUI dispatcher)",
+                mcp_session,
+            )
             client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
             client.initialize()
             last_err: Exception | None = None
