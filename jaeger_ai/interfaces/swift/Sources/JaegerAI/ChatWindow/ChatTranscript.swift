@@ -111,6 +111,11 @@ struct TranscriptRow: View {
 
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let label = message.agentLabel {
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Term.accent.opacity(0.85))
+            }
             if message.text.isEmpty && message.isStreaming {
                 ThinkingDots()
             } else {
