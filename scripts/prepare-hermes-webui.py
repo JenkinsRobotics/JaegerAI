@@ -26,10 +26,12 @@ def prepare():
     subprocess.run(["git", "apply", "--check", str(overlay / "native-capabilities.patch")], cwd=destination, check=True)
     subprocess.run(["git", "apply", str(overlay / "native-capabilities.patch")], cwd=destination, check=True)
     subprocess.run(["git", "apply", str(overlay / "conversation.patch")], cwd=destination, check=True)
+    subprocess.run(["git", "apply", str(overlay / "agents-proxy.patch")], cwd=destination, check=True)
     shutil.copy2(overlay / "jaeger_conversation.py", destination / "api/jaeger_conversation.py")
     shutil.copy2(overlay / "jaeger_ollama.py", destination / "api/jaeger_ollama.py")
     shutil.copy2(overlay / "jaeger_agent_compat.py", destination / "api/jaeger_agent_compat.py")
     shutil.copy2(overlay / "jaeger_gateway_routes.py", destination / "api/jaeger_gateway_routes.py")
+    shutil.copy2(overlay / "jaeger_agents.py", destination / "api/jaeger_agents.py")
     extensions = destination / 'jaeger-extensions'
     extensions.mkdir()
     for name in ('jaeger_webui_extensions.json', 'jaeger_webui_branding.js', 'jaeger_dispatcher.js',
