@@ -627,6 +627,8 @@ def test_system_prompt_for_session_agent_specialist():
     assert "gateway specialist" in prompt.lower()
     assert "SPECIALIST:Gateway" in prompt
     assert "You are Jaeger." not in prompt
+    assert "[SOUL]" not in prompt
+    assert "[Identity]" not in prompt
 
     lead = AgentRecord(
         id="native:jaeger",
@@ -641,7 +643,116 @@ def test_system_prompt_for_session_agent_specialist():
     # Lead uses SI Character.character_block() when instance character loads.
     assert "## My voice" in lead_prompt or "You are Assistant." in lead_prompt
     none_prompt = JaegerGatewayApp._system_prompt_for_agent(None)
-    assert none_prompt.startswith("## My voice") or none_prompt.startswith("You are Jaeger.")
+    assert (
+        "## My voice" in none_prompt
+        or none_prompt.startswith("[Identity]")
+        or none_prompt.startswith("You are Jaeger.")
+    )
+
+
+def test_lead_softfail_prompt_includes_soul(monkeypatch: pytest.MonkeyPatch):
+    """Lead Ollama soft-fail prompt: character_block then SOUL; empty omits."""
+    from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+
+    lead = AgentRecord(
+        id="native:jaeger",
+        name="jaeger",
+        kind=AgentKind.NATIVE,
+        display_name="Assistant",
+        source="registry",
+        role=AgentRole.LEAD,
+        metadata={"specialty": "lead", "summary": "Lead assistant."},
+    )
+    specialist = AgentRecord(
+        id="native:gateway",
+        name="gateway",
+        kind=AgentKind.NATIVE,
+        display_name="Gateway",
+        source="registry",
+        role=AgentRole.SPECIALIST,
+        metadata={"specialty": "gateway", "summary": "Spine health."},
+    )
+
+    monkeypatch.setattr(
+        JaegerGatewayApp,
+        "_si_character_prompt",
+        staticmethod(lambda: "## My voice\nI am the SI brief."),
+    )
+    monkeypatch.setattr(
+        JaegerGatewayApp,
+        "_si_soul_prompt",
+        staticmethod(lambda: "I keep promises. I speak plainly."),
+    )
+    prompt = JaegerGatewayApp._system_prompt_for_agent(lead)
+    assert prompt.startswith("[Identity]")
+    assert "## My voice" in prompt
+    assert "I am the SI brief." in prompt
+    assert "[SOUL]" in prompt
+    assert "I keep promises. I speak plainly." in prompt
+    # Identity before SOUL; no invented provenance prose.
+    assert prompt.index("[Identity]") < prompt.index("[SOUL]")
+    assert "provenance" not in prompt.lower()
+
+    monkeypatch.setattr(
+        JaegerGatewayApp,
+        "_si_soul_prompt",
+        staticmethod(lambda: None),
+    )
+    empty_soul = JaegerGatewayApp._system_prompt_for_agent(lead)
+    assert "[Identity]" in empty_soul
+    assert "I am the SI brief." in empty_soul
+    assert "[SOUL]" not in empty_soul
+
+    # Specialist path stays thin — never Identity/SOUL sections.
+    thin = JaegerGatewayApp._system_prompt_for_agent(specialist)
+    assert "You are Gateway." in thin
+    assert "gateway specialist" in thin.lower()
+    assert "[SOUL]" not in thin
+    assert "[Identity]" not in thin
+    assert "I am the SI brief." not in thin
+
+
+def test_si_soul_prompt_uses_instance_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """_si_soul_prompt loads via InstanceLayout on the same resolve root."""
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+
+    root = tmp_path / "instances" / "jaeger"
+    root.mkdir(parents=True)
+    (root / "SOUL.md").write_text("soul from disk", encoding="utf-8")
+
+    monkeypatch.setattr(
+        JaegerGatewayApp,
+        "_instance_root",
+        staticmethod(lambda: root),
+    )
+    seen: dict[str, object] = {}
+
+    def _fake_load_soul(layout):
+        seen["root"] = getattr(layout, "root", None)
+        return "soul from load_soul"
+
+    monkeypatch.setattr(
+        "jaeger_ai.core.prompt_documents.load_soul",
+        _fake_load_soul,
+    )
+    # Import path used inside the method — patch where it is imported from.
+    import jaeger_ai.core.prompt_documents as prompt_documents
+
+    monkeypatch.setattr(prompt_documents, "load_soul", _fake_load_soul)
+
+    text = JaegerGatewayApp._si_soul_prompt()
+    assert text == "soul from load_soul"
+    assert seen["root"] == root.resolve()
+
+    monkeypatch.setattr(prompt_documents, "load_soul", lambda layout: "")
+    assert JaegerGatewayApp._si_soul_prompt() is None
+
+    def _boom(layout):
+        raise RuntimeError("soul broken")
+
+    monkeypatch.setattr(prompt_documents, "load_soul", _boom)
+    assert JaegerGatewayApp._si_soul_prompt() is None
 
 
 class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):

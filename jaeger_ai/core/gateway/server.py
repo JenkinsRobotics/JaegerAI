@@ -527,14 +527,33 @@ class JaegerGatewayApp:
             return None
 
     @staticmethod
+    def _si_soul_prompt() -> str | None:
+        """Load SOUL.md via load_soul(InstanceLayout) — same root as character.
+
+        Soft-fails to None on any error / empty doc so Ollama soft-fail still
+        answers. Used only on the lead/default Ollama system prompt path.
+        """
+        try:
+            from jaeger_ai.core.instance.instance import InstanceLayout
+            from jaeger_ai.core.prompt_documents import load_soul
+
+            layout = InstanceLayout(root=JaegerGatewayApp._instance_root())
+            soul = (load_soul(layout) or "").strip()
+            return soul or None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SI SOUL prompt unavailable: %s", exc)
+            return None
+
+    @staticmethod
     def _system_prompt_for_agent(agent) -> str:
         """Build the turn system prompt.
 
-        Lead / default turns use the owner-authored SI character sheet
-        (``Character.character_block``) already in ``jaeger_ai/personality``.
-        Specialist handoffs keep a thin specialty overlay so P6 live
-        specialist turns keep working — specialists are teammates under
-        the SI host, not a second soul.
+        Lead / default Ollama soft-fail turns use readable SI sections:
+        ``[Identity]`` from ``Character.character_block``, then optional
+        ``[SOUL]`` from ``load_soul(InstanceLayout)`` (same
+        ``resolve_instance_dir`` root). Empty SOUL is omitted. Specialist
+        handoffs keep a thin specialty overlay — not a second soul.
+        MCP native lead path does not use this prompt.
         """
         role = getattr(agent, "role", None) if agent is not None else None
         role_s = role.value if hasattr(role, "value") else (str(role) if role else "")
@@ -560,9 +579,15 @@ class JaegerGatewayApp:
             parts.append("Reply briefly and helpfully.")
             return " ".join(parts)
 
+        sections: list[str] = []
         si = JaegerGatewayApp._si_character_prompt()
         if si:
-            return si
+            sections.append(f"[Identity]\n{si}")
+        soul = JaegerGatewayApp._si_soul_prompt()
+        if soul:
+            sections.append(f"[SOUL]\n{soul}")
+        if sections:
+            return "\n\n".join(sections)
 
         if agent is None:
             return "You are Jaeger. Reply briefly and helpfully."
@@ -718,8 +743,8 @@ class JaegerGatewayApp:
         """Background turn executor: lead via MCP :8811, specialist via Ollama.
 
         Soft-fail: MCP errors never crash :8810 — lead falls back to locked
-        Ollama with character_block already in system_prompt. Specialists keep
-        the specialty overlay path only.
+        Ollama with character_block + optional SOUL already in system_prompt.
+        Specialists keep the specialty overlay path only.
         """
         session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
