@@ -167,3 +167,105 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         assert len(sess_data["messages"]) >= 2
         assert sess_data["messages"][0]["role"] == "user"
         assert sess_data["messages"][1]["role"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_native_lead_turn_success_and_soft_fail(monkeypatch):
+    """Lead MCP path returns (text, mcp-label); failures soft-return None."""
+    app = JaegerGatewayApp(store=GatewaySessionStore(Path("/tmp/gw-native-test.sqlite3")))
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def initialize(self):
+            return {}
+
+        def _execute_call(self, name, arguments):
+            assert name in {"jaeger_chat", "chat"}
+            assert arguments.get("session_id") == "gateway:sess-native"
+            return {"content": [{"type": "text", "text": "NATIVE_MCP_OK autonomy=tools"}]}
+
+    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as jaeger_mcp
+
+    monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
+    monkeypatch.setattr(jaeger_mcp, "MCP_GATEWAY_URL", "http://127.0.0.1:8811/mcp")
+    monkeypatch.setattr(jaeger_mcp, "MCP_API_KEY", "")
+    monkeypatch.setattr(jaeger_mcp, "MCP_HOST_HEADER", "127.0.0.1:8811")
+
+    ok = await app._native_lead_turn("sess-native", "What is your autonomy mode?")
+    assert ok is not None
+    text, label = ok
+    assert "NATIVE_MCP_OK" in text
+    assert label.startswith("mcp")
+
+    class _BoomClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def initialize(self):
+            raise RuntimeError("mcp down")
+
+        def _execute_call(self, name, arguments):
+            raise RuntimeError("mcp down")
+
+    monkeypatch.setattr(jaeger_mcp, "MCPClient", _BoomClient)
+    failed = await app._native_lead_turn("sess-native", "hello")
+    assert failed is None
+
+
+@pytest.mark.asyncio
+async def test_execute_turn_lead_uses_mcp_backend(monkeypatch, tmp_path):
+    """Non-specialist turns stamp turn.finish backend from native MCP label."""
+    store = GatewaySessionStore(tmp_path / "native_turn.sqlite3")
+    bus = GatewayEventBus()
+    app = JaegerGatewayApp(store=store, event_bus=bus)
+    store.ensure_session("s1", title="native", profile="jaeger")
+
+    async def _fake_native(session_id, text):
+        return ("lead via mcp with tools", "mcp:127.0.0.1:8811")
+
+    async def _should_not_ollama(*a, **k):
+        raise AssertionError("ollama should not run when MCP succeeds")
+
+    monkeypatch.setattr(app, "_native_lead_turn", _fake_native)
+    monkeypatch.setattr(app, "_ollama_chat", _should_not_ollama)
+    monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
+
+    await app._execute_turn("s1", "turn-1", "Describe autonomy mode briefly.")
+    sess = store.get_session("s1")
+    assert sess["status"] == "idle"
+    assert any("lead via mcp" in m["content"] for m in sess["messages"] if m["role"] == "assistant")
+    finishes = [e for e in bus.get_replay_events("s1", since_event_id=0) if e.event == "turn.finish"]
+    assert finishes
+    assert finishes[-1].data["backend"].startswith("mcp")
+
+
+@pytest.mark.asyncio
+async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
+    store = GatewaySessionStore(tmp_path / "spec_turn.sqlite3")
+    bus = GatewayEventBus()
+    app = JaegerGatewayApp(store=store, event_bus=bus)
+    store.ensure_session("s2", title="spec", profile="jaeger")
+
+    class _Agent:
+        id = "agent-spec"
+        display_name = "Ops"
+        role = type("R", (), {"value": "specialist"})()
+        metadata = {"specialty": "ops"}
+
+    async def _boom_native(*a, **k):
+        raise AssertionError("specialist must not call native MCP")
+
+    async def _ollama(text, *, system_prompt=None):
+        assert "specialist" in (system_prompt or "").lower()
+        return "SPECIALIST:Ops"
+
+    monkeypatch.setattr(app, "_native_lead_turn", _boom_native)
+    monkeypatch.setattr(app, "_ollama_chat", _ollama)
+    monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: _Agent())
+
+    await app._execute_turn("s2", "turn-2", "name?")
+    finishes = [e for e in bus.get_replay_events("s2", since_event_id=0) if e.event == "turn.finish"]
+    assert finishes[-1].data["backend"]  # locked ollama url
+    assert "mcp" not in str(finishes[-1].data["backend"])
