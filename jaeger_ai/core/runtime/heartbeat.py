@@ -312,6 +312,42 @@ def build_prompt(layout: Any, *, now: datetime | None = None) -> str:
     return heartbeat_prompt(load_checklist(layout), board_digest=digest)
 
 
+_ares_singleton: Any = None
+
+
+def get_ares_engine(workspace_root: Any = None) -> Any:
+    global _ares_singleton
+    if _ares_singleton is None:
+        try:
+            from jaeger_ai.ares import ARESConfig, ARESEngine
+            root = getattr(workspace_root, "root", None) if workspace_root else None
+            _ares_singleton = ARESEngine(ARESConfig(workspace_root=root))
+        except Exception:
+            return None
+    return _ares_singleton
+
+
+def tick_ares(workspace_root: Any = None) -> Any:
+    """Execute an autonomous cognitive tick through the self-contained ARES subsystem."""
+    import asyncio
+    engine = get_ares_engine(workspace_root)
+    if engine is None:
+        return None
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, engine.tick()).result()
+        return asyncio.run(engine.tick())
+    except Exception:
+        return None
+
+
 __all__ = [
     "DEFAULT_CHECKLIST",
     "EOD_HOURS",
@@ -321,8 +357,9 @@ __all__ = [
     "briefing_kind",
     "briefing_prompt",
     "build_prompt",
-    "heartbeat_prompt",
     "checklist_path",
+    "get_ares_engine",
+    "heartbeat_prompt",
     "is_due",
     "is_silent_ok",
     "last_beat_at",
@@ -330,4 +367,5 @@ __all__ = [
     "mark_beat",
     "seed_checklist",
     "status",
+    "tick_ares",
 ]
