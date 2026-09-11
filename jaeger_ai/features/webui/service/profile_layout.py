@@ -199,7 +199,7 @@ def prepare_vendor_webui_home(
     """
     home = Path.home()
     hermes = (hermes_home or (home / ".hermes")).expanduser()
-    agent = (agent_home or (home / ".jaeger_ai" / "hermes-webui-agent")).expanduser()
+    agent = (agent_home or (home / ".jaeger" / "hermes-webui-agent")).expanduser()
     layout = ensure_webui_profile_layout(hermes)
     linked = link_shared_profiles(shared=hermes / "profiles", agent_home=agent)
     # Vendor HERMES_HOME itself is the default/root profile for :8790.
