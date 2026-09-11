@@ -290,44 +290,6 @@ index 947c9498..78b711c1 100644
  
  echo ""; echo "== Running hermes-webui"
  cd /app; python server.py || error_exit "hermes-webui failed or exited with an error"
-diff --git a/static/boot.js b/static/boot.js
-index 526caa24..6ce194df 100644
---- a/static/boot.js
-+++ b/static/boot.js
-@@ -3617,9 +3617,9 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
-   applyBotName();
-   // Update profile chip label immediately
-   const profileLabel=$('profileChipLabel');
--  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
-+  if(profileLabel) profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
-   const titleLabel=$('titlebarProfileLabel');
--  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
-+  if(titleLabel) titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
-   const profileIntent=(typeof _profileQueryIntentFromLocation==='function')?_profileQueryIntentFromLocation():null;
-   const _savedLocalBeforeProfileSwitch=localStorage.getItem('hermes-webui-session');
-   const _profileSwitchProfileBefore=S.activeProfile||'default';
-diff --git a/static/panels.js b/static/panels.js
-index 0b6fda6b..5f330895 100644
---- a/static/panels.js
-+++ b/static/panels.js
-@@ -6699,7 +6699,7 @@ async function loadProfilesPanel() {
-       card.innerHTML = `
-         <div class="profile-card-header">
-           <div style="min-width:0;flex:1">
--            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
-+            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.display_name||p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
-             ${meta.length ? `<div class="profile-card-meta">${esc(meta.join(' \u00b7 '))}</div>` : `<div class="profile-card-meta">${esc(t('profile_no_configuration'))}</div>`}
-           </div>
-         </div>`;
-@@ -6871,7 +6871,7 @@ function renderProfileDropdown(data) {
-     const gwDot = `<span class="profile-opt-badge ${p.gateway_running ? 'running' : 'stopped'}"></span>`;
-     const checkmark = p.name === active ? ' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--link)" stroke-width="3" style="vertical-align:-1px"><polyline points="20 6 9 17 4 12"/></svg>' : '';
-     const defaultBadge = p.is_default ? ` <span style="opacity:.5;font-weight:400">${esc(t('profile_default_label'))}</span>` : '';
--    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.name)}${defaultBadge}${checkmark}</div>` +
-+    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.display_name||p.name)}${defaultBadge}${checkmark}</div>` +
-       (meta.length ? `<div class="profile-opt-meta">${esc(meta.join(' \u00b7 '))}</div>` : '');
-     opt.onclick = async () => {
-       closeProfileDropdown();
 diff --git a/static/sessions.js b/static/sessions.js
 index b7a59359..40386360 100644
 --- a/static/sessions.js
@@ -379,34 +341,6 @@ index 98f6b7f0..f3cf729a 100644
  .cmd-item-badge{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:999px;border:1px solid var(--border2);color:var(--muted);background:var(--hover-bg);}
  .cmd-item-badge-skill{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent-bg-strong);}
  .ws-action-btn.danger:hover{background:rgba(239,83,80,.1);color:var(--error);border-color:var(--error);}
-diff --git a/static/ui.js b/static/ui.js
-index 56af87da..877d8647 100644
---- a/static/ui.js
-+++ b/static/ui.js
-@@ -11005,9 +11005,9 @@ function syncTopbar(){
-     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
-     // Update profile chip even when no session is active (e.g. right after profile switch)
-     const _profileLabel=$('profileChipLabel');
--    if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
-+    if(_profileLabel) _profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
-     const _titleLabel=$('titlebarProfileLabel');
--    if(_titleLabel) _titleLabel.textContent=S.activeProfile||'default';
-+    if(_titleLabel) _titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
-     return;
-   }
-   const sessionTitle=S.session.title||t('untitled');
-@@ -11132,9 +11132,9 @@ function syncTopbar(){
-   // scoping project/session operations to the session's own profile — is
-   // unaffected by this line.
-   const profileLabel=$('profileChipLabel');
--  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
-+  if(profileLabel) profileLabel.textContent=profileDisplayName(S.activeProfile||'default');
-   const titleLabel=$('titlebarProfileLabel');
--  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
-+  if(titleLabel) titleLabel.textContent=profileDisplayName(S.activeProfile||'default');
- }
- 
- function msgContent(m){
 diff --git a/tests/test_issue3957_profile_providers_models.py b/tests/test_issue3957_profile_providers_models.py
 index 27c2d179..1bcad4bb 100644
 --- a/tests/test_issue3957_profile_providers_models.py
