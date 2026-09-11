@@ -488,6 +488,27 @@
         if (msg && /Hermes/i.test(msg.getAttribute("placeholder") || "")) {
           msg.setAttribute("placeholder", "Message Jaeger…");
         }
+        const health = document.getElementById("agentHealthTitle");
+        if (health && /Hermes/i.test(health.textContent || "")) {
+          health.textContent = "Jaeger agent is not responding";
+        }
+        const offline = document.getElementById("offlineAutorefresh");
+        if (offline && /Hermes/i.test(offline.textContent || "")) {
+          offline.textContent = "I will refresh this page automatically when Jaeger is reachable again.";
+        }
+        const onboarding = document.getElementById("onboardingTitle");
+        if (onboarding && /Hermes/i.test(onboarding.textContent || "")) {
+          onboarding.textContent = "Welcome to Jaeger";
+        }
+        document.querySelectorAll('[data-tooltip*="Hermes"], [aria-label*="Hermes"]').forEach((el) => {
+          if (el.dataset.tooltip) el.dataset.tooltip = el.dataset.tooltip.replace(/Hermes\s*/gi, "").trim() || "Dashboard";
+          if (el.getAttribute("aria-label")) {
+            el.setAttribute(
+              "aria-label",
+              (el.getAttribute("aria-label") || "").replace(/Hermes\s*/gi, "").trim() || "Dashboard"
+            );
+          }
+        });
       } catch (_) {}
     };
     scrub();
