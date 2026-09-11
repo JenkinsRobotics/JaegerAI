@@ -3675,12 +3675,23 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         if agent is not None and getattr(agent, "context_guard", None) is not None and _active_ctx:
             from jaeger_agent.util.context_guard import ContextBudget
             old_b = agent.context_guard.budget
-            if old_b.ctx_window != _active_ctx or (_active_reserve and old_b.reserve_for_completion != _active_reserve):
+            # Match build_jaeger_agent: never let completion reserve eat the
+            # whole window. Ollama /api/ps often reports a small loaded
+            # context_length (e.g. 4096) while config max_tokens is still
+            # 4096 from a prior cloud pick — without this clamp the
+            # mid-session rescope sets prompt_budget=0 and every turn
+            # refuses with "budget=0 usable prompt room".
+            reserve = int(_active_reserve or old_b.reserve_for_completion or 0)
+            if reserve > 0:
+                reserve = min(reserve, max(1, int(_active_ctx) // 2))
+            else:
+                reserve = old_b.reserve_for_completion
+            if old_b.ctx_window != _active_ctx or old_b.reserve_for_completion != reserve:
                 per_result_cap = int(_active_ctx * old_b.chars_per_token / 4)
                 per_result_cap = max(2_000, min(old_b.max_tool_result_chars, per_result_cap))
                 agent.context_guard.budget = ContextBudget(
                     ctx_window=_active_ctx,
-                    reserve_for_completion=_active_reserve or old_b.reserve_for_completion,
+                    reserve_for_completion=reserve,
                     safety_margin=old_b.safety_margin,
                     chars_per_token=old_b.chars_per_token,
                     max_tool_result_chars=per_result_cap,

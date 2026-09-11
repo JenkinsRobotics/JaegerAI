@@ -419,7 +419,12 @@ class ExternalModelClient:
         if should_inject_num_ctx(
             self.provider, self.ext.base_url, self.model_name, source=source,
         ) and detected:
-            self.num_ctx = detected
+            # Cap training-max injections so a 128K card does not try to
+            # allocate a laptop-killing KV cache via options.num_ctx.
+            if source == "model_info":
+                self.num_ctx = min(int(detected), 16_384)
+            else:
+                self.num_ctx = detected
 
     def refresh_active_context(self) -> int | None:
         """Adopt Ollama's loaded window when the model is resident.
