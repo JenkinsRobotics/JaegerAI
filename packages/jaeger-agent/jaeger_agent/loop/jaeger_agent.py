@@ -540,7 +540,18 @@ class JaegerAgent:
                 pass
 
             if len(self._turn_messages) <= 1:
-                # Pre-flight refusal — the model never saw this turn.
+                # Pre-flight refusal — often the FULL tool-schema JSON alone
+                # exceeds a small local model's usable prompt room (~34k
+                # tokens with every toolset active). Slim to CORE once and
+                # retry before rolling the user message back.
+                if self._slim_tools_to_core_for_overflow():
+                    try:
+                        self.callbacks.on_thinking(
+                            "[context-guard] slimmed tool schemas to CORE to fit ctx budget"
+                        )
+                    except Exception:
+                        pass
+                    return self._run_turn_inner(user_message)
                 # Roll the user message back so a too-big prompt isn't
                 # sticky: with it left in place, every later turn
                 # re-fails on the same un-trimmable history.
@@ -1263,7 +1274,44 @@ class JaegerAgent:
             return text
         return self._halt_turn()
 
+    def _slim_tools_to_core_for_overflow(self) -> bool:
+        """One-shot: shrink visible tools to CORE when schemas alone blow ctx.
+
+        Returns True when the catalog changed and the caller should retry the
+        turn. Locked / already-slimmed agents return False (fail closed to the
+        existing ContextOverflow raise path).
+
+        Scoping is OFF by default, so mutating ``_intent_tool_names`` alone
+        does not hide tools (``tools`` fails open via ``_tool_visibility``).
+        For this emergency retry we REPLACE ``_all_tools`` with the CORE
+        subset and lock the filter for the rest of the turn.
+        """
+        if getattr(self, "_overflow_tools_slimmed", False):
+            return False
+        if self._tools_filter_locked:
+            return False
+        try:
+            from jaeger_agent.skill_registry.toolset_scoping import CORE
+        except Exception:
+            return False
+        before = {getattr(t, "name", None) for t in (self.tools or [])}
+        before.discard(None)
+        if not before or before <= set(CORE):
+            return False
+        slimmed = [t for t in (self._all_tools or []) if getattr(t, "name", None) in CORE]
+        if not slimmed or len(slimmed) >= len(before):
+            return False
+        self._all_tools = slimmed
+        self._dispatch_by_name = {t.name: t for t in self._all_tools}
+        self._intent_tool_names = set(CORE)
+        self._tools_filter_locked = True
+        self._overflow_tools_slimmed = True
+        after = {getattr(t, "name", None) for t in (self.tools or [])}
+        after.discard(None)
+        return len(after) < len(before)
+
     def _refresh_tool_catalog(self) -> None:
+
         """Pick up tools registered AFTER this agent was built (skill
         installed / activated mid-session) so they become visible and
         dispatchable on the next turn. Honours the construction

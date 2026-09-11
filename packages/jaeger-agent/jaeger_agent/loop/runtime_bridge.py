@@ -475,9 +475,51 @@ def drive_one_turn(
     try:
         answer = _run_turn_with_executive(agent, user_text)
     except ContextOverflow as overflow:
-        # Pre-flight refusal — the prompt couldn't be trimmed enough to
-        # fit. Surface an actionable message and end the turn cleanly
-        # so the TUI doesn't see a backtrace.
+        # Pre-flight refusal — often tool schemas alone exceed a small
+        # local model's usable prompt room. Slim to CORE once and retry
+        # before surfacing the actionable refuse message.
+        if (
+            overflow.tools_tokens >= max(1, overflow.budget)
+            and hasattr(agent, "_slim_tools_to_core_for_overflow")
+            and agent._slim_tools_to_core_for_overflow()
+        ):
+            try:
+                answer = _run_turn_with_executive(agent, user_text)
+            except ContextOverflow as overflow:
+                elapsed = time.perf_counter() - started
+                return {
+                    "answer": friendly_overflow_text(
+                        estimated=overflow.estimated,
+                        budget=overflow.budget,
+                        system_prompt_tokens=overflow.system_prompt_tokens,
+                        tools_tokens=overflow.tools_tokens,
+                        latest_user_tokens=overflow.latest_user_tokens,
+                    ),
+                    "tool_activity": [],
+                    "first_decision": None,
+                    "elapsed_s": elapsed,
+                    "skipped": False,
+                    "halt_reason": "context_overflow",
+                    "iterations": 0,
+                    "new_messages": [],
+                }
+            else:
+                # Fall through to the normal success packaging below.
+                elapsed = time.perf_counter() - started
+                new_messages = agent.last_turn_messages
+                return {
+                    "answer": answer,
+                    "tool_activity": _tool_activity_lines(new_messages),
+                    "first_decision": _first_decision_from(new_messages),
+                    "elapsed_s": elapsed,
+                    "skipped": agent.last_skip_final,
+                    "halt_reason": agent.last_halt_reason,
+                    "iterations": agent.last_iteration_count,
+                    "new_messages": new_messages,
+                    "prompt_tokens": agent.last_prompt_tokens,
+                    "completion_tokens": agent.last_completion_tokens,
+                    "ttft_s": agent.last_ttft_s,
+                }
         elapsed = time.perf_counter() - started
         return {
             "answer": friendly_overflow_text(
