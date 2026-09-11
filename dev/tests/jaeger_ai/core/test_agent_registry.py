@@ -336,3 +336,137 @@ class TestGatewaySessionHandoff(AioHTTPTestCase):
         )
         assert resp.status == 404
 
+
+def test_system_prompt_for_session_agent_specialist():
+    """P6: handoff agent identity must drive the Ollama system prompt."""
+    from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+
+    agent = AgentRecord(
+        id="native:gateway",
+        name="gateway",
+        kind=AgentKind.NATIVE,
+        display_name="Gateway",
+        source="registry",
+        role=AgentRole.SPECIALIST,
+        metadata={
+            "specialty": "gateway",
+            "summary": "Spine health, agents catalog, sessions, and approvals on :8810.",
+        },
+    )
+    prompt = JaegerGatewayApp._system_prompt_for_agent(agent)
+    assert "You are Gateway." in prompt
+    assert "gateway specialist" in prompt.lower()
+    assert "SPECIALIST:Gateway" in prompt
+    assert "You are Jaeger." not in prompt
+
+    lead = AgentRecord(
+        id="native:jaeger",
+        name="jaeger",
+        kind=AgentKind.NATIVE,
+        display_name="Assistant",
+        source="registry",
+        role=AgentRole.LEAD,
+        metadata={"specialty": "lead", "summary": "Lead assistant."},
+    )
+    lead_prompt = JaegerGatewayApp._system_prompt_for_agent(lead)
+    assert "You are Assistant." in lead_prompt
+    assert "lead assistant" in lead_prompt.lower()
+
+    assert JaegerGatewayApp._system_prompt_for_agent(None).startswith("You are Jaeger.")
+
+
+class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
+    """Live-turn path must resolve session agent_id into turn.finish fields."""
+
+    async def get_application(self):
+        import os
+        import tempfile
+
+        self.state_root = Path(tempfile.mkdtemp())
+        os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
+        (self.state_root / "instances" / "jaeger").mkdir(parents=True)
+        (self.state_root / "instances" / "jaeger" / "identity.yaml").write_text(
+            "name: Assistant\n", encoding="utf-8"
+        )
+        (self.state_root / "instances" / "gateway").mkdir(parents=True)
+        (self.state_root / "instances" / "gateway" / "identity.yaml").write_text(
+            "name: Gateway\n", encoding="utf-8"
+        )
+        self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
+        self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        return self.gateway_app.app
+
+    async def tearDownAsync(self):
+        import os
+        import shutil
+
+        os.environ.pop("JAEGER_STATE_DIR", None)
+        if hasattr(self, "state_root") and self.state_root.exists():
+            shutil.rmtree(self.state_root, ignore_errors=True)
+        await super().tearDownAsync()
+
+    async def test_execute_turn_publishes_agent_on_finish(self):
+        # Seed standing specialists via registry list (ensure_standing runs on get).
+        resp = await self.client.request("GET", "/v1/agents?role=specialist")
+        assert resp.status == 200
+        filtered = await resp.json()
+        gateway = next(a for a in filtered["agents"] if a["id"] == "native:gateway")
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions",
+            json={
+                "session_id": "p6-turn",
+                "title": "P6",
+                "metadata": {"agent_id": "native:jaeger"},
+            },
+        )
+        assert resp.status == 201
+
+        resp = await self.client.request(
+            "POST",
+            "/v1/sessions/p6-turn/handoff",
+            json={
+                "to_agent_id": gateway["id"],
+                "reason": "P6 proof",
+                "keep_history": True,
+            },
+        )
+        assert resp.status == 200
+
+        captured: dict = {}
+
+        async def fake_chat(text: str, *, system_prompt: str | None = None) -> str:
+            captured["system_prompt"] = system_prompt
+            captured["text"] = text
+            return "SPECIALIST:Gateway"
+
+        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+
+        await self.gateway_app._execute_turn(
+            "p6-turn", "turn-abc", "Reply with exactly: SPECIALIST:<your display name>"
+        )
+
+        assert "You are Gateway." in (captured.get("system_prompt") or "")
+        assert "SPECIALIST:Gateway" in (captured.get("system_prompt") or "")
+
+        session = self.temp_store.get_session("p6-turn")
+        assert session is not None
+        assert session["status"] == "idle"
+        assert session["agent_id"] == "native:gateway"
+        assert any(
+            m["role"] == "assistant" and "SPECIALIST:Gateway" in m["content"]
+            for m in session["messages"]
+        )
+
+        finishes = [
+            e
+            for e in self.gateway_app.event_bus.get_replay_events("p6-turn")
+            if e.event == "turn.finish"
+        ]
+        assert finishes, "expected turn.finish event with agent fields"
+        data = finishes[-1].data
+        assert data.get("agent_id") == "native:gateway"
+        assert data.get("display_name") == "Gateway"
+        assert data.get("role") == "specialist"
