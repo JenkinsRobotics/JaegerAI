@@ -63,34 +63,8 @@ final class AvatarWindowController {
 @MainActor
 final class AvatarChatWindowController {
     static let shared = AvatarChatWindowController()
-    private var window: NSWindow?
-    private var titleSub: AnyCancellable?
-
-    static func show(agent: AgentBridge) { shared.present(agent: agent) }
-
-    private func present(agent: AgentBridge) {
-        if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-        let view = AvatarChatView(agent: agent).environmentObject(agent)
-        let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1040, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
-            backing: .buffered, defer: false)
-        win.title = characterTitle(agent.status, suffix: "Avatar + Chat")
-        win.titlebarAppearsTransparent = true
-        win.isReleasedWhenClosed = false
-        win.contentViewController = NSHostingController(rootView: view)
-        win.center()
-        win.minSize = NSSize(width: 820, height: 480)
-        window = win
-        titleSub = agent.$status.sink { [weak win] status in
-            win?.title = characterTitle(status, suffix: "Avatar + Chat")
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        win.makeKeyAndOrderFront(nil)
+    static func show(agent: AgentBridge) {
+        ChatWindowController.show(agent: agent, tab: .avatar)
     }
 }
 

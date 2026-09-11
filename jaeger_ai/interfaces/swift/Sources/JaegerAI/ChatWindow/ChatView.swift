@@ -29,8 +29,11 @@ struct AgentRosterItem: Identifiable, Hashable {
 struct ChatView: View {
     @EnvironmentObject private var agent: AgentBridge
     @StateObject private var chat: ChatViewModel
+    @ObservedObject private var tabState = ChatViewTabState.shared
+    @ObservedObject private var tts = TTSManager.shared
 
     @State private var showSidebar = true
+    @State private var selectedSessionId: String? = nil
     @State private var selectedAgentId = "chief-of-staff"
     @State private var searchText = ""
     @State private var showHistory = false
@@ -39,103 +42,39 @@ struct ChatView: View {
     @State private var progressExpanded = true
     @State private var attachedURLs: [URL] = []
     @State private var showMonarchAuthSheet = false
+    @State private var micOn = false
+    @State private var expandedProjects: Set<String> = ["ARES", "JaegerAI"]
 
-    @State private var agentRoster: [AgentRosterItem] = [
-        AgentRosterItem(
-            id: "chief-of-staff",
-            name: "Chief of Staff",
-            preview: "Audit: Antigravity finish-alpha…",
-            timestamp: "1:31 PM",
-            color: Color(red: 0.96, green: 0.55, blue: 0.16),
-            unread: false
-        ),
-        AgentRosterItem(
-            id: "stack-auditor",
-            name: "Stack Auditor",
-            preview: "Message from Chief of Staff…",
-            timestamp: "1:30 PM",
-            color: Color(red: 0.98, green: 0.45, blue: 0.22),
-            unread: true
-        ),
-        AgentRosterItem(
-            id: "release-scribe",
-            name: "Release Scribe",
-            preview: "Updated the held 0.12.0 draft…",
-            timestamp: "1:30 AM",
-            color: Color(red: 0.95, green: 0.28, blue: 0.38),
-            unread: false
-        ),
-        AgentRosterItem(
-            id: "gateway",
-            name: "Jaeger Gateway",
-            preview: "Messaged Chief of Staff: Active…",
-            timestamp: "1:28 AM",
-            color: Color(red: 0.55, green: 0.58, blue: 0.62),
-            unread: true
-        ),
-        AgentRosterItem(
-            id: "migration-core",
-            name: "Jaeger Migration Core",
-            preview: "Core migration pass: GO to…",
-            timestamp: "1:25 AM",
-            color: Color(red: 0.95, green: 0.28, blue: 0.40),
-            unread: true
-        ),
-        AgentRosterItem(
-            id: "migration-install",
-            name: "Jaeger Migration Install",
-            preview: "Standing by for any CoS follow…",
-            timestamp: "1:22 AM",
-            color: Color(red: 0.72, green: 0.52, blue: 0.38),
-            unread: false
-        ),
-        AgentRosterItem(
-            id: "migration-webui",
-            name: "Jaeger Migration WebUI",
-            preview: "Reported to CoS. Standing…",
-            timestamp: "1:20 AM",
-            color: Color(red: 0.52, green: 0.58, blue: 0.64),
-            unread: true
-        ),
-        AgentRosterItem(
-            id: "migration-router",
-            name: "Jaeger Migration Router",
-            preview: "Told Chief of Staff: recommend…",
-            timestamp: "1:20 AM",
-            color: Color(red: 0.20, green: 0.78, blue: 0.55),
-            unread: false
-        ),
-        AgentRosterItem(
-            id: "surfaces-bar",
-            name: "Jaeger Surfaces Bar",
-            preview: "Message from Jaeger Surface…",
-            timestamp: "1:19 AM",
-            color: Color(red: 0.55, green: 0.58, blue: 0.62),
-            unread: false
-        ),
-        AgentRosterItem(
-            id: "migration-si",
-            name: "Jaeger Migration SI",
-            preview: "Messaged Chief of Staff: #…",
-            timestamp: "1:18 AM",
-            color: Color(red: 0.98, green: 0.45, blue: 0.22),
-            unread: true
-        )
-    ]
+    @State private var agentRoster: [AgentRosterItem] = []
 
     init(agent: AgentBridge) {
         _chat = StateObject(wrappedValue: ChatViewModel(agent: agent))
     }
 
-    private var selectedAgent: AgentRosterItem {
-        agentRoster.first(where: { $0.id == selectedAgentId }) ?? agentRoster[0]
+    private var activeAgentName: String {
+        agent.status?.displayName ?? "Chief of Staff"
     }
 
-    private var filteredAgents: [AgentRosterItem] {
+    private var activeAgentColor: Color {
+        Color(red: 0.96, green: 0.55, blue: 0.16)
+    }
+
+    private var selectedAgent: AgentRosterItem {
+        AgentRosterItem(
+            id: selectedAgentId,
+            name: activeAgentName,
+            preview: "Primary Assistant",
+            timestamp: "Active",
+            color: activeAgentColor,
+            unread: false
+        )
+    }
+
+    private var filteredSessions: [SessionSummary] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if q.isEmpty { return agentRoster }
-        return agentRoster.filter {
-            $0.name.lowercased().contains(q) || $0.preview.lowercased().contains(q)
+        if q.isEmpty { return sessions }
+        return sessions.filter {
+            $0.displayTitle.lowercased().contains(q) || ($0.preview?.lowercased().contains(q) ?? false)
         }
     }
 
@@ -164,13 +103,20 @@ struct ChatView: View {
                 }
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
 
-                if chat.messages.isEmpty {
-                    emptyStateHero
-                } else {
-                    messageList
-                    Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
-                    slashPalette
-                    floatingComposer
+                switch tabState.currentTab {
+                case .chat:
+                    if chat.messages.isEmpty {
+                        emptyStateHero
+                    } else {
+                        messageList
+                        Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
+                        slashPalette
+                        floatingComposer
+                    }
+                case .avatar:
+                    avatarStageView
+                case .work:
+                    workStageView
                 }
 
                 statusBar
@@ -181,7 +127,10 @@ struct ChatView: View {
         .onAppear {
             drainPendingPillPrompt()
             PillBridge.shared.isAgentBusy = chat.isSending
-            Task { await loadLiveAgentsFromGateway() }
+            Task {
+                await refreshHistoryIfNeeded(force: true)
+                await loadLiveAgentsFromGateway()
+            }
         }
         .onChange(of: PillBridge.shared.pendingPrompt) { _, _ in
             drainPendingPillPrompt()
@@ -215,11 +164,11 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Sidebar View (Image 1 reference)
+    // MARK: - Sidebar View
 
     private var sidebarView: some View {
         VStack(spacing: 0) {
-            // Search row + New Chat
+            // Header: Search + New Chat
             HStack(spacing: 8) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
@@ -249,33 +198,135 @@ struct ChatView: View {
 
             Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1)
 
-            // Agent roster list
+            // Sections: PINNED, PROJECTS, RECENT
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(filteredAgents) { item in
-                        agentRow(item)
+                VStack(alignment: .leading, spacing: 14) {
+                    // PINNED SECTION
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("PINNED")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Term.inkDim.opacity(0.6))
+                            .padding(.horizontal, 12)
+
+                        // 1. Primary Assistant
+                        Button {
+                            tabState.currentTab = .chat
+                            startNewChat()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(activeAgentColor)
+                                    .frame(width: 18)
+                                Text(activeAgentName)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Term.ink)
+                                    .lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(chat.messages.isEmpty && tabState.currentTab == .chat ? Color.white.opacity(0.08) : Color.clear))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        // 2. Financial Monitor (Monarch Money)
+                        Button {
+                            showMonarchAuthSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Color.green)
+                                    .frame(width: 18)
+                                Text("Financial Monitor")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(Term.ink)
+                                    .lineLimit(1)
+                                Spacer()
+                                Circle()
+                                    .fill(Color.green.opacity(0.8))
+                                    .frame(width: 6, height: 6)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.clear))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // PROJECTS SECTION
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("PROJECTS")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Term.inkDim.opacity(0.6))
+                            .padding(.horizontal, 12)
+
+                        projectFolderRow(name: "ARES", icon: "folder.fill", prompt: "Focus on ARES autonomous multi-agent orchestration and status")
+                        projectFolderRow(name: "JaegerAI", icon: "folder.fill", prompt: "Review JaegerAI core daemon, tools, and interface health")
+                        projectFolderRow(name: "Finances", icon: "chart.pie.fill", prompt: "Run a full financial audit on accounts and transactions")
+                    }
+
+                    // RECENT SESSIONS SECTION
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text("RECENT")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Term.inkDim.opacity(0.6))
+                            Spacer()
+                            if !sessions.isEmpty {
+                                Text("\(sessions.count)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Term.inkDim.opacity(0.4))
+                            }
+                        }
+                        .padding(.horizontal, 12)
+
+                        if filteredSessions.isEmpty {
+                            Text(sessionsLoaded ? "No conversations found" : "Loading chats…")
+                                .font(.system(size: 11))
+                                .foregroundColor(Term.inkDim.opacity(0.6))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                        } else {
+                            ForEach(filteredSessions) { session in
+                                sessionRow(session)
+                            }
+                        }
                     }
                 }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
             }
 
             Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1)
 
-            // Sidebar footer
-            VStack(spacing: 8) {
-                Button(action: {}) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "square.grid.2x2")
+            // Sidebar footer: Voice shortcut + Matthew Jenkins profile
+            VStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        tabState.currentTab = (tabState.currentTab == .avatar ? .chat : .avatar)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: tabState.currentTab == .avatar ? "waveform.circle.fill" : "waveform")
                             .font(.system(size: 13))
-                            .foregroundColor(Term.inkDim)
-                        Text("Marketplace")
+                            .foregroundColor(tabState.currentTab == .avatar ? Term.accent : Term.inkDim)
+                        Text("Voice Mode")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(Term.ink)
+                            .foregroundColor(tabState.currentTab == .avatar ? Term.accent : Term.ink)
                         Spacer()
+                        if tts.isSpeaking {
+                            Text("Speaking")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(Color.green)
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(tabState.currentTab == .avatar ? Color.white.opacity(0.08) : Color.clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -295,9 +346,9 @@ struct ChatView: View {
                             .foregroundColor(Term.ink)
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(Color.green)
+                                .fill(agent.isConnected ? Color.green : Color.orange)
                                 .frame(width: 6, height: 6)
-                            Text("Online")
+                            Text(agent.isConnected ? "Online" : "Connecting…")
                                 .font(.system(size: 10))
                                 .foregroundColor(Term.inkDim)
                         }
@@ -311,61 +362,96 @@ struct ChatView: View {
             .background(Color.white.opacity(0.02))
         }
         .background(Color(red: 0.06, green: 0.07, blue: 0.09))
+        .task {
+            await refreshHistoryIfNeeded(force: true)
+        }
     }
 
-    private func agentRow(_ item: AgentRosterItem) -> some View {
-        let isSelected = item.id == selectedAgentId
+    private func sessionRow(_ session: SessionSummary) -> some View {
+        let isSelected = session.id == chat.sessionKey && tabState.currentTab == .chat
         return Button {
-            selectedAgentId = item.id
-            if item.id == "gateway" || item.id == "chief-of-staff" {
-                Task { await chat.loadSession(item.id) }
-            }
+            tabState.currentTab = .chat
+            selectedSessionId = session.id
+            Task { await chat.loadSession(session.id) }
         } label: {
-            HStack(alignment: .center, spacing: 10) {
-                // Hexagonal badge icon
-                ZStack {
-                    Image(systemName: "hexagon.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(item.color)
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10))
-                        .foregroundColor(.white)
-                }
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "bubble.left.fill" : "bubble.left")
+                    .font(.system(size: 11))
+                    .foregroundColor(isSelected ? Term.accent : Term.inkDim)
+                    .frame(width: 14)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(item.name)
-                            .font(.system(size: 12, weight: isSelected ? .bold : .medium))
-                            .foregroundColor(isSelected ? Term.accent : Term.ink)
-                            .lineLimit(1)
-                        Spacer()
-                        Text(item.timestamp)
-                            .font(.system(size: 10))
-                            .foregroundColor(Term.inkDim.opacity(0.7))
-                    }
-                    HStack {
-                        Text(item.preview)
-                            .font(.system(size: 11))
-                            .foregroundColor(Term.inkDim)
-                            .lineLimit(1)
-                        Spacer()
-                        if item.unread {
-                            Circle()
-                                .fill(Color.blue)
-                                .frame(width: 6, height: 6)
-                        }
-                    }
-                }
+                Text(session.displayTitle)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(isSelected ? Term.ink : Term.ink.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer()
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected ? Color.white.opacity(0.08) : Color.clear)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func projectFolderRow(name: String, icon: String, prompt: String) -> some View {
+        let isExpanded = expandedProjects.contains(name)
+        return VStack(alignment: .leading, spacing: 2) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    if isExpanded {
+                        expandedProjects.remove(name)
+                    } else {
+                        expandedProjects.insert(name)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(Term.inkDim.opacity(0.7))
+                        .frame(width: 10)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 11))
+                        .foregroundColor(Term.accent.opacity(0.8))
+                        .frame(width: 14)
+
+                    Text(name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Term.ink)
+                    Spacer()
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                Button {
+                    tabState.currentTab = .chat
+                    chat.composerText = prompt
+                } label: {
+                    HStack(spacing: 6) {
+                        Rectangle().fill(Color.white.opacity(0.1)).frame(width: 1, height: 12)
+                            .padding(.leading, 14)
+                        Text("Prompt Workspace")
+                            .font(.system(size: 11))
+                            .foregroundColor(Term.inkDim)
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     // MARK: - Main Toolbar
@@ -381,12 +467,12 @@ struct ChatView: View {
             .help("Toggle Sidebar")
 
             // Active agent indicator
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "hexagon.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(selectedAgent.color)
-                Text(selectedAgent.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14))
+                    .foregroundColor(activeAgentColor)
+                Text(activeAgentName)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Term.ink)
             }
 
@@ -407,20 +493,16 @@ struct ChatView: View {
             .buttonStyle(.plain)
             .help("Switch model")
 
-            if chat.sessionKey == "dispatcher" {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(chat.dispatcherStatus).font(.caption).lineLimit(1)
-                    if chat.dispatcherRun?.active == true, let tool = chat.dispatcherRun?.tools?.last {
-                        Text((tool.tool ?? "Tool") + " · " + tool.event).font(.caption2)
-                    }
-                }
-                if chat.dispatcherRun?.active == true {
-                    Button(chat.dispatcherRun?.status == "interrupted" ? "Check status" : "Stop") {
-                        chat.controlDispatcher(chat.dispatcherRun?.status == "interrupted" ? "reconcile" : "cancel")
-                    }
-                    .buttonStyle(.plain)
-                }
+            Spacer()
+
+            // Centered Nav Pills: [ Chat ] [ Avatar ] [ Work ]
+            HStack(spacing: 2) {
+                tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
+                tabPillButton(title: "Avatar", icon: "waveform.circle.fill", tab: .avatar)
+                tabPillButton(title: "Work", icon: "briefcase.fill", tab: .work)
             }
+            .padding(3)
+            .background(Capsule().fill(Color.white.opacity(0.05)).overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)))
 
             Spacer()
 
@@ -454,11 +536,36 @@ struct ChatView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(Color(red: 0.05, green: 0.06, blue: 0.08))
     }
 
-    // MARK: - Empty State Hero (Image 2 reference)
+    private func tabPillButton(title: String, icon: String, tab: AppNavTab) -> some View {
+        let isSelected = tabState.currentTab == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                tabState.currentTab = tab
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+            }
+            .foregroundColor(isSelected ? Term.ink : Term.inkDim)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Empty State Hero
 
     private var emptyStateHero: some View {
         VStack(spacing: 28) {
@@ -468,25 +575,28 @@ struct ChatView: View {
                 Text("What's on your mind today?")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundColor(Term.ink)
-                Text("Collaborating with \(selectedAgent.name)")
+                Text("Collaborating with \(activeAgentName)")
                     .font(.system(size: 13))
                     .foregroundColor(Term.inkDim)
             }
 
-            // Quick suggestion chips
-            HStack(spacing: 8) {
-                suggestionChip(title: "Connect Monarch", icon: "creditcard.fill") {
-                    showMonarchAuthSheet = true
+            // Quick suggestion chips in horizontal scroll view to prevent ANY wrapping!
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    suggestionChip(title: "Connect Monarch", icon: "creditcard.fill") {
+                        showMonarchAuthSheet = true
+                    }
+                    suggestionChip(title: "Audit repo hygiene", icon: "shield.checkerboard") {
+                        chat.composerText = "Audit repository hygiene and check all test suites"
+                    }
+                    suggestionChip(title: "Review release draft", icon: "doc.text") {
+                        chat.composerText = "Review the release draft and summarize changes"
+                    }
+                    suggestionChip(title: "Check model router", icon: "network") {
+                        chat.composerText = "Check model router endpoints and active models"
+                    }
                 }
-                suggestionChip(title: "Audit repo hygiene", icon: "shield.checkerboard") {
-                    chat.composerText = "Audit repository hygiene and check all test suites"
-                }
-                suggestionChip(title: "Review release draft", icon: "doc.text") {
-                    chat.composerText = "Review the release draft and summarize changes"
-                }
-                suggestionChip(title: "Check model router", icon: "network") {
-                    chat.composerText = "Check model router endpoints and active models"
-                }
+                .padding(.horizontal, 2)
             }
 
             // Hero composer pill
@@ -508,6 +618,8 @@ struct ChatView: View {
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(Term.ink)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -519,6 +631,256 @@ struct ChatView: View {
                             .stroke(Color.white.opacity(0.08), lineWidth: 1)
                     )
             )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Avatar Stage View
+
+    private var avatarStageView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            VStack(spacing: 8) {
+                Text(activeAgentName)
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundColor(Term.ink)
+
+                let statusLabel: String = {
+                    if tts.isSpeaking { return "Speaking aloud…" }
+                    if agent.isBusy { return "Thinking…" }
+                    if micOn { return "Listening for speech…" }
+                    return "Ready · Tap to speak"
+                }()
+
+                Text(statusLabel)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(tts.isSpeaking ? Color.green : (agent.isBusy ? Term.accent : Term.inkDim))
+            }
+
+            // High-resolution Voice Orb View
+            VoiceOrbView(agent: agent)
+                .frame(width: 300, height: 300)
+                .background(
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Term.accent.opacity(0.12), Color.clear],
+                                center: .center,
+                                startRadius: 40,
+                                endRadius: 180
+                            )
+                        )
+                )
+
+            // Audio & Mic Controls
+            HStack(spacing: 16) {
+                // Mic button
+                Button {
+                    toggleVoice()
+                    micOn = voice.isRecording
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: voice.isRecording ? "stop.fill" : "mic.fill")
+                            .font(.system(size: 14))
+                        Text(voice.isRecording ? "Stop Listening" : "Push to Talk")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(voice.isRecording ? Color.white : Term.ink)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(voice.isRecording ? Color.red.opacity(0.8) : Color.white.opacity(0.08))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // TTS Speaker Toggle
+                Button {
+                    tts.autoSpeakEnabled.toggle()
+                    let on = tts.autoSpeakEnabled
+                    Task { await agent.command("save_config", args: ["speak_replies": on]) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: tts.autoSpeakEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .font(.system(size: 14))
+                        Text(tts.autoSpeakEnabled ? "Speaker ON" : "Muted")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(tts.autoSpeakEnabled ? Color.green : Term.inkDim)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(tts.autoSpeakEnabled ? Color.green.opacity(0.12) : Color.white.opacity(0.05))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Term.canvas)
+    }
+
+    // MARK: - Work Stage View (Missions & Dispatcher)
+
+    private var workStageView: some View {
+        VStack(spacing: 0) {
+            // Header bar
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Autonomous Dispatcher & Missions")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(Term.ink)
+                    Text("Background workers, heartbeat loops, and long-running autonomous runs")
+                        .font(.system(size: 11))
+                        .foregroundColor(Term.inkDim)
+                }
+                Spacer()
+
+                Button("Refresh") {
+                    Task { await chat.refreshDispatcher() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(16)
+            .background(Color.white.opacity(0.02))
+
+            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Status Card
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Circle()
+                                .fill(chat.dispatcherConnected ? Color.green : Color.orange)
+                                .frame(width: 8, height: 8)
+                            Text(chat.dispatcherStatus)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(Term.ink)
+                            Spacer()
+                            if let run = chat.dispatcherRun {
+                                Text("Run \(run.run_id)")
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(Term.inkDim)
+                            }
+                        }
+
+                        if let run = chat.dispatcherRun, run.active == true {
+                            HStack(spacing: 12) {
+                                Button(run.status == "interrupted" ? "Reconcile" : "Stop Run") {
+                                    chat.controlDispatcher(run.status == "interrupted" ? "reconcile" : "cancel")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(run.status == "interrupted" ? Term.accent : Color.red)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Term.panel).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1)))
+
+                    // Autonomous Missions Card
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Active Missions")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(Term.ink)
+
+                        HStack(spacing: 12) {
+                            missionCard(
+                                title: "Monarch Finance Worker",
+                                subtitle: "Hourly net worth, budget & transaction audits",
+                                status: "Ready",
+                                icon: "creditcard.fill",
+                                color: Color.green
+                            ) {
+                                showMonarchAuthSheet = true
+                            }
+
+                            missionCard(
+                                title: "Repo Hygiene Auditor",
+                                subtitle: "Git cleanliness, test suite passing, fast lint",
+                                status: "Idle",
+                                icon: "shield.checkerboard",
+                                color: Term.accent
+                            ) {
+                                tabState.currentTab = .chat
+                                chat.composerText = "Run repository hygiene audit"
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Term.panel).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1)))
+
+                    // Dispatcher Reports
+                    if !chat.dispatcherReports.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Recent Reports")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(Term.ink)
+
+                            ForEach(chat.dispatcherReports.prefix(10), id: \.run_id) { report in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(report.run_id)
+                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                            .foregroundColor(Term.ink)
+                                        Spacer()
+                                        Text(report.status)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(Term.accent)
+                                    }
+                                    Text(report.summary)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(Term.inkDim)
+                                        .lineLimit(2)
+                                }
+                                .padding(10)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.03)))
+                            }
+                        }
+                        .padding(16)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Term.panel).overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1)))
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Term.canvas)
+    }
+
+    private func missionCard(title: String, subtitle: String, status: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 14))
+                        .foregroundColor(color)
+                    Spacer()
+                    Text(status)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(color)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(color.opacity(0.12)))
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Term.ink)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(Term.inkDim)
+                    .lineLimit(2)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.04)).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.06), lineWidth: 1)))
         }
         .buttonStyle(.plain)
     }

@@ -21,12 +21,23 @@ import AppKit
 import Combine
 import SwiftUI
 
+enum AppNavTab: String, CaseIterable, Identifiable {
+    case chat = "Chat"
+    case avatar = "Avatar"
+    case work = "Work"
+    var id: String { rawValue }
+}
+
+@MainActor
+final class ChatViewTabState: ObservableObject {
+    static let shared = ChatViewTabState()
+    @Published var currentTab: AppNavTab = .chat
+}
+
 @MainActor
 final class ChatWindowController {
 
-    /// Singleton — one chat window per app session.  Clicking "Open
-    /// Chat" again raises the existing window instead of spawning a
-    /// duplicate (same UX the Lilith PyQt6 pill + chat used).
+    /// Singleton — one chat window per app session.
     static let shared = ChatWindowController()
 
     private var window: NSWindow?
@@ -43,7 +54,8 @@ final class ChatWindowController {
 
     /// Show (or raise) the chat window, wiring the SwiftUI ``ChatView``
     /// to the shared ``AgentBridge``.
-    static func show(agent: AgentBridge) {
+    static func show(agent: AgentBridge, tab: AppNavTab = .chat) {
+        ChatViewTabState.shared.currentTab = tab
         shared.showOrRaise(agent: agent)
     }
 
