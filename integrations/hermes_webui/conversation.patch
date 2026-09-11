@@ -1,16 +1,17 @@
+diff --git a/api/routes.py b/api/routes.py
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -12865,6 +12865,9 @@
- 
- def handle_get(handler, parsed) -> bool:
-     """Handle all GET routes. Returns True if handled, False for 404."""
+@@ -12928,6 +12928,9 @@ def handle_get(handler, parsed) -> bool:
+             return True
+     except Exception:
+         pass
 +    from api.jaeger_conversation import route as conversation_route
 +    if conversation_route(handler, parsed, "GET"):
 +        return True
      proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
      if proxy_result is not False:
          return proxy_result
-@@ -13898,6 +13901,8 @@
+@@ -13961,6 +13964,8 @@
                  )
                  if revision:
                      raw["regeneration_revision"] = revision
@@ -19,14 +20,13 @@
              redact = redact_session_data(raw)
              _t5 = _time.monotonic()
              if _diag: _diag.stage("t5_after_redact")
-@@ -14979,6 +14984,10 @@
-         if diag:
-             diag.finish()
-         return proxy_result
-+
+@@ -15012,6 +15017,9 @@ def handle_post(handler, parsed) -> bool:
+             return True
+     except Exception:
+         pass
 +    from api.jaeger_conversation import route as conversation_route
 +    if conversation_route(handler, parsed, "POST"):
 +        return True
- 
-     if parsed.path == "/api/shutdown":
-         return _handle_shutdown(handler)
+     diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
+     if parsed.path == "/api/csp-report":
+         if diag:
