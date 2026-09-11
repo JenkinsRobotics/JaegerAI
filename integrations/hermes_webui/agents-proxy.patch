@@ -1,0 +1,30 @@
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -12865,6 +12865,13 @@
+ 
+ def handle_get(handler, parsed) -> bool:
+     """Handle all GET routes. Returns True if handled, False for 404."""
++    try:
++        from api.jaeger_agents import route as jaeger_agents_route
++        if jaeger_agents_route(handler, parsed, "GET"):
++            return True
++    except Exception:
++        pass
+     from api.jaeger_conversation import route as conversation_route
+     if conversation_route(handler, parsed, "GET"):
+         return True
+@@ -14979,6 +14986,13 @@
+         if diag:
+             diag.finish()
+         return proxy_result
++
++    try:
++        from api.jaeger_agents import route as jaeger_agents_route
++        if jaeger_agents_route(handler, parsed, "POST"):
++            return True
++    except Exception:
++        pass
+ 
+     from api.jaeger_conversation import route as conversation_route
+     if conversation_route(handler, parsed, "POST"):
+         return True
