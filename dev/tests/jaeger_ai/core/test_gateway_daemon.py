@@ -183,7 +183,7 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch):
 
         def _execute_call(self, name, arguments):
             assert name in {"jaeger_chat", "chat"}
-            assert arguments.get("session_id") == "gateway:sess-native"
+            assert arguments.get("session_id") == "dispatcher"
             return {"content": [{"type": "text", "text": "NATIVE_MCP_OK autonomy=tools"}]}
 
     import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as jaeger_mcp
