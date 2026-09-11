@@ -77,8 +77,20 @@ struct ChatMessage: Identifiable, Equatable {
     var text: String
     var isStreaming: Bool
     var meta: String?
+    /// Gateway turn.finish / agents catalog identity for assistant rows.
+    var displayName: String?
+    var agentRole: String?
     var thoughtText: String
     var toolItems: [ToolCallItem]
+
+    /// Compact chrome label, e.g. "Everyday · specialist".
+    var agentLabel: String? {
+        let name = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let role = (agentRole ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty { return nil }
+        if role.isEmpty || role == "lead" { return name }
+        return "\(name) · \(role)"
+    }
 
     init(
         id: UUID = UUID(),
@@ -87,6 +99,8 @@ struct ChatMessage: Identifiable, Equatable {
         text: String = "",
         isStreaming: Bool = false,
         meta: String? = nil,
+        displayName: String? = nil,
+        agentRole: String? = nil,
         thoughtText: String = "",
         toolItems: [ToolCallItem] = []
     ) {
@@ -96,6 +110,8 @@ struct ChatMessage: Identifiable, Equatable {
         self.text = text
         self.isStreaming = isStreaming
         self.meta = meta
+        self.displayName = displayName
+        self.agentRole = agentRole
         self.thoughtText = thoughtText
         self.toolItems = toolItems
     }
@@ -712,6 +728,19 @@ final class ChatViewModel: ObservableObject {
                 messages[i].isStreaming = false
                 if let s = reply.elapsedS {
                     messages[i].meta = "replied in " + Self.fmtSeconds(s)
+                }
+                // Prefer turn payload identity; else Gateway active agent.
+                var dn = reply.displayName
+                var role = reply.agentRole
+                if dn == nil || (dn?.isEmpty ?? true) {
+                    if let active = try? await GatewayClient.fromEnvironment().listAgents().active {
+                        dn = active.displayName
+                        role = active.resolvedRole
+                    }
+                }
+                if let dn, !dn.isEmpty {
+                    messages[i].displayName = dn
+                    messages[i].agentRole = role
                 }
             }
             if let used = reply.ctxUsed, let mx = reply.ctxMax {

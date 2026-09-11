@@ -337,7 +337,7 @@ struct ChatView: View {
                         .padding(.horizontal, 12)
 
                         if filteredSessions.isEmpty {
-                            Text(sessionsLoaded ? "No conversations found" : "Loading chats…")
+                            Text(sessionsLoaded ? "No conversations yet" : "Loading chats…")
                                 .font(.system(size: 11))
                                 .foregroundColor(Term.inkDim.opacity(0.6))
                                 .padding(.horizontal, 12)

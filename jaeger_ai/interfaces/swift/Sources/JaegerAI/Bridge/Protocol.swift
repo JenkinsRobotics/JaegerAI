@@ -232,7 +232,8 @@ enum ProtocolFrame {
     /// ``telemetry`` fields are v1 ADDITIVE optionals — a core that
     /// doesn't send them (or an older fixture) decodes to nils.
     case reply(text: String, error: String?,
-               elapsedS: Double?, ctxUsed: Int?, ctxMax: Int?)
+               elapsedS: Double?, ctxUsed: Int?, ctxMax: Int?,
+               agentId: String?, agentRole: String?, displayName: String?)
     case result(id: String, ok: Bool, error: String?, data: Data?)
     case request(BridgeRequest)
     /// ``suggestedName`` is a v1 ADDITIVE optional (nil when the core
@@ -291,7 +292,10 @@ enum ProtocolFrame {
                           error: obj["error"] as? String,
                           elapsedS: (obj["elapsed_s"] as? NSNumber)?.doubleValue,
                           ctxUsed: (obj["ctx_used"] as? NSNumber)?.intValue,
-                          ctxMax: (obj["ctx_max"] as? NSNumber)?.intValue)
+                          ctxMax: (obj["ctx_max"] as? NSNumber)?.intValue,
+                          agentId: obj["agent_id"] as? String,
+                          agentRole: obj["role"] as? String,
+                          displayName: obj["display_name"] as? String)
         case "delta":
             guard let text = obj["text"] as? String else { return nil }
             return .delta(text: text)

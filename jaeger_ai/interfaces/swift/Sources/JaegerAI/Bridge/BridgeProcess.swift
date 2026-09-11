@@ -96,6 +96,10 @@ struct TurnResult: Sendable {
     var elapsedS: Double? = nil   // wall-clock turn time ("replied in 3s")
     var ctxUsed: Int? = nil       // estimated prompt tokens in the session
     var ctxMax: Int? = nil        // the loaded model's context window
+    // Gateway turn.finish identity (additive; nil when bridge/core omits).
+    var agentId: String? = nil
+    var agentRole: String? = nil
+    var displayName: String? = nil
 }
 
 /// Owns the child process + NDJSON framing. One pending turn at a time
@@ -394,10 +398,12 @@ actor BridgeProcess {
                 onDelta?(text)
             case .reasoning(let text):
                 onReasoning?(text)
-            case .reply(let text, let error, let elapsed, let used, let mx):
+            case .reply(let text, let error, let elapsed, let used, let mx,
+                        let agentId, let agentRole, let displayName):
                 replyCont?.resume(returning: TurnResult(
                     text: text, error: error,
-                    elapsedS: elapsed, ctxUsed: used, ctxMax: mx))
+                    elapsedS: elapsed, ctxUsed: used, ctxMax: mx,
+                    agentId: agentId, agentRole: agentRole, displayName: displayName))
                 replyCont = nil
             case .request(let r):
                 onRequest?(r)
