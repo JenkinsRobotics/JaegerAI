@@ -51,6 +51,7 @@ enum SlashRouting {
         Item(name: "steer",     summary: "guide an in-flight autonomous run"),
         Item(name: "stop",      summary: "cancel active turn or autonomous loop"),
         Item(name: "copy",      summary: "copy the last reply to clipboard"),
+        Item(name: "finance",   summary: "connect Monarch Money or manage budgets"),
         Item(name: "new",       summary: "start a new conversation"),
         Item(name: "help",      summary: "list all available slash commands"),
     ]
