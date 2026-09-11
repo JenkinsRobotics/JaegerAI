@@ -325,7 +325,7 @@ BRIDGE_QUERIES = (
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
     "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory",
-    "dispatcher_connection", "dispatcher_conversation",
+    "dispatcher_connection", "dispatcher_conversation", "ares_status",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -833,6 +833,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             except Exception:  # noqa: BLE001
                 pass
         return _hb.status(lay, interval_minutes=interval, enabled=enabled)
+    if what == "ares_status":
+        from jaeger_ai.core.runtime.heartbeat import get_ares_engine
+        engine = get_ares_engine(lay)
+        return engine.status() if engine else {"enabled": False, "status": "unavailable"}
     if what == "cron":
         from jaeger_ai.core.runtime.schedules import list_jobs
 

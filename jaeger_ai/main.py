@@ -5808,6 +5808,13 @@ def run_daemon(*, instance_name: str | None = None,
                     client, AUTO_BOARD_PROMPT, session_key="kanban_idle")
             elif _action is Action.HEARTBEAT:
                 print("[jaeger-daemon] heartbeat.", flush=True)
+                try:
+                    _ares_res = _hb.tick_ares(layout)
+                    if _ares_res and getattr(_ares_res, "status", None) == "acted":
+                        print(f"[jaeger-daemon] ARES acted: {_ares_res.intent.goal}", flush=True)
+                except Exception as _exc:
+                    print(f"[jaeger-daemon] ARES tick error: {_exc}", flush=True)
+
                 _text = run_worker_turn(
                     client, _hb.build_prompt(layout),
                     session_key=str(
