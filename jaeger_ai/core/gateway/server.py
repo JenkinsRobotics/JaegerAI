@@ -94,24 +94,70 @@ class JaegerGatewayApp:
         except Exception as exc:  # noqa: BLE001 — health must never crash
             return {"ok": False, "status_code": 0, "url": url, "error": str(exc)}
 
-    async def handle_health(self, request: web.Request) -> web.Response:
-        """Fail-closed health: gateway self + bridge + ollama (not :8813).
+    async def _probe_webui_legacy_chat(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
+        """Probe locked WebUI legacy ``/api/chat``. HTTP 500 ⇒ fail-closed (M8).
 
-        When brain/bridge is dead, status is not ok and all_green is false.
+        Non-500 responses (including 400/404 validation) mean the route is alive.
+        Connection errors also fail closed — chat surface unreachable.
+        """
+        url = f"{LOCKED_WEBUI_URL}/api/chat"
+        try:
+            timeout = ClientTimeout(total=timeout_s)
+            async with ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    url,
+                    json={"session_id": "__jaeger_health_probe__", "message": "ping"},
+                ) as resp:
+                    body = await resp.text()
+                    # CoS: must not claim all_green while legacy /api/chat returns 500.
+                    ok = resp.status != 500
+                    return {
+                        "ok": ok,
+                        "status_code": resp.status,
+                        "url": url,
+                        "required": True,
+                        "body_excerpt": body[:200],
+                        "note": (
+                            "legacy /api/chat returned 500"
+                            if resp.status == 500
+                            else "legacy /api/chat reachable (non-500)"
+                        ),
+                    }
+        except Exception as exc:  # noqa: BLE001 — health must never crash
+            return {
+                "ok": False,
+                "status_code": 0,
+                "url": url,
+                "required": True,
+                "error": str(exc),
+                "note": "legacy /api/chat unreachable",
+            }
+
+    async def handle_health(self, request: web.Request) -> web.Response:
+        """Fail-closed health: gateway + bridge + ollama + WebUI legacy chat (not :8813).
+
+        When brain/bridge is dead OR legacy /api/chat returns 500, status is
+        unhealthy and all_green is false (HTTP 503).
         """
         bridge = await self._probe_http(LOCKED_BRIDGE_HEALTH_URL)
         ollama = await self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags")
+        webui_chat = await self._probe_webui_legacy_chat()
         checks = {
             "gateway": {"ok": True, "url": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}"},
             "bridge": bridge,
             "ollama": ollama,
+            "webui_legacy_chat": webui_chat,
             "ares_agentgateway_8813": {
                 "ok": None,
                 "required": False,
                 "note": "not on chat spine; M9 does not require :8813",
             },
         }
-        required_ok = bool(bridge.get("ok")) and bool(ollama.get("ok"))
+        required_ok = (
+            bool(bridge.get("ok"))
+            and bool(ollama.get("ok"))
+            and bool(webui_chat.get("ok"))
+        )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
         payload = {
