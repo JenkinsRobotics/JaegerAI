@@ -63,4 +63,31 @@
   window.addEventListener("pageshow", installJaegerSurfaceLabels);
   document.addEventListener("DOMContentLoaded", installJaegerSurfaceLabels);
 
+
+  const hideTodosSurfaces = () => {
+    // S1: no /api/todos route yet — hide rail + mobile tab + workspace todos tab.
+    try {
+      document.querySelectorAll('[data-panel="todos"]').forEach((el) => {
+        el.hidden = true;
+        el.setAttribute("aria-hidden", "true");
+        el.style.display = "none";
+      });
+      const panel = document.getElementById("panelTodos");
+      if (panel) {
+        panel.hidden = true;
+        panel.style.display = "none";
+      }
+      const wsTab = document.getElementById("workspaceTodosTab");
+      if (wsTab) {
+        wsTab.hidden = true;
+        wsTab.style.display = "none";
+      }
+      const wsPanel = document.getElementById("workspaceTodosPanel");
+      if (wsPanel) wsPanel.hidden = true;
+    } catch (_) {}
+  };
+  hideTodosSurfaces();
+  window.addEventListener("pageshow", hideTodosSurfaces);
+  document.addEventListener("DOMContentLoaded", hideTodosSurfaces);
+
 })();
