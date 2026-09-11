@@ -499,12 +499,69 @@ class JaegerGatewayApp:
             return None
 
     @staticmethod
-    def _system_prompt_for_agent(agent) -> str:
-        """Build a brief identity system prompt from catalog agent fields.
+    def _instance_root() -> Path:
+        """Resolve the active Jaeger instance root (SI character + memory home)."""
+        try:
+            from jaeger_ai.core.instance.instance import resolve_instance_dir
 
-        Used so post-handoff turns speak as the specialist (display_name /
-        role / specialty), not a hard-coded "You are Jaeger".
+            return resolve_instance_dir()
+        except Exception:  # noqa: BLE001 — gateway must still answer without instance
+            home = Path(os.environ.get("JAEGER_HOME", str(Path.home() / ".jaeger")))
+            return home / "instances" / "jaeger"
+
+    @staticmethod
+    def _si_character_prompt() -> str | None:
+        """Load the live SI brief from personality/Character.character_block()."""
+        try:
+            from jaeger_ai.personality.character import active_character
+
+            character = active_character(JaegerGatewayApp._instance_root())
+            if character is None:
+                return None
+            block = (character.character_block() or "").strip()
+            return block or None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SI character prompt unavailable: %s", exc)
+            return None
+
+    @staticmethod
+    def _system_prompt_for_agent(agent) -> str:
+        """Build the turn system prompt.
+
+        Lead / default turns use the owner-authored SI character sheet
+        (``Character.character_block``) already in ``jaeger_ai/personality``.
+        Specialist handoffs keep a thin specialty overlay so P6 live
+        specialist turns keep working — specialists are teammates under
+        the SI host, not a second soul.
         """
+        role = getattr(agent, "role", None) if agent is not None else None
+        role_s = role.value if hasattr(role, "value") else (str(role) if role else "")
+
+        if agent is not None and role_s == "specialist":
+            display = str(
+                getattr(agent, "display_name", None)
+                or getattr(agent, "name", None)
+                or "Specialist"
+            )
+            meta = getattr(agent, "metadata", None) or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            specialty = str(meta.get("specialty") or meta.get("role") or "").strip()
+            summary = str(meta.get("summary") or "").strip()
+            parts = [f"You are {display}."]
+            parts.append(f"You are the {specialty or display} specialist.")
+            parts.append(
+                f"When asked for your display name, reply with exactly: SPECIALIST:{display}."
+            )
+            if summary:
+                parts.append(summary.rstrip(".") + ".")
+            parts.append("Reply briefly and helpfully.")
+            return " ".join(parts)
+
+        si = JaegerGatewayApp._si_character_prompt()
+        if si:
+            return si
+
         if agent is None:
             return "You are Jaeger. Reply briefly and helpfully."
         display = str(
@@ -512,21 +569,13 @@ class JaegerGatewayApp:
             or getattr(agent, "name", None)
             or "Jaeger"
         )
-        role = getattr(agent, "role", None)
-        role_s = role.value if hasattr(role, "value") else (str(role) if role else "runtime")
         meta = getattr(agent, "metadata", None) or {}
         if not isinstance(meta, dict):
             meta = {}
-        specialty = str(meta.get("specialty") or meta.get("role") or "").strip()
         summary = str(meta.get("summary") or "").strip()
         parts = [f"You are {display}."]
         if role_s == "lead":
             parts.append("You are the lead assistant.")
-        elif role_s == "specialist":
-            parts.append(f"You are the {specialty or display} specialist.")
-            parts.append(
-                f"When asked for your display name, reply with exactly: SPECIALIST:{display}."
-            )
         if summary:
             parts.append(summary.rstrip(".") + ".")
         parts.append("Reply briefly and helpfully.")

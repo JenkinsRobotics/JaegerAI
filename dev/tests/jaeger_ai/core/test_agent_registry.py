@@ -638,10 +638,10 @@ def test_system_prompt_for_session_agent_specialist():
         metadata={"specialty": "lead", "summary": "Lead assistant."},
     )
     lead_prompt = JaegerGatewayApp._system_prompt_for_agent(lead)
-    assert "You are Assistant." in lead_prompt
-    assert "lead assistant" in lead_prompt.lower()
-
-    assert JaegerGatewayApp._system_prompt_for_agent(None).startswith("You are Jaeger.")
+    # Lead uses SI Character.character_block() when instance character loads.
+    assert "## My voice" in lead_prompt or "You are Assistant." in lead_prompt
+    none_prompt = JaegerGatewayApp._system_prompt_for_agent(None)
+    assert none_prompt.startswith("## My voice") or none_prompt.startswith("You are Jaeger.")
 
 
 class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
