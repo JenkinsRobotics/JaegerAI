@@ -1,7 +1,7 @@
 # Product sprint status — 2026-09-11 ~09:45 PT
 
 **Machine:** MatthewacStudio (`f9644398-ff83-41bc-94e8-7d0bca7aac5d`)  
-**Branch:** `finish-alpha` @ `975b6b2` (ahead of origin; not pushed)  
+**Branch:** `finish-alpha` @ `a68050d` (ahead of origin; not pushed)  
 **Repo only:** `/Users/matthewjenkins/GitHub/JaegerAI`  
 **Claim level:** Grok-**shaped** start — **do not** claim more-advanced-than-Grok yet (handoffs are stubs; no proven live multi-agent turn).
 
@@ -77,4 +77,4 @@ Spine M1–M10 already green ×2 (prior). This sprint = product bar P1–P8.
 
 ## TIP (SI continuity-approve)
 - Gateway lead soft-fail prompt includes SOUL — ready for SI continuity-approve once commit hash is stamped below.
-- Commit: pending (see git log `fix(gateway): include SOUL on lead Ollama soft-fail prompt`).
+- Commit: `a68050d` (`a68050d8ecb943a005bf8c80dd1150ddf3089314`) — `fix(gateway): include SOUL on lead Ollama soft-fail prompt`.
