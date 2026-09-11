@@ -109,6 +109,10 @@
         width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #60a5fa);
       }
       #jaegerAgentsEmpty { font-size: 11px; color: var(--muted,#888); padding: 4px 10px 8px; }
+      #jaegerAgentsList .jaeger-agent-role {
+        font-size: 10px; color: var(--muted,#888); text-transform: uppercase;
+        letter-spacing: 0.03em; opacity: 0.85;
+      }
     `;
     document.head.appendChild(style);
   };
@@ -137,16 +141,20 @@
       return;
     }
     if (empty) empty.hidden = true;
+    const leadId = (catalog && catalog.lead && catalog.lead.id) || null;
     list.innerHTML = agents
       .map((a) => {
         const id = a.id || "";
         const name = a.display_name || a.name || id;
-        const kind = a.kind === "jaeger_native" ? "native" : "third";
+        const role = a.role || (a.metadata && a.metadata.role) || "";
+        const kind = role === "lead" || id === leadId ? "native" : (a.kind === "jaeger_native" ? "native" : "third");
         const isActive = !!a.active || id === activeId;
+        const roleTag = role ? `<span class="jaeger-agent-role">${escapeHtml(role)}</span>` : "";
         return (
-          `<button type="button" class="jaeger-agent-row${isActive ? " active" : ""}" data-agent-id="${escapeHtml(id)}" title="${escapeHtml(id)}">` +
+          `<button type="button" class="jaeger-agent-row${isActive ? " active" : ""}" data-agent-id="${escapeHtml(id)}" data-role="${escapeHtml(role)}" title="${escapeHtml(id)}">` +
           `<span class="jaeger-agent-dot ${kind}"></span>` +
           `<span class="jaeger-agent-name">${escapeHtml(name)}</span>` +
+          roleTag +
           (isActive ? `<span class="jaeger-agent-active-mark" aria-hidden="true"></span>` : "") +
           `</button>`
         );
@@ -203,6 +211,102 @@
     }
   };
 
+
+  const ensureApprovalStyles = () => {
+    if (document.getElementById("jaeger-approval-style")) return;
+    const style = document.createElement("style");
+    style.id = "jaeger-approval-style";
+    style.textContent = `
+      #jaegerApprovalCard {
+        position: fixed; right: 16px; bottom: 88px; z-index: 9999;
+        max-width: 360px; background: var(--panel, #1c1c1e); color: var(--text, #fff);
+        border: 1px solid rgba(127,127,127,0.35); border-radius: 12px; padding: 12px 14px;
+        box-shadow: 0 8px 28px rgba(0,0,0,0.35); font-size: 13px;
+      }
+      #jaegerApprovalCard[hidden] { display: none !important; }
+      #jaegerApprovalCard .jaeger-approval-title { font-weight: 700; margin-bottom: 6px; }
+      #jaegerApprovalCard .jaeger-approval-body { color: var(--muted, #bbb); margin-bottom: 10px; white-space: pre-wrap; }
+      #jaegerApprovalCard .jaeger-approval-actions { display: flex; gap: 8px; justify-content: flex-end; }
+      #jaegerApprovalCard button {
+        border: 0; border-radius: 8px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+      }
+      #jaegerApprovalCard .allow { background: #34d399; color: #062; }
+      #jaegerApprovalCard .deny { background: rgba(127,127,127,0.25); color: inherit; }
+    `;
+    document.head.appendChild(style);
+  };
+
+  let _pendingApproval = null;
+
+  const hideApprovalCard = () => {
+    const card = document.getElementById("jaegerApprovalCard");
+    if (card) card.hidden = true;
+    _pendingApproval = null;
+  };
+
+  const showApprovalCard = (payload) => {
+    ensureApprovalStyles();
+    let card = document.getElementById("jaegerApprovalCard");
+    if (!card) {
+      card = document.createElement("div");
+      card.id = "jaegerApprovalCard";
+      card.innerHTML =
+        `<div class="jaeger-approval-title">Approval needed</div>` +
+        `<div class="jaeger-approval-body" id="jaegerApprovalBody"></div>` +
+        `<div class="jaeger-approval-actions">` +
+        `<button type="button" class="deny" data-decision="deny">Deny</button>` +
+        `<button type="button" class="allow" data-decision="allow">Allow</button>` +
+        `</div>`;
+      document.body.appendChild(card);
+      card.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-decision]");
+        if (!btn || !_pendingApproval) return;
+        const approved = btn.dataset.decision === "allow";
+        const id = _pendingApproval.approval_id;
+        try {
+          await fetch(`/api/approvals/${encodeURIComponent(id)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ approved, decision: approved ? "allow" : "deny" }),
+          });
+        } catch (err) {
+          console.warn("[jaeger] approval resolve failed", err);
+        }
+        hideApprovalCard();
+        loadAgentsCatalog();
+      });
+    }
+    _pendingApproval = payload;
+    const body = document.getElementById("jaegerApprovalBody");
+    const to = (payload.metadata && payload.metadata.target_display) || payload.to_agent_id || "specialist";
+    body.textContent = `Hand off to ${to}?\n${payload.task || ""}`.trim();
+    card.hidden = false;
+  };
+
+  const requestSpecialistHandoff = async (id, displayName) => {
+    const task = `Help with current chat as ${displayName || id}`;
+    try {
+      const res = await fetch(`/api/agents/${encodeURIComponent(id)}/handoff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ task, reason: "surfaces-ui", require_approval: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn("[jaeger] handoff failed", res.status, data);
+        return activateAgent(id);
+      }
+      if (data.status === "pending_approval" && data.approval_id) {
+        showApprovalCard(data);
+        return;
+      }
+      await activateAgent(id);
+    } catch (err) {
+      console.warn("[jaeger] handoff error", err);
+      await activateAgent(id);
+    }
+  };
+
   const installAgentsSection = () => {
     ensureAgentsStyles();
     const sessionList = document.getElementById("sessionList");
@@ -222,7 +326,14 @@
     section.addEventListener("click", (ev) => {
       const btn = ev.target.closest("button.jaeger-agent-row");
       if (!btn) return;
-      activateAgent(btn.getAttribute("data-agent-id"));
+      const id = btn.getAttribute("data-agent-id");
+      const role = btn.getAttribute("data-role") || "";
+      const name = (btn.querySelector(".jaeger-agent-name") || {}).textContent || id;
+      if (role === "specialist") {
+        requestSpecialistHandoff(id, name);
+      } else {
+        activateAgent(id);
+      }
     });
     loadAgentsCatalog();
     // Refresh periodically so Mac/WebUI stay aligned when either face switches.
@@ -341,6 +452,24 @@
     }
   };
 
+
+  const observeHermesTitleLeak = () => {
+    const scrub = () => {
+      try {
+        if (/Hermes/i.test(document.title)) document.title = "Jaeger";
+        const t = document.getElementById("appTitlebarTitle");
+        if (t && /Hermes/i.test(t.textContent || "")) t.textContent = "Jaeger";
+        const msg = document.getElementById("msg");
+        if (msg && /Hermes/i.test(msg.getAttribute("placeholder") || "")) {
+          msg.setAttribute("placeholder", "Message Jaeger…");
+        }
+      } catch (_) {}
+    };
+    scrub();
+    const mo = new MutationObserver(scrub);
+    mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+  };
+
   const boot = () => {
     installJaegerIcons();
     installJaegerSurfaceLabels();
@@ -348,6 +477,8 @@
     hideHermesDashboardChrome();
     installAgentsSection();
     installStageNav();
+    observeHermesTitleLeak();
+    ensureApprovalStyles();
   };
 
   boot();
