@@ -62,13 +62,12 @@ struct GatewayClient: Sendable {
         return GatewayClient(baseURL: defaultBaseURL)
     }
 
-    func health() async throws -> [String: Any] {
-        let data = try await request(path: "health")
-        let object = try JSONSerialization.jsonObject(with: data)
-        guard let dict = object as? [String: Any] else {
-            throw Failure(message: "Gateway health returned non-object JSON")
-        }
-        return dict
+    /// Lightweight liveness probe. Avoids `[String: Any]` so Swift 6
+    /// concurrency (Sendable) accepts the call from UI tasks.
+    @discardableResult
+    func health() async throws -> Bool {
+        _ = try await request(path: "health")
+        return true
     }
 
     /// `GET /v1/agents` — optional `kind` / `role` filters (`lead|specialist|runtime`).

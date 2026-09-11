@@ -219,6 +219,7 @@ class JaegerAgent:
         if tools is not None:
             self._all_tools: list[ToolDef] = list(tools)
             self._tools_filter_locked = True   # explicit list = caller knows best
+            self._tools_filter_locked_reason = "allowlist"
         elif toolsets is not None:
             if self._toolset_resolver is None:
                 raise ValueError(
@@ -229,9 +230,11 @@ class JaegerAgent:
                 [t for t in get_tools() if t.name in wanted]
             )
             self._tools_filter_locked = False
+            self._tools_filter_locked_reason = None
         else:
             self._all_tools = _filter_available_tools(get_tools())
             self._tools_filter_locked = False
+            self._tools_filter_locked_reason = None
         # Per-agent dispatch map. ``_dispatch_one_tool`` previously
         # resolved by name against the *global* registry — so an agent
         # built with ``tools=[a, b, c]`` (an explicit allowlist) would
@@ -508,6 +511,12 @@ class JaegerAgent:
         # activated mid-session) so they're visible AND dispatchable
         # without rebuilding the agent. No-op for explicit ``tools=``
         # agents.
+        # Overflow slim-to-CORE is emergency for one turn only; allowlist
+        # locks stay. Otherwise non-CORE tools stay unknown forever.
+        if getattr(self, "_tools_filter_locked_reason", None) == "overflow":
+            self._tools_filter_locked = False
+            self._tools_filter_locked_reason = None
+            self._overflow_tools_slimmed = False
         self._refresh_tool_catalog()
         self._bind_turn_run()
 
@@ -1305,6 +1314,7 @@ class JaegerAgent:
         self._dispatch_by_name = {t.name: t for t in self._all_tools}
         self._intent_tool_names = set(CORE)
         self._tools_filter_locked = True
+        self._tools_filter_locked_reason = "overflow"
         self._overflow_tools_slimmed = True
         after = {getattr(t, "name", None) for t in (self.tools or [])}
         after.discard(None)
@@ -1933,6 +1943,20 @@ class JaegerAgent:
         # counts.
         sig = call_signature(name, args)
         tool_def = dispatch_map.get(name)
+        # If overflow/allowlist froze the map, the model can still see
+        # freshly registered tools via describe_tool/load_tools while
+        # dispatch_map misses them. Resolve once from the live registry
+        # (availability-filtered) and cache the hit.
+        if tool_def is None:
+            try:
+                _cands = _filter_available_tools(
+                    [t for t in get_tools() if getattr(t, "name", None) == name]
+                )
+                if _cands:
+                    tool_def = _cands[0]
+                    self._dispatch_by_name[name] = tool_def
+            except Exception:  # noqa: BLE001 — miss stays unknown_tool
+                pass
         is_read_tool = (
             tool_def is not None
             and getattr(tool_def, "side_effect", "") == "read"
