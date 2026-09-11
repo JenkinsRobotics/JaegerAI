@@ -333,7 +333,9 @@ class JaegerGatewayApp:
         session = self.store.get_session(session_id)
         if not session:
             return web.json_response({"error": "Session not found"}, status=404)
-        return web.json_response(session)
+        # Surfaces chrome polls GET without SSE — stamp role/display_name
+        # after handoff so the UI can render the active agent identity.
+        return web.json_response(self._enrich_session_agent(session))
 
     async def handle_delete_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
@@ -415,8 +417,20 @@ class JaegerGatewayApp:
         if not text:
             return web.json_response({"error": "Missing turn text"}, status=400)
 
-        # Ensure session exists
-        self.store.ensure_session(session_id)
+        # Ensure session exists, then reject concurrent turns cleanly.
+        # A second turn while status=running must not append another user
+        # message or spawn a second executor (would race agent_id / status).
+        session = self.store.ensure_session(session_id)
+        if (session or {}).get("status") == "running":
+            return web.json_response(
+                {
+                    "error": "Turn already in progress",
+                    "session_id": session_id,
+                    "status": "running",
+                    "agent_id": self._session_agent_id(session),
+                },
+                status=409,
+            )
         self.store.update_status(session_id, "running")
 
         # Record user message
@@ -450,6 +464,27 @@ class JaegerGatewayApp:
         if isinstance(meta, dict) and meta.get("agent_id"):
             return str(meta["agent_id"])
         return None
+
+    def _enrich_session_agent(self, session: dict[str, Any]) -> dict[str, Any]:
+        """Attach agent_id / role / display_name for chrome GET without SSE."""
+        out = dict(session)
+        agent_id = self._session_agent_id(session)
+        if not agent_id:
+            return out
+        out["agent_id"] = agent_id
+        try:
+            agent = self._registry().get_agent(agent_id)
+        except Exception:  # noqa: BLE001 — GET must stay readable
+            logger.exception("Failed to enrich session agent %s", agent_id)
+            agent = None
+        if agent is None:
+            out.setdefault("role", None)
+            out.setdefault("display_name", None)
+            return out
+        role = getattr(agent, "role", None)
+        out["role"] = role.value if hasattr(role, "value") else (str(role) if role else None)
+        out["display_name"] = agent.display_name
+        return out
 
     def _resolve_session_agent(self, session_id: str):
         """Look up the session's AgentRecord via AgentRegistry (or None)."""
@@ -631,7 +666,8 @@ class JaegerGatewayApp:
     async def handle_resolve_approval(self, request: web.Request) -> web.Response:
         """Resolve a pending approval (handoff stub or tool).
 
-        Unknown ids → clean 404. Handoff stub path resolves without crashing
+        Unknown ids → clean 404. Second resolve of the same id → clean 404
+        (not idempotent 200). Handoff stub path resolves without crashing
         even when the Future was never awaited (Surfaces card POST).
         """
         approval_id = request.match_info["id"]
