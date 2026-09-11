@@ -43,7 +43,7 @@ struct ChatView: View {
 
     @State private var showSidebar = true
     @State private var selectedSessionId: String? = nil
-    @State private var selectedAgentId = "chief-of-staff"
+    @State private var selectedAgentId = "native:jaeger"
     @State private var searchText = ""
     @State private var showHistory = false
     @State private var sessions: [SessionSummary] = []
@@ -296,6 +296,7 @@ struct ChatView: View {
                                 Button {
                                     tabState.currentTab = .chat
                                     selectedAgentId = item.id
+                                    Task { await activateGatewayAgent(id: item.id) }
                                     startNewChat()
                                 } label: {
                                     HStack(spacing: 8) {
@@ -1369,12 +1370,22 @@ struct ChatView: View {
     private func loadLiveAgentsFromGateway() async {
         do {
             let catalog = try await GatewayClient.fromEnvironment().listAgents()
+            // Prefer the unified `agents` array (grok_bot_shape). Fall back to
+            // native+third_party slices only when `agents` is absent — never concatenate
+            // all three (that triple-counted every row).
+            let allLive: [GatewayClient.Agent]
+            if let agents = catalog.agents, !agents.isEmpty {
+                allLive = agents
+            } else {
+                allLive = (catalog.jaeger_native ?? []) + (catalog.third_party ?? [])
+            }
+            var seen = Set<String>()
             var merged: [AgentRosterItem] = []
-            let allLive = (catalog.agents ?? []) + (catalog.jaeger_native ?? []) + (catalog.third_party ?? [])
             for a in allLive {
-                let color: Color = a.kind == "gateway" ? Color(red: 0.55, green: 0.58, blue: 0.62)
-                    : (a.kind == "lead" ? Color(red: 0.96, green: 0.55, blue: 0.16)
-                    : Color(red: 0.20, green: 0.78, blue: 0.55))
+                guard seen.insert(a.id).inserted else { continue }
+                let color: Color = a.kind == "jaeger_native"
+                    ? Color(red: 0.96, green: 0.55, blue: 0.16)
+                    : Color(red: 0.20, green: 0.78, blue: 0.55)
                 merged.append(
                     AgentRosterItem(
                         id: a.id,
@@ -1385,6 +1396,9 @@ struct ChatView: View {
                         unread: a.active == true
                     )
                 )
+                if a.active == true {
+                    selectedAgentId = a.id
+                }
             }
             if !merged.isEmpty {
                 agentRoster = merged
@@ -1397,6 +1411,18 @@ struct ChatView: View {
             // Gateway down/unreachable: sessions-only — do not invent fake agent names.
             agentRoster = []
             gatewayAgentsAvailable = false
+        }
+    }
+
+    /// Activate the Gateway spine agent (same contract WebUI `/api/agents/.../activate` uses).
+    private func activateGatewayAgent(id: String) async {
+        do {
+            let activated = try await GatewayClient.fromEnvironment().activateAgent(id: id)
+            selectedAgentId = activated.id
+            await loadLiveAgentsFromGateway()
+        } catch {
+            // Keep local selection; next send still uses bridge until gateway recovers.
+            NSLog("[ChatView] gateway activate failed for \(id): \(error.localizedDescription)")
         }
     }
 
