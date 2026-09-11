@@ -229,12 +229,125 @@
     setInterval(loadAgentsCatalog, 15000);
   };
 
+
+  const ensureStageNavStyles = () => {
+    if (document.getElementById("jaeger-stage-nav-style")) return;
+    const style = document.createElement("style");
+    style.id = "jaeger-stage-nav-style";
+    style.textContent = `
+      #jaegerStageNav {
+        display: flex; gap: 6px; align-items: center; justify-content: center;
+        padding: 6px 10px; margin: 0 auto;
+      }
+      #jaegerStageNav button.jaeger-stage-pill {
+        border: 1px solid rgba(127,127,127,0.25); background: transparent;
+        color: var(--text, inherit); border-radius: 999px; padding: 5px 12px;
+        font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+      }
+      #jaegerStageNav button.jaeger-stage-pill.active {
+        background: rgba(96,165,250,0.18); border-color: rgba(96,165,250,0.45);
+      }
+      #jaegerStageNav button.jaeger-stage-pill:hover { background: rgba(127,127,127,0.12); }
+      .rail .rail-btn.nav-tab[data-panel="kanban"],
+      .rail .rail-btn.nav-tab[data-panel="insights"],
+      .rail .rail-btn.nav-tab[data-panel="logs"],
+      .sidebar-nav .nav-tab[data-panel="kanban"],
+      .sidebar-nav .nav-tab[data-panel="insights"],
+      .sidebar-nav .nav-tab[data-panel="logs"] {
+        opacity: 0.45;
+      }
+    `;
+    document.head.appendChild(style);
+  };
+
+  let _stage = "chat";
+
+  const setStage = (stage) => {
+    _stage = stage;
+    document.querySelectorAll("#jaegerStageNav button.jaeger-stage-pill").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.stage === stage);
+    });
+    if (typeof switchPanel === "function") {
+      try { switchPanel("chat", { fromRailClick: true }); } catch (_) {}
+    }
+    const titlebar = document.getElementById("appTitlebarTitle");
+    if (titlebar) {
+      titlebar.textContent = stage === "chat" ? "Jaeger" : `Jaeger · ${stage[0].toUpperCase()}${stage.slice(1)}`;
+    }
+    const notice = document.getElementById("jaegerStageNotice");
+    if (notice) {
+      if (stage === "chat") {
+        notice.hidden = true;
+        notice.textContent = "";
+      } else {
+        notice.hidden = false;
+        notice.textContent =
+          stage === "avatar"
+            ? "Avatar stage (Mac parity) — voice/orb UI comes next; chat composer stays active."
+            : "Work stage (Mac parity) — projects/tasks surface comes next; chat composer stays active.";
+      }
+    }
+  };
+
+  const installStageNav = () => {
+    ensureStageNavStyles();
+    const titlebar = document.querySelector(".app-titlebar, #appTitlebar, header.app-header, #titlebar");
+    const host =
+      document.getElementById("appTitlebarCenter") ||
+      document.querySelector(".titlebar-center") ||
+      document.getElementById("appTitlebarTitle")?.parentElement ||
+      titlebar;
+    if (!host) return;
+    if (!document.getElementById("jaegerStageNav")) {
+      const nav = document.createElement("div");
+      nav.id = "jaegerStageNav";
+      nav.setAttribute("role", "tablist");
+      nav.setAttribute("aria-label", "Stage");
+      nav.innerHTML = [
+        ["chat", "Chat"],
+        ["avatar", "Avatar"],
+        ["work", "Work"],
+      ]
+        .map(
+          ([id, label]) =>
+            `<button type="button" class="jaeger-stage-pill${id === "chat" ? " active" : ""}" data-stage="${id}" role="tab">${label}</button>`
+        )
+        .join("");
+      const title = document.getElementById("appTitlebarTitle");
+      if (title && title.parentElement) {
+        title.insertAdjacentElement("afterend", nav);
+      } else {
+        host.appendChild(nav);
+      }
+      nav.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button.jaeger-stage-pill");
+        if (!btn) return;
+        setStage(btn.dataset.stage);
+      });
+    }
+    if (!document.getElementById("jaegerStageNotice")) {
+      const main = document.querySelector("main") || document.getElementById("chat") || document.body;
+      const notice = document.createElement("div");
+      notice.id = "jaegerStageNotice";
+      notice.hidden = true;
+      notice.style.cssText =
+        "font-size:12px;color:var(--muted,#888);padding:6px 14px;text-align:center;";
+      const composer = document.getElementById("composerWrap") || document.getElementById("composerBox");
+      if (composer && composer.parentElement) {
+        composer.parentElement.insertBefore(notice, composer);
+      } else {
+        main.appendChild(notice);
+      }
+    }
+  };
+
   const boot = () => {
     installJaegerIcons();
     installJaegerSurfaceLabels();
     hideTodosSurfaces();
     hideHermesDashboardChrome();
     installAgentsSection();
+    installStageNav();
   };
 
   boot();
