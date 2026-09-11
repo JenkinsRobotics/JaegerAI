@@ -193,6 +193,7 @@
       const dn = active.display_name || active.name;
       if (dn) label.textContent = dn;
     }
+    if (active) setTurnIdentity(active);
   };
 
   const activateAgent = async (id) => {
@@ -363,6 +364,23 @@
     loadAgentsCatalog();
     // Refresh periodically so Mac/WebUI stay aligned when either face switches.
     setInterval(loadAgentsCatalog, 15000);
+    polishSessionLibrary();
+  };
+
+  const polishSessionLibrary = () => {
+    try {
+      const emptyNotes = document.querySelectorAll(".session-empty-note, #sessionList .empty, #sessionList .session-empty");
+      emptyNotes.forEach((el) => {
+        const t = (el.textContent || "").trim();
+        if (!t) {
+          el.textContent = "No conversations yet";
+          return;
+        }
+        if (/no sessions/i.test(t) && !/project/i.test(t) && !/CLI/i.test(t) && !/unassigned/i.test(t)) {
+          el.textContent = "No conversations yet";
+        }
+      });
+    } catch (_) {}
   };
 
 
@@ -478,6 +496,207 @@
   };
 
 
+
+  // ── Transcript chrome: specialist/lead labels on assistant turns ──
+  // Gateway turn.finish carries agent_id / role / display_name. Surfaces
+  // chrome stamps the same fields onto .assistant-turn rows (no second store).
+  let _turnIdentity = null; // { agent_id, role, display_name }
+
+  const ensureTurnChromeStyles = () => {
+    if (document.getElementById("jaeger-turn-chrome-style")) return;
+    const style = document.createElement("style");
+    style.id = "jaeger-turn-chrome-style";
+    style.textContent = `
+      .msg-role.assistant .jaeger-turn-role-hint {
+        font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+        text-transform: uppercase; color: var(--muted, #888);
+        margin-left: 6px; opacity: 0.9;
+      }
+      .msg-role.assistant .msg-role-name[data-jaeger-labeled="1"] {
+        font-weight: 600;
+      }
+    `;
+    document.head.appendChild(style);
+  };
+
+  const normalizeTurnIdentity = (obj) => {
+    if (!obj || typeof obj !== "object") return null;
+    const agent_id = obj.agent_id || obj.id || null;
+    const role = obj.role || (obj.metadata && obj.metadata.role) || "";
+    const display_name = obj.display_name || obj.name || "";
+    if (!display_name && !agent_id) return null;
+    return {
+      agent_id: agent_id ? String(agent_id) : "",
+      role: role ? String(role) : "",
+      display_name: display_name ? String(display_name) : String(agent_id || ""),
+    };
+  };
+
+  const setTurnIdentity = (obj) => {
+    const next = normalizeTurnIdentity(obj);
+    if (!next) return;
+    _turnIdentity = next;
+    labelAssistantTurns({ stampLatest: true });
+  };
+
+  const identityFromDataset = (el) => {
+    if (!el || !el.dataset) return null;
+    const display_name = el.dataset.jaegerDisplayName || el.dataset.displayName || "";
+    const role = el.dataset.jaegerRole || el.dataset.role || "";
+    const agent_id = el.dataset.jaegerAgentId || el.dataset.agentId || "";
+    if (!display_name && !agent_id) return null;
+    return { agent_id, role, display_name: display_name || agent_id };
+  };
+
+  const applyIdentityToTurn = (turn, identity) => {
+    if (!turn || !identity || !identity.display_name) return;
+    ensureTurnChromeStyles();
+    turn.dataset.jaegerAgentId = identity.agent_id || "";
+    turn.dataset.jaegerRole = identity.role || "";
+    turn.dataset.jaegerDisplayName = identity.display_name || "";
+    const roleEl = turn.querySelector(".msg-role.assistant");
+    if (!roleEl) return;
+    const nameEl = roleEl.querySelector(".msg-role-name");
+    if (nameEl) {
+      nameEl.textContent = identity.display_name;
+      nameEl.dataset.jaegerLabeled = "1";
+      nameEl.title = [identity.display_name, identity.role, identity.agent_id]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    const icon = roleEl.querySelector(".role-icon.assistant");
+    if (icon && identity.display_name) {
+      icon.textContent = identity.display_name.charAt(0).toUpperCase();
+    }
+    let hint = roleEl.querySelector(".jaeger-turn-role-hint");
+    const role = (identity.role || "").trim();
+    if (role && role !== "lead") {
+      if (!hint) {
+        hint = document.createElement("span");
+        hint.className = "jaeger-turn-role-hint";
+        if (nameEl) nameEl.insertAdjacentElement("afterend", hint);
+        else roleEl.appendChild(hint);
+      }
+      hint.textContent = role;
+    } else if (hint) {
+      hint.remove();
+    }
+  };
+
+  const labelAssistantTurns = (opts) => {
+    opts = opts || {};
+    ensureTurnChromeStyles();
+    const turns = document.querySelectorAll(
+      ".assistant-turn, .msg-row[data-role='assistant'], #liveAssistantTurn"
+    );
+    turns.forEach((turn) => {
+      const stamped = identityFromDataset(turn);
+      if (stamped) {
+        applyIdentityToTurn(turn, stamped);
+        return;
+      }
+      // Payload fields sometimes land on child nodes or message wrappers.
+      const nested = turn.querySelector("[data-agent-id],[data-display-name],[data-jaeger-display-name]");
+      const fromNested = identityFromDataset(nested);
+      if (fromNested) {
+        applyIdentityToTurn(turn, fromNested);
+        return;
+      }
+      const isLive =
+        turn.id === "liveAssistantTurn" ||
+        turn.dataset.latestAssistantResponse === "true" ||
+        turn.classList.contains("streaming") ||
+        !!turn.querySelector(".streaming, [data-streaming='1']");
+      if ((opts.stampLatest || isLive) && _turnIdentity) {
+        applyIdentityToTurn(turn, _turnIdentity);
+      }
+    });
+  };
+
+  const ingestTurnPayload = (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    // Accept turn.finish envelope or flat identity fields.
+    const body =
+      payload.event === "turn.finish" || payload.type === "turn.finish"
+        ? payload.data && typeof payload.data === "object"
+          ? { ...payload, ...payload.data }
+          : payload
+        : payload;
+    if (body.display_name || body.agent_id || body.role) {
+      setTurnIdentity(body);
+    }
+  };
+
+  const installTurnChrome = () => {
+    ensureTurnChromeStyles();
+    labelAssistantTurns({ stampLatest: true });
+    if (document.documentElement.dataset.jaegerTurnChrome === "1") return;
+    document.documentElement.dataset.jaegerTurnChrome = "1";
+
+    const mo = new MutationObserver(() => {
+      labelAssistantTurns({ stampLatest: true });
+    });
+    mo.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        "data-role",
+        "data-agent-id",
+        "data-display-name",
+        "data-jaeger-agent-id",
+        "data-jaeger-display-name",
+        "data-jaeger-role",
+        "data-latest-assistant-response",
+      ],
+    });
+
+    // hermesExt turn lifecycle (when registered) — re-stamp after complete.
+    try {
+      const handle =
+        window.hermesExt && typeof window.hermesExt.register === "function"
+          ? window.hermesExt.register("jaeger-dispatcher")
+          : null;
+      if (handle && handle.events && typeof handle.events.on === "function") {
+        handle.events.on("turn:complete", () => labelAssistantTurns({ stampLatest: true }));
+        handle.events.on("turn:start", () => labelAssistantTurns({ stampLatest: true }));
+      }
+    } catch (_) {}
+
+    // Catch turn.finish / identity fields on SSE EventSource messages.
+    try {
+      const Proto = window.EventSource;
+      if (Proto && !Proto.__jaegerTurnChromePatched) {
+        const Orig = Proto;
+        function PatchedEventSource(url, config) {
+          const es = new Orig(url, config);
+          const wrap = (type) => {
+            es.addEventListener(type, (ev) => {
+              try {
+                const data = JSON.parse(ev.data);
+                ingestTurnPayload(
+                  type === "turn.finish" || type === "turn.delta"
+                    ? { event: type, ...data }
+                    : data
+                );
+              } catch (_) {}
+            });
+          };
+          wrap("turn.finish");
+          wrap("turn.delta");
+          wrap("message");
+          return es;
+        }
+        PatchedEventSource.prototype = Orig.prototype;
+        PatchedEventSource.CONNECTING = Orig.CONNECTING;
+        PatchedEventSource.OPEN = Orig.OPEN;
+        PatchedEventSource.CLOSED = Orig.CLOSED;
+        PatchedEventSource.__jaegerTurnChromePatched = true;
+        window.EventSource = PatchedEventSource;
+      }
+    } catch (_) {}
+  };
+
   const observeHermesTitleLeak = () => {
     const scrub = () => {
       try {
@@ -509,6 +728,16 @@
             );
           }
         });
+        // Settings /insights path residue (EN i18n + injected copy)
+        document.querySelectorAll("label, .settings-desc, .setting-desc, p, span, div").forEach((el) => {
+          if (!el || el.children.length > 2) return;
+          const raw = el.textContent || "";
+          if (/hermes\s*\/insights/i.test(raw) || /Hermes Insights/i.test(raw)) {
+            el.textContent = raw
+              .replace(/hermes\s*\/insights/gi, "Jaeger /insights")
+              .replace(/Hermes Insights/gi, "Jaeger Insights");
+          }
+        });
       } catch (_) {}
     };
     scrub();
@@ -523,6 +752,7 @@
     hideHermesDashboardChrome();
     installAgentsSection();
     installStageNav();
+    installTurnChrome();
     observeHermesTitleLeak();
     ensureApprovalStyles();
   };
