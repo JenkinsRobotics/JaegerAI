@@ -33,6 +33,8 @@ LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
 ).rstrip("/")
 LOCKED_WEBUI_URL = os.environ.get("JAEGER_WEBUI_URL", "http://100.74.2.15:8790").rstrip("/")
 DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "qwen2.5:3b")
+# Lead turns prefer MCP native chat (:8811 agentgateway → :8792). Soft-fail to Ollama.
+NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
 
 class JaegerGatewayApp:
@@ -581,6 +583,94 @@ class JaegerGatewayApp:
         parts.append("Reply briefly and helpfully.")
         return " ".join(parts)
 
+    @staticmethod
+    def _mcp_chat_text(result: Any) -> str:
+        """Extract assistant text from an MCP tools/call chat result."""
+        if not isinstance(result, dict):
+            return str(result or "").strip()
+        if result.get("isError"):
+            content = result.get("content", [])
+            err = ""
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        err += str(item.get("text") or "")
+            elif isinstance(content, str):
+                err = content
+            raise RuntimeError(err or "MCP tool error")
+        content = result.get("content", [])
+        text = ""
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text += str(item.get("text") or "")
+        elif isinstance(content, str):
+            text = content
+        else:
+            # Some adapters nest reply under structuredContent / text.
+            nested = result.get("structuredContent") or result.get("text")
+            if isinstance(nested, str):
+                text = nested
+            elif isinstance(nested, dict):
+                text = str(nested.get("text") or nested.get("reply") or "")
+        return text.strip()
+
+    async def _native_lead_turn(self, session_id: str, text: str) -> tuple[str, str] | None:
+        """Lead turn via existing Hermes MCPClient chat (JAEGERS_MCP_URL / :8811).
+
+        Returns ``(response_text, backend_label)`` on success, or ``None`` so
+        the caller can soft-fail to locked Ollama without crashing :8810.
+        Does not invent a parallel agent runtime — reuses hermes adapters.
+        """
+        mcp_session = f"gateway:{session_id}"
+
+        def _blocking_chat() -> tuple[str, str]:
+            from urllib.parse import urlparse
+
+            from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+                MCPClient,
+                MCP_GATEWAY_URL,
+                MCP_API_KEY,
+                MCP_HOST_HEADER,
+            )
+
+            # Reuse Hermes MCPClient transport. Agentgateway (:8811) exposes
+            # the target as ``jaeger_chat``; direct MCP HTTP (:8792) uses ``chat``.
+            args = {"message": text, "session_id": mcp_session}
+            client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
+            client.initialize()
+            last_err: Exception | None = None
+            result = None
+            for tool_name in ("jaeger_chat", "chat"):
+                try:
+                    result = client._execute_call(tool_name, args)
+                    break
+                except Exception as exc:  # noqa: BLE001 — try next tool name
+                    last_err = exc
+                    continue
+            if result is None:
+                raise last_err or RuntimeError("MCP chat tool unavailable")
+            response_text = JaegerGatewayApp._mcp_chat_text(result)
+            if not response_text:
+                raise RuntimeError("MCP chat returned empty content")
+            label = "mcp"
+            host = (urlparse(MCP_GATEWAY_URL).netloc or "").strip()
+            if host:
+                label = f"mcp:{host}"
+            return response_text, label
+
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(_blocking_chat),
+                timeout=NATIVE_LEAD_MCP_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — soft-fail contract
+            logger.warning(
+                "native lead MCP turn failed (soft-fail to ollama): %s",
+                exc,
+            )
+            return None
+
     async def _ollama_chat(self, text: str, *, system_prompt: str | None = None) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         model = DEFAULT_OLLAMA_MODEL
@@ -613,7 +703,12 @@ class JaegerGatewayApp:
         return content
 
     async def _execute_turn(self, session_id: str, turn_id: str, text: str) -> None:
-        """Background turn executor: real Ollama HTTP, not mocks, not :8813."""
+        """Background turn executor: lead via MCP :8811, specialist via Ollama.
+
+        Soft-fail: MCP errors never crash :8810 — lead falls back to locked
+        Ollama with character_block already in system_prompt. Specialists keep
+        the specialty overlay path only.
+        """
         session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
@@ -632,23 +727,45 @@ class JaegerGatewayApp:
                 "role": role.value if hasattr(role, "value") else str(role),
                 "display_name": agent.display_name,
             }
+        role_s = str(agent_fields.get("role") or "")
         try:
-            self.event_bus.publish(session_id, "turn.delta", {
-                "turn_id": turn_id,
-                "delta": "",
-                "model": DEFAULT_OLLAMA_MODEL,
-                "backend": LOCKED_OLLAMA_URL,
-                **agent_fields,
-            })
-            response_text = await self._ollama_chat(text, system_prompt=system_prompt)
+            backend = LOCKED_OLLAMA_URL
+            model = DEFAULT_OLLAMA_MODEL
+            response_text: str | None = None
+
+            if role_s != "specialist":
+                native = await self._native_lead_turn(session_id, text)
+                if native is not None:
+                    response_text, backend = native
+                    model = "jaeger-mcp"
+
+            if response_text is None:
+                # Specialist overlay, or lead soft-fail → locked Ollama.
+                self.event_bus.publish(session_id, "turn.delta", {
+                    "turn_id": turn_id,
+                    "delta": "",
+                    "model": model,
+                    "backend": backend,
+                    **agent_fields,
+                })
+                response_text = await self._ollama_chat(text, system_prompt=system_prompt)
+            else:
+                self.event_bus.publish(session_id, "turn.delta", {
+                    "turn_id": turn_id,
+                    "delta": "",
+                    "model": model,
+                    "backend": backend,
+                    **agent_fields,
+                })
+
             self.store.append_message(session_id, "assistant", response_text)
             self.store.update_status(session_id, "idle")
             self.event_bus.publish(session_id, "turn.finish", {
                 "turn_id": turn_id,
                 "output": response_text,
                 "status": "completed",
-                "backend": LOCKED_OLLAMA_URL,
-                "model": DEFAULT_OLLAMA_MODEL,
+                "backend": backend,
+                "model": model,
                 **agent_fields,
             })
         except Exception as exc:
