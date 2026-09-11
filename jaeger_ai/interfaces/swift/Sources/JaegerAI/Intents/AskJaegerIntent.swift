@@ -247,5 +247,23 @@ struct JaegerShortcuts: AppShortcutsProvider {
             shortTitle: "Run Routine",
             systemImageName: "list.bullet.clipboard"
         )
+        AppShortcut(
+            intent: CheckFinancesIntent(),
+            phrases: [
+                "Check \(.applicationName) finances",
+                "\(.applicationName) net worth",
+            ],
+            shortTitle: "Check Finances",
+            systemImageName: "creditcard"
+        )
+        AppShortcut(
+            intent: CheckBudgetIntent(),
+            phrases: [
+                "Check \(.applicationName) budget",
+                "What is my \(.applicationName) budget",
+            ],
+            shortTitle: "Check Budget",
+            systemImageName: "chart.pie"
+        )
     }
 }

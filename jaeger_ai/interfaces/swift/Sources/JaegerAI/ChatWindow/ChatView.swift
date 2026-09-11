@@ -38,6 +38,7 @@ struct ChatView: View {
     @State private var sessionsLoaded = false
     @State private var progressExpanded = true
     @State private var attachedURLs: [URL] = []
+    @State private var showMonarchAuthSheet = false
 
     @State private var agentRoster: [AgentRosterItem] = [
         AgentRosterItem(
@@ -203,6 +204,14 @@ struct ChatView: View {
             }, onSwitched: { line in
                 chat.appendSystem(line)
             })
+        }
+        .sheet(isPresented: $showMonarchAuthSheet) {
+            MonarchAuthSheet(
+                onDismiss: { showMonarchAuthSheet = false },
+                onConnected: { count in
+                    chat.appendSystem("✦ Monarch Money connected! Found \(count) account(s). You can now ask about your net worth, balances, and budgets.")
+                }
+            )
         }
     }
 
@@ -415,6 +424,14 @@ struct ChatView: View {
 
             Spacer()
 
+            Button(action: { showMonarchAuthSheet = true }) {
+                Image(systemName: "creditcard")
+                    .font(.system(size: 13))
+                    .foregroundColor(Term.inkDim)
+            }
+            .buttonStyle(.plain)
+            .help("Monarch Money & Finances")
+
             Button(action: startNewChat) {
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 13))
@@ -458,6 +475,9 @@ struct ChatView: View {
 
             // Quick suggestion chips
             HStack(spacing: 8) {
+                suggestionChip(title: "Connect Monarch", icon: "creditcard.fill") {
+                    showMonarchAuthSheet = true
+                }
                 suggestionChip(title: "Audit repo hygiene", icon: "shield.checkerboard") {
                     chat.composerText = "Audit repository hygiene and check all test suites"
                 }
@@ -762,6 +782,9 @@ struct ChatView: View {
         case "model", "models":
             chat.composerText = ""
             chat.showModelPicker = true
+        case "finance", "monarch":
+            chat.composerText = ""
+            showMonarchAuthSheet = true
         case "new":
             chat.composerText = ""
             startNewChat()
