@@ -143,7 +143,7 @@ final class ProtocolFixtureTests: XCTestCase {
             return XCTFail("state")
         }
         XCTAssertTrue(busy)
-        guard case .reply(let text, let error, let elapsed0, let used0, let max0) =
+        guard case .reply(let text, let error, let elapsed0, let used0, let max0, _, _, _) =
                 try decode("reply") else {
             return XCTFail("reply")
         }
@@ -153,11 +153,11 @@ final class ProtocolFixtureTests: XCTestCase {
         XCTAssertNil(elapsed0)
         XCTAssertNil(used0)
         XCTAssertNil(max0)
-        guard case .reply(_, let err2, _, _, _) = try decode("reply_error") else {
+        guard case .reply(_, let err2, _, _, _, _, _, _) = try decode("reply_error") else {
             return XCTFail("reply_error")
         }
         XCTAssertEqual(err2, "model exploded")
-        guard case .reply(_, _, let elapsed, let used, let mx) =
+        guard case .reply(_, _, let elapsed, let used, let mx, _, _, _) =
                 try decode("reply_telemetry") else {
             return XCTFail("reply_telemetry")
         }
