@@ -162,6 +162,25 @@ def configure_model(
             updated.external_model.api_key_env = ""
         if context_length:
             updated.external_model.ctx = int(context_length)
+        elif selected_provider == "ollama":
+            # Model switches often omit context_length. Keeping a prior
+            # cloud model's 131K ctx (or injecting it as num_ctx) leaves
+            # the guard / Ollama runtime mismatched — local tags then
+            # load at Ollama's tiny default (4096) while config still
+            # claims the stale window. Probe THIS model and persist it.
+            try:
+                from jaeger_ai.core.models.ollama_context import resolve_serving_context
+                detected, _source = resolve_serving_context(
+                    provider=selected_provider,
+                    model=selected_model,
+                    base_url=str(updated.external_model.base_url or ""),
+                    configured_ctx=0,
+                    fallback_ctx=int(getattr(updated.model, "ctx", 0) or 0),
+                )
+                if detected:
+                    updated.external_model.ctx = int(detected)
+            except Exception:  # noqa: BLE001 — best-effort; config still writes
+                pass
 
     validated = Config.model_validate(updated.model_dump())
     changed = validated != current

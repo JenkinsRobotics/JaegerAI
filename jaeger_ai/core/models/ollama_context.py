@@ -246,7 +246,11 @@ def should_inject_num_ctx(
         return False
     if (provider or "").lower() != "ollama":
         return False
-    return source in {"num_ctx", "configured"}
+    # num_ctx / configured: operator or Modelfile runtime value.
+    # model_info: training max — inject a CAPPED copy so local OpenAI-compat
+    # does not stay at Ollama's ~4096 default (which zeroed the guard when
+    # max_tokens matched). Cap is applied by the caller.
+    return source in {"num_ctx", "configured", "model_info"}
 
 
 def resolve_serving_context(
@@ -266,16 +270,25 @@ def resolve_serving_context(
     configured = _positive(configured_ctx)
     hosted = is_hosted_ollama(provider, base_url, model)
 
-    # An explicit number above the local default is the operator's
-    # word — don't second-guess it with a probe.
-    if configured is not None and configured > _LOCAL_DEFAULT_CTX:
-        return configured, "configured"
-
     probed, source = probe_ollama_context(
         model, base_url, api_key, provider=provider,
     )
+
+    # Hosted / Cloud: an explicit number above the local default is the
+    # operator's word — don't second-guess it with a probe that may be
+    # unreachable without a key.
+    # Local Ollama: prefer the live /api/show value for THIS model. A
+    # leftover configured ctx from a prior cloud pick (131K) otherwise
+    # wins and the guard budgets the wrong window while the daemon
+    # actually loads at its tiny default (often 4096).
+    if hosted and configured is not None and configured > _LOCAL_DEFAULT_CTX:
+        return configured, "configured"
+
     if probed is not None:
         return probed, source
+
+    if configured is not None and configured > _LOCAL_DEFAULT_CTX:
+        return configured, "configured"
 
     if hosted and model:
         return estimate_model_context_length(model), "estimate"

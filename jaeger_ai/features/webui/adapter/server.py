@@ -267,10 +267,32 @@ class RunnerBroker:
             model = str(request.get("model") or "").strip()
             provider = str(request.get("provider") or "").strip()
             if model:
-                self.bridge.command("configure_model", {
-                    "provider": self._jaeger_provider(provider, model),
+                jaeger_provider = self._jaeger_provider(provider, model)
+                configure_args: dict[str, Any] = {
+                    "provider": jaeger_provider,
                     "model": model,
-                })
+                }
+                # Probe the serving window for THIS model so configure_model
+                # does not keep a stale cloud ctx / leave Ollama at 4096.
+                try:
+                    from jaeger_ai.core.models.ollama_context import (
+                        is_hosted_ollama,
+                        resolve_serving_context,
+                    )
+                    if jaeger_provider == "ollama" and not is_hosted_ollama(
+                        jaeger_provider, "", model,
+                    ):
+                        detected, _source = resolve_serving_context(
+                            provider=jaeger_provider,
+                            model=model,
+                            base_url="http://127.0.0.1:11434/v1",
+                            configured_ctx=0,
+                        )
+                        if detected:
+                            configure_args["context_length"] = int(detected)
+                except Exception:  # noqa: BLE001 — configure still runs
+                    pass
+                self.bridge.command("configure_model", configure_args)
 
             def on_event(frame: dict[str, Any]) -> None:
                 nonlocal emitted_text
