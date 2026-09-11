@@ -17,16 +17,22 @@ def prepare():
     archive = subprocess.check_output(["git", "-C", str(donor), "archive", "HEAD"])
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(destination, filter="data")
-    subprocess.run(["git", "apply", "--check", str(overlay / "upstream.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "upstream.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", "--check", str(overlay / "update-labels.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "update-labels.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", "--check", str(overlay / "native-cancel-status.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "native-cancel-status.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", "--check", str(overlay / "native-capabilities.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "native-capabilities.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "conversation.patch")], cwd=destination, check=True)
-    subprocess.run(["git", "apply", str(overlay / "agents-proxy.patch")], cwd=destination, check=True)
+    def _apply_overlay(name: str) -> None:
+        path = overlay / name
+        if not path.is_file() or path.stat().st_size == 0:
+            return  # already folded into vendor/hermes-webui pin
+        subprocess.run(["git", "apply", "--check", str(path)], cwd=destination, check=True)
+        subprocess.run(["git", "apply", str(path)], cwd=destination, check=True)
+
+    for _name in (
+        "upstream.patch",
+        "update-labels.patch",
+        "native-cancel-status.patch",
+        "native-capabilities.patch",
+        "conversation.patch",
+        "agents-proxy.patch",
+    ):
+        _apply_overlay(_name)
     shutil.copy2(overlay / "jaeger_conversation.py", destination / "api/jaeger_conversation.py")
     shutil.copy2(overlay / "jaeger_ollama.py", destination / "api/jaeger_ollama.py")
     shutil.copy2(overlay / "jaeger_agent_compat.py", destination / "api/jaeger_agent_compat.py")
