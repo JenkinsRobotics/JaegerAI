@@ -1,4 +1,4 @@
-# Product sprint status — 2026-09-11 ~08:45 PT
+# Product sprint status — 2026-09-11 ~09:45 PT
 
 **Machine:** MatthewacStudio (`f9644398-ff83-41bc-94e8-7d0bca7aac5d`)  
 **Branch:** `finish-alpha` @ `975b6b2` (ahead of origin; not pushed)  
@@ -63,8 +63,18 @@ Spine M1–M10 already green ×2 (prior). This sprint = product bar P1–P8.
 | P7 specialists registered | **GREEN** | Registry + `/v1/agents` |
 | P8 approval path | **GREEN (API)** | Deny + approve via `/v1/approvals/{id}` |
 
+
+### 6. Gateway lead Ollama soft-fail SI prompt (SOUL)
+- Lead soft-fail → Ollama system prompt now: `[Identity]` (`character_block`) then optional `[SOUL]` via `load_soul(InstanceLayout)` on the same `resolve_instance_dir` root.
+- Empty / unreadable SOUL omitted (soft-fail). Specialist thin overlay unchanged. MCP native path unchanged. No costume/character rebinds. Provenance skipped.
+- Unit: `test_lead_softfail_prompt_includes_soul`, `test_si_soul_prompt_uses_instance_layout`.
+
 ## Next
 1. Grant Accessibility (+ Screen Recording) → Mac GUI matrix.
 2. Wire UI approval card for handoff `approval.request`.
 3. Replace handoff stub with real specialist turn before any “beyond Grok” claim.
 4. Second product probe ≥30m later for P-Must ×2.
+
+## TIP (SI continuity-approve)
+- Gateway lead soft-fail prompt includes SOUL — ready for SI continuity-approve once commit hash is stamped below.
+- Commit: pending (see git log `fix(gateway): include SOUL on lead Ollama soft-fail prompt`).
