@@ -437,15 +437,74 @@ class JaegerGatewayApp:
             "status": "running",
         })
 
-    async def _ollama_chat(self, text: str) -> str:
+    def _session_agent_id(self, session: dict[str, Any] | None) -> str | None:
+        """Resolve session agent_id from top-level or metadata (handoff patch)."""
+        if not session:
+            return None
+        aid = session.get("agent_id")
+        if aid:
+            return str(aid)
+        meta = session.get("metadata") or {}
+        if isinstance(meta, dict) and meta.get("agent_id"):
+            return str(meta["agent_id"])
+        return None
+
+    def _resolve_session_agent(self, session_id: str):
+        """Look up the session's AgentRecord via AgentRegistry (or None)."""
+        session = self.store.get_session(session_id)
+        agent_id = self._session_agent_id(session)
+        if not agent_id:
+            return None
+        try:
+            return self._registry().get_agent(agent_id)
+        except Exception:  # noqa: BLE001 — chat must not fail closed on registry
+            logger.exception("Failed to resolve session agent %s", agent_id)
+            return None
+
+    @staticmethod
+    def _system_prompt_for_agent(agent) -> str:
+        """Build a brief identity system prompt from catalog agent fields.
+
+        Used so post-handoff turns speak as the specialist (display_name /
+        role / specialty), not a hard-coded "You are Jaeger".
+        """
+        if agent is None:
+            return "You are Jaeger. Reply briefly and helpfully."
+        display = str(
+            getattr(agent, "display_name", None)
+            or getattr(agent, "name", None)
+            or "Jaeger"
+        )
+        role = getattr(agent, "role", None)
+        role_s = role.value if hasattr(role, "value") else (str(role) if role else "runtime")
+        meta = getattr(agent, "metadata", None) or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        specialty = str(meta.get("specialty") or meta.get("role") or "").strip()
+        summary = str(meta.get("summary") or "").strip()
+        parts = [f"You are {display}."]
+        if role_s == "lead":
+            parts.append("You are the lead assistant.")
+        elif role_s == "specialist":
+            parts.append(f"You are the {specialty or display} specialist.")
+            parts.append(
+                f"When asked for your display name, reply with exactly: SPECIALIST:{display}."
+            )
+        if summary:
+            parts.append(summary.rstrip(".") + ".")
+        parts.append("Reply briefly and helpfully.")
+        return " ".join(parts)
+
+    async def _ollama_chat(self, text: str, *, system_prompt: str | None = None) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         model = DEFAULT_OLLAMA_MODEL
+        sys_content = system_prompt or "You are Jaeger. Reply briefly and helpfully."
         payload = {
             "model": model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are Jaeger. Reply briefly and helpfully.",
+                    "content": sys_content,
                 },
                 {"role": "user", "content": text},
             ],
@@ -469,14 +528,25 @@ class JaegerGatewayApp:
 
     async def _execute_turn(self, session_id: str, turn_id: str, text: str) -> None:
         """Background turn executor: real Ollama HTTP, not mocks, not :8813."""
+        agent = self._resolve_session_agent(session_id)
+        system_prompt = self._system_prompt_for_agent(agent)
+        agent_fields: dict[str, Any] = {}
+        if agent is not None:
+            role = getattr(agent, "role", None)
+            agent_fields = {
+                "agent_id": agent.id,
+                "role": role.value if hasattr(role, "value") else str(role),
+                "display_name": agent.display_name,
+            }
         try:
             self.event_bus.publish(session_id, "turn.delta", {
                 "turn_id": turn_id,
                 "delta": "",
                 "model": DEFAULT_OLLAMA_MODEL,
                 "backend": LOCKED_OLLAMA_URL,
+                **agent_fields,
             })
-            response_text = await self._ollama_chat(text)
+            response_text = await self._ollama_chat(text, system_prompt=system_prompt)
             self.store.append_message(session_id, "assistant", response_text)
             self.store.update_status(session_id, "idle")
             self.event_bus.publish(session_id, "turn.finish", {
@@ -485,6 +555,7 @@ class JaegerGatewayApp:
                 "status": "completed",
                 "backend": LOCKED_OLLAMA_URL,
                 "model": DEFAULT_OLLAMA_MODEL,
+                **agent_fields,
             })
         except Exception as exc:
             logger.exception("Turn execution failed: %s", exc)
@@ -492,6 +563,7 @@ class JaegerGatewayApp:
             self.event_bus.publish(session_id, "turn.failed", {
                 "turn_id": turn_id,
                 "error": str(exc),
+                **agent_fields,
             })
 
     async def handle_stream_events(self, request: web.Request) -> web.StreamResponse:
