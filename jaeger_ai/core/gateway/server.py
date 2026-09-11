@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 
 from .event_bus import GatewayEventBus
 from .session_store import GatewaySessionStore
@@ -24,6 +24,14 @@ logger = logging.getLogger("jaeger.gateway")
 
 DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", "8810"))
 DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "127.0.0.1")
+
+# Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
+LOCKED_OLLAMA_URL = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
+LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
+    "JAEGER_BRIDGE_HEALTH_URL", "http://127.0.0.1:8791/health"
+).rstrip("/")
+LOCKED_WEBUI_URL = os.environ.get("JAEGER_WEBUI_URL", "http://100.74.2.15:8790").rstrip("/")
+DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "qwen2.5:3b")
 
 
 class JaegerGatewayApp:
@@ -53,16 +61,77 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
 
+    async def _probe_http(self, url: str, *, timeout_s: float = 2.0) -> dict[str, Any]:
+        """Probe a dependency; never raises — fail-closed callers inspect ok=False.
+
+        HTTP 2xx alone is not enough: bridge may answer 200 with ``{"ok": false}``.
+        """
+        try:
+            timeout = ClientTimeout(total=timeout_s)
+            async with ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    body = await resp.text()
+                    payload_ok: bool | None = None
+                    try:
+                        parsed = json.loads(body)
+                        if isinstance(parsed, dict) and "ok" in parsed:
+                            payload_ok = bool(parsed.get("ok"))
+                        elif isinstance(parsed, dict) and "status" in parsed:
+                            payload_ok = str(parsed.get("status")).lower() in {
+                                "ok", "healthy", "up", "ready",
+                            }
+                    except Exception:  # noqa: BLE001
+                        payload_ok = None
+                    http_ok = 200 <= resp.status < 300
+                    ok = http_ok if payload_ok is None else (http_ok and payload_ok)
+                    return {
+                        "ok": ok,
+                        "status_code": resp.status,
+                        "url": url,
+                        "payload_ok": payload_ok,
+                        "body_excerpt": body[:200],
+                    }
+        except Exception as exc:  # noqa: BLE001 — health must never crash
+            return {"ok": False, "status_code": 0, "url": url, "error": str(exc)}
+
     async def handle_health(self, request: web.Request) -> web.Response:
-        return web.json_response({
-            "status": "ok",
+        """Fail-closed health: gateway self + bridge + ollama (not :8813).
+
+        When brain/bridge is dead, status is not ok and all_green is false.
+        """
+        bridge = await self._probe_http(LOCKED_BRIDGE_HEALTH_URL)
+        ollama = await self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags")
+        checks = {
+            "gateway": {"ok": True, "url": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}"},
+            "bridge": bridge,
+            "ollama": ollama,
+            "ares_agentgateway_8813": {
+                "ok": None,
+                "required": False,
+                "note": "not on chat spine; M9 does not require :8813",
+            },
+        }
+        required_ok = bool(bridge.get("ok")) and bool(ollama.get("ok"))
+        all_green = required_ok
+        status = "ok" if all_green else "unhealthy"
+        payload = {
+            "status": status,
             "service": "jaeger-gateway",
-            "version": "0.4.0",
+            "version": "0.4.1",
             "architecture": "openclaw-parity",
             "persistence_spine": True,
             "agents_api": "/v1/agents",
             "fundamentals_fee_gated": False,
-        })
+            "fail_closed": True,
+            "all_green": all_green,
+            "checks": checks,
+            "locked_endpoints": {
+                "ollama": LOCKED_OLLAMA_URL,
+                "webui": LOCKED_WEBUI_URL,
+                "gateway": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}",
+            },
+        }
+        return web.json_response(payload, status=200 if all_green else 503)
 
     def _registry(self):
         from jaeger_ai.core.agent_registry import AgentRegistry
@@ -187,24 +256,54 @@ class JaegerGatewayApp:
             "status": "running",
         })
 
+    async def _ollama_chat(self, text: str) -> str:
+        """Live text turn via locked Ollama — never routes through :8813."""
+        model = DEFAULT_OLLAMA_MODEL
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are Jaeger. Reply briefly and helpfully.",
+                },
+                {"role": "user", "content": text},
+            ],
+            "stream": False,
+            "options": {"num_predict": 128},
+        }
+        timeout = ClientTimeout(total=90)
+        async with ClientSession(timeout=timeout) as session:
+            async with session.post(f"{LOCKED_OLLAMA_URL}/api/chat", json=payload) as resp:
+                body = await resp.text()
+                if resp.status >= 400:
+                    raise RuntimeError(
+                        f"Ollama chat HTTP {resp.status}: {body[:500]}"
+                    )
+                data = json.loads(body)
+        message = (data.get("message") or {})
+        content = str(message.get("content") or "").strip()
+        if not content:
+            raise RuntimeError(f"Ollama returned empty content: {body[:500]}")
+        return content
+
     async def _execute_turn(self, session_id: str, turn_id: str, text: str) -> None:
-        """Background turn executor that emits live streaming events."""
+        """Background turn executor: real Ollama HTTP, not mocks, not :8813."""
         try:
-            # Emit token stream
             self.event_bus.publish(session_id, "turn.delta", {
                 "turn_id": turn_id,
-                "delta": f"[Jaeger received: {text[:40]}...]",
+                "delta": "",
+                "model": DEFAULT_OLLAMA_MODEL,
+                "backend": LOCKED_OLLAMA_URL,
             })
-            await asyncio.sleep(0.05)
-
-            response_text = f"Processed: {text}"
+            response_text = await self._ollama_chat(text)
             self.store.append_message(session_id, "assistant", response_text)
             self.store.update_status(session_id, "idle")
-
             self.event_bus.publish(session_id, "turn.finish", {
                 "turn_id": turn_id,
                 "output": response_text,
                 "status": "completed",
+                "backend": LOCKED_OLLAMA_URL,
+                "model": DEFAULT_OLLAMA_MODEL,
             })
         except Exception as exc:
             logger.exception("Turn execution failed: %s", exc)
