@@ -86,6 +86,10 @@
     style.id = "jaeger-agents-style";
     style.textContent = `
       #jaegerAgentsSection { padding: 8px 8px 4px; border-bottom: 1px solid var(--border, rgba(255,255,255,0.06)); }
+      #jaegerAgentsSection .jaeger-agents-subhead {
+        font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+        color: var(--muted, #888); padding: 8px 8px 4px; text-transform: uppercase;
+      }
       #jaegerAgentsSection .jaeger-agents-head {
         font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
         color: var(--muted, #888); padding: 4px 8px 6px; text-transform: uppercase;
@@ -126,13 +130,40 @@
 
   let _agentsBusy = false;
 
+  const agentRowHtml = (a, activeId, leadId) => {
+    const id = a.id || "";
+    const name = a.display_name || a.name || id;
+    const role = a.role || (a.metadata && a.metadata.role) || "";
+    const kind = role === "lead" || id === leadId ? "native" : "third";
+    const isActive = !!a.active || id === activeId;
+    const roleTag = role ? `<span class="jaeger-agent-role">${escapeHtml(role)}</span>` : "";
+    return (
+      `<button type="button" class="jaeger-agent-row${isActive ? " active" : ""}" data-agent-id="${escapeHtml(id)}" data-role="${escapeHtml(role)}" title="${escapeHtml(id)}">` +
+      `<span class="jaeger-agent-dot ${kind}"></span>` +
+      `<span class="jaeger-agent-name">${escapeHtml(name)}</span>` +
+      roleTag +
+      (isActive ? `<span class="jaeger-agent-active-mark" aria-hidden="true"></span>` : "") +
+      `</button>`
+    );
+  };
+
   const renderAgents = (catalog) => {
     const list = document.getElementById("jaegerAgentsList");
     const empty = document.getElementById("jaegerAgentsEmpty");
     if (!list) return;
+    const lead = catalog && catalog.lead ? catalog.lead : null;
+    const specialists = Array.isArray(catalog && catalog.specialists) ? catalog.specialists : [];
     const agents = Array.isArray(catalog && catalog.agents) ? catalog.agents : [];
     const activeId = (catalog && catalog.active && catalog.active.id) || null;
-    if (!agents.length) {
+    const leadId = (lead && lead.id) || null;
+    const rows = [];
+    if (lead) rows.push(lead);
+    if (specialists.length) {
+      for (const s of specialists) if (!leadId || s.id !== leadId) rows.push(s);
+    } else {
+      for (const a of agents) if (!leadId || a.id !== leadId) rows.push(a);
+    }
+    if (!rows.length) {
       list.innerHTML = "";
       if (empty) {
         empty.hidden = false;
@@ -141,29 +172,23 @@
       return;
     }
     if (empty) empty.hidden = true;
-    const leadId = (catalog && catalog.lead && catalog.lead.id) || null;
-    list.innerHTML = agents
-      .map((a) => {
-        const id = a.id || "";
-        const name = a.display_name || a.name || id;
-        const role = a.role || (a.metadata && a.metadata.role) || "";
-        const kind = role === "lead" || id === leadId ? "native" : (a.kind === "jaeger_native" ? "native" : "third");
-        const isActive = !!a.active || id === activeId;
-        const roleTag = role ? `<span class="jaeger-agent-role">${escapeHtml(role)}</span>` : "";
-        return (
-          `<button type="button" class="jaeger-agent-row${isActive ? " active" : ""}" data-agent-id="${escapeHtml(id)}" data-role="${escapeHtml(role)}" title="${escapeHtml(id)}">` +
-          `<span class="jaeger-agent-dot ${kind}"></span>` +
-          `<span class="jaeger-agent-name">${escapeHtml(name)}</span>` +
-          roleTag +
-          (isActive ? `<span class="jaeger-agent-active-mark" aria-hidden="true"></span>` : "") +
-          `</button>`
-        );
-      })
-      .join("");
+    let html = "";
+    if (lead) {
+      html += `<div class="jaeger-agents-subhead">Lead</div>` + agentRowHtml(lead, activeId, leadId);
+    }
+    const specs = rows.filter((a) => a !== lead);
+    if (specs.length) {
+      html += `<div class="jaeger-agents-subhead">Specialists</div>`;
+      html += specs.map((a) => agentRowHtml(a, activeId, leadId)).join("");
+    }
+    list.innerHTML = html;
 
-    // Titlebar chip: show active agent display name when present.
     const label = document.getElementById("titlebarProfileLabel");
-    const active = agents.find((a) => a.id === activeId) || agents.find((a) => a.active);
+    const active =
+      (catalog && catalog.active) ||
+      rows.find((a) => a.id === activeId) ||
+      rows.find((a) => a.active) ||
+      lead;
     if (label && active) {
       const dn = active.display_name || active.name;
       if (dn) label.textContent = dn;

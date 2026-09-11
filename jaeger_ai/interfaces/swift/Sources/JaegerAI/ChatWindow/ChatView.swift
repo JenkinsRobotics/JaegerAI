@@ -1370,27 +1370,27 @@ struct ChatView: View {
     private func loadLiveAgentsFromGateway() async {
         do {
             let catalog = try await GatewayClient.fromEnvironment().listAgents()
-            // Prefer the unified `agents` array (grok_bot_shape). Fall back to
-            // native+third_party slices only when `agents` is absent — never concatenate
-            // all three (that triple-counted every row).
-            let allLive: [GatewayClient.Agent]
-            if let agents = catalog.agents, !agents.isEmpty {
+            // Gateway sample shape: prefer `lead` + `specialists`, then `agents`.
+            var allLive: [GatewayClient.Agent] = []
+            if let lead = catalog.lead { allLive.append(lead) }
+            if let specialists = catalog.specialists, !specialists.isEmpty {
+                allLive.append(contentsOf: specialists)
+            } else if let agents = catalog.agents, !agents.isEmpty {
                 allLive = agents
             } else {
                 allLive = (catalog.jaeger_native ?? []) + (catalog.third_party ?? [])
             }
             var seen = Set<String>()
             var merged: [AgentRosterItem] = []
+            let leadId = catalog.lead?.id
             for a in allLive {
                 guard seen.insert(a.id).inserted else { continue }
-                // Lead amber; standing specialists cyan; third-party green.
+                let role = a.resolvedRole
                 let color: Color
-                if a.id == "native:jaeger" {
+                if role == "lead" || a.id == leadId {
                     color = Color(red: 0.96, green: 0.55, blue: 0.16)
-                } else if a.id.hasPrefix("native:surfaces") || a.id.hasPrefix("native:gateway") || a.id.hasPrefix("native:everyday") {
-                    color = Color(red: 0.23, green: 0.63, blue: 1.0) // Term.accent
-                } else if a.kind == "jaeger_native" {
-                    color = Color(red: 0.96, green: 0.55, blue: 0.16).opacity(0.85)
+                } else if role == "specialist" {
+                    color = Color(red: 0.23, green: 0.63, blue: 1.0)
                 } else {
                     color = Color(red: 0.20, green: 0.78, blue: 0.55)
                 }
@@ -1398,7 +1398,7 @@ struct ChatView: View {
                     AgentRosterItem(
                         id: a.id,
                         name: a.displayName,
-                        preview: "Agent online (\(a.kind))",
+                        preview: "\(role) · online",
                         timestamp: "Now",
                         color: color,
                         unread: a.active == true
@@ -1407,6 +1407,9 @@ struct ChatView: View {
                 if a.active == true {
                     selectedAgentId = a.id
                 }
+            }
+            if let active = catalog.active {
+                selectedAgentId = active.id
             }
             if !merged.isEmpty {
                 agentRoster = merged
