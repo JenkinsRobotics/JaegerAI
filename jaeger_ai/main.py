@@ -1455,6 +1455,8 @@ def _register_builtins(client: Any) -> None:
 
     from jaeger_ai.features.ares_migration import tools as _ares_migration_tools  # noqa: F401
 
+    from jaeger_ai.features.finance import tools as _finance_tools  # noqa: F401
+
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See
     # :mod:`jaeger_ai.core.runtime.code_bridge`.
