@@ -3,11 +3,13 @@
 //  JaegerAI / ChatWindow
 //
 //  Unified desktop chat interface bringing together:
-//    1. Agent-centric sidebar (Chief of Staff, Stack Auditor, Release Scribe, Gateway)
-//       matching the Hermes WebUI layout.
+//    1. Sidebar: PINNED (primary assistant displayName + Monarch), PROJECTS from
+//       ~/.jaeger/desktop/projects.json, optional AGENTS from Gateway when up,
+//       and RECENT sessions (no fake roster when gateway is down).
 //    2. ChatGPT-style clean empty state hero ("What's on your mind today?") with quick chips.
 //    3. Detached floating pill composer with model selector (Instant ▾), attachment +,
 //       live voice transcription, and duplex voice mode.
+//    4. Chat / Avatar / Work stage nav.
 //
 
 import AppKit
@@ -22,6 +24,13 @@ struct AgentRosterItem: Identifiable, Hashable {
     let timestamp: String
     let color: Color
     var unread: Bool
+}
+
+struct DesktopProject: Identifiable, Hashable, Codable {
+    var id: String { name }
+    let name: String
+    let icon: String
+    let prompt: String
 }
 
 // MARK: - ChatView
@@ -43,7 +52,9 @@ struct ChatView: View {
     @State private var attachedURLs: [URL] = []
     @State private var showMonarchAuthSheet = false
     @State private var micOn = false
-    @State private var expandedProjects: Set<String> = ["ARES", "JaegerAI"]
+    @State private var expandedProjects: Set<String> = []
+    @State private var desktopProjects: [DesktopProject] = DesktopProjectStore.defaults
+    @State private var gatewayAgentsAvailable = false
 
     @State private var agentRoster: [AgentRosterItem] = []
 
@@ -127,6 +138,10 @@ struct ChatView: View {
         .onAppear {
             drainPendingPillPrompt()
             PillBridge.shared.isAgentBusy = chat.isSending
+            desktopProjects = DesktopProjectStore.loadOrMigrate()
+            if expandedProjects.isEmpty {
+                expandedProjects = Set(desktopProjects.prefix(2).map(\.name))
+            }
             Task {
                 await refreshHistoryIfNeeded(force: true)
                 await loadLiveAgentsFromGateway()
@@ -257,16 +272,52 @@ struct ChatView: View {
                         .buttonStyle(.plain)
                     }
 
-                    // PROJECTS SECTION
+                    // PROJECTS SECTION (from ~/.jaeger/desktop/projects.json)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("PROJECTS")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundColor(Term.inkDim.opacity(0.6))
                             .padding(.horizontal, 12)
 
-                        projectFolderRow(name: "ARES", icon: "folder.fill", prompt: "Focus on ARES autonomous multi-agent orchestration and status")
-                        projectFolderRow(name: "JaegerAI", icon: "folder.fill", prompt: "Review JaegerAI core daemon, tools, and interface health")
-                        projectFolderRow(name: "Finances", icon: "chart.pie.fill", prompt: "Run a full financial audit on accounts and transactions")
+                        ForEach(desktopProjects) { project in
+                            projectFolderRow(name: project.name, icon: project.icon, prompt: project.prompt)
+                        }
+                    }
+
+                    // AGENTS SECTION — only when Gateway lists live agents (no fake roster)
+                    if gatewayAgentsAvailable && !agentRoster.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("AGENTS")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Term.inkDim.opacity(0.6))
+                                .padding(.horizontal, 12)
+
+                            ForEach(agentRoster) { item in
+                                Button {
+                                    tabState.currentTab = .chat
+                                    selectedAgentId = item.id
+                                    startNewChat()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(item.color)
+                                            .frame(width: 8, height: 8)
+                                        Text(item.name)
+                                            .font(.system(size: 12, weight: .medium))
+                                            .foregroundColor(Term.ink)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        if item.unread {
+                                            Circle().fill(Term.accent).frame(width: 6, height: 6)
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
 
                     // RECENT SESSIONS SECTION
@@ -1336,17 +1387,16 @@ struct ChatView: View {
                 )
             }
             if !merged.isEmpty {
-                // Prepend or merge with current roster
-                var current = agentRoster
-                for m in merged {
-                    if !current.contains(where: { $0.id == m.id }) {
-                        current.insert(m, at: 0)
-                    }
-                }
-                agentRoster = current
+                agentRoster = merged
+                gatewayAgentsAvailable = true
+            } else {
+                agentRoster = []
+                gatewayAgentsAvailable = false
             }
         } catch {
-            // Keep default curated roster
+            // Gateway down/unreachable: sessions-only — do not invent fake agent names.
+            agentRoster = []
+            gatewayAgentsAvailable = false
         }
     }
 
@@ -1468,5 +1518,57 @@ private struct ApprovalSheetView: View {
         .padding(20)
         .frame(width: 380)
         .background(Term.canvas)
+    }
+}
+
+
+// MARK: - Desktop projects (~/.jaeger/desktop/projects.json)
+
+enum DesktopProjectStore {
+    static let defaults: [DesktopProject] = [
+        DesktopProject(
+            name: "JaegerAI",
+            icon: "folder.fill",
+            prompt: "Review JaegerAI core daemon, tools, and interface health"
+        ),
+        DesktopProject(
+            name: "Finances",
+            icon: "chart.pie.fill",
+            prompt: "Run a full financial audit on accounts and transactions"
+        ),
+    ]
+
+    private static var fileURL: URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let state = ProcessInfo.processInfo.environment["JAEGER_STATE_DIR"]
+            ?? ProcessInfo.processInfo.environment["JAEGER_HOME"]
+        let root: URL
+        if let state, !state.isEmpty {
+            root = URL(fileURLWithPath: (state as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            root = home.appendingPathComponent(".jaeger", isDirectory: true)
+        }
+        return root
+            .appendingPathComponent("desktop", isDirectory: true)
+            .appendingPathComponent("projects.json", isDirectory: false)
+    }
+
+    static func loadOrMigrate() -> [DesktopProject] {
+        let url = fileURL
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: url.path) {
+                let data = try Data(contentsOf: url)
+                let decoded = try JSONDecoder().decode([DesktopProject].self, from: data)
+                if !decoded.isEmpty { return decoded }
+            }
+            // Migrate defaults once
+            let data = try JSONEncoder().encode(defaults)
+            try data.write(to: url, options: .atomic)
+            return defaults
+        } catch {
+            return defaults
+        }
     }
 }

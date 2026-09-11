@@ -2,18 +2,36 @@
 
 Performs continuous budget pacing calculations, anomaly detection (spikes,
 duplicate charges), and generates actionable executive briefings for chat and Siri.
+
+Reports are written only under ``~/.jaeger/reports/finance/`` (or
+``$JAEGER_STATE_DIR/reports/finance/``).
 """
 
 from __future__ import annotations
 
 import calendar
+import json
 import logging
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from .monarch_service import MonarchService
+from .monarch_service import MonarchError, MonarchService, MonarchSessionMissing
 
 logger = logging.getLogger("jaeger_ai.features.finance.worker")
+
+MAX_CATEGORIES = 200
+MAX_TRANSACTIONS = 500
+LARGE_TX_THRESHOLD = 150.0
+
+
+def _reports_dir() -> Path:
+    raw = os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_HOME")
+    root = Path(raw).expanduser().resolve() if raw else (Path.home() / ".jaeger").resolve()
+    path = root / "reports" / "finance"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 class FinanceWorker:
@@ -22,11 +40,50 @@ class FinanceWorker:
     def __init__(self, service: MonarchService | None = None) -> None:
         self.service = service or MonarchService()
 
+    def _persist_report(self, payload: dict[str, Any]) -> Path | None:
+        """Write audit JSON only under ~/.jaeger/reports/finance/."""
+        try:
+            reports = _reports_dir()
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            latest = reports / "latest.json"
+            stamped = reports / f"audit-{stamp}.json"
+            body = json.dumps(payload, indent=2, default=str)
+            latest.write_text(body, encoding="utf-8")
+            stamped.write_text(body, encoding="utf-8")
+            # Cap retained stamped reports (no unbounded growth)
+            stamped_files = sorted(reports.glob("audit-*.json"), key=lambda p: p.name)
+            for old in stamped_files[:-20]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            return latest
+        except OSError as exc:
+            logger.warning("Failed to persist finance report: %s", type(exc).__name__)
+            return None
+
     async def audit(self, days: int = 7) -> dict[str, Any]:
         """Perform a complete financial health, budget pacing, and transaction audit."""
-        accounts_res = await self.service.get_accounts()
-        budgets_res = await self.service.get_budgets()
-        tx_res = await self.service.get_recent_transactions(days=days)
+        days = max(1, min(int(days), 90))
+
+        if not self.service.is_session_available():
+            return {
+                "ok": False,
+                "error": "Monarch Money session missing; connect before auditing.",
+            }
+
+        try:
+            accounts_res = await self.service.get_accounts()
+            budgets_res = await self.service.get_budgets()
+            tx_res = await self.service.get_recent_transactions(days=days)
+        except MonarchSessionMissing as exc:
+            return {"ok": False, "error": str(exc)}
+        except MonarchError as exc:
+            logger.warning("Finance audit API error: %s", type(exc).__name__)
+            return {"ok": False, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Finance audit unexpected error: %s", type(exc).__name__)
+            return {"ok": False, "error": f"Finance audit failed: {type(exc).__name__}"}
 
         if not accounts_res.get("ok"):
             return {
@@ -34,20 +91,27 @@ class FinanceWorker:
                 "error": accounts_res.get("error", "Unable to retrieve account balances."),
             }
 
+        # Soft-fail budgets/tx: still produce account briefing if they error
+        if not budgets_res.get("ok"):
+            logger.warning("Budget fetch failed during audit: %s", budgets_res.get("error"))
+            budgets_res = {"ok": False, "categories": []}
+        if not tx_res.get("ok"):
+            logger.warning("Transaction fetch failed during audit: %s", tx_res.get("error"))
+            tx_res = {"ok": False, "transactions": []}
+
         now = datetime.now(UTC)
         _, days_in_month = calendar.monthrange(now.year, now.month)
         elapsed_ratio = min(1.0, max(0.0, now.day / float(days_in_month)))
         elapsed_pct = round(elapsed_ratio * 100, 1)
 
-        # 1. Budget Pacing Analysis
-        categories = budgets_res.get("categories", [])
-        pacing_alerts = []
-        over_budget = []
-        healthy_categories = []
+        categories = list(budgets_res.get("categories", []) or [])[:MAX_CATEGORIES]
+        pacing_alerts: list[dict[str, Any]] = []
+        over_budget: list[dict[str, Any]] = []
+        healthy_categories: list[dict[str, Any]] = []
 
         for c in categories:
-            budgeted = c.get("budgeted", 0.0)
-            actual = c.get("actual", 0.0)
+            budgeted = float(c.get("budgeted", 0.0) or 0.0)
+            actual = float(c.get("actual", 0.0) or 0.0)
             if budgeted <= 0:
                 continue
 
@@ -74,34 +138,29 @@ class FinanceWorker:
             else:
                 healthy_categories.append(c)
 
-        # 2. Transaction Anomalies & Review Queue
-        transactions = tx_res.get("transactions", [])
-        large_transactions = []
-        uncategorized = []
+        transactions = list(tx_res.get("transactions", []) or [])[:MAX_TRANSACTIONS]
+        large_transactions: list[dict[str, Any]] = []
+        uncategorized: list[dict[str, Any]] = []
         seen_charges: dict[str, list[dict[str, Any]]] = {}
-        duplicates = []
+        duplicates: list[dict[str, Any]] = []
 
         for tx in transactions:
-            amt = abs(tx.get("amount", 0.0))
-            merchant = tx.get("merchant", "Unknown")
-            cat = tx.get("category", "")
+            amt = abs(float(tx.get("amount", 0.0) or 0.0))
+            merchant = str(tx.get("merchant", "Unknown") or "Unknown")
+            cat = str(tx.get("category", "") or "")
 
-            # Flag large single purchases (>$150)
-            if amt >= 150.0:
+            if amt >= LARGE_TX_THRESHOLD:
                 large_transactions.append(tx)
 
-            # Uncategorized check
             if not cat or cat.lower() in {"uncategorized", "unknown", "needs review"}:
                 uncategorized.append(tx)
 
-            # Duplicate charge detection (same merchant & amount within 48h)
             key = f"{merchant.lower()}:{amt:.2f}"
             if key in seen_charges:
                 duplicates.append({"original": seen_charges[key][0], "duplicate": tx})
             else:
                 seen_charges[key] = [tx]
 
-        # 3. Assemble Executive Briefing
         summary_markdown = self._format_briefing(
             accounts=accounts_res,
             elapsed_pct=elapsed_pct,
@@ -112,7 +171,7 @@ class FinanceWorker:
             uncategorized=uncategorized,
         )
 
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "timestamp": now.isoformat(),
             "month_elapsed_pct": elapsed_pct,
@@ -133,6 +192,23 @@ class FinanceWorker:
             },
             "briefing": summary_markdown,
         }
+
+        report_path = self._persist_report({
+            "ok": True,
+            "timestamp": result["timestamp"],
+            "accounts_summary": result["accounts_summary"],
+            "pacing": result["pacing"],
+            "anomalies": {
+                "large_count": len(large_transactions),
+                "duplicate_count": len(duplicates),
+                "uncategorized_count": len(uncategorized),
+            },
+            "briefing": summary_markdown,
+        })
+        if report_path is not None:
+            result["report_path"] = str(report_path)
+
+        return result
 
     def _format_briefing(
         self,
@@ -158,19 +234,25 @@ class FinanceWorker:
 
         if over_budget:
             lines.append("🚨 **Over Budget Categories:**")
-            for c in over_budget:
-                lines.append(f"- **{c['category']}**: Spent ${c['actual']:,.2f} of ${c['budgeted']:,.2f} (+${c['over_by']:,.2f} over limit)")
+            for c in over_budget[:20]:
+                lines.append(
+                    f"- **{c['category']}**: Spent ${c['actual']:,.2f} of "
+                    f"${c['budgeted']:,.2f} (+${c['over_by']:,.2f} over limit)"
+                )
             lines.append("")
 
         if pacing_alerts:
             lines.append("⚠️ **Pacing Fast (Exceeding Expected Run Rate):**")
-            for c in pacing_alerts:
-                lines.append(f"- **{c['category']}**: {c['spent_pct']}% spent (${c['actual']:,.2f}/${c['budgeted']:,.2f}, remaining: ${c['remaining']:,.2f})")
+            for c in pacing_alerts[:20]:
+                lines.append(
+                    f"- **{c['category']}**: {c['spent_pct']}% spent "
+                    f"(${c['actual']:,.2f}/${c['budgeted']:,.2f}, remaining: ${c['remaining']:,.2f})"
+                )
             lines.append("")
 
         if duplicates:
             lines.append("⚠️ **Potential Duplicate Charges Detected:**")
-            for d in duplicates:
+            for d in duplicates[:10]:
                 tx = d["duplicate"]
                 lines.append(f"- ${tx['amount']:,.2f} at {tx['merchant']} on {tx['date']}")
             lines.append("")
@@ -178,7 +260,9 @@ class FinanceWorker:
         if large_transactions:
             lines.append("🔍 **Notable Recent Charges (Past 7 Days):**")
             for tx in large_transactions[:5]:
-                lines.append(f"- ${tx['amount']:,.2f} at {tx['merchant']} ({tx['category']}) on {tx['date']}")
+                lines.append(
+                    f"- ${tx['amount']:,.2f} at {tx['merchant']} ({tx['category']}) on {tx['date']}"
+                )
             lines.append("")
 
         if uncategorized:
@@ -188,6 +272,8 @@ class FinanceWorker:
             lines.append("")
 
         if not over_budget and not pacing_alerts and not duplicates:
-            lines.append("✅ **All budget categories are pacing normally within expected monthly burn rate.**")
+            lines.append(
+                "✅ **All budget categories are pacing normally within expected monthly burn rate.**"
+            )
 
         return "\n".join(lines)

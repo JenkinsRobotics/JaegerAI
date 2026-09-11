@@ -9,7 +9,7 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 from .finance_worker import FinanceWorker
-from .monarch_service import MonarchService
+from .monarch_service import MonarchError, MonarchService, MonarchSessionMissing
 
 
 def _get_worker() -> FinanceWorker:
@@ -38,10 +38,13 @@ def finance_summary() -> dict[str, Any]:
             "error": "Monarch Money is not connected. Connect via the Monarch auth sheet in Jaeger chat or use `/finance`.",
         }
     try:
-        res = asyncio.run(service.get_accounts())
-        return res
-    except Exception as exc:  # noqa: BLE001
+        return asyncio.run(service.get_accounts())
+    except MonarchSessionMissing as exc:
         return {"ok": False, "error": str(exc)}
+    except MonarchError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}"}
 
 
 @register_tool_from_function(side_effect="read")
@@ -63,10 +66,11 @@ def finance_audit(days: int = 7) -> dict[str, Any]:
             "error": "Monarch Money is not connected. Connect via the Monarch auth sheet in Jaeger chat or use `/finance`.",
         }
     try:
-        res = asyncio.run(worker.audit(days=days))
-        return res
-    except Exception as exc:  # noqa: BLE001
+        return asyncio.run(worker.audit(days=days))
+    except MonarchError as exc:
         return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}"}
 
 
 @register_tool_from_function(side_effect="read")
@@ -85,7 +89,8 @@ def finance_transactions(days: int = 7, limit: int = 50) -> dict[str, Any]:
             "error": "Monarch Money is not connected. Connect via the Monarch auth sheet in Jaeger chat or use `/finance`.",
         }
     try:
-        res = asyncio.run(service.get_recent_transactions(days=days, limit=limit))
-        return res
-    except Exception as exc:  # noqa: BLE001
+        return asyncio.run(service.get_recent_transactions(days=days, limit=limit))
+    except MonarchError as exc:
         return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(exc).__name__}"}

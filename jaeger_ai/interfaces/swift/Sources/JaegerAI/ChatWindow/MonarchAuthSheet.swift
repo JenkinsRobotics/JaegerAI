@@ -3,8 +3,9 @@
 //  JaegerAI / ChatWindow
 //
 //  Native macOS Authentication Sheet for Monarch Money.
-//  Configured with Apple Passwords / iCloud Keychain AutoFill (.textContentType)
-//  and Touch ID support, so operators never have to copy passwords into a terminal.
+//  AutoFill is UI-only via Apple Passwords / iCloud Keychain (.textContentType).
+//  Session persistence is a local pickle at ~/.jaeger/finance/mm_session.pickle
+//  (mode 0600) — not Keychain-backed AES-GCM encryption.
 //
 
 import AppKit
@@ -37,7 +38,7 @@ struct MonarchAuthSheet: View {
                     Text("Connect Monarch Money")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Term.ink)
-                    Text("AutoFill credentials via Apple Passwords & iCloud Keychain")
+                    Text("AutoFill is UI only; session saved as local pickle (0600)")
                         .font(.system(size: 11))
                         .foregroundColor(Term.inkDim)
                 }
@@ -109,7 +110,7 @@ struct MonarchAuthSheet: View {
                 Image(systemName: "lock.shield.fill")
                     .font(.system(size: 12))
                     .foregroundColor(Color.green)
-                Text("Stored strictly in ~/.ares/.mm_session.pickle (mode 0600). Never uploaded to GitHub.")
+                Text("Session pickle at ~/.jaeger/finance/mm_session.pickle (0600). Not Keychain AES-GCM. Never uploaded.")
                     .font(.system(size: 10))
                     .foregroundColor(Term.inkDim)
             }
@@ -177,8 +178,14 @@ from pathlib import Path
 from monarchmoney import MonarchMoney
 
 async def do_login():
-    session_file = Path.home() / ".ares/.mm_session.pickle"
+    state = os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_HOME")
+    root = Path(state).expanduser() if state else (Path.home() / ".jaeger")
+    session_file = root / "finance" / "mm_session.pickle"
     session_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy = Path.home() / ".ares" / ".mm_session.pickle"
+    if (not session_file.exists() or session_file.stat().st_size == 0) and legacy.is_file():
+        import shutil
+        shutil.copy2(legacy, session_file)
     mm = MonarchMoney(session_file=str(session_file))
     email = sys.argv[1]
     pwd = sys.argv[2]
