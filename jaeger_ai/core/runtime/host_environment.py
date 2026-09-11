@@ -17,5 +17,5 @@ def snapshot(roots: list[str]) -> dict:
         "container_repo": "/mnt/host/GitHub/JaegerAI",
         "approved_roots": roots,
         "access_note": "Grants are configuration, not proof of a successful file write. Probe the target before claiming access.",
-        "execution_note": "Agent terminal tools run in Linux containers. macOS operations require authorized host MCP tools.",
+        "execution_note": "Agent terminal/file tools already work inside the Linux container for the mounted repo and Linux tasks. Only native macOS UI/host actions need authorized host MCP tools — do not refuse ordinary container work.",
     }
