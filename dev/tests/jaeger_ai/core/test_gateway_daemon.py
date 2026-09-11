@@ -82,11 +82,51 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         await super().tearDownAsync()
 
     async def test_health_check(self):
+        # Hermetic: stub dependency probes so unit test does not hit live LAN.
+        async def _ok_http(url, *, timeout_s: float = 2.0):
+            return {"ok": True, "status_code": 200, "url": url}
+
+        async def _ok_webui(*, timeout_s: float = 3.0):
+            return {
+                "ok": True,
+                "status_code": 404,
+                "url": "http://test/api/chat",
+                "required": True,
+                "note": "legacy /api/chat reachable (non-500)",
+            }
+
+        self.gateway_app._probe_http = _ok_http  # type: ignore[method-assign]
+        self.gateway_app._probe_webui_legacy_chat = _ok_webui  # type: ignore[method-assign]
         resp = await self.client.request("GET", "/health")
         assert resp.status == 200
         data = await resp.json()
         assert data["status"] == "ok"
+        assert data["all_green"] is True
         assert data["service"] == "jaeger-gateway"
+        assert "webui_legacy_chat" in data["checks"]
+
+    async def test_health_fail_closed_when_legacy_chat_500(self):
+        async def _ok_http(url, *, timeout_s: float = 2.0):
+            return {"ok": True, "status_code": 200, "url": url}
+
+        async def _chat_500(*, timeout_s: float = 3.0):
+            return {
+                "ok": False,
+                "status_code": 500,
+                "url": "http://test/api/chat",
+                "required": True,
+                "note": "legacy /api/chat returned 500",
+            }
+
+        self.gateway_app._probe_http = _ok_http  # type: ignore[method-assign]
+        self.gateway_app._probe_webui_legacy_chat = _chat_500  # type: ignore[method-assign]
+        resp = await self.client.request("GET", "/health")
+        assert resp.status == 503
+        data = await resp.json()
+        assert data["status"] == "unhealthy"
+        assert data["all_green"] is False
+        assert data["fail_closed"] is True
+        assert data["checks"]["webui_legacy_chat"]["status_code"] == 500
 
     async def test_sessions_crud_and_turn(self):
         # 1. Create session
