@@ -114,10 +114,21 @@ final class FirstBootGate: ObservableObject {
     /// `question` is `"voice"` or `"q2"`. Every transition underneath is
     /// idempotent, so a double-submitted answer lands on the same state
     /// rather than advancing twice.
-    func submit(question: String, reply: String) async -> Result<Turn?, Failure> {
-        let result = await bridge.command(
-            "first_boot_answer", args: ["question": question, "reply": reply],
-        )
+    func submit(
+        question: String,
+        reply: String,
+        latencyMs: Int? = nil,
+        energyVariance: Float? = nil
+    ) async -> Result<Turn?, Failure> {
+        // Acoustic evidence rides with the answer. The backend reads
+        // hesitance from hedging language OR a delayed start OR unsteady
+        // delivery — without these only the first is visible, so a long
+        // silent pause before a confident word would read as confidence.
+        var args: [String: any Sendable] = ["question": question, "reply": reply]
+        if let latencyMs { args["latency_ms"] = latencyMs }
+        if let energyVariance { args["energy_variance"] = Double(energyVariance) }
+
+        let result = await bridge.command("first_boot_answer", args: args)
         guard result.ok else {
             // `unclear_voice_answer` is the backend declining to guess when
             // the reply names neither or both. Surface it so the caller
