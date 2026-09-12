@@ -48,6 +48,27 @@ final class AppleSpeechSynth: NSObject, TTSBackend, AVSpeechSynthesizerDelegate,
     /// later when we wire a picker UI.
     var voiceIdentifier: String? = nil
 
+    /// Adopt an OS 1 acoustic stage: pick the stage's voice and prosody.
+    ///
+    /// ``.installer`` deliberately ignores ``profile`` — States 1 and 2
+    /// must sound identical before and after the operator answers the
+    /// voice question, or the handoff has nothing left to reveal.
+    func applyStage(_ stage: VoiceStage, profile: String?) {
+        voiceIdentifier = VoiceStageResolver.voiceIdentifier(for: stage, profile: profile)
+        rate = VoiceStageResolver.rate(for: stage)
+    }
+
+    /// Stop at the next word boundary and settle.
+    ///
+    /// ``.word`` rather than ``.immediate``: an immediate stop truncates
+    /// mid-phoneme and the buffer tears audibly — exactly the click the
+    /// handoff cannot have. Callers that need a hard stop (barge-in, where
+    /// latency beats smoothness) still use ``stop()``.
+    func finishCurrentUtteranceCleanly() {
+        guard synth.isSpeaking else { return }
+        synth.stopSpeaking(at: .word)
+    }
+
     /// Speech rate — 0.0 (slow) to 1.0 (fast).  Default ~0.5 sounds
     /// natural for chat replies; closer to ``AVSpeechUtteranceDefaultSpeechRate``.
     var rate: Float = AVSpeechUtteranceDefaultSpeechRate
