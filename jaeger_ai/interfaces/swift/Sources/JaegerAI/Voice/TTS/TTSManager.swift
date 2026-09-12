@@ -98,7 +98,16 @@ final class TTSManager: ObservableObject {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // States 1–2 are the installer and NEVER reach the neural
+            // engine: routing them through Kokoro would make the handoff
+            // inaudible, which is the whole point of the stage split.
+            if self.voiceStage == .installer {
+                self.speakLocally(body)
+                return
+            }
             if await self.speakViaAgent(body) { return }
+            // Apple is the fallback, reached only when the bridge daemon is
+            // unreachable or refuses — not a co-equal backend.
             self.speakLocally(body)
         }
     }
@@ -128,7 +137,15 @@ final class TTSManager: ObservableObject {
         // narration would outlive the request timeout), so ok here means
         // "accepted" — ``isSpeaking`` doesn't track Kokoro playback yet.
         // Wiring a spoken-done frame for the indicator is a follow-up.
-        let result = await bridge.command("speak", args: ["text": body])
+        // Pass the Kokoro pack matching the operator's voice_profile. Sent
+        // per-utterance because during first boot no character is bound
+        // yet, so the Python side has nothing to resolve a voice from.
+        var args: [String: any Sendable] = ["text": body]
+        if let pack = VoiceStageResolver.kokoroVoice(for: voiceStage,
+                                                     profile: preferredVoiceProfile) {
+            args["voice"] = pack
+        }
+        let result = await bridge.command("speak", args: args)
         if !result.ok {
             NSLog("[TTSManager] bridge speak refused (\(result.error ?? "?")) — falling back to Apple synth")
         }

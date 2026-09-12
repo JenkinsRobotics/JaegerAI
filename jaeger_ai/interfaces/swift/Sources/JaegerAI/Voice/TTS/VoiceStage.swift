@@ -89,6 +89,27 @@ enum VoiceStageResolver {
 
     static let personaRate: Float = AVSpeechUtteranceDefaultSpeechRate
 
+    /// Kokoro-82M voice packs, by profile.
+    ///
+    /// Kokoro is the persona's real voice: open-source, on-device, neural,
+    /// and near-zero latency — no proprietary OS voice lock-in and none of
+    /// the weight of a cloning model. The Apple identifiers above are the
+    /// FALLBACK for when the bridge daemon is unreachable, not the target.
+    ///
+    /// Deliberately absent for `.installer`: States 1–2 must never reach
+    /// the neural engine. The installer is supposed to sound synthetic, and
+    /// routing it through Kokoro would erase the handoff entirely.
+    static let kokoroVoices: [String: String] = [
+        "female": "af_heart",
+        "male": "am_michael",
+    ]
+
+    /// The Kokoro pack for a stage, or nil when Kokoro must not be used.
+    static func kokoroVoice(for stage: VoiceStage, profile: String?) -> String? {
+        guard stage == .persona, let profile else { return nil }
+        return kokoroVoices[profile.lowercased()]
+    }
+
     /// The voice identifier for a stage, or nil to let the synth fall back.
     ///
     /// `profile` is ignored for `.installer` — that is the point. A

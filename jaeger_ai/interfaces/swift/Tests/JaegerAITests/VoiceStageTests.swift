@@ -132,3 +132,40 @@ final class VoiceStageTests: XCTestCase {
         XCTAssertEqual(tts.appleSpeech.voiceIdentifier, before)
     }
 }
+
+final class KokoroRoutingTests: XCTestCase {
+
+    func testPersonaMapsToTheKokoroPacks() {
+        XCTAssertEqual(VoiceStageResolver.kokoroVoice(for: .persona, profile: "female"),
+                       "af_heart")
+        XCTAssertEqual(VoiceStageResolver.kokoroVoice(for: .persona, profile: "male"),
+                       "am_michael")
+    }
+
+    func testInstallerNeverRoutesToKokoro() {
+        // THE constraint. States 1–2 must stay on the synthetic installer
+        // voice; sending them through the neural engine erases the handoff.
+        for profile in ["female", "male", nil] {
+            XCTAssertNil(VoiceStageResolver.kokoroVoice(for: .installer, profile: profile))
+        }
+    }
+
+    func testUnknownOrAbsentProfileYieldsNoPack() {
+        // No pack -> the bridge resolves the active character's voice,
+        // which is the correct behaviour outside first boot.
+        XCTAssertNil(VoiceStageResolver.kokoroVoice(for: .persona, profile: nil))
+        XCTAssertNil(VoiceStageResolver.kokoroVoice(for: .persona, profile: "purple"))
+    }
+
+    func testProfileMatchingIsCaseInsensitive() {
+        XCTAssertEqual(VoiceStageResolver.kokoroVoice(for: .persona, profile: "FEMALE"),
+                       "af_heart")
+    }
+
+    func testAppleIdentifiersRemainAsTheFallbackPath() {
+        // Kokoro is the target; Apple is what we use when the bridge is
+        // unreachable. Both must stay resolvable.
+        XCTAssertNotNil(VoiceStageResolver.voiceIdentifier(for: .persona, profile: "female"))
+        XCTAssertNotNil(VoiceStageResolver.voiceIdentifier(for: .installer, profile: nil))
+    }
+}
