@@ -45,7 +45,34 @@ final class TTSManager: ObservableObject {
     /// very first decision to one TTS backend for the life of the identity.
     /// Persisted by the backend in `first_boot.yaml`; mirrored here so the
     /// speech layer can honour it without a round trip on every utterance.
+    ///
+    /// Recording this does NOT change what is currently speaking — see
+    /// ``voiceStage``. During first boot the preference is held until the
+    /// handoff, because the change of voice IS the handoff.
     @Published var preferredVoiceProfile: String?
+
+    /// Which voice is speaking right now.
+    ///
+    /// ``.installer`` for OS 1 States 1–2 (flat system baseline, ignores
+    /// ``preferredVoiceProfile``) and ``.persona`` from the handoff line
+    /// onward. Defaults to ``.persona`` so ordinary operation — every
+    /// session after first boot — uses the calibrated voice without
+    /// anyone having to set a stage.
+    @Published private(set) var voiceStage: VoiceStage = .persona
+
+    /// Move to a new acoustic stage, flushing cleanly.
+    ///
+    /// Stops any in-flight utterance at a word boundary rather than
+    /// ``.immediate``: cutting mid-phoneme produces the click the handoff
+    /// must not have. The synth is left idle before the next utterance is
+    /// built, so the new voice starts from silence instead of splicing
+    /// onto a half-drained buffer.
+    func enterVoiceStage(_ stage: VoiceStage) {
+        guard stage != voiceStage else { return }
+        appleSpeech.finishCurrentUtteranceCleanly()
+        voiceStage = stage
+        appleSpeech.applyStage(stage, profile: preferredVoiceProfile)
+    }
 
     let appleSpeech = AppleSpeechSynth()
 

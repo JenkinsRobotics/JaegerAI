@@ -144,12 +144,23 @@ struct FirstBootView: View {
         .onAppear { speakCurrentTurn() }
     }
 
-    /// Speak the turn in the right voice. States 1 and 2 use the neutral
-    /// installer voice; State 3 is the initialized persona, and that change
-    /// of voice IS the handoff the operator is meant to notice.
+    /// Speak the turn in the stage's voice.
+    ///
+    /// States 1–2 are the flat installer. State 3 swaps to the calibrated
+    /// persona immediately before the handoff line, so the first thing the
+    /// operator hears in the new voice is "*(clears throat)* Hello, I'm
+    /// here." — the change of voice is the moment, not a side effect of it.
     private func speakCurrentTurn() {
         guard !spoken else { return }
         spoken = true
+
+        if turn.isPersonaHandoff {
+            // Flushes the installer's audio at a word boundary first, so
+            // the swap does not click.
+            tts.enterVoiceStage(.persona)
+        } else {
+            tts.enterVoiceStage(.installer)
+        }
         tts.speak(turn.text)
     }
 
@@ -169,9 +180,12 @@ struct FirstBootView: View {
             switch outcome {
             case .success(let next):
                 reply = ""
-                // State 1 answered: apply the chosen voice before the next
-                // line is spoken, so the operator hears their choice
-                // immediately rather than one turn later.
+                // Record the preference WITHOUT changing what is speaking.
+                // An earlier version applied it here so the operator would
+                // "hear their choice sooner"; that spends the handoff a
+                // turn early and State 3 then arrives in a voice they have
+                // already been listening to. The swap belongs at the
+                // handoff and nowhere else.
                 if let profile = gate.voiceProfile {
                     gate.applyVoiceProfile(profile, to: tts)
                 }
