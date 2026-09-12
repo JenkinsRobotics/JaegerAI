@@ -75,6 +75,28 @@ final class VoiceRecorder: ObservableObject, @unchecked Sendable {
     private(set) var capturedFormat: AVAudioFormat?
 
     private let engine = AVAudioEngine()
+
+    /// Real-time speech detector fed from the input tap.
+    ///
+    /// Barge-in has to decide inside one audio frame, so detection runs on
+    /// the render thread beside the existing down-mix rather than hopping
+    /// to the main queue first — a main-queue round trip per buffer would
+    /// add scheduling latency to the one path that cannot afford it.
+    let speechDetector = SpeechEnergyDetector()
+
+    /// Fired on the MAIN queue when sustained speech starts.
+    ///
+    /// Wired to ``AmbientLoop.handleSpeechOnset()``. The detector itself
+    /// suppresses onset while TTS is playing (no AEC), so this cannot fire
+    /// on the agent's own voice.
+    var onSpeechOnset: (() -> Void)?
+
+    /// Fired on the MAIN queue when speech stops.
+    var onSpeechEnded: (() -> Void)?
+
+    /// Whether tap buffers are kept for a transcript. False while
+    /// monitoring: frames are scored for speech and dropped.
+    private var retainCapturedAudio: Bool = true
     private let log = Logger(subsystem: "com.jenkinsrobotics.JaegerAI",
                              category: "VoiceRecorder")
 
@@ -90,10 +112,43 @@ final class VoiceRecorder: ObservableObject, @unchecked Sendable {
     /// the main actor keeps the call graph dead simple and avoids the
     /// dispatch races.  ``requestAccess`` for the mic prompt fires
     /// automatically the first time we touch ``inputNode``.
+    /// True when the tap is open purely to watch for speech, not to
+    /// capture it. Barge-in needs the mic listening WHILE the agent talks,
+    /// which push-to-talk cannot provide: the operator is not holding a
+    /// key at the moment they decide to interrupt.
+    @Published private(set) var isMonitoring: Bool = false
+
+    /// Open the mic for detection only — no capture, no transcript.
+    ///
+    /// Buffers are scored and discarded. Nothing is retained, which is the
+    /// privacy-relevant difference from ``startRecording``: an always-open
+    /// mic that stores nothing is a level meter, not a recording.
+    func startMonitoring() throws {
+        guard !isRecording, !isMonitoring else { return }
+        speechDetector.reset()
+        try startTap(capturing: false)
+        isMonitoring = true
+    }
+
+    func stopMonitoring() {
+        guard isMonitoring else { return }
+        isMonitoring = false
+        stopRecording()
+    }
+
     func startRecording() throws {
         guard !isRecording else { return }
+        if isMonitoring { stopMonitoring() }
 
         captureBuffer.removeAll(keepingCapacity: true)
+        try startTap(capturing: true)
+        isRecording = true
+    }
+
+    /// Shared engine + tap setup. ``capturing`` decides whether buffers are
+    /// retained for a transcript or scored and dropped.
+    private func startTap(capturing: Bool) throws {
+        retainCapturedAudio = capturing
 
         // Defensive teardown — if a previous start crashed mid-way,
         // the engine could be in a partial state.  Stop + reset
@@ -158,14 +213,14 @@ final class VoiceRecorder: ObservableObject, @unchecked Sendable {
             throw VoiceError.engineStartFailed(detail)
         }
 
-        isRecording = true
         lastError = nil
-        log.info("recording started — format=\(format.description, privacy: .public)")
+        log.info("tap open — format=\(format.description, privacy: .public)")
     }
 
     /// Stop capturing.  No-op if not recording.  Must be called from
     /// the main queue — same as ``startRecording``.
     func stopRecording() {
+        isMonitoring = false
         guard isRecording else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -227,9 +282,29 @@ final class VoiceRecorder: ObservableObject, @unchecked Sendable {
         var peak: Float = 0
         for s in mono where abs(s) > peak { peak = abs(s) }
 
+        // Speech detection on the render thread. Microseconds of RMS over
+        // this same buffer — the reason barge-in can answer in ~70 ms
+        // instead of waiting for a transcript.
+        let transition = mono.withUnsafeBufferPointer { pointer -> SpeechEnergyDetector.Transition in
+            guard let base = pointer.baseAddress else { return .none }
+            return speechDetector.process(samples: base, count: pointer.count)
+        }
+        if transition != .none {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                switch transition {
+                case .speechOnset: self.onSpeechOnset?()
+                case .speechEnded: self.onSpeechEnded?()
+                case .none:        break
+                }
+            }
+        }
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.captureBuffer.append(contentsOf: mono)
+            if self.retainCapturedAudio {
+                self.captureBuffer.append(contentsOf: mono)
+            }
             // Smooth the meter a bit so it doesn't flicker — ema(0.4).
             self.levelMeter = min(1.0, max(self.levelMeter * 0.6 + peak * 0.4, peak))
         }
