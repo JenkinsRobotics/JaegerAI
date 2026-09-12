@@ -317,7 +317,9 @@ def test_integration_contract_is_versioned_and_self_describing():
     # sidebars that otherwise treat a mid-run cron session as completed.
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
     # v15 adds the Dispatcher projection over native facts and board memory.
-    assert contract["contract_version"] == 15
+    assert contract["contract_version"] == 16
+    assert "background_messages" in contract["operations"]["queries"]
+    assert "acknowledge_background" in contract["operations"]["commands"]
     assert 'dispatcher_memory' in contract['operations']['queries']
     assert 'turn_status' in contract['operations']['queries']
     assert "board" in contract["operations"]["queries"]
@@ -364,7 +366,7 @@ def test_integration_contract_is_versioned_and_self_describing():
         "visual_reports",
     }.intersection(contract["features"])
     sessions = contract["features"]["sessions"]["contract"]
-    assert sessions["version"] == 3
+    assert sessions["version"] == 4
     assert sessions["ownership"]["transcript"] == "jaeger"
     assert sessions["ownership"]["archive"] == "ares"
     assert set(sessions["operations"]) == {

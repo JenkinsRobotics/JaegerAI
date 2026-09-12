@@ -1,4 +1,4 @@
-"""Continuous environment perception for ARES."""
+"""Continuous environment perception for the reasoning engine."""
 
 from __future__ import annotations
 

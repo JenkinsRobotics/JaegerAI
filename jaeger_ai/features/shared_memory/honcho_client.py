@@ -38,7 +38,7 @@ class HonchoClient:
         if self.api_key:
             self._headers["Authorization"] = f"Bearer {self.api_key}"
 
-    def _request(self, method: str, path: str, data: dict | None = None) -> dict[str, Any]:
+    def _request(self, method: str, path: str, data: dict | None = None) -> Any:
         url = f"{self.base_url}{path}"
         # Critical: serialize empty dict {} as b"{}" instead of dropping to None to satisfy FastAPI schemas
         body = json.dumps(data).encode("utf-8") if data is not None else None
@@ -77,7 +77,19 @@ class HonchoClient:
         })
 
     def get_peer(self, peer_id: str) -> dict:
-        return self._request("GET", f"{self._ws()}/peers/{peer_id}")
+        return self._get_named("peers", peer_id)
+
+    def _get_named(self, collection: str, identity: str) -> dict:
+        # Honcho 3.0.10 exposes POST list/read and POST get-or-create, not
+        # GET /peers/id or /sessions/id (those return 405). Keep reads pure.
+        payload = self._request("POST", f"{self._ws()}/{collection}/list",
+                                {"filters": {"id": identity}})
+        if payload.get("error"):
+            return payload
+        if not isinstance(payload.get("items"), list):
+            return {"error": "Honcho returned a malformed list response"}
+        found = next((item for item in payload["items"] if item.get("id") == identity), None)
+        return found if found is not None else {"error": "HTTP 404: record not found"}
 
     def get_peer_representation(self, peer_id: str, search_query: str = "") -> dict:
         body = {}
@@ -108,7 +120,7 @@ class HonchoClient:
         return self._request("POST", f"{self._ws()}/sessions/list", {})
 
     def get_session(self, session_id: str) -> dict:
-        return self._request("GET", f"{self._ws()}/sessions/{session_id}")
+        return self._get_named("sessions", session_id)
 
     def get_session_context(self, session_id: str) -> dict:
         return self._request("GET", f"{self._ws()}/sessions/{session_id}/context")
@@ -119,12 +131,29 @@ class HonchoClient:
     # --- Messages ---
 
     def add_message(self, session_id: str, peer_id: str, content: str) -> dict:
-        return self._request("POST", f"{self._ws()}/sessions/{session_id}/messages", {
+        result = self._request("POST", f"{self._ws()}/sessions/{session_id}/messages", {
             "messages": [{"peer_id": peer_id, "content": content}],
         })
+        # The deployed API returns HTTP 201 with an array of Message objects.
+        # Preserve our structured error envelope without mistaking that array
+        # for a failed write and triggering a duplicate submission.
+        return {"messages": result} if isinstance(result, list) else result
 
     def list_messages(self, session_id: str) -> dict:
-        return self._request("POST", f"{self._ws()}/sessions/{session_id}/messages/list", {})
+        # Read-back must search beyond the first 50 messages. Never return a
+        # partial page as proof of absence: a caller might duplicate a write.
+        items = []
+        for page in range(1, 101):
+            payload = self._request("POST",
+                f"{self._ws()}/sessions/{session_id}/messages/list?page={page}&size=100", {})
+            if payload.get("error"):
+                return payload
+            if not isinstance(payload.get("items"), list) or not isinstance(payload.get("pages"), int):
+                return {"error": "Honcho returned malformed pagination"}
+            items.extend(payload["items"])
+            if page >= payload["pages"]:
+                return {"items": items, "total": len(items), "complete": True}
+        return {"error": "Honcho message pagination limit reached; read is incomplete"}
 
     # --- Search ---
 

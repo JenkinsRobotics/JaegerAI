@@ -60,6 +60,7 @@ from jaeger_os.core.safety.permissions import (
     install_policy,
     requires_tier,
 )
+from jaeger_os.core.safety.safety_rules import AuditLogger
 from jaeger_ai.core.instance.schemas import SCHEMA_VERSION, Config
 from jaeger_ai.core.instance.schemas import load_yaml
 from jaeger_agent.skill_registry.skill_loader import load_and_register
@@ -333,7 +334,7 @@ def _parse_toolsets_env() -> frozenset[str] | None:
     except KeyError as exc:
         raise ValueError(
             f"JAEGER_TOOLSETS contains an unknown toolset {exc}; "
-            f"see ``jaeger_os.agent.JAEGER_TOOLSETS`` for valid names."
+            f"see ``jaeger_agent.JAEGER_TOOLSETS`` for valid names."
         ) from exc
     return names
 _MAX_HISTORY_MESSAGES = 20
@@ -1233,7 +1234,7 @@ def _register_builtins(client: Any) -> None:
 
 
     # NB: ``describe_tool`` and ``load_tools`` are NOT redefined here.
-    # Both are owned by :mod:`jaeger_os.agent.tools.meta` and registered
+    # Both are owned by :mod:`jaeger_agent.tools.meta` and registered
     # at module-import time. The pre-Phase-9 pattern of wrapping each
     # built-in tool inside this closure created two copies (one in
     # ``meta.py`` and one here) that could drift; the meta module is
@@ -3208,7 +3209,7 @@ def _run_persona_lane_turn(
     lock: Any,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Mode C glue. Builds the id's system prompt + bounded history, then
-    hands :func:`~jaeger_os.agent.prompts.persona_lane.run_persona_turn` a
+    hands :func:`~jaeger_agent.prompts.persona_lane.run_persona_turn` a
     ``perform_task`` closure — a closure over the SAME per-session
     ``jaeger_agent`` and the SAME ``llm_lock`` discipline the plain path
     (and :func:`delegate_task`, main.py:1104-1130) already use, so inner
@@ -3404,6 +3405,12 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
     from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
 
     key = session_key
+    from jaeger_agent.tool_executor import active_tool_allowlist
+    grant = active_tool_allowlist()
+    if key.startswith("specialist:") and grant is None:
+        raise ValueError("Specialist sessions require an explicit tool grant")
+    if key in _jaeger_agents_by_session and getattr(_jaeger_agents_by_session[key], "allowed_tools", None) != grant:
+        raise ValueError("Session tool grant cannot change; create a new child session")
     # First call per session builds + caches a JaegerAgent. Force the
     # pydantic-ai agent to build too so its tool registrations + the
     # bridge's mirror both fire.
@@ -3621,7 +3628,8 @@ def _ensure_session_agent(client: Any, session_key: str) -> Any:
         _summarizer = summarizer_for(client, key)
         # Session system prompt = base prompt + runtime identity + frozen
         # facts snapshot — see :func:`compose_session_prompt`.
-        _session_prompt = compose_session_prompt(_pipeline["system_prompt"])
+        _session_prompt = (_pipeline["system_prompt"] if key.startswith("specialist:")
+                           else compose_session_prompt(_pipeline["system_prompt"]))
         from jaeger_ai.core.runtime.dispatcher import session_policy, context_note
         _focus = session_policy(_layout, key)
         _note = context_note(_layout, key) if key == 'dispatcher' or key.startswith('focus:') else ''
@@ -4702,7 +4710,7 @@ class LlamaCppPythonClient:
     :class:`jaeger_os.core.models.external_model.ExternalModelClient`, which
     presents the same ``.chat()`` / ``.kind`` surface. The new agent
     loop (Phase-9) wraps ``.llm`` in
-    :class:`jaeger_os.agent.LocalLlamaAdapter` to drive inference;
+    :class:`jaeger_agent.LocalLlamaAdapter` to drive inference;
     nothing here talks to ``pydantic-ai`` any more."""
 
     kind = "local"
@@ -5100,6 +5108,32 @@ def _cli_delete_credential(layout: InstanceLayout, name: str) -> int:
     return 1
 
 
+def _ensure_first_boot_state(layout: InstanceLayout) -> None:
+    """Classify this identity for OS 1 first boot, once, before anything runs.
+
+    Called on every boot immediately after the manifest check. Its whole job
+    is the §22 hazard: an instance created before first boot existed has no
+    ``first_boot.yaml``, which is indistinguishable from a brand-new one by
+    file existence alone. Without this gate, shipping the welcome would march
+    every established operator back through it — which to a long-time user
+    reads as their SI having forgotten them.
+
+    ``ensure_migrated`` is idempotent (an instance with state is returned
+    unchanged) and fails conservatively (unclassifiable state is marked
+    COMPLETED rather than replayed), so calling it unconditionally on every
+    boot is both safe and the point.
+
+    Never raises: a first-boot bookkeeping problem must not stop the agent
+    from starting.
+    """
+    try:
+        from jaeger_ai.core.instance.first_boot import ensure_migrated
+
+        ensure_migrated(layout)
+    except Exception as exc:  # noqa: BLE001 — must never block boot
+        print(f"[jaeger] first-boot state check skipped: {exc}", flush=True)
+
+
 def _cli_migrate(layout: InstanceLayout) -> int:
     from jaeger_ai.core.instance.migrations import run_pending_migrations
 
@@ -5471,6 +5505,8 @@ def boot_for_tui(
         run_pending_migrations(layout)
         manifest = check_manifest(layout)
 
+    _ensure_first_boot_state(layout)
+
     lock = InstanceLock(layout)
     lock.acquire()
 
@@ -5511,7 +5547,12 @@ def boot_for_tui(
         # (run_in_venv, install_package, …) prompt the user instead of
         # being auto-denied. On non-interactive stdin it denies safely.
         _preflight_log()
-        install_policy(PermissionPolicy(confirmation=_confirmation_provider(config, layout)))
+        install_policy(PermissionPolicy(
+            confirmation=_confirmation_provider(config, layout),
+            # Safety pillar 4: the hash-chained record of every gated
+            # decision. Writes to <instance>/logs/audit.log.
+            audit=AuditLogger(path=layout.audit_log_path),
+        ))
 
         client = make_client(config, layout, warmup=warmup)
         # Skills that loop with the model — macos_computer's computer_do —
@@ -6213,6 +6254,8 @@ def _main_dispatch() -> int:
             print(f"[jaeger] refuse-to-start: {exc}", file=sys.stderr, flush=True)
             return 2
 
+    _ensure_first_boot_state(layout)
+
     # Interactive use (no one-shot prompt) → the TUI is the interface.
     # Every exit-flag mode is already handled above and no instance lock
     # is held yet, so this hand-off is clean: the TUI does its own boot.
@@ -6351,7 +6394,12 @@ def _main_dispatch() -> int:
         # Interactive permission provider — tier-gated tools prompt the
         # user rather than auto-denying. Safe on non-interactive stdin.
         _preflight_log()
-        install_policy(PermissionPolicy(confirmation=_confirmation_provider(config, layout)))
+        install_policy(PermissionPolicy(
+            confirmation=_confirmation_provider(config, layout),
+            # Safety pillar 4: the hash-chained record of every gated
+            # decision. Writes to <instance>/logs/audit.log.
+            audit=AuditLogger(path=layout.audit_log_path),
+        ))
 
         from jaeger_ai.core.models.external_model import (
             ExternalModelSelectionError as _SelectionError,

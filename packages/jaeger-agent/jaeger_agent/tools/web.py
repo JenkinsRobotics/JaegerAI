@@ -21,7 +21,7 @@ Backend order (most preferred first):
                                 en.wikipedia.org's public API. Only
                                 useful for knowledge queries, not
                                 news / time-sensitive lookups, but
-                                always available.
+                                dependent on network and service availability.
 
 Future backends (Brave Search API, SearXNG, Bing) can plug in by
 appending to ``_BACKENDS`` — they need the same
@@ -34,6 +34,8 @@ from __future__ import annotations
 import html
 import json
 import re
+import threading
+import time
 from html.parser import HTMLParser
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlparse
@@ -45,6 +47,17 @@ from jaeger_agent.util.tool_interrupt import is_interrupted
 # ── Shared result shape ─────────────────────────────────────────────
 
 _Result = dict[str, Any]
+
+
+class NoSearchResults(RuntimeError):
+    """A responding search service found no matches; not a transport outage."""
+
+
+# Per configured endpoint. A down rack must not cost two connect timeouts
+# on every query. One caller probes after cooldown; concurrent callers skip.
+_searx_lock = threading.Lock()
+_searx_retry_at: dict[str, float] = {}
+_searx_probing: set[str] = set()
 
 
 def _normalize(title: str | None, url: str | None, snippet: str | None) -> _Result:
@@ -61,10 +74,10 @@ def _normalize(title: str | None, url: str | None, snippet: str | None) -> _Resu
 
 def _backend_ddgs(query: str, max_results: int) -> list[_Result]:
     from ddgs import DDGS  # may raise ImportError
-    with DDGS() as ddgs:
+    with DDGS(timeout=8) as ddgs:
         raw = list(ddgs.text(query, max_results=max_results))
     if not raw:
-        raise RuntimeError("ddgs returned zero results")
+        raise NoSearchResults("ddgs returned zero results")
     return [
         _normalize(r.get("title"), r.get("href") or r.get("url"),
                    r.get("body") or r.get("snippet"))
@@ -77,10 +90,10 @@ def _backend_ddgs(query: str, max_results: int) -> list[_Result]:
 
 def _backend_duckduckgo_legacy(query: str, max_results: int) -> list[_Result]:
     from duckduckgo_search import DDGS  # may raise ImportError
-    with DDGS() as ddgs:
+    with DDGS(timeout=8) as ddgs:
         raw = list(ddgs.text(query, max_results=max_results))
     if not raw:
-        raise RuntimeError("duckduckgo_search returned zero results")
+        raise NoSearchResults("duckduckgo_search returned zero results")
     return [
         _normalize(r.get("title"), r.get("href") or r.get("url"),
                    r.get("body") or r.get("snippet"))
@@ -222,9 +235,11 @@ def _backend_wikipedia(query: str, max_results: int) -> list[_Result]:
         data = json.loads(response.text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"wikipedia returned non-JSON: {exc}") from exc
+    if data.get("error"):
+        raise RuntimeError(f"wikipedia API error: {data['error']}")
     hits = (data.get("query") or {}).get("search") or []
     if not hits:
-        raise RuntimeError("wikipedia returned zero results")
+        raise NoSearchResults("wikipedia returned zero results")
     results: list[_Result] = []
     for h in hits[:max_results]:
         title = h.get("title") or ""
@@ -260,6 +275,11 @@ def _backend_searxng(query: str, max_results: int) -> list[_Result]:
         raise RuntimeError("searxng not configured (set SEARXNG_URL)")
     last_exc: Exception | None = None
     for base in urls:
+        with _searx_lock:
+            if base in _searx_probing or time.monotonic() < _searx_retry_at.get(base, 0):
+                last_exc = RuntimeError("configured endpoint cooling down after failure")
+                continue
+            _searx_probing.add(base)
         try:
             response = requests.get(
                 f"{base}/search",
@@ -269,15 +289,24 @@ def _backend_searxng(query: str, max_results: int) -> list[_Result]:
             )
             response.raise_for_status()
             hits = (response.json().get("results") or [])
+            with _searx_lock:
+                _searx_retry_at.pop(base, None)
             if not hits:
-                raise RuntimeError(f"searxng at {base} returned zero results")
+                raise NoSearchResults("searxng returned zero results")
             return [
                 _normalize(h.get("title"), h.get("url"), h.get("content"))
                 for h in hits[:max_results]
             ]
+        except NoSearchResults:
+            raise
         except Exception as exc:  # noqa: BLE001
+            with _searx_lock:
+                _searx_retry_at[base] = time.monotonic() + 60
             last_exc = exc
             continue
+        finally:
+            with _searx_lock:
+                _searx_probing.discard(base)
     raise RuntimeError(f"searxng unreachable: {last_exc}")
 
 
@@ -301,26 +330,43 @@ def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
     diagnose (missing libs vs. blocked vs. malformed)."""
     cleaned = (query or "").strip()
     if not cleaned:
-        return {"error": "empty query"}
+        return {"ok": False, "error": "empty query", "retryable": False}
     capped = max(1, min(int(max_results or 5), 20))
 
     errors: list[str] = []
+    empty_backends: list[str] = []
     for name, backend in _BACKENDS:
+        if is_interrupted():
+            return {"ok": False, "error": "search interrupted", "retryable": False}
         try:
             results = backend(cleaned, capped)
+        except NoSearchResults as exc:
+            empty_backends.append(name)
+            errors.append(f"{name}: {exc}")
+            continue
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
             continue
         if results:
             return {
+                "ok": True, "status": "results",
                 "query": cleaned,
                 "results": results,
                 "backend": name,
                 "tried": errors,  # empty if first backend worked
             }
+        empty_backends.append(name)
         errors.append(f"{name}: returned empty list")
 
+    if empty_backends:
+        return {
+            "ok": True, "status": "no_results", "results": [], "query": cleaned,
+            "empty_backends": empty_backends, "tried": errors,
+            "guidance": "No matches from the responding backends. This does not disprove the claim. Simplify the query, fetch a known source, or report the evidence gap. Other backends may be unavailable.",
+        }
+
     return {
+        "ok": False, "status": "unavailable", "retryable": False,
         "error": "all search backends failed",
         "tried": errors,
         "query": cleaned,

@@ -1,4 +1,4 @@
-"""Transducers package for ARES (experimental heartbeat cognition)."""
+"""Transducers package for the reasoning engine (experimental heartbeat cognition)."""
 
 from __future__ import annotations
 

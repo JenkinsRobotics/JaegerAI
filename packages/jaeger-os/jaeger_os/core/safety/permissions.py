@@ -327,6 +327,29 @@ class PermissionPolicy:
 
     mode: PolicyMode = PolicyMode.NORMAL
     confirmation: ConfirmationProvider = field(default_factory=DenyAllProvider)
+    #: Optional hash-chained audit sink (``safety_rules.AuditLogger``).
+    #: ``None`` disables auditing — the historical behaviour, and still the
+    #: default so no existing caller changes shape. This is the "later chunk"
+    #: AuditLogger's docstring promised: ``check()`` is the ONE place every
+    #: gated decision passes through, so wiring it here records all five
+    #: outcomes without scattering append() calls through the agent loop.
+    audit: Any = None
+
+    def _record(self, kind: str, request: "PermissionRequest", outcome: str) -> None:
+        """Best-effort audit write. Never raises, never alters the decision.
+
+        A broken or unwritable audit sink must not turn an allowed action
+        into a failure — the gate's job is the permission decision, and
+        losing a log line is strictly less bad than crashing the turn. The
+        converse would be worse: auditing that can deny is a second,
+        undeclared policy.
+        """
+        if self.audit is None:
+            return
+        try:
+            self.audit.append(kind=kind, request=request, outcome=outcome)
+        except Exception:  # noqa: BLE001 — logging must not break the gate
+            pass
 
     # ----- Tier check --------------------------------------------------------
 
@@ -351,6 +374,7 @@ class PermissionPolicy:
             HumanOverrideRequired
         """
         if self.mode == PolicyMode.PAUSED:
+            self._record("tier_check", request, "deny_paused")
             raise PermissionDenied(
                 f"policy is PAUSED; refusing {request.skill}.{request.operation}"
             )
@@ -358,6 +382,7 @@ class PermissionPolicy:
             self.mode == PolicyMode.READ_ONLY
             and request.tier != PermissionTier.READ_ONLY
         ):
+            self._record("tier_check", request, "deny_read_only")
             raise PermissionDenied(
                 f"policy is READ_ONLY; tier {request.tier.name} blocked for "
                 f"{request.skill}.{request.operation}"
@@ -365,9 +390,11 @@ class PermissionPolicy:
 
         # NORMAL mode below.
         if request.tier == PermissionTier.READ_ONLY:
+            self._record("tier_check", request, "allow")
             return
 
         if request.tier == PermissionTier.DEV_BYPASS:
+            self._record("tier_check", request, "human_override_required")
             raise HumanOverrideRequired(
                 f"tier 5 (DEV_BYPASS) requires explicit human override; "
                 f"a tool or subagent cannot grant it. "
@@ -379,6 +406,10 @@ class PermissionPolicy:
         # DenyAllProvider default refuses it, and the capability layer
         # independently fails closed while the e-stop latch is engaged.
         approved = self.confirmation.confirm(request)
+        self._record(
+            "confirmation_prompt", request,
+            "prompt_approved" if approved else "prompt_refused",
+        )
         if not approved:
             raise PermissionDenied(
                 f"confirmation refused for {request.skill}.{request.operation} "

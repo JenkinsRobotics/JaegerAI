@@ -179,6 +179,11 @@ class JaegerAgent:
         self.primary_adapter = adapter
         self.fallback_adapters: list[ProviderAdapter] = list(fallback_adapters or [])
         self.system_prompt = system_prompt
+        from jaeger_agent.tool_executor import active_tool_allowlist
+        self.allowed_tools = active_tool_allowlist()
+        if self.allowed_tools is not None:
+            tools = [tool for tool in (tools if tools is not None else get_tools())
+                     if tool.name in self.allowed_tools]
         # Tool selection precedence:
         #   1. explicit ``tools=`` list  — caller picks exact ToolDefs
         #   2. ``toolsets={...}`` set    — pick by category; resolve to names
@@ -263,6 +268,9 @@ class JaegerAgent:
         self._run_id: str | None = None
         self._effect_checkpoint: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
         self._tool_executor: ToolExecutor = tool_executor or _default_tool_executor()
+        if self.allowed_tools is not None:
+            from jaeger_agent.tool_executor import AllowlistToolExecutor
+            self._tool_executor = AllowlistToolExecutor(self._tool_executor, self.allowed_tools)
 
         # Skip-final: tools whose dict result IS the answer (``get_time``,
         # ``recall``, ``calculate``, …). When the turn's first model
@@ -373,7 +381,7 @@ class JaegerAgent:
 
         Recomputed on every access so a mid-session ``load_tools``
         call (which mutates the shared visibility state in
-        :mod:`jaeger_os.agent.skill_registry.toolset_scoping`) takes effect on the
+        :mod:`jaeger_agent.skill_registry.toolset_scoping`) takes effect on the
         next turn without rebuilding the agent. The full set the agent
         can dispatch + validate against lives in ``self._all_tools`` —
         ``describe_tool`` reads from there so the model can peek at a
@@ -1156,8 +1164,14 @@ class JaegerAgent:
         return self._final_text_or_halt()
 
     def _budget_halt_or_stop(self, reason: str) -> str:
-        """Total budget gets a tool-free final answer; loops still stop cold."""
-        if "tool calls in a single turn" in reason:
+        """Summarize gathered evidence after a budget or repeated tool failure.
+
+        Execution remains halted; a tool-free summary never clears the failure
+        receipt. Interrupts and repeated identical actions still stop cold.
+        """
+        if "tool calls in a single turn" in reason or (
+            reason.startswith("hit the same ") and " failure " in reason
+        ):
             return self._wind_down_summary()
         return self._halt_turn()
 
@@ -1243,7 +1257,7 @@ class JaegerAgent:
         halt path."""
         self._close_dangling_tool_calls(self.last_halt_reason or "budget")
         self._append_message({
-            "role": "user", "content": self._WIND_DOWN_PROMPT,
+            "role": "user", "content": f"Execution stopped: {self.last_halt_reason}.\n{self._WIND_DOWN_PROMPT}",
         })
         self.callbacks.on_thinking(
             "[iteration budget exhausted — asking the model to wrap up]"
@@ -1377,10 +1391,11 @@ class JaegerAgent:
     # spend ONE extra toolless call asking the model to wrap up. The
     # synthetic prompt is removed from history; the summary stays.
     _WIND_DOWN_PROMPT = (
-        "You have reached the tool-call budget for this turn. Stop "
+        "Tool execution has stopped for this turn. Stop "
         "using tools now. In one short reply: summarise what you "
         "accomplished, what remains undone, and the single next step "
-        "you would take."
+        "you would take. Preserve citations from gathered evidence and state "
+        "uncertainty. Do not claim missing tools, archives, or outputs succeeded."
     )
 
     def _one_model_step_with_length_retry(self) -> Message:
@@ -2063,6 +2078,14 @@ class JaegerAgent:
         started = prep["started"]
         self._turn_tool_names.append(name)
 
+        # Determine outcome before truncation/hooks can replace a structured
+        # error with an artifact pointer. An error-only envelope is a failure.
+        _ok = not (isinstance(content, dict) and (
+            content.get("ok") is False or content.get("success") is False
+            or bool(content.get("error"))
+        ))
+        _err = str(content.get("error") or content.get("reason") or "tool failed") if not _ok else None
+
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it
         # here so the history-trim pass downstream isn't fighting a
@@ -2093,10 +2116,8 @@ class JaegerAgent:
         # ok/error from the final content shape: dispatch-raised paths
         # built a ``{"ok": False, "error": ...}`` dict above; a tool
         # returning a successful payload won't carry ``"ok": False``.
-        _ok = True
-        _err: str | None = None
         if isinstance(content, dict) and (
-            content.get("ok") is False or content.get("success") is False
+            content.get("ok") is False or content.get("success") is False or bool(content.get("error"))
         ):
             _ok = False
             _err = str(content.get("error") or "") or None

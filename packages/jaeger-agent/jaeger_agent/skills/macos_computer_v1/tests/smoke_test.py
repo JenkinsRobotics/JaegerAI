@@ -13,7 +13,7 @@ from __future__ import annotations
 # subprocess (`python smoke_test.py`), CWD is the skill folder and
 # the repo root may not be on ``sys.path``.  Walk four parents up
 # (tests/ → macos_computer_v1/ → skills/ → jaeger_os/ → repo root)
-# and prepend it so the ``from jaeger_os.agent.skills...`` imports below
+# and prepend it so the ``from jaeger_agent.skills...`` imports below
 # resolve.
 import os.path as _osp
 import sys as _sys

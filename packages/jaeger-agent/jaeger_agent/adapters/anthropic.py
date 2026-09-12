@@ -4,7 +4,7 @@ Direct SDK calls, no pydantic-ai indirection. The adapter owns:
 
   • internal ``Message`` ↔ Anthropic content-block translation
   • the actual ``client.messages.create(...)`` round-trip, wrapped in
-    :func:`jaeger_os.agent.loop.interrupt.interruptible_call` so Ctrl-C lands
+    :func:`jaeger_agent.loop.interrupt.interruptible_call` so Ctrl-C lands
   • response decode back to a single internal ``Message``
   • capability declaration + a lightweight health probe
 

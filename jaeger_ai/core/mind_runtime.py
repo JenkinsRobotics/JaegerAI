@@ -24,7 +24,14 @@ def _install_bus_confirmation(bus: Any) -> Any:
     if isinstance(policy.confirmation, AllowAllProvider):
         return None
     confirmation = BusConfirmationProvider(bus)
-    install_policy(PermissionPolicy(mode=policy.mode, confirmation=confirmation))
+    # Carry the audit sink across the swap. This replaces the live policy to
+    # route confirmations through the bus; rebuilding it without ``audit``
+    # would silently stop the hash-chained decision log the moment the mind
+    # node attached — the audit would appear to work right up until the
+    # surface that actually asks the user came online.
+    install_policy(PermissionPolicy(
+        mode=policy.mode, confirmation=confirmation, audit=policy.audit,
+    ))
     return confirmation
 
 

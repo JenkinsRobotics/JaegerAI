@@ -178,7 +178,18 @@ def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path)
         thread.join(timeout=2)
 
 
-def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
+def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path, monkeypatch):
+    # The adapter probes the live serving window so configure_model does not
+    # leave Ollama at its 4096 default. That probe talks to 127.0.0.1:11434
+    # for real, so on a developer machine running Ollama this test picked up
+    # whatever that daemon served and the command grew a context_length the
+    # assertion below did not expect — green on CI, red on a dev box. Pin the
+    # probe so the forwarded value is the one under test.
+    from jaeger_ai.core.models import ollama_context as _oc
+
+    monkeypatch.setattr(_oc, "resolve_serving_context",
+                        lambda **kwargs: (65_536, "configured"))
+
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _Bridge()
     server.bridge = bridge
@@ -212,8 +223,14 @@ def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path):
             status = json.load(response)
         assert status["status"] == "completed"
         assert status["terminal_state"] == "completed"
+        # context_length rides along from the probe so the serving window
+        # follows the model being configured.
         assert bridge.commands == [
-            ("configure_model", {"provider": "ollama", "model": "qwen:latest"}),
+            ("configure_model", {
+                "provider": "ollama",
+                "model": "qwen:latest",
+                "context_length": 65_536,
+            }),
         ]
     finally:
         server.shutdown()

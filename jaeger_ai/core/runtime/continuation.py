@@ -187,7 +187,6 @@ def hit_inner_cap(halt_reason: str | None) -> bool:
     return (
         "max_iterations" in reason
         or "tool calls in a single turn" in reason
-        or reason == "empty_response"
     )
 
 
@@ -201,11 +200,10 @@ def is_loop_breaker(halt_reason: str | None) -> bool:
     reason = (halt_reason or "").lower()
     if not reason or hit_inner_cap(reason):
         return False
-    if "identical arguments" in reason:
-        return True
-    if "failure" in reason and ("same" in reason or "times" in reason):
-        return True
-    return False
+    # Only explicit budget boundaries authorize another outer turn. Empty
+    # responses, exhausted reasoning, cancellation and unknown failures must
+    # not reset the inner counters and spend another full model allowance.
+    return True
 
 
 def needs_continuation(text: str) -> bool:

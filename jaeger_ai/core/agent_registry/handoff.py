@@ -1,8 +1,9 @@
-"""Lead → specialist handoff stub (agents-as-tools).
+"""Lead → specialist handoff records.
 
-This is intentionally a stub: it records a handoff, optionally waits on the
-existing Gateway approval path, and returns a structured result the lead can
-narrate. It does **not** claim a live multi-agent turn until that is proven.
+Durable rows live in the gateway session store. This module keeps the
+record shape and a small in-memory helper for tests that do not open a
+store. Live execution is performed by the gateway using the native
+specialist runtime — registration or an in-memory row is not success.
 """
 
 from __future__ import annotations
@@ -19,19 +20,44 @@ class HandoffRecord:
     from_agent_id: str
     to_agent_id: str
     task: str
-    status: str  # pending_approval | approved | denied | stub_complete
+    status: str
     require_approval: bool = True
     approval_id: str | None = None
     created_at: float = field(default_factory=time.time)
     result_summary: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    request_id: str | None = None
+    parent_run_id: str | None = None
+    child_run_id: str | None = None
+    result: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["result_summary"] = self.result_summary or (self.result or {}).get("summary")
+        return payload
+
+    @classmethod
+    def from_store(cls, row: dict[str, Any]) -> HandoffRecord:
+        return cls(
+            id=row["id"],
+            from_agent_id=row["from_agent_id"],
+            to_agent_id=row["to_agent_id"],
+            task=row["task"],
+            status=row["status"],
+            require_approval=bool(row.get("require_approval")),
+            approval_id=row.get("approval_id"),
+            created_at=float(row.get("created_at") or time.time()),
+            result_summary=(row.get("result") or {}).get("summary") or row.get("result_summary"),
+            metadata=dict(row.get("metadata") or {}),
+            request_id=row.get("request_id"),
+            parent_run_id=row.get("parent_run_id"),
+            child_run_id=row.get("child_run_id"),
+            result=dict(row.get("result") or {}),
+        )
 
 
 class HandoffStub:
-    """In-memory handoff ledger shared with Gateway approvals when wired."""
+    """In-memory fallback used only when no session store is available."""
 
     def __init__(self) -> None:
         self._records: dict[str, HandoffRecord] = {}
@@ -47,13 +73,7 @@ class HandoffStub:
     ) -> HandoffRecord:
         handoff_id = f"handoff_{uuid.uuid4().hex[:12]}"
         approval_id = f"approval_{uuid.uuid4().hex[:12]}" if require_approval else None
-        status = "pending_approval" if require_approval else "stub_complete"
-        summary = None
-        if not require_approval:
-            summary = (
-                f"Stub handoff to {to_agent_id}: recorded task without live "
-                "multi-agent turn (product sprint stub)."
-            )
+        status = "pending_approval" if require_approval else "admitted"
         record = HandoffRecord(
             id=handoff_id,
             from_agent_id=from_agent_id or "native:jaeger",
@@ -62,8 +82,8 @@ class HandoffStub:
             status=status,
             require_approval=require_approval,
             approval_id=approval_id,
-            result_summary=summary,
             metadata=dict(metadata or {}),
+            request_id=handoff_id,
         )
         self._records[handoff_id] = record
         return record
@@ -76,12 +96,10 @@ class HandoffStub:
             if record.approval_id == approval_id and record.status == "pending_approval":
                 record.status = "approved" if approved else "denied"
                 if approved:
-                    record.result_summary = (
-                        f"Approved stub handoff to {record.to_agent_id} — "
-                        "no live specialist turn yet (honest stub)."
-                    )
+                    record.result_summary = f"Approved handoff to {record.to_agent_id}"
                 else:
                     record.result_summary = "Handoff denied by operator."
+                    record.result = {"ok": False, "status": "denied"}
                 return record
         return None
 

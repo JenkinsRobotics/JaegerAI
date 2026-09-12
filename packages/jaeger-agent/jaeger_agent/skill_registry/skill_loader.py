@@ -81,7 +81,7 @@ CORE_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 
 _SKILL_RE = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9_]*)_v(?P<v>\d+)$")
-# (V3 ID validation lives in jaeger_os.agent.skill_registry.manifest_v3 now.)
+# (V3 ID validation lives in jaeger_agent.skill_registry.manifest_v3 now.)
 
 
 def _semver_tuple(v: str) -> tuple[int, ...]:

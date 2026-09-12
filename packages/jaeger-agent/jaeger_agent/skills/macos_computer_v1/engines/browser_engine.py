@@ -8,7 +8,7 @@ reliable (DOM is stable, screen coordinates are not).
 
 Today this is a thin wrapper that delegates to the existing
 ``browser()`` tool implementation in
-:mod:`jaeger_os.agent.tools.browser`. The point is to let the
+:mod:`jaeger_agent.tools.browser`. The point is to let the
 planner CHOOSE the browser path semantically — "fill a form" or
 "click selector" routes here instead of the AX / vision tiers,
 regardless of whether the browser window has focus.

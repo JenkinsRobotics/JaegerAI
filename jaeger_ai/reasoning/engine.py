@@ -1,8 +1,8 @@
-"""Central ARES Engine orchestrating perception, reasoning, transduction, and learning.
+"""Central Reasoning Engine orchestrating perception, intent, transduction, and learning.
 
 Experimental endogenous heartbeat cognition — not an AGI/SI replacement.
 Dangerous system actions and desktop notifications are fail-closed unless
-explicitly allowed on ``ARESConfig``.
+explicitly allowed on ``ReasoningConfig``.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ARESConfig:
+class ReasoningConfig:
     """Runtime gates for the experimental cognition loop.
 
     Defaults are fail-closed for anything that can modify code, run suites,
@@ -49,7 +49,7 @@ class ARESConfig:
 
 
 @dataclass
-class ARESResult:
+class ReasoningResult:
     timestamp: float = field(default_factory=time.time)
     status: str = "idle"  # "acted", "vigilant_idle", "disabled", "error"
     snapshot: PerceptionSnapshot | None = None
@@ -66,15 +66,15 @@ class ARESResult:
         }
 
 
-class ARESEngine:
-    """Experimental Autonomous Reasoning and Execution System (heartbeat cognition).
+class ReasoningEngine:
+    """Experimental heartbeat cognition — reasons unprompted, on its own tick.
 
     Self-contained within JaegerAI. Executes the continuous OODA loop:
     Perception -> Episodic Context -> Endogenous Intent -> Medium Transduction -> Learning.
     """
 
-    def __init__(self, config: ARESConfig | None = None) -> None:
-        self.config = config or ARESConfig()
+    def __init__(self, config: ReasoningConfig | None = None) -> None:
+        self.config = config or ReasoningConfig()
         root = self.config.workspace_root or Path(os.getcwd())
         default_base = (
             os.environ.get("JAEGER_STATE_DIR")
@@ -111,10 +111,10 @@ class ARESEngine:
         self.learning_loop = EpistemicLearningLoop(context=self.epistemic_context, log_dir=data_dir)
 
         self._last_tick_ts = 0.0
-        self._last_result: ARESResult | None = None
+        self._last_result: ReasoningResult | None = None
 
     @property
-    def last_result(self) -> ARESResult | None:
+    def last_result(self) -> ReasoningResult | None:
         return self._last_result
 
     def status(self) -> dict[str, Any]:
@@ -135,10 +135,10 @@ class ARESEngine:
             "belief": self.epistemic_context.current.to_dict(),
         }
 
-    async def tick(self) -> ARESResult:
+    async def tick(self) -> ReasoningResult:
         """Executes one full autonomous cognitive cycle (never raises to caller)."""
         if not self.config.enabled:
-            res = ARESResult(status="disabled")
+            res = ReasoningResult(status="disabled")
             self._last_result = res
             return res
 
@@ -149,7 +149,7 @@ class ARESEngine:
             intent = await self.intent_engine.form_intent(snapshot, belief)
 
             if not intent.is_active:
-                res = ARESResult(
+                res = ReasoningResult(
                     status="vigilant_idle",
                     snapshot=snapshot,
                     intent=intent,
@@ -161,7 +161,7 @@ class ARESEngine:
             transductions = await self.transducers.broadcast(intent)
             await self.learning_loop.record_outcome(intent, transductions)
 
-            res = ARESResult(
+            res = ReasoningResult(
                 status="acted",
                 snapshot=snapshot,
                 intent=intent,
@@ -171,7 +171,7 @@ class ARESEngine:
             return res
 
         except Exception as exc:  # noqa: BLE001 — tick must never crash heartbeat
-            logger.exception("ARES cognitive tick encountered an error: %s", type(exc).__name__)
-            res = ARESResult(status=f"error: {type(exc).__name__}")
+            logger.exception("reasoning tick encountered an error: %s", type(exc).__name__)
+            res = ReasoningResult(status=f"error: {type(exc).__name__}")
             self._last_result = res
             return res

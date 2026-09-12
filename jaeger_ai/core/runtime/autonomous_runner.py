@@ -98,6 +98,22 @@ def ledger_open() -> bool:
     return ledger is not None and not ledger.completed
 
 
+def conversation_only(text: str) -> bool:
+    """Explicit single-response requests must not inherit unrelated job state.
+
+    This is deliberately narrow. General tasks still use the existing work
+    lifecycle; an explicit batch or /goal is never classified as small talk.
+    """
+    value = (text or "").strip()
+    if looks_like_batch(value):
+        return False
+    return bool(
+        re.fullmatch(r"(?i)(?:hi|hello|hey|ping|thanks|thank you)[!. ]*", value)
+        or re.match(r"(?i)^(?:please\s+)?reply\s+(?:with\s+)?exactly\b", value)
+        or re.search(r"(?i)\b(?:do not|don't) use (?:any )?tools\b", value)
+    )
+
+
 def should_run_autonomous(text: str = "") -> bool:
     """Whether THIS prompt should keep the outer loop in control.
 
@@ -107,6 +123,8 @@ def should_run_autonomous(text: str = "") -> bool:
     on "what's 2+2" would burn the step budget.
     """
     if os.environ.get("JAEGER_AUTONOMOUS", "1").strip() == "0":
+        return False
+    if conversation_only(text):
         return False
     if ledger_open():
         return True
@@ -144,6 +162,8 @@ def ensure_autonomous_ledger(text: str) -> Any:
     before inspection, execution, and verification have each been recorded.
     Existing ledgers are never replaced.
     """
+    if conversation_only(text):
+        return None
     existing = active_ledger()
     if existing is not None:
         return existing
@@ -258,6 +278,8 @@ def next_continuation_prompt(
     Isolated workers (``delegate_task`` children) pass ``isolated=True``
     so they do not mutate the main session's execution mode.
     """
+    if conversation_only(objective):
+        return None
     if isolated:
         remaining = execution.max_steps() if steps_left is None else steps_left
         return _worker_next(

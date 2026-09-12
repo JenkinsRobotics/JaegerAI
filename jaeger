@@ -11,7 +11,7 @@
 #   jaeger agent ...            manage agents: create / list / use /
 #                               inspect / delete / clear
 #   jaeger skills|personality|status|roadmap|avatar    operator console
-#   jaeger setup [name]         create an agent (GUI-first; `setup tui` = wizard)
+#   jaeger setup [name]         create an agent (terminal wizard; `setup gui` = windowed)
 #   jaeger doctor               environment + readiness check
 #
 # Management subcommands go to the console (jaeger_ai.cli); everything

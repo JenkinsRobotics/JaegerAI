@@ -35,7 +35,7 @@ The repository source tree must remain pristine, deterministic, and free of runt
 ## 3. Resilience & Gateway Continuity
 
 * **Gateway Architecture:**
-  * The Jaeger Gateway (`jaeger_ai.core.gateway`) runs as an isolated daemon on port 8810. It owns persistent SQLite session state (`~/.jaeger/gateway/sessions.db`) and broadcasts SSE multi-client events.
+  * The Jaeger Gateway (`jaeger_ai.core.gateway`) runs as an isolated daemon on port 8810. It owns persistent SQLite session state (`~/.jaeger/gateway_sessions.sqlite3`) and broadcasts SSE multi-client events.
   * Native macOS apps (`apps/macos`), Web UIs (`apps/web`), and CLI interfaces connect as decoupled clients to the Gateway.
 * **Tool Call Resilience:**
   * All model-generated tool calls must pass through `jaeger_ai.core.runtime.tool_repair` to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes without failing the user's turn.

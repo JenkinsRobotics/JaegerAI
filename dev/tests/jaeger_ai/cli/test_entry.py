@@ -20,21 +20,26 @@ def test_console_subcommands_go_to_cli():
         assert route([sub, "x"]) == [PY, "-m", "jaeger_ai.cli", sub, "x"]
 
 
-def test_setup_routes_gui_first_agent_create():
-    # GUI-first (2026-07-17): setup goes through `agent create`, which
-    # opens the app's onboarding and falls back to the terminal wizard
-    # itself when headless / no app.
+def test_setup_routes_terminal_first_wizard():
+    # Terminal-first (OpenClaw parity): bare `setup` runs the interactive
+    # wizard in the terminal. The GUI is the opt-in, not the default —
+    # see `_route`'s setup branch in jaeger_ai/cli/entry.py.
     assert route(["setup", "bob"]) == [PY, "-m", "jaeger_ai.cli.run",
-                                       "agent", "create", "bob"]
+                                       "setup", "bob"]
+    for alias in ("onboard", "onboarding"):
+        assert route([alias]) == [PY, "-m", "jaeger_ai.cli.run", "setup"]
 
 
-def test_setup_tui_forces_terminal_wizard():
-    assert route(["setup", "tui"]) == [PY, "-m", "jaeger_ai.cli.run",
-                                       "agent", "create", "--tui"]
-    # --tui trails so agent-create's positional-name shim still sees the
-    # name at rest[0].
-    assert route(["setup", "tui", "bob"]) == [PY, "-m", "jaeger_ai.cli.run",
-                                              "agent", "create", "bob", "--tui"]
+def test_setup_gui_opts_into_agent_create():
+    # `gui` (positional) and `--gui` (flag) both opt into the windowed
+    # onboarding, and the opt-in token is stripped before dispatch so
+    # agent-create's positional-name shim still sees the name at rest[0].
+    assert route(["setup", "gui"]) == [PY, "-m", "jaeger_ai.cli.run",
+                                       "agent", "create"]
+    assert route(["setup", "gui", "bob"]) == [PY, "-m", "jaeger_ai.cli.run",
+                                              "agent", "create", "bob"]
+    assert route(["setup", "--gui", "bob"]) == [PY, "-m", "jaeger_ai.cli.run",
+                                                "agent", "create", "bob"]
 
 
 def test_doctor_routes_to_runner_with_flag():

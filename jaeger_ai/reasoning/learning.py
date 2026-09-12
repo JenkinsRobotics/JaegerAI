@@ -1,4 +1,4 @@
-"""Epistemic learning loop for ARES.
+"""Epistemic learning loop for the reasoning engine.
 
 Records cause-and-effect relationships from executed intents, updates belief
 heuristics, and prevents repeating ineffective actions.
@@ -74,7 +74,7 @@ class EpistemicLearningLoop:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(record.to_dict()) + "\n")
         except Exception as exc:
-            logger.warning("Failed to write ARES cause-and-effect log: %s", exc)
+            logger.warning("Failed to write reasoning cause-and-effect log: %s", exc)
 
         # 2. Update epistemic context insight
         if all_success:

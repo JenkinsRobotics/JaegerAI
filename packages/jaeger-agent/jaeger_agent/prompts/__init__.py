@@ -2,7 +2,7 @@
 
 Public surface (prefer these imports in new code):
 
-    from jaeger_os.agent.prompts import (
+    from jaeger_agent.prompts import (
         assemble_prompt,        # single entry point, mode-dispatched
         build_system_prompt,    # back-compat shim ⇒ assemble_prompt(mode='agent')
         AUTO_BOARD_PROMPT,      # synthetic user message: idle board pickup

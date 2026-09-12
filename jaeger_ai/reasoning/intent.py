@@ -1,4 +1,4 @@
-"""Endogenous reasoner and intent formation for ARES.
+"""Endogenous reasoner and intent formation for the reasoning engine.
 
 Generates internal goals and intents based on perceived world state,
 unbroken belief context, and homeostatic drives (stability, accuracy, assistance).

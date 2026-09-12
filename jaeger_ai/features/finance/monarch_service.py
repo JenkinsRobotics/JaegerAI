@@ -17,12 +17,20 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.core.ares_interop import ares_migration_source
+
 logger = logging.getLogger("jaeger_ai.features.finance.monarch")
 
 DEFAULT_API_TIMEOUT_SECONDS = 30.0
 MAX_TRANSACTION_DAYS = 365
 MAX_TRANSACTION_LIMIT = 500
-LEGACY_SESSION_PATH = Path.home() / ".ares" / ".mm_session.pickle"
+# Read-only, one-shot migration source. Routed through ``ares_interop`` —
+# the single audited place JaegerAI may resolve ARES's home — rather than
+# rebuilding the path inline; see that module's docstring for why the
+# ownership guard is strict everywhere else. This is ARES's PRIVATE session
+# state, so it is deliberately NOT a declared shared artifact: we read it
+# once to migrate the operator's existing login and never write back.
+LEGACY_SESSION_PATH = ares_migration_source() / ".mm_session.pickle"
 
 
 class MonarchError(Exception):

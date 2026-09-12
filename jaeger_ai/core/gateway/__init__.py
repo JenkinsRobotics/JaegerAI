@@ -5,7 +5,12 @@ reconnectable, multi-client sessions across Mac App, Web UI, and CLI.
 Modeled after OpenClaw's Gateway architecture.
 """
 
-from .session_store import GatewaySessionStore, default_store_path
+from .session_store import (
+    GatewaySessionStore,
+    RequestBusy,
+    RequestConflict,
+    default_store_path,
+)
 from .event_bus import GatewayEventBus, GatewayEvent
 from .server import (
     JaegerGatewayApp,
@@ -17,6 +22,8 @@ from .server import (
 
 __all__ = [
     "GatewaySessionStore",
+    "RequestBusy",
+    "RequestConflict",
     "default_store_path",
     "GatewayEventBus",
     "GatewayEvent",

@@ -243,7 +243,7 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
 # ---------------------------------------------------------------------------
 # Phase-9 cleanup: the legacy ``build_external_model`` constructed a
 # pydantic-ai ``Model`` instance. After Phase 6.2 the agent layer drives
-# providers directly via :mod:`jaeger_os.agent.adapters`, so the only
+# providers directly via :mod:`jaeger_agent.adapters`, so the only
 # work this layer needs to do is validate that the API key is present
 # before the adapter tries to use it.
 
@@ -314,7 +314,7 @@ class ExternalModelClient:
       • ``.kind``    — ``"external"`` (vs ``"local"``)
       • ``.describe()`` — one-line human summary for the status panel
       • ``.ext`` / ``.provider`` / ``.model_name`` — config attributes
-        the new agent layer's :func:`jaeger_os.agent.loop.runtime_bridge.
+        the new agent layer's :func:`jaeger_agent.loop.runtime_bridge.
         _adapter_for_client` reads to pick the right adapter.
     """
 

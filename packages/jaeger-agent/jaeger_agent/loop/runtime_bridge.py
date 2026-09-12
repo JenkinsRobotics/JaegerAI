@@ -447,6 +447,8 @@ def _run_turn_with_executive(agent: JaegerAgent, user_text: str) -> str:
         SqliteCommitmentStore(),
         provider=getattr(agent.primary_adapter, "name", None),
         claims=SqliteKnowledgeStore(),
+        world_event=getattr(agent, "_world_event", None),
+        prepare_world_context=False,  # host turn preparation already added it
     ).run_turn(user_text)
 
 

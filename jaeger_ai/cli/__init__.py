@@ -21,7 +21,7 @@ Each subcommand has:
   - A ``run(args)`` function that does the work and exits
 
 Entry point:
-  ``jaeger`` shell shim → ``python -m jaeger_os.cli``
+  ``jaeger`` shell shim → ``python -m jaeger_ai.cli``
 
 Headless-safe: nothing here imports the LLM client or the audio
 plugins — operators can inspect instance state without booting the
@@ -36,7 +36,7 @@ __all__ = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point.  Dispatched from ``python -m jaeger_os.cli``."""
+    """CLI entry point.  Dispatched from ``python -m jaeger_ai.cli``."""
     import argparse
     import sys
 
@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     # line here.
     epilog = (
         "other commands (dispatched before this console):\n"
-        "  setup       run first-run onboarding (GUI; `setup tui` forces terminal)\n"
+        "  setup       run first-run onboarding (terminal; `setup gui` forces windowed)\n"
         "  doctor      check dependencies, permissions, and install health\n"
         "  update      update JaegerAI in place\n"
         "  start       start services, containers, and the desktop app\n"
@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         "  mcp         run the MCP server (`mcp --http` attaches to the live bridge)\n"
         "  a2a         run the A2A JSON-RPC server (loopback :8796)\n"
         "  gateway     install/start/stop Agentgateway (MCP :8811, A2A :8812)\n"
+        "  gateway daemon\n"
+        "              run the Jaeger Gateway (sessions + SSE, loopback :8810)\n"
         "  hermes-webui-adapter\n"
         "              run the loopback adapter for the Hermes WebUI\n"
         "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"

@@ -1,7 +1,7 @@
 """System medium transducer for code execution, git, and file modifications.
 
 Dangerous actions (``run_test_suite``, code-mod paths) require
-``allow_dangerous_actions=True`` on the transducer / ARESConfig (default False).
+``allow_dangerous_actions=True`` on the transducer / ReasoningConfig (default False).
 ``clean_scratch_caches`` is limited to ``~/.jaeger/scratch`` only.
 """
 
@@ -60,7 +60,7 @@ class SystemTransducer:
                     medium=MediumType.SYSTEM,
                     output=(
                         f"Blocked gated system action '{action}': "
-                        "requires ARESConfig.allow_dangerous_system_actions=True"
+                        "requires ReasoningConfig.allow_dangerous_system_actions=True"
                     ),
                     metadata={"action": action, "gated": True, "blocked": True},
                 )

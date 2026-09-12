@@ -3,8 +3,8 @@
 Mirrors python_pydantic_ai/core/tools/ for cross-framework structural
 parity. Use either form:
 
-    from jaeger_os.agent import tools             # then tools.get_time(...)
-    from jaeger_os.agent.tools import get_time    # direct import
+    from jaeger_agent import tools             # then tools.get_time(...)
+    from jaeger_agent.tools import get_time    # direct import
 
 Categories:
 
@@ -57,6 +57,7 @@ from .meta import describe_tool, load_tools
 
 # Memory
 from .memory import forget, list_facts, memory, recall, remember, search_memory
+from .insights import record_insight, recall_insight
 
 # Scheduling
 from .scheduling import cancel_schedule, list_schedules, schedule_prompt
@@ -102,7 +103,7 @@ from .credentials import get_credential, list_credentials
 
 # Coordination / meta
 from .delegation import CAPABILITY_SUMMARY, ask_user, help_me
-from .call_agent import call_agent
+from .call_agent import call_agent, get_agent_result
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin
@@ -196,6 +197,7 @@ __all__ = [
     "get_time", "calculate", "system_status",
     # memory
     "remember", "recall", "forget", "list_facts", "search_memory", "memory",
+    "record_insight", "recall_insight",
     # scheduling
     "schedule_prompt", "list_schedules", "cancel_schedule",
     # web
@@ -216,7 +218,7 @@ __all__ = [
     # credentials
     "get_credential", "list_credentials",
     # delegation
-    "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent",
+    "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent", "get_agent_result",
     # plugins
     "list_plugins", "setup_plugin",
     # audio input

@@ -178,8 +178,9 @@ def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):
     assert captured["payload"]["choices"][0]["message"]["content"] == "READY"
 
 
-def test_jaeger_runtime_artifacts_live_inside_repository():
-    assert setup.JAEGER_RUNTIME_ROOT == setup.REPO_ROOT / ".jaeger_ai" / "shared"
+def test_jaeger_runtime_artifacts_live_outside_repository():
+    assert setup.JAEGER_RUNTIME_ROOT == setup.operator_state_root() / "shared"
+    assert not setup.JAEGER_RUNTIME_ROOT.resolve().is_relative_to(setup.REPO_ROOT.resolve())
     plist = setup._plist("test.adapter", "example.module")
     assert str(setup.JAEGER_RUNTIME_ROOT / "logs").encode() in plist
 

@@ -55,6 +55,8 @@ def prepare_turn_text(
     callers pass this prepared string only to the model loop.
     """
     compact_agent(agent)
+    from jaeger_ai.core.runtime.autonomous_runner import conversation_only
+    ledger = ledger and not conversation_only(user_text)
     parts: list[str] = []
     if ledger:
         try:
@@ -76,6 +78,21 @@ def prepare_turn_text(
         if block:
             parts.append(block)
     parts.append(user_text)
+    # World admission sees only the original utterance, never work-ledger or
+    # domain prompt scaffolding. Conversation scope is a conservative fallback
+    # until authenticated ingress supplies a stronger actor mapping.
+    from jaeger_agent.memory import sqlite_store
+    if sqlite_store.is_bound():
+        from jaeger_agent.cognition.world import WorldEvent, WorldModel
+        from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
+        event = WorldEvent.for_session(user_text, session_key)
+        agent._world_event = event
+        world = WorldModel(SqliteKnowledgeStore())
+        packet = world.prepare(event)
+        if packet:
+            parts.insert(0, packet)
+    else:
+        agent._world_event = None
     return "\n\n".join(parts)
 
 

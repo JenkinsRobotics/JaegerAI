@@ -51,6 +51,7 @@ requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
 [project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24,<2"]
 # Acoustic echo cancellation for duplex voice — passed through from
 # jaeger-os (core/audio/aec.py); re-declared here so `pip install
 # 'jaeger-ai[aec]'` works without the operator needing to know it's
@@ -109,6 +110,14 @@ jaeger_ai = [
     "interfaces/avatar/Resources/**/*",
     "interfaces/hermes_webui_adapter/static/**/*",
 ]
+
+[tool.ruff]
+# Ruff writes .ruff_cache to the CWD by default, which lands in the repo
+# root every time CI or an operator lints — the exact in-tree runtime junk
+# test_repo_root_has_zero_runtime_junk fails on. Redirect it the same way
+# pytest's cache_dir is redirected below, so the tree stays clean at the
+# producer instead of being masked in .gitignore.
+cache-dir = "~/.cache/ruff"
 
 [tool.pytest.ini_options]
 cache_dir = "~/.cache/pytest"

@@ -40,7 +40,12 @@ def _ver_tuple_to_dot(t: tuple[int, ...]) -> str:
 def discover_migrations() -> list[dict[str, Any]]:
     """Return migrations sorted by (from_ver, to_ver). Each entry is
     {name, from_ver, to_ver, path}."""
-    if not MIGRATIONS_DIR.exists():
+    # Loud when the scripts directory is missing. This exact guard hid a
+    # broken runner: the 0.9 split moved the runner away from its scripts
+    # and ``[]`` read as "nothing pending" at six call sites, boot included.
+    from jaeger_ai.core.wiring import expect_path
+
+    if not expect_path(MIGRATIONS_DIR, "migration scripts directory"):
         return []
     found: list[dict[str, Any]] = []
     for p in MIGRATIONS_DIR.iterdir():

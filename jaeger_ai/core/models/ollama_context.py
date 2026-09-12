@@ -237,10 +237,15 @@ def should_inject_num_ctx(
     Local Ollama defaults to a small window on ``/v1/chat/completions``
     unless the request says otherwise. Cloud (and ``:cloud`` tags
     routed through a local server) already load at the model max —
-    sending a leftover local number would shrink them. Locally we inject
-    either the Modelfile runtime value or an explicit operator setting.
-    We deliberately do not inject a training maximum inferred from model
-    metadata: that could allocate an unsafe KV cache on a laptop.
+    sending a leftover local number would shrink them.
+
+    Locally we inject the Modelfile runtime value, an explicit operator
+    setting, or a training maximum read from model metadata. The
+    metadata case was once excluded for fear of allocating an unsafe KV
+    cache on a laptop; leaving it out was worse, because the daemon then
+    stayed at its ~4096 default and the context guard zeroed out whenever
+    ``max_tokens`` matched. It is injected as a CAPPED copy instead —
+    the caller applies the cap, which is what keeps the KV cache safe.
     """
     if is_hosted_ollama(provider, base_url, model):
         return False

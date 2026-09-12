@@ -46,11 +46,15 @@ class TurnExecutive:
         provider: str | None = None,
         claims: ClaimWriter | None = None,
         planner: Planner | None = None,
+        world_event=None,
+        prepare_world_context: bool = True,
     ) -> None:
         self.agent = agent
         self.runs = runs
         self.commitments = commitments
         self.claims = claims
+        self.world_event = world_event
+        self.prepare_world_context = prepare_world_context
         self.planner = planner or EvidenceFirstPlanner()
         self.provider = provider or getattr(agent.primary_adapter, "name", None)
         binder = getattr(agent, "set_effect_checkpoint", None)
@@ -93,7 +97,14 @@ class TurnExecutive:
                 )
             )
         needs_evidence = False
-        if self.claims is not None:
+        if self.claims is not None and self.world_event is not None:
+            from jaeger_agent.cognition.world import WorldModel
+            world = WorldModel(self.claims)
+            context = world.prepare(self.world_event)
+            if self.prepare_world_context:
+                if context:
+                    text = context + "\n\n" + text
+        elif self.claims is not None:
             asserted = extract_told_propositions(text)
             record_told(self.claims, text, source_id=run.id)
             rebuilder = getattr(self.claims, "rebuild_beliefs_from_claims", None)

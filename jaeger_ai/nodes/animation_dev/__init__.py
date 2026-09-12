@@ -1,10 +1,16 @@
 """Animation node — Mochi-vendored adapters + skill-tree integration.
 
-LIVE, not staging — despite the ``_dev`` suffix. Its ``mscript/`` scenes +
-``mscript.logging_utils`` are imported by ``interfaces/studio/pages.py`` and
-``interfaces/v4/mochi_gui.py``, so this stays under ``nodes/`` (moving it to
-``dev/staging/`` would break both GUIs). Distinct from the generic
-``nodes/animation/`` node; this is the Mochi MScript renderer path.
+Distinct from the generic ``nodes/animation/`` node; this is the Mochi
+MScript renderer path.
+
+Status (corrected 2026-09-12): this package previously documented itself as
+"LIVE, not staging", on the grounds that ``interfaces/studio/pages.py`` and
+``interfaces/v4/mochi_gui.py`` imported its ``mscript/`` scenes. **Both of
+those consumers have been deleted** — neither path exists in the tree — so
+nothing imports the scenes today. The node itself is still reachable through
+its ``module.yaml`` factory on the bus; only the MScript scene library is
+currently unconsumed. Decide whether to retire the scenes or wire a new
+renderer surface before treating them as load-bearing.
 
 The node owns one active :class:`AnimationAdapter` at a time; it
 subscribes to ``/act/animation`` + ``/act/animation_stop`` on the

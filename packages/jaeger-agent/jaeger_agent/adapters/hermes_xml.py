@@ -21,7 +21,7 @@ deliberately a function instead of an SDK client so it can wrap
 ``llama_cpp.Llama.create_completion``, ``mlx_lm.generate``, an HTTP
 ``/completion`` endpoint, or a unit-test stub interchangeably.
 
-Drift parsing lives in :mod:`jaeger_os.agent.dialects` so both this
+Drift parsing lives in :mod:`jaeger_agent.dialects` so both this
 adapter and the future ``OpenAICompatLocalAdapter`` (Gemma / Qwen on
 llama.cpp's OpenAI surface) can share one battle-tested implementation.
 """
@@ -273,7 +273,7 @@ class HermesXMLAdapter(ProviderAdapter):
         """Remove every ``<tool_call>`` / ``<|tool_call|>`` envelope
         from a response so the visible assistant text doesn't carry the
         call markup. Mirrors the patterns used in
-        :mod:`jaeger_os.agent.dialects` — kept in sync there."""
+        :mod:`jaeger_agent.dialects` — kept in sync there."""
         import re
         patterns = [
             r"<\|tool_call\|>\s*.*?\s*<\|/tool_call\|>",

@@ -35,3 +35,28 @@ def test_recovery_query_has_bounded_handshake_and_response_wait(monkeypatch):
     result = BridgeClient('jaeger').query('turn_status', {'turn_id': 'original'}, timeout_s=10)
     assert result == {'status': 'unknown'}
     assert requests[0]['op'] == 'query'  # Observation only, never send/replay.
+
+
+def test_bridge_client_preserves_structured_halt(monkeypatch):
+    @contextmanager
+    def connection(self):
+        yield None, iter([json.dumps({'type': 'reply', 'text': 'stopped',
+            'halt_reason': 'repeated failures', 'halt_code': 'repeated_tool_failure'})])
+    monkeypatch.setattr(BridgeClient, '_connection', connection)
+    monkeypatch.setattr(BridgeClient, '_ready', staticmethod(lambda _: {}))
+    monkeypatch.setattr(BridgeClient, '_write', staticmethod(lambda *args: None))
+    reply = BridgeClient('jaeger').turn('task', 'dispatcher')
+    assert reply['halt_reason'] == 'repeated failures'
+    assert reply['halt_code'] == 'repeated_tool_failure'
+
+
+def test_bridge_forwards_empty_tool_grant_instead_of_omitting_it(monkeypatch):
+    frames = []
+    @contextmanager
+    def connection(self):
+        yield None, iter([json.dumps({'type': 'reply', 'text': 'done'})])
+    monkeypatch.setattr(BridgeClient, '_connection', connection)
+    monkeypatch.setattr(BridgeClient, '_ready', staticmethod(lambda _: {}))
+    monkeypatch.setattr(BridgeClient, '_write', staticmethod(lambda rx, frame: frames.append(frame)))
+    BridgeClient('jaeger').turn('task', 'specialist:test', turn_id='receipt', allowed_tools=[])
+    assert frames[0]['allowed_tools'] == [] and frames[0]['turn_id'] == 'receipt'

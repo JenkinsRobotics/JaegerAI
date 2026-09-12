@@ -1,4 +1,4 @@
-"""Base protocol and data structures for ARES medium transducers."""
+"""Base protocol and data structures for reasoning medium transducers."""
 
 from __future__ import annotations
 

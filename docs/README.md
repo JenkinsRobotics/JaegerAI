@@ -1,5 +1,7 @@
 # JaegerAI documentation
 
+Backend evidence trial: [Chronicler research and memory benchmark](benchmarks/chronicler-trial.md).
+
 Start here for the current product and its repository. Existing package and
 integration documents stay beside the code they describe; this index links to
 them without creating another copy.
@@ -24,6 +26,8 @@ them without creating another copy.
 | --- | --- |
 | [Architecture decisions](architecture/adr/) | ADRs and ownership boundaries |
 | [Architecture status](architecture/master-build-status.md) | Architecture implementation record; check its date |
+| [World-model integration plan](WORLD_MODEL_INTEGRATION_PLAN.md) | Pending build sequence, existing code boundaries, and end-to-end acceptance for relational knowledge and action |
+| [Backend acceptance and benchmarks](BACKEND_ACCEPTANCE.md) | Current priority: native agent, gateway stability, then agent connections; UI-independent scoring and live measurements |
 | [JaegerAgent](../packages/jaeger-agent/README.md) | Reusable agent package |
 | [JaegerOS](../packages/jaeger-os/README.md) | Runtime foundation |
 | [Generated agent contract](../jaeger_ai/docs/agent_contract.md) | Generator-owned reference shipped as package data |

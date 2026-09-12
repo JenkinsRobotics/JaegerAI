@@ -9,7 +9,7 @@ on higher ones. Concretely:
     whole rule in one place).
   * ``jaeger_os.transport`` / ``jaeger_os.nodes`` / ``jaeger_os.hardware``
     / ``jaeger_os.app`` (the runtime tier) never import
-    ``jaeger_os.agent`` (the Mind). The e-stop lives below the Mind —
+    ``jaeger_agent`` (the Mind). The e-stop lives below the Mind —
     a runtime module that imports agent/ could not be trusted to keep
     working if the Mind never boots, which breaks the whole point of
     the tiering (JP01 must run headless).
@@ -61,7 +61,7 @@ import jaeger_os
 REPO_ROOT = pathlib.Path(jaeger_os.__file__).resolve().parent
 
 # The runtime tier — enforced. transport/nodes/hardware/app must never
-# import jaeger_os.agent (or any of its submodules).
+# import jaeger_agent (or any of its submodules).
 ENFORCED_DIRS = ("transport", "nodes", "hardware", "app")
 
 # Grandfathered exceptions, keyed by path relative to jaeger_os/.
@@ -69,7 +69,7 @@ ENFORCED_DIRS = ("transport", "nodes", "hardware", "app")
 # the audit that introduced this test found zero cases hard enough to
 # warrant one; every real violation was inverted instead.
 ALLOWLIST: dict[str, tuple[str, ...]] = {
-    # "nodes/example.py": ("from jaeger_os.agent.x import y",),  # why
+    # "nodes/example.py": ("from jaeger_agent.x import y",),  # why
 }
 
 
@@ -84,18 +84,18 @@ def _agent_imports(path: pathlib.Path) -> list[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 name = alias.name
-                if name == "jaeger_os.agent" or name.startswith("jaeger_os.agent."):
+                if name == "jaeger_agent" or name.startswith("jaeger_agent."):
                     offenders.append(f"import {name}")
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                # Relative imports inside jaeger_os.agent itself can't
+                # Relative imports inside jaeger_agent itself can't
                 # reach these directories; relative imports inside
-                # these directories can't reach jaeger_os.agent either
+                # these directories can't reach jaeger_agent either
                 # (no relative path walks from transport/nodes/hardware/
                 # app into agent). Nothing to check.
                 continue
             module = node.module or ""
-            if module == "jaeger_os.agent" or module.startswith("jaeger_os.agent."):
+            if module == "jaeger_agent" or module.startswith("jaeger_agent."):
                 offenders.append(f"from {module} import ...")
     return offenders
 
@@ -120,7 +120,7 @@ def test_runtime_tier_never_imports_agent():
                 violations[rel] = leftover
     assert not violations, (
         "runtime tier (transport/nodes/hardware/app) must never import "
-        "jaeger_os.agent (nervous-system rule, THREE_TIER_STRUCTURE.md "
+        "jaeger_agent (nervous-system rule, THREE_TIER_STRUCTURE.md "
         f"law 2): {violations}"
     )
 
