@@ -138,6 +138,7 @@ def select_name(
     voice_profile: str | None,
     q2_response: str = "",
     q2_refused: bool = False,
+    register_override: str | None = None,
 ) -> dict[str, Any] | None:
     """Choose a name. ``None`` when the corpus is unavailable.
 
@@ -155,7 +156,12 @@ def select_name(
     if not pool:
         pool = list(corpus)
 
-    register, confidence = read_register(q2_response, refused=q2_refused)
+    if register_override in REGISTERS:
+        # The calibrated stance already weighed Probe 1's delivery, which
+        # the Q2 text alone cannot see.
+        register, confidence = register_override, 0.6
+    else:
+        register, confidence = read_register(q2_response, refused=q2_refused)
     matching = [c for c in pool if c.register == register]
     # Fall back to the whole gendered pool rather than forcing a register
     # match — a thin signal should narrow the field, not dictate it.

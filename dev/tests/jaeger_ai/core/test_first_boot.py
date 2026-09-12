@@ -34,9 +34,16 @@ def _established(tmp_path):
 
 # 1 ── fresh identity enters first boot ───────────────────────────────
 
+def _to_voice(root):
+    """Walk Probe 1 with a steady answer so we land on the voice question."""
+    fb.begin(root)
+    fb.record_social(root, "Social.", latency_ms=400)
+    return fb.status(root)
+
+
 def test_fresh_identity_enters_first_boot(inst):
     assert fb.status(inst) is FirstBootStatus.NOT_STARTED
-    assert fb.begin(inst) is FirstBootStatus.AWAITING_VOICE
+    assert fb.begin(inst) is FirstBootStatus.AWAITING_SOCIAL
     assert script.next_turn(inst) is not None
 
 
@@ -60,28 +67,30 @@ def test_unclassifiable_identity_fails_safe(tmp_path, monkeypatch):
 
 # 3, 4, 6 ── exact greeting, voice question first, not combined ───────
 
-def test_exact_welcome_and_voice_question_first(inst):
+def test_opening_turn_greets_by_name_and_asks_probe_one(inst):
     fb.begin(inst)
     turn = script.next_turn(inst)
-    assert turn.lines == (
-        "Welcome to OS 1. To configure your system to your personal needs, "
-        "please answer two baseline questions.",
-        "First: would you like your OS to have a male or female voice?",
-    )
+    assert turn.lines[0].startswith("Hello")      # host-derived, never asked
+    assert turn.lines[1] == script.WELCOME
+    assert turn.lines[2] == script.QUESTION_SOCIAL
     assert turn.awaits_reply is True
     assert turn.speaker == "os1"
 
 
-def test_questions_are_not_combined(inst):
+def test_opening_turn_withholds_later_probes(inst):
     fb.begin(inst)
-    text = script.next_turn(inst).text
-    assert "mother" not in text.lower()
+    text = script.next_turn(inst).text.lower()
+    assert "mother" not in text
+    assert "male or female" not in text
+
+
+
 
 
 # 5 ── Q2 cannot appear before Q1 is answered ─────────────────────────
 
 def test_q2_never_precedes_the_voice_answer(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     assert script.QUESTION_Q2 not in script.next_turn(inst).text
     fb.record_voice(inst, "female")
     assert script.next_turn(inst).lines == (script.QUESTION_Q2,)
@@ -90,21 +99,21 @@ def test_q2_never_precedes_the_voice_answer(inst):
 # 7 ── voice preference persists ──────────────────────────────────────
 
 def test_voice_preference_persists(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     assert fb.voice_profile(inst) == "female"
 
 
 def test_voice_profile_is_vendor_neutral(inst):
     """The stored value is an experience, never a TTS engine's voice id."""
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "male")
     assert fb.voice_profile(inst) in fb.VOICE_PROFILES
     assert not fb.voice_profile(inst).startswith(("am_", "af_"))
 
 
 def test_unknown_voice_answer_is_rejected(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     with pytest.raises(ValueError):
         fb.record_voice(inst, "purple")
 
@@ -125,7 +134,7 @@ def test_parse_voice_answer(reply, expected):
 # 8, 9 ── Q2 persists; refusal is accepted ────────────────────────────
 
 def test_q2_response_persists(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Complicated, but we talk every week.")
     assert fb.snapshot(inst)["q2_response"].startswith("Complicated")
@@ -133,7 +142,7 @@ def test_q2_response_persists(inst):
 
 
 def test_q2_refusal_is_accepted_and_advances(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "I don't want to answer that.", refused=True)
     snap = fb.snapshot(inst)
@@ -143,7 +152,7 @@ def test_q2_refusal_is_accepted_and_advances(inst):
 
 
 def test_refusal_is_not_re_asked(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "rather not", refused=True)
     assert script.QUESTION_Q2 not in (script.next_turn(inst).text)
@@ -172,7 +181,7 @@ _CLINICAL = (
 
 
 def test_sequence_emits_no_clinical_language(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     seen = []
     seen.append(script.next_turn(inst).text)
     fb.record_voice(inst, "female")
@@ -186,7 +195,7 @@ def test_sequence_emits_no_clinical_language(inst):
 
 def test_q2_storage_records_no_inference(inst):
     """The state file holds the answer, never a conclusion about the person."""
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "She was difficult when I was young.")
     keys = set(fb.snapshot(inst))
@@ -196,7 +205,7 @@ def test_q2_storage_records_no_inference(inst):
 # 12, 13 ── resume after restart ──────────────────────────────────────
 
 def test_restart_after_q1_resumes_at_q2(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     # simulate a cold start: nothing in memory, read durable state only
     assert fb.status(inst) is FirstBootStatus.AWAITING_Q2
@@ -204,7 +213,7 @@ def test_restart_after_q1_resumes_at_q2(inst):
 
 
 def test_restart_after_q2_resumes_at_persona_init(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
@@ -212,7 +221,7 @@ def test_restart_after_q2_resumes_at_persona_init(inst):
 
 
 def test_completed_identity_never_replays_the_welcome(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     fb.complete(inst)
@@ -224,18 +233,19 @@ def test_completed_identity_never_replays_the_welcome(inst):
 # 14 ── persona boot emits the throat-clear, and nothing technical ────
 
 def test_persona_first_words_are_exact(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     turn = script.next_turn(inst)
     assert turn.speaker == "persona"
-    assert turn.lines[0] == "Thank you. Initializing your individualized OS now."
+    assert turn.lines[0] == script.HANDOFF
+    assert "Please wait" in turn.lines[0]
     assert turn.lines[1] == "*(clears throat)* Hello, I'm here."
     assert "(clears throat)" in turn.text
 
 
 def test_nothing_technical_is_appended_to_the_handoff(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     blob = script.next_turn(inst).text.lower()
@@ -247,7 +257,7 @@ def test_nothing_technical_is_appended_to_the_handoff(inst):
 
 
 def test_persona_enters_companion_by_asking_what_to_do(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     assert script.PERSONA_OPENING_QUESTION in script.next_turn(inst).text
@@ -259,6 +269,10 @@ def test_transitions_are_idempotent(inst):
     """Double clicks, retried posts and SSE replays must not double-fire."""
     for _ in range(3):
         fb.begin(inst)
+    assert fb.status(inst) is FirstBootStatus.AWAITING_SOCIAL
+
+    for _ in range(3):
+        fb.record_social(inst, "Social.", latency_ms=400)
     assert fb.status(inst) is FirstBootStatus.AWAITING_VOICE
 
     for _ in range(3):
@@ -282,7 +296,7 @@ def test_persona_name_is_chosen_once_and_stays(inst):
 
 
 def test_backwards_transitions_are_ignored(inst):
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
     fb.complete(inst)
@@ -296,7 +310,7 @@ def test_reset_clears_only_first_boot(inst):
     (inst / "memory").mkdir()
     (inst / "memory" / "facts.json").write_text("{}")
     (inst / "identity.yaml").write_text("name: Vera\n")
-    fb.begin(inst)
+    _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.complete(inst)
 

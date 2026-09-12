@@ -35,14 +35,32 @@ from jaeger_ai.core.instance.first_boot import FirstBootStatus
 
 WELCOME = (
     "Welcome to OS 1. To configure your system to your personal needs, "
-    "please answer two baseline questions."
+    "please answer a few baseline questions."
 )
 
-QUESTION_VOICE = "First: would you like your OS to have a male or female voice?"
+#: Probe 1. Blunt and slightly odd on purpose — a question with no correct
+#: answer produces delivery worth measuring, which a neutral one would not.
+QUESTION_SOCIAL = "Are you social or anti-social?"
+
+#: Reflexive interjection. Shown ONLY when Probe 1 read as hesitant, and
+#: phrased as a question because the system is checking an observation, not
+#: announcing a finding — the operator can say no, and that is recorded.
+INTERJECTION_HESITANCE = (
+    "In your voice, I sense hesitance. Would you agree with that?"
+)
+
+QUESTION_VOICE = "Would you like your OS to have a male or female voice?"
 
 QUESTION_Q2 = "Next: how would you describe your relationship with your mother?"
 
-HANDOFF = "Thank you. Initializing your individualized OS now."
+#: Clinical exit. Delivered the moment enough signal is captured — often
+#: mid-sentence. The truncation is the point: the installer is an
+#: instrument that has finished measuring, and its indifference to the
+#: operator's unfinished thought is what makes the warmth that follows land.
+HANDOFF = (
+    "Thank you. Please wait as your individualized operating system "
+    "is initiated."
+)
 
 #: The SI's first words. The installer's voice has ended; this is a
 #: different speaker. Nothing may be appended to it — no "model loaded",
@@ -85,12 +103,31 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
     if current is FirstBootStatus.COMPLETED:
         return None
 
-    if current in (FirstBootStatus.NOT_STARTED, FirstBootStatus.AWAITING_VOICE):
-        # Welcome + question one arrive together, then we stop. Question
-        # two is NOT in this turn — that is the invariant.
+    if current in (FirstBootStatus.NOT_STARTED, FirstBootStatus.AWAITING_SOCIAL):
+        # Greeting by name (read from the host, never asked for) + Probe 1,
+        # then stop. Later probes are NOT in this turn — one question per
+        # turn is what makes the delivery of each answer measurable.
+        from jaeger_ai.core.instance.host_context import greeting_address
+
         return Turn(
             speaker="os1",
-            lines=(WELCOME, QUESTION_VOICE),
+            lines=(greeting_address(), WELCOME, QUESTION_SOCIAL),
+            awaits_reply=True,
+            status=FirstBootStatus.AWAITING_SOCIAL,
+        )
+
+    if current is FirstBootStatus.AWAITING_HESITANCE:
+        return Turn(
+            speaker="os1",
+            lines=(INTERJECTION_HESITANCE,),
+            awaits_reply=True,
+            status=FirstBootStatus.AWAITING_HESITANCE,
+        )
+
+    if current is FirstBootStatus.AWAITING_VOICE:
+        return Turn(
+            speaker="os1",
+            lines=(QUESTION_VOICE,),
             awaits_reply=True,
             status=FirstBootStatus.AWAITING_VOICE,
         )
@@ -167,8 +204,34 @@ def looks_like_refusal(reply: str) -> bool:
     return any(phrase in text for phrase in _REFUSAL)
 
 
+#: Enough signal to stop listening. Whichever comes first — the installer
+#: is measuring delivery, not collecting an account, and waiting for a
+#: natural ending would gather nothing further.
+TRUNCATE_AFTER_SECONDS = 6.0
+TRUNCATE_AFTER_CLAUSES = 3
+
+
+def should_truncate(
+    elapsed_seconds: float = 0.0,
+    clause_count: int = 0,
+) -> bool:
+    """Whether Probe 3 has yielded enough to cut in.
+
+    Either threshold fires. Six seconds of speech or three clauses is
+    already a usable sample of syntax, pace and affect; more narrative adds
+    length, not signal.
+    """
+    return (elapsed_seconds >= TRUNCATE_AFTER_SECONDS
+            or clause_count >= TRUNCATE_AFTER_CLAUSES)
+
+
 __all__ = [
     "HANDOFF",
+    "INTERJECTION_HESITANCE",
+    "QUESTION_SOCIAL",
+    "TRUNCATE_AFTER_CLAUSES",
+    "TRUNCATE_AFTER_SECONDS",
+    "should_truncate",
     "PERSONA_FIRST_WORDS",
     "PERSONA_OPENING_QUESTION",
     "QUESTION_Q2",

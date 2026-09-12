@@ -156,5 +156,6 @@ def test_status_json_is_machine_readable(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(onboarding_cmd, "_layout", lambda _i: (root, "test"))
     assert onboarding_cmd.main(["status", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "AWAITING_VOICE"
+    # begin() now opens on Probe 1, not the voice question.
+    assert payload["status"] == "AWAITING_SOCIAL"
     assert payload["schema_version"] == fb.SCHEMA_VERSION

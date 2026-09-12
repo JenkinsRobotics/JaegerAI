@@ -50,13 +50,21 @@ STATE_FILENAME = "first_boot.yaml"
 
 #: Bumped only when the shape below changes incompatibly. Readers tolerate
 #: unknown keys, so additive fields do NOT need a bump.
-SCHEMA_VERSION = 1
+#: 2 — three-probe diagnostic sequence. A v1 record has no social probe,
+#: so its status may be a state this build no longer defines; readers fall
+#: back to NOT_STARTED, and ``ensure_migrated`` still protects established
+#: identities from being walked through the welcome again.
+SCHEMA_VERSION = 2
 
 
 class FirstBootStatus(str, Enum):
     """Where this identity is in the welcome sequence."""
 
     NOT_STARTED = "NOT_STARTED"
+    #: Probe 1 — social polarity, and how steadily it is answered.
+    AWAITING_SOCIAL = "AWAITING_SOCIAL"
+    #: Reflexive interjection, entered ONLY when Probe 1 showed hesitance.
+    AWAITING_HESITANCE = "AWAITING_HESITANCE"
     AWAITING_VOICE = "AWAITING_VOICE"
     AWAITING_Q2 = "AWAITING_Q2"
     INITIALIZING_PERSONA = "INITIALIZING_PERSONA"
@@ -66,6 +74,8 @@ class FirstBootStatus(str, Enum):
 #: Forward order. Used to reject backwards transitions.
 _ORDER: tuple[FirstBootStatus, ...] = (
     FirstBootStatus.NOT_STARTED,
+    FirstBootStatus.AWAITING_SOCIAL,
+    FirstBootStatus.AWAITING_HESITANCE,
     FirstBootStatus.AWAITING_VOICE,
     FirstBootStatus.AWAITING_Q2,
     FirstBootStatus.INITIALIZING_PERSONA,
@@ -214,10 +224,76 @@ def begin(instance_root: Path | Any) -> FirstBootStatus:
     correct check on a crashed-and-restarted process.
     """
     doc = _read(instance_root)
-    if _advance(doc, FirstBootStatus.AWAITING_VOICE):
-        doc["status"] = FirstBootStatus.AWAITING_VOICE.value
+    if _advance(doc, FirstBootStatus.AWAITING_SOCIAL):
+        doc["status"] = FirstBootStatus.AWAITING_SOCIAL.value
         doc.setdefault("started_at", _now())
         _write(instance_root, doc)
+    return status(instance_root)
+
+
+def record_social(
+    instance_root: Path | Any,
+    response: str,
+    *,
+    latency_ms: int | None = None,
+    energy_variance: float | None = None,
+) -> FirstBootStatus:
+    """Probe 1. Advances to the interjection ONLY when hesitance shows.
+
+    ``latency_ms`` and ``energy_variance`` come from the client; a typed
+    answer supplies neither and the read degrades to text-only rather than
+    refusing, because a keyboard is a legitimate way to answer.
+    """
+    from jaeger_ai.core.instance.first_boot_signals import (
+        ProbeObservation,
+        read_social_polarity,
+    )
+
+    observation = ProbeObservation(
+        text=str(response or ""), latency_ms=latency_ms,
+        energy_variance=energy_variance,
+    )
+    signals = read_social_polarity(observation)
+
+    doc = _read(instance_root)
+    doc["social_response"] = observation.text
+    doc["social_signals"] = signals
+    doc.setdefault("social_recorded_at", _now())
+
+    hesitant = bool(signals["hesitance"]["value"])
+    target = (FirstBootStatus.AWAITING_HESITANCE if hesitant
+              else FirstBootStatus.AWAITING_VOICE)
+    if _advance(doc, target):
+        doc["status"] = target.value
+    _write(instance_root, doc)
+    return status(instance_root)
+
+
+def record_hesitance_reply(instance_root: Path | Any, response: str) -> FirstBootStatus:
+    """The operator's answer to "I sense hesitance. Would you agree?".
+
+    Recorded either way. Agreement confirms the read; disagreement is ALSO
+    information — someone correcting the system in its first minute is
+    telling it something about how they expect to be treated — and the
+    stored confidence drops so a denied inference cannot harden into fact.
+    """
+    text = str(response or "").strip().lower()
+    denied = any(marker in text for marker in
+                 ("no", "not really", "disagree", "wouldn't say", "nope"))
+
+    doc = _read(instance_root)
+    doc["hesitance_reply"] = str(response or "")
+    doc["hesitance_confirmed"] = not denied
+    signals = doc.get("social_signals") or {}
+    if denied and isinstance(signals.get("hesitance"), dict):
+        # The operator said no. Keep the observation, drop the confidence.
+        signals["hesitance"]["value"] = False
+        signals["hesitance"]["confidence"] = 0.15
+        signals["hesitance"]["evidence_source"] = "probe.social.denied"
+        doc["social_signals"] = signals
+    if _advance(doc, FirstBootStatus.AWAITING_VOICE):
+        doc["status"] = FirstBootStatus.AWAITING_VOICE.value
+    _write(instance_root, doc)
     return status(instance_root)
 
 
@@ -274,8 +350,42 @@ def record_q2(
     # before the persona ever speaks — it is part of who arrives, not a
     # fact looked up later.
     if entering_persona:
+        _calibrate_stance(instance_root)
         initialize_persona_name(instance_root)
     return status(instance_root)
+
+
+def _calibrate_stance(instance_root: Path | Any) -> dict[str, Any] | None:
+    """Map the probes onto a latent stance for the waking persona.
+
+    Runs once, at the State 3 transition, so the stance exists before the
+    persona speaks — it is part of who arrives rather than something
+    applied afterwards.
+    """
+    from jaeger_ai.core.instance.first_boot_signals import (
+        ProbeObservation,
+        calibrate,
+        read_relational_narrative,
+    )
+
+    doc = _read(instance_root)
+    observation = ProbeObservation(
+        text=str(doc.get("q2_response") or ""),
+        refused=bool(doc.get("q2_refused")),
+    )
+    relational = read_relational_narrative(observation)
+    stance = calibrate(doc.get("social_signals"), relational)
+
+    doc["relational_signals"] = relational
+    doc["latent_stance"] = stance.as_dict()
+    _write(instance_root, doc)
+    return doc["latent_stance"]
+
+
+def latent_stance(instance_root: Path | Any) -> dict[str, Any] | None:
+    """The calibrated stance, for the persona prompt assembler."""
+    value = _read(instance_root).get("latent_stance")
+    return value if isinstance(value, dict) else None
 
 
 def record_persona_name(
@@ -319,11 +429,16 @@ def initialize_persona_name(instance_root: Path | Any) -> str | None:
     from jaeger_ai.core.instance.name_selection import select_name
 
     doc = _read(instance_root)
+    # Prefer the calibrated register over re-reading the raw answer: the
+    # stance already folded in Probe 1's delivery, which the Q2 text alone
+    # cannot see.
+    stance = doc.get("latent_stance") or {}
     record = select_name(
         instance_root,
         voice_profile=doc.get("voice_profile"),
         q2_response=str(doc.get("q2_response") or ""),
         q2_refused=bool(doc.get("q2_refused")),
+        register_override=stance.get("register"),
     )
     if record is None:
         return None
@@ -459,6 +574,9 @@ def ensure_migrated(layout: Any) -> FirstBootStatus:
 __all__ = [
     "SCHEMA_VERSION",
     "initialize_persona_name",
+    "latent_stance",
+    "record_hesitance_reply",
+    "record_social",
     "persona_name_record",
     "STATE_FILENAME",
     "UNKNOWN",
