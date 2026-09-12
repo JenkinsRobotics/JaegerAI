@@ -35,18 +35,70 @@ The repository source tree must remain pristine, deterministic, and free of runt
 ## 3. Resilience & Gateway Continuity
 
 * **Gateway Architecture:**
-  * The Jaeger Gateway (`jaeger_ai.core.gateway`) runs as an isolated daemon on port 8810. It owns persistent SQLite session state (`~/.jaeger/gateway_sessions.sqlite3`) and broadcasts SSE multi-client events.
-  * Native macOS apps (`apps/macos`), Web UIs (`apps/web`), and CLI interfaces connect as decoupled clients to the Gateway.
+  * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:8810`, launched by **`jaeger gateway daemon`**. It owns persistent SQLite session state and broadcasts SSE multi-client events.
+  * **`jaeger gateway daemon` and `jaeger gateway` are different processes.** Bare `jaeger gateway` manages the *external* Agentgateway (MCP `:8811`, A2A `:8812`) via `jaeger_ai.features.gateway`. Only the `daemon` subcommand runs the Jaeger Gateway. The two are one word apart and are routinely confused.
+  * Native macOS apps (`apps/macos`), Web UIs (`apps/web`), and CLI interfaces connect as decoupled clients to the Gateway. **`apps/macos` and `apps/web` are symlinks**, not separate codebases — they alias `jaeger_ai/interfaces/swift` and `jaeger_ai/features/webui`. Treat the targets as authoritative; the aliases exist so `apps/` reads as the client layer.
+  * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
 * **Tool Call Resilience:**
   * All model-generated tool calls must pass through `jaeger_ai.core.runtime.tool_repair` to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes without failing the user's turn.
 
 ---
 
-## 4. Repository Structure & Boundaries
+## 4. System Topology
+
+Verified against running code. Every port, path and command below was
+exercised; none are aspirational.
+
+### Daemons and ports
+
+| Process | Bind | Launch | Owns |
+|---|---|---|---|
+| Jaeger Gateway | `127.0.0.1:8810` | `jaeger gateway daemon` | sessions, SSE, approvals |
+| Agentgateway (external) | `:8811` MCP, `:8812` A2A | `jaeger gateway start` | external MCP/A2A proxy |
+| Hermes WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
+| MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
+| A2A server | loopback `:8796` | `jaeger a2a` | agent-to-agent JSON-RPC |
+
+### IPC
+
+* **NDJSON over AF_UNIX** — `<instance>/run/bridge.sock`, via `jaeger bridge`.
+  The native app and TUI speak this for turn execution.
+* **REST + SSE** — `:8810`. Sessions and live events. The gateway serves
+  **`/health`**, not `/v1/health` (the latter 404s).
+
+### Clients
+
+| Client | Stack | Transport |
+|---|---|---|
+| `jaeger_ai/interfaces/swift` (= `apps/macos`) | SwiftUI, `MenuBarExtra`, `LSUIElement` | REST+SSE `:8810`, AF_UNIX bridge |
+| `jaeger_ai/features/webui` (= `apps/web`) | vendored Python + vanilla JS overlays | server-side proxy → `:8810` |
+| `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
+| `jaeger_ai/interfaces/pyside6` | Qt + tray | AF_UNIX bridge |
+
+There is no React, Electron, Next.js or TypeScript anywhere, and no JS
+build system. The type-safe client layer is Swift `Decodable`.
+
+### Run locally
+
+```bash
+jaeger gateway daemon                       # :8810 — start first
+./scripts/run-jaeger-webui.sh               # :8790
+open jaeger_ai/interfaces/swift/.build/JaegerAI.app
+
+jaeger onboarding status --json             # OS 1 first-boot state
+jaeger onboarding reset                     # replay the welcome (narrow)
+```
+
+Isolate a scratch instance with `JAEGER_STATE_DIR=/tmp/gw-iso` — it isolates
+the session store, so a test run cannot touch the operator's live database.
+
+---
+
+## 5. Repository Structure & Boundaries
 
 ```text
 JaegerAI/
-├── apps/               # Multi-platform client frontends (apps/macos, apps/web)
+├── apps/               # Client aliases — SYMLINKS to the real targets below
 ├── clients/            # Client SDKs connecting to the Gateway
 ├── dev/                # Test suites (dev/tests) and driver scripts (dev/scripts)
 ├── docs/               # Technical specifications and architectural docs
