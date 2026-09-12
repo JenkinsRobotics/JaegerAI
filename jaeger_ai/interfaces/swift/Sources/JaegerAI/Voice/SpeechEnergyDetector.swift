@@ -79,6 +79,70 @@ final class SpeechEnergyDetector: @unchecked Sendable {
     /// Most recent frame energy in dBFS, for meters. −160 = silence.
     private(set) var lastLevelDB: Float = -160
 
+    // ── onset latency ────────────────────────────────────────────────
+    //
+    // Measured from the instant the installer STOPS talking to the first
+    // frame of the operator's reply. Anchoring on playback end (not on the
+    // question appearing) is what makes the number mean "how long they took
+    // to answer" rather than "how long the prompt was".
+
+    private var promptEndedAt: Date?
+    private var measuredLatencyMs: Int?
+
+    /// Start the response clock — call when the prompt finishes speaking.
+    func markPromptEnded() {
+        lock.lock(); defer { lock.unlock() }
+        promptEndedAt = Date()
+        measuredLatencyMs = nil
+    }
+
+    /// Milliseconds from prompt end to speech onset, or nil if unmeasured.
+    var onsetLatencyMs: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return measuredLatencyMs
+    }
+
+    // ── energy variance ──────────────────────────────────────────────
+    //
+    // Welford's online algorithm over per-frame dBFS while speech is
+    // active. A steady voice holds a narrow band; an unsteady one — trailing
+    // off, restarting, uneven emphasis — spreads. Normalised to roughly
+    // 0…1 so the backend threshold is engine-independent.
+
+    private var varianceCount = 0
+    private var varianceMean: Double = 0
+    private var varianceM2: Double = 0
+
+    /// Normalised spread of speech energy, or nil with too few frames.
+    ///
+    /// Needs at least 5 frames (~115 ms): a standard deviation over two
+    /// samples is noise, and reporting it would let a cough read as
+    /// hesitance.
+    var energyVariance: Float? {
+        lock.lock(); defer { lock.unlock() }
+        guard varianceCount >= 5 else { return nil }
+        let stdDev = (varianceM2 / Double(varianceCount - 1)).squareRoot()
+        // ~12 dB of spread is a lot of wobble for one utterance; scale to 1.
+        return Float(min(1.0, stdDev / 12.0))
+    }
+
+    private func accumulate(_ db: Float) {
+        // Ignore silence floors — they would dominate the spread and make
+        // every pause look like instability.
+        guard db > -100 else { return }
+        varianceCount += 1
+        let value = Double(db)
+        let delta = value - varianceMean
+        varianceMean += delta / Double(varianceCount)
+        varianceM2 += delta * (value - varianceMean)
+    }
+
+    private func resetVariance() {
+        varianceCount = 0
+        varianceMean = 0
+        varianceM2 = 0
+    }
+
     init(configuration: VADConfiguration = .default) {
         self.config = configuration
     }
@@ -114,6 +178,9 @@ final class SpeechEnergyDetector: @unchecked Sendable {
         speechFrames = 0
         quietFrames = 0
         inSpeech = false
+        promptEndedAt = nil
+        measuredLatencyMs = nil
+        resetVariance()
     }
 
     /// Score one buffer. Returns the transition it caused, if any.
@@ -148,8 +215,17 @@ final class SpeechEnergyDetector: @unchecked Sendable {
         if db >= config.onsetThresholdDB {
             speechFrames += 1
             quietFrames = 0
+            accumulate(db)
             if !inSpeech, speechFrames >= config.onsetFrames {
                 inSpeech = true
+                if let started = promptEndedAt, measuredLatencyMs == nil {
+                    // Subtract the frames it took to CONFIRM onset, so the
+                    // number reports when they started talking rather than
+                    // when we became sure of it.
+                    let confirmMs = Double(config.onsetFrames) * 1024.0 / 44_100.0 * 1000.0
+                    let elapsed = Date().timeIntervalSince(started) * 1000.0
+                    measuredLatencyMs = max(0, Int(elapsed - confirmMs))
+                }
                 return .speechOnset
             }
         } else if db <= config.releaseThresholdDB {

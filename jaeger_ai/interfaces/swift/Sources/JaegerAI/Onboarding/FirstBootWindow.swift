@@ -83,6 +83,16 @@ struct FirstBootView: View {
     @State private var spoken = false
 
     private let tts = TTSManager.shared
+    private let ambient = AmbientCoordinator.shared
+
+    /// Watches Probe 3 and cuts in once enough signal is captured.
+    @State private var truncationWatch: Task<Void, Never>?
+
+    /// Mirrors the backend thresholds in first_boot_script.py. Duplicated
+    /// deliberately: the client must decide locally and instantly, and a
+    /// round trip per second to ask "enough yet?" would make the cut land
+    /// late and unevenly.
+    private static let truncateAfterSeconds: Double = 6.0
 
     init(gate: FirstBootGate, firstTurn: FirstBootGate.Turn, onFinish: @escaping () -> Void) {
         self.gate = gate
@@ -93,7 +103,12 @@ struct FirstBootView: View {
 
     /// Which question the current turn is asking, in the backend's terms.
     private var questionKey: String {
-        gate.status == "AWAITING_Q2" ? "q2" : "voice"
+        switch gate.status {
+        case "AWAITING_SOCIAL":    return "social"
+        case "AWAITING_HESITANCE": return "hesitance"
+        case "AWAITING_Q2":        return "q2"
+        default:                   return "voice"
+        }
     }
 
     var body: some View {
@@ -154,6 +169,11 @@ struct FirstBootView: View {
         guard !spoken else { return }
         spoken = true
 
+        // Arm the response clock as the prompt ENDS, so latency measures
+        // how long they took to answer rather than how long we talked.
+        ambient.armResponseClock()
+        if questionKey == "q2" { startTruncationWatch() }
+
         if turn.isPersonaHandoff {
             // Flushes the installer's audio at a word boundary first, so
             // the swap does not click.
@@ -164,7 +184,55 @@ struct FirstBootView: View {
         tts.speak(turn.text)
     }
 
+    /// Cut the operator off mid-narrative once Probe 3 has yielded enough.
+    ///
+    /// The interruption IS the design: the installer is an instrument that
+    /// has finished measuring, and its indifference to an unfinished
+    /// sentence is what makes the warmth that follows land. Waiting for a
+    /// natural ending would gather nothing further and lose the moment.
+    private func startTruncationWatch() {
+        truncationWatch?.cancel()
+        truncationWatch = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
+                guard ambient.elapsedSpeechSeconds >= Self.truncateAfterSeconds
+                else { continue }
+                truncate()
+                return
+            }
+        }
+    }
+
+    /// Stop listening, speak the exit line, and advance.
+    private func truncate() {
+        truncationWatch?.cancel()
+        truncationWatch = nil
+        // Close the mic BEFORE speaking: the exit line must not be heard by
+        // a tap that is still scoring frames, and a hard stop here is right
+        // — this is a deliberate cut, not a graceful ending.
+        ambient.recorder.stopMonitoring()
+        tts.stop()
+
+        Task { @MainActor in
+            let telemetry = ambient.probeTelemetry
+            _ = await gate.submit(
+                question: "q2",
+                reply: reply.trimmingCharacters(in: .whitespacesAndNewlines),
+                latencyMs: telemetry.latencyMs,
+                energyVariance: telemetry.energyVariance,
+            )
+            if case .onboard(let next) = await gate.evaluate() {
+                turn = next
+                spoken = false
+                speakCurrentTurn()
+            }
+        }
+    }
+
     private func submit() {
+        truncationWatch?.cancel()
+        truncationWatch = nil
         if turn.isPersonaHandoff {
             Task { await finishHandoff() }
             return
@@ -175,7 +243,15 @@ struct FirstBootView: View {
         busy = true
         errorText = nil
         Task {
-            let outcome = await gate.submit(question: questionKey, reply: answer)
+            // Ship the acoustic evidence with the answer — without it the
+            // backend sees hedging words but not a long silent pause, so a
+            // delayed confident reply would read as confidence.
+            let telemetry = ambient.probeTelemetry
+            let outcome = await gate.submit(
+                question: questionKey, reply: answer,
+                latencyMs: telemetry.latencyMs,
+                energyVariance: telemetry.energyVariance,
+            )
             busy = false
             switch outcome {
             case .success(let next):

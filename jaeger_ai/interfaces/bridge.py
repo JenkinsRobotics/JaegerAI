@@ -1182,7 +1182,34 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             question = str(args.get("question") or "").strip().lower()
             reply = str(args.get("reply") or "")
 
-            if question == "voice":
+            # Acoustic evidence from the client. Optional by design: a typed
+            # answer carries neither, and the probe read degrades to
+            # text-only rather than refusing.
+            def _opt_int(key: str) -> int | None:
+                raw = args.get(key)
+                try:
+                    return int(raw) if raw is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            def _opt_float(key: str) -> float | None:
+                raw = args.get(key)
+                try:
+                    return float(raw) if raw is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            latency_ms = _opt_int("latency_ms")
+            energy_variance = _opt_float("energy_variance")
+
+            if question == "social":
+                _fb.record_social(
+                    lay, reply, latency_ms=latency_ms,
+                    energy_variance=energy_variance,
+                )
+            elif question == "hesitance":
+                _fb.record_hesitance_reply(lay, reply)
+            elif question == "voice":
                 choice = _fbs.parse_voice_answer(reply)
                 if choice is None:
                     # Ambiguous. Do NOT guess — assigning someone a voice

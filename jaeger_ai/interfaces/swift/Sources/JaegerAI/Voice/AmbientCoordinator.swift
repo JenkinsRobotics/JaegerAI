@@ -65,6 +65,7 @@ final class AmbientCoordinator: ObservableObject {
         loop.recorder = recorder
         recorder.onSpeechOnset = { [weak self] in
             guard let self, self.isEnabled else { return }
+            if self.speechStartedAt == nil { self.speechStartedAt = Date() }
             self.loop.handleSpeechOnset()
             self.reconcileMonitoring()
         }
@@ -85,6 +86,37 @@ final class AmbientCoordinator: ObservableObject {
         recorder.onSpeechEnded = nil
         stopMonitoring()
         loop.stop()
+    }
+
+    // MARK: - Probe telemetry
+
+    /// When the operator's Probe 3 speech began, for truncation timing.
+    private(set) var speechStartedAt: Date?
+
+    /// Arm the response clock: call the moment a probe finishes speaking.
+    ///
+    /// Anchored on playback END rather than on the question appearing, so
+    /// the latency reports how long they took to answer, not how long the
+    /// prompt was.
+    func armResponseClock() {
+        recorder.speechDetector.markPromptEnded()
+        speechStartedAt = nil
+        reconcileMonitoring()
+    }
+
+    /// Acoustic evidence for the probe just answered.
+    ///
+    /// Either value may be nil — a typed answer has no acoustics, and the
+    /// backend degrades to text-only rather than refusing.
+    var probeTelemetry: (latencyMs: Int?, energyVariance: Float?) {
+        (recorder.speechDetector.onsetLatencyMs,
+         recorder.speechDetector.energyVariance)
+    }
+
+    /// Seconds of speech so far, for the Probe 3 truncation threshold.
+    var elapsedSpeechSeconds: Double {
+        guard let started = speechStartedAt else { return 0 }
+        return Date().timeIntervalSince(started)
     }
 
     // MARK: - Monitoring policy

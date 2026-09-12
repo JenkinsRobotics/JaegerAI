@@ -159,3 +159,78 @@ def test_status_json_is_machine_readable(tmp_path, monkeypatch, capsys):
     # begin() now opens on Probe 1, not the voice question.
     assert payload["status"] == "AWAITING_SOCIAL"
     assert payload["schema_version"] == fb.SCHEMA_VERSION
+
+
+# ── probe telemetry reaches the state machine ────────────────────────
+
+def test_bridge_routes_the_social_probe_with_telemetry(tmp_path):
+    """The acoustic evidence must survive the bridge hop.
+
+    The client measures latency and energy variance; if the handler drops
+    them, hesitance is read from hedging words alone and a long silent
+    pause before a confident answer reads as confidence.
+    """
+    from jaeger_ai.interfaces.bridge import _command
+
+    root = tmp_path / "inst"
+    root.mkdir()
+    boot = type("B", (), {"layout": root})()
+    fb.begin(root)
+
+    ok, _ = _command("first_boot_answer", {
+        "question": "social", "reply": "Social.",
+        "latency_ms": 2600, "energy_variance": 0.1,
+    }, boot)
+    assert ok
+
+    # A confident word with a 2.6 s pause must still read as hesitance.
+    assert fb.status(root) is FirstBootStatus.AWAITING_HESITANCE
+    signals = fb.snapshot(root)["social_signals"]
+    assert signals["latency_ms"] == 2600
+    assert signals["hesitance"]["value"] is True
+
+
+def test_bridge_routes_the_hesitance_reply(tmp_path):
+    from jaeger_ai.interfaces.bridge import _command
+
+    root = tmp_path / "inst"
+    root.mkdir()
+    boot = type("B", (), {"layout": root})()
+    fb.begin(root)
+    fb.record_social(root, "Well, I guess?", latency_ms=2400)
+
+    ok, _ = _command("first_boot_answer",
+                     {"question": "hesitance", "reply": "No, not really."}, boot)
+    assert ok
+    assert fb.snapshot(root)["hesitance_confirmed"] is False
+    assert fb.status(root) is FirstBootStatus.AWAITING_VOICE
+
+
+def test_missing_telemetry_degrades_to_text_only(tmp_path):
+    """A typed answer has no acoustics and must not be rejected."""
+    from jaeger_ai.interfaces.bridge import _command
+
+    root = tmp_path / "inst"
+    root.mkdir()
+    boot = type("B", (), {"layout": root})()
+    fb.begin(root)
+
+    ok, _ = _command("first_boot_answer",
+                     {"question": "social", "reply": "Anti-social."}, boot)
+    assert ok
+    assert fb.status(root) is FirstBootStatus.AWAITING_VOICE
+
+
+def test_malformed_telemetry_is_ignored_not_fatal(tmp_path):
+    from jaeger_ai.interfaces.bridge import _command
+
+    root = tmp_path / "inst"
+    root.mkdir()
+    boot = type("B", (), {"layout": root})()
+    fb.begin(root)
+
+    ok, _ = _command("first_boot_answer", {
+        "question": "social", "reply": "Social.",
+        "latency_ms": "not-a-number", "energy_variance": None,
+    }, boot)
+    assert ok
