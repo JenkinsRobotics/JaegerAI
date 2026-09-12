@@ -117,6 +117,26 @@ final class AmbientLoop: ObservableObject {
         self.detector = detector
     }
 
+    /// Connect a recorder's live tap so speech can interrupt playback.
+    ///
+    /// Without this the detector runs and nothing listens: `handleSpeechOnset`
+    /// existed, was tested, and was never called by anything — the agent
+    /// could be talked over with no effect. Opening the mic in monitor mode
+    /// is what makes barge-in possible at all, because push-to-talk cannot
+    /// help: the operator is not holding a key at the moment they decide to
+    /// interrupt.
+    func attach(recorder: VoiceRecorder) throws {
+        recorder.onSpeechOnset = { [weak self] in self?.handleSpeechOnset() }
+        recorder.onSpeechEnded = { [weak self] in self?.handleSpeechEnded() }
+        try recorder.startMonitoring()
+    }
+
+    func detach(recorder: VoiceRecorder) {
+        recorder.onSpeechOnset = nil
+        recorder.onSpeechEnded = nil
+        recorder.stopMonitoring()
+    }
+
     // MARK: - Session
 
     func attach(sessionID: String) {

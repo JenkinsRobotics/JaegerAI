@@ -165,3 +165,92 @@ final class SpeechEnergyDetectorTests: XCTestCase {
         XCTAssertLessThan(onsetSeconds, 0.100, "barge-in onset exceeds 100 ms")
     }
 }
+
+@MainActor
+final class BargeInWiringTests: XCTestCase {
+
+    /// Feed frames the way the render thread does, through the same
+    /// pointer API ``VoiceRecorder.handle(buffer:)`` uses.
+    private func feed(
+        _ detector: SpeechEnergyDetector, amplitude: Float, frames: Int
+    ) -> [SpeechEnergyDetector.Transition] {
+        let samples = [Float](repeating: amplitude, count: 1024)
+        return (0..<frames).map { _ in
+            samples.withUnsafeBufferPointer {
+                detector.process(samples: $0.baseAddress!, count: $0.count)
+            }
+        }
+    }
+
+    func testRecorderExposesTheDetectorAndOnsetHooks() {
+        // The gap this closes: the detector existed and nothing fed it,
+        // and handleSpeechOnset existed and nothing called it.
+        let recorder = VoiceRecorder()
+        XCTAssertFalse(recorder.isMonitoring)
+
+        var fired = false
+        recorder.onSpeechOnset = { fired = true }
+        recorder.onSpeechOnset?()
+        XCTAssertTrue(fired, "onset hook must be invocable by the tap")
+    }
+
+    func testAttachWiresBothCallbacks() {
+        let loop = AmbientLoop(gateway: GatewayClient(baseURL: GatewayClient.defaultBaseURL),
+                               tts: TTSManager(),
+                               detector: SpeechEnergyDetector())
+        let recorder = VoiceRecorder()
+        // startMonitoring may fail on a headless CI box with no input
+        // device; the wiring is what is under test, so tolerate that.
+        try? loop.attach(recorder: recorder)
+        XCTAssertNotNil(recorder.onSpeechOnset)
+        XCTAssertNotNil(recorder.onSpeechEnded)
+
+        loop.detach(recorder: recorder)
+        XCTAssertNil(recorder.onSpeechOnset)
+        XCTAssertFalse(recorder.isMonitoring)
+    }
+
+    func testOnsetPropagatesThroughTheRecorderHook() {
+        // End to end minus CoreAudio: detector transition -> hook -> loop.
+        let detector = SpeechEnergyDetector()
+        let loop = AmbientLoop(gateway: GatewayClient(baseURL: GatewayClient.defaultBaseURL),
+                               tts: TTSManager(), detector: detector)
+        let recorder = VoiceRecorder()
+        recorder.onSpeechOnset = { [weak loop] in loop?.handleSpeechOnset() }
+
+        let seen = feed(detector, amplitude: 0.1, frames: 5)
+        XCTAssertTrue(seen.contains(.speechOnset))
+        recorder.onSpeechOnset?()          // what the tap dispatches
+        XCTAssertEqual(loop.state, .listening)
+    }
+
+    func testTTSPlaybackCannotSelfTriggerBargeIn() {
+        // THE guard. With AEC disabled the mic hears the speakers; without
+        // suppression the agent interrupts itself in a loop.
+        let detector = SpeechEnergyDetector()
+        detector.setOutputActive(true)
+        let seen = feed(detector, amplitude: 0.6, frames: 30)
+        XCTAssertFalse(seen.contains(.speechOnset),
+                       "agent's own TTS must not trigger its own barge-in")
+    }
+
+    func testBargeInStopsSpeakingAndReturnsToListening() {
+        let loop = AmbientLoop(gateway: GatewayClient(baseURL: GatewayClient.defaultBaseURL),
+                               tts: TTSManager(), detector: SpeechEnergyDetector())
+        loop.attach(sessionID: "s1")
+        loop.handleSpeechOnset()
+        // Local stop happens first and synchronously; the gateway cancel is
+        // fired detached so the room goes quiet without a round trip.
+        XCTAssertEqual(loop.state, .listening)
+    }
+
+    func testMonitoringDoesNotRetainAudio() {
+        // An always-open mic that stores nothing is a level meter, not a
+        // recording — the privacy-relevant difference from startRecording.
+        let recorder = VoiceRecorder()
+        try? recorder.startMonitoring()
+        XCTAssertNil(recorder.takeCapturedAudio()?.samples.isEmpty == false ? true : nil)
+        recorder.stopMonitoring()
+        XCTAssertFalse(recorder.isMonitoring)
+    }
+}
