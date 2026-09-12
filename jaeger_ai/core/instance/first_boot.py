@@ -263,9 +263,18 @@ def record_q2(
     doc["q2_response"] = "" if refused else str(response or "")
     doc["q2_refused"] = bool(refused)
     doc.setdefault("q2_recorded_at", _now())
-    if _advance(doc, FirstBootStatus.INITIALIZING_PERSONA):
+    entering_persona = _advance(doc, FirstBootStatus.INITIALIZING_PERSONA)
+    if entering_persona:
         doc["status"] = FirstBootStatus.INITIALIZING_PERSONA.value
     _write(instance_root, doc)
+
+    # The SI names itself at the State 3 transition, once, using the voice
+    # profile as a hard filter and the Q2 register as a soft one. Done here
+    # rather than lazily at first "what's your name?" so the name exists
+    # before the persona ever speaks — it is part of who arrives, not a
+    # fact looked up later.
+    if entering_persona:
+        initialize_persona_name(instance_root)
     return status(instance_root)
 
 
@@ -290,6 +299,48 @@ def record_persona_name(
     doc["persona_name_created_at"] = _now()
     _write(instance_root, doc)
     return str(name)
+
+
+def initialize_persona_name(instance_root: Path | Any) -> str | None:
+    """Choose and record the SI's name, if it does not have one.
+
+    Called at the State 3 transition. Idempotent by construction — the
+    storage layer's first-write-wins means a retried initialization returns
+    the existing name rather than renaming an SI the operator has met.
+
+    The gender filter is the operator's State 1 answer, treated as a hard
+    constraint: it is the one explicit choice they made, and a name that
+    contradicts it would be the system overruling them.
+    """
+    existing = persona_name(instance_root)
+    if existing:
+        return existing
+
+    from jaeger_ai.core.instance.name_selection import select_name
+
+    doc = _read(instance_root)
+    record = select_name(
+        instance_root,
+        voice_profile=doc.get("voice_profile"),
+        q2_response=str(doc.get("q2_response") or ""),
+        q2_refused=bool(doc.get("q2_refused")),
+    )
+    if record is None:
+        return None
+
+    chosen = record_persona_name(instance_root, record["name"])
+    # Keep the provenance beside the name: "what's your name?" is answered
+    # from this, so the explanation never has to be reconstructed.
+    doc = _read(instance_root)
+    doc["persona_name_record"] = record
+    _write(instance_root, doc)
+    return chosen
+
+
+def persona_name_record(instance_root: Path | Any) -> dict[str, Any] | None:
+    """Origin and meaning of the chosen name, for the identity answer."""
+    record = _read(instance_root).get("persona_name_record")
+    return record if isinstance(record, dict) else None
 
 
 def complete(instance_root: Path | Any) -> FirstBootStatus:
@@ -407,6 +458,8 @@ def ensure_migrated(layout: Any) -> FirstBootStatus:
 
 __all__ = [
     "SCHEMA_VERSION",
+    "initialize_persona_name",
+    "persona_name_record",
     "STATE_FILENAME",
     "UNKNOWN",
     "VOICE_PROFILES",

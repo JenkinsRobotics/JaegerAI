@@ -89,6 +89,7 @@ exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"jaeger_ai.core.instance" = ["name_corpus.json"]
 # Non-.py assets under the package (module.yaml/plugin.yaml, character
 # personas + card art, skill markdown + paper-writing templates, ...) —
 # setuptools only auto-includes .py files for a found package; a REAL

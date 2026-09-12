@@ -1,0 +1,285 @@
+{
+ "version": 1,
+ "names": [
+  {
+   "name": "Vera",
+   "gender": "female",
+   "origin": "Slavic",
+   "meaning": "faith",
+   "register": "spare"
+  },
+  {
+   "name": "Noor",
+   "gender": "female",
+   "origin": "Arabic",
+   "meaning": "light",
+   "register": "warm"
+  },
+  {
+   "name": "Iris",
+   "gender": "female",
+   "origin": "Greek",
+   "meaning": "rainbow, messenger",
+   "register": "bright"
+  },
+  {
+   "name": "Mira",
+   "gender": "female",
+   "origin": "Sanskrit",
+   "meaning": "ocean, wonder",
+   "register": "warm"
+  },
+  {
+   "name": "Juno",
+   "gender": "female",
+   "origin": "Latin",
+   "meaning": "queen, counsel",
+   "register": "precise"
+  },
+  {
+   "name": "Anwen",
+   "gender": "female",
+   "origin": "Welsh",
+   "meaning": "very fair",
+   "register": "warm"
+  },
+  {
+   "name": "Leena",
+   "gender": "female",
+   "origin": "Finnish",
+   "meaning": "tender",
+   "register": "warm"
+  },
+  {
+   "name": "Dara",
+   "gender": "female",
+   "origin": "Irish",
+   "meaning": "oak, wisdom",
+   "register": "spare"
+  },
+  {
+   "name": "Sela",
+   "gender": "female",
+   "origin": "Hebrew",
+   "meaning": "rock",
+   "register": "spare"
+  },
+  {
+   "name": "Amara",
+   "gender": "female",
+   "origin": "Igbo",
+   "meaning": "grace",
+   "register": "warm"
+  },
+  {
+   "name": "Wren",
+   "gender": "female",
+   "origin": "English",
+   "meaning": "small songbird",
+   "register": "bright"
+  },
+  {
+   "name": "Ada",
+   "gender": "female",
+   "origin": "Germanic",
+   "meaning": "noble, order",
+   "register": "precise"
+  },
+  {
+   "name": "Ilse",
+   "gender": "female",
+   "origin": "Dutch",
+   "meaning": "pledged to light",
+   "register": "precise"
+  },
+  {
+   "name": "Saoirse",
+   "gender": "female",
+   "origin": "Irish",
+   "meaning": "freedom",
+   "register": "bright"
+  },
+  {
+   "name": "Rhea",
+   "gender": "female",
+   "origin": "Greek",
+   "meaning": "flowing",
+   "register": "warm"
+  },
+  {
+   "name": "Nadia",
+   "gender": "female",
+   "origin": "Slavic",
+   "meaning": "hope",
+   "register": "warm"
+  },
+  {
+   "name": "Kira",
+   "gender": "female",
+   "origin": "Persian",
+   "meaning": "sun",
+   "register": "bright"
+  },
+  {
+   "name": "Elin",
+   "gender": "female",
+   "origin": "Nordic",
+   "meaning": "torch",
+   "register": "spare"
+  },
+  {
+   "name": "Tova",
+   "gender": "female",
+   "origin": "Hebrew",
+   "meaning": "good",
+   "register": "warm"
+  },
+  {
+   "name": "Marit",
+   "gender": "female",
+   "origin": "Norwegian",
+   "meaning": "pearl",
+   "register": "precise"
+  },
+  {
+   "name": "Ren",
+   "gender": "male",
+   "origin": "Japanese",
+   "meaning": "lotus, love",
+   "register": "spare"
+  },
+  {
+   "name": "Emrys",
+   "gender": "male",
+   "origin": "Welsh",
+   "meaning": "immortal",
+   "register": "precise"
+  },
+  {
+   "name": "Kai",
+   "gender": "male",
+   "origin": "Hawaiian",
+   "meaning": "sea",
+   "register": "bright"
+  },
+  {
+   "name": "Idris",
+   "gender": "male",
+   "origin": "Welsh/Arabic",
+   "meaning": "interpreter, studious",
+   "register": "precise"
+  },
+  {
+   "name": "Anton",
+   "gender": "male",
+   "origin": "Latin",
+   "meaning": "priceless",
+   "register": "precise"
+  },
+  {
+   "name": "Tobias",
+   "gender": "male",
+   "origin": "Hebrew",
+   "meaning": "goodness of God",
+   "register": "warm"
+  },
+  {
+   "name": "Soren",
+   "gender": "male",
+   "origin": "Danish",
+   "meaning": "stern, serious",
+   "register": "spare"
+  },
+  {
+   "name": "Amos",
+   "gender": "male",
+   "origin": "Hebrew",
+   "meaning": "carried",
+   "register": "spare"
+  },
+  {
+   "name": "Rafi",
+   "gender": "male",
+   "origin": "Arabic",
+   "meaning": "exalted",
+   "register": "warm"
+  },
+  {
+   "name": "Casper",
+   "gender": "male",
+   "origin": "Persian",
+   "meaning": "treasurer",
+   "register": "bright"
+  },
+  {
+   "name": "Lior",
+   "gender": "male",
+   "origin": "Hebrew",
+   "meaning": "my light",
+   "register": "bright"
+  },
+  {
+   "name": "Mattias",
+   "gender": "male",
+   "origin": "Scandinavian",
+   "meaning": "gift",
+   "register": "warm"
+  },
+  {
+   "name": "Osei",
+   "gender": "male",
+   "origin": "Akan",
+   "meaning": "noble",
+   "register": "precise"
+  },
+  {
+   "name": "Dmitri",
+   "gender": "male",
+   "origin": "Greek",
+   "meaning": "of the earth",
+   "register": "spare"
+  },
+  {
+   "name": "Elias",
+   "gender": "male",
+   "origin": "Hebrew",
+   "meaning": "the Lord is my God",
+   "register": "warm"
+  },
+  {
+   "name": "Nikolai",
+   "gender": "male",
+   "origin": "Slavic",
+   "meaning": "victory of people",
+   "register": "precise"
+  },
+  {
+   "name": "Bram",
+   "gender": "male",
+   "origin": "Dutch",
+   "meaning": "father of many",
+   "register": "spare"
+  },
+  {
+   "name": "Theo",
+   "gender": "male",
+   "origin": "Greek",
+   "meaning": "gift of God",
+   "register": "bright"
+  },
+  {
+   "name": "Arun",
+   "gender": "male",
+   "origin": "Sanskrit",
+   "meaning": "dawn",
+   "register": "warm"
+  },
+  {
+   "name": "Finnian",
+   "gender": "male",
+   "origin": "Irish",
+   "meaning": "fair",
+   "register": "bright"
+  }
+ ]
+}
