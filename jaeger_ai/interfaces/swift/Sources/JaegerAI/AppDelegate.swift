@@ -97,6 +97,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await splash.finish(AgentBridge.shared.isConnected
                                 ? "All systems online"
                                 : "Offline shell ready")
+
+            // OS 1 launch gate. Asked AFTER the bridge attempt, because the
+            // answer lives in Jaeger-owned state and only the bridge can
+            // read it; asking earlier would always return `.unavailable`.
+            //
+            // Only `.onboard` opens a window. `.proceed` is the common case
+            // (first boot done, or an identity that predates it), and
+            // `.unavailable` deliberately falls through to normal launch
+            // too — a bridge that is down must not block the menu bar, and
+            // the gate is re-evaluated on the next start.
+            let gate = FirstBootGate(bridge: AgentBridge.shared)
+            if case .onboard(let turn) = await gate.evaluate() {
+                FirstBootWindowController.show(gate: gate, turn: turn)
+            }
+
             if ProcessInfo.processInfo.arguments.contains("--chat") {
                 ChatWindowController.show(agent: AgentBridge.shared)
             }

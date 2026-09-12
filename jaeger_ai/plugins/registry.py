@@ -21,7 +21,10 @@ Opt-in + local: discovery only runs when called; a plugin runs in-process
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 # Known lifecycle hook events. Plugins register against these names.
 HOOK_EVENTS = ("pre_tool", "post_tool", "turn_start", "turn_end", "session_start")
@@ -62,7 +65,15 @@ def discover_plugins(group: str = "jaeger_ai.plugins") -> list[str]:
     loaded: list[str] = []
     try:
         from importlib.metadata import entry_points
-    except Exception:  # noqa: BLE001
+    except ImportError:
+        # Narrowed from bare Exception: only an import failure belongs here,
+        # and on any supported Python this cannot happen. Logged rather than
+        # swallowed so "no plugins loaded" is never indistinguishable from
+        # "plugin discovery could not start".
+        logger.warning(
+            "importlib.metadata unavailable — plugin discovery disabled",
+            exc_info=True,
+        )
         return loaded
     try:
         eps = entry_points(group=group)
@@ -74,9 +85,13 @@ def discover_plugins(group: str = "jaeger_ai.plugins") -> list[str]:
             register(_CONTEXT)
             loaded.append(ep.name)
         except Exception as exc:  # noqa: BLE001 — one bad plugin can't break boot
-            import sys
-            print(f"[jaeger-plugins] {ep.name} failed to load: {exc}",
-                  file=sys.stderr)
+            # Stays broad on purpose: third-party `register()` can raise
+            # anything, and one bad plugin must not stop the others or the
+            # boot. Now carries a traceback — a bare message told the
+            # operator a plugin failed but never where.
+            logger.warning(
+                "plugin %s failed to load: %s", ep.name, exc, exc_info=True,
+            )
     return loaded
 
 
@@ -92,8 +107,12 @@ def fire_hook(event: str, **kwargs: Any) -> None:
     for handler in _CONTEXT.hooks.get(event, ()):
         try:
             handler(**kwargs)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:  # noqa: BLE001 — a hook must not break the turn
+            # Was `pass`: a plugin hook could fail on every single turn and
+            # leave no trace anywhere. Still non-fatal, now audible.
+            logger.warning(
+                "plugin hook for %r raised; continuing", event, exc_info=True,
+            )
 
 
 def reset_for_tests() -> None:
