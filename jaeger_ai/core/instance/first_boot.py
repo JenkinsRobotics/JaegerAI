@@ -305,15 +305,26 @@ def complete(instance_root: Path | Any) -> FirstBootStatus:
 def reset(instance_root: Path | Any) -> None:
     """Clear first-boot state ONLY. Deliberate, explicit, narrow.
 
-    This is ``jaeger onboarding reset``. It removes the welcome record so
-    the sequence runs again — and it touches nothing else. Memory, the
-    Library, projects, credentials, provider settings and the character
-    sheet all survive, because wiping those is a different and far more
-    consequential operation that the operator has to ask for by name.
+    This is ``jaeger onboarding reset``. It rewinds the welcome so the
+    sequence runs again — and it touches nothing else. Memory, the Library,
+    projects, credentials, provider settings and the character sheet all
+    survive, because wiping those is a different and far more consequential
+    operation that the operator has to ask for by name.
+
+    Writes an explicit NOT_STARTED record rather than deleting the file.
+    That distinction is load-bearing: :func:`ensure_migrated` treats "no
+    state file" as "this identity predates the feature" and classifies an
+    established install COMPLETED. Deleting would therefore undo itself on
+    the very next boot — reset, then silently re-suppressed, with no sign
+    anything happened. An explicit marker means a deliberate operator reset
+    outranks the migration heuristic, which is the correct precedence: the
+    heuristic exists to guess for identities that never had state, not to
+    overrule someone who asked.
     """
-    path = state_path(instance_root)
-    with __import__("contextlib").suppress(OSError):
-        path.unlink()
+    _write(instance_root, {
+        "status": FirstBootStatus.NOT_STARTED.value,
+        "reset_at": _now(),
+    })
 
 
 # ── migration for identities that predate this feature ───────────────

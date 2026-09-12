@@ -36,6 +36,17 @@ final class TTSManager: ObservableObject {
     /// button is the primary surface for "speak this specific reply."
     @Published var autoSpeakEnabled: Bool = false
 
+    /// The voice experience the operator chose at OS 1 first boot —
+    /// ``"male"`` or ``"female"``, or nil before they have answered.
+    ///
+    /// Deliberately an experience rather than a vendor voice id: the
+    /// capability router maps it onto Apple / Kokoro / OpenAI / whatever is
+    /// installed. Storing ``am_michael`` here would weld the operator's
+    /// very first decision to one TTS backend for the life of the identity.
+    /// Persisted by the backend in `first_boot.yaml`; mirrored here so the
+    /// speech layer can honour it without a round trip on every utterance.
+    @Published var preferredVoiceProfile: String?
+
     let appleSpeech = AppleSpeechSynth()
 
     private let log = Logger(subsystem: "com.jenkinsrobotics.JaegerAI",
