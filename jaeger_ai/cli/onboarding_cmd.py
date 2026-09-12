@@ -103,7 +103,43 @@ def _cmd_reset(args: argparse.Namespace) -> int:
 
     fb.reset(layout)
     print("  First-boot state cleared.")
+
+    if args.clean_slate:
+        _clean_slate(force=args.force)
     return 0
+
+
+def _clean_slate(*, force: bool) -> None:
+    """Clear gateway session history so the UI wakes genuinely empty.
+
+    Separate from the first-boot reset on purpose. Stale transcripts behind
+    a fresh welcome break the illusion, but transcripts are also the
+    operator's record of real work — so this is opt-in, archives before it
+    deletes, and refuses to write underneath a live daemon.
+    """
+    from jaeger_ai.core.gateway.clean_slate import prune_history
+    from jaeger_ai.core.gateway.session_store import default_store_path
+
+    db = default_store_path()
+    print()
+    print(f"  Clean slate — pruning session history in {db}")
+
+    result = prune_history(db, archive=True, force=force)
+    if not result.ok:
+        print(f"  REFUSED: {result.refused}", file=sys.stderr)
+        print("  First-boot state was still reset; history is untouched.",
+              file=sys.stderr)
+        return
+
+    if result.archived_to:
+        print(f"  Archived to {result.archived_to}")
+    if not result.total_removed:
+        print("  No session history to clear.")
+        return
+    for table, count in sorted(result.removed.items()):
+        print(f"    {count:>6} {table}")
+    print(f"  Cleared {result.total_removed} rows across "
+          f"{len(result.removed)} tables.")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,6 +148,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instance", default=None)
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     parser.add_argument("--json", action="store_true", help="machine-readable status")
+    parser.add_argument(
+        "--clean-slate", action="store_true",
+        help="ALSO clear gateway session history (archived first). Off by "
+             "default: the welcome reset must not erase the operator's work.",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="with --clean-slate, prune even while the gateway daemon owns "
+             "the store (unsafe — stop the daemon instead)",
+    )
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     return _cmd_status(args) if args.action == "status" else _cmd_reset(args)
 
