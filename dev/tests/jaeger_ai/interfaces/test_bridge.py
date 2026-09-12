@@ -1197,8 +1197,13 @@ def test_speak_command_roundtrip(monkeypatch):
     spoken = {}
     done = threading.Event()
 
-    def fake_speak(text="", path=""):
+    def fake_speak(text="", path="", voice=""):
+        # ``voice`` is the additive per-utterance override OS 1 State 3
+        # uses to pick a Kokoro pack. A stub missing it makes the bridge's
+        # background speak thread raise TypeError and die silently, which
+        # surfaces only as this test's event never being set.
         spoken["text"] = text
+        spoken["voice"] = voice
         done.set()
         return {"spoken": True, "elapsed_s": 0.1, "reason": ""}
 
@@ -1207,7 +1212,8 @@ def test_speak_command_roundtrip(monkeypatch):
     # attribute lookup, so the string form patches the wrong object.
     speak_mod = importlib.import_module("jaeger_agent.tools.speak")
     monkeypatch.setattr(speak_mod, "speak", fake_speak)
-    stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day."},"id":"r3"}\n'
+    stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day.",'
+             '"voice":"af_heart"},"id":"r3"}\n'
              '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
              '{"op":"quit"}\n')
     # Hold the first command back so the (faked, instant) boot wins the
@@ -1220,6 +1226,8 @@ def test_speak_command_roundtrip(monkeypatch):
     assert "nothing to speak" in results["r4"]["error"]
     assert done.wait(5.0)
     assert spoken["text"] == "Good day."
+    # the pack rides through to the synth, unmodified
+    assert spoken["voice"] == "af_heart"
     assert rc == 0
 
 

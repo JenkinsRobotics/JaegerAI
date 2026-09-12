@@ -102,7 +102,7 @@ def _get_tts() -> KokoroTTS:
     return synth
 
 
-def speak(text: str = "", path: str = "") -> dict[str, Any]:
+def speak(text: str = "", path: str = "", voice: str = "") -> dict[str, Any]:
     """Speak aloud through the default audio output via the TTS node.
 
     Pass ``text`` to speak literal text, or ``path`` to narrate a
@@ -134,14 +134,14 @@ def speak(text: str = "", path: str = "") -> dict[str, Any]:
             return {"spoken": False, "reason": "file not found",
                     "path": file_path}
         body = target.read_text(encoding="utf-8")
-        result = _speak_via_bus(body)
+        result = _speak_via_bus(body, voice)
         result["from_file"] = str(target.relative_to(layout.root))
         return result
 
     if not (text or "").strip():
         return {"spoken": False,
                 "reason": "nothing to speak — pass text or path"}
-    return _speak_via_bus(text)
+    return _speak_via_bus(text, voice)
 
 
 def _tts_module_present() -> bool:
@@ -170,7 +170,7 @@ def _tts_module_present() -> bool:
         return True  # fail-open: don't block speak because discovery broke
 
 
-def _speak_via_bus(text: str) -> dict[str, Any]:
+def _speak_via_bus(text: str, voice: str = "") -> dict[str, Any]:
     """Publish a :class:`SpeechCommand` and block on the matching
     :class:`SpokenAck`.  Returns a dict shaped like the pre-0.4
     in-process result for backward-compatible callers."""
@@ -204,7 +204,12 @@ def _speak_via_bus(text: str) -> dict[str, Any]:
     cid = uuid.uuid4().hex
     request = topics.SpeechCommand(
         text=text,
-        voice=_resolve_voice(),
+        # An explicit ``voice`` overrides the active character's configured
+        # one for THIS utterance only. OS 1's State 3 uses it to speak the
+        # handoff in the pack matching the operator's voice_profile, before
+        # any character is bound. Empty (the default) keeps the historical
+        # behaviour: resolve from the active character.
+        voice=voice.strip() or _resolve_voice(),
         node_id="brain",
         correlation_id=cid,
     )

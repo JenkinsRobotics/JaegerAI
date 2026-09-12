@@ -1274,10 +1274,15 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             if getattr(boot, "client", None) is None:
                 return False, "agent still booting"
 
+            # Optional per-utterance voice. OS 1 State 3 passes the Kokoro
+            # pack matching the operator's voice_profile; empty keeps the
+            # active character's configured voice.
+            voice = str(args.get("voice") or "").strip()
+
             def _speak_bg() -> None:
                 try:
                     from jaeger_agent.tools.speak import speak
-                    out = speak(text=text)
+                    out = speak(text=text, voice=voice)
                     if not out.get("spoken"):
                         print(f"[bridge] speak failed: {out.get('reason')}",
                               file=sys.stderr, flush=True)
