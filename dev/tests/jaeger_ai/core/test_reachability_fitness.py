@@ -282,3 +282,52 @@ def test_new_discovery_guards_use_the_loud_helper():
         isinstance(node, ast.FunctionDef) and node.name == "discover_migrations"
         for node in ast.walk(tree)
     )
+
+
+# ── silent-fallback policy ───────────────────────────────────────────
+
+
+def test_report_degraded_is_loud_in_tests_quiet_in_production():
+    """The house rule for ~548 defensive handlers.
+
+    Production keeps degrading (never crash on a corrupt optional file);
+    dev/test raises, so a suite catches what production tolerates. If these
+    two behaviours ever collapse into one, the policy is dead either way:
+    all-raise breaks resilience, all-warn restores the silence.
+    """
+    import logging
+
+    from jaeger_ai.core.wiring import WiringError, report_degraded
+
+    with pytest.raises(WiringError):
+        report_degraded("probing a thing", OSError("boom"), strict=True)
+
+    # Non-strict: returns normally, having logged.
+    report_degraded("probing a thing", OSError("boom"),
+                    logger_=logging.getLogger("test"), strict=False)
+
+
+def test_report_degraded_preserves_the_cause():
+    """The traceback must survive — a message without one says nothing."""
+    from jaeger_ai.core.wiring import WiringError, report_degraded
+
+    original = KeyError("missing")
+    try:
+        report_degraded("looking something up", original, strict=True)
+    except WiringError as raised:
+        assert raised.__cause__ is original
+    else:
+        pytest.fail("strict mode must raise")
+
+
+def test_plugin_registry_no_longer_swallows_silently():
+    """Critical-path exemplar: plugin load + hook failures must be logged.
+
+    A plugin hook that raised on every turn previously left no trace
+    anywhere, because the handler was a bare `pass`.
+    """
+    src = (REPO / "jaeger_ai/plugins/registry.py").read_text(encoding="utf-8")
+    assert "logger.warning" in src
+    assert "exc_info=True" in src
+    # the old silent hook handler must be gone
+    assert "except Exception:  # noqa: BLE001\n            pass" not in src

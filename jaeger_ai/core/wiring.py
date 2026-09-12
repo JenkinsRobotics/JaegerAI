@@ -77,4 +77,45 @@ def expect_path(path: Path | str, what: str, *, strict: bool | None = None) -> b
     return False
 
 
-__all__ = ["WiringError", "expect_path", "strict_wiring"]
+def report_degraded(
+    what: str,
+    exc: BaseException,
+    *,
+    logger_: logging.Logger | None = None,
+    strict: bool | None = None,
+) -> None:
+    """Record that something failed and was degraded rather than fatal.
+
+    The house rule for the ~548 defensive handlers in this tree. They are
+    not a bug — "a corrupt file means no overrides, not a dead agent" is
+    correct, and blanket-removing them would trade resilience for noise.
+    The bug is that a swallowed failure and a genuine no-op look identical
+    from outside, which is how a broken migration runner survived six call
+    sites for a release.
+
+    Policy, applied to critical paths first (discovery routines, bridge
+    operations, plugin initialisation):
+
+    1. **Keep the fallback.** Production still degrades instead of crashing.
+    2. **Narrow the catch** where the failure modes are known —
+       ``FileNotFoundError``, ``KeyError``, ``json.JSONDecodeError`` — and
+       stay broad only where third-party code can raise anything.
+    3. **Always log with ``exc_info=True``.** A message without a traceback
+       tells you something failed and never where.
+    4. **Be loud in dev/test.** Under pytest or ``JAEGER_STRICT_WIRING=1``
+       this re-raises, so a suite catches what production tolerates.
+
+    Use at a handler that would otherwise ``pass``::
+
+        except (OSError, json.JSONDecodeError) as exc:
+            report_degraded("reading the skill manifest", exc)
+            return {}
+    """
+    log = logger_ or logger
+    message = f"{what} failed; continuing in a degraded state"
+    if strict if strict is not None else strict_wiring():
+        raise WiringError(f"{message}: {exc}") from exc
+    log.warning("%s: %s", message, exc, exc_info=True)
+
+
+__all__ = ["WiringError", "expect_path", "report_degraded", "strict_wiring"]
