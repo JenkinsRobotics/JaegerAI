@@ -23,7 +23,7 @@ exactly so existing personas port without conversion.
 
 Public surface::
 
-    from jaeger_os.personality import (
+    from jaeger_ai.personality import (
         Personality, HEXACO, SPECIAL, Expression, Domains,
         load_personality, save_personality, compose_block,
     )

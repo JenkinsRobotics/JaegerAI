@@ -1,6 +1,7 @@
-"""Unbroken epistemic context fabric for ARES.
+"""Bounded operational context cache for the reasoning engine.
 
-Maintains an enduring rolling belief state across sessions and turns.
+Maintains a rolling state across sessions and turns. Research archives belong
+in the native persistent memory; this cache does not prove unbroken memory.
 Honcho shared memory is optional — never crash a tick if Honcho is down.
 Belief state persists under ``~/.jaeger/ares/`` (or JAEGER_STATE_DIR/ares/).
 """
@@ -8,6 +9,7 @@ Belief state persists under ``~/.jaeger/ares/`` (or JAEGER_STATE_DIR/ares/).
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import os
 import time
@@ -29,9 +31,9 @@ class GoalRecord:
 
 @dataclass
 class OperatorProfile:
-    name: str = "Matthew Jenkins"
+    name: str = ""
     communication_style: str = "concise, direct, high-agency"
-    frequent_projects: list[str] = field(default_factory=lambda: ["JaegerAI", "Finances"])
+    frequent_projects: list[str] = field(default_factory=list)
     learned_preferences: dict[str, Any] = field(default_factory=dict)
 
 
@@ -57,14 +59,14 @@ class BeliefState:
                 {"id": g.id, "desc": g.description, "completed": g.completed}
                 for g in self.active_goals
             ],
-            "recent_insights": self.recent_insights[-5:],
+            "recent_insights": self.recent_insights[-20:],
             "system_confidence": self.system_confidence,
             "unbroken_narrative": self.unbroken_narrative,
         }
 
 
 class EpistemicContext:
-    """Maintains and updates the agent's enduring worldview without amnesia."""
+    """Persist recent operational context; not the canonical world model."""
 
     def __init__(self, cache_dir: Path | str | None = None) -> None:
         default_base = (
@@ -85,7 +87,7 @@ class EpistemicContext:
 
             return HonchoClient()
         except Exception as exc:  # noqa: BLE001
-            logger.info("Honcho unavailable for ARES belief context: %s", type(exc).__name__)
+            logger.info("Honcho unavailable for reasoning belief context: %s", type(exc).__name__)
             return None
 
     @property
@@ -99,12 +101,12 @@ class EpistemicContext:
             data = json.loads(self._state_file.read_text(encoding="utf-8"))
             operator_data = data.get("operator", {})
             operator = OperatorProfile(
-                name=operator_data.get("name", "Matthew Jenkins"),
+                name=operator_data.get("name", ""),
                 communication_style=operator_data.get(
                     "communication_style", "concise, direct"
                 ),
                 frequent_projects=operator_data.get(
-                    "frequent_projects", ["JaegerAI", "Finances"]
+                    "frequent_projects", []
                 ),
                 learned_preferences=operator_data.get("learned_preferences", {}),
             )
@@ -126,7 +128,7 @@ class EpistemicContext:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Failed to parse ARES belief state, resetting to clean state: %s",
+                "Failed to parse reasoning belief state, resetting to clean state: %s",
                 type(exc).__name__,
             )
             return BeliefState()
@@ -139,15 +141,15 @@ class EpistemicContext:
                 encoding="utf-8",
             )
         except OSError as exc:
-            logger.warning("Failed to persist ARES belief state: %s", type(exc).__name__)
+            logger.warning("Failed to persist reasoning belief state: %s", type(exc).__name__)
 
     async def orient(self, snapshot: Any) -> BeliefState:
         """Update belief state; Honcho down must never crash the tick."""
         if self._honcho is not None:
             try:
-                honcho_status = self._honcho.status()
-                if isinstance(honcho_status, dict) and honcho_status.get("status") == "healthy":
-                    pass  # optional sync point — soft no-op today
+                # Connectivity only. This is not a memory synchronization
+                # receipt, and the client has health(), not status().
+                await asyncio.to_thread(self._honcho.health)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Honcho status probe failed (ignored): %s", type(exc).__name__)
 
@@ -165,7 +167,7 @@ class EpistemicContext:
         return self._state
 
     def add_insight(self, insight: str) -> None:
-        """Records an enduring realization or observation into permanent context."""
+        """Keep up to twenty recent observations in the operational cache."""
         if insight not in self._state.recent_insights:
             self._state.recent_insights.append(insight)
             if len(self._state.recent_insights) > 20:

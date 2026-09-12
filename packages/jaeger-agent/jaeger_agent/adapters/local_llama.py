@@ -10,7 +10,7 @@ The remaining 5%:
     works verbatim.
   • Gemma 4 / Qwen3-Coder routinely emit tool calls as TEXT inside
     ``<tool_call>…</tool_call>`` blocks even when ``tools=[...]`` is
-    passed structurally — :mod:`jaeger_os.agent.dialects` salvages
+    passed structurally — :mod:`jaeger_agent.dialects` salvages
     those after the parent's parse step.
 
 Construction stays light: nothing loads at import time. A real
@@ -521,7 +521,7 @@ class LocalLlamaAdapter(OpenAIAdapter):
              template renders tools (Gemma-4, some Qwen).
 
           2. A NATIVE-DIALECT tool block embedded in the system prompt
-             (this override, via :mod:`jaeger_os.agent.dialects`). Many GGUF
+             (this override, via :mod:`jaeger_agent.dialects`). Many GGUF
              builds ship templates with the tool section stripped (the
              LM Studio Hermes-3 build, verified), so the structured
              param silently no-ops and the model never sees the tools →

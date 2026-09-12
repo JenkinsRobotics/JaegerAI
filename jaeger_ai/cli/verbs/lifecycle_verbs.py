@@ -176,11 +176,22 @@ def _service_port_open(
     }:
         return _is_port_open(port) or _is_port_open(port, "192.168.64.1")
     if label == "com.jenkinsrobotics.hermes-native-api":
-        container = containers.get(_container_names()[0], {})
-        if container.get("state") != "running":
-            return False
-        address = container.get("ip", "").split("/")[0]
-        return bool(address) and _is_port_open(port, address)
+        # Check EVERY known Hermes identity, not just the one the workspace
+        # state file happens to name. The WebUI ships under three valid
+        # container names (legacy → managed → expanded) and the state file
+        # records only the one this host last started; a container running
+        # under either of the other two is still the native API we want, and
+        # looking at a single name reported it down.
+        from jaeger_ai.core.runtime.agent_workspaces import hermes_container_aliases
+
+        for name in hermes_container_aliases():
+            container = containers.get(name)
+            if not container or container.get("state") != "running":
+                continue
+            address = (container.get("ip") or "").split("/")[0]
+            if address and _is_port_open(port, address):
+                return True
+        return False
     return _is_port_open(port)
 
 
@@ -616,14 +627,28 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
             "pid": pid,
         })
 
-    # Collect container statuses
+    # Collect container statuses. The workspace state file records one name
+    # per role, but Hermes ships under three valid identities (legacy →
+    # managed → expanded). If the recorded name is absent, fall back to
+    # whichever alias is actually present before declaring it stopped —
+    # otherwise a running WebUI reports as down purely because this host
+    # last started it under a different name.
+    from jaeger_ai.core.runtime.agent_workspaces import hermes_container_aliases
+
     containers_report = []
     for cname in _container_names():
-        cdata = containers.get(cname, {"state": "stopped", "ip": "—"})
+        cdata = containers.get(cname)
+        if cdata is None and cname in hermes_container_aliases():
+            for alias in hermes_container_aliases():
+                if alias in containers:
+                    cname, cdata = alias, containers[alias]
+                    break
+        if cdata is None:
+            cdata = {"state": "stopped", "ip": "—"}
         containers_report.append({
             "name": cname,
-            "state": cdata["state"],
-            "ip": cdata["ip"],
+            "state": cdata.get("state", "stopped"),
+            "ip": cdata.get("ip", "—"),
         })
 
     # Mac Ollama is the default. Rack services remain explicitly paused until

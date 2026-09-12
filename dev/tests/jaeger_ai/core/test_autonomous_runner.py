@@ -87,6 +87,30 @@ def test_uncounted_durable_request_uses_acceptance_phases():
     assert "prose claim" in ACCEPTANCE_GUIDANCE
 
 
+def test_single_reply_does_not_inherit_or_destroy_unfinished_work():
+    from jaeger_ai.features.dispatcher.router import prepare_turn_text
+    from jaeger_ai.core.runtime.agent_controller import JaegerAgentController
+    existing = ensure_autonomous_ledger("process these 436 records")
+    class Agent:
+        messages = []
+        system_prompt = ""
+        context_guard = None
+    prompt = "Reply exactly AUDIT-PONG. Do not use tools."
+    assert ensure_autonomous_ledger(prompt) is None
+    assert not should_run_autonomous(prompt)
+    prepared = prepare_turn_text(Agent(), prompt, session_key="dispatcher")
+    assert prepared == prompt
+    calls = []
+    def turn(client, text, **kwargs):
+        calls.append(text)
+        return {"text": "AUDIT-PONG", "tool_activity": []}
+    result = JaegerAgentController(None, turn_fn=turn, max_steps=4).run_to_completion(prompt, "dispatcher")
+    assert len(calls) == 1
+    assert existing.remaining() == 436
+    assert not existing.completed
+    assert result["output"]["steps"] == 1
+
+
 def test_inner_cap_forces_continuation_on_settled_prose():
     """Wind-down summaries look finished. The fuse is not a job end."""
     nxt = next_continuation_prompt(
@@ -106,7 +130,7 @@ def test_inner_cap_forces_continuation_on_settled_prose():
 
 @pytest.mark.parametrize("halt", [
     "made 24 tool calls in a single turn",
-    "empty_response",
+    "hit max_iterations=24 without a final answer",
 ])
 def test_recoverable_halt_forces_outer_continuation(halt):
     nxt = next_continuation_prompt(
@@ -220,3 +244,9 @@ def test_harness_prompt_carries_progress():
     prompt = harness_prompt()
     assert HARNESS_PREFIX in prompt
     assert "2/8" in prompt
+
+
+@pytest.mark.parametrize('halt', ['empty_response', 'thinking_exhausted', 'context_overflow', 'interrupted'])
+def test_terminal_native_failure_cannot_restart_through_open_ledger(halt):
+    assert next_continuation_prompt('', force_ledger=True, halt_reason=halt, steps_left=10) is None
+    assert next_continuation_prompt('', isolated=True, batch=True, halt_reason=halt, steps_left=10) is None

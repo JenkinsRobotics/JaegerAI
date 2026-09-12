@@ -5,12 +5,12 @@ import os
 import pytest
 from pathlib import Path
 
-from jaeger_ai.ares.belief import BeliefState, EpistemicContext
-from jaeger_ai.ares.engine import ARESConfig, ARESEngine, ARESResult
-from jaeger_ai.ares.intent import CognitiveIntent, IntentEngine, IntentKind, MediumType
-from jaeger_ai.ares.perception import PerceptionSnapshot, RepoStatus, SensorStream, SystemTelemetry
-from jaeger_ai.ares.transducers import AcousticTransducer, TransducerRegistry, VisualTransducer
-from jaeger_ai.core.runtime.heartbeat import get_ares_engine, tick_ares
+from jaeger_ai.reasoning.belief import BeliefState, EpistemicContext
+from jaeger_ai.reasoning.engine import ReasoningConfig, ReasoningEngine, ReasoningResult
+from jaeger_ai.reasoning.intent import CognitiveIntent, IntentEngine, IntentKind, MediumType
+from jaeger_ai.reasoning.perception import PerceptionSnapshot, RepoStatus, SensorStream, SystemTelemetry
+from jaeger_ai.reasoning.transducers import AcousticTransducer, TransducerRegistry, VisualTransducer
+from jaeger_ai.core.runtime.heartbeat import get_reasoning_engine, tick_ares
 
 
 @pytest.fixture
@@ -128,20 +128,20 @@ def test_medium_transducers(temp_ares_env):
 def test_ares_engine_tick_cycle(temp_ares_env):
     async def _run():
         workspace, data_dir = temp_ares_env
-        config = ARESConfig(
+        config = ReasoningConfig(
             enabled=True,
             workspace_root=workspace,
             data_dir=data_dir,
             salience_threshold=0.5,
         )
-        engine = ARESEngine(config=config)
+        engine = ReasoningEngine(config=config)
 
         # Disable audio sound playing in acoustic transducer for test isolation
         engine.transducers.register(MediumType.ACOUSTIC, AcousticTransducer(enable_audio_play=False))
 
         # Run tick in clean state -> should be vigilant_idle
         res = await engine.tick()
-        assert isinstance(res, ARESResult)
+        assert isinstance(res, ReasoningResult)
         assert res.status == "vigilant_idle"
         assert res.intent is not None
         assert res.intent.kind == IntentKind.SILENT_VIGIL
@@ -175,7 +175,7 @@ def test_heartbeat_ares_hook(temp_ares_env):
         root = workspace
     layout = MockLayout()
 
-    engine = get_ares_engine(layout)
+    engine = get_reasoning_engine(layout)
     assert engine is not None
 
     result = tick_ares(layout)
@@ -185,7 +185,7 @@ def test_heartbeat_ares_hook(temp_ares_env):
 
 def test_system_transducer_blocks_dangerous_by_default():
     async def _run():
-        from jaeger_ai.ares.transducers import SystemTransducer
+        from jaeger_ai.reasoning.transducers import SystemTransducer
 
         t = SystemTransducer(allow_dangerous_actions=False)
         intent = CognitiveIntent(
@@ -205,7 +205,7 @@ def test_system_transducer_blocks_dangerous_by_default():
 
 def test_system_transducer_clean_scratch_ok(tmp_path, monkeypatch):
     async def _run():
-        from jaeger_ai.ares.transducers import SystemTransducer
+        from jaeger_ai.reasoning.transducers import SystemTransducer
 
         scratch = tmp_path / "scratch"
         scratch.mkdir()
@@ -252,7 +252,7 @@ def test_visual_notifications_gated(temp_ares_env):
 
 
 def test_ares_config_defaults_fail_closed():
-    cfg = ARESConfig()
+    cfg = ReasoningConfig()
     assert cfg.allow_dangerous_system_actions is False
     assert cfg.allow_notifications is False
     assert cfg.allow_audio_play is False
@@ -264,7 +264,7 @@ def test_honcho_down_does_not_crash_orient(temp_ares_env):
         ctx = EpistemicContext(cache_dir=data_dir)
 
         class Boom:
-            def status(self):
+            def health(self):
                 raise RuntimeError("honcho down")
 
         ctx._honcho = Boom()
@@ -273,3 +273,14 @@ def test_honcho_down_does_not_crash_orient(temp_ares_env):
         assert isinstance(belief, BeliefState)
 
     asyncio.run(_run())
+
+
+def test_ares_does_not_invent_operator_and_retains_full_recent_window(temp_ares_env):
+    _, data_dir = temp_ares_env
+    ctx = EpistemicContext(cache_dir=data_dir)
+    assert ctx.current.operator.name == ""
+    assert ctx.current.operator.frequent_projects == []
+    for i in range(25):
+        ctx.add_insight(f"observation-{i}")
+    reloaded = EpistemicContext(cache_dir=data_dir)
+    assert reloaded.current.recent_insights == [f"observation-{i}" for i in range(5, 25)]

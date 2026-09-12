@@ -18,8 +18,8 @@ from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
 
-from .event_bus import GatewayEventBus
-from .session_store import GatewaySessionStore
+from .event_bus import GatewayEventBus, ReplayGap
+from .session_store import GatewaySessionStore, RequestBusy, RequestConflict
 
 logger = logging.getLogger("jaeger.gateway")
 
@@ -33,7 +33,7 @@ LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
 ).rstrip("/")
 LOCKED_WEBUI_URL = os.environ.get("JAEGER_WEBUI_URL", "http://100.74.2.15:8790").rstrip("/")
 DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "qwen2.5:3b")
-# Lead turns prefer MCP native chat (:8811 agentgateway → :8792). Soft-fail to Ollama.
+# Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
 
@@ -42,12 +42,77 @@ class JaegerGatewayApp:
         self,
         store: GatewaySessionStore | None = None,
         event_bus: GatewayEventBus | None = None,
+        background_client: Any = None,
     ) -> None:
+        # Explicit stores are used by embedded/test gateways and never attach
+        # to the operator's running bridge unless a client is supplied.
+        if background_client is None and store is None:
+            from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
+            background_client = BridgeClient("jaeger")
+        self._background_client = background_client
+        self._background_task: asyncio.Task | None = None
+        self._background_status: dict[str, Any] = {"enabled": background_client is not None}
         self.store = store or GatewaySessionStore()
-        self.event_bus = event_bus or GatewayEventBus()
+        self.event_bus = event_bus or GatewayEventBus(store=self.store)
+        if getattr(self.event_bus, "store", None) is None:
+            self.event_bus.attach_store(self.store)
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
+        self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._cancel_requested: set[str] = set()
+        self._owns_store = False
         self.app = web.Application()
+        self.app.on_startup.append(self._recover_interrupted)
+        self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
+
+    async def _recover_interrupted(self, app: web.Application) -> None:
+        lease = self.store.claim_process(source_file=str(Path(__file__).resolve()))
+        if not lease.get("ok"):
+            raise RuntimeError(f"Gateway store is owned by live pid {lease.get('owner_pid')}")
+        self._owns_store = True
+        self.store.recover_interrupted_sessions()
+        if self._background_client is not None:
+            self._background_task = asyncio.create_task(self._background_loop())
+
+    async def _bounded_shutdown(self, app: web.Application) -> None:
+        if not self._owns_store:
+            return
+        if self._background_task is not None:
+            self._background_task.cancel()
+            await asyncio.gather(self._background_task, return_exceptions=True)
+            self._background_task = None
+        tasks = list(self._running_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.wait(tasks, timeout=2.0)
+        self.store.recover_interrupted_sessions()
+        self.store.release_process()
+        self._owns_store = False
+
+    async def _collect_background(self) -> int:
+        client = self._background_client
+        rows = await asyncio.to_thread(client.query, "background_messages", {"limit": 50}, timeout_s=5)
+        if not isinstance(rows, list):
+            raise ValueError("Native background outbox returned an invalid response")
+        for row in rows:
+            receipt = self.store.receive_background(row)
+            if not receipt["replayed"]:
+                self.event_bus.fanout(receipt["event"])
+            # Receipt + transcript + event are committed before native ACK.
+            # Failed/lost ACK retries delivery, never the model or its tools.
+            await asyncio.to_thread(client.command, "acknowledge_background", {"delivery_id": row["delivery_id"]})
+        return len(rows)
+
+    async def _background_loop(self) -> None:
+        while True:
+            try:
+                count = await self._collect_background()
+                self._background_status = {"enabled": True, "ok": True, "last_poll": time.time(), "received": count}
+            except Exception as exc:
+                self._background_status = {"enabled": True, "ok": False, "error": str(exc)}
+                logger.warning("Background delivery pending: %s", exc)
+            await asyncio.sleep(2)
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
@@ -63,8 +128,12 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
+        self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
+        self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
+        self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
 
     async def _probe_http(self, url: str, *, timeout_s: float = 2.0) -> dict[str, Any]:
@@ -116,7 +185,8 @@ class JaegerGatewayApp:
                 ) as resp:
                     body = await resp.text()
                     # CoS: must not claim all_green while legacy /api/chat returns 500.
-                    ok = resp.status != 500
+                    # Validation errors establish reachability only, not readiness.
+                    ok = 200 <= resp.status < 300
                     return {
                         "ok": ok,
                         "status_code": resp.status,
@@ -126,7 +196,7 @@ class JaegerGatewayApp:
                         "note": (
                             "legacy /api/chat returned 500"
                             if resp.status == 500
-                            else "legacy /api/chat reachable (non-500)"
+                            else "legacy chat readiness is not verified by a validation response"
                         ),
                     }
         except Exception as exc:  # noqa: BLE001 — health must never crash
@@ -139,20 +209,105 @@ class JaegerGatewayApp:
                 "note": "legacy /api/chat unreachable",
             }
 
-    async def handle_health(self, request: web.Request) -> web.Response:
-        """Fail-closed health: gateway + bridge + ollama + WebUI legacy chat (not :8813).
+    async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
+        """Read-only MCP and native-agent readiness; never executes chat."""
+        from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+            MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
+        )
+        headers = {"Accept": "application/json, text/event-stream",
+                   "Authorization": f"Bearer {MCP_API_KEY}", "Host": MCP_HOST_HEADER}
 
-        When brain/bridge is dead OR legacy /api/chat returns 500, status is
-        unhealthy and all_green is false (HTTP 503).
-        """
-        bridge = await self._probe_http(LOCKED_BRIDGE_HEALTH_URL)
-        ollama = await self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags")
-        webui_chat = await self._probe_webui_legacy_chat()
+        async def rpc(client, method, params, identity):
+            async with client.post(MCP_GATEWAY_URL, headers=headers, json={
+                "jsonrpc": "2.0", "id": identity, "method": method, "params": params,
+            }) as response:
+                response.raise_for_status()
+                if response.headers.get("Mcp-Session-Id"):
+                    headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
+                # A server may keep SSE open after the response; consume only
+                # the matching RPC result, with a bounded total body and timeout.
+                if "text/event-stream" in response.headers.get("Content-Type", ""):
+                    size = 0
+                    async for line in response.content:
+                        size += len(line)
+                        if size > 1_000_000:
+                            raise ValueError("MCP catalog response too large")
+                        if line.startswith(b"data:"):
+                            value = json.loads(line[5:])
+                            if value.get("id") == identity:
+                                break
+                    else:
+                        raise ValueError("MCP returned no matching result")
+                else:
+                    raw = bytearray()
+                    async for chunk in response.content.iter_chunked(65536):
+                        raw.extend(chunk)
+                        if len(raw) > 1_000_000:
+                            raise ValueError("MCP catalog response too large")
+                    value = json.loads(raw)
+                if value.get("error") or value.get("id") != identity:
+                    raise ValueError("MCP rejected readiness probe")
+                return value.get("result", {})
+
+        try:
+            async with asyncio.timeout(timeout_s):
+                async with ClientSession(timeout=ClientTimeout(total=timeout_s)) as client:
+                    await rpc(client, "initialize", {
+                        "protocolVersion": "2024-11-05", "capabilities": {},
+                        "clientInfo": {"name": "jaeger-health", "version": "1"},
+                    }, 1)
+                    async with client.post(MCP_GATEWAY_URL, headers=headers, json={
+                        "jsonrpc": "2.0", "method": "notifications/initialized",
+                    }) as response:
+                        response.raise_for_status()
+                    catalog = await rpc(client, "tools/list", {}, 2)
+                    names = {t.get("name") for t in catalog.get("tools", [])}
+                    chat_available = bool(names & {"chat", "jaeger_chat"})
+                    health_tool = next((n for n in ("jaeger_bridge_health", "bridge_health") if n in names), None)
+                    agent_ready = False
+                    if chat_available and health_tool:
+                        health_result = await rpc(client, "tools/call", {"name": health_tool, "arguments": {}}, 3)
+                        if not health_result.get("isError"):
+                            health = health_result.get("structuredContent")
+                            if not isinstance(health, dict):
+                                health = json.loads(self._mcp_chat_text(health_result))
+                            agent_ready = bool(health.get("ok")) and health.get("ready", {}).get("agent") == "ready"
+                    transport_ready = chat_available
+                    ok = chat_available and agent_ready
+                    return {
+                        "ok": ok, "required": True, "url": MCP_GATEWAY_URL,
+                        "transport_ready": transport_ready,
+                        "chat_tool_available": chat_available,
+                        "agent_ready": agent_ready,
+                        "execution_verified": False,
+                        "note": "Native bridge readiness; model execution not probed",
+                    }
+        except Exception as exc:
+            return {
+                "ok": False, "required": True, "url": MCP_GATEWAY_URL,
+                "error": type(exc).__name__,
+                "transport_ready": False,
+                "chat_tool_available": False,
+                "agent_ready": False,
+                "execution_verified": False,
+            }
+
+    async def handle_health(self, request: web.Request) -> web.Response:
+        """Backend readiness is independent of optional HTTP adapters and UIs."""
+        bridge, ollama, webui_chat, native_mcp = await asyncio.gather(
+            self._probe_http(LOCKED_BRIDGE_HEALTH_URL),
+            self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags"),
+            self._probe_http(LOCKED_WEBUI_URL),
+            self._probe_native_mcp(),
+        )
+        # Read-only surface availability. Never create fake chat requests from
+        # health checks, and never mistake a 404 for a working conversation.
         checks = {
             "gateway": {"ok": True, "url": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}"},
-            "bridge": bridge,
-            "ollama": ollama,
-            "webui_legacy_chat": webui_chat,
+            "bridge": {**bridge, "required": False},
+            "ollama": {**ollama, "required": True},
+            "webui": {**webui_chat, "required": False, "chat_execution_verified": False},
+            "native_mcp": native_mcp,
             "ares_agentgateway_8813": {
                 "ok": None,
                 "required": False,
@@ -160,9 +315,8 @@ class JaegerGatewayApp:
             },
         }
         required_ok = (
-            bool(bridge.get("ok"))
-            and bool(ollama.get("ok"))
-            and bool(webui_chat.get("ok"))
+            bool(ollama.get("ok"))
+            and bool(native_mcp.get("ok"))
         )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
@@ -175,8 +329,22 @@ class JaegerGatewayApp:
             "agents_api": "/v1/agents",
             "fundamentals_fee_gated": False,
             "fail_closed": True,
+            "health_scope": "backend_transport_readiness",
             "all_green": all_green,
             "checks": checks,
+            "diagnostics": {"source_file": str(Path(__file__).resolve()),
+                            "background_delivery": self._background_status,
+                            "session_store": str(self.store.path.resolve()),
+                            "instance_root": str(self._instance_root()),
+                            "schema_version": self.store.schema_version(),
+                            "process_lease": self.store.process_lease()},
+            "capabilities": {
+                "native_agent": bool(native_mcp.get("ok")),
+                "transport_ready": bool(native_mcp.get("transport_ready") or native_mcp.get("chat_tool_available")),
+                "agent_ready": bool(native_mcp.get("agent_ready")),
+                "execution_verified": bool(native_mcp.get("execution_verified")),
+                "end_to_end_chat_verified": False,
+            },
             "locked_endpoints": {
                 "ollama": LOCKED_OLLAMA_URL,
                 "webui": LOCKED_WEBUI_URL,
@@ -254,14 +422,7 @@ class JaegerGatewayApp:
         return web.json_response(record.to_dict())
 
     async def handle_handoff_agent(self, request: web.Request) -> web.Response:
-        """Lead → specialist handoff stub (agents-as-tools).
-
-        Body: ``{task, from_agent_id?, require_approval?}``. Reuses Gateway
-        ``pending_approvals`` when approval is required. Does not run a live
-        multi-agent turn — returns a structured stub record.
-        """
-        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
-
+        """Lead → specialist handoff using a real isolated child run."""
         to_agent_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
         task = str(body.get("task") or "").strip()
@@ -273,39 +434,120 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Agent not found"}, status=404)
         from_id = str(body.get("from_agent_id") or "native:jaeger").strip()
         require_approval = bool(body.get("require_approval", True))
-        stub = get_handoff_stub()
-        record = stub.create(
+        request_id = str(body.get("request_id") or uuid.uuid4().hex)
+        parent_run_id = body.get("parent_run_id") or body.get("parent_request_id")
+        parent_chain = list(body.get("parent_chain") or [])
+        depth = int(body.get("delegation_depth") or len(parent_chain))
+        permitted_context = str(body.get("permitted_context") or "")
+        timeout_s = int(body.get("timeout_seconds") or 120)
+        allowed_tools = body.get("allowed_tools") or []
+        if not isinstance(allowed_tools, list) or any(not isinstance(x, str) or not x.strip() for x in allowed_tools):
+            return web.json_response({"error": "allowed_tools must be a list of tool names"}, status=400)
+        if "dispatcher" in permitted_context.lower() and "dispatcher transcript" in permitted_context.lower():
+            return web.json_response({"error": "dispatcher transcript is not permitted specialist context"}, status=403)
+
+        existing = self.store.get_handoff_by_request(request_id)
+        if existing:
+            prior = existing.get("metadata") or {}
+            if (existing["task"] != task or existing["to_agent_id"] != target.id
+                or existing["from_agent_id"] != from_id
+                or existing.get("parent_run_id") != parent_run_id
+                or existing["require_approval"] != require_approval
+                or prior.get("permitted_context", "") != permitted_context
+                or sorted(prior.get("allowed_tools") or []) != sorted(allowed_tools)
+                or prior.get("timeout_seconds", 120) != timeout_s):
+                return web.json_response(
+                    {"error": "Request identity was already used for different input"},
+                    status=409,
+                )
+            return web.json_response(existing, status=200)
+
+        from jaeger_ai.core.agent_registry.specialist_runtime import check_delegation_limits
+        limit_error = check_delegation_limits(
             from_agent_id=from_id,
             to_agent_id=target.id,
-            task=task,
-            require_approval=require_approval,
-            metadata={"target_display": target.display_name, "target_role": (target.metadata or {}).get("role")},
+            parent_chain=parent_chain,
+            depth=depth,
+            active_children=self.store.count_active_handoffs(parent_run_id=str(parent_run_id) if parent_run_id else None),
         )
-        if require_approval and record.approval_id:
-            loop = asyncio.get_running_loop()
-            self.pending_approvals[record.approval_id] = loop.create_future()
-            self.event_bus.publish(
-                "*",
-                "approval.request",
-                {
-                    "approval_id": record.approval_id,
-                    "handoff_id": record.id,
-                    "kind": "handoff",
-                    "from_agent_id": from_id,
-                    "to_agent_id": target.id,
-                    "task": task,
-                    "options": ["once", "deny"],
-                    "prompt": f"Allow handoff to {target.display_name}?",
-                },
+        if limit_error:
+            return web.json_response({"error": limit_error, "ok": False, "status": "rejected"}, status=409)
+
+        approval_id = f"approval_{uuid.uuid4().hex[:12]}" if require_approval else None
+        handoff_id = f"handoff_{uuid.uuid4().hex[:12]}"
+        record = {
+            "id": handoff_id,
+            "request_id": request_id,
+            "from_agent_id": from_id,
+            "to_agent_id": target.id,
+            "parent_run_id": parent_run_id,
+            "child_run_id": None,
+            "task": task,
+            "status": "pending_approval" if require_approval else "admitted",
+            "require_approval": require_approval,
+            "approval_id": approval_id,
+            "result": {},
+            "metadata": {
+                "target_display": target.display_name,
+                "target_role": (target.metadata or {}).get("role"),
+                "specialty": (target.metadata or {}).get("specialty"),
+                "permitted_context": permitted_context,
+                "allowed_tools": list(allowed_tools),
+                "timeout_seconds": timeout_s,
+                "parent_chain": [*parent_chain, from_id],
+                "delegation_depth": depth + 1,
+            },
+        }
+        saved = self.store.save_handoff(record)
+        if require_approval and approval_id:
+            self.store.create_approval(
+                approval_id=approval_id,
+                kind="handoff",
+                prompt=f"Allow handoff to {target.display_name}?",
+                options=["once", "deny"],
+                request_id=request_id,
+                metadata={"handoff_id": handoff_id, "to_agent_id": target.id},
             )
-        self.event_bus.publish("*", "agent.handoff", {"handoff": record.to_dict()})
-        return web.json_response(record.to_dict(), status=202 if require_approval else 200)
+            loop = asyncio.get_running_loop()
+            self.pending_approvals[approval_id] = loop.create_future()
+            self.event_bus.publish("*", "approval.request", {
+                "approval_id": approval_id,
+                "handoff_id": handoff_id,
+                "kind": "handoff",
+                "from_agent_id": from_id,
+                "to_agent_id": target.id,
+                "task": task,
+                "options": ["once", "deny"],
+                "prompt": f"Allow handoff to {target.display_name}?",
+            })
+        else:
+            self._running_tasks[request_id] = asyncio.create_task(self._execute_handoff(handoff_id))
+        self.event_bus.publish("*", "agent.handoff", {"handoff": saved})
+        return web.json_response(saved, status=202 if require_approval else 200)
 
     async def handle_list_handoffs(self, request: web.Request) -> web.Response:
-        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
-
-        records = [r.to_dict() for r in get_handoff_stub().list_records()]
+        records = self.store.list_handoffs()
         return web.json_response({"handoffs": records, "count": len(records)})
+
+    async def handle_get_handoff(self, request: web.Request) -> web.Response:
+        record = self.store.get_handoff(request.match_info["id"])
+        if record is None:
+            return web.json_response({"error": "Handoff not found"}, status=404)
+        if record["status"] == "execution_unknown":
+            import hashlib
+            from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+            rid = record.get("request_id") or record["id"]
+            native_id = hashlib.sha256(("handoff:" + rid).encode()).hexdigest()
+            session = specialist_session(record["to_agent_id"], rid)
+            receipt = self._native_receipt(native_id, session)
+            if receipt and not receipt.get("execution_unknown") and receipt.get("status") in {"completed", "failed", "cancelled"}:
+                reply = receipt.get("reply") or {}
+                record = self.store.save_handoff({**record, "status": receipt["status"],
+                    "result": {"ok": receipt["status"] == "completed", "status": receipt["status"],
+                               "summary": reply.get("text") or reply.get("error") or reply.get("halt_reason") or "",
+                               "worker_session_id": session, "metadata": {"native_receipt": receipt}}})
+                self.event_bus.publish("*", "agent.handoff.finished", {"handoff": record})
+        return web.json_response(record)
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
@@ -418,42 +660,55 @@ class JaegerGatewayApp:
         text = str(body.get("text") or body.get("input") or "").strip()
         if not text:
             return web.json_response({"error": "Missing turn text"}, status=400)
+        request_id = body.get("request_id")
+        if request_id is not None:
+            request_id = str(request_id).strip() or None
 
-        # Ensure session exists, then reject concurrent turns cleanly.
-        # A second turn while status=running must not append another user
-        # message or spawn a second executor (would race agent_id / status).
-        session = self.store.ensure_session(session_id)
-        if (session or {}).get("status") == "running":
+        try:
+            admitted = self.store.admit_request(session_id, text, request_id=request_id)
+        except RequestConflict as exc:
+            return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
+        except RequestBusy as exc:
+            session = self.store.get_session(session_id) or {}
             return web.json_response(
                 {
-                    "error": "Turn already in progress",
+                    "error": str(exc),
                     "session_id": session_id,
-                    "status": "running",
+                    "status": session.get("status"),
                     "agent_id": self._session_agent_id(session),
                 },
                 status=409,
             )
-        self.store.update_status(session_id, "running")
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
 
-        # Record user message
-        msg_id = self.store.append_message(session_id, "user", text)
-        turn_id = uuid.uuid4().hex
+        turn_id = admitted["turn_id"]
+        rid = admitted["request_id"]
+        if admitted.get("event"):
+            self.event_bus.fanout(admitted["event"])
+        elif not admitted.get("replayed"):
+            self.event_bus.publish(session_id, "turn.start", {
+                "turn_id": turn_id,
+                "request_id": rid,
+                "text": text,
+            })
 
-        # Publish turn.start to all subscribers (Mac App, Web UI, etc.)
-        self.event_bus.publish(session_id, "turn.start", {
-            "turn_id": turn_id,
-            "message_id": msg_id,
-            "text": text,
-        })
+        if admitted.get("accepted") and rid not in self._running_tasks:
+            self._running_tasks[rid] = asyncio.create_task(
+                self._execute_turn(session_id, turn_id, text, request_id=rid)
+            )
 
-        # Start autonomous execution in background task so API responds immediately
-        asyncio.create_task(self._execute_turn(session_id, turn_id, text))
-
-        return web.json_response({
+        result = admitted.get("result") or {}
+        payload = {
             "session_id": session_id,
             "turn_id": turn_id,
-            "status": "running",
-        })
+            "request_id": rid,
+            "status": admitted["status"] if admitted.get("replayed") else "running",
+            "replayed": bool(admitted.get("replayed")),
+        }
+        if result.get("output") is not None:
+            payload["output"] = result.get("output")
+        return web.json_response(payload)
 
     def _session_agent_id(self, session: dict[str, Any] | None) -> str | None:
         """Resolve session agent_id from top-level or metadata (handoff patch)."""
@@ -530,8 +785,8 @@ class JaegerGatewayApp:
     def _si_soul_prompt() -> str | None:
         """Load SOUL.md via load_soul(InstanceLayout) — same root as character.
 
-        Soft-fails to None on any error / empty doc so Ollama soft-fail still
-        answers. Used only on the lead/default Ollama system prompt path.
+        Returns None on an error or empty document. Used only for the
+        explicitly selected lead/default text-mode system prompt.
         """
         try:
             from jaeger_ai.core.instance.instance import InstanceLayout
@@ -548,7 +803,7 @@ class JaegerGatewayApp:
     def _system_prompt_for_agent(agent) -> str:
         """Build the turn system prompt.
 
-        Lead / default Ollama soft-fail turns use readable SI sections:
+        Lead / default text-mode turns use readable SI sections:
         ``[Identity]`` from ``Character.character_block``, then optional
         ``[SOUL]`` from ``load_soul(InstanceLayout)`` (same
         ``resolve_instance_dir`` root). Empty SOUL is omitted. Specialist
@@ -640,11 +895,19 @@ class JaegerGatewayApp:
                 text = str(nested.get("text") or nested.get("reply") or "")
         return text.strip()
 
-    async def _native_lead_turn(self, session_id: str, text: str) -> tuple[str, str] | None:
+    async def _native_lead_turn(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        request_id: str | None = None,
+        mcp_session: str | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> tuple[str, str] | None:
         """Lead turn via existing Hermes MCPClient chat (JAEGERS_MCP_URL / :8811).
 
-        Returns ``(response_text, backend_label)`` on success, or ``None`` so
-        the caller can soft-fail to locked Ollama without crashing :8810.
+        Returns ``(response_text, backend_label)`` on success, or ``None`` when
+        no result was confirmed. An uncertain execution must not be retried here.
         Does not invent a parallel agent runtime — reuses hermes adapters.
 
         Shared MCP chat session: literal ``dispatcher`` — same key Mac Chat /
@@ -653,9 +916,9 @@ class JaegerGatewayApp:
         features/webui/service/session_unify.py, features/dispatcher/store.py
         DISPATCHER). Gateway /v1/sessions UUID stays separate for SSE/store;
         only the MCP chat session_id is shared so one self / one transcript.
+        Specialist child runs pass an isolated ``mcp_session``.
         """
-        # Shared with Mac/WebUI live chat — NOT gateway:{uuid} (that isolated transcripts).
-        mcp_session = "dispatcher"
+        native_session = mcp_session or "dispatcher"
 
         def _blocking_chat() -> tuple[str, str]:
             from urllib.parse import urlparse
@@ -669,24 +932,32 @@ class JaegerGatewayApp:
 
             # Reuse Hermes MCPClient transport. Agentgateway (:8811) exposes
             # the target as ``jaeger_chat``; direct MCP HTTP (:8792) uses ``chat``.
-            args = {"message": text, "session_id": mcp_session}
+            args: dict[str, Any] = {"message": text, "session_id": native_session}
+            if request_id:
+                args["request_id"] = request_id
+            if allowed_tools is not None:
+                args["allowed_tools"] = allowed_tools
             logger.info(
-                "native lead MCP chat session_id=%s (shared Mac/WebUI dispatcher)",
-                mcp_session,
+                "native MCP chat session_id=%s request_id=%s",
+                native_session,
+                request_id,
             )
             client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
             client.initialize()
-            last_err: Exception | None = None
-            result = None
-            for tool_name in ("jaeger_chat", "chat"):
-                try:
-                    result = client._execute_call(tool_name, args)
-                    break
-                except Exception as exc:  # noqa: BLE001 — try next tool name
-                    last_err = exc
-                    continue
-            if result is None:
-                raise last_err or RuntimeError("MCP chat tool unavailable")
+            names = {tool.get("name") for tool in client.list_tools()}
+            tool_name = next((name for name in ("jaeger_chat", "chat") if name in names), None)
+            if tool_name is None:
+                raise RuntimeError("MCP chat tool unavailable")
+            if request_id and self.store.get_request(request_id) is not None:
+                self.store.bind_native(
+                    request_id,
+                    native_run_id=request_id,
+                    native_session=native_session,
+                    status="running",
+                )
+            result = client._execute_call(tool_name, args)
+            if result.get("isError"):
+                raise RuntimeError("MCP chat returned a tool error")
             response_text = JaegerGatewayApp._mcp_chat_text(result)
             if not response_text:
                 raise RuntimeError("MCP chat returned empty content")
@@ -701,9 +972,9 @@ class JaegerGatewayApp:
                 asyncio.to_thread(_blocking_chat),
                 timeout=NATIVE_LEAD_MCP_TIMEOUT_S,
             )
-        except Exception as exc:  # noqa: BLE001 — soft-fail contract
+        except Exception as exc:  # noqa: BLE001 — caller records the unconfirmed turn
             logger.warning(
-                "native lead MCP turn failed (soft-fail to ollama): %s",
+                "native MCP turn has no confirmed result: %s",
                 exc,
             )
             return None
@@ -739,19 +1010,23 @@ class JaegerGatewayApp:
             raise RuntimeError(f"Ollama returned empty content: {body[:500]}")
         return content
 
-    async def _execute_turn(self, session_id: str, turn_id: str, text: str) -> None:
+    async def _execute_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        text: str,
+        *,
+        request_id: str | None = None,
+    ) -> None:
         """Background turn executor: lead via MCP :8811, specialist via Ollama.
 
-        Soft-fail: MCP errors never crash :8810 — lead falls back to locked
-        Ollama with character_block + optional SOUL already in system_prompt.
-        Specialists keep the specialty overlay path only.
+        Final assistant text is persisted before turn.finish is published.
+        Cancellation is explicit; a dropped SSE client does not stop work.
         """
         session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
         system_prompt = self._system_prompt_for_agent(agent)
-        # Surfaces expect agent identity on turn.finish after handoff even if
-        # registry lookup soft-fails — always stamp the three keys when known.
         agent_fields: dict[str, Any] = {}
         if session_agent_id:
             agent_fields["agent_id"] = session_agent_id
@@ -765,21 +1040,45 @@ class JaegerGatewayApp:
                 "display_name": agent.display_name,
             }
         role_s = str(agent_fields.get("role") or "")
+        rid = request_id or turn_id
         try:
+            if rid in self._cancel_requested:
+                self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
+                return
+
             backend = LOCKED_OLLAMA_URL
             model = DEFAULT_OLLAMA_MODEL
             response_text: str | None = None
 
-            if role_s != "specialist":
-                native = await self._native_lead_turn(session_id, text)
+            text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
+            if role_s != "specialist" and not text_only:
+                if rid in self._cancel_requested:
+                    self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
+                    return
+                self.store.bind_native(rid, native_run_id=rid, native_session="dispatcher", status="running")
+                native = await self._native_lead_turn(session_id, text, request_id=rid)
                 if native is not None:
                     response_text, backend = native
                     model = "jaeger-mcp"
 
+            if rid in self._cancel_requested and response_text is None:
+                bound = self.store.get_request(rid)
+                if bound and bound.get("native_run_id"):
+                    raise RuntimeError(
+                        "Cancellation requested after native acceptance; "
+                        "outcome is unconfirmed until reconcile"
+                    )
+                self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native acceptance")
+                return
+
+            if response_text is None and role_s != "specialist" and not text_only:
+                raise RuntimeError("Native agent did not return a confirmed result. Execution may be incomplete; "
+                                   "check native run state before retrying this request.")
+
             if response_text is None:
-                # Specialist overlay, or lead soft-fail → locked Ollama.
                 self.event_bus.publish(session_id, "turn.delta", {
                     "turn_id": turn_id,
+                    "request_id": rid,
                     "delta": "",
                     "model": model,
                     "backend": backend,
@@ -789,30 +1088,211 @@ class JaegerGatewayApp:
             else:
                 self.event_bus.publish(session_id, "turn.delta", {
                     "turn_id": turn_id,
+                    "request_id": rid,
                     "delta": "",
                     "model": model,
                     "backend": backend,
                     **agent_fields,
                 })
 
-            self.store.append_message(session_id, "assistant", response_text)
-            self.store.update_status(session_id, "idle")
-            self.event_bus.publish(session_id, "turn.finish", {
-                "turn_id": turn_id,
+            result = {
                 "output": response_text,
                 "status": "completed",
                 "backend": backend,
                 "model": model,
+                "turn_id": turn_id,
+                "execution_mode": "agent" if str(backend).startswith("mcp") else "text_only",
+                "capabilities": {
+                    "native_tools": str(backend).startswith("mcp"),
+                    "native_memory": str(backend).startswith("mcp"),
+                },
                 **agent_fields,
-            })
+            }
+            self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text)
         except Exception as exc:
             logger.exception("Turn execution failed: %s", exc)
-            self.store.update_status(session_id, "failed")
-            self.event_bus.publish(session_id, "turn.failed", {
-                "turn_id": turn_id,
-                "error": str(exc),
-                **agent_fields,
-            })
+            bound = self.store.get_request(rid) or {}
+            after_native = bool(bound.get("native_run_id"))
+            status = "execution_unknown" if after_native else "failed"
+            receipt = self._native_receipt(bound.get("native_run_id"), bound.get("native_session")) if after_native else None
+            if receipt and receipt.get("execution_unknown") is False and receipt.get("status") in {"failed", "cancelled"}:
+                status = receipt["status"]
+            result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields}
+            if receipt:
+                result["native_receipt"] = receipt
+            self._persist_terminal(rid, session_id, status, result)
+        finally:
+            self._running_tasks.pop(rid, None)
+
+    def _persist_terminal(
+        self,
+        request_id: str,
+        session_id: str,
+        status: str,
+        result: dict[str, Any],
+        *,
+        assistant_text: str | None = None,
+    ) -> None:
+        session_status = "idle" if status in {"completed", "cancelled"} else status
+        try:
+            persisted = self.store.complete_request(
+                request_id,
+                status=status,
+                result=result,
+                assistant_text=assistant_text,
+                session_status=session_status,
+            )
+            if persisted.get("event"):
+                self.event_bus.fanout(persisted["event"])
+        except KeyError:
+            if assistant_text is not None:
+                self.store.append_message(session_id, "assistant", assistant_text)
+            self.store.update_status(session_id, session_status)
+            self.event_bus.publish(session_id, {
+                "completed": "turn.finish", "failed": "turn.failed",
+                "cancelled": "turn.cancelled", "execution_unknown": "turn.unknown",
+            }[status], {**result, "request_id": request_id})
+
+    def _finish_cancelled(
+        self,
+        session_id: str,
+        turn_id: str,
+        request_id: str,
+        agent_fields: dict[str, Any],
+        reason: str,
+    ) -> None:
+        result = {
+            "status": "cancelled",
+            "turn_id": turn_id,
+            "output": None,
+            "error": reason,
+            **agent_fields,
+        }
+        self._persist_terminal(request_id, session_id, "cancelled", result)
+
+    async def handle_get_request(self, request: web.Request) -> web.Response:
+        row = self.store.get_request(request.match_info["request_id"])
+        if row is None or row["session_id"] != request.match_info["id"]:
+            return web.json_response({"error": "Request not found"}, status=404)
+        return web.json_response(row)
+
+    async def handle_cancel_turn(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        request_id = str(body.get("request_id") or body.get("turn_id") or "").strip()
+        if not request_id:
+            return web.json_response({"error": "request_id is required"}, status=400)
+        row = self.store.get_request(request_id) or self.store.get_request_by_turn(request_id)
+        if row is None or row["session_id"] != session_id:
+            return web.json_response({"error": "Request not found"}, status=404)
+        if row["status"] in {"completed", "failed", "cancelled"}:
+            return web.json_response({**row, "cancel_requested": False, "already_terminal": True})
+        self._cancel_requested.add(row["request_id"])
+        updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
+        native_requested = False
+        if updated.get("native_run_id"):
+            native_requested = await self._request_native_cancel(
+                updated["native_run_id"], updated.get("native_session") or "dispatcher"
+            )
+        self.event_bus.publish(session_id, "turn.cancel", {
+            "request_id": updated["request_id"],
+            "turn_id": updated["turn_id"],
+            "native_cancel_requested": native_requested,
+            "native_cancel_confirmed": False,
+        })
+        return web.json_response({
+            **updated,
+            "cancel_requested": True,
+            "native_cancel_requested": native_requested,
+            "cancellation_confirmed": False,
+        })
+
+    async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
+        try:
+            from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+                MCPClient, MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
+            )
+            def _call() -> bool:
+                client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
+                client.initialize()
+                names = {tool.get("name") for tool in client.list_tools()}
+                tool = next((n for n in ("cancel_turn", "jaeger_cancel_turn") if n in names), None)
+                if tool is None:
+                    return False
+                result = client._execute_call(tool, {
+                    "session_id": native_session,
+                    "request_id": native_run_id,
+                })
+                return not result.get("isError")
+            return await asyncio.to_thread(_call)
+        except Exception as exc:  # noqa: BLE001 — cancel request is best-effort
+            logger.warning("native cancel request failed: %s", exc)
+            return False
+
+    async def handle_reconcile(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        request_id = str(body.get("request_id") or "").strip()
+        if not request_id:
+            if self.store.get_session(session_id) is None:
+                return web.json_response({"error": "Session not found"}, status=404)
+            return web.json_response({"error": "request_id is required"}, status=400)
+        row = self.store.get_request(request_id)
+        if row is None or row["session_id"] != session_id:
+            return web.json_response({"error": "Request not found"}, status=404)
+        if row["status"] in {"completed", "failed", "cancelled"}:
+            return web.json_response({**row, "reconciled": False, "already_terminal": True})
+        receipt = self._native_receipt(row.get("native_run_id"), row.get("native_session"))
+        if receipt is None or receipt.get("execution_unknown") is not False:
+            return web.json_response({
+                **row,
+                "reconciled": False,
+                "execution_unknown": True,
+                "error": "Native execution remains unknown; not replaying",
+                "receipt": receipt,
+            }, status=409)
+        status = receipt.get("status")
+        if status not in {"completed", "failed", "cancelled"}:
+            return web.json_response({
+                **row,
+                "reconciled": False,
+                "execution_unknown": True,
+                "error": "Native receipt is not terminal; not replaying",
+                "receipt": receipt,
+            }, status=409)
+        output = ""
+        reply = receipt.get("reply") or {}
+        if isinstance(reply, dict):
+            output = str(reply.get("text") or "")
+        result = {
+            "output": output,
+            "status": status,
+            "backend": "native_receipt",
+            "turn_id": row["turn_id"],
+            "reconciliation": receipt,
+        }
+        persisted = self.store.complete_request(
+            request_id,
+            status=status,
+            result=result,
+            assistant_text=output or None,
+            session_status="idle" if status in {"completed", "cancelled"} else "failed",
+            event_name="turn.reconciled",
+        )
+        if persisted.get("event"):
+            self.event_bus.fanout(persisted["event"])
+        return web.json_response({**persisted, "reconciled": True, "receipt": receipt})
+
+    def _native_receipt(self, native_run_id: str | None, native_session: str | None) -> dict[str, Any] | None:
+        if not native_run_id or not native_session:
+            return None
+        try:
+            from jaeger_ai.core.runtime.native_turns import NativeTurns
+            root = self._instance_root() / "run"
+            return NativeTurns(root, read_only=True).get(native_run_id, native_session)
+        except Exception as exc:  # noqa: BLE001 — reconciliation must not crash
+            logger.warning("native receipt lookup failed: %s", exc)
+            return {"execution_unknown": True, "error": type(exc).__name__}
 
     async def handle_stream_events(self, request: web.Request) -> web.StreamResponse:
         """SSE for session + global (``*``) events.
@@ -837,6 +1317,17 @@ class JaegerGatewayApp:
         """
         session_id = request.match_info["id"]
         last_event_id = int(request.query.get("last_event_id") or 0)
+        window = self.event_bus.replay_window(session_id, last_event_id)
+        if window.get("cursor_expired"):
+            return web.json_response(
+                {
+                    "error": "Resume cursor is no longer retained",
+                    "oldest_event_id": window.get("oldest_event_id"),
+                    "latest_event_id": window.get("latest_event_id"),
+                    "valid_cursor": False,
+                },
+                status=410,
+            )
 
         response = web.StreamResponse(
             status=200,
@@ -861,45 +1352,156 @@ class JaegerGatewayApp:
                 })
                 chunk = f"id: {evt.event_id}\nevent: {evt.event}\ndata: {payload}\n\n"
                 await response.write(chunk.encode("utf-8"))
-        except (asyncio.CancelledError, ConnectionResetError):
+        except (asyncio.CancelledError, ConnectionResetError, ReplayGap):
             pass
 
         return response
 
     async def handle_resolve_approval(self, request: web.Request) -> web.Response:
-        """Resolve a pending approval (handoff stub or tool).
-
-        Unknown ids → clean 404. Second resolve of the same id → clean 404
-        (not idempotent 200). Handoff stub path resolves without crashing
-        even when the Future was never awaited (Surfaces card POST).
-        """
+        """Resolve a pending approval. First writer wins; denial prevents effects."""
         approval_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
         approved = bool(body.get("approved", True))
+        decision = str(body.get("decision") or body.get("choice") or ("once" if approved else "deny"))
+        if decision not in {"once", "deny", "always", "allow", "yes"}:
+            return web.json_response({"error": "Unsupported approval decision"}, status=400)
+        approved = decision != "deny"
 
+        resolved = self.store.resolve_approval(approval_id, approved=approved, decision=decision)
         future = self.pending_approvals.pop(approval_id, None)
-
-        from jaeger_ai.core.agent_registry.handoff import get_handoff_stub
-
-        handoff = get_handoff_stub().resolve_approval(approval_id, approved=approved)
-
-        if future is None and handoff is None:
+        if resolved is None and future is None:
             return web.json_response({"error": "Approval not found"}, status=404)
-
         if future is not None and not future.done():
             future.set_result(approved)
 
-        self.event_bus.publish("*", "approval.resolved", {
-            "approval_id": approval_id,
-            "approved": approved,
-            "handoff": handoff.to_dict() if handoff else None,
-        })
-        return web.json_response({
+        handoff_row = None
+        if resolved is not None:
+            hid = (resolved.get("metadata") or {}).get("handoff_id")
+            if hid:
+                handoff_row = self.store.get_handoff(str(hid))
+            if handoff_row is None:
+                for item in self.store.list_handoffs():
+                    if item.get("approval_id") == approval_id:
+                        handoff_row = item
+                        break
+            if handoff_row is not None:
+                if approved:
+                    handoff_row = self.store.save_handoff({**handoff_row, "status": "approved"})
+                    rid = handoff_row.get("request_id") or handoff_row["id"]
+                    if rid not in self._running_tasks:
+                        self._running_tasks[rid] = asyncio.create_task(
+                            self._execute_handoff(handoff_row["id"])
+                        )
+                else:
+                    handoff_row = self.store.save_handoff({
+                        **handoff_row,
+                        "status": "denied",
+                        "result": {"ok": False, "status": "denied", "summary": "Handoff denied by operator."},
+                    })
+
+        payload = {
             "approval_id": approval_id,
             "resolved": True,
             "approved": approved,
-            "handoff": handoff.to_dict() if handoff else None,
-        })
+            "decision": decision,
+            "handoff": handoff_row,
+        }
+        self.event_bus.publish("*", "approval.resolved", payload)
+        return web.json_response(payload)
+
+    async def _execute_handoff(self, handoff_id: str) -> None:
+        record = self.store.get_handoff(handoff_id)
+        if record is None:
+            return
+        if record["status"] not in {"admitted", "approved"}:
+            return
+        try:
+            self.store.save_handoff({**record, "status": "running"})
+            from jaeger_agent.cognition.runs import InMemoryRunStore
+            from jaeger_agent.delegates.contracts import DelegateRequest
+            from jaeger_agent.delegates.executor import DelegateExecutor, DelegateExecutionError
+            from jaeger_agent.delegates.registry import DelegateRegistry
+            from jaeger_ai.core.agent_registry.specialist_runtime import (
+                NativeSpecialistRuntime, bounded_prompt, DEFAULT_TIMEOUT_S,
+            )
+
+            meta = dict(record.get("metadata") or {})
+            registry = self._registry()
+            target = registry.get_agent(record["to_agent_id"])
+            display = getattr(target, "display_name", None) or record["to_agent_id"]
+            specialty = meta.get("specialty") or (getattr(target, "metadata", None) or {}).get("specialty") or display
+            allowed = meta.get("allowed_tools") or []
+            prompt = bounded_prompt(
+                display_name=str(display),
+                specialty=str(specialty),
+                task=record["task"],
+                permitted_context=str(meta.get("permitted_context") or ""),
+                allowed_tools=frozenset(str(x) for x in allowed) if allowed else None,
+            )
+            timeout = int(meta.get("timeout_seconds") or DEFAULT_TIMEOUT_S)
+            runs = InMemoryRunStore()
+            child = runs.create(
+                f"handoff:{record['id']}",
+                owner_pid=os.getpid(),
+                payload={"handoff_id": record["id"], "to_agent_id": record["to_agent_id"]},
+                parent_run_id=None,
+                relation="delegate",
+            )
+            self.store.save_handoff({**record, "status": "running", "child_run_id": child.id})
+            runtime = NativeSpecialistRuntime(self._specialist_chat)
+            delegates = DelegateRegistry()
+            delegates.register(runtime, replace=True)
+            executor = DelegateExecutor(delegates, runs)
+            request = DelegateRequest(
+                task_id=child.id,
+                prompt=prompt,
+                parent_task_id=str(record.get("parent_run_id") or "") or None,
+                timeout_seconds=max(1, timeout),
+                idempotency_key=str(record.get("request_id") or record["id"]),
+                allowed_tools=frozenset(str(x) for x in allowed),
+                metadata={
+                    "to_agent_id": record["to_agent_id"],
+                    "handoff_id": record["id"],
+                    "from_agent_id": record["from_agent_id"],
+                },
+            )
+            result = await executor.execute(runtime.runtime_id, request)
+            status = "execution_unknown" if result.metadata.get("execution_unknown") else result.status
+            ok = status == "completed"
+            saved = self.store.save_handoff({
+                **record,
+                "status": status,
+                "child_run_id": child.id,
+                "result": {
+                    "ok": ok,
+                    "status": result.status,
+                    "summary": result.summary,
+                    "evidence": list(result.evidence),
+                    "metadata": dict(result.metadata),
+                    "worker_session_id": result.worker_session_id,
+                },
+            })
+            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+        except Exception as exc:  # noqa: BLE001 — specialist failure must not kill the gateway
+            logger.exception("specialist handoff failed: %s", exc)
+            saved = self.store.save_handoff({
+                **record,
+                "status": "failed",
+                "result": {"ok": False, "status": "failed", "summary": f"{type(exc).__name__}: {exc}"},
+            })
+            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+        finally:
+            self._running_tasks.pop(record.get("request_id") or handoff_id, None)
+
+    async def _specialist_chat(self, session_id: str, text: str, *, request_id: str,
+                               allowed_tools: list[str]) -> tuple[str, str]:
+        import hashlib
+        native_id = hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()
+        native = await self._native_lead_turn("specialist", text, mcp_session=session_id,
+                                              request_id=native_id, allowed_tools=allowed_tools)
+        if native is None:
+            raise RuntimeError("Specialist native execution returned no confirmed result")
+        return native
 
 
 def create_gateway_server(
@@ -928,5 +1530,41 @@ async def run_gateway_forever(
         await runner.cleanup()
 
 
-if __name__ == "__main__":
-    asyncio.run(run_gateway_forever())
+def main(argv: list[str] | None = None) -> int:
+    """``jaeger gateway daemon`` — run the Jaeger Gateway on :8810.
+
+    This is the daemon AGENTS.md §3 describes: persistent SQLite session
+    state and SSE multi-client broadcast, with the native app, WebUI and
+    CLI attaching as decoupled clients.
+
+    It had no route for a whole release. ``jaeger gateway`` goes to
+    ``features.gateway``, which manages the *external* Agentgateway on
+    :8811/:8812 — a different process entirely — while
+    ``integrations/hermes_webui/jaeger_agents.py`` and
+    ``scripts/run-jaeger-webui.sh`` both pointed clients at :8810 with
+    nothing listening. Adding the route is what makes those clients real.
+
+    Binds loopback by default; publish to a tailnet rather than widening
+    the bind.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="jaeger gateway daemon",
+        description="Run the Jaeger Gateway daemon (sessions + SSE).",
+    )
+    parser.add_argument("--host", default=DEFAULT_GATEWAY_HOST,
+                        help=f"bind address (default {DEFAULT_GATEWAY_HOST})")
+    parser.add_argument("--port", type=int, default=DEFAULT_GATEWAY_PORT,
+                        help=f"bind port (default {DEFAULT_GATEWAY_PORT})")
+    args = parser.parse_args(argv)
+
+    try:
+        asyncio.run(run_gateway_forever(args.host, args.port))
+    except KeyboardInterrupt:
+        print("\n[jaeger-gateway] stopped", flush=True)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover — process entry point
+    raise SystemExit(main())

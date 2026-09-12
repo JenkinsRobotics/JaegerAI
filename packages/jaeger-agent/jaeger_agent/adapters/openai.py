@@ -467,6 +467,8 @@ class OpenAIAdapter(ProviderAdapter):
             out["tool_calls"] = tool_calls
         if finish_reason:
             out["finish_reason"] = finish_reason
+        if finish_reason == "length" and reasoning and not content and not tool_calls:
+            out["finish_reason"] = "thinking_exhausted"
         return out
 
     # ── capabilities + health ───────────────────────────────────────

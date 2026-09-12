@@ -315,7 +315,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # 13: ``model_picker`` query — Hermes-style two-stage catalog for the
 # windowed ``/model`` overlay (clickable, not a transcript dump).
 # 14: native turn receipts support observation/reconciliation without replay.
-INTEGRATION_CONTRACT_VERSION = 15
+INTEGRATION_CONTRACT_VERSION = 16
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -325,7 +325,8 @@ BRIDGE_QUERIES = (
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
     "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory",
-    "dispatcher_connection", "dispatcher_conversation", "ares_status",
+    "dispatcher_connection", "dispatcher_conversation", "reasoning_status", "background_messages",
+    "first_boot",
 )
 BRIDGE_COMMANDS = (
     "select_character", "make_default", "save_profile", "save_traits",
@@ -337,7 +338,8 @@ BRIDGE_COMMANDS = (
     "set_credential", "delete_credential",
     "configure_model", "configure_fallback_chain",
     "create_session", "clear_session", "delete_session", "reconcile_session_transcript",
-    "create_schedule", "cancel_schedule", "pause_schedule", "resume_schedule",
+    "create_schedule", "cancel_schedule", "pause_schedule", "resume_schedule", "acknowledge_background",
+    "first_boot_answer", "first_boot_complete",
 )
 
 
@@ -710,11 +712,42 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     lay = getattr(boot, "layout", None)
     if what == "contract":
         return _integration_contract()
+    if what == "background_messages":
+        from jaeger_ai.core.sessions import get_store
+        store = get_store(lay)
+        if store is None:
+            raise ValueError("Native conversation storage unavailable")
+        return store.background_messages(limit=int(args.get("limit", 50)))
     if what == 'turn_status':
         from jaeger_ai.core.runtime.native_turns import NativeTurns
         if lay is None:
             raise ValueError('Native instance is unavailable')
         return NativeTurns(lay.run_dir).get(args.get('turn_id'), args.get('session_id'))
+    if what == "first_boot":
+        # OS 1 welcome state. A client asks this BEFORE rendering a
+        # conversation: a COMPLETED identity goes straight to Companion,
+        # anything else renders the turn returned here. ``turn`` is null
+        # once first boot is done, which is the signal to stop asking.
+        from jaeger_ai.core.instance import first_boot as _fb
+        from jaeger_ai.core.instance import first_boot_script as _fbs
+
+        if lay is None:
+            raise ValueError("Native instance is unavailable")
+        _fb.ensure_migrated(lay)
+        turn = _fbs.next_turn(lay)
+        return {
+            "status": _fb.status(lay).value,
+            "schema_version": _fb.SCHEMA_VERSION,
+            "complete": _fb.is_complete(lay),
+            "voice_profile": _fb.voice_profile(lay),
+            "persona_name": _fb.persona_name(lay),
+            "turn": None if turn is None else {
+                "speaker": turn.speaker,
+                "lines": list(turn.lines),
+                "text": turn.text,
+                "awaits_reply": turn.awaits_reply,
+            },
+        }
     if what == "list_skills":
         from jaeger_ai.core.skills.service import list_skills
 
@@ -833,9 +866,9 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             except Exception:  # noqa: BLE001
                 pass
         return _hb.status(lay, interval_minutes=interval, enabled=enabled)
-    if what == "ares_status":
-        from jaeger_ai.core.runtime.heartbeat import get_ares_engine
-        engine = get_ares_engine(lay)
+    if what == "reasoning_status":
+        from jaeger_ai.core.runtime.heartbeat import get_reasoning_engine
+        engine = get_reasoning_engine(lay)
         return engine.status() if engine else {"enabled": False, "status": "unavailable"}
     if what == "cron":
         from jaeger_ai.core.runtime.schedules import list_jobs
@@ -1125,6 +1158,56 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     lay = getattr(boot, "layout", None)
     try:
         import jaeger_ai.personality.character as ch
+        if cmd == "acknowledge_background":
+            from jaeger_ai.core.sessions import get_store
+            store = get_store(lay)
+            if store is None:
+                raise ValueError("Native conversation storage unavailable")
+            store.acknowledge_background(str(args.get("delivery_id") or ""))
+            return True, None
+        if cmd == "first_boot_answer":
+            # Records one answer in the OS 1 welcome. The client sends the
+            # raw reply; interpretation lives in the script module so every
+            # surface (native app, TUI, web) reads the same free text the
+            # same way rather than each inventing its own parser.
+            #
+            # Every transition underneath is idempotent, so a double-tapped
+            # button or a resent frame after an SSE reconnect lands on the
+            # same state instead of advancing twice.
+            from jaeger_ai.core.instance import first_boot as _fb
+            from jaeger_ai.core.instance import first_boot_script as _fbs
+
+            if lay is None:
+                raise ValueError("Native instance is unavailable")
+            question = str(args.get("question") or "").strip().lower()
+            reply = str(args.get("reply") or "")
+
+            if question == "voice":
+                choice = _fbs.parse_voice_answer(reply)
+                if choice is None:
+                    # Ambiguous. Do NOT guess — assigning someone a voice
+                    # they did not pick, on the first thing they ever say,
+                    # is worse than asking again.
+                    return False, "unclear_voice_answer"
+                _fb.record_voice(lay, choice)
+            elif question == "q2":
+                _fb.record_q2(
+                    lay, reply, refused=_fbs.looks_like_refusal(reply),
+                )
+            else:
+                raise ValueError(f"unknown first-boot question {question!r}")
+            return True, None
+        if cmd == "first_boot_complete":
+            # Persona initialization finished; the welcome never shows again.
+            from jaeger_ai.core.instance import first_boot as _fb
+
+            if lay is None:
+                raise ValueError("Native instance is unavailable")
+            name = str(args.get("persona_name") or "").strip()
+            if name:
+                _fb.record_persona_name(lay, name)
+            _fb.complete(lay)
+            return True, None
         if cmd == "select_character":
             # Live override only. Binding (manifest.bound_character) is
             # make_default — an explicit rebind, not a side effect of the pick.
@@ -1604,6 +1687,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                 from jaeger_ai.main import run_for_voice
                 with ctx.workspace_lock:
                     result = run_for_voice(ctx.client, prompt, session_key=session)
+                    _record_background_result(ctx, result, source="cron", session=session)
                 text = result.get("text") or ""
                 _emit(proto, protocol.reply_frame(
                     text, result.get("error"), session,
@@ -1624,7 +1708,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
                     try:
                         from jaeger_ai.main import _pipeline
                         cfg = _pipeline.get("config")
-                        if cfg is not None and cfg.voice.speak_replies:
+                        if cfg is not None and cfg.voice.enabled and cfg.voice.speak_replies:
                             from jaeger_agent.tools.speak import speak
                             speak(text=text)
                     except Exception as exc:  # noqa: BLE001 — TTS is best-effort
@@ -1832,7 +1916,26 @@ def _heartbeat_config(ctx: _Ctx) -> tuple[bool, int, str]:
     return enabled, interval, session
 
 
+def _record_background_result(ctx: _Ctx, result: dict[str, Any], *, source: str, session: str):
+    from jaeger_ai.core.runtime.background_delivery import record_result
+    return record_result(ctx.layout, result, source=source, source_session=session,
+                         display_name=_display_name(ctx.boot) or ctx.layout.root.name)
+
+
 def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
+    # The workspace and tool bindings are process-wide. Do not run background
+    # work in a foreground turn's temporary workspace or splice its messages.
+    if not ctx.workspace_lock.acquire(blocking=False):
+        return
+    try:
+        if ctx.busy:
+            return
+        _idle_once_locked(proto, ctx)
+    finally:
+        ctx.workspace_lock.release()
+
+
+def _idle_once_locked(proto: TextIO, ctx: _Ctx) -> None:
     """One supervisor tick. Never raises into the poll loop."""
     from jaeger_agent.background.board import has_actionable_work
     from jaeger_agent.prompts import AUTO_BOARD_PROMPT
@@ -1899,7 +2002,7 @@ def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
     prompt = None
     if action is Action.COMPLETION:
         prompt = next_completion_turn(layout)
-        session = ctx.last_user_session or "completions"
+        session = "completions"
     elif action is Action.BOARD:
         prompt = AUTO_BOARD_PROMPT
         session = "kanban_idle"
@@ -1907,7 +2010,8 @@ def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
     elif action is Action.HEARTBEAT:
         prompt = hb.build_prompt(layout)
         session = hb_session
-        persona = False
+        # A message initiated by the droid keeps its configured character.
+        persona = True
     if not prompt:
         return
 
@@ -1921,10 +2025,13 @@ def _idle_once(proto: TextIO, ctx: _Ctx) -> None:
             )
         text = result.get("text") or ""
         error = result.get("error")
+        _record_background_result(ctx, result, source=action.value, session=session)
         if action is Action.HEARTBEAT:
             silent = hb.is_silent_ok(text)
-            hb.mark_beat(layout, silent=silent)
-            if silent and not error:
+            failed = bool(error or result.get("halt_reason") or result.get("cancelled")
+                          or result.get("execution_unknown"))
+            hb.mark_beat(layout, silent=silent or failed)
+            if silent and not failed:
                 return
         _emit(proto, protocol.reply_frame(
             text, error, session, elapsed_s=result.get("elapsed_s"),
@@ -2142,11 +2249,15 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                             return provider.request(kind, prompt, options)
                         return ""
 
+                    from jaeger_agent.tool_executor import tool_allowlist
                     with (
+                        tool_allowlist(req.get("allowed_tools")),
                         stream_delta_sink(deltas.feed),
                         stream_reasoning_sink(_emit_reasoning),
                         interaction_request_sink(_request_interaction),
                     ):
+                        from jaeger_ai.core.runtime.native_turns import NativeTurns
+                        NativeTurns(ctx.layout.run_dir).bind_tool_grant(session, req.get("allowed_tools"))
                         result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
                 deltas.flush()
 
@@ -2180,6 +2291,9 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                 else:
                     break
 
+            if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
+                from jaeger_ai.core.runtime.work_ledger import pause_active_ledger
+                pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
             final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
             used, mx = _ctx_usage(session)
             # A delivered cancel request may lose the race with completion.

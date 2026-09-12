@@ -180,3 +180,28 @@ def test_agent_defaults_to_ledger_executor():
     assert agent.run_id
 
 
+
+
+def test_child_allowlist_survives_catalog_injection_and_context_exit():
+    from jaeger_agent.tool_executor import tool_allowlist, active_tool_allowlist
+    executor = _RecordingExecutor()
+    with tool_allowlist([]):
+        agent = JaegerAgent(adapter=_ScriptedAdapter(), tools=[_tool()], tool_executor=executor)
+        with tool_allowlist(['double']):
+            assert active_tool_allowlist() == frozenset()
+    assert active_tool_allowlist() is None
+    # Simulate overflow/catalog refresh accidentally advertising a denied tool.
+    agent._dispatch_by_name['double'] = _tool()
+    agent.run_turn('attempt a denied tool')
+    assert executor.calls == []
+    assert agent.allowed_tools == frozenset()
+    assert any('permission_denied' in str(m.get('content')) for m in agent.messages)
+
+
+def test_child_allowlist_allows_granted_tool():
+    from jaeger_agent.tool_executor import tool_allowlist
+    executor = _RecordingExecutor()
+    with tool_allowlist(['double']):
+        agent = JaegerAgent(adapter=_ScriptedAdapter(), tools=[_tool()], tool_executor=executor)
+    agent.run_turn('double four')
+    assert executor.calls == [('double', {'value': 4})]

@@ -67,3 +67,30 @@ def test_domain_block_includes_a_matching_ledger():
     assert DOMAIN_TAG in block
     assert "Atlas" in block
     work_ledger.reset()
+
+
+def test_dispatcher_world_context_survives_next_turn_without_recording_scaffolding(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from jaeger_agent.memory import sqlite_store
+    from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
+    from jaeger_ai.features.dispatcher import router
+    layout = SimpleNamespace(root=tmp_path, memory_dir=tmp_path / 'memory')
+    layout.memory_dir.mkdir()
+    sqlite_store.bind(layout)
+    agent = SimpleNamespace(messages=[], system_prompt='', context_guard=None)
+    monkeypatch.setattr(router, 'compact_agent', lambda agent: None)
+    try:
+        router.prepare_turn_text(agent, 'Ben approves electrical changes.',
+                                 session_key='dispatcher', ledger=False, domain=False)
+        prepared = router.prepare_turn_text(agent, 'Who approves electrical changes?',
+                                            session_key='dispatcher', ledger=False, domain=False)
+        assert '"subject": "Ben"' in prepared
+        assert agent._world_event.text == 'Who approves electrical changes?'
+        claims = SqliteKnowledgeStore().list_claims(predicate='said')
+        assert len(claims) == 2
+        assert all('World context' not in c.value for c in claims)
+        other = router.prepare_turn_text(agent, 'Who approves electrical changes?',
+                                         session_key='separate', ledger=False, domain=False)
+        assert '"subject": "Ben"' not in other
+    finally:
+        sqlite_store.close()

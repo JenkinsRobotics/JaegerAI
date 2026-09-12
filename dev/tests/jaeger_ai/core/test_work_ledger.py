@@ -276,3 +276,20 @@ def test_create_update_complete_emit_live_progress():
     assert events[-1]["phase"] == "done"
     assert events[-1]["args"]["completed"] is True
     assert events[-1]["args"]["state"] == "COMPLETED"
+
+
+def test_paused_work_does_not_reappear_in_next_conversation_turn(monkeypatch, tmp_path):
+    from jaeger_ai.core.runtime import work_ledger as module
+    monkeypatch.setattr(module, '_layout_run_dir', lambda: tmp_path)
+    module.bind_session('dispatcher')
+    created = work_ledger(action='create', task_name='cancelled benchmark', total_items=3)
+    identity = created['ledger']['task_id']
+    module.pause_active_ledger('interrupted')
+    assert active_ledger() is None
+    module.bind_session('other')
+    module.bind_session('dispatcher')
+    assert active_ledger() is None
+    saved = module.get_ledger(identity)
+    assert saved is not None and not saved.completed
+    pointer = json.loads(module._session_pointer('dispatcher').read_text())
+    assert pointer['paused_task_id'] == identity and pointer['task_id'] is None

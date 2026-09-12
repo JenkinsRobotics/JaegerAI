@@ -114,13 +114,13 @@ class TestGatewayAgentsAPI(AioHTTPTestCase):
         return self.gateway_app.app
 
     async def tearDownAsync(self):
+        await super().tearDownAsync()
         import os
         import shutil
 
         os.environ.pop("JAEGER_STATE_DIR", None)
         if hasattr(self, "state_root") and self.state_root.exists():
             shutil.rmtree(self.state_root, ignore_errors=True)
-        await super().tearDownAsync()
 
     async def test_agents_catalog_create_and_activate(self):
         resp = await self.client.request("GET", "/health")
@@ -199,16 +199,21 @@ class TestGatewayHandoffAPI(AioHTTPTestCase):
         os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
         self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
         self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+
+        async def _fake_specialist(session_id, text):
+            return f"SPECIALIST:{text[:40]}", "mcp:test"
+
+        self.gateway_app._specialist_chat = _fake_specialist  # type: ignore[method-assign]
         return self.gateway_app.app
 
     async def tearDownAsync(self):
+        await super().tearDownAsync()
         import os
         import shutil
 
         os.environ.pop("JAEGER_STATE_DIR", None)
         if hasattr(self, "state_root") and self.state_root.exists():
             shutil.rmtree(self.state_root, ignore_errors=True)
-        await super().tearDownAsync()
 
     async def test_handoff_creates_approval_and_resolves(self):
         # Ensure specialists exist via catalog
@@ -342,13 +347,13 @@ class TestGatewaySessionHandoff(AioHTTPTestCase):
         return self.gateway_app.app
 
     async def tearDownAsync(self):
+        await super().tearDownAsync()
         import os
         import shutil
 
         os.environ.pop("JAEGER_STATE_DIR", None)
         if hasattr(self, "state_root") and self.state_root.exists():
             shutil.rmtree(self.state_root, ignore_errors=True)
-        await super().tearDownAsync()
 
     async def test_session_handoff_and_role_filter(self):
         resp = await self.client.request("GET", "/v1/agents")
@@ -777,13 +782,13 @@ class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
         return self.gateway_app.app
 
     async def tearDownAsync(self):
+        await super().tearDownAsync()
         import os
         import shutil
 
         os.environ.pop("JAEGER_STATE_DIR", None)
         if hasattr(self, "state_root") and self.state_root.exists():
             shutil.rmtree(self.state_root, ignore_errors=True)
-        await super().tearDownAsync()
 
     async def test_execute_turn_publishes_agent_on_finish(self):
         # Seed standing specialists via registry list (ensure_standing runs on get).

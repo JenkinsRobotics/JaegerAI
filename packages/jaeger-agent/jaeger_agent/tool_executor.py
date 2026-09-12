@@ -27,6 +27,48 @@ logger = logging.getLogger(__name__)
 # crash must not re-send; LedgerToolExecutor routes them through once().
 AUTHORITATIVE_SIDE_EFFECTS = frozenset({"external"})
 
+_allowed_tools: ContextVar[frozenset[str] | None] = ContextVar("allowed_tools", default=None)
+
+
+def active_tool_allowlist() -> frozenset[str] | None:
+    return _allowed_tools.get()
+
+
+@contextmanager
+def tool_allowlist(names: list[str] | None):
+    """Host-granted tool names, inherited and intersected by child execution."""
+    if names is not None and (not isinstance(names, list) or any(
+        not isinstance(name, str) or not name.strip() for name in names
+    )):
+        raise ValueError("allowed_tools must be a list of nonempty tool names")
+    granted = None if names is None else frozenset(names)
+    inherited = _allowed_tools.get()
+    if inherited is not None:
+        granted = inherited if granted is None else inherited & granted
+    token = _allowed_tools.set(granted)
+    try:
+        yield
+    finally:
+        _allowed_tools.reset(token)
+
+
+class AllowlistToolExecutor:
+    """Enforce the grant even if catalog refresh exposes another tool."""
+
+    def __init__(self, inner: ToolExecutor, allowed: frozenset[str]):
+        self._inner, self.allowed = inner, allowed
+
+    def bind_run(self, run_id):
+        binder = getattr(self._inner, "bind_run", None)
+        if binder:
+            binder(run_id)
+
+    def execute(self, tool, arguments):
+        if tool.name not in self.allowed:
+            return {"ok": False, "error": "Tool is outside the child grant",
+                    "error_type": "permission_denied", "retryable": False}
+        return self._inner.execute(tool, arguments)
+
 # ContextVar for worker thread and sub-agent post-tool hook suppression (from Hermes model_tools.py)
 _post_tool_call_hook_suppressed: ContextVar[bool] = ContextVar(
     "post_tool_call_hook_suppressed", default=False

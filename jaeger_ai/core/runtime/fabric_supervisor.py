@@ -176,11 +176,32 @@ def _container_http(name: str, port: int, path: str = "/health") -> bool:
 
 def _restart_honcho_on_rack() -> bool:
     """Restart persistent Honcho containers over LAN-addressed rack SSH."""
-    return _run([
+    ssh = [
         "/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
-        "10.15.0.239", "docker", "start", "honcho-db", "honcho-redis",
-        "honcho-api", "honcho-deriver",
-    ], timeout=60)
+        "10.15.0.239",
+    ]
+    containers = ["honcho-db", "honcho-redis", "honcho-api", "honcho-deriver"]
+    if _run([*ssh, "docker", "start", *containers], timeout=30):
+        return True
+    # This configured rack is Windows. A direct Desktop launch belongs to
+    # the OpenSSH job and can die when SSH exits. CIM creates an independent
+    # process. No new scheduled task, credentials, firewall rule or container.
+    import base64
+    script = '''$ErrorActionPreference='Stop'
+$docker=(Get-Command docker).Source
+$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=('"'+$docker+'" desktop start')}
+if ($result.ReturnValue -ne 0) { exit 1 }
+for ($i=0; $i -lt 15; $i++) {
+  Start-Sleep -Seconds 2
+  try {
+    docker start honcho-db honcho-redis honcho-api honcho-deriver 2>$null
+    if ($LASTEXITCODE -eq 0) { exit 0 }
+  } catch { }
+}
+exit 1
+'''
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    return _run([*ssh, "powershell -NoProfile -EncodedCommand " + encoded], timeout=45)
 
 
 def components() -> tuple[Component, ...]:

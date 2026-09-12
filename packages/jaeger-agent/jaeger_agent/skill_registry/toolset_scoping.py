@@ -125,7 +125,7 @@ CORE: frozenset[str] = frozenset({
     # granular verbs (forget / list_facts / search_memory) load via the
     # ``memory_granular`` toolset. ``recall`` is CORE because scoped runs
     # showed the umbrella alone lost the plain "what did I say" cases.
-    "memory", "recall",
+    "memory", "recall", "record_insight", "recall_insight",
     # Tasks + board. Individual board verbs (a local model routes over
     # distinct named tools better than one ``action=`` umbrella); the
     # common two are CORE, the rest load via the ``board`` toolset.
@@ -300,7 +300,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
-    "delegates": frozenset({"list_delegate_runtimes"}),
+    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result"}),
+    "finance": frozenset({"finance_summary", "finance_audit", "finance_transactions"}),
     "missions": frozenset({
         "mission_create", "mission_list", "mission_status", "mission_transition",
     }),
@@ -356,7 +357,8 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "system_control": "volume, brightness, dark mode, do-not-disturb, prevent-sleep",
     "media_control": "control + read Music.app/Spotify playback",
     "ocr": "extract text from an image or PDF (Vision framework)",
-    "delegates": "inspect external Claude, Codex, Grok, Hermes, OpenClaw, and local runtimes",
+    "delegates": "inspect runtimes and request standing specialist handoffs",
+    "finance": "inspect financial summaries, audit results and transactions",
     "missions": "create and track durable missions, goals, and plan steps",
     "history_import": "scan and import ARES and external-agent transcripts",
     "cost_tracking": "configure and inspect runtime usage and cost budgets",

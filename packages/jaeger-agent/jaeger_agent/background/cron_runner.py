@@ -15,6 +15,7 @@ needs to schedule it manually.
 from __future__ import annotations
 
 import threading
+import inspect
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -32,6 +33,15 @@ class CronRunner(threading.Thread):
     ) -> None:
         super().__init__(daemon=True, name="jaeger-cron")
         self._callback = callback
+        # Adapt the callable before execution. A TypeError raised after an
+        # effect must never cause the scheduled task to run a second time.
+        try:
+            inspect.signature(callback).bind("prompt", session_key="cron:probe")
+            self._callback_has_session = True
+        except TypeError:
+            self._callback_has_session = False
+        except (ValueError, AttributeError):
+            self._callback_has_session = True
         self._poll_s = max(1.0, float(poll_s))
         self._lock = llm_lock
         self._stop_event = threading.Event()
@@ -76,9 +86,9 @@ class CronRunner(threading.Thread):
 
     def _invoke(self, prompt: str, schedule_name: str) -> None:
         key = f"cron:{schedule_name}"
-        try:
+        if self._callback_has_session:
             self._callback(prompt, session_key=key)
-        except TypeError:
+        else:
             self._callback(prompt)
 
     def _maybe_run_housekeeping(self) -> None:

@@ -26,8 +26,8 @@ declarative.
 
 Usage::
 
-    from jaeger_os.skill_tree import SkillTreeRegistry
-    from jaeger_os.skill_tree.seed import seed_default_tree
+    from jaeger_ai.skill_tree import SkillTreeRegistry
+    from jaeger_ai.skill_tree.seed import seed_default_tree
 
     registry = SkillTreeRegistry.for_instance(layout)
     seed_default_tree(registry)

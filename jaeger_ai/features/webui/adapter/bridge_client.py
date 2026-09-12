@@ -63,10 +63,12 @@ class BridgeClient:
              on_event: Callable[[dict[str, Any]], None] | None = None,
              on_request: Callable[[dict[str, Any]], str] | None = None,
              *, turn_id: str | None = None, workspace: str | None = None,
-             model: str | None = None, provider: str | None = None) -> dict[str, Any]:
+             model: str | None = None, provider: str | None = None,
+             allowed_tools: list[str] | None = None) -> dict[str, Any]:
         with self._connection() as (_sock, rx):
             self._ready(rx)
             self._write(rx, {"op": "send", "text": text, "session": session,
+                             **({"allowed_tools": allowed_tools} if allowed_tools is not None else {}),
                              **({"turn_id": turn_id} if turn_id else {}),
                              **({"workspace": workspace} if workspace else {}),
                              **({"model": model} if model else {}),
@@ -78,6 +80,7 @@ class BridgeClient:
                 kind = frame.get("type")
                 if kind == "reply":
                     return {"text": frame.get("text") or "", "error": frame.get("error"),
+                            **({key: frame[key] for key in ("halt_reason", "halt_code") if key in frame}),
                             **({"execution_unknown": frame["execution_unknown"] is not False}
                                if "execution_unknown" in frame else {}),
                             **({"cancelled": bool(frame["cancelled"])} if "cancelled" in frame else {})}

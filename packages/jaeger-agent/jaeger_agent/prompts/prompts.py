@@ -25,7 +25,7 @@ from .rules import RUNTIME_TOOLSET_SCOPED, RUNTIME_TOOLSET_UNSCOPED  # noqa: F40
 
 def build_system_prompt(layout: InstanceLayout) -> str:
     """Assemble the live-agent system prompt (``mode="agent"``). New code
-    should call :func:`jaeger_os.agent.prompts.assemble_prompt` directly with
+    should call :func:`jaeger_agent.prompts.assemble_prompt` directly with
     an explicit mode."""
     return _assemble(layout, mode="agent")
 

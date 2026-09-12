@@ -8,7 +8,7 @@ See docs/kanban_design.md. One board per instance, persisted at
 
 The board is the single store behind both ad-hoc task planning and Deep
 Think — a Deep Think job is a card with ``source="deepthink"`` (see
-:class:`jaeger_os.agent.background.deep_think.DeepThinkQueue`, which is a thin view
+:class:`jaeger_agent.background.deep_think.DeepThinkQueue`, which is a thin view
 over this board).
 
 This module is the pure data layer — no dependency on jaeger_os.main,

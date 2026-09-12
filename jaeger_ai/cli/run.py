@@ -27,7 +27,7 @@ from jaeger_ai.main import main as _main
 if __name__ == "__main__":
     raise SystemExit(_main())
 else:
-    # Importing ``jaeger_os.cli.run`` (rather than executing it as a script)
+    # Importing ``jaeger_ai.cli.run`` (rather than executing it as a script)
     # exposes the same name ``main`` callers may have expected from the
     # old module. Re-export is one line — keeps the surface tidy.
     main = _main  # noqa: F401

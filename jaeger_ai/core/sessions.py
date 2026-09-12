@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS session_tombstones (
     id         TEXT PRIMARY KEY,
     deleted_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS background_outbox (
+    delivery_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    acknowledged_at REAL
+);
 """
 
 SESSION_CONTRACT_VERSION = 4
@@ -346,6 +353,60 @@ class SessionStore:
                     (model or None, provider or None, session_id),
                 )
 
+    def record_background(self, delivery_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Commit an unsolicited reply and its delivery obligation together.
+
+        A transport acknowledgement never deletes the transcript. Retrying the
+        same identity cannot append another message or change its contents.
+        """
+        from jaeger_ai.core.redaction import redact_value
+
+        session = canonical_session_id(payload["session_id"])
+        if not delivery_id or len(delivery_id) > 128 or not payload.get("text"):
+            raise ValueError("Background delivery requires an identity and text")
+        clean = redact_value({**payload, "delivery_id": delivery_id})
+        encoded = json.dumps(clean, sort_keys=True, ensure_ascii=False)
+        now = time.time()
+        with self._lock, self._conn:
+            prior = self._conn.execute(
+                "SELECT payload FROM background_outbox WHERE delivery_id=?", (delivery_id,)
+            ).fetchone()
+            if prior:
+                if prior[0] != encoded:
+                    raise ValueError("Background delivery identity conflicts with saved result")
+                return json.loads(prior[0])
+            if self._is_tombstoned_locked(session):
+                raise ValueError("Background destination was deleted")
+            self._conn.execute(
+                "INSERT OR IGNORE INTO sessions(id, title, created_at, last_active, origin, profile) "
+                "VALUES(?, 'Jaeger', ?, ?, 'worker', ?)",
+                (session, now, now, clean["profile"]))
+            self._conn.execute(
+                "INSERT INTO background_outbox VALUES (?, ?, ?, ?, NULL)",
+                (delivery_id, session, encoded, now))
+            self._conn.execute(
+                "INSERT INTO messages(session_id, role, text, ts, metadata) VALUES(?, 'assistant', ?, ?, ?)",
+                (session, clean["text"], now, encoded))
+            self._conn.execute("UPDATE sessions SET last_active=? WHERE id=?", (now, session))
+        return clean
+
+    def background_messages(self, *, pending: bool = True, limit: int = 50) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT b.payload FROM background_outbox b JOIN sessions s ON s.id=b.session_id "
+                + ("WHERE b.acknowledged_at IS NULL " if pending else "")
+                + "ORDER BY b.created_at " + ("ASC" if pending else "DESC") + " LIMIT ?",
+                (max(1, min(int(limit), 100)),)).fetchall()
+            return [json.loads(row[0]) for row in rows]
+
+    def acknowledge_background(self, delivery_id: str) -> None:
+        with self._lock, self._conn:
+            changed = self._conn.execute(
+                "UPDATE background_outbox SET acknowledged_at=COALESCE(acknowledged_at, ?) WHERE delivery_id=?",
+                (time.time(), delivery_id))
+            if not changed.rowcount:
+                raise ValueError("Unknown background delivery")
+
     def import_transcript(
         self,
         session_id: str,
@@ -601,6 +662,7 @@ class SessionStore:
             ).fetchone() is not None
             if not exists:
                 return False
+            self._conn.execute("DELETE FROM background_outbox WHERE session_id=?", (session_id,))
             self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
             self._conn.execute(
                 "UPDATE sessions SET preview=NULL, execution_state='idle', "
@@ -708,6 +770,7 @@ class SessionStore:
             exists = self._conn.execute(
                 "SELECT 1 FROM sessions WHERE id=?", (session_id,),
             ).fetchone() is not None
+            self._conn.execute("DELETE FROM background_outbox WHERE session_id=?", (session_id,))
             self._conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
             self._conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
             self._conn.execute(

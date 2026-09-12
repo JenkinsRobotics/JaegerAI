@@ -667,3 +667,24 @@ def test_telemetry_failure_never_breaks_the_turn(monkeypatch):
         {"role": "assistant", "content": "it is noon"},
     ])
     assert JaegerAgent(adapter=adapter).run_turn("what time is it?") == "it is noon"
+
+
+def test_error_only_results_are_failures_and_preserve_partial_summary():
+    from jaeger_agent.loop.callbacks import AgentCallbacks
+    observed = []
+    @register_tool('lookup', 'Search unavailable.', _SmallArgs)
+    def fail(value='x'):
+        return {'error': 'service offline'}
+    adapter = _ScriptedAdapter([
+        {'role': 'assistant', 'content': None, 'tool_calls': [
+            {'id': str(i), 'name': 'lookup', 'arguments': {'value': str(i)}}]}
+        for i in range(2)
+    ] + [{'role': 'assistant', 'content': 'The lookup failed; evidence is incomplete.'}])
+    agent = JaegerAgent(adapter=adapter, callbacks=AgentCallbacks(
+        tool_done=lambda name, args, result, ok, error, elapsed: observed.append((ok, error))))
+    result = agent.run_turn('research')
+    assert result == 'The lookup failed; evidence is incomplete.'
+    assert observed == [(False, 'service offline')] * 2
+    assert adapter.last_tools_count == 0
+    assert 'failure 2 times' in agent.last_halt_reason
+    assert 'lookup' not in agent._turn_tool_successes

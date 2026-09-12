@@ -9,8 +9,8 @@ anywhere on PATH.
 It mirrors the historical wrapper routing 1:1: each subcommand re-execs
 ``python -m <module>`` (via :func:`os.execv`, exactly like the wrapper's
 ``exec``), so command behaviour is byte-identical to before — only the dispatch
-moved. Management subcommands go to :mod:`jaeger_os.cli`; everything else runs
-the agent via :mod:`jaeger_os.cli.run`.
+moved. Management subcommands go to :mod:`jaeger_ai.cli`; everything else runs
+the agent via :mod:`jaeger_ai.cli.run`.
 
 :func:`_route` is PURE (argv -> the argv to exec), so the whole routing table is
 unit-testable without spawning anything; :func:`main` just execs what it returns.
@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-# Operator-console subcommands handled by jaeger_os.cli (argparse subparsers).
+# Operator-console subcommands handled by jaeger_ai.cli (argparse subparsers).
 # (0.9.6: "instances" removed — `jaeger agent` is the one management
 # surface; it rides the run path's verb dispatch, not this console.)
 _CONSOLE = (
@@ -39,6 +39,11 @@ def _route(argv: list[str], py: str) -> list[str]:
     rest = argv[1:]
     if cmd in _CONSOLE:
         return [py, "-m", "jaeger_ai.cli", *argv]
+    if cmd in ("onboard", "onboarding") and rest[:1] and rest[0] in ("status", "reset"):
+        # `jaeger onboarding reset|status` administers OS 1 first-boot state.
+        # Checked BEFORE the setup branch below, which would otherwise send
+        # "reset" into the instance-creation wizard as a positional name.
+        return [py, "-m", "jaeger_ai.cli.onboarding_cmd", *rest]
     if cmd in ("setup", "onboard", "onboarding"):
         # OpenClaw-parity terminal-first onboarding/setup wizard:
         # `jaeger setup` or `jaeger onboard` runs the interactive terminal wizard.
@@ -53,6 +58,13 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.interfaces.mcp_server", *rest]
     if cmd == "a2a":
         return [py, "-m", "jaeger_ai.interfaces.a2a_server", *rest]
+    if cmd == "gateway" and rest[:1] == ["daemon"]:
+        # The Jaeger Gateway daemon (:8810) — sessions + SSE, AGENTS.md §3.
+        # Checked BEFORE the Agentgateway branch below: `jaeger gateway`
+        # manages the EXTERNAL Agentgateway (:8811/:8812), which is a
+        # different process. Without this route the :8810 daemon had no
+        # launcher at all while the WebUI integrations pointed clients at it.
+        return [py, "-m", "jaeger_ai.core.gateway.server", *rest[1:]]
     if cmd == "gateway":
         return [py, "-m", "jaeger_ai.features.gateway", *rest]
     if cmd == "hermes-webui-adapter":

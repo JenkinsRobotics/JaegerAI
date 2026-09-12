@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from functools import wraps
 from typing import Any
 from jaeger_agent.memory import memory as _mem
 from jaeger_agent.memory import sqlite_store
@@ -16,6 +17,15 @@ from jaeger_agent.memory.models import (
     Relationship,
     utc_now_iso,
 )
+
+
+def _atomic(method):
+    """All cognitive writers share the store lock, including single-row writes."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.transaction():
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 def _safe_json_loads(val: Any, default: Any) -> Any:
@@ -105,6 +115,30 @@ def _rel_from_row(row: Any) -> Relationship:
 class SqliteKnowledgeStore:
     """Delegates to the bound instance ``state.db`` (schema v5+)."""
 
+    def __init__(self) -> None:
+        from contextvars import ContextVar
+        self._in_transaction = ContextVar("knowledge_transaction", default=False)
+
+    def transaction(self):
+        """Atomically admit an event and its evidence/graph records."""
+        from contextlib import contextmanager
+        @contextmanager
+        def transaction():
+            if self._in_transaction.get():
+                yield self
+                return
+            with sqlite_store.writer():
+                token = self._in_transaction.set(True)
+                try:
+                    yield self
+                finally:
+                    self._in_transaction.reset(token)
+        return transaction()
+
+    def _commit(self, conn) -> None:
+        if not self._in_transaction.get():
+            conn.commit()
+
     # ── MemoryStore implementation ─────────────────────────────────
 
     def remember(
@@ -136,6 +170,7 @@ class SqliteKnowledgeStore:
 
     # ── ClaimStore implementation ──────────────────────────────────
 
+    @_atomic
     def add_claim(self, claim: Claim) -> Claim:
         conn = sqlite_store.connection()
         conn.execute(
@@ -162,7 +197,7 @@ class SqliteKnowledgeStore:
                 claim.updated_at,
             ),
         )
-        conn.commit()
+        self._commit(conn)
         return claim
 
     def get_claim(self, claim_id: str) -> Claim | None:
@@ -204,6 +239,7 @@ class SqliteKnowledgeStore:
         rows = conn.execute(query, params).fetchall()
         return [_claim_from_row(r) for r in rows]
 
+    @_atomic
     def invalidate_claim(self, claim_id: str) -> bool:
         conn = sqlite_store.connection()
         now = utc_now_iso()
@@ -211,11 +247,12 @@ class SqliteKnowledgeStore:
             "UPDATE claims SET status = 'invalid', updated_at = ? WHERE id = ?",
             (now, claim_id),
         )
-        conn.commit()
+        self._commit(conn)
         return cur.rowcount > 0
 
     # ── EvidenceStore implementation ───────────────────────────────
 
+    @_atomic
     def add_evidence(self, evidence: Evidence) -> Evidence:
         conn = sqlite_store.connection()
         conn.execute(
@@ -235,7 +272,7 @@ class SqliteKnowledgeStore:
                 evidence.created_at,
             ),
         )
-        conn.commit()
+        self._commit(conn)
         return evidence
 
     def get_evidence(self, evidence_id: str) -> Evidence | None:
@@ -270,7 +307,8 @@ class SqliteKnowledgeStore:
     # ── BeliefStore implementation ─────────────────────────────────
 
     def save_belief(self, belief: Belief) -> Belief:
-        with sqlite_store.writer() as conn:
+        with self.transaction():
+            conn = sqlite_store.connection()
             self._write_belief(conn, belief)
         return belief
 
@@ -344,6 +382,7 @@ class SqliteKnowledgeStore:
         rows = conn.execute(query, params).fetchall()
         return [_belief_from_row(r) for r in rows]
 
+    @_atomic
     def supersede_belief(self, old_belief_id: str, new_belief: Belief) -> Belief:
         now = utc_now_iso()
         conn = sqlite_store.connection()
@@ -352,9 +391,10 @@ class SqliteKnowledgeStore:
             (new_belief.id, now, old_belief_id),
         )
         self.save_belief(new_belief)
-        conn.commit()
+        self._commit(conn)
         return new_belief
 
+    @_atomic
     def retract_belief(self, belief_id: str) -> bool:
         now = utc_now_iso()
         conn = sqlite_store.connection()
@@ -362,7 +402,7 @@ class SqliteKnowledgeStore:
             "UPDATE beliefs SET status = 'retracted', updated_at = ? WHERE id = ?",
             (now, belief_id),
         )
-        conn.commit()
+        self._commit(conn)
         return cur.rowcount > 0
 
     def rebuild_beliefs_from_claims(self, *, subject: str | None = None) -> list[Belief]:
@@ -379,7 +419,8 @@ class SqliteKnowledgeStore:
             params.append(subject)
         query += ' ORDER BY created_at, rowid'
         out = []
-        with sqlite_store.writer() as conn:
+        with self.transaction():
+            conn = sqlite_store.connection()
             rebuilt = revise_all(_claim_from_row(row) for row in conn.execute(query, params))
             for belief in rebuilt:
                 row = conn.execute(
@@ -402,6 +443,7 @@ class SqliteKnowledgeStore:
 
     # ── EntityStore implementation ─────────────────────────────────
 
+    @_atomic
     def save_entity(self, entity: Entity) -> Entity:
         conn = sqlite_store.connection()
         conn.execute(
@@ -420,7 +462,7 @@ class SqliteKnowledgeStore:
                 entity.updated_at,
             ),
         )
-        conn.commit()
+        self._commit(conn)
         return entity
 
     def get_entity(self, entity_id: str) -> Entity | None:
@@ -451,6 +493,7 @@ class SqliteKnowledgeStore:
             ).fetchall()
         return [_entity_from_row(r) for r in rows]
 
+    @_atomic
     def save_relationship(self, relationship: Relationship) -> Relationship:
         conn = sqlite_store.connection()
         conn.execute(
@@ -474,7 +517,7 @@ class SqliteKnowledgeStore:
                 relationship.updated_at,
             ),
         )
-        conn.commit()
+        self._commit(conn)
         return relationship
 
     def list_relationships(

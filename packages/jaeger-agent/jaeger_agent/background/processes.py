@@ -267,7 +267,7 @@ def consume_pending_completions(layout: Any) -> list[dict[str, Any]]:
     that want fuller detail can follow up with ``process_status``.
 
     Used by the agent's heartbeat / status surface — see
-    :mod:`jaeger_os.agent.tools.background.pending_background`. Idempotent
+    :mod:`jaeger_agent.tools.background.pending_background`. Idempotent
     on an empty queue."""
     root = _processes_root(layout)
     if not root.is_dir():

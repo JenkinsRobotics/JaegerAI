@@ -133,6 +133,40 @@ class MCPClient:
                 results = self._parse_sse(data)
                 return results[0] if results else {}
 
+    def list_tools(self) -> list[dict]:
+        """Discover names without executing a possibly stateful chat request."""
+        with self._lock:
+            tools = []
+            cursor = None
+            seen = set()
+            for _ in range(32):
+                request_id = self._next_id()
+                body = json.dumps({
+                    "jsonrpc": "2.0", "id": request_id, "method": "tools/list",
+                    "params": {"cursor": cursor} if cursor else {},
+                }).encode("utf-8")
+                req = urllib.request.Request(self.base_url, data=body, headers=self._headers(), method="POST")
+                with urllib.request.urlopen(req, timeout=15.0) as resp:
+                    data = resp.read(1_048_577)
+                if len(data) > 1_048_576:
+                    raise RuntimeError("MCP catalog exceeds size limit")
+                messages = self._parse_sse(data)
+                reply = next((m for m in messages if m.get("id") == request_id), None)
+                if reply is None or reply.get("error"):
+                    raise RuntimeError("MCP tool discovery failed")
+                result = reply.get("result", {})
+                page = result.get("tools")
+                if not isinstance(page, list) or not all(isinstance(t, dict) for t in page):
+                    raise RuntimeError("Invalid MCP tool catalog")
+                tools.extend(page)
+                cursor = result.get("nextCursor")
+                if not cursor:
+                    return tools
+                if not isinstance(cursor, str) or cursor in seen:
+                    raise RuntimeError("Invalid MCP catalog cursor")
+                seen.add(cursor)
+            raise RuntimeError("MCP catalog exceeds page limit")
+
     def _execute_call(self, name: str, arguments: dict[str, Any]) -> dict:
         body = json.dumps({
             "jsonrpc": "2.0", "id": self._next_id(), "method": "tools/call",

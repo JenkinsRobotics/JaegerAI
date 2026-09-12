@@ -11,7 +11,7 @@ fixed here:
      foreign chat template AND a foreign tool dialect — drift city.
      Now the prompt renders through the model's OWN chat template
      (``tokenizer.apply_chat_template``) and tools are presented in
-     the model's native dialect via :mod:`jaeger_os.agent.dialects`
+     the model's native dialect via :mod:`jaeger_agent.dialects`
      (``detect_family`` + ``render_tools_for`` + ``textify_tool_history``
      — the same machinery that fixed the llama.cpp path).
 

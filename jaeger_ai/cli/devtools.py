@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""jaeger_os.cli.devtools — the developer toolbox behind `jaeger --dev`.
+"""jaeger_ai.cli.devtools — the developer toolbox behind `jaeger --dev`.
 
 Replaces the old repo-root launch.py (removed 2026-07-05): the windowed
 dev shell is the repo's JaegerAI.app run in the dev STATE (`jaeger --dev`

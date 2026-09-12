@@ -28,6 +28,20 @@ class InMemoryKnowledgeStore:
         self._entities: dict[str, Entity] = {}
         self._relationships: dict[str, Relationship] = {}
 
+    def transaction(self):
+        from contextlib import contextmanager
+        from copy import deepcopy
+        @contextmanager
+        def transaction():
+            snapshot = deepcopy(self.__dict__)
+            try:
+                yield self
+            except Exception:
+                self.__dict__.clear()
+                self.__dict__.update(snapshot)
+                raise
+        return transaction()
+
     # ── MemoryStore implementation ─────────────────────────────────
 
     def remember(

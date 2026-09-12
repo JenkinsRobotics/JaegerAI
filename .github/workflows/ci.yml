@@ -71,7 +71,7 @@ jobs:
           # though it is only a build dependency of Jaeger.
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
-            root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e . pytest ;;
+            root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e '.[test]' ;;
             agent) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent pytest ;;
             os) python -m pip install -e packages/jaeger-os pytest ;;
             kokoro) python -m pip install -e packages/jaeger-os -e packages/jaeger-kokoro-tts pytest ;;

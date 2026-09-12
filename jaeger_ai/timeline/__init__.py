@@ -4,7 +4,7 @@ See ``dev/docs/avatar/0.5.0_timeline_schema.md`` for the schema design.
 
 Public surface:
 
-    from jaeger_os.timeline import (
+    from jaeger_ai.timeline import (
         Timeline, TimelineTrack, TimelineClip,
         load_timeline, save_timeline,
     )

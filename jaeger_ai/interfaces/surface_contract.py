@@ -24,6 +24,13 @@ SWIFT_QUERY_SUPPORT = {
     "dispatcher_memory": "bridge_only",
     "dispatcher_connection": "dedicated",
     "dispatcher_conversation": "bridge_only",
+    # Protocol-complete, no native consumer yet: the app reads neither the
+    # reasoning engine's status nor the dispatcher's background message feed.
+    "reasoning_status": "bridge_only",
+    "background_messages": "bridge_only",
+    # OS 1 welcome. Protocol-complete; the native app does not render the
+    # first-boot sequence yet, so no dedicated consumer is claimed.
+    "first_boot": "bridge_only",
 }
 
 SWIFT_COMMAND_SUPPORT = {
@@ -42,7 +49,8 @@ for _name in (
     "remove_mcp_server", "reload_tools", "set_credential", "delete_credential",
     "configure_fallback_chain", "create_session", "clear_session", "delete_session",
     "reconcile_session_transcript", "create_schedule", "cancel_schedule",
-    "pause_schedule", "resume_schedule",
+    "pause_schedule", "resume_schedule", "acknowledge_background",
+    "first_boot_answer", "first_boot_complete",
 ):
     SWIFT_COMMAND_SUPPORT[_name] = "bridge_only"
 

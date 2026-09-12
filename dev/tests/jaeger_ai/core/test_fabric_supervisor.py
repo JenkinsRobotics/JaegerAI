@@ -11,10 +11,11 @@ from jaeger_ai.core.runtime.fabric_supervisor import (
 )
 
 
-def test_supervisor_state_lives_inside_repository():
+def test_supervisor_state_lives_outside_repository():
     import os
     from pathlib import Path
-    assert JAEGER_RUNTIME_ROOT == Path(os.environ["JAEGER_HOME"]) / "shared"
+    assert JAEGER_RUNTIME_ROOT.is_relative_to(Path(os.environ["JAEGER_HOME"]).resolve())
+    assert not JAEGER_RUNTIME_ROOT.is_relative_to(REPO_ROOT)
     assert _state_path() == JAEGER_RUNTIME_ROOT / "health" / "agent-fabric.json"
 
 
@@ -184,3 +185,18 @@ def test_jaeger_health_checks_the_actual_mcp_listener_not_a_nonexistent_health_r
     assert jaeger.probe()
     assert urls == ['http://192.168.64.1:8642/v1/health']
     assert ports == [8792, 8811]
+
+
+def test_stopped_windows_rack_engine_is_started_outside_ssh_job(monkeypatch):
+    import base64
+    from jaeger_ai.core.runtime import fabric_supervisor as module
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        return len(calls) == 2
+    monkeypatch.setattr(module, '_run', run)
+    assert module._restart_honcho_on_rack()
+    assert calls[0][-4:] == ['honcho-db', 'honcho-redis', 'honcho-api', 'honcho-deriver']
+    script = base64.b64decode(calls[1][-1].split()[-1]).decode('utf-16le')
+    assert 'Invoke-CimMethod' in script and 'Win32_Process' in script
+    assert 'docker start honcho-db' in script

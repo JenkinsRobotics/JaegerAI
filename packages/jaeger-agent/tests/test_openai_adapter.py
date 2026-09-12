@@ -730,3 +730,10 @@ def test_openai_adapter_drives_jaeger_agent_loop_to_completion():
         ]
     finally:
         clear_registry()
+
+
+def test_reasoning_only_length_stop_is_not_an_empty_retry():
+    adapter = OpenAIAdapter(provider='ollama-cloud', model='test')
+    parsed = adapter.parse_response({'choices': [{'message': {
+        'content': '', 'reasoning_content': 'reasoning without final answer'}, 'finish_reason': 'length'}]})
+    assert parsed['finish_reason'] == 'thinking_exhausted'

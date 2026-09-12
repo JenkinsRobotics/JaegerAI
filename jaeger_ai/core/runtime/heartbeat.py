@@ -312,25 +312,25 @@ def build_prompt(layout: Any, *, now: datetime | None = None) -> str:
     return heartbeat_prompt(load_checklist(layout), board_digest=digest)
 
 
-_ares_singleton: Any = None
+_reasoning_singleton: Any = None
 
 
-def get_ares_engine(workspace_root: Any = None) -> Any:
-    global _ares_singleton
-    if _ares_singleton is None:
+def get_reasoning_engine(workspace_root: Any = None) -> Any:
+    global _reasoning_singleton
+    if _reasoning_singleton is None:
         try:
-            from jaeger_ai.ares import ARESConfig, ARESEngine
+            from jaeger_ai.reasoning import ReasoningConfig, ReasoningEngine
             root = getattr(workspace_root, "root", None) if workspace_root else None
-            _ares_singleton = ARESEngine(ARESConfig(workspace_root=root))
+            _reasoning_singleton = ReasoningEngine(ReasoningConfig(workspace_root=root))
         except Exception:
             return None
-    return _ares_singleton
+    return _reasoning_singleton
 
 
 def tick_ares(workspace_root: Any = None) -> Any:
     """Execute an autonomous cognitive tick through the self-contained ARES subsystem."""
     import asyncio
-    engine = get_ares_engine(workspace_root)
+    engine = get_reasoning_engine(workspace_root)
     if engine is None:
         return None
     try:
@@ -358,7 +358,7 @@ __all__ = [
     "briefing_prompt",
     "build_prompt",
     "checklist_path",
-    "get_ares_engine",
+    "get_reasoning_engine",
     "heartbeat_prompt",
     "is_due",
     "is_silent_ok",

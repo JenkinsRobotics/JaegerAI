@@ -108,7 +108,11 @@ struct GatewayClient: Sendable {
         return try JSONDecoder().decode(SessionHandoff.self, from: data)
     }
 
-    private func request(
+    /// Internal (not private) so the session/stream half in
+    /// ``GatewaySessions.swift`` reuses this one request path — same
+    /// timeout, same error unwrapping, same URL building — instead of
+    /// growing a second, subtly different HTTP layer.
+    func request(
         path: String,
         method: String = "GET",
         jsonBody: [String: Any]? = nil

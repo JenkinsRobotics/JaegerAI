@@ -11,7 +11,7 @@ Defines the interfaces for:
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ContextManager, Protocol, runtime_checkable
 from jaeger_agent.memory.models import (
     Belief,
     BeliefStatus,
@@ -108,7 +108,7 @@ class EntityStore(Protocol):
 @runtime_checkable
 class KnowledgeStore(MemoryStore, ClaimStore, EvidenceStore, BeliefStore, EntityStore, Protocol):
     """Unified contract combining legacy MemoryStore with cognitive data architecture."""
-    ...
+    def transaction(self) -> ContextManager[Any]: ...
 
 
 @runtime_checkable

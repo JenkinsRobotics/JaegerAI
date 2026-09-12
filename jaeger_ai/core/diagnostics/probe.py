@@ -97,7 +97,7 @@ def _check_memory() -> tuple[bool, str]:
     on the SQLite ``facts`` table or a broken InstanceLayout binding
     (the memory store reads layout.memory_dir at every call).
 
-    NB on the import shape: ``from jaeger_os.agent.tools import memory``
+    NB on the import shape: ``from jaeger_agent.tools import memory``
     resolves to the ``memory()`` umbrella *function* (re-exported from
     ``core.tools.__init__``) rather than the submodule of the same
     name — Python's name resolution picks the function attribute over
@@ -158,7 +158,7 @@ def _check_tool_registry() -> tuple[bool, str]:
       2. **Legacy pydantic-ai agent** — ``agent._function_toolset.tools``
          (still in the codebase but no longer the active loop).
       3. **No agent booted** — return ok with a "not checked" message
-         rather than scan ``dir(jaeger_os.agent.tools)``: the Python
+         rather than scan ``dir(jaeger_agent.tools)``: the Python
          function names there don't match the agent-facing names
          CORE uses (e.g. ``read_file`` vs ``file_read``), so a naive
          scan would always false-negative.

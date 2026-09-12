@@ -218,6 +218,25 @@ def bind_session(session: str) -> None:
             _tls.active = restored
 
 
+def pause_active_ledger(reason: str) -> None:
+    """Detach stopped work from automatic continuation, retaining its record.
+
+    A cancelled/failed request must not commandeer the next user message in
+    the shared conversation. The unfinished ledger remains addressable by ID.
+    """
+    ledger = _tls_active()
+    if ledger is None:
+        return
+    session = getattr(_tls, "session", None)
+    path = _session_pointer(session) if session is not None else None
+    if path is not None:
+        with _lock:
+            _atomic_write(path, json.dumps({"task_id": None, "paused_task_id": ledger.task_id,
+                                           "reason": reason, "paused_at": time.time()}))
+    _tls.active = None
+    _tls.completion = None
+
+
 def _set_tls_completion(payload: dict[str, Any] | None) -> None:
     _tls.completion = payload
 

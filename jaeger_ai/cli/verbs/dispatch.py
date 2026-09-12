@@ -244,7 +244,7 @@ def _print_usage() -> None:
 __all__ = ["SUBCOMMANDS", "dispatch", "is_daemon_subcommand"]
 
 
-# ``python -m jaeger_os.cli.verbs.dispatch health`` — direct entry for
+# ``python -m jaeger_ai.cli.verbs.dispatch health`` — direct entry for
 # scripts / smoke tests that want a verb without booting ``jaeger_os.main``.
 if __name__ == "__main__":  # pragma: no cover — exercised via subprocess
     sys.exit(dispatch(sys.argv[1:]))

@@ -414,7 +414,7 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
 
     ``warm=True`` calls ``synth.warm()`` before returning so the
     Kokoro pipeline is preloaded — call this from
-    :func:`jaeger_os.agent.tools.speak.warm_kokoro` at boot so the
+    :func:`jaeger_agent.tools.speak.warm_kokoro` at boot so the
     first user-facing ``text_to_speech`` doesn't pay the 5-7 s
     weight-load tax.
     """

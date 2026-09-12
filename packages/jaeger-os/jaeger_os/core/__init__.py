@@ -12,7 +12,9 @@ Modules:
   • memory.py        — per-instance facts / episodic / schedules I/O
   • cron_runner.py   — schedule firing + daily housekeeping hook
   • log_rotation.py  — daily rotation + retention enforcement
-  • migrations.py    — discover + apply per-version migrations
+  • migrations.py    — MOVED (0.9 split): the runner is
+                       jaeger_ai.core.instance.migrations, and its
+                       scripts live in jaeger_ai/migrations/
   • skill_loader.py  — discover + register skills (core/ and instance/)
   • llm_model.py     — in-process Gemma adapter for pydantic-ai
   • prompts.py       — system-prompt assembler

@@ -43,15 +43,39 @@ def _run_chat(run_turn: TurnFn, client: Any, message: str, session_key: str = "m
     forced to stderr so it never corrupts the MCP JSON-RPC stdout stream."""
     with contextlib.redirect_stdout(sys.stderr):
         out = run_turn(client, message, session_key=session_key or "mcp")
-    if out.get("error"):
-        return f"(agent error: {out['error']})"
+    if out.get("error") or out.get("halt_reason"):
+        raise RuntimeError(f"Native agent failed: {out.get('error') or out['halt_reason']}")
     return out.get("text") or ""
 
 
-def _bridge_chat(bridge: Any, message: str, session: str = "mcp") -> str:
-    out = bridge.turn(message, session=session or "mcp")
-    if isinstance(out, dict) and out.get("error"):
-        return f"(agent error: {out['error']})"
+def _gateway_approval_wait(frame: dict[str, Any], request_id: str) -> str:
+    """Block native tool execution until the gateway records a decision."""
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    store = GatewaySessionStore()
+    approval = store.create_approval(
+        kind=str(frame.get("kind") or "tool"),
+        prompt=str(frame.get("prompt") or "Approve native tool?"),
+        options=list(frame.get("options") or ["once", "deny"]),
+        request_id=request_id or None,
+        fingerprint=str(frame.get("id") or ""),
+        metadata={"native_id": frame.get("id"), "session": frame.get("session")},
+    )
+    waited = store.wait_for_approval(approval["approval_id"])
+    return str(waited.get("decision") or "deny")
+
+
+def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: str = "",
+                 allowed_tools: list[str] | None = None) -> str:
+    kwargs: dict[str, Any] = {}
+    if allowed_tools is not None:
+        kwargs["allowed_tools"] = allowed_tools
+    if request_id:
+        kwargs["turn_id"] = request_id
+        kwargs["on_request"] = lambda frame: _gateway_approval_wait(frame, request_id)
+    out = bridge.turn(message, session=session or "mcp", **kwargs)
+    if isinstance(out, dict) and (out.get("error") or out.get("halt_reason") or out.get("execution_unknown")):
+        raise RuntimeError(f"Native agent has no confirmed result: {out.get('error') or out.get('halt_reason') or 'execution unknown'}")
     if isinstance(out, dict):
         return out.get("text") or ""
     return str(out or "")
@@ -126,18 +150,36 @@ def build_server(client: Any, instance: str, model: str | None,
 
     @mcp.tool()
     @_off_event_loop
-    def chat(message: str, session_id: str = "") -> str:
+    def chat(message: str, session_id: str = "", request_id: str = "",
+             allowed_tools: list[str] | None = None) -> str:
         """Send a message to the local JaegerAI agent and return its reply.
 
         The agent has its own tools, memory, and skills; this drives a full
         turn (it may take a while for a complex request). ``session_id``
         isolates Roundtable members and other concurrent callers so they
-        do not collide on the default ``mcp`` session.
+        do not collide on the default ``mcp`` session. ``request_id`` is the
+        durable gateway/native turn identity and is not the dispatcher key.
+        ``allowed_tools`` is an optional enforced grant: [] permits no tools;
+        omitted preserves the normal lead policy. Child sessions keep their
+        initial grant and cannot expand it on a later request.
         """
         session = (session_id or "").strip() or "mcp"
         if bridge is not None:
-            return _bridge_chat(bridge, message, session=session)
-        return _run_chat(run_turn, client, message, session_key=session)
+            return _bridge_chat(bridge, message, session=session, request_id=request_id, allowed_tools=allowed_tools)
+        from jaeger_agent.tool_executor import tool_allowlist
+        with tool_allowlist(allowed_tools):
+            return _run_chat(run_turn, client, message, session_key=session)
+
+    if bridge is not None:
+        @mcp.tool()
+        @_off_event_loop
+        def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
+            """Request native cancellation. Does not claim the native effect stopped."""
+            try:
+                bridge.control("cancel", turn_id=request_id, session=session_id)
+                return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
 
     @mcp.tool()
     @_off_event_loop

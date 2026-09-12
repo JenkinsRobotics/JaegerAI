@@ -161,7 +161,7 @@ def _synthesize_args_model(
     fn: Callable[..., Any], tool_name: str,
 ) -> type[BaseModel]:
     """Build a Pydantic v2 model from ``fn``'s signature. Shared with
-    :mod:`jaeger_os.agent.bridge` — kept here as well so the decorator
+    :mod:`jaeger_agent.bridge` — kept here as well so the decorator
     has zero migration-bridge dependency once Phase 6.2 lands."""
     sig = inspect.signature(fn)
     try:

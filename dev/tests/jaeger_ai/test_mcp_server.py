@@ -5,6 +5,7 @@ is the SDK's responsibility)."""
 from __future__ import annotations
 
 import asyncio
+import pytest
 
 from starlette.testclient import TestClient
 
@@ -30,7 +31,17 @@ def test_chat_surfaces_errors():
     def boom(client, message, session_key=None):
         return {"text": "", "error": "model exploded"}
 
-    assert "agent error: model exploded" in _run_chat(boom, object(), "x")
+    with pytest.raises(RuntimeError, match="model exploded"):
+        _run_chat(boom, object(), "x")
+
+
+@pytest.mark.parametrize("result", [{"error": "model unavailable"}, {"execution_unknown": True}])
+def test_bridge_failure_cannot_become_successful_reply(result):
+    class Bridge:
+        def turn(self, *args, **kwargs):
+            return result
+    with pytest.raises(RuntimeError, match="no confirmed result"):
+        _bridge_chat(Bridge(), "hello")
 
 
 def test_chat_uses_explicit_session():
@@ -70,6 +81,27 @@ class _FakeBridge:
 
 def test_bridge_chat_uses_session():
     assert _bridge_chat(_FakeBridge(), "hi", session="table-1") == "bridge:hi:table-1"
+
+
+def test_bridge_chat_does_not_report_halted_turn_as_success():
+    class Halted(_FakeBridge):
+        def turn(self, *args, **kwargs):
+            return {"text": "stopped", "error": None, "halt_reason": "repeated_tool_failure"}
+    with pytest.raises(RuntimeError, match="repeated_tool_failure"):
+        _bridge_chat(Halted(), "research")
+
+
+def test_bridge_chat_passes_request_id_as_native_turn_id():
+    seen = {}
+
+    class Bridge(_FakeBridge):
+        def turn(self, text, session, **kwargs):
+            seen.update(kwargs)
+            return {"text": "ok", "error": None}
+
+    assert _bridge_chat(Bridge(), "hi", session="dispatcher", request_id="ab" * 16) == "ok"
+    assert seen["turn_id"] == "ab" * 16
+    assert callable(seen["on_request"])
 
 
 def test_chat_tool_declares_session_id():
@@ -135,3 +167,13 @@ def test_parse_args_http_flag():
     stdio = parse_args(["jaeger-dev"])
     assert stdio.http is False
     assert stdio.instance_name == "jaeger-dev"
+
+
+def test_mcp_passes_explicit_tool_grant_to_bridge():
+    class Bridge:
+        def turn(self, message, session, **kwargs):
+            assert session == 'specialist:test'
+            assert kwargs['allowed_tools'] == []
+            assert kwargs['turn_id'] == 'identity'
+            return {'text': 'done'}
+    assert _bridge_chat(Bridge(), 'task', 'specialist:test', 'identity', []) == 'done'

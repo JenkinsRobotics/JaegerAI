@@ -52,6 +52,17 @@ def route(handler, parsed, method: str) -> bool:
     path = parsed.path or ""
     method = (method or "GET").upper()
 
+    # Sessions, the SSE stream and approvals live in the sibling overlay.
+    # Chained here rather than patched into the vendored routes.py because
+    # this function is ALREADY the mounted hook for both GET and POST — one
+    # dispatch point, no extra patch to keep rebasing against upstream.
+    try:
+        from api.jaeger_sessions import route as _sessions_route
+    except ImportError:  # pragma: no cover — overlay not installed
+        _sessions_route = None
+    if _sessions_route is not None and _sessions_route(handler, parsed, method):
+        return True
+
     if method == "GET" and path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/agents{qs}")

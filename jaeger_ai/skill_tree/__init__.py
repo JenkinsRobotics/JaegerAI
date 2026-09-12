@@ -13,7 +13,7 @@ The registry persists per-instance state to
 
 Public surface:
 
-    from jaeger_os.skill_tree import (
+    from jaeger_ai.skill_tree import (
         SkillNode, SkillTree, XpAward,
         SkillTreeRegistry,
     )

@@ -263,6 +263,31 @@ def remember(key: str, value: str, category: str | None = None,
         )
 
 
+def remember_if_absent(key: str, value: str, *, subject: str, category: str) -> str:
+    """Atomically admit an immutable record; return the persisted value.
+
+    Concurrent retries cannot overwrite an existing ID or append duplicate
+    history. Uses the same facts table/source partition as ordinary memory.
+    """
+    from jaeger_agent.memory import sqlite_store
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    subj, src = _norm_subject(subject), current_memory_source()
+    with sqlite_store.writer() as conn:
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO facts "
+            "(subject,key,value,category,source,tags,note,created_at,updated_at) VALUES (?,?,?,?,?,'','',?,?)",
+            (subj, key, value, category, src, now, now),
+        )
+        if inserted.rowcount:
+            conn.execute(
+                "INSERT INTO fact_log (subject,key,value,category,source,tags,note,ts) VALUES (?,?,?,?,?,'','',?)",
+                (subj, key, value, category, src, now),
+            )
+        return str(conn.execute(
+            "SELECT value FROM facts WHERE subject=? AND key=? AND source=?", (subj, key, src),
+        ).fetchone()["value"])
+
+
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {"my", "the", "a", "an", "is", "of", "do", "i", "what", "this", "that"}
 

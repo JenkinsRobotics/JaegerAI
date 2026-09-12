@@ -38,9 +38,11 @@ def prepare():
     shutil.copy2(overlay / "jaeger_agent_compat.py", destination / "api/jaeger_agent_compat.py")
     shutil.copy2(overlay / "jaeger_gateway_routes.py", destination / "api/jaeger_gateway_routes.py")
     shutil.copy2(overlay / "jaeger_agents.py", destination / "api/jaeger_agents.py")
+    shutil.copy2(overlay / "jaeger_sessions.py", destination / "api/jaeger_sessions.py")
     extensions = destination / 'jaeger-extensions'
     extensions.mkdir()
     for name in ('jaeger_webui_extensions.json', 'jaeger_webui_branding.js', 'jaeger_dispatcher.js',
+                 'jaeger_gateway_console.js',
                  'jaeger_app_icon_16.png', 'jaeger_app_icon_32.png', 'jaeger_app_icon_256.png'):
         shutil.copy2(ROOT / 'jaeger_ai/assets' / name, extensions / name)
     shutil.copy2(ROOT / 'jaeger_ai/features/hermes_webui/dispatcher_sidecar.py',

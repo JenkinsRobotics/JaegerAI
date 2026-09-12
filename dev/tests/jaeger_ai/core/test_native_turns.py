@@ -49,6 +49,41 @@ def test_queue_is_bounded_before_native_dispatch(tmp_path):
     ledger.accept('two', 'another')
 
 
+def test_structured_halt_is_failed_even_when_text_exists_and_error_is_null(tmp_path):
+    ledger = NativeTurns(tmp_path)
+    ledger.accept('halted', 'dispatcher')
+    frame = {'text': '[halted: repeated failure]', 'error': None,
+             'halt_reason': 'hit the same web_search failure 2 times', 'halt_code': 'repeated_tool_failure'}
+    ledger.finish('halted', 'dispatcher', frame)
+    assert ledger.get('halted', 'dispatcher')['status'] == 'failed'
+    # A legacy completed row retains its bytes but is interpreted correctly.
+    with ledger.transaction() as conn:
+        conn.execute("UPDATE turns SET status='completed' WHERE id='halted'")
+    assert NativeTurns(tmp_path, read_only=True).get('halted', 'dispatcher')['status'] == 'failed'
+
+
+def test_read_only_receipt_probe_does_not_create_state(tmp_path):
+    import sqlite3
+    root = tmp_path / 'absent'
+    reader = NativeTurns(root, read_only=True)
+    with pytest.raises(sqlite3.OperationalError):
+        reader.get('unknown', 'dispatcher')
+    assert not root.exists()
+
+
 @pytest.mark.parametrize('identity', ['', '../escape', 'x' * 129])
 def test_invalid_native_identity_is_rejected(tmp_path, identity):
     with pytest.raises(ValueError): NativeTurns(tmp_path).accept(identity, 'session')
+
+
+def test_session_tool_grant_survives_reopen_and_cannot_expand(tmp_path):
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    first = NativeTurns(tmp_path, epoch='first')
+    first.bind_tool_grant('specialist:child', ['web_search'])
+    restarted = NativeTurns(tmp_path, epoch='second')
+    restarted.bind_tool_grant('specialist:child', ['web_search', 'web_search'])
+    for grant in (None, ['web_search', 'run_shell'], []):
+        with pytest.raises(ValueError):
+            restarted.bind_tool_grant('specialist:child', grant)
+    restarted.bind_tool_grant('specialist:new', [])
+    restarted.bind_tool_grant('dispatcher', None)

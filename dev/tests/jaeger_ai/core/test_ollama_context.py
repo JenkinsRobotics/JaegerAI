@@ -151,23 +151,52 @@ def test_cloud_never_injects_num_ctx():
 
 
 def test_local_injects_modelfile_or_explicit_num_ctx():
-    assert should_inject_num_ctx(
-        provider="ollama", base_url="http://localhost:11434/v1",
-        model="llama3.2", source="num_ctx",
-    ) is True
+    for source in ("num_ctx", "configured", "model_info"):
+        assert should_inject_num_ctx(
+            provider="ollama", base_url="http://localhost:11434/v1",
+            model="llama3.2", source=source,
+        ) is True, source
+
+
+def test_local_injects_model_info_as_a_capped_copy():
+    """``model_info`` (the training max) is injected, not skipped.
+
+    It was excluded originally to avoid allocating an unsafe KV cache.
+    That backfired: without an explicit ``num_ctx`` the daemon stayed at
+    its ~4096 default, which zeroed the context guard whenever
+    ``max_tokens`` matched. The cap the caller applies is what keeps the
+    allocation safe, so the value is injected rather than dropped.
+    """
     assert should_inject_num_ctx(
         provider="ollama", base_url="http://localhost:11434/v1",
         model="llama3.2", source="model_info",
-    ) is False
-    assert should_inject_num_ctx(
-        provider="ollama", base_url="http://localhost:11434/v1",
-        model="llama3.2", source="configured",
     ) is True
 
 
+def test_unknown_source_is_not_injected():
+    """Only the three known sources inject; anything else stays out."""
+    for source in ("", "estimate", "fallback"):
+        assert should_inject_num_ctx(
+            provider="ollama", base_url="http://localhost:11434/v1",
+            model="llama3.2", source=source,
+        ) is False, source
+
+
 def test_local_client_injects_explicit_context(monkeypatch):
+    """With no live daemon to probe, the operator's ``ctx`` is what loads.
+
+    The probe is stubbed out deliberately. Constructing the client calls
+    ``/api/show`` for real, so on a developer machine that happens to be
+    running Ollama this test used to pick up whatever that daemon served
+    (256K for a local qwen) and fail — while passing on a machine with no
+    daemon. The precedence under test is "no probe -> configured wins",
+    so the probe has to be absent by construction, not by luck.
+    """
     from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models import ollama_context as oc
     from jaeger_ai.core.models.external_model import ExternalModelClient
+
+    monkeypatch.setattr(oc, "probe_ollama_context", lambda *a, **k: (None, ""))
 
     ext = ExternalModelConfig(
         enabled=True,

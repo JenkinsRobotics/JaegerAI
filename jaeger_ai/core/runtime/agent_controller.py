@@ -31,6 +31,7 @@ from typing import Any, Callable
 from jaeger_ai.core.runtime import continuation, execution
 from jaeger_ai.core.runtime.autonomous_runner import (
     WORKER_PREAMBLE,
+    conversation_only,
     harness_prompt,
     looks_like_batch,
     next_continuation_prompt,
@@ -193,6 +194,8 @@ class JaegerAgentController:
         return bool(compact_agent(agent))
 
     def _build_continuation_prompt(self, last: dict[str, Any]) -> str | None:
+        if conversation_only(self.objective):
+            return None
         remaining = max(0, self.max_steps - self.step_count)
         nxt = next_continuation_prompt(
             last.get("text") or "",

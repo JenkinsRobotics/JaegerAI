@@ -16,10 +16,13 @@ EPOCH = uuid.uuid4().hex
 
 
 class NativeTurns:
-    def __init__(self, root: Path, *, epoch=EPOCH, max_pending=256):
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    def __init__(self, root: Path, *, epoch=EPOCH, max_pending=256, read_only=False):
         self.path = root / 'native-turns.sqlite3'
         self.epoch, self.max_pending = epoch, max_pending
+        self.read_only = read_only
+        if read_only:
+            return
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd = os.open(self.path, os.O_CREAT | os.O_RDWR | getattr(os, 'O_NOFOLLOW', 0), 0o600)
         os.close(fd)
         self.path.chmod(0o600)
@@ -27,13 +30,32 @@ class NativeTurns:
             db.execute('CREATE TABLE IF NOT EXISTS turns ('
                        'id TEXT PRIMARY KEY, session TEXT NOT NULL, epoch TEXT NOT NULL, '
                        'status TEXT NOT NULL, reply TEXT, updated REAL NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS session_tool_grants ('
+                       'session TEXT PRIMARY KEY, tools TEXT NOT NULL)')
+
+    def bind_tool_grant(self, session, tools):
+        """A session's first native grant survives process restart unchanged."""
+        self.validate('grant', session)
+        if tools is not None and (not isinstance(tools, list) or any(
+            not isinstance(name, str) or not name.strip() for name in tools
+        )):
+            raise ValueError('allowed_tools must be a list of nonempty tool names')
+        if session.startswith('specialist:') and tools is None:
+            raise ValueError('Specialist sessions require an explicit tool grant')
+        encoded = json.dumps(sorted(set(tools)) if tools is not None else None)
+        with self.transaction() as db:
+            row = db.execute('SELECT tools FROM session_tool_grants WHERE session=?', (session,)).fetchone()
+            if row is not None and row['tools'] != encoded:
+                raise ValueError('Session tool grant cannot change; create a new child session')
+            db.execute('INSERT OR IGNORE INTO session_tool_grants VALUES (?, ?)', (session, encoded))
 
     @contextmanager
     def transaction(self):
-        db = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        db = (sqlite3.connect(self.path.resolve().as_uri() + '?mode=ro', uri=True, timeout=5, isolation_level=None)
+              if self.read_only else sqlite3.connect(self.path, timeout=5, isolation_level=None))
         db.row_factory = sqlite3.Row
         try:
-            db.execute('BEGIN IMMEDIATE')
+            db.execute('BEGIN' if self.read_only else 'BEGIN IMMEDIATE')
             yield db
             db.commit()
         except BaseException:
@@ -62,7 +84,8 @@ class NativeTurns:
 
     def finish(self, turn, session, reply):
         self.validate(turn, session)
-        status = 'cancelled' if reply.get('cancelled') else 'failed' if reply.get('error') else 'completed'
+        status = ('cancelled' if reply.get('cancelled') or reply.get('halt_reason') == 'interrupted'
+                  else 'failed' if reply.get('error') or reply.get('halt_reason') else 'completed')
         encoded = json.dumps(reply)
         with self.transaction() as db:
             changed = db.execute('UPDATE turns SET status=?, reply=?, updated=? '
@@ -80,6 +103,12 @@ class NativeTurns:
             return unknown
         if row['reply'] is None:
             return {**unknown, 'status': row['status'] if row['epoch'] == self.epoch else 'unknown'}
-        return {'turn_id': turn, 'session_id': session, 'status': row['status'],
-                'execution_unknown': False, 'reply': json.loads(row['reply']),
+        reply = json.loads(row['reply'])
+        # Older receipts labelled structured halts "completed". Interpret
+        # their preserved evidence honestly without rewriting that history.
+        status = row['status']
+        if status == 'completed' and reply.get('halt_reason'):
+            status = 'cancelled' if reply['halt_reason'] == 'interrupted' else 'failed'
+        return {'turn_id': turn, 'session_id': session, 'status': status,
+                'execution_unknown': bool(reply.get('execution_unknown')), 'reply': reply,
                 'observed_at': row['updated'], 'source': 'native_bridge_receipt'}

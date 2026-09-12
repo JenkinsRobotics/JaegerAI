@@ -1,4 +1,4 @@
-"""``python -m jaeger_os.cli`` entry."""
+"""``python -m jaeger_ai.cli`` entry."""
 
 from __future__ import annotations
 

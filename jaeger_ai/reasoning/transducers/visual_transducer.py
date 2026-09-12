@@ -52,12 +52,12 @@ class VisualTransducer:
             with open(self.events_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(card) + "\n")
         except OSError as exc:
-            logger.warning("Failed to append ARES visual event card: %s", type(exc).__name__)
+            logger.warning("Failed to append reasoning visual event card: %s", type(exc).__name__)
 
         notified = False
         if self.allow_notifications and intent.salience >= 0.85:
             notified = self._post_macos_notification(
-                title="ARES Cognitive Alert",
+                title="Reasoning Alert",
                 message=intent.goal,
             )
 

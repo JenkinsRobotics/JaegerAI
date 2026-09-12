@@ -126,8 +126,8 @@ To keep the codebase clean for beginners while ensuring older modules and tests 
 
 | Unified Module | Purpose | Backwards-Compatible Shims |
 | :--- | :--- | :--- |
-| [`router.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/core/models/router.py) | Routing, Privacy Gate, Endpoint Resolution | `ollama_endpoint.py`, `sensitivity_gate.py`, `session_selection.py` |
-| [`discovery.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/core/models/discovery.py) | Local & Remote Model Discovery | `local_discovery.py`, `model_discovery.py` |
-| [`external_model.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/core/models/external_model.py) | HTTP Client & Provider History | `external_model_history.py` |
-| [`mlx_client.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/core/models/mlx_client.py) | Apple Silicon MLX Text & VLM Clients | `mlx_vlm_client.py` |
-| [`__init__.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/core/models/__init__.py) | Master Package Front Door | Exports all unified symbols with lazy loading |
+| [`router.py`](./router.py) | Routing, Privacy Gate, Endpoint Resolution | `ollama_endpoint.py`, `sensitivity_gate.py`, `session_selection.py` |
+| [`discovery.py`](./discovery.py) | Local & Remote Model Discovery | `local_discovery.py`, `model_discovery.py` |
+| [`external_model.py`](./external_model.py) | HTTP Client & Provider History | `external_model_history.py` |
+| [`mlx_client.py`](./mlx_client.py) | Apple Silicon MLX Text & VLM Clients | `mlx_vlm_client.py` |
+| [`__init__.py`](./__init__.py) | Master Package Front Door | Exports all unified symbols with lazy loading |
