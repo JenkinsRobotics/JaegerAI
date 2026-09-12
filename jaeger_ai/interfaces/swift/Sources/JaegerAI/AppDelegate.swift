@@ -112,6 +112,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 FirstBootWindowController.show(gate: gate, turn: turn)
             }
 
+            // Ambient voice loop. Wires the mic tap to the barge-in path so
+            // the operator can talk over the agent. activate() only WIRES —
+            // the mic stays shut until the loop is speaking or thinking, so
+            // a launched app is not a launched microphone.
+            AmbientCoordinator.shared.activate()
+
             if ProcessInfo.processInfo.arguments.contains("--chat") {
                 ChatWindowController.show(agent: AgentBridge.shared)
             }
@@ -142,6 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// idempotent — but the system reclaiming our hotkey on process
     /// exit is what's actually doing the work in the common case.
     func applicationWillTerminate(_ notification: Notification) {
+        // Release the microphone before teardown. An input tap surviving
+        // the app that opened it is the kind of thing users notice in the
+        // menu bar's recording indicator.
+        AmbientCoordinator.shared.deactivate()
         Task { @MainActor in
             PillHotkey.shared.unregister()
         }

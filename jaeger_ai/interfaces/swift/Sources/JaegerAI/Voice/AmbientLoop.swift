@@ -125,13 +125,23 @@ final class AmbientLoop: ObservableObject {
     /// is what makes barge-in possible at all, because push-to-talk cannot
     /// help: the operator is not holding a key at the moment they decide to
     /// interrupt.
+    /// The live tap, set by ``AmbientCoordinator``. Weak: the coordinator
+    /// owns the recorder's lifetime, and a strong reference here would keep
+    /// a microphone alive past the coordinator that is supposed to govern it.
+    weak var recorder: VoiceRecorder?
+
+    /// Convenience wiring for tests and any caller managing its own
+    /// recorder. Production goes through ``AmbientCoordinator.activate()``,
+    /// which also owns the open/close policy.
     func attach(recorder: VoiceRecorder) throws {
+        self.recorder = recorder
         recorder.onSpeechOnset = { [weak self] in self?.handleSpeechOnset() }
         recorder.onSpeechEnded = { [weak self] in self?.handleSpeechEnded() }
         try recorder.startMonitoring()
     }
 
     func detach(recorder: VoiceRecorder) {
+        if self.recorder === recorder { self.recorder = nil }
         recorder.onSpeechOnset = nil
         recorder.onSpeechEnded = nil
         recorder.stopMonitoring()
