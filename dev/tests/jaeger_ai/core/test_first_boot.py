@@ -319,3 +319,29 @@ def test_state_file_lives_under_the_instance(inst):
     fb.begin(inst)
     assert fb.state_path(inst) == inst / "first_boot.yaml"
     assert fb.state_path(inst).is_file()
+
+
+def test_reset_survives_the_migration_guard(tmp_path):
+    """An explicit reset must outrank ``ensure_migrated``'s classification.
+
+    Regression: reset used to DELETE first_boot.yaml. ``ensure_migrated``
+    reads "no state file" as "predates the feature" and marks an
+    established identity COMPLETED — so on an install with an identity.yaml
+    the reset silently undid itself on the very next boot, with nothing to
+    show the operator it had happened.
+    """
+    root = tmp_path / "established"
+    root.mkdir()
+    (root / "identity.yaml").write_text("name: Vera\n")
+    (root / "manifest.json").write_text("{}")
+
+    # Established identity: the guard correctly suppresses the welcome.
+    assert fb.ensure_migrated(root) is FirstBootStatus.COMPLETED
+
+    fb.reset(root)
+    assert fb.status(root) is FirstBootStatus.NOT_STARTED
+
+    # The next boot runs the guard again — and must NOT re-suppress.
+    assert fb.ensure_migrated(root) is FirstBootStatus.NOT_STARTED
+    assert script.next_turn(root) is not None
+    assert "Welcome to OS 1." in script.next_turn(root).text

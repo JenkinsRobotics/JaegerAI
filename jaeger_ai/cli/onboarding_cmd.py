@@ -81,8 +81,15 @@ def _cmd_reset(args: argparse.Namespace) -> int:
     print()
 
     if not path.is_file():
-        print("  Nothing to reset — this identity has no first-boot record.")
-        return 0
+        # NOT a no-op. An absent state file is exactly the case
+        # ``ensure_migrated`` reads as "this identity predates onboarding"
+        # and marks COMPLETED — so on an established install, returning
+        # early here leaves the welcome suppressed while telling the
+        # operator the reset succeeded. Fall through and write the explicit
+        # NOT_STARTED marker, which is what actually overrides the guard.
+        print("  No existing record — writing an explicit reset marker")
+        print("  so the migration guard cannot re-suppress the welcome.")
+        print()
 
     if not args.yes:
         try:
