@@ -78,7 +78,8 @@ if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
           || ("$LEGACY_PROCESS_ALIAS" != "$LEGACY_JAEGER_HOME" \
               && "$command" == "$LEGACY_PROCESS_ALIAS/"*) ]]; then
       printf '%s %s\n' "$pid" "$command"
-      break
+      # Drain the process table: an early break can SIGPIPE ps under pipefail
+      # and exit before explaining why migration was refused.
     fi
   done)"
   if [[ -n "$LEGACY_PROCESS" ]]; then

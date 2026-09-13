@@ -35,13 +35,22 @@ set -euo pipefail
 
 CONFIG="debug"
 INSTALL=0
+DISTRIBUTION=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
         --dev)     ;;   # accepted for compat — debug config (the default)
+        --distribution) DISTRIBUTION=1; CONFIG="release" ;;
+        *) echo "Unknown build argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
+if [[ "$DISTRIBUTION" == "1" && "$SIGN_IDENTITY" != "Developer ID Application:"* ]]; then
+    echo "Distribution requires JAEGER_SIGN_IDENTITY with a Developer ID Application certificate." >&2
+    exit 2
+fi
 
 # ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
 # split): dev is a launch STATE, not a separate bundle. `jaeger dev`
@@ -83,6 +92,7 @@ ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
 icon_needs_rebuild() {
     [[ ! -f "$ICNS_PATH" ]] && return 0
+    [[ "$ASSETS_DIR/jaeger_app_icon.png" -nt "$ICNS_PATH" ]] && return 0
     for size in 16 32 64 128 256 512; do
         local src="$ASSETS_DIR/jaeger_app_icon_${size}.png"
         if [[ -f "$src" && "$src" -nt "$ICNS_PATH" ]]; then
@@ -128,6 +138,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # (the single source of truth), CFBundleVersion suffixed with the git SHA
 # so two builds of the same release line are distinguishable.
 cp "$APP_ROOT/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :JaegerLauncherPath string $REPO_ROOT/jaeger" \
+    "$APP_BUNDLE/Contents/Info.plist"
 JROS_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO_ROOT/jaeger_ai/__init__.py")"
 GIT_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 if [[ -n "$JROS_VERSION" ]]; then
@@ -142,6 +154,18 @@ rm -rf "$BUILD_DIR/JaegerOS-dev.app"
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerOS"
 chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerOS"
+
+# The Qt face must execute inside THIS app bundle. Launching .venv/bin/python
+# leaves NSBundle.main without privacy strings, so Qt refuses camera consent.
+# Reuse the development environment's interpreter and site packages; this is
+# still a repo-backed development app, not a self-contained Python distribution.
+cp -L "$REPO_ROOT/.venv/bin/python" "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+JAEGER_PYTHON_BASE="$("$REPO_ROOT/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')"
+JAEGER_PYTHON_SITE="$("$REPO_ROOT/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+/usr/libexec/PlistBuddy -c "Add :JaegerPythonHome string $JAEGER_PYTHON_BASE" \
+    -c "Add :JaegerPythonSite string $JAEGER_PYTHON_SITE" \
+    "$APP_BUNDLE/Contents/Info.plist"
 
 # Icon.
 cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
@@ -194,12 +218,24 @@ git -C "$REPO_ROOT" rev-parse HEAD > "$APP_BUNDLE/Contents/Resources/build-commi
 # Application: <name> (<team>)" for a real signature; then notarize with
 #   xcrun notarytool submit <zip> --keychain-profile jaeger-notary --wait
 #   xcrun stapler staple JaegerOS.app
-SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
 echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
-codesign --force --sign "$SIGN_IDENTITY" \
-    "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
-codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
-    echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
+SIGN_ARGS=(--force --options runtime --sign "$SIGN_IDENTITY")
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+    SIGN_ARGS+=(--timestamp)
+fi
+codesign "${SIGN_ARGS[@]}" \
+    --entitlements "$APP_ROOT/Resources/JaegerMultimodal.entitlements" \
+    "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+if [[ -d "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" ]]; then
+    codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME"
+fi
+codesign "${SIGN_ARGS[@]}" "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
+# Verify the actual embedded interpreter as well as its signature. Hardened
+# runtime without the helper's library entitlement can sign successfully but
+# abort at launch before Python loads any code.
+PYTHONHOME="$JAEGER_PYTHON_BASE" \
+    "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal" -c 'import sys; assert sys.version_info[:2] >= (3, 11)'
 
 # Keep the app VISIBLE at the repo root (gitignored symlink) — the
 # bundle itself lives in swift/.build, which nobody should have to find.

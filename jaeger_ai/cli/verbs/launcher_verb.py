@@ -1,10 +1,8 @@
-"""``jaeger launcher`` — a clickable macOS ``.app`` that launches JaegerAI.
+"""``jaeger launcher`` — install the native, branded macOS application.
 
-A **thin** launcher (no bundling, no signing): ``Jaeger AI.app`` whose
-``Contents/MacOS/Jaeger AI`` stub just execs the install's ``jaeger`` command.
-Because it's *created locally* (not downloaded), it carries no quarantine
-flag — it opens without the "unidentified developer" block, no notarization.
-macOS only; the agent + its `.venv` stay exactly where the installer put them.
+The app bundle owns the Dock identity; the agent and its virtualenv remain in
+the installation directory. Local builds use ad-hoc signing, not notarization.
+The thin-bundle builder remains for compatibility with older installer callers.
 
   jaeger launcher install   drop Jaeger AI.app into /Applications (Dock/Launchpad)
   jaeger launcher remove    delete it
@@ -17,6 +15,8 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
 from pathlib import Path
 
 _APP_NAME = "Jaeger AI.app"
@@ -29,9 +29,9 @@ _LSREGISTER = (
 _USAGE = (
     "usage: jaeger launcher {install|remove}\n"
     "\n"
-    "  install   create a clickable Jaeger AI.app (Dock / Launchpad) that runs\n"
-    "            this install's `jaeger`. Thin launcher — no bundling/signing,\n"
-    "            opens without a Gatekeeper prompt. Opt-in.\n"
+    "  install   build and install the native Jaeger AI.app (Dock / Launchpad)\n"
+    "            using this install's agent and the canonical desktop icon.\n"
+    "            Existing Jaeger AI launchers are backed up.\n"
     "  remove    delete the launcher.\n"
 )
 
@@ -112,19 +112,53 @@ def _write_bundle(
 # ── install / remove (macOS IO) ────────────────────────────────────
 
 
+def _install_native_bundle(source: Path, app: Path, backup_root: Path) -> Path | None:
+    """Replace only this product's launcher, with rollback and a saved copy."""
+    for candidate in (source, app):
+        if candidate == app and not candidate.exists():
+            continue
+        with (candidate / "Contents/Info.plist").open("rb") as stream:
+            if plistlib.load(stream).get("CFBundleIdentifier") != _BUNDLE_ID:
+                raise ValueError(f"Refusing to replace an unrelated app: {candidate}")
+    if not (source / "Contents/Resources/AppIcon.icns").is_file():
+        raise ValueError("Native app is missing the desktop icon; rebuild it first")
+    app.parent.mkdir(parents=True, exist_ok=True)
+    backup = None
+    with tempfile.TemporaryDirectory(prefix=".jaeger-launcher-", dir=app.parent) as stage:
+        staged = Path(stage) / _APP_NAME
+        shutil.copytree(source, staged, symlinks=True)
+        if app.exists():
+            backup = backup_root / uuid.uuid4().hex / _APP_NAME
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            app.rename(backup)
+        try:
+            staged.rename(app)
+        except OSError:
+            if backup is not None:
+                backup.rename(app)
+            raise
+    return backup
+
+
 def _macos_install() -> int:
     home = _install_root()
-    exe = _jaeger_exe(home)
     app = _app_dir()
-    if app.exists():
-        shutil.rmtree(app)          # idempotent re-install
-    icon = home / "jaeger_ai" / "interfaces" / "swift" / ".build" / "AppIcon.icns"
-    _write_bundle(app, exe, icon_source=icon)
+    swift = home / "jaeger_ai/interfaces/swift"
+    try:
+        subprocess.run(["bash", str(swift / "Scripts/build-app.sh"), "--dev"], check=True)
+        source = swift / ".build/JaegerOS.app"
+        subprocess.run([str(source / "Contents/MacOS/JaegerOS"), "--verify-launch"], check=True)
+        backup = _install_native_bundle(source, app, home / ".jaeger_os/launcher-backups")
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        print(f"[launcher] install failed: {exc}", file=sys.stderr)
+        return 1
     # Best-effort: register with LaunchServices so it shows immediately in
     # Spotlight / Launchpad without a re-login.
-    subprocess.run([_LSREGISTER, "-f", str(app)], capture_output=True)
+    subprocess.run([_LSREGISTER, "-f", str(app)], capture_output=True, check=False)
     print(f"[launcher] installed {app}")
-    print(f"[launcher] it runs: {exe}")
+    print(f"[launcher] agent launcher: {home / 'jaeger'}")
+    if backup is not None:
+        print(f"[launcher] previous launcher saved: {backup}")
     print("[launcher] open it from Launchpad / Applications, or `jaeger "
           "launcher remove` to delete.")
     return 0

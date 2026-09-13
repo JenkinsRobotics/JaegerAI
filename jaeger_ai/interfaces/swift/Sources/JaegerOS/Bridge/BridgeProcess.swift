@@ -209,8 +209,14 @@ actor BridgeProcess {
             if dir.path == "/" { break }
             dir.deleteLastPathComponent()
         }
-        let repo = (env["JAEGER_REPO"].flatMap { $0.isEmpty ? nil : $0 })
-            ?? (NSHomeDirectory() as NSString).appendingPathComponent("GITHUB/JROS")
+        if let repo = env["JAEGER_REPO"], !repo.isEmpty {
+            return (repo as NSString).appendingPathComponent("jaeger")
+        }
+        if let installed = Bundle.main.object(forInfoDictionaryKey: "JaegerLauncherPath") as? String,
+           FileManager.default.isExecutableFile(atPath: installed) {
+            return installed
+        }
+        let repo = (NSHomeDirectory() as NSString).appendingPathComponent("GITHUB/JaegerAI")
         return (repo as NSString).appendingPathComponent("jaeger")
     }
 

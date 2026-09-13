@@ -13,14 +13,23 @@ import os
 import queue
 import threading
 import time
-from collections.abc import Callable
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QBuffer, QIODevice, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QBuffer,
+    QCameraPermission,
+    QCoreApplication,
+    QIODevice,
+    QMicrophonePermission,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtMultimedia import (
     QCamera,
@@ -38,6 +47,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QProgressBar,
+    QSizePolicy,
     QSplitter,
     QTextEdit,
     QVBoxLayout,
@@ -60,6 +71,10 @@ _GREEN = "#43E08A"
 _MONO = "SF Mono, Menlo, Consolas, monospace"
 
 _VIRTUAL_CAM = ("obs", "virtual", "ndi", "camo", "snap", "loopback")
+
+# A failed native close must not free sounddevice's CFFI callback while
+# CoreAudio can still call it. Keep such streams alive until process exit.
+_UNCLOSED_INPUT_STREAMS: list[Any] = []
 
 
 def _offer_audio(target: queue.Queue[np.ndarray], block: Any) -> None:
@@ -237,16 +252,28 @@ class MultimodalWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.ctx = ctx
+        from ..branding import apply_app_identity
+
+        apply_app_identity(self)
         self._engine_factory = engine_factory
         self._main_surface = main_surface
         self.worker: MultimodalWorker | None = None
         self.mic_stream: Any = None
+        self._worker_ready = False
+        self._mic_requested = True
+        self._mic_permission_pending = False
+        self._mic_capture_ready = False
+        self._mic_started_at = 0.0
+        self._mic_last_frame_at = 0.0
+        self._mic_blocks = 0
+        self._mic_device_name = "default input"
         self.camera: QCamera | None = None
         self.capture: QMediaCaptureSession | None = None
         self.video_sink: QVideoSink | None = None
         self._camera_devices: list[Any] = []
         self._camera_discovery_started = False
         self._camera_enable_pending = False
+        self._camera_permission_pending = False
         self._last_jpeg = 0.0
         self._mic_waveform_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=8)
         self._agent_waveform_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=8)
@@ -310,6 +337,11 @@ class MultimodalWindow(QMainWindow):
         self.mode_box = QComboBox()
         for label, mode in self.MODES:
             self.mode_box.addItem(label, mode)
+        self.mode_box.setToolTip(
+            "Half-duplex: recommended default. Quasi/full-duplex: experimental; "
+            "live echo cancellation and interruption acceptance are not yet certified. "
+            "All modes use the same agent tools, memory and neural models."
+        )
         self.mode_box.currentIndexChanged.connect(self._mode_changed)
         header.addWidget(self.mode_box)
         header.addWidget(QLabel("Barge"))
@@ -332,12 +364,13 @@ class MultimodalWindow(QMainWindow):
         controls.addStretch(1)
         self.force_btn = QPushButton("Force Listen")
         self.force_btn.clicked.connect(self._force_listen)
-        self.mic_check = QPushButton("Mic: On")
+        self.mic_check = QPushButton("Mic: Waiting")
         self.mic_check.setCheckable(True)
         self.mic_check.setChecked(True)
-        self.mic_check.setToolTip("Mute or enable microphone input; on by default.")
+        self.mic_check.setToolTip("Microphone is enabled by default. Live means actual audio frames are arriving; click to mute or retry.")
         self.mic_check.toggled.connect(self._mic_enabled_changed)
         self.record_check = QCheckBox("Record")
+        self.record_check.setToolTip("Optionally save captured microphone audio as a WAV when the window closes. Listening does not require this.")
         self.record_check.toggled.connect(self._set_record_enabled)
         for widget in (
             self.force_btn,
@@ -358,7 +391,12 @@ class MultimodalWindow(QMainWindow):
         self.camera_label = QLabel("camera off")
         self.camera_label.setObjectName("Camera")
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.camera_label.setWordWrap(True)
         self.camera_label.setMinimumHeight(250)
+        # A live pixmap must never become a layout constraint. In particular,
+        # label padding + scaling to the entire widget otherwise grows the
+        # preferred size again on every frame.
+        self.camera_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         layout.addWidget(self.camera_label, stretch=3)
         camera_row = QHBoxLayout()
         camera_row.addWidget(QLabel("Camera"))
@@ -373,6 +411,15 @@ class MultimodalWindow(QMainWindow):
         self.video_check.toggled.connect(self._toggle_camera)
         layout.addWidget(self.video_check)
         layout.addWidget(QLabel("Microphone — 1 s · logarithmic −60 to 0 dBFS"))
+        self.mic_status = QLabel("Waiting for the agent before opening microphone…")
+        self.mic_status.setWordWrap(True)
+        self.mic_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.mic_status)
+        self.mic_level = QProgressBar()
+        self.mic_level.setRange(0, 100)
+        self.mic_level.setValue(0)
+        self.mic_level.setFormat("No audio received")
+        layout.addWidget(self.mic_level)
         self.user_waveform = Waveform(SAMPLE_RATE)
         layout.addWidget(self.user_waveform)
         layout.addWidget(QLabel("Optional extra system prompt"))
@@ -397,7 +444,7 @@ class MultimodalWindow(QMainWindow):
             "Agentic uses memory/tools; Chatbot uses the same Gemma with tools disabled."
         )
         self.agentic_check.toggled.connect(self._agent_mode_changed)
-        typed_row.addWidget(self.typed_edit, stretch=1)
+        layout.addWidget(self.typed_edit)
         typed_row.addWidget(self.attach_btn)
         typed_row.addWidget(self.agentic_check)
         typed_row.addWidget(self.send_btn)
@@ -621,6 +668,12 @@ class MultimodalWindow(QMainWindow):
         if runtime is None and self._engine_factory is None:
             self._set_status("FAILED: the JaegerAI AgentRuntime is not available")
             return
+        # Includes duplex-mode switches: release video before either the GUI
+        # input stream or the engine-owned AEC device is opened again.
+        self._close_camera()
+        self._worker_ready = False
+        self._reset_mic_activity()
+        self._set_mic_state("Waiting", "Waiting for the agent…")
         self._commit_count = 0
         self.conversation.clear()
         self.transcript.clear()
@@ -657,13 +710,15 @@ class MultimodalWindow(QMainWindow):
         self._set_running_controls(True)
         self._set_status(f"Loading {self.current_audio_mode()} audio pipeline…")
 
-    def stop_session(self) -> bool:
+    def stop_session(self, *, wait_ms: int = 10_000) -> bool:
+        self._worker_ready = False
+        self._close_camera()
         self._close_microphone()
         worker = self.worker
         if worker is not None:
             worker.stop()
-            if worker.isRunning() and not worker.wait(10_000):
-                self._set_status("Worker still stopping after 10 s")
+            if worker.isRunning() and not worker.wait(wait_ms):
+                self._set_status("Stopping the current turn…")
                 self._save_recording()
                 return False
             self.worker = None
@@ -673,20 +728,44 @@ class MultimodalWindow(QMainWindow):
         return True
 
     def _on_ready(self) -> None:
+        if self.sender() is not None and self.sender() is not self.worker:
+            return
         worker = self.worker
-        if worker is not None and worker.gui_feeds_audio and self.mic_check.isChecked():
+        if worker is None:
+            return
+        self._worker_ready = True
+        if not self._mic_requested:
+            worker.set_paused(True)
+            self._set_mic_state("Muted", "Microphone muted")
+            self._resume_requested_camera()
+        elif worker.gui_feeds_audio:
             self._open_microphone()
         else:
-            self._set_status("Engine-owned 48 kHz AEC device is active")
+            self._mic_started_at = time.monotonic()
+            self._mic_device_name = "engine-owned AEC input"
+            self._set_mic_state("Starting", "Waiting for audio from the engine-owned AEC device…")
         self.force_btn.setEnabled(True)
 
     def _on_finished(self) -> None:
         sender = self.sender()
-        if sender is self.worker:
-            self.worker = None
+        if sender is not self.worker:
+            return
+        self._worker_ready = False
+        self._close_microphone()
+        self.worker = None
         self._set_running_controls(False)
+        if getattr(self, "_close_requested", False):
+            self._close_requested = False
+            QTimer.singleShot(0, self, self.close)
+        elif getattr(self, "_restart_requested", False):
+            self._restart_requested = False
+            if self.isVisible():
+                QTimer.singleShot(0, self, self.start_session)
 
     def _on_failed(self, message: str) -> None:
+        if self.sender() is not None and self.sender() is not self.worker:
+            return
+        self._worker_ready = False
         self._set_status(f"FAILED: {message}")
         self._close_microphone()
         self._set_running_controls(False)
@@ -716,12 +795,14 @@ class MultimodalWindow(QMainWindow):
         worker = self.worker
         if worker is not None and worker.isRunning():
             worker.set_agentic_tools(enabled)
-        self._set_status(f"{mode} active")
+        self._set_status(f"{mode} selected — applies to the next turn")
 
     def _mode_changed(self, _index: int) -> None:
         if self.worker is not None and self.worker.isRunning():
             self._set_status(f"Switching to {self.mode_box.currentText()}…")
-            if self.stop_session():
+            self._restart_requested = True
+            if self.stop_session(wait_ms=0):
+                self._restart_requested = False
                 self.start_session()
         else:
             self._set_status(
@@ -738,9 +819,12 @@ class MultimodalWindow(QMainWindow):
         self._on_telemetry("Barge", mode)
 
     def _mic_enabled_changed(self, enabled: bool) -> None:
-        self.mic_check.setText("Mic: On" if enabled else "Mic: Muted")
+        self._mic_requested = enabled
+        self._reset_mic_activity()
+        self._set_mic_state("Waiting" if enabled else "Muted",
+                            "Waiting for audio…" if enabled else "Microphone muted")
         worker = self.worker
-        if worker is not None and worker.isRunning():
+        if worker is not None and worker.isRunning() and self._worker_ready:
             try:
                 worker.set_paused(not enabled)
                 if worker.gui_feeds_audio:
@@ -748,9 +832,12 @@ class MultimodalWindow(QMainWindow):
                         self._open_microphone()
                     else:
                         self._close_microphone()
+                elif enabled:
+                    self._mic_started_at = time.monotonic()
             except Exception as exc:  # noqa: BLE001
-                self._set_status(f"Microphone control failed: {exc}")
-        self._on_telemetry("Microphone", "ON" if enabled else "MUTED")
+                self._microphone_failed(f"Microphone control failed: {exc}")
+        if not enabled:
+            self._resume_requested_camera()
 
     def _force_listen(self) -> None:
         if self.worker is None:
@@ -796,12 +883,78 @@ class MultimodalWindow(QMainWindow):
         worker.submit_image(f"data:{mime};base64,{payload}")
         self._set_status(f"Attached {Path(path).name} to the next turn")
 
+    def _set_mic_state(self, state: str, detail: str) -> None:
+        self.mic_check.setText(f"Mic: {state}")
+        self.mic_status.setText(detail)
+        self._on_telemetry("Microphone", f"{state.upper()} · {self._mic_device_name}")
+        self.mic_status.setStyleSheet(
+            f"color: {_GREEN if state == 'Live' else '#FF6B6B' if state in {'Error', 'No audio'} else _INK_DIM};"
+        )
+
+    def _reset_mic_activity(self) -> None:
+        self._mic_capture_ready = False
+        self._mic_started_at = 0.0
+        self._mic_last_frame_at = 0.0
+        self._mic_blocks = 0
+        _drain_audio(self._mic_waveform_q)
+        self.user_waveform.clear()
+        self.mic_level.setValue(0)
+        self.mic_level.setFormat("No audio received")
+
+    def _microphone_failed(self, detail: str) -> None:
+        self._close_microphone()
+        self._mic_requested = False
+        self.mic_check.blockSignals(True)
+        self.mic_check.setChecked(False)
+        self.mic_check.blockSignals(False)
+        self._set_mic_state("Error", f"{detail} — click Mic to retry.")
+        self._set_status(f"MICROPHONE FAILED: {detail}")
+        # Camera-only operation remains available after an explicit error.
+        self._resume_requested_camera()
+
+    def _microphone_permission_result(self, permission: Any) -> None:
+        self._mic_permission_pending = False
+        if not self._mic_requested or not self._worker_ready:
+            return
+        if permission.status() == Qt.PermissionStatus.Granted:
+            self._open_microphone()
+        else:
+            self._microphone_permission_denied()
+
+    def _microphone_permission_denied(self) -> None:
+        self._microphone_failed(
+            "Microphone access denied. Enable Jaeger AI in System Settings → "
+            "Privacy & Security → Microphone"
+        )
+
     def _open_microphone(self) -> None:
         if self.mic_stream is not None:
+            return
+        # The Elgato/CoreAudio input can fail if QCamera is already capturing.
+        # Retain the user's video selection, then resume it on the first PCM.
+        self._close_camera()
+        self._reset_mic_activity()
+        if _UNCLOSED_INPUT_STREAMS:
+            self._microphone_failed("A previous audio device could not close; quit and reopen the multimodal window")
+            return
+        app = QCoreApplication.instance()
+        permission = QMicrophonePermission()
+        status = app.checkPermission(permission)
+        if status == Qt.PermissionStatus.Undetermined:
+            self._set_mic_state("Permission", "Waiting for microphone permission…")
+            if not self._mic_permission_pending:
+                self._mic_permission_pending = True
+                app.requestPermission(permission, self, self._microphone_permission_result)
+            return
+        if status == Qt.PermissionStatus.Denied:
+            self._microphone_permission_denied()
             return
         try:
             import sounddevice as sd
 
+            self._mic_device_name = str(sd.query_devices(kind="input")["name"])
+            self._mic_started_at = time.monotonic()
+            self._set_mic_state("Starting", f"Opening {self._mic_device_name}; waiting for audio…")
             self.mic_stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 channels=1,
@@ -810,22 +963,23 @@ class MultimodalWindow(QMainWindow):
                 callback=self._microphone_callback,
             )
             self.mic_stream.start()
-            device = sd.query_devices(sd.default.device[0])["name"]
-            self._on_telemetry("Microphone", str(device))
-            self._set_status(f"Microphone active: {device}")
         except Exception as exc:  # noqa: BLE001 — device failure belongs in status
-            self.mic_stream = None
-            self._set_status(f"MICROPHONE FAILED: {type(exc).__name__}: {exc}")
+            self._microphone_failed(f"{type(exc).__name__}: {exc}")
 
     def _close_microphone(self) -> None:
-        if self.mic_stream is None:
-            return
-        try:
-            self.mic_stream.stop()
-            self.mic_stream.close()
-        except Exception:  # noqa: BLE001 — teardown never blocks close
-            pass
-        self.mic_stream = None
+        stream = self.mic_stream
+        if stream is not None:
+            try:
+                stream.stop(ignore_errors=False)
+            except Exception:  # noqa: BLE001 — close must still run after stop fails
+                pass
+            try:
+                # sounddevice otherwise suppresses native close errors.
+                stream.close(ignore_errors=False)
+            except Exception:  # noqa: BLE001 — retain native callback on failed close
+                _UNCLOSED_INPUT_STREAMS.append(stream)
+            self.mic_stream = None
+        self._reset_mic_activity()
 
     def _microphone_callback(
         self,
@@ -834,7 +988,11 @@ class MultimodalWindow(QMainWindow):
         _time_info: Any,
         _status: Any,
     ) -> None:
+        if not self._mic_requested:
+            return
         mono = np.asarray(input_data[:, 0], dtype=np.float32).copy()
+        self._mic_last_frame_at = time.monotonic()
+        self._mic_blocks += 1
         _offer_audio(self._mic_waveform_q, mono)
         if self._record_enabled:
             self._recorded.append(mono)
@@ -843,11 +1001,16 @@ class MultimodalWindow(QMainWindow):
             worker is not None
             and worker.isRunning()
             and worker.gui_feeds_audio
-            and self.mic_check.isChecked()
         ):
             worker.audio_q.put(mono)
 
     def _on_heard(self, pcm: Any) -> None:
+        if self.sender() is not None and self.sender() is not self.worker:
+            return
+        if not self._mic_requested:
+            return
+        self._mic_last_frame_at = time.monotonic()
+        self._mic_blocks += 1
         _offer_audio(self._mic_waveform_q, pcm)
         if self._record_enabled:
             self._recorded.append(np.asarray(pcm, dtype=np.float32).reshape(-1).copy())
@@ -860,8 +1023,26 @@ class MultimodalWindow(QMainWindow):
 
     def _paint_waveforms(self) -> None:
         user_pcm = _drain_audio(self._mic_waveform_q)
-        if user_pcm is not None:
+        if user_pcm is not None and user_pcm.size and self._mic_requested:
             self.user_waveform.push(user_pcm)
+            first_capture = not self._mic_capture_ready
+            self._mic_capture_ready = True
+            db = 20.0 * np.log10(max(1e-6, float(np.sqrt(np.mean(user_pcm ** 2)))))
+            self.mic_level.setValue(int(np.clip((db + 60.0) / 60.0 * 100.0, 0, 100)))
+            self.mic_level.setFormat(f"{db:.0f} dBFS")
+            self._set_mic_state(
+                "Live", f"Capturing · {self._mic_device_name} · {self._mic_blocks} blocks"
+                + (" · silent input" if db < -60 else ""),
+            )
+            if first_capture:
+                self._set_status(f"Microphone receiving audio: {self._mic_device_name}")
+                self._resume_requested_camera()
+        elif self._mic_requested and self._mic_started_at:
+            if time.monotonic() - (self._mic_last_frame_at or self._mic_started_at) > 5.0:
+                self._mic_capture_ready = False
+                self.mic_level.setValue(0)
+                self.mic_level.setFormat("No audio received")
+                self._set_mic_state("No audio", "No audio frames for 5 s. Check the input device, or mute and re-enable Mic.")
         agent_pcm = _drain_audio(self._agent_waveform_q)
         if agent_pcm is not None:
             # Engine Events arrive one generated chunk at a time, so this is
@@ -1182,6 +1363,26 @@ class MultimodalWindow(QMainWindow):
             self._open_selected_camera()
 
     def _open_selected_camera(self) -> None:
+        if self.camera is not None:
+            return
+        app = QCoreApplication.instance()
+        permission = QCameraPermission()
+        status = app.checkPermission(permission)
+        if status == Qt.PermissionStatus.Undetermined:
+            self.camera_label.setText("Waiting for camera permission…")
+            if not self._camera_permission_pending:
+                self._camera_permission_pending = True
+                app.requestPermission(permission, self, self._camera_permission_result)
+            return
+        if status == Qt.PermissionStatus.Denied:
+            self._camera_permission_denied()
+            return
+        if not self._worker_ready:
+            self.camera_label.setText("Waiting for audio pipeline initialization before starting camera…")
+            return
+        if self._mic_requested and not self._mic_capture_ready:
+            self.camera_label.setText("Waiting for microphone capture before starting camera…")
+            return
         camera = self._selected_camera(self._camera_devices)
         if camera is None:
             self.camera_label.setText("no camera found")
@@ -1201,6 +1402,27 @@ class MultimodalWindow(QMainWindow):
         self.video_sink.videoFrameChanged.connect(self._on_video_frame)
         self.camera.start()
 
+    def _camera_permission_result(self, permission: Any) -> None:
+        self._camera_permission_pending = False
+        # A permission prompt may outlive the operator's camera-off action.
+        if not self.video_check.isChecked():
+            return
+        if permission.status() == Qt.PermissionStatus.Granted:
+            self._open_selected_camera()
+        else:
+            self._camera_permission_denied()
+
+    def _camera_permission_denied(self) -> None:
+        self._camera_enable_pending = False
+        self.video_check.blockSignals(True)
+        self.video_check.setChecked(False)
+        self.video_check.blockSignals(False)
+        self._close_camera()
+        self.camera_label.setText(
+            "Camera access denied. Enable Jaeger AI camera access in "
+            "System Settings → Privacy & Security → Camera, then turn video on."
+        )
+
     def _toggle_camera(self, enabled: bool) -> None:
         if not enabled:
             self._camera_enable_pending = False
@@ -1213,17 +1435,32 @@ class MultimodalWindow(QMainWindow):
             return
         self._open_selected_camera()
 
+    def _resume_requested_camera(self) -> None:
+        if self.video_check.isChecked() and self.camera is None:
+            self._toggle_camera(True)
+
     def _reopen_camera(self, _index: int) -> None:
         if self.video_check.isChecked():
             self._close_camera()
             self._toggle_camera(True)
 
     def _close_camera(self) -> None:
+        if self.video_sink is not None:
+            try:
+                self.video_sink.videoFrameChanged.disconnect(self._on_video_frame)
+            except (RuntimeError, TypeError):
+                pass
         if self.camera is not None:
             try:
                 self.camera.stop()
             except Exception:  # noqa: BLE001
                 pass
+        if self.capture is not None:
+            self.capture.setCamera(None)
+            self.capture.setVideoSink(None)
+        for resource in (self.camera, self.video_sink, self.capture):
+            if resource is not None:
+                resource.deleteLater()
         self.camera = None
         self.capture = None
         self.video_sink = None
@@ -1236,7 +1473,7 @@ class MultimodalWindow(QMainWindow):
             return
         self.camera_label.setPixmap(
             QPixmap.fromImage(image).scaled(
-                self.camera_label.size(),
+                self.camera_label.contentsRect().size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -1264,16 +1501,31 @@ class MultimodalWindow(QMainWindow):
         super().showEvent(event)
         if not getattr(self, "_opened_once", False):
             self._opened_once = True
-            QTimer.singleShot(0, self.start_session)
-            QTimer.singleShot(100, lambda: self.video_check.setChecked(True))
+            QTimer.singleShot(0, self, self._start_visible_session)
+            QTimer.singleShot(100, self, self._enable_visible_camera)
+
+    def _start_visible_session(self) -> None:
+        if self.isVisible() and self._opened_once:
+            self.start_session()
+
+    def _enable_visible_camera(self) -> None:
+        if self.isVisible() and self._opened_once:
+            self.video_check.setChecked(True)
 
     def closeEvent(self, event: Any) -> None:  # noqa: N802 — Qt override
-        if not self.stop_session():
+        self._restart_requested = False
+        if not self.stop_session(wait_ms=0):
             # Keep the QObject alive while an in-flight model turn unwinds;
             # destroying a running QThread terminates the process in Qt.
+            self._close_requested = True
             event.ignore()
             return
+        self._close_requested = False
         self._close_camera()
+        self._opened_once = False
+        self.video_check.blockSignals(True)
+        self.video_check.setChecked(False)
+        self.video_check.blockSignals(False)
         if self._main_surface:
             event.accept()
         else:

@@ -136,7 +136,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         client=object(), cleanup=lambda: cleaned.append(True)))
     monkeypatch.setattr(
         m, "run_for_voice",
-        lambda c, t, session_key="gui": {"text": f"echo: {t}", "error": None})
+        lambda c, t, session_key="gui", output_mode="dynamic": {"text": f"echo: {t}", "error": None})
 
     from jaeger_os.nodes import runtime as node_runtime
 

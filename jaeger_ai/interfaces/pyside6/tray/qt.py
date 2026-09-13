@@ -19,26 +19,14 @@ from typing import Any
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from .base import TrayState, asset_path, icon_path_for
+from .base import TrayState, icon_path_for
 
 
 def apply_app_icon() -> None:
-    """Set the windowed app's icon (every window + the macOS Dock) to the
-    ``jaeger_app_icon`` asset. Qt's ``setWindowIcon`` covers windows; the
-    Dock for a non-bundled process needs AppKit. Both are best-effort."""
-    path = asset_path("jaeger_app_icon.png")
-    if not path:
-        return
-    app = QApplication.instance()
-    if app is not None:
-        app.setWindowIcon(QIcon(path))
-    try:
-        from AppKit import NSApplication, NSImage
-        img = NSImage.alloc().initByReferencingFile_(path)
-        if img is not None:
-            NSApplication.sharedApplication().setApplicationIconImage_(img)
-    except Exception:  # noqa: BLE001 — non-macOS / pyobjc missing
-        pass
+    """Compatibility entry point for the shared desktop identity."""
+    from ..branding import apply_app_identity
+
+    apply_app_identity()
 
 
 def _agent_name(ctx: Any) -> str:

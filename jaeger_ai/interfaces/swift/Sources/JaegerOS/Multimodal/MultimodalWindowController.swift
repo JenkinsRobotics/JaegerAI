@@ -8,6 +8,7 @@
 //
 
 import AppKit
+import AVFoundation
 import Foundation
 
 @MainActor
@@ -15,6 +16,12 @@ final class MultimodalWindowController {
     static let shared = MultimodalWindowController()
 
     static let launchArguments = ["multimodal", "--attach", "--audio", "structured"]
+
+    static func bundledHelperArguments(sitePackages: String) -> [String] {
+        ["-c", "import site, sys; site.addsitedir(sys.argv.pop(1)); "
+            + "from jaeger_ai.interfaces.pyside6.multimodal.__main__ import main; "
+            + "raise SystemExit(main())", sitePackages, "--attach", "--audio", "structured"]
+    }
 
     private var process: Process?
     private var launchInProgress = false
@@ -31,7 +38,22 @@ final class MultimodalWindowController {
     ) -> [String: String] {
         var environment = base
         environment["JAEGER_INSTANCE_NAME"] = instance
+        environment["JAEGER_DESKTOP_HELPER"] = "1"
         return environment
+    }
+
+    /// Consent belongs to the installed app, whose Info.plist contains the
+    /// camera purpose string. Ask before the embedded Python helper starts
+    /// its device initialization; both executables share the app's metadata.
+    static func prepareCameraPermission(
+        status: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video),
+        request: () async -> Bool = { await AVCaptureDevice.requestAccess(for: .video) }
+    ) async -> Bool {
+        switch status {
+        case .authorized: return true
+        case .notDetermined: return await request()
+        default: return false
+        }
     }
 
     private func present(agent: AgentBridge) async {
@@ -62,6 +84,9 @@ final class MultimodalWindowController {
             return
         }
 
+        // Denying video must not prevent text/audio use of the workspace.
+        _ = await Self.prepareCameraPermission()
+
         let child = Process()
         child.executableURL = URL(fileURLWithPath: path)
         child.arguments = Self.launchArguments
@@ -72,6 +97,14 @@ final class MultimodalWindowController {
             base: ProcessInfo.processInfo.environment,
             instance: instance
         )
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/JaegerMultimodal")
+        if FileManager.default.isExecutableFile(atPath: helper.path),
+           let pythonHome = Bundle.main.object(forInfoDictionaryKey: "JaegerPythonHome") as? String,
+           let sitePackages = Bundle.main.object(forInfoDictionaryKey: "JaegerPythonSite") as? String {
+            child.executableURL = helper
+            child.arguments = Self.bundledHelperArguments(sitePackages: sitePackages)
+            child.environment?["PYTHONHOME"] = pythonHome
+        }
         child.standardOutput = FileHandle.standardOutput
         child.standardError = FileHandle.standardError
         child.terminationHandler = { [weak self] _ in

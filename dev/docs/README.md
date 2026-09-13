@@ -6,6 +6,11 @@
 area below that. Nothing here is deleted when it goes stale — it moves to
 `history/`.
 
+Start with the [development workspace guide](../README.md) for executable
+tools and tests, or [0.12.0 release evidence](releases/0.12.0/) for the current
+review and verification reports. Agent mechanism documentation is maintained
+in JaegerAgent; see [the ownership map](MOVED_TO_JAEGER_AGENT.md).
+
 ---
 
 ## Reality — the system as it exists
@@ -19,17 +24,15 @@ code wins and the doc is out of date — fix the doc, don't trust it blind.
 | [STATUS.md](reality/STATUS.md) | Pipeline runtime-verification status, updated every behavior-touching commit |
 | [STRUCTURE.md](reality/STRUCTURE.md) | Repository structure guide for reviewers / new contributors |
 | [naming_conventions.md](reality/naming_conventions.md) | Tools / skills / repo naming conventions |
-| [agentic_runners.md](reality/agentic_runners.md) | The two-tier agentic runner design (realtime + Deep Think) + inference lanes |
 | [memory_architecture.md](reality/memory_architecture.md) | Subject-attributed SQL memory — curated facts + episodic history |
 | [persona_compiler.md](reality/persona_compiler.md) | Persona compiler — State/View split for the character layer |
-| [skill_standard.md](reality/skill_standard.md) | The self-authored skill standard — cheat sheets for a 4B agent |
 | [pipeline_health.md](reality/pipeline_health.md) | What's solid / incomplete / unwired across the core pipelines |
 | [scenario_bench.md](reality/scenario_bench.md) | The two JROS benchmarks — routing corpus vs. scenario suite |
 | [scenario_test_suite.md](reality/scenario_test_suite.md) | The full-system, real-world scenario test suite (81-case corpus) |
 
-**Also live reference:** [`pipelines/`](pipelines/) — one doc per core pipeline
-(agent turn loop, skill discovery, memory, persona, voice, transport,
-permissions, model inference), each verified against code.
+**Application pipeline reference:** [`pipelines/`](pipelines/) — persona,
+voice, and transport documentation. Reusable agent pipeline and skill-standard
+docs moved with the agent; their destinations are in the ownership map above.
 
 ## History — the log
 
@@ -60,7 +63,7 @@ kept for the record, never rewritten.
 | [skill-evolution-impl-B-review.md](history/skill-evolution-impl-B-review.md) | Skill evolution plan B — the review (implemented) |
 | [skill-evolution-impl-C-lifecycle.md](history/skill-evolution-impl-C-lifecycle.md) | Skill evolution plan C — archive/scoring/retirement (implemented) |
 | [skill_unification.md](history/skill_unification.md) | Skill unification — one Skill, one loader (DONE, presence-based, 2026-07-02) |
-| [skill_schema_v3-v1.md](history/skill_schema_v3-v1.md) | Earlier top-level skill-manifest v3 note — the code-verified spec `skill_loader.py` actually implements; diverges from the larger aspirational draft at [skills/skill_schema_v3.md](skills/skill_schema_v3.md), kept for the record rather than reconciled |
+| [skill_schema_v3-v1.md](history/skill_schema_v3-v1.md) | Historical skill-manifest v3 note; current agent skill documentation is covered by the [ownership map](MOVED_TO_JAEGER_AGENT.md) |
 | [SWIFT_APP_ARCHITECTURE_PLAN.md](history/SWIFT_APP_ARCHITECTURE_PLAN.md) | Swift-first app architecture plan (shipped 0.6/0.7) |
 | [JROS_0.8_MODULE_REFACTOR_SPEC.md](history/JROS_0.8_MODULE_REFACTOR_SPEC.md) | 0.8 runtime-unification + node-modules spec — Phase U/M shipped; hardware-modules step still open, see the Roadmap section below |
 | [JROS_0.8_U1_BUS_UNIFICATION_PLAN.md](history/JROS_0.8_U1_BUS_UNIFICATION_PLAN.md) | 0.8 U1 — bus unification (shipped) |
@@ -83,7 +86,6 @@ Open future work, not yet shipped.
 |---|---|
 | [future_backlog.md](roadmap/future_backlog.md) | Living backlog of deferred work — the "later" pile |
 | [agentic_skill_pipeline_backlog.md](roadmap/agentic_skill_pipeline_backlog.md) | Tools ↔ tool-skills ↔ playbook-skills routing improvement backlog |
-| [JROS_0.8_CAPABILITY_LAYER_DESIGN.md](roadmap/JROS_0.8_CAPABILITY_LAYER_DESIGN.md) | 0.8 Mind↔Body capability-layer design draft — pending operator approval |
 
 Also open: the hardware-modules step of [JROS_0.8_MODULE_REFACTOR_SPEC.md](history/JROS_0.8_MODULE_REFACTOR_SPEC.md)
 (Phase U/M shipped; hardware modules not yet converted).
@@ -107,13 +109,12 @@ is per-doc, not per-folder.
 
 | folder | covers |
 |---|---|
-| [core/](core/) | Agent loop · prompts · memory · tools · models · instance |
+| [core/](core/) | Application R&D, safety policy, and agent extraction history |
 | [audio/](audio/) | STT · TTS · voice pipeline |
 | [avatar/](avatar/) | Animation · media · Studio/GUI · characters |
-| [hardware/](hardware/) | JP01 · motor/light/vision · device adapters |
-| [infra/](infra/) | Transport/bus · app framework · protocol · client · deploy |
-| [skills/](skills/) | Skill tree · sharing · marketplace · schema · templates |
-| [pipelines/](pipelines/) | Live reference docs for the core agent pipelines (see Reality above) |
+| [skills/](skills/) | Application skill-tree R&D |
+| [pipelines/](pipelines/) | Application persona, voice, and transport references |
+| [releases/0.12.0/](releases/0.12.0/) | Current release review, hardening, and verification evidence |
 | [revision_summaries/](revision_summaries/) | Per-release write-ups (0.1.0 → 0.7.0) |
 | [archive/](archive/) | Deferred/shelved planning briefs, kept for the record |
 | [library_review/](library_review/) | Upstream-project (Hermes, VoiceLLM, JP01, Mochi) value reviews |

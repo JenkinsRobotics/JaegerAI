@@ -41,8 +41,9 @@ contract, capability layer) and builds everything agentic on top:
 
 - **`modules/`** — optional provider-named application integrations.
   JaegerKokoroTTS and JaegerWhisperSTT remain available for explicit tools or
-  app-specific features; they are not the live conversational speech path.
-  JaegerAgent owns that end-to-end multimodal pipeline.
+  app-specific features. The attached Multimodal face uses JaegerAgent's own
+  speech nodes; the legacy TUI retains a separate capture/STT adapter while
+  sharing agent-owned final speech.
 - **`core/`** — Jaeger AI's application lifecycle, instance integration,
   policy, diagnostics, and the **`persona_first`** pipeline: an id/ego split
   where a persona lane speaks to the user directly, in character, and
@@ -63,11 +64,13 @@ contract, capability layer) and builds everything agentic on top:
 - **Its own faces** — the Swift app (default windowed UI), the TUI
   (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
-  (through JaegerAgent's built-in multimodal nodes), and the
+  and the
   PySide6 Multimodal face. The Multimodal window is a renderer and device
   pump over `jaeger_agent`; the agent package owns its audio
-  pipeline, turn policy, vision transport, and speech. All faces are clients
-  of one protocol.
+  pipeline, turn policy, vision transport, and speech. Native Chat/Avatar
+  share its bridge-owned model, memory, and speech nodes. Final output channels
+  are preserved across persona composition and speech playback. See the current
+  release review below for the remaining capture and distribution boundaries.
 - **The client protocol** — JaegerOS's versioned contract plus
   `jaeger_ai/interfaces/client.py` (`JrosClient`), a
   versioned NDJSON wire contract any surface — including third-party
@@ -78,7 +81,8 @@ contract, capability layer) and builds everything agentic on top:
 
 Optional engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
 [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
-are **tool/add-on extras**, not the agent's final-response pipeline. Each is
+are companion dependencies for explicit tools and legacy interfaces, not the
+attached Multimodal engine's final-response pipeline. Each is
 its own repo, pinning JaegerOS only, so a
 robot body can run without the AI product installed at all.
 
@@ -118,12 +122,9 @@ self-modifies its own skills.
 `pip install jaeger-ai` from PyPI is **(planned, 1.0)** — not available
 yet.
 
-Voice is optional — pull in the engine extras when you want speech:
-
-```bash
-pip install -e '.[kokoro_tts]'     # speak (JaegerKokoroTTS)
-pip install -e '.[whisper_stt]'    # listen (JaegerWhisperSTT)
-```
+The application installs JaegerAgent's `multimodal-duplex` dependencies by
+default. The standalone JaegerAgent library keeps neural audio optional.
+There are no `kokoro_tts` or `whisper_stt` extras on the JaegerAI package.
 
 ## Quick start
 
@@ -160,12 +161,23 @@ memory database, logs, skills workspace, and process lock. At application boot,
 JaegerAI injects that instance layout into JaegerAgent, so the reusable agent
 reads and writes the same state; it does not create a second agent instance.
 
-Chat, Avatar, and Multimodal are three faces on this same running agent. Chat
-sends text; Avatar sends text/audio; Multimodal sends text/audio/video. The
+Chat, Avatar, and Multimodal share the running bridge's model and instance
+memory. Native dictation sends captured PCM to JaegerAgent's prewarmed Whisper;
+the attached Multimodal face submits text/audio/video through its engine. The
 Multimodal face defaults to **Half-Duplex** and can switch its audio front end
 to experimental **Quasi Full-Duplex** or **Full-Duplex** without swapping the
 model or agent pipeline. The explicit `./jaeger multimodal --standalone` mode
 exists only for isolated reference benchmarks and development.
+
+**Release status (2026-09-13): release candidate, shipment pending.** Desktop
+and TUI final output now uses JaegerAgent's routing and speech runtime. The
+dependency manifest pins published, immutable candidate commits, including
+English speech assets required by a fresh installation. Half-duplex camera
+and microphone capture has passed live device checks. Physical conversation
+acceptance and macOS distribution signing remain outstanding; full/quasi
+duplex remain experimental. The legacy TUI still uses its older capture/STT
+adapter with half-duplex playback. See [the current candidate report](
+dev/docs/releases/0.12.0/RELEASE_CANDIDATE_20260913.md) for results and limits.
 
 A `.jaeger_agent/` directory is JaegerAgent's standalone fallback when its CLI
 or library is run directly without a host. It is not part of a hosted JaegerAI

@@ -15,6 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytestmark = pytest.mark.ui
 
+from jaeger_os.app.manifest import load_manifest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QGroupBox, QPushButton  # noqa: E402
 
 from jaeger_ai.interfaces.pyside6.multimodal.preflight import (  # noqa: E402
@@ -22,12 +23,13 @@ from jaeger_ai.interfaces.pyside6.multimodal.preflight import (  # noqa: E402
     print_preflight,
 )
 from jaeger_ai.interfaces.pyside6.multimodal.selftest import selftest  # noqa: E402
-from jaeger_ai.interfaces.pyside6.multimodal.window import MultimodalWindow  # noqa: E402
+from jaeger_ai.interfaces.pyside6.multimodal.window import (
+    MultimodalWindow,  # noqa: E402
+)
 from jaeger_ai.interfaces.pyside6.multimodal.worker import (  # noqa: E402
     BorrowedRuntime,
     MultimodalWorker,
 )
-from jaeger_os.app.manifest import load_manifest  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -122,6 +124,30 @@ def test_worker_completes_speech_only_output_without_a_blank_chat_commit(qapp) -
     assert worker._turns == 1
 
 
+def test_worker_keeps_only_latest_camera_frame() -> None:
+    worker = MultimodalWorker(engine_factory=_StubEngine)
+    for index in range(100):
+        worker.submit_image(f"frame-{index}")
+    assert worker.image_q.qsize() == 1
+    assert worker.image_q.get_nowait() == "frame-99"
+
+
+def test_remote_vision_load_is_not_called_in_ui_constructor() -> None:
+    configured = []
+    runtime = SimpleNamespace(vision_is_remote=True, configure_vision=configured.append)
+    worker = MultimodalWorker(runtime=runtime, engine_factory=_StubEngine, want_vision=True)
+    assert configured == []
+    assert worker._remote_vision_runtime is runtime
+
+
+def test_hidden_window_can_start_again_after_close(qapp) -> None:
+    window = MultimodalWindow(SimpleNamespace(core=SimpleNamespace(runtime=object())),
+                              engine_factory=_StubEngine)
+    window._opened_once = True
+    window.close()
+    assert window._opened_once is False
+
+
 def test_borrowed_runtime_routes_chatbot_without_touching_agentic_turn() -> None:
     calls = []
     runtime = SimpleNamespace(
@@ -202,6 +228,92 @@ def test_window_builds_four_sections_and_all_required_controls(qapp) -> None:
     finally:
         window._main_surface = True
         window.close()
+
+
+def test_closed_window_ignores_queued_autostart(qapp, monkeypatch):
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    window = MultimodalWindow(SimpleNamespace(core=SimpleNamespace(runtime=object())),
+                              engine_factory=_StubEngine, main_surface=True)
+    monkeypatch.setattr(window, "start_session", lambda: pytest.fail("hidden session start"))
+    window._opened_once = True
+    try:
+        window._start_visible_session()
+        window._enable_visible_camera()
+        assert not window.video_check.isChecked()
+        window._opened_once = False
+        monkeypatch.setattr(window, "isVisible", lambda: True)
+        window._start_visible_session()
+        window._enable_visible_camera()
+        assert not window.video_check.isChecked()
+    finally:
+        window.close()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_camera_denial_is_actionable_and_does_not_start_capture(qapp, monkeypatch):
+    from PySide6.QtCore import Qt
+
+    from jaeger_ai.interfaces.pyside6.multimodal import window as module
+
+    window = MultimodalWindow(SimpleNamespace(core=SimpleNamespace(runtime=object())),
+                              engine_factory=_StubEngine, main_surface=True)
+    app = SimpleNamespace(checkPermission=lambda _: Qt.PermissionStatus.Denied)
+    monkeypatch.setattr(module, "QCoreApplication", SimpleNamespace(instance=lambda: app))
+    monkeypatch.setattr(module, "QCamera", lambda *_: pytest.fail("capture after denial"))
+    try:
+        window.video_check.blockSignals(True)
+        window.video_check.setChecked(True)
+        window.video_check.blockSignals(False)
+        window._open_selected_camera()
+        assert not window.video_check.isChecked()
+        assert window.camera is None
+        assert "Camera access denied" in window.camera_label.text()
+        assert "Privacy & Security" in window.camera_label.text()
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.parametrize("still_enabled", [False, True])
+def test_camera_permission_is_requested_once_and_honors_late_camera_off(
+    qapp, monkeypatch, still_enabled,
+):
+    from PySide6.QtCore import Qt
+
+    from jaeger_ai.interfaces.pyside6.multimodal import window as module
+
+    window = MultimodalWindow(SimpleNamespace(core=SimpleNamespace(runtime=object())),
+                              engine_factory=_StubEngine, main_surface=True)
+    callbacks = []
+    app = SimpleNamespace(
+        checkPermission=lambda _: Qt.PermissionStatus.Undetermined,
+        requestPermission=lambda permission, context, callback: callbacks.append(callback),
+    )
+    monkeypatch.setattr(module, "QCoreApplication", SimpleNamespace(instance=lambda: app))
+    opened = []
+    try:
+        window._open_selected_camera()
+        window._open_selected_camera()
+        assert len(callbacks) == 1
+        assert "Waiting for camera permission" in window.camera_label.text()
+        monkeypatch.setattr(window, "_open_selected_camera", lambda: opened.append(True))
+        window.video_check.blockSignals(True)
+        window.video_check.setChecked(still_enabled)
+        window.video_check.blockSignals(False)
+        callbacks[0](SimpleNamespace(status=lambda: Qt.PermissionStatus.Granted))
+        assert opened == ([True] if still_enabled else [])
+        assert not window._camera_permission_pending
+    finally:
+        window.close()
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_agentic_workspace_renders_activity_tools_outputs_and_artifacts(qapp) -> None:
@@ -314,3 +426,38 @@ def test_manifests_index_multimodal_as_face_and_dedicated_app() -> None:
     assert [(surface.id, surface.main) for surface in dedicated.surfaces] == [
         ("multimodal", True)
     ]
+
+
+def test_busy_window_close_waits_asynchronously_for_worker(qapp):
+    from PySide6.QtCore import QObject, Signal, QCoreApplication, QEvent
+    from PySide6.QtGui import QCloseEvent
+    class Worker(QObject):
+        finished = Signal()
+        running = True
+        waits = []
+        def stop(self): pass
+        def isRunning(self): return self.running
+        def wait(self, milliseconds):
+            self.waits.append(milliseconds)
+            return not self.running
+    window = MultimodalWindow(SimpleNamespace(core=None), main_surface=True)
+    worker = Worker()
+    window.worker = worker
+    worker.finished.connect(window._on_finished)
+    event = QCloseEvent()
+    try:
+        window.closeEvent(event)
+        assert not event.isAccepted()
+        assert worker.waits == [0]
+        assert window.worker is worker
+        assert window._close_requested
+        worker.running = False
+        worker.finished.emit()
+        qapp.processEvents()
+        assert window.worker is None
+        assert not window._close_requested
+    finally:
+        window.worker = None
+        window.close()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

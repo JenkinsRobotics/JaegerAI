@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import queue
 import re
+import threading
 import time
 import uuid
 from typing import Any
@@ -166,7 +167,6 @@ class VoiceController:
             from jaeger_os.core.audio import AudioSessionConfig
             from jaeger_os.nodes import runtime
 
-            runtime.ensure_tts_node()
             runtime.ensure_audio_session_node(
                 config=AudioSessionConfig(
                     stt_mode="two_pass",
@@ -179,7 +179,7 @@ class VoiceController:
                 ),
             )
             self._bus = runtime.get_bus()
-            self._tts = runtime.get_synth()
+            self._tts = None
             self._audio_session = runtime.get_audio_session()
             if self._audio_session is None:
                 raise RuntimeError("audio session did not initialize")
@@ -192,9 +192,10 @@ class VoiceController:
                 audio_health.get("aec")
                 or audio_health.get("input_backend") == "avaudio"
             )
-            self._barge_in_live = bool(
-                self.barge_in and echo_control_live
-            )
+            # This legacy TUI capture adapter has no reference feed from the
+            # agent-owned playback stream. Keep capture paused while speaking;
+            # device AEC health alone cannot establish echo cancellation here.
+            self._barge_in_live = False
             self._audio_session.barge_in_live = self._barge_in_live
             self._on_transcript = self._make_transcript_handler()
             self._bus.subscribe(topics.SENSE_STT_TRANSCRIPT, self._on_transcript)
@@ -237,8 +238,8 @@ class VoiceController:
             self._chimes = None
 
         try:
-            from jaeger_ai.modules import jaeger_kokoro_tts as tts
-            tts.warm()  # idempotent — usually already warm from boot
+            from jaeger_ai.main import conversation_speech_runtime
+            conversation_speech_runtime().load()
         except Exception:  # noqa: BLE001
             pass
 
@@ -375,6 +376,7 @@ class VoiceController:
         spoken.
         """
         self._last_speech_succeeded = False
+        self._speech_cancel = threading.Event()
         if not text or self._bus is None or self._audio_session is None:
             return False
         from jaeger_os.core.voice import clean_voice_reply
@@ -464,18 +466,15 @@ class VoiceController:
         self._accepting_input = True
 
     def _request_speech(self, text: str, correlation_id: str) -> Any:
-        """Publish speech intent and wait for the TTS node ack."""
-        from jaeger_os.transport import topics
+        """Use the same JaegerAgent speech nodes as desktop and multimodal."""
+        from types import SimpleNamespace
+        from jaeger_ai.main import speak_conversation
 
-        return self._bus.request(
-            topics.SpeechCommand(
-                text=text,
-                node_id="tui_voice",
-                correlation_id=correlation_id,
-            ),
-            ack_topic=topics.ACT_SPEECH_SPOKEN,
-            timeout_s=180.0,
-        )
+        try:
+            spoken = speak_conversation(text, cancel_event=self._speech_cancel)
+            return SimpleNamespace(ok=spoken, reason="" if spoken else "interrupted")
+        except Exception as exc:
+            return SimpleNamespace(ok=False, reason=str(exc))
 
     def _publish_speech_stop(
         self,
@@ -483,16 +482,10 @@ class VoiceController:
         *,
         reason: str = "interrupted",
     ) -> None:
-        """Interrupt speech via the bus instead of calling Kokoro directly."""
-        if self._bus is None:
-            return
-        from jaeger_os.transport import topics
-
-        self._bus.publish(topics.SpeechStop(
-            reason=reason,
-            node_id="tui_voice",
-            correlation_id=correlation_id,
-        ))
+        """Cancel this controller's current reply without stopping other audio."""
+        event = getattr(self, "_speech_cancel", None)
+        if event is not None:
+            event.set()
 
     def chime(self, kind: str) -> None:
         """Play a wake / follow-up earcon. Pauses the mic around it when

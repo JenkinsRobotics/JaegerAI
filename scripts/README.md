@@ -24,7 +24,7 @@ It never overwrites `.venv/` or `.jaeger_os/` on an ordinary re-run.
 ## Not to be confused with…
 
 - **`/install.sh`** (repo root) — the *local* installer the curl script calls
-  once the repo is on disk; it builds the venv + editable-installs JROS. Run it
+  once the repo is on disk; it builds the venv + editable-installs Jaeger AI. Run it
   yourself after a manual `git clone`.
 - **`dev/scripts/`** — internal developer tooling (`dev_env.sh`,
   `run_tests.sh`, generators). Never shipped to an end-user install, free to

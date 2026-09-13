@@ -13,13 +13,13 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Called once, before any scene materialises.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // ``.accessory`` makes JaegerOS a menu-bar-only app: no Dock
-        // icon, no Cmd-Tab presence. Without this, an SPM-built
-        // executable launched with no Info.plist defaults to ``.regular``
-        // and the app vanishes the moment its (nonexistent) main window
-        // would close.
-        NSApp.setActivationPolicy(.accessory)
-        NSLog("[JaegerOS] app launched, activation policy = .accessory")
+        // The native application owns one branded Dock/Cmd-Tab entry.
+        // Separate Qt popup helpers use accessory policy instead.
+        NSApp.setActivationPolicy(.regular)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+            NSApp.applicationIconImage = NSImage(contentsOf: iconURL)
+        }
+        NSLog("[Jaeger AI] app launched, activation policy = .regular")
 
         SplashWindowController.shared.show()
 
@@ -138,6 +138,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         // We're a menu-bar app. Closing a window should NOT quit us.
         return false
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag { ChatWindowController.show(agent: AgentBridge.shared) }
+        return true
     }
 
     /// The app's ONE exit door (Quit from the tray card, Cmd-Q): hold

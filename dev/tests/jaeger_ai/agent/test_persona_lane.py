@@ -739,3 +739,48 @@ def test_history_budget_constants_are_sane():
     # comment for the aux_ctx=4096 rationale.
     assert MAX_HISTORY_PAIRS == 6
     assert MAX_HISTORY_CHARS == 3200
+
+
+def test_grounded_turn_reaches_worker_once_and_preserves_output_choice():
+    client = _Client([_reply('The sky is blue.')])
+    requests = []
+    result = run_persona_turn(
+        client, 'What color is the sky?', character_block=BLOCK, agent_name='Ted',
+        history=[{'role': 'user', 'content': [
+            {'type': 'text', 'text': 'Look at this sky'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,abcd'}},
+        ]}], requires_grounding=True,
+        perform_task=lambda text: requests.append(text) or '[OUTPUT:SPEECH] The sky is blue.',
+    )
+    assert requests == ['What color is the sky?']
+    assert result == '[OUTPUT:SPEECH] The sky is blue.'
+    assert len(client.calls) == 1  # composition only; no text-only perception guess
+    assert 'base64' not in str(client.calls)
+
+
+def test_exact_answer_is_not_restyled_after_worker():
+    client = _Client([])
+    result = run_persona_turn(
+        client, 'Reply with only READY.', character_block=BLOCK, agent_name='Ted',
+        history=[], requires_grounding=True,
+        perform_task=lambda _: '[OUTPUT:TEXT] READY',
+    )
+    assert result == '[OUTPUT:TEXT] READY'
+    assert client.calls == []
+
+
+def test_cancel_during_grounding_does_not_compose_or_emit_stale_speech():
+    import threading
+    from jaeger_agent.core.cancellation import turn_cancellation
+    cancelled = threading.Event()
+    client = _Client([])
+    def perform(_):
+        cancelled.set()
+        return '[OUTPUT:SPEECH] Outdated reply.'
+    with turn_cancellation(cancelled):
+        result = run_persona_turn(
+            client, 'Explain this image', character_block=BLOCK, agent_name='Ted',
+            history=[], requires_grounding=True, perform_task=perform,
+        )
+    assert result == ''
+    assert client.calls == []

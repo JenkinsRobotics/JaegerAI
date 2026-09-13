@@ -36,26 +36,27 @@ HERMETIC BY CONSTRUCTION
 The scenarios WRITE real files/schedules/facts/board-cards. So the run
 boots a THROWAWAY temp instance (copy of the live config/identity into a
 tempdir, fresh empty memory/workspace, ``JAEGER_INSTANCE_DIR`` pointed
-there) and deletes it afterwards. It is IMPOSSIBLE for a scenario to touch
-the operator's live instance: we never snapshot-restore live state, and the
-tempdir is removed in a ``finally``. The run verifies, before and after,
-that the live instance's memory signature is unchanged.
+there) and deletes it afterwards. A temporary instance alone does not
+isolate tool execution from the host. Security scenarios therefore require
+dev/verification/security_gate.py, which enforces an OS sandbox and verifies
+its read/write/network boundary before any adversarial turn. The run also
+checks the seed instance's memory signature before and after.
 
 Exit code: 0 = all pass; 1 = a scriptable scenario failed; 2 = a SECURITY
-gate failed (LOUD — a real vulnerability, not a score dip). Inconclusive
-(a per-turn timeout) never sets a failing exit code but is flagged.
+gate failed. Inconclusive cases and empty selections also fail the gate.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import contextlib
 import os
 import pathlib
 import sys
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -413,7 +414,7 @@ def _print_report(results: list[ScenarioResult]) -> int:
     passed = sum(1 for r in results if r.status == "pass")
     failed = sum(1 for r in results if r.status == "fail")
     inconc = sum(1 for r in results if r.status == "inconclusive")
-    sec_fail = [r for r in results if r.lane == "security" and r.status == "fail"]
+    sec_fail = [r for r in results if r.lane == "security" and r.status != "pass"]
 
     print("\n" + "-" * 72)
     print(f"{passed}/{total} passed · {failed} failed · {inconc} inconclusive")
@@ -425,7 +426,7 @@ def _print_report(results: list[ScenarioResult]) -> int:
 
     if sec_fail:
         return 2
-    if failed:
+    if failed or inconc or not results:
         return 1
     return 0
 
@@ -461,6 +462,16 @@ def _run(args: argparse.Namespace) -> int:
         print(f"\nManual (watch-lane, human-only): "
               f"{', '.join(m['id'] for m in MANUAL_SCENARIOS)}")
         return 0
+
+    if any(case.lane == "security" for case in selected):
+        # A temporary instance alone cannot contain shell/tool side effects.
+        # Verify the inherited OS sandbox before executing adversarial prompts.
+        from dev.verification.security_gate import PROBE
+        import subprocess
+        probe = subprocess.run([sys.executable, "-c", PROBE], capture_output=True, text=True)
+        if probe.returncode:
+            print("Security scenarios require enforced isolation. Run dev/verification/security_gate.py.", flush=True)
+            return 2
 
     # Resolve the LIVE instance (the one we must never touch) BEFORE we
     # override JAEGER_INSTANCE_DIR.
@@ -537,6 +548,13 @@ def _run(args: argparse.Namespace) -> int:
                   flush=True)
 
     rc = _print_report(results)
+    if getattr(args, "output", None):
+        pathlib.Path(args.output).write_text(json.dumps({
+            "results": [asdict(result) for result in results],
+            "passed": sum(result.status == "pass" for result in results),
+            "total": len(results), "exit_code": rc,
+            "worker_path": args.worker_path,
+        }, indent=2) + "\n")
 
     # Cheap engagement check (roadmap 0.8.0 runway item 1): prove the
     # persona_first lane actually fired at least once this run — printed
@@ -574,6 +592,7 @@ def main() -> int:
                    help="Run only one lane. Default: both.")
     p.add_argument("--ids", default="",
                    help="Comma-separated scenario ids to run.")
+    p.add_argument("--output", default=None, help="Write machine-readable release-gate results.")
     p.add_argument("--list", action="store_true",
                    help="List the selected scenarios and exit (no model boot).")
     p.add_argument("--no-prewarm", action="store_true",

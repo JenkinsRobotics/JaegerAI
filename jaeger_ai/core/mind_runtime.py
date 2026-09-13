@@ -8,6 +8,7 @@ memory, and personality pipeline supplied through this adapter.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 
@@ -106,11 +107,16 @@ class JaegerAIRuntime:
             self._confirmation = None
 
     def run_turn(self, text: str, *, session_key: str) -> dict[str, Any]:
-        from jaeger_ai.main import run_for_voice
+        from jaeger_ai.main import _ensure_session_agent, run_for_voice
 
+        if self._closed:
+            return {"text": "", "error": "runtime is closed"}
+        if session_key in getattr(self, "_conversation_owners", {}):
+            agent = _ensure_session_agent(self.client, session_key)
+            self._activate_conversation(session_key, agent)
         if self._confirmation is not None:
             self._confirmation.current_session = session_key
-        return run_for_voice(self.client, text, session_key=session_key)
+        return run_for_voice(self.client, text, session_key=session_key, output_mode="dynamic")
 
     def run_multimodal_turn(
         self,
@@ -141,6 +147,7 @@ class JaegerAIRuntime:
         # agent optimization untouched and require the multimodal session's
         # post-tool model step to choose text/speech/both/silent itself.
         agent.skip_final_tools = frozenset()
+        self._activate_conversation(session_key, agent)
         self._apply_vision_handler(agent)
         return app.run_for_voice(
             self.client,
@@ -148,6 +155,7 @@ class JaegerAIRuntime:
             session_key=session_key,
             content=content,
             system_prompt_addon=system_prompt,
+            output_mode="dynamic",
         )
 
     def warmup(
@@ -178,6 +186,23 @@ class JaegerAIRuntime:
         with lock:
             return bool(warm(system_prompt=agent.system_prompt, tools=agent.tools))
 
+    def _activate_conversation(self, session_key: str, agent: Any) -> None:
+        """Transfer the current transcript when toggling tools, not the memory store.
+
+        Keep tool/result pairs and media intact. Separate tool-free adapters
+        prevent a hallucinated tool call from enabling tools in chatbot mode.
+        Warmup never calls this method and cannot change conversation ownership.
+        """
+        from jaeger_ai.main import _jaeger_agents_by_session
+
+        owners = getattr(self, "_conversation_owners", None)
+        if owners is None:
+            owners = self._conversation_owners = {}
+        source = owners.get(session_key, _jaeger_agents_by_session.get(session_key))
+        if source is not None and source is not agent and hasattr(source, "messages"):
+            agent.messages = deepcopy(source.messages)
+        owners[session_key] = agent
+
     def _chatbot_agent(self, session_key: str, system_prompt: str = "") -> Any:
         """Return a tool-free peer without mutating the product agent lane."""
         from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
@@ -193,6 +218,9 @@ class JaegerAIRuntime:
                 tools_enabled=False,
             )
             sessions[session_key] = agent
+        elif system_prompt:
+            # Switching input/output policy must not retain a stale prompt.
+            agent.system_prompt = system_prompt
         self._apply_vision_handler(agent)
         return agent
 
@@ -247,13 +275,18 @@ class JaegerAIRuntime:
         try:
             lock = _pipeline.get("llm_lock")
             if lock is None:
+                self._activate_conversation(session_key, agent)
                 result = drive_one_turn(agent, text, content=content)
             else:
                 with lock:
+                    self._activate_conversation(session_key, agent)
                     result = drive_one_turn(agent, text, content=content)
         except Exception as exc:  # noqa: BLE001 — match the AgentRuntime boundary
             return {"text": "", "error": f"{type(exc).__name__}: {exc}"}
-        return {"text": str(result.get("answer") or ""), "error": None}
+        response = {"text": str(result.get("answer") or ""), "error": None}
+        if "elapsed_s" in result:
+            response["elapsed_s"] = result["elapsed_s"]
+        return response
 
     def configure_vision(self, chat_handler: Any) -> None:
         """Attach the engine-owned projector to current and future local sessions."""
@@ -291,12 +324,12 @@ class JaegerAIRuntime:
         from jaeger_ai.main import evict_session
 
         evict_session(session_key)
+        getattr(self, "_chatbot_sessions", {}).pop(session_key, None)
+        getattr(self, "_conversation_owners", {}).pop(session_key, None)
 
     def clear_chatbot_session(self, session_key: str) -> None:
-        """Forget only the isolated no-tools transcript."""
-        sessions = getattr(self, "_chatbot_sessions", None)
-        if sessions is not None:
-            sessions.pop(session_key, None)
+        """New chat clears both modes so switching back cannot resurrect it."""
+        self.clear_session(session_key)
 
     def steer(self, text: str) -> bool:
         try:
@@ -306,6 +339,16 @@ class JaegerAIRuntime:
             return bool(agent.steer(text)) if agent is not None else False
         except Exception:  # noqa: BLE001 - steering falls back to the next queued turn
             return False
+
+    def interrupt(self, *, session_key: str) -> None:
+        """Same-process faces address their session, never the global active one."""
+        from jaeger_ai.main import _jaeger_agents_by_session
+
+        agent = getattr(self, "_conversation_owners", {}).get(session_key)
+        if agent is None:
+            agent = _jaeger_agents_by_session.get(session_key)
+        if agent is not None:
+            agent.interrupt()
 
     def context_detail(self, session: str) -> str:
         try:
@@ -327,6 +370,7 @@ class JaegerAIRuntime:
             return
         self._closed = True
         getattr(self, "_chatbot_sessions", {}).clear()
+        getattr(self, "_conversation_owners", {}).clear()
         self.boot.cleanup()
 
 

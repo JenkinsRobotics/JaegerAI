@@ -12,6 +12,7 @@ def test_native_app_uses_jaeger_ai_as_its_visible_product_name() -> None:
     settings = (REPO / "jaeger_ai/interfaces/swift/Sources/JaegerOS/MenuCard/SettingsView.swift").read_text()
     transcript = (REPO / "jaeger_ai/interfaces/swift/Sources/JaegerOS/ChatWindow/ChatTranscript.swift").read_text()
     controller = (REPO / "jaeger_ai/interfaces/swift/Sources/JaegerOS/ChatWindow/ChatWindowController.swift").read_text()
+    avatar = (REPO / "jaeger_ai/interfaces/swift/Sources/JaegerOS/Avatar/AvatarWindows.swift").read_text()
 
     assert 'Text("JAEGER AI")' in splash
     assert 'Text("JAEGER AI SETUP")' in onboarding
@@ -21,6 +22,8 @@ def test_native_app_uses_jaeger_ai_as_its_visible_product_name() -> None:
     assert "real-world local agentic agent framework" not in transcript
     assert 'return "Jaeger AI"' in controller
     assert 'return "Jaeger"' not in controller
+    assert 'return "Jaeger AI — ' in avatar
+    assert 'return "Jaeger — ' not in avatar
     assert "powered by JaegerAgent on JaegerOS" in settings
 
 
@@ -48,3 +51,16 @@ def test_development_instance_is_product_specific() -> None:
     devtools = (REPO / "jaeger_ai/cli/devtools.py").read_text()
     assert 'INSTANCE_NAME = "jaeger-dev"' in devtools
     assert 'INSTANCE_NAME = "jros-dev"' not in devtools
+
+
+def test_native_bundle_has_one_desktop_identity_and_device_descriptions():
+    import plistlib
+
+    path = REPO / "jaeger_ai/interfaces/swift/Resources/Info.plist"
+    with path.open("rb") as stream:
+        plist = plistlib.load(stream)
+    assert plist["CFBundleIdentifier"] == "com.jenkinsrobotics.JaegerAI"
+    assert plist["CFBundleIconFile"] == "AppIcon"
+    assert plist["LSUIElement"] is False
+    assert plist["NSCameraUsageDescription"]
+    assert plist["NSMicrophoneUsageDescription"]

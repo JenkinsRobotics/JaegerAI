@@ -12,38 +12,26 @@
 # --- framework + reusable mind + engine modules (git dependencies —
 # none of these have PyPI releases yet). PEP 508 direct references, not
 # `-e ../X` — setuptools' dynamic-dependencies file parser only accepts
-# requirement specifiers, not pip's `-e`/`-r` directives. A dev clone
-# with sibling ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,
-# JaegerWhisperSTT} checkouts gets editable installs of those instead —
-# see install.sh's sibling-detection step. kokoro_tts + whisper_stt are
+# requirement specifiers, not pip's `-e`/`-r` directives. Developers can opt in
+# to editable sibling checkouts with JAEGER_DEV_SIBLINGS=1; normal installs
+# use the immutable references below. kokoro_tts + whisper_stt are
 # DEFAULT deps (not optional extras) as of 0.9: a robot needs a voice out
 # of the curl one-liner, not a follow-up install.
 #
-# These dependencies track their coordinated release branches, and the 0.9.0
-# tag pins they replaced were actively wrong rather than merely stale. JaegerAI
-# 0.12.0 is tested against jaeger-agent 1.2.0 plus the current JaegerOS, Kokoro,
-# and Whisper branches; a fresh
-# clone pinned there installed engines OLDER than anything this release
-# was tested with, and that is not a theoretical hazard — kokoro's config
-# schema dropped `sample_rate` between 0.9 and 2.0, so the mismatch
-# aborted boot with a pydantic extra_forbidden error rather than
-# degrading. (jaeger-agent@v1 was worse: that branch does not exist on
-# the remote at all, so the requirement could not resolve for anyone.)
-#
-# Switch each back to a tag pin the moment that repo cuts one matching
-# the version this release was tested against. Tracking a branch is the
-# lesser evil while four repos release together, not the destination.
-jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master
-jaeger-agent[multimodal-duplex] @ git+https://github.com/JenkinsRobotics/jaeger-agent@1.2.0
-jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@master
-jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@master
+# Immutable, tested source candidates. These commits are published on release
+# candidate branches; installs do not depend on developer sibling checkouts.
+jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@53d5ad61699b91a6b250a658456b8c45e78cc4ff
+jaeger-agent[multimodal-duplex] @ git+https://github.com/JenkinsRobotics/jaeger-agent@88715a5dd4ed09706892ad270cc087bd8358972c
+jaeger-kokoro-tts @ git+https://github.com/JenkinsRobotics/JaegerKokoroTTS@e36f53223d70eff8fb6c828dc367ea49da6b77db
+jaeger-whisper-stt @ git+https://github.com/JenkinsRobotics/JaegerWhisperSTT@816f78b5f48aa373d4a06616bfad7fd4b8d80b3e
 
 # --- agent core ---
 pydantic>=2.0
 requests>=2.32
 rich>=13.0
 prompt-toolkit>=3.0
-llama-cpp-python>=0.3
+# Gemma 4 MTMD and native context caching were verified with this binding.
+llama-cpp-python==0.3.34
 # Apple-Silicon-native MLX backend (config ``model.backend: mlx_lm``,
 # ``/model use mlx <name>``). Marker-gated so Linux installs skip it.
 mlx-lm>=0.21; sys_platform == "darwin" and platform_machine == "arm64"

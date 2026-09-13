@@ -19,8 +19,8 @@ import time
 from types import SimpleNamespace
 
 import pytest
-
 from jaeger_os.contract import protocol
+
 from jaeger_ai.interfaces import bridge
 
 
@@ -45,6 +45,7 @@ def _instance_on_disk(tmp_path, monkeypatch):
     root.mkdir()
     for f in ("identity.yaml", "config.yaml", "manifest.json"):
         (root / f).write_text("{}", encoding="utf-8")
+    _write_valid_instance(root)
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
     return root
 
@@ -209,19 +210,29 @@ def _run(
         boot.layout = InstanceLayout(resolve_instance_dir(instance_name))
         return boot
 
-    def fake_run(client, text, session_key=None):
+    def fake_run(client, text, session_key=None, **kwargs):
+        assert kwargs.get("output_mode") == "dynamic"
+        if run_fn is not None:
+            return run_fn(client, text, session_key=session_key)
         return run_reply or {"text": f"echo:{text}", "error": None}
 
     monkeypatch.setattr("jaeger_ai.main.boot_for_tui", fake_boot, raising=False)
     monkeypatch.setattr(
-        "jaeger_ai.main.run_for_voice", run_fn or fake_run, raising=False
+        "jaeger_ai.main.run_for_voice", fake_run, raising=False
     )
 
     class _FakeSpeechRuntime:
         config = SimpleNamespace(stt_model="large-v3-turbo")
 
+        def __init__(self, config=None):
+            if config is not None:
+                self.config = config
+
         def load(self, _say):
             return None
+
+        def transcribe(self, audio, *, sample_rate=16000):
+            return f"agent-whisper:{audio.size}:{sample_rate}"
 
     monkeypatch.setattr("jaeger_agent.SpeechRuntime", _FakeSpeechRuntime)
     # Protocol unit tests must not ask macOS for camera/mic/accessibility
@@ -252,7 +263,7 @@ def _run(
 
 def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     rc, frames, boot = _run(monkeypatch, '{"text":"hi"}\n{"op":"quit"}\n')
-    assert rc == 0
+    assert rc == 0, frames
     types = [f["type"] for f in frames]
     # FAST READY: transport first, agent streams in behind, bye marks
     # the orderly exit.
@@ -725,6 +736,7 @@ def test_permission_request_timeout_denies(monkeypatch):
     hangs — a short fuse proves the wait actually bounds, not just that a
     late answer happens to resolve it."""
     from jaeger_os.core.safety.permissions import current_policy
+
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider
 
     monkeypatch.setattr(BridgeConfirmationProvider, "TIMEOUT_S", 0.1)
@@ -802,12 +814,13 @@ def test_open_on_host_field_case_over_the_bridge(monkeypatch, _instance_on_disk)
     construct — executes with NO frame at all."""
     import types as _types
 
+    from jaeger_agent.tools.host import _t_open_on_host
     from jaeger_os.core.safety.permissions import (
         PermissionGrants,
         PermissionPolicy,
         use_policy,
     )
-    from jaeger_agent.tools.host import _t_open_on_host
+
     from jaeger_ai.interfaces.bridge import BridgeConfirmationProvider, _Ctx
 
     opened = []
@@ -933,6 +946,22 @@ def test_speak_command_while_booting_reports_not_ready(monkeypatch):
     result = next(f for f in frames if f["type"] == "result")
     assert result["ok"] is False
     assert "booting" in result["error"]
+    assert rc == 0
+
+
+def test_native_dictation_decodes_with_agent_owned_speech(monkeypatch):
+    import base64
+    import struct
+
+    pcm = base64.b64encode(struct.pack("<ff", 0.25, -0.25)).decode("ascii")
+    request = {"op": "command", "cmd": "transcribe_audio", "id": "native-stt",
+               "args": {"pcm": pcm, "sample_rate": 48000}}
+    rc, frames, _ = _run(
+        monkeypatch, json.dumps(request) + '\n{"op":"quit"}\n', stdin_delay=0.25,
+    )
+    result = next(f for f in frames if f.get("id") == "native-stt")
+    assert result["ok"] is True
+    assert result["data"]["text"] == "agent-whisper:2:48000"
     assert rc == 0
 
 
@@ -1535,3 +1564,26 @@ def test_run_update_command_refuses_while_a_turn_is_in_flight(monkeypatch):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_queued_native_turn_waits_for_whole_scheduled_turn(monkeypatch):
+    """Persona/session state cannot change while another face owns the turn."""
+    import io
+    import queue
+    import threading
+    from jaeger_ai.interfaces import bridge
+    ctx = bridge._Ctx()
+    entered = threading.Event()
+    complete = threading.Event()
+    turns = queue.Queue()
+    turns.put({'text': 'native follow-up', '_on_complete': complete.set})
+    turns.put(None)
+    monkeypatch.setattr(bridge, '_execute_turn', lambda *_: entered.set())
+    worker = threading.Thread(target=bridge._turn_worker, args=(io.StringIO(), ctx, turns))
+    with ctx.turn_lock:  # scheduled callback still composing its persona reply
+        worker.start()
+        assert not entered.wait(0.1)
+        assert not complete.is_set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert entered.is_set() and complete.is_set()

@@ -13,11 +13,11 @@ import SwiftUI
 
 /// Window title leading with the AGENT's name (identity.yaml; instance-name
 /// fallback while the identity query is in flight — NEVER the character) —
-/// shared by both avatar surfaces ("<suffix>" ↦ "Jaeger — <name> · <suffix>").
+/// shared by both avatar surfaces ("<suffix>" ↦ "Jaeger AI — <name> · <suffix>").
 @MainActor
 private func characterTitle(_ status: AgentStatus?, suffix: String) -> String {
-    if let name = status?.displayName { return "Jaeger — \(name) · \(suffix)" }
-    return "Jaeger — \(suffix)"
+    if let name = status?.displayName { return "Jaeger AI — \(name) · \(suffix)" }
+    return "Jaeger AI — \(suffix)"
 }
 
 // MARK: - agent window (orb only)

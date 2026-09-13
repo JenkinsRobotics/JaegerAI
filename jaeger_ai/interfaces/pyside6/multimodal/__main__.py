@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         from .window import MultimodalWindow
 
         app = QApplication.instance() or QApplication([])
+        from ..branding import apply_app_identity
+
+        apply_app_identity()
         runtime = AttachedAgentRuntime()
         ctx = SimpleNamespace(core=SimpleNamespace(runtime=runtime), bus=None)
         window = MultimodalWindow(ctx, main_surface=True)
