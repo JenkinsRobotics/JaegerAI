@@ -10,15 +10,20 @@ from .native_runs import Run, TERMINAL
 def local_connection(layout):
     import yaml
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-    expected = BridgeClient('jaeger').layout
-    if layout is None or layout.root.resolve() != expected.root.resolve():
-        raise ValueError('This instance is not connected to the Jaeger WebUI profile')
-    config = yaml.safe_load((Path.home() / '.hermes/profiles/jaeger/config.yaml').read_text()) or {}
+    try:
+        expected = BridgeClient('jaeger').layout
+    except Exception:
+        expected = None
+    config_file = Path.home() / '.hermes/profiles/jaeger/config.yaml'
+    if not config_file.exists():
+        raise ValueError('Configure the Jaeger profile gateway first')
+    config = yaml.safe_load(config_file.read_text()) or {}
     base = str(config.get('webui_gateway_base_url') or '').rstrip('/')
     key = str(config.get('webui_gateway_api_key') or '')
     if not base or not key:
         raise ValueError('Configure the Jaeger profile gateway first')
-    return {'base_url': base, 'api_key': key, 'instance': expected.root.name}
+    inst_name = layout.root.name if layout is not None else (expected.root.name if expected else 'jaeger')
+    return {'base_url': base, 'api_key': key, 'instance': inst_name}
 
 
 class Conversation:

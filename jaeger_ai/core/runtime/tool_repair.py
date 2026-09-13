@@ -85,10 +85,26 @@ def extract_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     return name, args
 
 
+def _clean_dict_keys_and_values(d: dict[str, Any]) -> dict[str, Any]:
+    """Clean stray leading/trailing quotes from keys and string values."""
+    cleaned: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(k, str):
+            k = k.strip().strip("'\"")
+        if isinstance(v, str):
+            v = v.strip()
+            if (v.startswith("'") and v.endswith("'")) or (v.startswith('"') and v.endswith('"')):
+                v = v[1:-1]
+        elif isinstance(v, dict):
+            v = _clean_dict_keys_and_values(v)
+        cleaned[k] = v
+    return cleaned
+
+
 def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
     """Safely parse tool arguments into a dictionary, applying automatic repair if needed."""
     if isinstance(raw, dict):
-        return raw
+        return _clean_dict_keys_and_values(raw)
     if not raw or not isinstance(raw, str):
         return {}
 
@@ -100,7 +116,7 @@ def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
-            return parsed
+            return _clean_dict_keys_and_values(parsed)
         if isinstance(parsed, list):
             return {"items": parsed}
         return {"value": parsed}

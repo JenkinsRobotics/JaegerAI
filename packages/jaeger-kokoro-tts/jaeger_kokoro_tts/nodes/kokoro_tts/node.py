@@ -54,7 +54,7 @@ class Synthesizer(Protocol):
     pass a mock that records calls and returns canned results.
     """
 
-    def speak(self, text: str) -> dict[str, Any]:
+    def speak(self, text: str, *, rate: float = 1.0) -> dict[str, Any]:
         """Synthesize + play ``text``; block until playback finishes.
         Returns a dict with at least ``spoken: bool``; may also carry
         ``elapsed_s``, ``reason`` (when ok=False), ``text`` (cleaned),
@@ -199,6 +199,24 @@ class TTSNode(Node):
             self._log(f"synthesizer stop() raised: "
                       f"{type(exc).__name__}: {exc}")
 
+        # Drain any pending queued commands that match this stop so queued
+        # streaming sentences don't continue playing after an interruption.
+        remaining: list[topics.SpeechCommand] = []
+        while True:
+            try:
+                cmd = self._pending.get_nowait()
+                if not msg.correlation_id or cmd.correlation_id == msg.correlation_id:
+                    self._publish_ack(cmd, ok=False, duration_s=0.0, reason="interrupted by speech_stop")
+                else:
+                    remaining.append(cmd)
+            except queue.Empty:
+                break
+        for cmd in remaining:
+            try:
+                self._pending.put_nowait(cmd)
+            except queue.Full:
+                break
+
     def _handle(self, msg: topics.SpeechCommand) -> None:
         t0 = time.perf_counter()
         self._active_correlation_id = msg.correlation_id
@@ -212,8 +230,16 @@ class TTSNode(Node):
             daemon=True,
         )
         amp_thread.start()
+        # SpeechCommand.voice is a per-utterance override. The node queue is
+        # serialized, so changing the Kokoro pack for this blocking call and
+        # restoring it afterwards cannot leak into another utterance. This is
+        # what lets setup and the agent share one loaded Kokoro-82M model.
+        previous_voice = getattr(self.synthesizer, "voice", None)
+        voice_overridden = bool(msg.voice and hasattr(self.synthesizer, "voice"))
+        if voice_overridden:
+            self.synthesizer.voice = msg.voice
         try:
-            result = self.synthesizer.speak(msg.text)
+            result = self.synthesizer.speak(msg.text, rate=msg.rate)
         except Exception as exc:  # noqa: BLE001
             self._log(f"speak() raised: {type(exc).__name__}: {exc}")
             amp_stop.set()
@@ -225,6 +251,8 @@ class TTSNode(Node):
             )
             return
         finally:
+            if voice_overridden:
+                self.synthesizer.voice = previous_voice
             amp_stop.set()
             amp_thread.join(timeout=0.5)
             self._active_correlation_id = None

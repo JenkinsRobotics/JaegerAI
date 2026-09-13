@@ -288,10 +288,11 @@ def _try_live_pick(
     character_id: str,
     character_path: str,
 ) -> dict[str, Any] | None:
-    """Ask Ollama to pick a corpus name + why. Never raises."""
-    import json
+    """Ask a live model to pick a corpus name + why. Never raises."""
     import os
-    import urllib.request
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
 
     pool = _candidate_pool(record)
     if not pool:
@@ -316,6 +317,38 @@ def _try_live_pick(
         f"Host: {tier} {awake_name}. Stance: {stance_label}/{register}. "
         f"Operator style sample: {(q2_response or '')[:180] or 'none'}."
     )
+    text = _try_ollama_reason(prompt) or _try_utility_reason(prompt, listing)
+    if not text:
+        return None
+    parsed = _parse_name_json(text)
+    if parsed is None:
+        return None
+    chosen_name, why = parsed
+    match = next((c for c in pool if c.name.lower() == chosen_name.lower()), None)
+    if match is None:
+        return None
+    why = why.strip().strip('"').strip("'")
+    if len(why) < 8:
+        return None
+    if len(why) > 280:
+        why = why[:277].rstrip() + "…"
+    return {
+        **match.as_dict(),
+        "selected_from": len(load_corpus()),
+        "considered": len(pool),
+        "register_signal": str(record.get("register_signal") or match.register),
+        "register_confidence": record.get("register_confidence", 0.5),
+        "origin_note": f"{match.name} — {match.origin}, {match.meaning}",
+        "reason": why,
+        "reason_source": "model",
+    }
+
+
+def _try_ollama_reason(prompt: str) -> str | None:
+    import json
+    import os
+    import urllib.request
+
     url = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
     model = (
         os.environ.get("JAEGER_ONBOARD_REASON_MODEL")
@@ -342,29 +375,19 @@ def _try_live_pick(
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
-    text = str((payload.get("message") or {}).get("content") or payload.get("response") or "").strip()
-    parsed = _parse_name_json(text)
-    if parsed is None:
+    return str((payload.get("message") or {}).get("content") or payload.get("response") or "").strip() or None
+
+
+def _try_utility_reason(prompt: str, facts: str) -> str | None:
+    try:
+        from jaeger_ai.core.models.system_utility import SystemUtilityModel
+        utility = SystemUtilityModel()
+        try:
+            return utility.respond(prompt, mode="onboarding", facts=facts)
+        finally:
+            utility.unload()
+    except Exception:
         return None
-    chosen_name, why = parsed
-    match = next((c for c in pool if c.name.lower() == chosen_name.lower()), None)
-    if match is None:
-        return None
-    why = why.strip().strip('"').strip("'")
-    if len(why) < 8:
-        return None
-    if len(why) > 280:
-        why = why[:277].rstrip() + "…"
-    return {
-        **match.as_dict(),
-        "selected_from": len(load_corpus()),
-        "considered": len(pool),
-        "register_signal": str(record.get("register_signal") or match.register),
-        "register_confidence": record.get("register_confidence", 0.5),
-        "origin_note": f"{match.name} — {match.origin}, {match.meaning}",
-        "reason": why,
-        "reason_source": "model",
-    }
 
 
 def _parse_name_json(text: str) -> tuple[str, str] | None:

@@ -44,6 +44,7 @@ include = ["jaeger_os*"]
 jaeger_os = ["contract/*.json"]
 
 [tool.pytest.ini_options]
+cache_dir = "~/.cache/pytest"
 pythonpath = ["."]
 addopts = ["--import-mode=importlib"]
 testpaths = ["dev/tests"]

@@ -29,10 +29,11 @@ _QWEN_TOOLCALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _QWEN_FUNCTION = re.compile(r"<function=([^>]+)>(.*?)</function>", re.DOTALL)
 _QWEN_PARAM = re.compile(r"<parameter=([^>]+)>\n?(.*?)\n?</parameter>", re.DOTALL)
 
-# Standard Hermes JSON envelope. Capture EVERYTHING inside — not a brace
-# block — so f-string braces inside a ``content:"…"`` value don't stop
-# the lazy quantifier early.
-ENVELOPE_PATTERN = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+# Standard Hermes JSON envelope, plus attribute-named variants (<tool_call name="...">).
+ENVELOPE_PATTERN = re.compile(
+    r"<tool_call(?:\s+(?:name|tool)=[\'\"]([^\'\"]+)[\'\"])?[^>]*>\s*(.*?)\s*</tool_call>",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def extract_qwen(text: str) -> list[dict[str, Any]]:
@@ -83,16 +84,37 @@ def extract_qwen(text: str) -> list[dict[str, Any]]:
 
 
 def extract_envelope(text: str) -> list[dict[str, Any]]:
-    """Salvage Hermes ``<tool_call>{json}</tool_call>`` JSON envelopes.
+    """Salvage Hermes ``<tool_call>{json}</tool_call>`` and XML attribute envelopes.
 
     Tolerant payload parsing (trailing commas, Gemma quote tokens,
     double-encoded arg strings, flat-arg style) lives in
     :func:`_shared.payload_to_call`."""
     out: list[dict[str, Any]] = []
     for match in ENVELOPE_PATTERN.finditer(text):
-        call = _shared.payload_to_call(match.group(1))
+        attr_name = match.group(1)
+        body = match.group(2).strip()
+        call = _shared.payload_to_call(body)
         if call:
+            if attr_name and not call.get("name"):
+                call["name"] = attr_name
             out.append(call)
+        elif attr_name:
+            # Body is arguments directly
+            try:
+                from jaeger_ai.core.runtime.tool_repair import safe_parse_tool_arguments
+                args = safe_parse_tool_arguments(body)
+            except Exception:
+                args = {}
+            out.append({"name": attr_name, "args": args})
+        else:
+            # Check for XML child tags (<name>...</name>)
+            try:
+                from jaeger_ai.core.runtime.tool_repair import extract_xml_tool_call
+                xml_call = extract_xml_tool_call(match.group(0))
+                if xml_call:
+                    out.append({"name": xml_call[0], "args": xml_call[1]})
+            except Exception:
+                pass
     return out
 
 

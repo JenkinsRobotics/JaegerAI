@@ -182,6 +182,11 @@ final class ChatViewModel: ObservableObject {
     /// shows a "transcribing…" indicator in the status bar.
     @Published private(set) var isTranscribing: Bool = false
 
+    /// True only while macOS is resolving the explicit microphone request.
+    /// Keeping this distinct from recording avoids making a slow TCC prompt
+    /// look like a dead button.
+    @Published private(set) var isRequestingMicrophone: Bool = false
+
     /// Context usage after the most recent reply — ``(used, max)`` tokens
     /// off the reply frame's v1 telemetry.  Rendered in the status bar as
     /// "ctx 18.3K/32.8K"; nil until the first telemetry-carrying reply.
@@ -358,8 +363,8 @@ final class ChatViewModel: ObservableObject {
             }
             return completed
         } catch {
-            if composerText.isEmpty { composerText = text }
-            dispatcherStatus = "Send was not confirmed: \(error.localizedDescription). Reconnect to check history before retrying."
+            NSLog("[ChatViewModel] sendDispatcher failed (\(error.localizedDescription)) — falling back to local agent")
+            dispatcherStatus = "Dispatcher gateway unavailable — routing locally"
             return false
         }
     }
@@ -383,7 +388,7 @@ final class ChatViewModel: ObservableObject {
             .lowercased().prefix(8).description
     }
 
-    init(agent: AgentBridge, sessionKey: String = "dispatcher") {
+    init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey()) {
         self.agent = agent
         self.sessionKey = sessionKey
         // Subscribe to agent events so we can show thinking + tool
@@ -398,8 +403,11 @@ final class ChatViewModel: ObservableObject {
         Task { [weak self] in await self?.loadDisplayConfig() }
         Task { [weak self] in
             while !Task.isCancelled {
-                guard self != nil else { return }
-                await self?.refreshDispatcher()
+                guard let self, self.sessionKey == "dispatcher" else {
+                    try? await Task.sleep(for: .seconds(2))
+                    continue
+                }
+                await self.refreshDispatcher()
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -431,10 +439,31 @@ final class ChatViewModel: ObservableObject {
     /// Start push-to-talk capture.  Synchronous — see VoiceRecorder
     /// for why we avoid Task-hops in this path.
     func startVoice() {
-        do {
-            try voice.startRecording()
-        } catch {
-            appendSystem("voice unavailable — \(error.localizedDescription)")
+        guard !voice.isRecording, !isRequestingMicrophone else { return }
+        guard VoiceRecorder.hasAudioInput else {
+            appendSystem(
+                "voice unavailable — macOS reports no audio input device. "
+                + "Connect a USB, Bluetooth, display, or Continuity microphone."
+            )
+            return
+        }
+        isRequestingMicrophone = true
+        Task { [weak self] in
+            guard let self else { return }
+            let granted = await VoiceRecorder.requestMicrophoneAccess()
+            self.isRequestingMicrophone = false
+            guard granted else {
+                self.appendSystem(
+                    "voice unavailable — allow JaegerAI under System Settings "
+                    + "→ Privacy & Security → Microphone."
+                )
+                return
+            }
+            do {
+                try self.voice.startRecording()
+            } catch {
+                self.appendSystem("voice unavailable — \(error.localizedDescription)")
+            }
         }
     }
 
@@ -444,11 +473,12 @@ final class ChatViewModel: ObservableObject {
     /// Notes uses for voice dictation, lower stakes than auto-
     /// submitting to the agent.  A system bubble notes capture
     /// duration + which backend ran for telemetry.
-    func stopVoice() {
+    func stopVoice(autoSend: Bool = false) {
         voice.stopRecording()
         guard let captured = voice.takeCapturedAudio() else { return }
-        let seconds = Double(captured.samples.count) / captured.format.sampleRate
-        let backendName = STTManager.shared.activeBackend.displayName
+        let sampleRate = captured.format.sampleRate
+        let seconds = Double(captured.samples.count) / sampleRate
+        let backendName = "Jaeger Whisper medium.en"
 
         // Skip very short captures — usually accidental taps.
         guard seconds >= 0.4 else {
@@ -464,38 +494,42 @@ final class ChatViewModel: ObservableObject {
             seconds, backendName
         ))
         isTranscribing = true
-        STTManager.shared.transcribe(
-            samples: captured.samples,
-            format: captured.format
-        ) { [weak self] result in
-            // STTManager / backends guarantee the completion runs on
-            // the main queue.  ``MainActor.assumeIsolated`` is the
-            // ergonomic way to tell the compiler that without forcing
-            // a Task hop — the runtime asserts in debug builds if the
-            // guarantee is wrong.
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.isTranscribing = false
-                switch result {
-                case .success(let r):
-                    // Append to the composer rather than replacing —
-                    // if the operator was already mid-typing, we don't
-                    // clobber their work.  A space joins the two
-                    // pieces cleanly.
-                    if self.composerText.isEmpty {
-                        self.composerText = r.text
-                    } else {
-                        self.composerText += " " + r.text
-                    }
-                    self.appendSystem(String(
-                        format: "✓ transcribed in %.1fs · review and hit send",
-                        r.elapsedSeconds
-                    ))
-                case .failure(let err):
-                    self.appendSystem(
-                        "⚠ transcription failed — \(err.localizedDescription)"
-                    )
-                }
+        let pcm = captured.samples.withUnsafeBufferPointer { pointer -> Data in
+            guard let base = pointer.baseAddress else { return Data() }
+            return Data(bytes: base, count: pointer.count * MemoryLayout<Float>.size)
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.agent.command(
+                "transcribe_audio",
+                args: [
+                    "pcm_f32le": pcm.base64EncodedString(),
+                    "sample_rate": sampleRate,
+                    "model": "medium.en",
+                ],
+                timeout: .seconds(90)
+            )
+            self.isTranscribing = false
+            guard result.ok, let data = result.json,
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let text = object["text"] as? String, !text.isEmpty else {
+                self.appendSystem(
+                    "⚠ transcription failed — \(result.error ?? "no speech detected")"
+                )
+                return
+            }
+            let elapsed = object["elapsed_seconds"] as? Double ?? 0
+            if autoSend {
+                self.appendSystem(String(
+                    format: "✓ heard in %.1fs · sending voice turn", elapsed
+                ))
+                await self.send(text)
+            } else {
+                if self.composerText.isEmpty { self.composerText = text }
+                else { self.composerText += " " + text }
+                self.appendSystem(String(
+                    format: "✓ transcribed in %.1fs · review and hit send", elapsed
+                ))
             }
         }
     }
@@ -619,6 +653,9 @@ final class ChatViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        // Stop in-flight speech playback immediately when user sends a new message or command
+        TTSManager.shared.stop()
+
         switch SlashRouting.action(for: trimmed) {
         case .modelPicker:
             showModelPicker = true
@@ -630,6 +667,7 @@ final class ChatViewModel: ObservableObject {
             await newChat()
             return
         case .stop:
+            TTSManager.shared.stop()
             if sessionKey == "dispatcher" { controlDispatcher("cancel") }
             else { agent.cancelTurn() }
             appendSystem("stop requested")
@@ -688,7 +726,11 @@ final class ChatViewModel: ObservableObject {
     private func runTurn(_ trimmed: String, appendUserBubble: Bool,
                          displayText: String? = nil) async -> Bool {
         if !displayConfigLoaded { await loadDisplayConfig() }
-        if sessionKey == "dispatcher" { return await sendDispatcher(trimmed) }
+        if sessionKey == "dispatcher" {
+            let handled = await sendDispatcher(trimmed)
+            if handled { return true }
+            NSLog("[ChatViewModel] Dispatcher gateway unavailable; continuing with native agent turn for session \(sessionKey)")
+        }
 
         let turnStarted = Date()
         if appendUserBubble {

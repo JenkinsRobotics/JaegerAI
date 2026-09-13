@@ -203,7 +203,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Inspect, package, benchmark, reload skills; the usage journal "
             "+ review loop; the deep-think queue."
         ),
-        tools=_tools(_core("list_skills"), _scoping("skills")),
+        tools=_tools(_core("list_skills", "use_skill"), _scoping("skills")),
         includes=[],
     ),
     "media": ToolsetDef(

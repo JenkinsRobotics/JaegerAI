@@ -807,35 +807,41 @@ class LocalLlamaAdapter(OpenAIAdapter):
         if "channel" in text.lower():
             text = strip_reasoning_channels(text)
             message["content"] = text or None
-        # Cheap pre-filter: skip the drift parser only when the text
-        # can't possibly hold a tool call. A tool call always contains
-        # either an angle-bracket envelope (``<tool_call>``,
-        # ``<|python_tag|>``) or a JSON object (bare ``{"name": …}``,
-        # Gemma braces, or Mistral's bare ``name{json}``). So anything
-        # with neither ``<`` nor ``{`` is plain prose — skip it; let
-        # ``extract_tool_calls`` be the single decision point otherwise.
-        # (The old guard required a ``"name"`` key and so silently
-        # dropped DeepSeek-R1's bare JSON and Ministral's ``name{}``.)
-        if "<" not in text and "{" not in text:
+        # Cheap pre-filter: check if text can hold a tool call (angle brackets, braces, parens, or code fences)
+        salvaged = []
+        if any(c in text for c in ("<", "{", "(", "```")):
+            salvaged = extract_tool_calls(text)
+
+        all_calls = list(message.get("tool_calls") or [])
+        all_calls.extend(salvaged)
+        if not all_calls:
             return message
-        salvaged = extract_tool_calls(text)
-        if not salvaged:
-            return message
+
         # Strip the envelopes from the visible text so the loop doesn't
         # echo the markup back to the user on the final answer.
         cleaned = self._strip_tool_call_blocks(text).strip()
         # Bare-JSON tool calls (no envelope) aren't removed by the
         # envelope stripper — so when the cleaned remainder is itself
-        # just a tool-call JSON object, null it. Otherwise the model's
-        # raw ``{"name": …}`` would surface as the visible "answer".
+        # just a tool-call JSON object, null it.
         if cleaned.startswith("{") and (
             '"name"' in cleaned or '"tool_name"' in cleaned
         ):
             cleaned = ""
         message["content"] = cleaned or None
-        existing = list(message.get("tool_calls") or [])
-        existing.extend(salvaged)
-        message["tool_calls"] = existing
+
+        # All model-generated tool calls pass through jaeger_ai.core.runtime.tool_repair
+        # to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes
+        from jaeger_ai.core.runtime.tool_repair import repair_tool_call
+        repaired_calls = []
+        for tc in all_calls:
+            tc_id = tc.get("id") or "call_0"
+            tc_name = tc.get("name") or ""
+            tc_args = tc.get("arguments")
+            if isinstance(tc_args, dict) and "_raw_arguments" in tc_args:
+                tc_args = tc_args["_raw_arguments"]
+            clean_name, clean_args = repair_tool_call(tc_name, tc_args)
+            repaired_calls.append({"id": tc_id, "name": clean_name, "arguments": clean_args})
+        message["tool_calls"] = repaired_calls
         return message
 
     @staticmethod
@@ -859,10 +865,10 @@ class LocalLlamaAdapter(OpenAIAdapter):
         for pat in gemma.NATIVE_PATTERNS:
             out = pat.sub("", out)
         for p in (
-            r"<tool_call>\s*.*?\s*</tool_call>",
+            r"<tool_call(?:\s+[^>]*)?>\s*.*?\s*</tool_call>",
             r"\[TOOL_CALLS\]\s*\[.*?\]",
         ):
-            out = re.sub(p, "", out, flags=re.DOTALL)
+            out = re.sub(p, "", out, flags=re.DOTALL | re.IGNORECASE)
         return out
 
     # ── capabilities + diagnostics ──────────────────────────────────

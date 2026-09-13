@@ -7,15 +7,11 @@
 //  ``isSpeaking`` SwiftUI views can watch (the menu bar shows a
 //  speaker indicator when audio's playing, e.g.).
 //
-//  Engine routing: the agent's REAL voice is Kokoro on the Python side
-//  (the ``speak`` tool / TTS node, using the active character's
-//  configured voice_id).  When the bridge is up and config.yaml's
-//  ``voice.speech_engine`` says "kokoro" (the default), ``speak`` routes
-//  through the bridge's additive ``speak`` command so the chat window's
-//  speaker button sounds like the agent, not like Siri.  AppleSpeechSynth
-//  remains the local engine ("apple") and the automatic fallback whenever
-//  the bridge is down / still booting.  Exposing the engine picker in the
-//  settings HUD is a follow-up (AgentSettingsHUD is operator-owned).
+//  Engine routing: UI-owned speech publishes through JaegerOS's TTS slot;
+//  Kokoro is the installed neural module today. Installer narration uses a
+//  fixed technical pack and never silently degrades to Apple speech. Normal
+//  operation still honors an explicit `speech_engine: apple` preference and
+//  exposes any emergency fallback reason through `lastError`.
 //
 
 import Foundation
@@ -26,6 +22,7 @@ final class TTSManager: ObservableObject {
     static let shared = TTSManager()
 
     @Published private(set) var isSpeaking: Bool = false
+    @Published private(set) var lastError: String?
 
     /// Operator preference — when off, the auto-speak path in
     /// ChatViewModel short-circuits.  Default OFF: the agent has its
@@ -53,7 +50,7 @@ final class TTSManager: ObservableObject {
 
     /// Which voice is speaking right now.
     ///
-    /// ``.installer`` for OS 1 States 1–2 (flat system baseline, ignores
+    /// ``.installer`` for OS 1 setup (technical Kokoro voice, ignores
     /// ``preferredVoiceProfile``) and ``.persona`` from the handoff line
     /// onward. Defaults to ``.persona`` so ordinary operation — every
     /// session after first boot — uses the calibrated voice without
@@ -69,7 +66,7 @@ final class TTSManager: ObservableObject {
     /// onto a half-drained buffer.
     func enterVoiceStage(_ stage: VoiceStage) {
         guard stage != voiceStage else { return }
-        appleSpeech.finishCurrentUtteranceCleanly()
+        stop()
         voiceStage = stage
         appleSpeech.applyStage(stage, profile: preferredVoiceProfile)
     }
@@ -98,28 +95,39 @@ final class TTSManager: ObservableObject {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // States 1–2 are the installer and NEVER reach the neural
-            // engine: routing them through Kokoro would make the handoff
-            // inaudible, which is the whole point of the stage split.
-            if self.voiceStage == .installer {
+            self.lastError = nil
+            self.isSpeaking = true
+            switch await self.speakViaFramework(body) {
+            case .spoken:
+                self.isSpeaking = false
+            case .useApple(let reason):
+                self.lastError = reason
                 self.speakLocally(body)
-                return
+            case .failed(let reason):
+                self.lastError = reason
+                self.isSpeaking = false
             }
-            if await self.speakViaAgent(body) { return }
-            // Apple is the fallback, reached only when the bridge daemon is
-            // unreachable or refuses — not a co-equal backend.
-            self.speakLocally(body)
         }
     }
 
-    /// Try the agent's real voice: the bridge's ``speak`` command runs
-    /// Kokoro on the Python side with the ACTIVE character's configured
-    /// voice.  Returns false — caller falls back to the Apple synth —
-    /// when the bridge is down, config.yaml's ``voice.speech_engine`` is
-    /// "apple", or the command is refused (agent still booting).
-    private func speakViaAgent(_ body: String) async -> Bool {
+    private enum FrameworkResult {
+        case spoken
+        case useApple(String)
+        case failed(String)
+    }
+
+    /// Route interface speech through JaegerOS's TTS slot. The bridge waits
+    /// for the real SpokenAck, so `isSpeaking` and the setup handoff describe
+    /// playback rather than merely saying that a background thread started.
+    private func speakViaFramework(
+        _ body: String,
+        rate overrideRate: Float? = nil
+    ) async -> FrameworkResult {
         let bridge = AgentBridge.shared
-        guard bridge.isConnected else { return false }
+        guard bridge.isConnected else {
+            let reason = "Neural voice unavailable because the agent bridge is disconnected."
+            return .failed(reason)
+        }
         // The engine choice lives in config.yaml (voice.speech_engine,
         // default "kokoro") and is read over the EXISTING config query on
         // every utterance — a config edit applies on the next speak, no
@@ -129,14 +137,11 @@ final class TTSManager: ObservableObject {
         if cfg.ok, let json = cfg.json,
            let obj = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
            let engine = obj["speech_engine"] as? String,
+           voiceStage == .persona,
            engine == "apple" {
-            return false
+            return .useApple("System speech is selected in voice settings.")
         }
-        log.info("speak via bridge/kokoro — \(body.count) chars")
-        // The Python side accepts and synthesizes fire-and-forget (a long
-        // narration would outlive the request timeout), so ok here means
-        // "accepted" — ``isSpeaking`` doesn't track Kokoro playback yet.
-        // Wiring a spoken-done frame for the indicator is a follow-up.
+        log.info("speak via JaegerOS tts slot — \(body.count) chars")
         // Pass the Kokoro pack matching the operator's voice_profile. Sent
         // per-utterance because during first boot no character is bound
         // yet, so the Python side has nothing to resolve a voice from.
@@ -145,11 +150,45 @@ final class TTSManager: ObservableObject {
                                                      profile: preferredVoiceProfile) {
             args["voice"] = pack
         }
-        let result = await bridge.command("speak", args: args)
+        args["rate"] = Double(
+            overrideRate ?? VoiceStageResolver.kokoroRate(for: voiceStage)
+        )
+        args["wait"] = true
+        let result = await bridge.command(
+            "speak", args: args, timeout: .seconds(190))
         if !result.ok {
-            NSLog("[TTSManager] bridge speak refused (\(result.error ?? "?")) — falling back to Apple synth")
+            let reason = result.error ?? "The configured neural voice did not complete playback."
+            NSLog("[TTSManager] JaegerOS speech failed: \(reason)")
+            return .failed(reason)
         }
-        return result.ok
+        return .spoken
+    }
+
+    /// Speak one complete utterance before returning. Used at the setup →
+    /// agent handoff so the Kokoro voice pack never changes mid-sentence.
+    func speakAndWait(_ text: String, rate: Float? = nil) async -> Bool {
+        let body = TTSText.plainForSpeech(text)
+        guard !body.isEmpty else { return false }
+        lastError = nil
+        isSpeaking = true
+        switch await speakViaFramework(body, rate: rate) {
+        case .spoken:
+            isSpeaking = false
+            return true
+        case .failed(let reason):
+            lastError = reason
+            isSpeaking = false
+            return false
+        case .useApple(let reason):
+            lastError = reason
+            let completed = await withCheckedContinuation { continuation in
+                appleSpeech.speak(text: body) { completed in
+                    continuation.resume(returning: completed)
+                }
+            }
+            isSpeaking = false
+            return completed
+        }
     }
 
     /// Local synthesis via the Apple backend — the "apple" engine and the
@@ -170,7 +209,11 @@ final class TTSManager: ObservableObject {
     }
 
     func stop() {
-        activeBackend.stop()
+        appleSpeech.stop()
         isSpeaking = false
+        guard AgentBridge.shared.isConnected else { return }
+        Task {
+            _ = await AgentBridge.shared.command("stop_speech")
+        }
     }
 }

@@ -166,6 +166,24 @@ def test_missing_model_selection_does_not_modify_existing_config(tmp_path):
     assert layout.config_path.read_bytes() == before
 
 
+def test_resume_setup_keeps_conversation_answers(tmp_path):
+    from jaeger_ai.core.instance.onboarding_setup import complete_setup
+    from jaeger_ai.core.instance import first_boot as fb
+    layout = _layout(tmp_path)
+    layout.identity_path.write_text("name: Existing\n")
+    layout.manifest_path.write_text("{}")
+    fb.begin(layout)
+    fb.record_bench(layout, {"tier_label": "32 GB"})
+    fb.record_character(layout, "custom")
+    before = fb.snapshot(layout)
+    complete_setup(layout, {"awake_provider": "openai", "awake_model": "gpt-test",
+                            "resume_onboarding": True})
+    after = fb.snapshot(layout)
+    assert after["status"] == before["status"]
+    assert after["hardware_bench"] == before["hardware_bench"]
+    assert after["character_path"] == "custom"
+
+
 def test_inference_probe_accepts_budget_exhausted_reasoning(monkeypatch):
     from types import SimpleNamespace
     from jaeger_ai.core.models.external_model import ExternalModelClient

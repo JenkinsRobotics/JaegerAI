@@ -51,6 +51,34 @@ import os
 /// thread.  No two threads write the same property simultaneously.
 final class VoiceRecorder: ObservableObject, @unchecked Sendable {
 
+    /// Whether CoreAudio currently exposes an input route. A Mac Studio has
+    /// no built-in microphone, so this can legitimately be false until the
+    /// operator connects a USB/Bluetooth mic or enables Continuity input.
+    static var hasAudioInput: Bool {
+        AVCaptureDevice.default(for: .audio) != nil
+    }
+
+    /// Ask macOS for microphone access from the user's explicit button tap.
+    /// Reading ``AVAudioEngine.inputNode`` does not reliably trigger the TCC
+    /// prompt and can instead report a zero-channel format, which previously
+    /// looked like missing hardware even when permission was merely pending.
+    static func requestMicrophoneAccess() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    continuation.resume(returning: granted)
+                }
+            }
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
     /// True while the engine is running and we're capturing samples.
     @Published private(set) var isRecording: Bool = false
 

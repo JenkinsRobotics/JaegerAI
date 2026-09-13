@@ -86,15 +86,143 @@ def test_opening_turn_greets_by_name_and_asks_probe_one(inst):
     assert turn.status is FirstBootStatus.AWAITING_BENCH
 
 
-def test_hybrid_sequence_bench_then_character_then_social(inst):
+def test_preset_character_skips_the_custom_interview(inst):
     fb.begin(inst)
     assert script.QUESTION_SOCIAL not in script.next_turn(inst).text
     fb.record_bench(inst, recommendation={"tier_label": "32 GB"})
     assert fb.status(inst) is FirstBootStatus.AWAITING_CHARACTER
     assert script.next_turn(inst).lines == (script.QUESTION_CHARACTER,)
     fb.record_character(inst, "preset", character_id="jarvis")
+    assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
+    assert script.PERSONA_FIRST_WORDS in script.next_turn(inst).lines
+    state = fb.snapshot(inst)
+    assert state["calibration_source"] == "character_preset"
+    assert "social_response" not in state
+    assert "voice_profile" not in state
+    assert "q2_response" not in state
+    assert not state.get("persona_name")
+
+
+def test_custom_walk_commits_name_voice_stance_and_character(tmp_path):
+    """The hybrid conversation must land in the files the agent actually reads."""
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml, load_yaml
+    from jaeger_ai.personality import persona_state
+    from jaeger_ai.personality.character import active_character_id
+
+    layout = InstanceLayout(root=tmp_path / "inst")
+    layout.root.mkdir(parents=True)
+    layout.ensure_dirs()
+    dump_yaml(layout.identity_path, Identity(
+        name="Assistant", role="assistant", personality="helpful"))
+    dump_yaml(layout.config_path, Config(
+        instance_name="inst", model=ModelConfig(model_path="/dev/null")))
+    layout.manifest_path.write_text("{}", encoding="utf-8")
+
+    fb.begin(layout)
+    fb.record_bench(layout, recommendation={"tier_label": "32 GB"})
+    fb.record_character(layout, "custom", character_id="assistant")
+    fb.record_social(layout, "Anti-social.", latency_ms=300)
+    fb.record_voice(layout, "male")
+    fb.record_q2(layout, "Fine.")
+    fb.record_model_selection(layout, "in-process", "gemma-4-e4b-it-q4_k_m")
+    fb.complete(layout)
+
+    identity = load_yaml(layout.identity_path, Identity)
+    config = load_yaml(layout.config_path, Config)
+    snap = fb.snapshot(layout)
+    assert snap["status"] == FirstBootStatus.COMPLETED.value
+    assert identity.name == snap["persona_name"]
+    assert identity.voice_id == "am_michael"
+    assert config.kokoro_tts.voice == "am_michael"
+    assert active_character_id(layout.root) == "assistant"
+    stance = snap["latent_stance"]["stance"]
+    overrides = persona_state.load_overrides(layout.root, "assistant")
+    assert overrides.get("expression")
+    assert stance in {"grounded", "pragmatic", "disarming", "attentive"}
+
+
+def test_custom_assistant_enters_the_guided_interview(inst):
+    fb.begin(inst)
+    fb.record_bench(inst)
+    fb.record_character(inst, "custom", character_id="assistant")
     assert fb.status(inst) is FirstBootStatus.AWAITING_SOCIAL
-    assert script.next_turn(inst).lines == (script.QUESTION_SOCIAL,)
+    # The calibration preamble rides the first probe's turn: why the
+    # questions exist is spoken once, ahead of the question itself.
+    turn = script.next_turn(inst)
+    assert turn.lines == (script.CALIBRATION_PREAMBLE, script.QUESTION_SOCIAL)
+    assert fb.snapshot(inst)["calibration_source"] == "guided_interview"
+
+
+def test_step_back_rewinds_one_question_and_clears_the_answer(inst):
+    """Backwards navigation: one step = one question, answers invalidated.
+
+    From Q2 the voice answer stays (revising q2 keeps voice). From VOICE
+    the profile is cleared — a stale ``voice_profile`` would silently skip
+    the question on re-advance (``_after_social_target`` reads it).
+    """
+    fb.begin(inst)
+    fb.record_character(inst, "custom", character_id="assistant")
+    fb.record_social(inst, "I guess maybe social", latency_ms=2400)
+    fb.record_hesitance_reply(inst, "no")
+    fb.record_voice(inst, "female")
+    assert fb.status(inst) is FirstBootStatus.AWAITING_Q2
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_VOICE
+    doc = fb._read(inst)
+    assert "q2_response" not in doc and doc.get("voice_profile") == "female"
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_HESITANCE
+    assert "voice_profile" not in fb._read(inst)
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_SOCIAL
+    assert "hesitance_reply" not in fb._read(inst)
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_CHARACTER
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_BENCH
+    assert fb.step_back(inst) is FirstBootStatus.NOT_STARTED
+    assert fb.step_back(inst) is FirstBootStatus.NOT_STARTED  # stays put
+
+
+def test_step_back_from_voice_lands_on_the_real_previous_question(inst, tmp_path):
+    """With the interjection, VOICE's previous question is HESITANCE.
+
+    Without it, VOICE steps back to SOCIAL directly — the interjection
+    only counts as "previous" when it actually ran. The answer keys are
+    durable by design, so the two branches need separate instances.
+    """
+    other = tmp_path / "no-interjection"
+    other.mkdir()
+    fb.begin(other)
+    fb.record_character(inst, "custom", character_id="assistant")
+    fb.record_social(inst, "I guess maybe social", latency_ms=2400)
+    fb.record_hesitance_reply(inst, "no")
+    fb.record_voice(inst, "male")
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_VOICE
+    assert fb.step_back(inst) is FirstBootStatus.AWAITING_HESITANCE
+
+    fb.record_character(other, "custom", character_id="assistant")
+    fb.record_social(other, "Social.", latency_ms=300)
+    fb.record_voice(other, "male")
+    assert fb.step_back(other) is FirstBootStatus.AWAITING_VOICE
+    assert fb.step_back(other) is FirstBootStatus.AWAITING_SOCIAL
+
+
+def test_step_back_never_rewinds_arrival_or_completion(inst):
+    """Once the persona begins arriving, a late frame must not drag a
+    finished identity back into the welcome."""
+    fb.begin(inst)
+    fb.record_character(inst, "custom", character_id="assistant")
+    fb.record_social(inst, "social."); fb.record_voice(inst, "male")
+    fb.record_q2(inst, "close.")
+    assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
+    assert fb.step_back(inst) is FirstBootStatus.INITIALIZING_PERSONA
+    # And re-answering forward after a pending rewind re-asks cleanly.
+    fb.record_social(inst, "Social.", latency_ms=200)
+
+
+def test_unnamed_preset_is_rejected_without_advancing(inst):
+    fb.begin(inst)
+    fb.record_bench(inst)
+    with pytest.raises(ValueError, match="character_id"):
+        fb.record_character(inst, "preset")
+    assert fb.status(inst) is FirstBootStatus.AWAITING_CHARACTER
 
 
 def test_opening_turn_withholds_later_probes(inst):
@@ -341,6 +469,24 @@ def test_persona_name_is_chosen_once_and_stays(inst):
     second = fb.record_persona_name(inst, "Someone Else")
     assert first == second == "Vera"
     assert fb.snapshot(inst)["persona_name_origin"] == "autonomous_initialization"
+
+
+def test_generated_persona_name_becomes_runtime_identity(inst):
+    from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
+
+    identity_path = inst / "identity.yaml"
+    dump_yaml(identity_path, Identity(
+        name="Assistant",
+        role="general assistant",
+        personality="calm and direct",
+    ))
+
+    assert fb.record_persona_name(inst, "Iris") == "Iris"
+    assert load_yaml(identity_path, Identity).name == "Iris"
+
+    # First write wins across both records.
+    assert fb.record_persona_name(inst, "Someone Else") == "Iris"
+    assert load_yaml(identity_path, Identity).name == "Iris"
 
 
 def test_backwards_transitions_are_ignored(inst):

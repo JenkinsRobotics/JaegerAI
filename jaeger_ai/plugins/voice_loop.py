@@ -65,7 +65,7 @@ from typing import Any
 
 from ..main import (
     init_extensions,
-    prewarm,
+    prewarm_session,
     run_for_voice,
     shutdown_extensions,
 )
@@ -106,10 +106,16 @@ def main() -> int:
                    help="Whisper fast/continuous model name (default: base.en).")
     p.add_argument("--accurate-model", type=str, default="medium.en",
                    help="Whisper accurate model name (two_pass only, default: medium.en).")
+    p.add_argument("--input-device", type=str, default=None,
+                   help="Microphone name or index. Defaults to the macOS system input.")
+    p.add_argument("--list-audio-devices", action="store_true",
+                   help="List detected microphones and exit before loading models.")
     p.add_argument("--no-cron", action="store_true",
                    help="Don't start the cron runner alongside the voice loop.")
     p.add_argument("--no-chimes", action="store_true",
                    help="Disable wake / follow-up audio earcons.")
+    p.add_argument("--conversation-only", action="store_true",
+                   help="Omit tool schemas for low-latency local voice chat.")
     # NOTE — the --attach flag (which routed turns through the
     # daemon's chat.send verb to skip an in-process LLM load) was
     # removed 2026-06-14 with the daemon-arch decision (J5C). The
@@ -142,6 +148,39 @@ def main() -> int:
 
     os.environ.setdefault("DESTRUCTIVE_OPS_REQUIRE_CONFIRM", "1")
 
+    # Fail before loading the LLM/STT/TTS stack. A missing microphone is a
+    # hardware condition, and the terminal should say that directly instead
+    # of leaking a CoreAudio/PortAudio exception.
+    from jaeger_ai.core.audio_devices import (
+        describe_input_devices,
+        select_input_device,
+    )
+    try:
+        selected_input, detected_inputs = select_input_device(args.input_device)
+    except Exception as exc:
+        print(f"[voice] ERROR — {exc}", file=sys.stderr, flush=True)
+        return 2
+    print("[voice] detected microphones:", flush=True)
+    for row in describe_input_devices(detected_inputs):
+        marker = "→" if row.startswith(f"{selected_input['index']}:") else " "
+        print(f"  {marker} {row}", flush=True)
+    if args.list_audio_devices:
+        return 0
+
+    # AVAudioEngine follows the system input and cannot target a different
+    # device per process. Preserve its stable native path for the default;
+    # use PortAudio only when the operator explicitly selects another mic.
+    stt_audio_backend = args.audio_backend
+    stt_input_device = None
+    if args.audio_backend == "portaudio":
+        stt_input_device = selected_input["index"]
+    elif args.input_device is not None and not selected_input["default"]:
+        stt_audio_backend = "portaudio"
+        stt_input_device = selected_input["index"]
+        print("[voice] selected mic is not the macOS default; "
+              "using PortAudio for input selection while Kokoro remains "
+              "on AVAudioEngine.", flush=True)
+
     # ── Instance + agent setup (mirrors messaging_gateway) ───────────
     instance_name = args.instance or default_instance_name()
     layout = InstanceLayout(root=resolve_instance_dir(instance_name))
@@ -151,7 +190,21 @@ def main() -> int:
         return 2
 
     config: Config = load_yaml(layout.config_path, Config)
+    # Headless voice is an offline product surface. Disable the configured
+    # external lane on an in-memory copy so make_client cannot send a spoken
+    # transcript to a cloud endpoint. The instance file is left unchanged.
+    local_config = config.model_copy(deep=True)
+    local_config.external_model.enabled = False
     agent_tools.bind(layout)
+
+    # Wire the permission provider matching config.yaml (e.g. 'allow' -> AllowAllProvider)
+    from jaeger_ai.main import _confirmation_provider
+    from jaeger_os.core.safety.permissions import PermissionPolicy, install_policy
+    from jaeger_os.core.safety.safety_rules import AuditLogger
+    install_policy(PermissionPolicy(
+        confirmation=_confirmation_provider(local_config, layout),
+        audit=AuditLogger(path=layout.audit_log_path),
+    ))
 
     if args.wake_word and args.no_wake_word:
         print("[voice] choose only one of --wake-word / --no-wake-word",
@@ -186,10 +239,17 @@ def main() -> int:
 
     from ..main import _pipeline
     _pipeline["layout"] = layout
-    _pipeline["config"] = config
+    _pipeline["config"] = local_config
     _pipeline["system_prompt"] = build_system_prompt(layout)
     _pipeline["show_latency"] = config.display.show_latency
     _pipeline["show_tool_activity"] = config.display.show_tool_activity
+    if args.conversation_only:
+        _pipeline["toolsets"] = set()
+        print("[voice] conversation-only mode — tool schemas omitted",
+              flush=True)
+    elif not _pipeline.get("toolsets"):
+        _pipeline["toolsets"] = frozenset({"host_ui", "web", "essentials", "skills"})
+        print("[voice] voice toolsets active: host_ui, web, essentials, skills", flush=True)
 
     # ── LLM bring-up — local model, always ──────────────────────────
     #
@@ -202,7 +262,11 @@ def main() -> int:
           flush=True)
     started = time.perf_counter()
     from ..main import make_client
-    client = make_client(config, layout, warmup=True)
+    client = make_client(local_config, layout, warmup=True)
+    if getattr(client, "kind", "") not in {"local", "mlx"}:
+        print("[voice] ERROR — local-only voice selected a non-local brain",
+              file=sys.stderr, flush=True)
+        return 2
     print(f"[voice] loaded in {time.perf_counter() - started:.1f}s",
           flush=True)
 
@@ -211,10 +275,15 @@ def main() -> int:
         with_mcp = False
         think = False
     init_extensions(_Args(), client)
-    prewarm(client)
+    # Warm the exact session prefix used below. Generic prewarm loaded a
+    # slightly different prompt, then the first spoken turn paid the entire
+    # 185-tool prefill again (measured at 102 s on this M1 Max).
+    prewarm_session(client, session_key="voice")
 
     def turn_runner(phrase: str) -> dict[str, Any]:
-        return run_for_voice(client, phrase, session_key="voice")
+        return run_for_voice(
+            client, phrase, session_key="voice", local_only=True,
+        )
 
     # ── AEC + reference buffer ───────────────────────────────────────
     # 0.2.6: barge-in is request-by-default; we attempt to enable AEC,
@@ -226,7 +295,7 @@ def main() -> int:
     aec = None
     reference_buffer = None
     if barge_in_requested:
-        from ..core.audio import AECWrapper, ReferenceBuffer, aec_available
+        from jaeger_os.core.audio import AECWrapper, ReferenceBuffer, aec_available
         if aec_available():
             aec = AECWrapper(sample_rate=16000, frame_ms=10, enabled=True)
             reference_buffer = ReferenceBuffer(sample_rate=16000,
@@ -234,6 +303,10 @@ def main() -> int:
             barge_in_active = True
             print(f"[voice] AEC barge-in enabled ({aec.backend}) — "
                   f"interrupt the agent any time", flush=True)
+        elif stt_audio_backend == "avaudio" or sys.platform == "darwin":
+            barge_in_active = True
+            print("[voice] Apple-native voice processing AEC barge-in enabled — "
+                  "interrupt the agent any time", flush=True)
         else:
             barge_in_active = False
             print("[voice] speexdsp not installed (pip install speexdsp) — "
@@ -243,7 +316,7 @@ def main() -> int:
         print("[voice] --no-barge-in: mic-pause during TTS", flush=True)
 
     # ── Chimes (wake + follow-up earcons) ────────────────────────────
-    from ..core.audio import ChimePlayer
+    from jaeger_os.core.audio import ChimePlayer
     chimes = ChimePlayer(
         enabled=not args.no_chimes,
         # Push chime audio into the AEC reference buffer when barge-in is on,
@@ -264,8 +337,9 @@ def main() -> int:
     # close+reopen.  Set it here so the player opens against the
     # requested backend on the very first call.
     if hasattr(tts, "audio_backend"):
-        tts.audio_backend = args.audio_backend
-        print(f"[voice] audio backend = {args.audio_backend}", flush=True)
+        tts_backend = "sounddevice" if args.audio_backend in {"portaudio", "sounddevice"} or getattr(config.voice, "audio_backend", "") == "sounddevice" else args.audio_backend
+        tts.audio_backend = tts_backend
+        print(f"[voice] audio backend: STT={stt_audio_backend}, TTS={tts_backend}", flush=True)
     print("[voice] warming Kokoro TTS...", flush=True)
     warm_result = tts.warm()
     if warm_result.get("warmed"):
@@ -291,7 +365,8 @@ def main() -> int:
             require_wake_word=require_wake_word,
             followup_window_s=10.0,
             aec=aec, far_end_buffer=reference_buffer,
-            audio_backend=args.audio_backend,
+            audio_backend=stt_audio_backend,
+            input_device=stt_input_device,
         )
     else:
         from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTTwoPass
@@ -301,7 +376,8 @@ def main() -> int:
             require_wake_word=require_wake_word,
             followup_window_s=10.0,
             aec=aec, far_end_buffer=reference_buffer,
-            audio_backend=args.audio_backend,
+            audio_backend=stt_audio_backend,
+            input_device=stt_input_device,
         )
 
     # 0.4 Track B.3.2.a — STT phrase consumption migrates to the bus.
@@ -317,6 +393,7 @@ def main() -> int:
     import queue as _queue
     from jaeger_os.transport import topics as _topics
     from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
+    from jaeger_ai.core.voice.sentence_buffer import StreamingSentenceAggregator
     from jaeger_os.core.audio import AudioSession as _AudioSession
     from jaeger_os.nodes import AudioSessionNode as _AudioSessionNode
     from jaeger_os.nodes import runtime as _runtime
@@ -517,6 +594,7 @@ def main() -> int:
                 result = turn_runner(phrase)
                 text = clean_voice_reply(result.get("text") or "")
                 spoke_via_tool = result.get("spoke_via_tool", False)
+                print(f"[voice] agent: '{text}'", flush=True)
                 if is_non_speech_marker(text):
                     print(f"[voice] model returned non-speech marker "
                           f"{text!r} — suppressing TTS", flush=True)
@@ -559,72 +637,116 @@ def main() -> int:
                 # flight speak.  Either way, the result is a SpokenAck
                 # that mirrors the pre-bus speak_result shape (ok,
                 # duration_s, reason).
-                # Honest voice latency (VoiceLLM metrics port): the
-                # user stopped talking at ``speech_end``; we are about
-                # to start talking NOW. This is the number the
-                # operator actually feels — everything else is a
-                # component of it.
+                # Honest voice latency (VoiceLLM metrics port): preserve
+                # the speech-end clock through STT, local inference, first
+                # audible TTS output, and completed playback.
                 _speech_end = float(phrase_timing.get("speech_end") or 0.0)
+                _response_ready_at = time.perf_counter()
                 if _speech_end:
                     _stt_s = max(0.0, float(
                         phrase_timing.get("stt_done") or _speech_end,
                     ) - _speech_end)
                     _agent_s = float(result.get("elapsed_s") or 0.0)
-                    _e2e_s = max(0.0, time.perf_counter() - _speech_end)
+                    _ready_s = max(0.0, _response_ready_at - _speech_end)
                     print(f"[voice-latency] stt={_stt_s:.2f}s "
                           f"agent={_agent_s:.2f}s "
-                          f"speech-end→speak={_e2e_s:.2f}s", flush=True)
+                          f"speech-end→response-ready={_ready_s:.2f}s",
+                          flush=True)
                     _log_gate_event(
                         "latency", phrase, decision="ok",
                         reason=(f"stt={_stt_s:.3f};agent={_agent_s:.3f};"
-                                f"e2e={_e2e_s:.3f}"),
+                                f"response_ready={_ready_s:.3f}"),
                     )
 
                 interrupted = {"flag": False}
                 _speech_cid = uuid.uuid4().hex
+                _first_audio_at = {"value": 0.0}
 
-                if barge_in_active:
-                    # Install an STT-thread callback that publishes
-                    # SpeechStop instead of calling tts.stop() directly.
-                    # Same sub-50ms detection — the publish lands on the
-                    # bus delivery thread which calls synth.stop() in
-                    # the TTS node.
-                    def _on_user_speaks() -> None:
-                        if not interrupted["flag"]:
-                            interrupted["flag"] = True
-                            print("[voice] barge-in detected — publishing "
-                                  "SpeechStop", flush=True)
-                            _bus.publish(_topics.SpeechStop(
-                                reason="user interrupted",
-                                node_id="voice_loop",
-                                correlation_id=_speech_cid,
-                            ))
+                def _on_tts_chunk(msg: Any) -> None:
+                    if (getattr(msg, "correlation_id", "") == _speech_cid
+                            and float(getattr(msg, "amplitude", 0.0) or 0.0) > 0.001
+                            and not _first_audio_at["value"]):
+                        _first_audio_at["value"] = time.perf_counter()
 
-                    stt.set_on_speech_detected(_on_user_speaks)
-                    try:
-                        ack = _bus.request(
-                            _topics.SpeechCommand(
-                                text=text,
-                                node_id="voice_loop",
-                                correlation_id=_speech_cid,
-                            ),
-                            ack_topic=_topics.SENSE_SPOKEN,
-                            timeout_s=180.0,
-                        )
-                    finally:
-                        stt.set_on_speech_detected(None)
-                else:
-                    # Sync path: TTS runs with mic paused; same bus
-                    # round-trip but no barge-in callback registered.
-                    ack = _bus.request(
-                        _topics.SpeechCommand(
-                            text=text,
-                            node_id="voice_loop",
-                            correlation_id=_speech_cid,
-                        ),
-                        ack_topic=_topics.SENSE_SPOKEN,
-                        timeout_s=180.0,
+                _bus.subscribe(_topics.SENSE_TTS_CHUNK, _on_tts_chunk)
+
+                _agg = StreamingSentenceAggregator()
+                _sentences = _agg.feed(text) + _agg.flush()
+                if not _sentences:
+                    _sentences = [text]
+
+                ack = None
+                total_duration_s = 0.0
+
+                try:
+                    if barge_in_active:
+                        # Install an STT-thread callback that publishes
+                        # SpeechStop instead of calling tts.stop() directly.
+                        # Same sub-50ms detection — the publish lands on the
+                        # bus delivery thread which calls synth.stop() in
+                        # the TTS node.
+                        def _on_user_speaks() -> None:
+                            if not interrupted["flag"]:
+                                interrupted["flag"] = True
+                                print("[voice] barge-in detected — publishing "
+                                      "SpeechStop", flush=True)
+                                _bus.publish(_topics.SpeechStop(
+                                    reason="user interrupted",
+                                    node_id="voice_loop",
+                                    correlation_id=_speech_cid,
+                                ))
+
+                        stt.set_on_speech_detected(_on_user_speaks)
+                        try:
+                            for sent in _sentences:
+                                if interrupted["flag"]:
+                                    break
+                                ack = _bus.request(
+                                    _topics.SpeechCommand(
+                                        text=sent,
+                                        node_id="voice_loop",
+                                        correlation_id=_speech_cid,
+                                    ),
+                                    ack_topic=_topics.SENSE_SPOKEN,
+                                    timeout_s=180.0,
+                                )
+                                if ack is not None:
+                                    total_duration_s += float(getattr(ack, "duration_s", 0.0) or 0.0)
+                                if ack is None or not ack.ok:
+                                    break
+                        finally:
+                            stt.set_on_speech_detected(None)
+                    else:
+                        # Sync path: TTS runs with mic paused; same bus
+                        # round-trip but no barge-in callback registered.
+                        for sent in _sentences:
+                            ack = _bus.request(
+                                _topics.SpeechCommand(
+                                    text=sent,
+                                    node_id="voice_loop",
+                                    correlation_id=_speech_cid,
+                                ),
+                                ack_topic=_topics.SENSE_SPOKEN,
+                                timeout_s=180.0,
+                            )
+                            if ack is not None:
+                                total_duration_s += float(getattr(ack, "duration_s", 0.0) or 0.0)
+                            if ack is None or not ack.ok:
+                                break
+                finally:
+                    _bus.unsubscribe(_topics.SENSE_TTS_CHUNK, _on_tts_chunk)
+
+                if _speech_end:
+                    _first_audio = _first_audio_at["value"]
+                    _first_audio_text = (
+                        f"{max(0.0, _first_audio - _speech_end):.2f}s"
+                        if _first_audio else "unavailable"
                     )
+                    _turn_total = max(0.0, time.perf_counter() - _speech_end)
+                    _spoken_s = total_duration_s
+                    print(f"[voice-latency] speech-end→first-audio="
+                          f"{_first_audio_text} tts-total={_spoken_s:.2f}s "
+                          f"turn-total={_turn_total:.2f}s", flush=True)
 
                 if ack is None or not ack.ok:
                     # Three possible flavours:

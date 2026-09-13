@@ -119,19 +119,19 @@ final class AgentBridge: ObservableObject {
     /// Launch the bridge child and await its (fast) ready handshake.
     /// Settings/queries are usable on return; the model may still be
     /// booting — watch ``agentState``.
-    func connect(instance: String? = explicitInstance) async throws {
+    func connect(instance: String? = explicitInstance, setupOnly: Bool = false) async throws {
         if state == .ready { return }
         if let inFlight = connectTask {          // join, don't double-spawn
             try await inFlight.value
             return
         }
-        let task = Task { try await self.doConnect(instance: instance) }
+        let task = Task { try await self.doConnect(instance: instance, setupOnly: setupOnly) }
         connectTask = task
         defer { connectTask = nil }
         try await task.value
     }
 
-    private func doConnect(instance: String?) async throws {
+    private func doConnect(instance: String?, setupOnly: Bool) async throws {
         state = .connecting
         agentState = .booting
         let proc = BridgeProcess()
@@ -165,7 +165,7 @@ final class AgentBridge: ObservableObject {
             Task { @MainActor in self?.handleTermination(clean: clean) }
         }
         do {
-            let ready = try await proc.start(instance: instance)
+            let ready = try await proc.start(instance: instance, setupOnly: setupOnly)
             if ready.proto != ProtocolV1.version {
                 await proc.stop()
                 throw BridgeError.bootFailed(
@@ -175,6 +175,7 @@ final class AgentBridge: ObservableObject {
             bridge = proc
             state = .ready
             lastError = nil
+            needsOnboarding = ready.agent == "setup"
             if ready.agent == "ready" {          // already-warm core (attach)
                 agentState = .ready(model: ready.model,
                                     character: ready.character, icon: ready.icon,
@@ -201,9 +202,9 @@ final class AgentBridge: ObservableObject {
     /// Connect without throwing — failures land on ``lastError``. The
     /// launch hook uses this (a missing bridge is the first-run state,
     /// not an exception).
-    func tryConnect(instance: String? = explicitInstance) async {
+    func tryConnect(instance: String? = explicitInstance, setupOnly: Bool = false) async {
         do {
-            try await connect(instance: instance)
+            try await connect(instance: instance, setupOnly: setupOnly)
             NSLog("[Bridge] connected — instance=\(status?.instance ?? "?")")
         } catch {
             lastError = error.localizedDescription
@@ -247,10 +248,14 @@ final class AgentBridge: ObservableObject {
     /// surface bound to ``status`` (tray card, chat header, orb face)
     /// re-brands immediately — no restart, no next-boot wait.
     @discardableResult
-    func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
+    func command(_ cmd: String, args: [String: any Sendable] = [:],
+                 timeout: Duration? = nil) async -> QueryResult {
         guard let bridge else { return QueryResult(ok: false, error: "not connected", json: nil) }
-        let result = await bridge.command(cmd, args: args)
-        if result.ok && (cmd == "select_character" || cmd == "make_default") {
+        let result = await bridge.command(cmd, args: args, timeout: timeout)
+        if result.ok && (
+            cmd == "select_character" || cmd == "make_default"
+            || cmd == "save_identity" || cmd == "first_boot_complete"
+        ) {
             await refreshIdentity()
         }
         return result
@@ -352,9 +357,21 @@ final class AgentBridge: ObservableObject {
 
     /// Onboarding finished (instance created + agent booted): clear the
     /// first-run flag and refresh the identity every surface renders.
+    private var onboardingRuntimeActivated = false
+
+    func onboardingRuntimeReady() {
+        guard !onboardingRuntimeActivated else { return }
+        onboardingRuntimeActivated = true
+        PillHotkey.shared.register {
+            PillPanelController.toggle(agent: self)
+        }
+        AmbientCoordinator.shared.activate()
+        Task { await self.refreshIdentity() }
+    }
+
     func onboardingDidFinish() {
         needsOnboarding = false
-        Task { await self.refreshIdentity() }
+        onboardingRuntimeReady()
     }
 
     private func handleTermination(clean: Bool) {

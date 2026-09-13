@@ -69,7 +69,7 @@ def test_speak_round_trip_with_a_fake_synth() -> None:
     engine: publish a SpeechCommand, get a SpokenAck back."""
 
     class _FakeSynth:
-        def speak(self, text: str) -> dict:
+        def speak(self, text: str, *, rate: float = 1.0) -> dict:
             return {"spoken": True, "elapsed_s": 0.01}
 
         def shutdown(self) -> None:

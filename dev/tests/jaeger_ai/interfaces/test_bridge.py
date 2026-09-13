@@ -65,6 +65,32 @@ def _instance_on_disk(tmp_path, monkeypatch):
     return root
 
 
+def test_character_catalog_exposes_authored_profile_for_onboarding(_instance_on_disk):
+    """The picker must explain a preset before committing to it."""
+    import types
+
+    boot = types.SimpleNamespace(layout=types.SimpleNamespace(root=_instance_on_disk))
+    catalog = bridge._query("characters", {}, boot)
+    jarvis = next(item for item in catalog if item["id"] == "jarvis")
+    assert jarvis["description"]
+    assert jarvis["voice_tone"]
+    assert jarvis["voice_id"]
+    assert jarvis["backstory"]
+    assert any(line.startswith("Mindset: ") for line in jarvis["highlights"])
+    assert any(line.startswith("Behavior: ") for line in jarvis["highlights"])
+    assert any(line.startswith("Personality: ") for line in jarvis["highlights"])
+    assert any(line.startswith("Voice: ") for line in jarvis["highlights"])
+
+    detail = bridge._query("character", {"id": "jarvis"}, boot)
+    assert detail["soul"]
+    assert detail["backstory"]
+    assert detail["ideals"]
+    assert detail["behaviors"]
+    assert detail["mannerisms"]
+    assert detail["speech_patterns"]
+    assert detail["custom_instructions"]
+
+
 def test_effective_icon_prefers_instance_avatar_over_character_card(tmp_path):
     """The agent's face is instance-owned: identity.avatar wins when set +
     present; otherwise the active character's card is the default."""
@@ -318,7 +344,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
     # v15 adds the Dispatcher projection over native facts and board memory.
     # v18 exposes the bundled OS utility for setup, diagnostics, and recovery.
-    assert contract["contract_version"] == 18
+    assert contract["contract_version"] == 22
     assert "system_utility_status" in contract["operations"]["queries"]
     assert "system_utility" in contract["operations"]["queries"]
     assert "onboarding_guide" in contract["operations"]["queries"]
@@ -586,11 +612,9 @@ def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path
     rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
                          boot_exc=AssertionError("boot must not run"))
     types = [f["type"] for f in frames]
-    assert types == ["ready", "agent_state", "fatal", "bye"]
-    assert frames[1]["state"] == "failed"
-    assert "first-run setup required" in frames[1]["error"]
-    assert frames[2]["kind"] == "no_instance"
-    assert rc == 1
+    assert types == ["ready", "bye"]
+    assert frames[0]["agent"] == "setup"
+    assert rc == 0
 
 
 def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
@@ -605,9 +629,9 @@ def test_no_instance_fatal_carries_suggested_name_from_explicit_cli_pin(
     rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
                          boot_exc=AssertionError("boot must not run"),
                          argv=["lilith"])
-    fatal = next(f for f in frames if f["type"] == "fatal")
-    assert fatal["kind"] == "no_instance"
-    assert fatal["suggested_name"] == "lilith"
+    ready = next(f for f in frames if f["type"] == "ready")
+    assert ready["agent"] == "setup"
+    assert ready["instance"] == "lilith"
 
 
 def test_no_instance_fatal_omits_suggested_name_for_generic_default(
@@ -621,9 +645,9 @@ def test_no_instance_fatal_omits_suggested_name_for_generic_default(
     rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n',
                          boot_exc=AssertionError("boot must not run"),
                          default_name="default")
-    fatal = next(f for f in frames if f["type"] == "fatal")
-    assert fatal["kind"] == "no_instance"
-    assert "suggested_name" not in fatal
+    ready = next(f for f in frames if f["type"] == "ready")
+    assert ready["agent"] == "setup"
+    assert "suggested_name" not in ready
 
 
 def test_no_instance_transport_still_serves_queries(monkeypatch, tmp_path):
@@ -689,13 +713,12 @@ def test_create_instance_command_writes_instance_and_boots(monkeypatch, tmp_path
     rc, frames, _ = _run(monkeypatch, stdin)
     types = [f["type"] for f in frames]
     # no-instance handshake, then the create result, then a REAL boot.
-    assert types == ["ready", "agent_state", "fatal",
-                     "result", "agent_state", "agent_state", "bye"]
-    result = frames[3]
+    assert types == ["ready", "result", "agent_state", "agent_state", "bye"]
+    result = frames[1]
     assert result["ok"] is True
     assert result["data"]["root"] == str(inst_dir)
-    assert frames[4]["state"] == "booting"
-    assert frames[5]["state"] == "ready"
+    assert frames[2]["state"] == "booting"
+    assert frames[3]["state"] == "ready"
     assert rc == 0   # boot_error cleared by the restart
 
     # The instance on disk is complete and schema-valid.
@@ -1192,32 +1215,25 @@ def test_identity_query_roundtrip(monkeypatch, _instance_on_disk):
 
 def test_speak_command_roundtrip(monkeypatch):
     """``{"op":"command","cmd":"speak"}`` — the native app's speaker button.
-    Accepted (ok=True) once the agent is up; the synthesis itself runs
-    fire-and-forget on a worker thread via the agent's speak machinery
-    (Kokoro + the active character's voice). Empty text is refused."""
-    import importlib
+    UI speech goes directly through the JaegerOS TTS lane; no agent tool is
+    involved. Empty text is refused."""
     import threading
 
     spoken = {}
     done = threading.Event()
 
-    def fake_speak(text="", path="", voice=""):
-        # ``voice`` is the additive per-utterance override OS 1 State 3
-        # uses to pick a Kokoro pack. A stub missing it makes the bridge's
-        # background speak thread raise TypeError and die silently, which
-        # surfaces only as this test's event never being set.
-        spoken["text"] = text
-        spoken["voice"] = voice
-        done.set()
-        return {"spoken": True, "elapsed_s": 0.1, "reason": ""}
+    class FakeUISpeech:
+        def speak(self, text, *, voice="", rate=1.0):
+            spoken.update(text=text, voice=voice, rate=rate)
+            done.set()
+            return {"spoken": True, "elapsed_s": 0.1, "reason": ""}
 
-    # Patch the MODULE object, not the dotted string: the tools package
-    # re-exports a ``speak`` FUNCTION that shadows the submodule on
-    # attribute lookup, so the string form patches the wrong object.
-    speak_mod = importlib.import_module("jaeger_agent.tools.speak")
-    monkeypatch.setattr(speak_mod, "speak", fake_speak)
+        def stop(self):
+            return {"stopped": True, "active": False}
+
+    monkeypatch.setattr("jaeger_ai.core.ui_speech.UISpeech", FakeUISpeech)
     stdin = ('{"op":"command","cmd":"speak","args":{"text":"Good day.",'
-             '"voice":"af_heart"},"id":"r3"}\n'
+             '"voice":"af_heart","rate":0.95},"id":"r3"}\n'
              '{"op":"command","cmd":"speak","args":{"text":"  "},"id":"r4"}\n'
              '{"op":"quit"}\n')
     # Hold the first command back so the (faked, instant) boot wins the
@@ -1230,8 +1246,8 @@ def test_speak_command_roundtrip(monkeypatch):
     assert "nothing to speak" in results["r4"]["error"]
     assert done.wait(5.0)
     assert spoken["text"] == "Good day."
-    # the pack rides through to the synth, unmodified
     assert spoken["voice"] == "af_heart"
+    assert spoken["rate"] == 0.95
     assert rc == 0
 
 
@@ -2220,6 +2236,11 @@ def test_setup_commits_to_existing_instance_before_any_boot(monkeypatch, _instan
     assert rc == 0
     assert calls == [("openai", "gpt-test")]
     assert next(f for f in frames if f.get("id") == "save")["ok"]
+    # A client awaiting save must not mistake the previous ready state for
+    # successful initialization of this selection.
+    save_index = next(i for i, f in enumerate(frames) if f.get("id") == "save")
+    assert any(f.get("type") == "agent_state" and f.get("state") == "booting"
+               for f in frames[:save_index])
     assert (_instance_on_disk / "identity.yaml").read_bytes() == identity
 
 
@@ -2231,3 +2252,114 @@ def test_incomplete_unconfirmed_instance_does_not_autoboot(monkeypatch, _instanc
     _, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
     assert frames[0]["agent"] == "setup"
     assert not calls
+
+
+def test_waiting_speech_does_not_block_queries(monkeypatch, _instance_on_disk):
+    import threading
+    speaking = threading.Event()
+    queried = threading.Event()
+    finished = threading.Event()
+
+    class FakeUISpeech:
+        def speak(self, text, *, voice="", rate=1.0):
+            speaking.set()
+            assert queried.wait(2), "speech blocked the query loop"
+            finished.set()
+            return {"spoken": True, "elapsed_s": 0.1}
+
+        def stop(self):
+            return {"stopped": True, "active": speaking.is_set()}
+
+    def query(what, args, target):
+        assert speaking.wait(2)
+        assert not finished.is_set()
+        queried.set()
+        return {"responsive": True}
+
+    def input_lines():
+        yield json.dumps({"op": "command", "cmd": "speak", "id": "speech",
+                          "args": {"text": "Welcome", "wait": True}}) + "\n"
+        yield json.dumps({"op": "query", "what": "probe", "id": "probe"}) + "\n"
+        assert finished.wait(3)
+        yield '{"op":"quit"}\n'
+
+    monkeypatch.setattr("jaeger_ai.core.ui_speech.UISpeech", FakeUISpeech)
+    monkeypatch.setattr(bridge, "_query", query)
+    _, frames, _ = _run(monkeypatch, "", argv=["--setup"], stdin_obj=input_lines())
+    assert next(f for f in frames if f.get("id") == "probe")["data"]["responsive"]
+
+
+def test_stop_speech_reaches_the_active_ui_speech_lane(monkeypatch):
+    import threading
+
+    started = threading.Event()
+    stopped = threading.Event()
+
+    class FakeUISpeech:
+        def speak(self, text, *, voice="", rate=1.0):
+            started.set()
+            assert stopped.wait(2)
+            return {"spoken": False, "reason": "interface requested stop"}
+
+        def stop(self):
+            stopped.set()
+            return {"stopped": True, "active": True,
+                    "correlation_id": "speech-1"}
+
+    def input_lines():
+        yield json.dumps({"op": "command", "cmd": "speak", "id": "speech",
+                          "args": {"text": "Welcome", "wait": True}}) + "\n"
+        assert started.wait(2)
+        yield json.dumps({"op": "command", "cmd": "stop_speech",
+                          "id": "stop"}) + "\n"
+        assert stopped.wait(2)
+        yield '{"op":"quit"}\n'
+
+    monkeypatch.setattr("jaeger_ai.core.ui_speech.UISpeech", FakeUISpeech)
+    _, frames, _ = _run(monkeypatch, "", argv=["--setup"], stdin_obj=input_lines())
+    result = next(f for f in frames if f.get("id") == "stop")
+    assert result["ok"] is True
+    assert result["data"]["active"] is True
+
+
+def test_native_audio_transcription_is_async_and_correlated(monkeypatch):
+    """The Swift recorder reaches the agent Whisper adapter without
+    blocking the bridge query loop, and receives its own result id."""
+    import threading
+
+    started = threading.Event()
+    queried = threading.Event()
+
+    def transcribe(payload, *, sample_rate, model):
+        started.set()
+        assert payload == "encoded-pcm"
+        assert sample_rate == 48_000
+        assert model == "medium.en"
+        assert queried.wait(2), "transcription blocked the query loop"
+        return {"text": "hello jaeger", "model": model}
+
+    def query(what, args, target):
+        assert started.wait(2)
+        queried.set()
+        return {"responsive": True}
+
+    def input_lines():
+        yield json.dumps({
+            "op": "command", "cmd": "transcribe_audio", "id": "stt",
+            "args": {"pcm_f32le": "encoded-pcm", "sample_rate": 48_000,
+                     "model": "medium.en"},
+        }) + "\n"
+        yield json.dumps({"op": "query", "what": "probe", "id": "probe"}) + "\n"
+        assert queried.wait(2)
+        yield '{"op":"quit"}\n'
+
+    monkeypatch.setattr(
+        "jaeger_ai.core.ui_transcription.transcribe_pcm", transcribe,
+    )
+    monkeypatch.setattr(bridge, "_query", query)
+    _, frames, _ = _run(monkeypatch, "", argv=["--setup"], stdin_obj=input_lines())
+    probe = next(frame for frame in frames if frame.get("id") == "probe")
+    result = next(frame for frame in frames if frame.get("id") == "stt")
+    assert probe["data"]["responsive"] is True
+    assert result["ok"] is True
+    assert result["data"] == {"text": "hello jaeger", "model": "medium.en"}

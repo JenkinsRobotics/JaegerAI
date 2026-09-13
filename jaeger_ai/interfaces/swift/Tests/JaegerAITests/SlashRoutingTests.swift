@@ -94,6 +94,20 @@ final class SlashRoutingTests: XCTestCase {
         }
     }
 
+    func testNaturalStopPhrasesRouteToStop() {
+        XCTAssertEqual(SlashRouting.action(for: "stop"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop speaking"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop talking"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop agent from talking"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop agent from talking its sounds broken"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "shut up"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "be quiet"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "quiet"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "cancel"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop!"), .stop)
+        XCTAssertEqual(SlashRouting.action(for: "stop speaking please"), .stop)
+    }
+
     func testPlainTextAndHelpPassThrough() {
         XCTAssertEqual(SlashRouting.action(for: "improve my apple notes"), .passThrough)
         XCTAssertEqual(SlashRouting.action(for: "/help"), .passThrough)

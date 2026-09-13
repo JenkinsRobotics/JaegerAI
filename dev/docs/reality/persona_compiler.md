@@ -3,9 +3,12 @@
 Status: **compiler + WORKERS-RUN-VANILLA shipped** (2026-07-02).
 Architecture MEASURED: single-pass boundary disproven → persona removed from the
 worker prompt entirely (no `character` fragment; sub-agents already clean). The
-compiled View (`Character.character_block()`) is retained to feed the **two-pass
-output filter** (re-voices the final reply) — that filter stage is the next
-sprint (TODO), tracked below.
+compiled View (`Character.character_block()`) feeds the shipped persona lane and
+two-pass output filter. It includes a concise baseline profile: role, soul,
+author directives, core values, behavioral defaults, interpersonal mannerisms,
+strong six-factor deviations, and formative context. Signature quotes stay in
+the library for reference and evaluation so the model does not simply parrot
+catchphrases.
 
 ## Problem
 

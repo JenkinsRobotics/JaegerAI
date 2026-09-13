@@ -12,6 +12,10 @@ from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
     [
         "",
         "[BLANK_AUDIO]",
+        "[INAUDIBLE]",
+        "(unintelligible)",
+        "[ Pause ]",
+        "(long pause)",
         "[SOUND]",
         "(wind blowing)",
         "(engine roaring)",

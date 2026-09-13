@@ -54,6 +54,7 @@ namespaces = false
 jaeger_whisper_stt = ["**/*.yaml"]
 
 [tool.pytest.ini_options]
+cache_dir = "~/.cache/pytest"
 testpaths = ["jaeger_whisper_stt/nodes/whisper_stt/tests"]
 markers = [
     "slow: tests that fork real processes or do real network I/O.",

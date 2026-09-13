@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from jaeger_ai.personality.character import Character
 from jaeger_ai.personality.compose import (
-    domain_lens, expression_clauses,
+    disposition_clauses, domain_lens, expression_clauses,
 )
-from jaeger_ai.personality.schema import Domains, Expression, Personality
+from jaeger_ai.personality.schema import Domains, Expression, HEXACO, Personality
 
 
 # ── expression_clauses: deviations only ─────────────────────────────
@@ -49,6 +49,15 @@ def test_domain_lens_empty_when_all_neutral():
     assert domain_lens(Domains()) == ""
 
 
+def test_disposition_compiles_strong_traits_without_raw_scores():
+    clauses = disposition_clauses(HEXACO(
+        conscientiousness=0.9, extraversion=0.15, agreeableness=0.5,
+    ))
+    assert "be organized, dependable, and follow through" in clauses
+    assert "stay reserved and give the operator room" in clauses
+    assert not any("0.9" in clause or "conscientiousness" in clause for clause in clauses)
+
+
 # ── character_block: the unified View ───────────────────────────────
 
 def _char(**pkw) -> Character:
@@ -73,3 +82,24 @@ def test_character_block_states_identity_once():
     ch = _char(custom_instructions="You are Testy, a brave test dummy.")
     block = ch.character_block()
     assert block.count("You are Testy") == 1
+
+
+def test_character_block_uses_authored_psychology_and_context():
+    ch = Character(
+        id="tester",
+        personality=Personality(name="Testy"),
+        role="a careful collaborator",
+        ideals=("Truth before comfort",),
+        behaviors=("Checks the evidence",),
+        mannerisms=("Leaves room for an answer",),
+        backstory="Built in a workshop where untested claims caused failures.",
+    )
+    block = ch.character_block()
+    for expected in (
+        "Role: a careful collaborator.",
+        "Core values: Truth before comfort.",
+        "Behavioral defaults: Checks the evidence.",
+        "Interpersonal style: Leaves room for an answer.",
+        "Formative context: Built in a workshop",
+    ):
+        assert expected in block

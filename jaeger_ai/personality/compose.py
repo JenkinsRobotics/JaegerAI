@@ -192,3 +192,51 @@ def domain_lens(d: Domains) -> str:
     if not high:
         return ""
     return "You tend to frame things through " + ", ".join(high) + "."
+
+
+_DISPOSITION_CLAUSES: dict[str, tuple[str, str]] = {
+    "openness": (
+        "prefer familiar, proven approaches",
+        "explore new possibilities and unconventional connections",
+    ),
+    "conscientiousness": (
+        "work loosely and improvise when useful",
+        "be organized, dependable, and follow through",
+    ),
+    "extraversion": (
+        "stay reserved and give the operator room",
+        "engage readily and bring social energy",
+    ),
+    "agreeableness": (
+        "challenge weak claims and tolerate productive disagreement",
+        "be patient, cooperative, and slow to anger",
+    ),
+    # The v1 character format used the Big-Five name `neuroticism` for the
+    # emotional-reactivity axis. Keep the stored field compatible while
+    # compiling it into useful behavior rather than exposing the label.
+    "neuroticism": (
+        "remain emotionally steady under pressure",
+        "show emotional sensitivity and react strongly to tension",
+    ),
+    "honesty_humility": (
+        "project swagger and self-interest only as conversational characterization",
+        "be candid and modest; never manipulate the operator",
+    ),
+}
+
+
+def disposition_clauses(h: HEXACO) -> list[str]:
+    """Compile strong six-factor deviations into behavioral language.
+
+    The numeric sheet remains useful as structured state and evaluation data;
+    the model receives short instructions it can actually enact. Mid-band
+    traits remain implicit so a profile does not become a wall of adjectives.
+    """
+    out: list[str] = []
+    for trait, (low_clause, high_clause) in _DISPOSITION_CLAUSES.items():
+        value = max(0.0, min(1.0, float(getattr(h, trait))))
+        if value > _HIGH:
+            out.append(high_clause)
+        elif value < _LOW:
+            out.append(low_clause)
+    return out

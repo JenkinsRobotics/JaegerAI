@@ -1,4 +1,4 @@
-"""Character library packing: SOUL.md is the live identity; lore/ stays off the prompt."""
+"""Character library packing: authored psychology reaches the live profile."""
 from pathlib import Path
 
 from jaeger_ai.personality.character import characters_root, list_characters, load_character
@@ -17,7 +17,7 @@ def test_load_character_prefers_soul_md(tmp_path: Path):
     assert "I am the SOUL.md voice." in character.character_block()
 
 
-def test_lore_pack_is_not_in_the_live_prompt(tmp_path: Path):
+def test_quotes_stay_reference_only_while_behavioral_lore_reaches_prompt(tmp_path: Path):
     (tmp_path / "character.yaml").write_text(
         "schema: character/v1\nid: tester\nname: Tester\n"
         "prompt:\n  soul: I am Tester.\n  custom_instructions: Stay brief.\n",
@@ -26,11 +26,15 @@ def test_lore_pack_is_not_in_the_live_prompt(tmp_path: Path):
     lore = tmp_path / "lore"
     lore.mkdir()
     (lore / "quotes.md").write_text("Secret canon line.\n", encoding="utf-8")
+    (lore / "ideals.md").write_text("Evidence before pride.\n", encoding="utf-8")
+    (lore / "behaviors.md").write_text("Checks the work.\n", encoding="utf-8")
     character = load_character(tmp_path)
     assert "Secret canon line." in character.quotes
     block = character.character_block()
     assert "Secret canon line." not in block
     assert "I am Tester." in block
+    assert "Evidence before pride." in block
+    assert "Checks the work." in block
 
 
 def test_glados_soul_is_packed_and_lore_stays_off_prompt():
@@ -51,7 +55,7 @@ def test_jarvis_soul_md_is_the_live_identity():
     assert "I am JARVIS" in jarvis.character_block()
 
 
-def test_every_wearable_character_has_soul_and_lore_off_prompt():
+def test_every_wearable_character_has_a_complete_baseline_profile():
     root = characters_root()
     wearable = []
     for folder in sorted(root.iterdir()):
@@ -63,10 +67,19 @@ def test_every_wearable_character_has_soul_and_lore_off_prompt():
         wearable.append(character)
         assert (folder / "SOUL.md").is_file(), folder.name
         assert character.soul.strip(), folder.name
+        assert character.role.strip(), folder.name
+        assert character.backstory.strip(), folder.name
+        assert character.ideals, folder.name
+        assert character.behaviors, folder.name
+        assert character.mannerisms, folder.name
+        assert character.personality.speech_patterns, folder.name
+        assert character.personality.custom_instructions.strip(), folder.name
         block = character.character_block()
         assert character.soul.splitlines()[0] in block
-        if character.backstory and len(character.backstory) > 48:
-            assert character.backstory[:48] not in block
+        assert character.backstory[:48] in block
+        assert character.ideals[0] in block
+        assert character.behaviors[0] in block
+        assert character.mannerisms[0] in block
         assert "You are " + character.name not in character.personality.custom_instructions
     assert len(wearable) >= 14
 

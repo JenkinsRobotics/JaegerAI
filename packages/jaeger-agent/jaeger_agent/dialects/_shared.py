@@ -249,16 +249,29 @@ def parse_drift_payload(raw: str) -> dict[str, Any] | None:
             if isinstance(parsed, dict):
                 return parsed
     loose = parse_gemma_args(text)
-    if not loose:
-        return None
-    cleaned: dict[str, Any] = {}
-    for key, value in loose.items():
-        if isinstance(key, str):
-            key = key.strip().strip('"').strip("'")
-        if isinstance(value, str):
-            value = value.strip().strip('"').strip("'")
-        cleaned[key] = value
-    return cleaned or None
+    if loose:
+        cleaned: dict[str, Any] = {}
+        for key, value in loose.items():
+            if isinstance(key, str):
+                key = key.strip().strip('"').strip("'")
+            if isinstance(value, str):
+                value = value.strip().strip('"').strip("'")
+            cleaned[key] = value
+        if cleaned:
+            return cleaned
+
+    # Tool call repair pass (code fences, single quotes, Python constants, truncated brackets)
+    try:
+        from jaeger_ai.core.runtime.tool_repair import repair_json_string
+        repaired = repair_json_string(text)
+        if repaired and repaired != text:
+            parsed = json.loads(repaired, strict=False)
+            if isinstance(parsed, dict):
+                return parsed
+    except Exception:
+        pass
+
+    return None
 
 
 def payload_to_call(inner: str) -> dict[str, Any] | None:

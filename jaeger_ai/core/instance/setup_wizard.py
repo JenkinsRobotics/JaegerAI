@@ -1453,9 +1453,23 @@ def create_instance(
     dump_json(layout.manifest_path, manifest)
     # Mark new identities before migration can mistake identity.yaml for
     # evidence that this operator has already completed the welcome.
-    from jaeger_ai.core.instance.first_boot import begin, record_model_selection
+    from jaeger_ai.core.instance.first_boot import (
+        begin,
+        record_bench,
+        record_character,
+        record_model_selection,
+    )
     begin(layout)
     record_model_selection(layout, provider, awake_model)
+    # Instance creation already follows model + character selection. Carry
+    # those answered stages into first boot so OS initialization resumes at
+    # the character's handoff (preset) or the Assistant's guided interview.
+    record_bench(layout)
+    record_character(
+        layout,
+        "custom" if character_id == "assistant" else "preset",
+        character_id=character_id,
+    )
     # Characters are the persona — wire the instance to the chosen one
     # so the running agent plays it (identity / soul / traits / voice).
     from jaeger_ai.personality.character import set_active_character

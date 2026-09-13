@@ -78,15 +78,34 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
             permission_mode=str(args.get("permission_mode") or "confirm"),
         )
     from jaeger_ai.core.models.onboarding_credentials import persist_pending
-    from jaeger_ai.core.instance.first_boot import reset, begin, record_model_selection, record_setup_preferences
+    from jaeger_ai.core.instance.first_boot import (
+        begin,
+        commit_to_instance,
+        record_bench,
+        record_character,
+        record_model_selection,
+        record_setup_preferences,
+        reset,
+    )
     persist_pending(layout)
-    reset(layout)
+    if not args.get("resume_onboarding"):
+        reset(layout)
     begin(layout)
     record_model_selection(layout, provider, model)
     record_setup_preferences(layout, voice_profile=profile, interaction_posture=posture)
+    # The unified wizard already completed these choices. Do not ask for them
+    # a second time when OS initialization takes over.
+    if character_id:
+        record_bench(layout)
+        record_character(
+            layout,
+            "custom" if character_id == "assistant" else "preset",
+            character_id=character_id,
+        )
     facts = {key: str(args[source]).strip() for source, key in
              (("user_name", "name"), ("custom_prime_directive", "custom_prime_directive")) if args.get(source)}
     if facts:
         from jaeger_agent.memory.sqlite_store import seed_facts
         seed_facts(layout, facts)
+    commit_to_instance(layout)
     return layout

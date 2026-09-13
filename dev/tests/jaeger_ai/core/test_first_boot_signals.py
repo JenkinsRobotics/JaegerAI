@@ -137,6 +137,29 @@ def test_flat_affect_calibrates_to_disarming():
     assert stance.stance in {"disarming", "attentive"}
 
 
+def test_first_boot_answers_change_stored_stance(tmp_path):
+    """Custom-path answers must land in first_boot.yaml as different traits."""
+    hesitant = tmp_path / "hesitant"
+    terse = tmp_path / "terse"
+    hesitant.mkdir()
+    terse.mkdir()
+    for root in (hesitant, terse):
+        fb.begin(root)
+        fb.record_bench(root)
+        fb.record_character(root, "custom", character_id="assistant")
+    fb.record_social(hesitant, "Well, I guess, sort of?", latency_ms=2400)
+    fb.record_hesitance_reply(hesitant, "yes")
+    fb.record_voice(hesitant, "female")
+    fb.record_q2(hesitant, "It's complicated and distant.")
+    fb.record_social(terse, "Anti-social.", latency_ms=300)
+    fb.record_voice(terse, "male")
+    fb.record_q2(terse, "Fine.")
+    a = fb.latent_stance(hesitant)
+    b = fb.latent_stance(terse)
+    assert a and b
+    assert a["stance"] != b["stance"] or a["traits"] != b["traits"]
+
+
 def test_every_stance_is_known_and_carries_confidence():
     for text, latency in [("Well, I guess?", 2400), ("Anti-social.", 300),
                           ("Social.", 300), ("Very social indeed.", 400)]:

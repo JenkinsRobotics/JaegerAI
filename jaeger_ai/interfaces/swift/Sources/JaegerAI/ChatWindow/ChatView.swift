@@ -38,6 +38,7 @@ struct DesktopProject: Identifiable, Hashable, Codable {
 struct ChatView: View {
     @EnvironmentObject private var agent: AgentBridge
     @StateObject private var chat: ChatViewModel
+    @ObservedObject private var voice: VoiceRecorder
     @ObservedObject private var tabState = ChatViewTabState.shared
     @ObservedObject private var tts = TTSManager.shared
 
@@ -51,7 +52,7 @@ struct ChatView: View {
     @State private var progressExpanded = true
     @State private var attachedURLs: [URL] = []
     @State private var showMonarchAuthSheet = false
-    @State private var micOn = false
+    @State private var liveVoiceMode = false
     @State private var expandedProjects: Set<String> = []
     @State private var desktopProjects: [DesktopProject] = DesktopProjectStore.defaults
     @State private var gatewayAgentsAvailable = false
@@ -59,7 +60,9 @@ struct ChatView: View {
     @State private var agentRoster: [AgentRosterItem] = []
 
     init(agent: AgentBridge) {
-        _chat = StateObject(wrappedValue: ChatViewModel(agent: agent))
+        let model = ChatViewModel(agent: agent)
+        _chat = StateObject(wrappedValue: model)
+        _voice = ObservedObject(wrappedValue: model.voice)
     }
 
     private var activeAgentName: String {
@@ -701,7 +704,8 @@ struct ChatView: View {
                 let statusLabel: String = {
                     if tts.isSpeaking { return "Speaking aloud…" }
                     if agent.isBusy { return "Thinking…" }
-                    if micOn { return "Listening for speech…" }
+                    if chat.isRequestingMicrophone { return "Requesting microphone access…" }
+                    if voice.isRecording { return "Listening for speech…" }
                     return "Ready · Tap to speak"
                 }()
 
@@ -729,8 +733,7 @@ struct ChatView: View {
             HStack(spacing: 16) {
                 // Mic button
                 Button {
-                    toggleVoice()
-                    micOn = voice.isRecording
+                    toggleDictation()
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: voice.isRecording ? "stop.fill" : "mic.fill")
@@ -970,6 +973,13 @@ struct ChatView: View {
                     .foregroundColor(Term.ink)
                     .tint(Term.accent)
                     .onSubmit(sendCurrent)
+                    .onKeyPress(.return) {
+                        if NSEvent.modifierFlags.contains(.shift) {
+                            return .ignored
+                        }
+                        sendCurrent()
+                        return .handled
+                    }
 
                 Spacer(minLength: 4)
 
@@ -990,7 +1000,7 @@ struct ChatView: View {
                 .buttonStyle(.plain)
 
                 // Voice mic tap toggle
-                Button(action: toggleVoice) {
+                Button(action: toggleDictation) {
                     Image(systemName: voice.isRecording ? "stop.circle.fill" : "mic.fill")
                         .font(.system(size: 14))
                         .foregroundColor(voice.isRecording ? Color.red : Term.inkDim)
@@ -1000,8 +1010,9 @@ struct ChatView: View {
                 .disabled(!agent.isConnected)
                 .help(voice.isRecording ? "Stop recording" : "Dictate prompt")
 
-                // Blue duplex audio wave button (Image 2 voice mode)
-                Button(action: toggleVoice) {
+                // One-turn voice conversation: record, transcribe through the
+                // Jaeger Whisper lane, send immediately, then speak the reply.
+                Button(action: toggleLiveVoice) {
                     ZStack {
                         Circle()
                             .fill(voice.isRecording ? Color.red : Term.accent)
@@ -1012,7 +1023,9 @@ struct ChatView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help("Voice Mode")
+                .help(voice.isRecording && liveVoiceMode
+                      ? "Stop, send, and speak the reply"
+                      : "Start a live voice turn")
 
                 // Send button
                 if canSend {
@@ -1306,18 +1319,29 @@ struct ChatView: View {
         }
     }
 
-    private var voice: VoiceRecorder { chat.voice }
-
     private var borderColor: Color {
         if voice.isRecording { return Color.red.opacity(0.6) }
         if chat.isTranscribing { return Term.accent.opacity(0.6) }
         return Color.white.opacity(0.09)
     }
 
-    private func toggleVoice() {
+    private func toggleDictation() {
         if voice.isRecording {
-            chat.stopVoice()
+            chat.stopVoice(autoSend: false)
         } else {
+            liveVoiceMode = false
+            chat.startVoice()
+        }
+    }
+
+    private func toggleLiveVoice() {
+        if voice.isRecording {
+            chat.stopVoice(autoSend: true)
+            liveVoiceMode = false
+        } else {
+            liveVoiceMode = true
+            tts.autoSpeakEnabled = true
+            Task { await agent.command("save_config", args: ["speak_replies": true]) }
             chat.startVoice()
         }
     }

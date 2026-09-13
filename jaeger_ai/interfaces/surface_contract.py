@@ -12,7 +12,11 @@ SWIFT_QUERY_SUPPORT = {
     "character": "dedicated", "character_card": "bridge_only", "config": "generic",
     "serving_model": "bridge_only", "settings_catalog": "generic",
     "permissions": "dedicated", "instance_exists": "bridge_only",
-    "setup_defaults": "dedicated", "model_catalog": "bridge_only",
+    "setup_defaults": "dedicated", "onboarding_model_matrix": "dedicated",
+    "onboarding_identity": "dedicated",
+    "system_utility_status": "bridge_only", "system_utility": "bridge_only",
+    "onboarding_guide": "dedicated",
+    "model_catalog": "bridge_only",
     "model_picker": "dedicated", "session_contract": "bridge_only",
     "list_sessions": "dedicated", "load_session": "dedicated",
     "search_sessions": "bridge_only", "check_update": "dedicated",
@@ -28,9 +32,12 @@ SWIFT_QUERY_SUPPORT = {
     # reasoning engine's status nor the dispatcher's background message feed.
     "reasoning_status": "bridge_only",
     "background_messages": "bridge_only",
-    # OS 1 welcome. Protocol-complete; the native app does not render the
-    # first-boot sequence yet, so no dedicated consumer is claimed.
-    "first_boot": "bridge_only",
+    # OS 1 welcome + hybrid hardware bench. Native FirstBootWindow consumes
+    # first_boot and the bench queries.
+    "first_boot": "dedicated",
+    "hardware_bench": "dedicated",
+    "hardware_bench_start": "dedicated",
+    "hardware_bench_status": "dedicated",
 }
 
 SWIFT_COMMAND_SUPPORT = {
@@ -40,7 +47,12 @@ SWIFT_COMMAND_SUPPORT = {
     "revoke_permission": "dedicated", "speak": "dedicated",
     "settings_set": "generic", "run_update": "dedicated",
     "new_session": "dedicated", "create_instance": "dedicated",
+    "complete_setup": "dedicated",
     "configure_model": "dedicated",
+    "calibrate_provider": "dedicated",
+    "update_configured_stack": "bridge_only",
+    "stop_speech": "dedicated",
+    "transcribe_audio": "dedicated",
 }
 
 for _name in (
@@ -50,7 +62,8 @@ for _name in (
     "configure_fallback_chain", "create_session", "clear_session", "delete_session",
     "reconcile_session_transcript", "create_schedule", "cancel_schedule",
     "pause_schedule", "resume_schedule", "acknowledge_background",
-    "first_boot_answer", "first_boot_complete",
+    "first_boot_answer", "first_boot_complete", "first_boot_reset",
+    "first_boot_back", "tts_warmup",
 ):
     SWIFT_COMMAND_SUPPORT[_name] = "bridge_only"
 

@@ -6,8 +6,10 @@ renders it into the system prompt. A *character* is just that ``Personality``
 plus the library extras — identity (role/voice), backstory, and assets
 (card/avatar) — stored as a folder ``personality/characters/<id>/``.
 
-Only ``custom_instructions`` feeds the model today; the trait ratings are
-stored + shown on the profile and drive behavior in a later update.
+The live character view compiles these fields into behavioral language. Raw
+trait ratings remain structured state for editing and evaluation; the model
+receives the authored narrative, values, behavior, mannerisms, and strong trait
+deviations rather than a numeric dump.
 """
 
 from __future__ import annotations
@@ -87,10 +89,9 @@ class Character:
 
     def soul_block(self) -> str:
         """The SHORT brief's narrative slice — just the soul narrative. The
-        core directive + traits come from the personality block (compose_block).
-        The rich lore (ideals/mannerisms/quotes/...) stays on the sheet for
-        future use and is NOT dumped into the live prompt — keeps turns lean.
-        ponytail: brief today; sheet is the in-depth store for later."""
+        core directive and concise psychology are compiled separately.
+        Signature quotes remain reference material so the model does not
+        parrot catchphrases. This method owns only the soul narrative."""
         text = self.soul.strip()
         if not text:
             return ""
@@ -104,7 +105,7 @@ class Character:
         return text
 
     def _lore_block(self) -> str:
-        """In-depth lore — Studio display + future use, never the live prompt."""
+        """Full in-depth lore for Studio and profile inspection."""
         parts = [
             self._bullets("Ideals", self.ideals),
             self._bullets("Mannerisms", self.mannerisms),
@@ -133,10 +134,13 @@ class Character:
         sub-agent gets no persona (its preamble is its whole identity).
         See dev/docs/reality/persona_compiler.md."""
         from jaeger_ai.personality.compose import (
-            PERSONA_BOUNDARY, domain_lens, expression_clauses,
+            PERSONA_BOUNDARY, disposition_clauses, domain_lens,
+            expression_clauses,
         )
         p = self.personality
         parts: list[str] = [f"## My voice — {self.name}"]
+        if self.role:
+            parts.append(f"Role: {self.role.strip().rstrip('.')}.")
         # Persona body = the prose fields written for the model: soul (narrative)
         # + custom_instructions (the directive; per schema the one that feeds the
         # model today). `description` is a library tagline (UI only) and excluded;
@@ -145,7 +149,33 @@ class Character:
         # the one-liner too — this is what kills the repeated "You are X".
         body = [x.strip() for x in (self.soul_block(), p.custom_instructions) if x.strip()]
         parts.extend(body or [self.identity_block()])
-        # compiled trait View — voice clauses (deviations only) + domain lens.
+        # A preset is a complete baseline, so the fields an author supplied
+        # must reach the live character view. Quotes remain reference/eval
+        # material: feeding catchphrases encourages parroting rather than a
+        # coherent person. Lists are capped to keep the 4B persona lane lean.
+        psychology: list[str] = []
+        if self.ideals:
+            psychology.append("Core values: " + "; ".join(self.ideals[:4]) + ".")
+        if self.behaviors:
+            psychology.append(
+                "Behavioral defaults: " + "; ".join(self.behaviors[:4]) + "."
+            )
+        if self.mannerisms:
+            psychology.append(
+                "Interpersonal style: " + "; ".join(self.mannerisms[:3]) + "."
+            )
+        disposition = disposition_clauses(p.hexaco)
+        if disposition:
+            psychology.append("Underlying disposition: " + "; ".join(disposition) + ".")
+        if self.backstory:
+            context = self.backstory.strip()
+            if len(context) > 320:
+                context = context[:320].rsplit(" ", 1)[0].rstrip() + "…"
+            psychology.append("Formative context: " + context)
+        if psychology:
+            parts.append("## Character psychology\n" + "\n".join(psychology))
+
+        # Compiled expression View — deviations only — plus domain lens.
         voice: list[str] = []
         clauses = expression_clauses(p.expression)
         if clauses:

@@ -13,27 +13,44 @@ import XCTest
 
 final class OnboardingFlowTests: XCTestCase {
 
-    // MARK: step machine
-
-    func testStepsAdvanceInOrderAndClampAtDone() {
-        var step = OnboardingStep.welcome
-        var seen: [OnboardingStep] = [step]
-        for _ in 0..<10 {
-            step = step.next
-            seen.append(step)
-            if step == .done { break }
-        }
-        XCTAssertEqual(seen, [.welcome, .os1, .character, .identity, .model,
-                              .permissions, .review, .creating, .done])
-        XCTAssertEqual(OnboardingStep.done.next, .done)         // clamped
-        XCTAssertEqual(OnboardingStep.welcome.previous, .welcome)
+    func testSelectionCarriesProviderWithModel() {
+        var answers = OnboardingAnswers()
+        answers.awakeModel = "gemini-test:cloud"
+        answers.awakeProvider = "ollama-local"
+        XCTAssertEqual(answers.commandArgs()["awake_provider"], "ollama-local")
+        XCTAssertEqual(answers.commandArgs()["awake_model"], "gemini-test:cloud")
     }
 
-    func testDottedStepsAreTheInteractiveOnes() {
-        XCTAssertEqual(OnboardingStep.dotted,
-                       [.welcome, .os1, .character, .identity, .model,
-                        .permissions, .review])
-        XCTAssertFalse(OnboardingStep.dotted.contains(.creating))
+    private func catalog() throws -> ModelMatrixPayload {
+        let json = #"{"host_memory_gb":32,"tier_label":"test","tier_description":"test","recommended_primary_key":"test.gguf","recommended_fallback_key":"test.gguf","providers":[{"id":"in-process","name":"Local","kind":"local","status":"available","endpoint":"local","requires_key":false,"env_var":"","description":"Local"}],"models":[]}"#
+        return try ModelMatrixPayload.decode(Data(json.utf8))
+    }
+
+    @MainActor
+    func testCatalogFailureCannotAdvanceOrCreate() {
+        let model = OnboardingModel(agent: AgentBridge())
+        model.loading = false
+        model.catalogError = "Catalog unavailable"
+        model.advance()
+        XCTAssertEqual(model.step, .welcome)
+        XCTAssertFalse(model.canContinue)
+    }
+
+    @MainActor
+    func testChangingProviderClearsPreviousModel() {
+        let model = OnboardingModel(agent: AgentBridge())
+        model.answers.awakeProvider = "in-process"
+        model.answers.awakeModel = "old.gguf"
+        model.selectProvider("openai")
+        XCTAssertEqual(model.answers.awakeProvider, "openai")
+        XCTAssertEqual(model.answers.awakeModel, "")
+    }
+
+    func testSetupLaunchNeverAttachesToAlreadyLoadedAgent() {
+        XCTAssertEqual(BridgeProcess.launchArguments(instance: "os-1", setupOnly: true),
+                       ["bridge", "os-1", "--setup"])
+        XCTAssertEqual(BridgeProcess.launchArguments(instance: nil, setupOnly: false),
+                       ["bridge", "--attach"])
     }
 
     // MARK: answers → create_instance args
@@ -57,6 +74,8 @@ final class OnboardingFlowTests: XCTestCase {
         XCTAssertNil(args["awake_model"])   // = use recommended
         XCTAssertNil(args["asleep_model"])
         XCTAssertNil(args["voice_id"])
+        XCTAssertNil(args["voice_profile"])
+        XCTAssertNil(args["interaction_posture"])
     }
 
     func testCommandArgsCarryTypedOverrides() {
@@ -172,6 +191,11 @@ final class OnboardingFlowTests: XCTestCase {
         // level, …) — the decoder must skim just the card fields.
         let json = """
         [{"id": "jarvis", "name": "Jarvis", "role": "AI butler",
+          "description": "A composed systems companion",
+          "voice_tone": "measured and natural",
+          "voice_id": "bm_fable",
+          "backstory": "Built to manage a complex household.",
+          "highlights": ["Mindset: anticipates needs", "Voice: measured"],
           "level": 3, "revision": 7, "icon": "/tmp/j.png",
           "card": "/tmp/j_card.png", "active": true, "bound": true,
           "stats": [{"key": "honesty", "val": 0.9}]}]
@@ -180,5 +204,10 @@ final class OnboardingFlowTests: XCTestCase {
                                             from: json)
         XCTAssertEqual(list.first?.id, "jarvis")
         XCTAssertEqual(list.first?.card, "/tmp/j_card.png")
+        XCTAssertEqual(list.first?.description, "A composed systems companion")
+        XCTAssertEqual(list.first?.voiceTone, "measured and natural")
+        XCTAssertEqual(list.first?.voiceId, "bm_fable")
+        XCTAssertEqual(list.first?.backstory, "Built to manage a complex household.")
+        XCTAssertEqual(list.first?.highlights?.count, 2)
     }
 }

@@ -11,7 +11,8 @@ import re
 
 
 _NON_SPEECH_MARKERS = frozenset({
-    "blank_audio", "no_speech",
+    "blank_audio", "no_speech", "inaudible", "unintelligible",
+    "pause", "paused", "long pause",
     "sound", "noise", "background noise", "silence",
     "beep", "beeping", "click", "clicking", "computer click",
     "mouse click", "keyboard click", "keyboard clicking",

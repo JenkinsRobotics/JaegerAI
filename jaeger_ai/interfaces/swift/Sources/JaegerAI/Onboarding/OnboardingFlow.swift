@@ -20,8 +20,8 @@ import Foundation
 /// One screen per step, iOS-new-device style. ``creating``/``done`` sit
 /// past the interactive run and don't count toward the progress dots.
 enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
-    case welcome, os1, character, identity, model, permissions, review
-    case creating, done
+    case welcome, architecture, character, calibration, identity, model, permissions, review
+    case creating, firstContact, done
 
     static func < (lhs: OnboardingStep, rhs: OnboardingStep) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -37,18 +37,20 @@ enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
 
     /// Steps that show as progress dots (the interactive ones).
     static let dotted: [OnboardingStep] =
-        [.welcome, .os1, .character, .identity, .model, .permissions, .review]
+        [.welcome, .architecture, .character, .identity, .model, .permissions, .review, .firstContact]
 
     var title: String {
         switch self {
         case .welcome: return "Welcome"
-        case .os1: return "OS 1"
+        case .architecture: return "Architecture"
         case .character: return "Character"
+        case .calibration: return "Calibration"
         case .identity: return "Identity"
         case .model: return "Model"
         case .permissions: return "Permissions"
         case .review: return "Review"
         case .creating: return "Creating"
+        case .firstContact: return "First Contact"
         case .done: return "Ready"
         }
     }
@@ -59,8 +61,9 @@ enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
 /// ``protocol_v1_fixtures.json``.
 struct OnboardingAnswers: Sendable, Equatable {
     var userName: String = ""
-    var voiceProfile: String = "female"
-    var interactionPosture: String = "attentive"
+    var setupPath: String = "preset"
+    var voiceProfile: String = ""
+    var interactionPosture: String = ""
     var customPrimeDirective: String = ""
     var characterId: String = ""
     var displayName: String = ""
@@ -69,6 +72,7 @@ struct OnboardingAnswers: Sendable, Equatable {
     /// Empty = "Use recommended" (the Python side resolves the host
     /// tier's pick, same as the wizard's default).
     var awakeModel: String = ""
+    var awakeProvider: String = ""
     var asleepModel: String = ""
     var permissionMode: String = "confirm"
 
@@ -111,6 +115,7 @@ struct OnboardingAnswers: Sendable, Equatable {
             ("voice_profile", voiceProfile),
             ("interaction_posture", interactionPosture),
             ("awake_model", awakeModel),
+            ("awake_provider", awakeProvider),
             ("asleep_model", asleepModel),
         ]
         for (key, value) in optional {
@@ -122,7 +127,7 @@ struct OnboardingAnswers: Sendable, Equatable {
         return args
     }
 
-    var canCreate: Bool { !characterId.isEmpty }
+    var canCreate: Bool { !characterId.isEmpty || setupPath == "custom_test" }
 }
 
 // MARK: - Bridge payloads (decoded from query results)
@@ -133,8 +138,20 @@ struct OnboardingCharacter: Decodable, Identifiable, Sendable, Equatable {
     let id: String
     let name: String
     let role: String
+    let description: String?
+    let voiceTone: String?
+    let voiceId: String?
+    let backstory: String?
+    let highlights: [String]?
     let icon: String?
     let card: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, role, description, highlights, icon, card
+        case voiceTone = "voice_tone"
+        case voiceId = "voice_id"
+        case backstory
+    }
 }
 
 /// The ``setup_defaults`` query — host tier + the recommended model pair
@@ -167,5 +184,87 @@ struct SetupDefaults: Decodable, Sendable, Equatable {
         let dec = JSONDecoder()
         dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(SetupDefaults.self, from: data)
+    }
+}
+
+/// One provider descriptor from ``onboarding_model_matrix``.
+struct ModelProvider: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let kind: String           // "local" or "cloud"
+    var status: String         // "connected", "available", "configured", "needs_key", "offline"
+    let endpoint: String
+    let requiresKey: Bool
+    let envVar: String
+    let description: String
+}
+
+/// One model descriptor from ``onboarding_model_matrix``.
+struct DiscoveredModelEntry: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let provider: String
+    let providerLabel: String
+    let location: String       // "local" or "cloud"
+    let sizeGb: Double?
+    let contextLength: Int?
+    let role: String           // "realtime", "deep_think", "general", "vision", "embedding"
+    let speed: String
+    let description: String
+    let isRecommendedPrimary: Bool
+    let isRecommendedFallback: Bool
+    let isConfigured: Bool?
+    let isChatModel: Bool?
+}
+
+/// The configured neural stack currently active in config.yaml.
+struct ConfiguredStack: Decodable, Sendable, Equatable {
+    let instanceName: String
+    var primaryModel: String
+    var primaryProvider: String
+    var primaryEndpoint: String
+    var fallbackModel: String
+    var fallbackProvider: String
+    var coderModel: String
+    var ttsEngine: String
+    var ttsVoice: String
+    var ttsLang: String
+    var sttEngine: String
+    var sttMode: String
+    var sttFastModel: String
+    var sttAccurateModel: String
+    var visionModel: String?
+    var embeddingModel: String?
+    var voiceEnabled: Bool
+}
+
+/// Simple option for TTS voices and STT models.
+struct VoiceOption: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let label: String
+}
+
+struct SttModelOption: Decodable, Sendable, Identifiable, Equatable {
+    let id: String
+    let label: String
+}
+
+/// The full provider and model matrix for OS 1 onboarding.
+struct ModelMatrixPayload: Decodable, Sendable, Equatable {
+    let hostMemoryGb: Double
+    let tierLabel: String
+    let tierDescription: String
+    let recommendedPrimaryKey: String
+    let recommendedFallbackKey: String
+    let providers: [ModelProvider]
+    let models: [DiscoveredModelEntry]
+    let configured: ConfiguredStack?
+    let availableTtsVoices: [VoiceOption]?
+    let availableSttModels: [SttModelOption]?
+
+    static func decode(_ data: Data) throws -> ModelMatrixPayload {
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        return try dec.decode(ModelMatrixPayload.self, from: data)
     }
 }

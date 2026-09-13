@@ -323,6 +323,13 @@ def test_create_instance_no_name_dirs_and_names_from_character(
     assert character is not None
     assert ident.name.lower() == character.name.lower(), (
         "framing must stay SILENT: no pin means agent name == character name")
+    from jaeger_ai.core.instance import first_boot as fb
+    assert ident.voice_id == character.voice_id
+    assert fb.status(layout) is fb.FirstBootStatus.INITIALIZING_PERSONA
+    state = fb.snapshot(layout)
+    assert state["character_id"] == "anakin_skywalker"
+    assert state["calibration_source"] == "character_preset"
+    assert "social_response" not in state
 
 
 def test_create_instance_blank_display_name_falls_back_never_empty(

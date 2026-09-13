@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import huggingface_hub
 import huggingface_hub.constants as hf_constants
+import numpy as np
 import pytest
 
 from jaeger_kokoro_tts.nodes.kokoro_tts import engine as kokoro_engine
@@ -90,3 +91,54 @@ def test_respects_an_operator_set_env_var_either_direction(monkeypatch):
     result = kokoro_engine.ensure_hf_offline_if_cached("hexgrad/Kokoro-82M", "af_heart")
     assert result is True
     assert calls == []
+
+
+def test_bundled_assets_resolve_voice_without_hub(monkeypatch, tmp_path):
+    (tmp_path / "voices").mkdir()
+    (tmp_path / "config.json").write_text("{}")
+    (tmp_path / "kokoro-v1_0.pth").write_bytes(b"model")
+    voice = tmp_path / "voices" / "am_adam.pt"
+    voice.write_bytes(b"voice")
+    monkeypatch.setenv("JAEGER_KOKORO_ASSETS", str(tmp_path))
+
+    synth = kokoro_engine.KokoroTTS(voice="am_adam")
+    assert synth._pipeline_voice() == str(voice)
+
+
+def test_clean_for_tts_preserves_paragraph_breaks():
+    cleaned = kokoro_engine.clean_for_tts(
+        "First thought.  \n\n  Second **thought**."
+    )
+    assert cleaned == "First thought.\n\nSecond thought."
+
+
+def test_speak_passes_rate_to_kokoro_pipeline(monkeypatch):
+    rates: list[float] = []
+
+    class _Result:
+        audio = np.ones(240, dtype=np.float32)
+
+    def pipeline(text, *, voice, speed):
+        rates.append(speed)
+        yield _Result()
+
+    class _Player:
+        device_name = "test"
+
+        def enqueue(self, audio):
+            pass
+
+        def mark_end(self):
+            pass
+
+        def wait_until_drained(self):
+            return True
+
+    synth = kokoro_engine.KokoroTTS()
+    monkeypatch.setattr(synth, "_ensure_pipeline", lambda: pipeline)
+    monkeypatch.setattr(synth, "_ensure_player", lambda: _Player())
+
+    result = synth.speak("A measured sentence.", rate=1.1)
+
+    assert result["spoken"] is True
+    assert rates == [1.1]

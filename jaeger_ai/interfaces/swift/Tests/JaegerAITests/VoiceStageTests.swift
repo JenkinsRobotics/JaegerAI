@@ -29,12 +29,11 @@ final class VoiceStageTests: XCTestCase {
         }
     }
 
-    func testInstallerRateIsIndependentOfProfile() {
+    func testInstallerRateIsStable() {
         XCTAssertEqual(VoiceStageResolver.rate(for: .installer),
                        VoiceStageResolver.installerRate)
-        XCTAssertNotEqual(VoiceStageResolver.rate(for: .installer),
-                          VoiceStageResolver.rate(for: .persona),
-                          "installer and persona must differ in prosody too")
+        XCTAssertEqual(VoiceStageResolver.kokoroRate(for: .installer), 1.10)
+        XCTAssertEqual(VoiceStageResolver.kokoroRate(for: .persona), 1.04)
     }
 
     func testPersonaVoiceRespondsToTheProfile() {
@@ -142,12 +141,16 @@ final class KokoroRoutingTests: XCTestCase {
                        "am_michael")
     }
 
-    func testInstallerNeverRoutesToKokoro() {
-        // THE constraint. States 1–2 must stay on the synthetic installer
-        // voice; sending them through the neural engine erases the handoff.
+    func testInstallerUsesOneDedicatedKokoroPack() {
+        // Setup and the agent share Kokoro-82M; only the voice pack changes.
         for profile in ["female", "male", nil] {
-            XCTAssertNil(VoiceStageResolver.kokoroVoice(for: .installer, profile: profile))
+            XCTAssertEqual(VoiceStageResolver.kokoroVoice(for: .installer, profile: profile),
+                           VoiceStageResolver.installerKokoroVoice)
         }
+        XCTAssertNotEqual(VoiceStageResolver.installerKokoroVoice,
+                          VoiceStageResolver.kokoroVoices["female"])
+        XCTAssertNotEqual(VoiceStageResolver.installerKokoroVoice,
+                          VoiceStageResolver.kokoroVoices["male"])
     }
 
     func testUnknownOrAbsentProfileYieldsNoPack() {

@@ -41,6 +41,7 @@ htmlcov/
 # IDEs
 .vscode/
 .idea/
+.continue/
 *.swp
 *.swo
 

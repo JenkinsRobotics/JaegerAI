@@ -51,3 +51,40 @@ def test_conversation_pick_preserves_history_and_does_not_change_another_session
     main.run_for_voice(default,'second',session_key='a',model='chosen',provider='ollama')
     main.run_for_voice(default,'other',session_key='b')
     assert picks==[('a','default-model',['first']),('a','chosen',['first','second']),('b','default-model',['other'])]
+
+
+def test_local_only_voice_turn_cannot_enter_dynamic_model_routing(monkeypatch):
+    from jaeger_ai import main
+    from jaeger_ai.core import sessions
+    from jaeger_ai.core.models import sensitivity_gate, session_selection
+
+    default = SimpleNamespace(model_name="local-model", provider="in-process")
+    selected = []
+    monkeypatch.setattr(main, "_session_model_clients", {})
+    monkeypatch.setattr(main, "_jaeger_agents_by_session", {})
+    monkeypatch.setattr(main, "_carried_session_messages", {})
+    monkeypatch.setattr(main, "_pipeline", {})
+    monkeypatch.setattr(sessions, "get_store", lambda: None)
+    monkeypatch.setattr(
+        sensitivity_gate,
+        "apply_sensitivity_routing",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("local voice must not route")
+        ),
+    )
+
+    def choose(client, config, layout, model, provider):
+        selected.append((model, provider))
+        return client
+
+    monkeypatch.setattr(session_selection, "select_client", choose)
+    monkeypatch.setattr(main, "_run_turn", lambda *args, **kwargs: {
+        "text": "local reply", "tool_activity": [], "spoke_via_tool": False,
+        "elapsed_s": 0.1, "skipped_final": False, "error": None,
+    })
+    result = main.run_for_voice(
+        default, "my private conversation", session_key="voice-test",
+        local_only=True,
+    )
+    assert result["text"] == "local reply"
+    assert selected == [(None, None)]

@@ -430,10 +430,10 @@ class JaegerAgent:
 
     def _bind_turn_run(self) -> None:
         if self._run_id is None:
-            self._run_id = _open_or_create_run(self)
-        binder = getattr(self._tool_executor, "bind_run", None)
-        if callable(binder):
-            binder(self._run_id)
+            self._ephemeral_run = True
+            self.bind_run(_open_or_create_run(self))
+        else:
+            self._ephemeral_run = False
 
     def run_turn(self, user_message: str) -> str:
         """Run one conversational turn end-to-end.
@@ -611,6 +611,8 @@ class JaegerAgent:
         finally:
             self._turn_active = False
             self._record_skill_outcomes()
+            if getattr(self, "_ephemeral_run", False):
+                self.bind_run(None)
 
     def _run_turn_inner(self, user_message: str) -> str:
         """The actual loop body — see :meth:`run_turn` for the contract."""
