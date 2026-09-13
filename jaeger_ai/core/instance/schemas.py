@@ -147,7 +147,7 @@ class ModelConfig(BaseModel):
     flash_attn: bool = Field(True, json_schema_extra=_setting("model", restart=True, advanced=True))
     threads: int | None = Field(None, ge=1, json_schema_extra=_setting("model", restart=True, advanced=True))
     max_tokens: int = Field(
-        4096, ge=16, le=32_768,
+        8192, ge=16, le=32_768,
         json_schema_extra=_setting("model", restart=True),
         description="Per-turn output cap the in-process adapter passes "
                     "as ``max_tokens`` into ``create_chat_completion``. "

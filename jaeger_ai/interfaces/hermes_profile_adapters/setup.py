@@ -216,7 +216,10 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
         for target in gateway.get("mcp", {}).get("targets", []):
             if target.get("name") == "host-openclaw":
                 stdio = target.setdefault("stdio", {})
-                stdio["cmd"] = str(REPO_ROOT / ".venv" / "bin" / "python")
+                venv_py = home / ".jaeger" / "venv" / "bin" / "python"
+                if not venv_py.exists():
+                    venv_py = REPO_ROOT / ".venv" / "bin" / "python"
+                stdio["cmd"] = str(venv_py)
                 stdio["args"] = [str(REPO_ROOT / "scripts" / "run-host-capability-server.py")]
                 env = stdio.setdefault("env", {})
                 env["ARES_CAPABILITY_IDENTITY"] = "hermes"
