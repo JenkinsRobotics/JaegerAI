@@ -84,9 +84,12 @@ def configure(backup):
         target["name"] = "host-hermes"
         target["stdio"]["env"]["ARES_CAPABILITY_IDENTITY"] = "hermes"
         targets.append(target)
+    venv_py = home / ".jaeger/venv/bin/python"
+    if not venv_py.exists():
+        venv_py = aw.REPO_ROOT / ".venv/bin/python"
     for target in targets:
         if target.get("name") in ("host-hermes", "host-openclaw"):
-            target["stdio"]["cmd"] = str(aw.REPO_ROOT / ".venv/bin/python")
+            target["stdio"]["cmd"] = str(venv_py)
             target["stdio"]["args"] = [str(aw.REPO_ROOT / "scripts/run-host-capability-server.py")]
     save(gateway_path)
     atomic_write(gateway_path, yaml.safe_dump(gateway, sort_keys=False))
