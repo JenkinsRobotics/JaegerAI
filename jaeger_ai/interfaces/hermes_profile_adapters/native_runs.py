@@ -464,7 +464,7 @@ class RunsHTTP(ProfileIngress):
 
 def jaeger_reconcile(native):
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-    receipt = BridgeClient('jaeger').query('turn_status', {
+    receipt = BridgeClient().query('turn_status', {
         'turn_id': native['run_id'], 'session_id': native['session_id']}, timeout_s=10)
     if not isinstance(receipt, dict):
         raise RuntimeError('Invalid native turn receipt')
@@ -475,7 +475,7 @@ def jaeger_reconcile(native):
 def jaeger_turn(run, workspace=None):
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
     run.execution_unknown = False
-    bridge = BridgeClient("jaeger")
+    bridge = BridgeClient()
     if workspace:
         workspace = host_workspace(workspace)
     accepted = threading.Event()

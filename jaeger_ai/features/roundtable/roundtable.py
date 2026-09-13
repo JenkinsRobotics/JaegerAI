@@ -203,9 +203,10 @@ def _native_hermes_runs():
     global _hermes_runs
     with _hermes_runs_lock:
         if _hermes_runs is None:
+            from jaeger_ai.core.instance.instance import operator_state_root
             from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs
             from jaeger_ai.interfaces.hermes_profile_adapters.hermes_native import hermes_turn
-            root = Path(__file__).resolve().parents[3] / '.jaeger_ai/shared/roundtable/hermes-runs'
+            root = operator_state_root() / 'shared/roundtable/hermes-runs'
             _hermes_runs = Runs(root, hermes_turn)
         return _hermes_runs
 
@@ -503,14 +504,12 @@ class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
         return profile_key('roundtable')
 
     def native_runs(self):
-        from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
-        session_id = self.headers.get("X-Hermes-Session-Id") or "roundtable-default"
-        table_key = profile_key("roundtable", session_id)
         global _native_table
         with _native_table_lock:
             if _native_table is None:
+                from jaeger_ai.core.instance.instance import operator_state_root
                 from .service import TableService
-                _native_table = TableService(Path(__file__).resolve().parents[3] / '.jaeger_ai/shared/roundtable')
+                _native_table = TableService(operator_state_root() / 'shared/roundtable')
             return _native_table
 
     def create_native_run(self, body):
