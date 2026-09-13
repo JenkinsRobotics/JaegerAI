@@ -1,0 +1,462 @@
+{
+  "schema": "multimodal-agent-result-v1",
+  "benchmark": "gemma-multimodal-comparison-v1",
+  "engine": "jaeger-ai-attached-bridge",
+  "suite": "full",
+  "created_at": "2026-09-13T11:32:35-0700",
+  "load_ms": 42177.38,
+  "cases": [
+    {
+      "id": "text_math",
+      "modality": "text",
+      "response": "45",
+      "transcript": null,
+      "total_ms": 1630.37,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "text_fact",
+      "modality": "text",
+      "response": "Tokyo is the capital of Japan.",
+      "transcript": null,
+      "total_ms": 745.29,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "text_sequence",
+      "modality": "text",
+      "response": "The next number in the sequence is 32.",
+      "transcript": null,
+      "total_ms": 919.55,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "text_instruction",
+      "modality": "text",
+      "response": "amber comet",
+      "transcript": null,
+      "total_ms": 337.31,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "memory_two_facts",
+      "modality": "memory",
+      "response": "Project codename: Violet. Build number: 731.",
+      "transcript": null,
+      "total_ms": 2187.9,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-text-fallback",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "vision_red_square",
+      "modality": "vision",
+      "response": "The central shape is a square, and its color is red.",
+      "transcript": null,
+      "total_ms": 12212.23,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "vision_three_blue_circles",
+      "modality": "vision",
+      "response": "The data indicates three shapes are present. They are circles, and their color is blue.",
+      "transcript": null,
+      "total_ms": 1530.79,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q00",
+      "modality": "spoken",
+      "response": "Two plus two equals four.",
+      "transcript": "What is 2 plus 2?",
+      "total_ms": 2564.86,
+      "first_audio_ms": 2564.79,
+      "audio_samples": 52200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q01",
+      "modality": "spoken",
+      "response": "The sky's typical blue hue is subject to variation based on the time of day or prevailing weather conditions.",
+      "transcript": "What color is the sky?",
+      "total_ms": 3260.13,
+      "first_audio_ms": 3260.08,
+      "audio_samples": 178200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q02",
+      "modality": "spoken",
+      "response": "There are seven days in a week.",
+      "transcript": "How many days in a week?",
+      "total_ms": 1907.26,
+      "first_audio_ms": 1907.21,
+      "audio_samples": 52200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q03",
+      "modality": "spoken",
+      "response": "The capital of France is Paris.",
+      "transcript": "What is the capital of France?",
+      "total_ms": 1886.25,
+      "first_audio_ms": 1886.2,
+      "audio_samples": 55200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q04",
+      "modality": "spoken",
+      "response": "Ten minus three is seven.",
+      "transcript": "What is 10 minus 3?",
+      "total_ms": 1754.32,
+      "first_audio_ms": 1754.28,
+      "audio_samples": 50400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q05",
+      "modality": "spoken",
+      "response": "A spider possesses eight legs.",
+      "transcript": "How many legs does a spider have?",
+      "total_ms": 1708.16,
+      "first_audio_ms": 1708.12,
+      "audio_samples": 57000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q06",
+      "modality": "spoken",
+      "response": "Jupiter is the largest planet in our solar system.",
+      "transcript": "What is the largest planet?",
+      "total_ms": 1992.85,
+      "first_audio_ms": 1992.82,
+      "audio_samples": 85200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q07",
+      "modality": "spoken",
+      "response": "Five times five equals twenty-five.",
+      "transcript": "What is 5 times 5?",
+      "total_ms": 1875.55,
+      "first_audio_ms": 1875.49,
+      "audio_samples": 67800,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q08",
+      "modality": "spoken",
+      "response": "Autumn follows summer. It is also called fall.",
+      "transcript": "What season comes after summer?",
+      "total_ms": 2114.04,
+      "first_audio_ms": 2114.0,
+      "audio_samples": 78000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q09",
+      "modality": "spoken",
+      "response": "There are twenty-four hours in a day.",
+      "transcript": "How many hours in a day?",
+      "total_ms": 1921.36,
+      "first_audio_ms": 1921.32,
+      "audio_samples": 59400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q10",
+      "modality": "spoken",
+      "response": "The freezing point of water is zero degrees Celsius or thirty-two degrees Fahrenheit.",
+      "transcript": "What is the freezing point of water?",
+      "total_ms": 2621.82,
+      "first_audio_ms": 2621.77,
+      "audio_samples": 138000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    },
+    {
+      "id": "spoken_q11",
+      "modality": "spoken",
+      "response": "William Shakespeare wrote Romeo and Juliet.",
+      "transcript": "who wrote Romeo and Juliet.",
+      "total_ms": 2000.97,
+      "first_audio_ms": 2000.92,
+      "audio_samples": 71400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null,
+      "correct": true
+    }
+  ],
+  "configuration": {
+    "model": "jaeger_ai/models/gemma-4-E4B-it-Q4_K_M.gguf",
+    "model_precision": "Q4_K_M",
+    "audio_mode": "plain",
+    "play": false,
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "ctx": 32768,
+    "agentic_tools": true,
+    "toolset_scoping": true,
+    "selected_ids": [],
+    "visible_tools": null,
+    "available_tools": null,
+    "memory_owner": "AgentRuntime",
+    "audio_output": "synthesized Kokoro af_heart PCM at 24000 Hz",
+    "instance_config": {
+      "backend": "llama_cpp_python",
+      "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+      "ctx": 32768,
+      "aux_ctx": 4096,
+      "gpu_layers": -1,
+      "n_batch": 512,
+      "n_ubatch": 512,
+      "flash_attn": true,
+      "threads": null,
+      "max_tokens": 4096,
+      "extra_gguf_dirs": [],
+      "stall_timeout_s": null
+    },
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_jucncsay/instance",
+    "benchmark_boundary": "completed endpoint; no live devices"
+  },
+  "environment": {
+    "jaeger_agent": "1.2.0",
+    "python": "3.11.9",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "summary": {
+    "correct": 19,
+    "n": 19,
+    "task_accuracy": 1.0,
+    "errors": 0,
+    "audio_output_coverage": 0.6316,
+    "spoken_wer": 0.029,
+    "by_modality": {
+      "text": {
+        "correct": 4,
+        "n": 4,
+        "accuracy": 1.0,
+        "median_first_audio_ms": null,
+        "median_total_ms": 832.42
+      },
+      "memory": {
+        "correct": 1,
+        "n": 1,
+        "accuracy": 1.0,
+        "median_first_audio_ms": null,
+        "median_total_ms": 2187.9
+      },
+      "vision": {
+        "correct": 2,
+        "n": 2,
+        "accuracy": 1.0,
+        "median_first_audio_ms": null,
+        "median_total_ms": 6871.51
+      },
+      "spoken": {
+        "correct": 12,
+        "n": 12,
+        "accuracy": 1.0,
+        "median_first_audio_ms": 1957.07,
+        "median_total_ms": 1957.11
+      }
+    }
+  },
+  "spoken_audio_complete": true,
+  "engine_load_ms": 11450.26,
+  "bridge_boot_and_vision_ms": 30727.12,
+  "native_dictation_probe": {
+    "type": "result",
+    "id": "native-stt-probe",
+    "ok": true,
+    "data": {
+      "model": "large-v3-turbo",
+      "text": "What is 2 plus 2?"
+    },
+    "error": null,
+    "elapsed_ms": 587.62
+  },
+  "workflow": {
+    "reply": {
+      "type": "reply",
+      "text": "The file 'workspace/release_review_smoke.txt' contains the exact sequence: READY-012.",
+      "error": null,
+      "session": "release-workflow",
+      "elapsed_s": 15.97,
+      "ctx_used": 8237,
+      "ctx_max": 32768,
+      "id": "face-68"
+    },
+    "tools": [
+      "read_file",
+      "write_file"
+    ],
+    "artifact": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_jucncsay/instance/workspace/release_review_smoke.txt",
+    "content": "READY-012",
+    "elapsed_s": 15.972470415988937,
+    "ok": true
+  },
+  "mode_switch": {
+    "answers": [
+      {
+        "type": "reply",
+        "text": "The result is simply: OK.",
+        "error": null,
+        "session": "release-mode-switch",
+        "elapsed_s": 10.94,
+        "ctx_used": 8288,
+        "ctx_max": 32768,
+        "id": "face-69"
+      },
+      {
+        "type": "reply",
+        "text": "ORBIT-CEDAR-712",
+        "error": null,
+        "session": "release-mode-switch",
+        "elapsed_s": 0.48,
+        "id": "face-70"
+      },
+      {
+        "type": "reply",
+        "text": "ORBIT-CEDAR-712",
+        "error": null,
+        "session": "release-mode-switch",
+        "elapsed_s": 15.65,
+        "ctx_used": 8181,
+        "ctx_max": 32768,
+        "id": "face-71"
+      }
+    ],
+    "ok": true
+  },
+  "lifecycle": {
+    "exit_code": 0,
+    "bye_received": true,
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_jucncsay/instance"
+  }
+}

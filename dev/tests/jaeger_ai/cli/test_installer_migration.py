@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO = Path(__file__).resolve().parents[4]
 INSTALLER = REPO / "scripts" / "install.sh"
@@ -75,9 +77,20 @@ def test_product_installer_migrates_legacy_state_and_keeps_source(tmp_path):
     assert old_state.is_dir(), "legacy state is the rollback copy and must remain"
 
 
-def test_product_installer_refuses_to_copy_running_legacy_install(tmp_path):
+@pytest.mark.parametrize("large_process_table", [False, True])
+def test_product_installer_refuses_to_copy_running_legacy_install(tmp_path, large_process_table):
     _legacy_state(tmp_path)
     fakebin = _fake_commands(tmp_path)
+    if large_process_table:
+        fake_ps = fakebin / "ps"
+        fake_ps.write_text(
+            '#!/bin/bash\n'
+            'printf "123 %s/jaeger/running-agent\\n" "$HOME"\n'
+            'for ((i=0; i<20000; i++)); do\n'
+            '  printf "456 /usr/bin/unrelated-process\\n"\n'
+            'done\n'
+        )
+        fake_ps.chmod(0o755)
     running = tmp_path / "jaeger" / "running-agent"
     running.symlink_to("/bin/sleep")
     process = subprocess.Popen([str(running), "30"])

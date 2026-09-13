@@ -18,12 +18,10 @@
 import AppKit
 import SwiftUI
 
-@main
 struct JaegerOSApp: App {
     /// AppDelegate runs ``applicationDidFinishLaunching`` before any
-    /// scenes are activated. Use it to mark the app as a menu-bar
-    /// accessory so it stays alive without a Dock icon — necessary
-    /// for SwiftPM-built apps that ship without a real Info.plist.
+    /// scenes are activated. The native app owns the one desktop/Dock
+    /// identity; closing a face leaves the menu-bar application running.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// The Unix-socket agent client (Week 1).  Owns the connection,

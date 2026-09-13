@@ -194,22 +194,24 @@ class _FakeSTT:
         self.events.append(("remembered", text))
 
 
-def test_voice_controller_speaks_through_tts_node_bus() -> None:
+def test_voice_controller_speaks_through_agent_nodes(monkeypatch) -> None:
     c = VoiceController(Console(file=open("/dev/null", "w")))
     c._bus = _FakeSpeechBus()
     c._audio_session = _FakeSTT()
+    calls = []
+
+    def speak(text, *, cancel_event):
+        assert not cancel_event.is_set()
+        calls.append(text)
+        return True
+
+    monkeypatch.setattr("jaeger_ai.main.speak_conversation", speak)
 
     interrupted = c.speak("hello from the bus")
 
     assert interrupted is False
-    request, ack_topic, timeout_s = c._bus.requests[0]
-    assert isinstance(request, topics.SpeechCommand)
-    assert request.topic == topics.ACT_SPEECH_SAY
-    assert request.text == "hello from the bus"
-    assert request.node_id == "tui_voice"
-    assert request.correlation_id
-    assert ack_topic == topics.ACT_SPEECH_SPOKEN
-    assert timeout_s == 180.0
+    assert calls == ["hello from the bus"]
+    assert c._bus.requests == []
     assert c._audio_session.paused == [True, False]
     assert c.last_speech_succeeded is True
     assert c._audio_session.drained is True
@@ -286,7 +288,7 @@ def test_voice_controller_poll_drops_stale_transcripts() -> None:
     assert c.poll(timeout=0.01) is None
 
 
-def test_voice_controller_barge_in_publishes_correlated_speech_stop() -> None:
+def test_voice_controller_barge_in_cancels_only_its_agent_reply(monkeypatch) -> None:
     c = VoiceController(Console(file=open("/dev/null", "w")),
                         barge_in=True)
     stt = _FakeSTT()
@@ -297,16 +299,20 @@ def test_voice_controller_barge_in_publishes_correlated_speech_stop() -> None:
     c._bus = bus
     c._audio_session = stt
     c._barge_in_live = True
+    def speak(text, *, cancel_event):
+        assert text == "long answer"
+        assert not cancel_event.is_set()
+        stt.on_speech_detected()
+        assert cancel_event.is_set()
+        return False
+
+    monkeypatch.setattr("jaeger_ai.main.speak_conversation", speak)
 
     interrupted = c.speak("long answer")
 
     assert interrupted is True
-    request = bus.requests[0][0]
-    stop = bus.published[0]
-    assert isinstance(stop, topics.SpeechStop)
-    assert stop.topic == topics.ACT_SPEECH_STOP
-    assert stop.correlation_id == request.correlation_id
-    assert stop.node_id == "tui_voice"
+    assert bus.requests == []
+    assert bus.published == []
     # The interruption phrase should survive as the next user turn.
     assert stt.drained is False
 

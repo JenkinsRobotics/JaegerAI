@@ -236,3 +236,29 @@ def test_check_wheel_main_returns_nonzero_on_dirty(tmp_path, check_wheel_module,
     assert code == 1
     err = capsys.readouterr().err
     assert "config.yaml" in err
+
+
+@pytest.mark.parametrize('leaked', [
+    'jaeger_ai/core/__pycache__/runtime.cpython-311.pyc',
+    'jaeger_ai/models/local.gguf',
+    'jaeger_agent/nodes/model.safetensors',
+    'jaeger_ai/interfaces/swift/.build/release/JaegerOS',
+    'jaeger_ai/.env',
+    'jaeger_ai/.env.production',
+    'jaeger_ai/.jaeger_os/instances/dev/config.yaml',
+    '../outside.txt',
+])
+def test_check_wheel_rejects_runtime_state_from_every_package(tmp_path, check_wheel_module, leaked):
+    wheel = tmp_path / 'dirty.whl'
+    _build_fake_wheel(wheel, {leaked: b'private'})
+    assert check_wheel_module.check_wheel(wheel) == [leaked]
+
+
+def test_wheel_requires_the_reference_vad_not_arbitrary_weights(tmp_path, check_wheel_module):
+    wheel = tmp_path / 'agent.whl'
+    _build_fake_wheel(wheel, {'jaeger_agent/core/assets.py': b'asset loader'})
+    assert check_wheel_module.check_wheel(wheel)
+    _build_fake_wheel(wheel, {check_wheel_module.VAD_ASSET: b'wrong weights'})
+    assert 'checksum' in check_wheel_module.check_wheel(wheel)[0]
+    _build_fake_wheel(wheel, {'jaeger_ai/models/private.onnx': b'private model'})
+    assert check_wheel_module.check_wheel(wheel) == ['jaeger_ai/models/private.onnx']

@@ -30,8 +30,9 @@ pip-log.txt
 pip-delete-this-directory.txt
 .jaeger-product-install
 
-# Pytest / coverage
+# Test / lint / coverage caches
 .pytest_cache/
+.ruff_cache/
 .coverage
 .coverage.*
 htmlcov/

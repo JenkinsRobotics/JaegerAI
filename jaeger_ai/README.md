@@ -11,6 +11,7 @@ main.py           application composition and lifecycle
 module_roots.py   JaegerOS package-discovery entrypoint
 
 characters/      portable character/v1 packs and persona compilation
+cli/             jaeger command dispatcher and verbs
 core/            Jaeger AI application logic and runtime services
 interfaces/      native Swift, PySide6, TUI, protocol, and avatar surfaces
 modules/         provider-named adapters for imported Jaeger modules
@@ -20,6 +21,7 @@ skill_tree/      Jaeger AI skill progression and training state
 timeline/        application timeline/event support
 assets/          shared application assets
 models/          model metadata and local model links
+docs/            generated agent contract (release reports live in dev/docs)
 ```
 
 The division follows the same application convention as Mochi:

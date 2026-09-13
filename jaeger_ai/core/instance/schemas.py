@@ -22,6 +22,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
+from jaeger_agent.core.config import MultimodalConfig
 
 # ``_setting``'s canonical definition moved to ``setting_meta.py`` at 0.8
 # M1 so an engine-module's config slice (e.g. ``jaeger_os/nodes/
@@ -832,6 +833,7 @@ class Config(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    multimodal: MultimodalConfig = Field(default_factory=MultimodalConfig)
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content

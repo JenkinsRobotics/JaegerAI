@@ -10,10 +10,9 @@ fix has two halves:
 
 * MANIFEST.in + pyproject ``exclude-package-data`` keep the leak out of
   freshly-built artifacts (HYGIENE-1/2 in docs/ROADMAP_0.2.0.md).
-* This script is the post-build belt-and-suspenders check. CI calls it
-  after ``python -m build`` to confirm the wheel ships only the
-  intended skeleton: a parent .gitignore, a parent README, plus
-  ``default/{memory,logs,skills,credentials}/.gitkeep`` placeholders.
+* This post-build check rejects the obsolete instance tree, interpreter
+  caches, native build output, model weights, environment files, and unsafe
+  archive paths in every package, including JaegerAI and JaegerAgent.
 
 Usage:
     scripts/check_wheel.py                  # newest dist/*.whl
@@ -29,7 +28,8 @@ from __future__ import annotations
 
 import sys
 import zipfile
-from pathlib import Path
+import hashlib
+from pathlib import Path, PurePosixPath
 
 REPO = Path(__file__).resolve().parent.parent.parent
 
@@ -39,6 +39,8 @@ REPO = Path(__file__).resolve().parent.parent.parent
 # belongs at ``~/.jaeger/instances/<name>/``, created by the wizard
 # at first run. The allow-list is intentionally empty.
 ALLOWED_INSTANCE_FILES: set[str] = set()
+VAD_ASSET = "jaeger_agent/assets/silero/silero_vad_16k_op15.onnx"
+VAD_SHA256 = "b6875a49bacf6d57826a7e0a549d5a05d769ee34405cadcc9ff8b4442544b1f9"
 
 
 def _find_default_wheel() -> Path:
@@ -58,14 +60,22 @@ def check_wheel(wheel_path: Path) -> list[str]:
     violations: list[str] = []
     with zipfile.ZipFile(wheel_path) as zf:
         names = zf.namelist()
+        if "jaeger_agent/core/assets.py" in names and VAD_ASSET not in names:
+            violations.append(f"missing required asset: {VAD_ASSET}")
+        if VAD_ASSET in names and hashlib.sha256(zf.read(VAD_ASSET)).hexdigest() != VAD_SHA256:
+            violations.append(f"unexpected reference model checksum: {VAD_ASSET}")
     for name in names:
-        if not name.startswith("jaeger_os/instance/"):
-            continue
         if name.endswith("/"):
             continue  # directory entry — not a file
-        if name in ALLOWED_INSTANCE_FILES:
-            continue
-        violations.append(name)
+        path = PurePosixPath(name)
+        state = {"__pycache__", ".git", ".build", ".venv", ".jaeger_os", ".jaeger_agent"}
+        if (name.startswith("jaeger_os/instance/")
+                or state.intersection(path.parts)
+                or path.suffix.lower() in {".pyc", ".pyo", ".gguf", ".safetensors"}
+                or (path.suffix.lower() == ".onnx" and name != VAD_ASSET)
+                or path.name == ".env" or path.name.startswith(".env.")
+                or ".." in path.parts or path.is_absolute()):
+            violations.append(name)
     return violations
 
 
@@ -84,8 +94,7 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(f"  - {v}\n")
         sys.stderr.write(
             "\nThese files are packager-machine state and must NOT travel\n"
-            "in the wheel. Clean src/jaeger_os/instance/default/ and rebuild\n"
-            "(see HYGIENE-1..5 in docs/ROADMAP_0.2.0.md).\n"
+            "in the wheel. Correct package exclusions and rebuild.\n"
         )
         return 1
     print(f"[check_wheel] {wheel.name}: clean")

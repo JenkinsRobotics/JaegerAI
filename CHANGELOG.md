@@ -5,6 +5,20 @@ understanding that pre-1.0 minor bumps may carry breaking changes.
 
 ## `0.12.0` — the multimodal face
 
+Release candidate verification dated 2026-09-13 is recorded in
+`dev/docs/releases/0.12.0/RELEASE_CANDIDATE_20260913.md`; this is not a signed
+public macOS binary release. Native/TUI final replies now share the agent's
+output routing and Kokoro runtime. Spoken input normally receives spoken
+output, and persona composition preserves the selected channel and exact
+answer constraints. Stored facts cannot grant permissions. Image decoding
+reuses only verified matching text prefixes, and window close/mode changes
+wait asynchronously for active turns. Scheduled and interactive turns share
+a whole-turn lock. Immutable dependency commits replace the missing agent
+branch; English speech assets and the exact reference VAD now install with
+the audio stack. Native builds verify the embedded interpreter as well as
+the app signature. Caller cancellation scopes cross the attached socket, and
+the installer reliably reports live legacy processes even on busy hosts.
+
 Character packs now live directly under `jaeger_ai/characters/`, matching the
 Mochi application convention and removing the redundant
 `personality/characters/` nesting. Their Python loaders and trait compiler move
@@ -17,9 +31,9 @@ microphone, and typed input. It is deliberately only a device pump and Event
 renderer: `jaeger_agent` owns wake/endpoint policy, transcription,
 vision transport, agent turns, speech, and barge-in behavior. The regular
 PySide6 and native Swift menu cards open the face from a dedicated camera
-button, while `jaeger multimodal` launches it directly. The launcher performs
-an orderly runtime handoff and reconnects normal Chat when the multimodal
-window closes, preserving one model and instance-lock owner. A read-only
+button, while `jaeger multimodal` launches it directly. The native launcher
+connects a thin helper to the same bridge used by Chat and Avatar, preserving
+one model and instance-lock owner when the window closes or reopens. A read-only
 preflight and model-free headless Event-routing selftest cover the deployment
 boundaries.
 

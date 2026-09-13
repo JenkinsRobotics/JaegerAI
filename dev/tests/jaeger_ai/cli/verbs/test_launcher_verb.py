@@ -6,9 +6,37 @@ from __future__ import annotations
 
 import os
 import plistlib
+import shutil
 from pathlib import Path
 
 from jaeger_ai.cli.verbs import launcher_verb as L
+
+
+def test_native_install_keeps_recoverable_previous_launcher(tmp_path):
+    icon = tmp_path / "icon.icns"
+    icon.write_bytes(b"canonical")
+    source = tmp_path / "build/Jaeger AI.app"
+    target = tmp_path / "Applications/Jaeger AI.app"
+    L._write_bundle(source, Path("/new/jaeger"), icon_source=icon)
+    L._write_bundle(target, Path("/old/jaeger"), icon_source=icon)
+    backup = L._install_native_bundle(source, target, tmp_path / "backups")
+    assert "/old/jaeger" in (backup / "Contents/MacOS/Jaeger AI").read_text()
+    assert "/new/jaeger" in (target / "Contents/MacOS/Jaeger AI").read_text()
+    assert (target / "Contents/Resources/AppIcon.icns").read_bytes() == b"canonical"
+
+
+def test_native_install_refuses_unrelated_application(tmp_path):
+    import pytest
+
+    source = tmp_path / "source.app"
+    L._write_bundle(source, Path("/new/jaeger"))
+    target = tmp_path / "Applications/Jaeger AI.app"
+    shutil.copytree(source, target)
+    with (target / "Contents/Info.plist").open("wb") as stream:
+        plistlib.dump({"CFBundleIdentifier": "someone.else"}, stream)
+    with pytest.raises(ValueError, match="unrelated app"):
+        L._install_native_bundle(source, target, tmp_path / "backups")
+    assert target.exists()
 
 
 def test_stub_execs_the_jaeger_exe():

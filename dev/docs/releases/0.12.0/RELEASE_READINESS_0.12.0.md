@@ -2,6 +2,11 @@
 
 Date: 2026-09-04
 
+> Current status: [September 13 release candidate](RELEASE_CANDIDATE_20260913.md).
+> This historical report was superseded by [the production review](PRODUCTION_REVIEW_20260904.md).
+> The historical results below are not certification of the current attached
+> pipeline or a public-release approval.
+
 ## Result
 
 The local JaegerAI 0.12.0 / JaegerAgent 1.2.0 development stack is installable

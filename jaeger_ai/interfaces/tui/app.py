@@ -908,36 +908,33 @@ class JaegerTUI:
         except Exception:  # noqa: BLE001 — never let expansion break a turn
             agent_text = user_text
         result = run_for_voice(client, agent_text,
-                               session_key=_DEFAULT_SESSION_KEY)
+                               session_key=_DEFAULT_SESSION_KEY, output_mode="dynamic")
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
         text = result.get("text") or ""
         error = result.get("error")
         self._render_answer(text, error=error)
-        if (text and not error and not result.get("spoke_via_tool")
-                and _wants_spoken_output(user_text)):
-            self._speak_text_turn_fallback(text)
+        speech_text = result.get("speech_text") or ""
+        if speech_text and not error:
+            if self._voice is not None and self._voice.running:
+                self._voice.speak(speech_text)
+            else:
+                self._speak_text_turn_fallback(speech_text)
 
     def _speak_text_turn_fallback(self, text: str) -> None:
-        """Speak a typed-turn answer when the model missed the TTS tool.
-
-        ``text_to_speech`` remains the canonical agent action. This fallback
-        covers routing misses such as "speak me a joke" where the model
-        answers in text only, leaving the user with silence.
-        """
+        """Play the agent-selected speech channel when the mic is inactive."""
         try:
-            from jaeger_agent.tools.speak import speak
-            result = speak(text=text)
+            from jaeger_ai.main import speak_conversation
+            spoken = speak_conversation(text)
         except Exception as exc:  # noqa: BLE001
             self.console.print(
                 f"[dim](couldn't speak the answer: {exc})[/]"
             )
             return
-        if not result.get("spoken"):
-            reason = result.get("reason") or "unknown TTS error"
+        if not spoken:
             self.console.print(
-                f"[dim](couldn't speak the answer: {reason})[/]"
+                "[dim](speech interrupted or no audio produced)[/]"
             )
 
     # ── Voice conversation ──────────────────────────────────────────
@@ -1109,6 +1106,7 @@ class JaegerTUI:
             client,
             user_text,
             session_key=_DEFAULT_SESSION_KEY,
+            input_modality="speech", output_mode="dynamic",
         )
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
@@ -1126,8 +1124,9 @@ class JaegerTUI:
         self._render_answer(text, error=result.get("error"))
         v = self._voice
         if v is not None and v.running:
-            if text and not result.get("spoke_via_tool"):
-                interrupted = v.speak(text)
+            speech_text = result.get("speech_text") or ""
+            if speech_text:
+                interrupted = v.speak(speech_text)
                 if interrupted or not getattr(
                     v, "last_speech_succeeded", True,
                 ):

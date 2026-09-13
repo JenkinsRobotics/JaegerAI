@@ -16,7 +16,6 @@ from typing import Any
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
-
 EVENT_KINDS = frozenset(
     {
         "user",
@@ -50,6 +49,7 @@ class BorrowedRuntime:
             method = getattr(self.runtime, "run_chatbot_turn", None)
             if callable(method):
                 return method(text, session_key=session_key)
+            raise RuntimeError("tool-free chatbot runtime is unavailable; refusing agentic fallback")
         return self.runtime.run_turn(text, session_key=session_key)
 
     def run_multimodal_turn(
@@ -110,6 +110,11 @@ class BorrowedRuntime:
         method = getattr(self.runtime, "health", None)
         return dict(method() or {}) if callable(method) else {}
 
+    def interrupt(self, *, session_key: str) -> None:
+        method = getattr(self.runtime, "interrupt", None)
+        if callable(method):
+            method(session_key=session_key)
+
     def close(self) -> None:
         """The chassis owns the borrowed runtime and closes it at app exit."""
         # The engine has just closed its native projector. Detach that stale
@@ -158,7 +163,7 @@ class MultimodalWorker(QThread):
             raise ValueError("output_mode must be dynamic|speech|text|mirror")
         self.audio_q: queue.Queue[np.ndarray] = queue.Queue()
         self.text_q: queue.Queue[str] = queue.Queue()
-        self.image_q: queue.Queue[str] = queue.Queue()
+        self.image_q: queue.Queue[str] = queue.Queue(maxsize=1)
         self._stop_evt = threading.Event()
         self.audio_mode = audio_mode
         self.barge_mode = barge_mode
@@ -172,11 +177,8 @@ class MultimodalWorker(QThread):
         remote_vision = bool(
             runtime is not None and getattr(runtime, "vision_is_remote", False)
         )
-        if remote_vision and want_vision:
-            # The projector must live beside the shared Llama instance. Asking
-            # the bridge to load it avoids a useless second Metal projector in
-            # this UI process while image composition remains in the engine.
-            runtime.configure_vision(True)
+        self._remote_vision_runtime = runtime if remote_vision and want_vision else None
+        self._shared_config_runtime = runtime if runtime is not None and getattr(runtime, "speech_is_remote", False) else None
         kwargs: dict[str, Any] = {
             "on_event": self._on_event,
             "want_vision": want_vision and not remote_vision,
@@ -218,7 +220,19 @@ class MultimodalWorker(QThread):
         self.text_q.put(text)
 
     def submit_image(self, data_uri: str) -> None:
-        self.image_q.put(data_uri)
+        # Camera preview is latest-state, not a backlog of frames to replay
+        # after a slow model turn. Keep capture nonblocking and memory bounded.
+        try:
+            self.image_q.put_nowait(data_uri)
+        except queue.Full:
+            try:
+                self.image_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self.image_q.put_nowait(data_uri)
+            except queue.Full:
+                pass
 
     def set_paused(self, paused: bool) -> None:
         method = getattr(self.engine, "set_paused", None)
@@ -240,6 +254,11 @@ class MultimodalWorker(QThread):
     def set_agentic_tools(self, enabled: bool) -> None:
         """Switch the next turn between the shared agentic/chatbot lanes."""
         self.agentic_tools = bool(enabled)
+        request_mode = getattr(self.engine, "set_agentic_tools", None)
+        if callable(request_mode):
+            request_mode(self.agentic_tools)
+            self.output_mode = "dynamic" if self.agentic_tools else "speech"
+            return
         brain = getattr(self.engine, "node_llm", None)
         borrowed = getattr(brain, "runtime", None)
         if borrowed is not None and hasattr(borrowed, "agentic_tools"):
@@ -324,6 +343,19 @@ class MultimodalWorker(QThread):
     def run(self) -> None:
         failure = ""
         try:
+            if self._shared_config_runtime is not None:
+                from jaeger_agent.core.config import MultimodalConfig
+
+                health = self._shared_config_runtime.health()
+                settings = health.get("multimodal_config")
+                if settings is not None:
+                    self.engine.config = MultimodalConfig.model_validate(settings).model_copy(
+                        update={"audio_mode": self.audio_mode, "output_mode": self.output_mode}
+                    )
+                    self.engine.node_llm._base_session_key = self.engine.config.session_key
+            if self._remote_vision_runtime is not None:
+                # Model loading must never block the Qt constructor/UI thread.
+                self._remote_vision_runtime.configure_vision(True)
             self.engine.set_barge_mode(self.barge_mode)
             self.engine.load()
             self._emit_session_facts()

@@ -1,0 +1,76 @@
+{
+  "passed": true,
+  "audio_before_first_video": [
+    14
+  ],
+  "mute_stopped_callbacks": true,
+  "totals": {
+    "audio_blocks": 316,
+    "video_frames": 476,
+    "peak": 1.0165529251098633
+  },
+  "phases": [
+    {
+      "phase": "initial audio-first capture",
+      "audio_blocks": 60,
+      "video_frames": 93,
+      "geometry": [
+        1760,
+        900,
+        408,
+        346
+      ],
+      "geometry_stable": true,
+      "mic_status": "Capturing \u00b7 Elgato XLR Dock \u00b7 75 blocks",
+      "mic_live": true,
+      "camera_active": true
+    },
+    {
+      "phase": "unmute with camera previously active",
+      "audio_blocks": 60,
+      "video_frames": 88,
+      "geometry": [
+        1760,
+        900,
+        408,
+        346
+      ],
+      "geometry_stable": true,
+      "mic_status": "Capturing \u00b7 Elgato XLR Dock \u00b7 73 blocks",
+      "mic_live": true,
+      "camera_active": true
+    },
+    {
+      "phase": "camera off/on with microphone active",
+      "audio_blocks": 60,
+      "video_frames": 89,
+      "geometry": [
+        1760,
+        900,
+        408,
+        346
+      ],
+      "geometry_stable": true,
+      "mic_status": "Capturing \u00b7 Elgato XLR Dock \u00b7 164 blocks",
+      "mic_live": true,
+      "camera_active": true
+    },
+    {
+      "phase": "audio resource restart",
+      "audio_blocks": 61,
+      "video_frames": 100,
+      "geometry": [
+        1760,
+        900,
+        408,
+        346
+      ],
+      "geometry_stable": true,
+      "mic_status": "Capturing \u00b7 Elgato XLR Dock \u00b7 73 blocks",
+      "mic_live": true,
+      "camera_active": true
+    }
+  ],
+  "models_loaded": false,
+  "media_saved": false
+}

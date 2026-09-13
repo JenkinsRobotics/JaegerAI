@@ -1,0 +1,311 @@
+{
+  "date": "2026-09-07",
+  "probe": "dev/verification/multimodal_capture.py",
+  "scope": "Real half-duplex UI capture; stub consumer, no neural models, no saved media. Not an acoustic duplex or end-to-end inference benchmark.",
+  "runs": [
+    {
+      "passed": true,
+      "audio_before_first_video": [
+        3
+      ],
+      "mute_stopped_callbacks": true,
+      "totals": {
+        "audio_blocks": 314,
+        "video_frames": 477,
+        "peak": 0.6750189065933228
+      },
+      "phases": [
+        {
+          "phase": "initial audio-first capture",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 72 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "unmute with camera previously active",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "camera off/on with microphone active",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 165 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "audio resource restart",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 74 blocks",
+          "mic_live": true,
+          "camera_active": true
+        }
+      ],
+      "models_loaded": false,
+      "media_saved": false
+    },
+    {
+      "passed": true,
+      "audio_before_first_video": [
+        3
+      ],
+      "mute_stopped_callbacks": true,
+      "totals": {
+        "audio_blocks": 315,
+        "video_frames": 478,
+        "peak": 0.5235807299613953
+      },
+      "phases": [
+        {
+          "phase": "initial audio-first capture",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "unmute with camera previously active",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "camera off/on with microphone active",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 165 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "audio resource restart",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        }
+      ],
+      "models_loaded": false,
+      "media_saved": false
+    },
+    {
+      "passed": true,
+      "audio_before_first_video": [
+        3
+      ],
+      "mute_stopped_callbacks": true,
+      "totals": {
+        "audio_blocks": 316,
+        "video_frames": 478,
+        "peak": 0.44670236110687256
+      },
+      "phases": [
+        {
+          "phase": "initial audio-first capture",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 74 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "unmute with camera previously active",
+          "audio_blocks": 60,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 74 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "camera off/on with microphone active",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 165 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "audio resource restart",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        }
+      ],
+      "models_loaded": false,
+      "media_saved": false
+    },
+    {
+      "passed": true,
+      "audio_before_first_video": [
+        2
+      ],
+      "mute_stopped_callbacks": true,
+      "totals": {
+        "audio_blocks": 315,
+        "video_frames": 478,
+        "peak": 0.8716083765029907
+      },
+      "phases": [
+        {
+          "phase": "initial audio-first capture",
+          "audio_blocks": 61,
+          "video_frames": 90,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 72 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "unmute with camera previously active",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "camera off/on with microphone active",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 165 blocks",
+          "mic_live": true,
+          "camera_active": true
+        },
+        {
+          "phase": "audio resource restart",
+          "audio_blocks": 60,
+          "video_frames": 91,
+          "geometry": [
+            1760,
+            900,
+            408,
+            346
+          ],
+          "geometry_stable": true,
+          "mic_status": "Capturing · Elgato XLR Dock · 73 blocks",
+          "mic_live": true,
+          "camera_active": true
+        }
+      ],
+      "models_loaded": false,
+      "media_saved": false
+    }
+  ]
+}

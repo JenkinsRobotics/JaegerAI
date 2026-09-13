@@ -277,6 +277,9 @@ class AgentSettingsWindow(QWidget):
 
     def __init__(self, ctx: Any = None) -> None:
         super().__init__()
+        from ..branding import apply_app_identity
+
+        apply_app_identity(self)
         self.ctx = ctx
         self._lay: Any = None
         self.character = resolve_character(ctx)

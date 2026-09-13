@@ -216,8 +216,8 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Stop push-to-talk capture and hand the buffer to the STT
-    /// manager.  Transcription lands in ``composerText`` so the
+    /// Stop push-to-talk capture and hand PCM to JaegerAgent's prewarmed
+    /// Whisper runtime. Transcription lands in ``composerText`` so the
     /// operator can review / edit before sending — same flow Apple
     /// Notes uses for voice dictation, lower stakes than auto-
     /// submitting to the agent.  A system bubble notes capture
@@ -226,7 +226,7 @@ final class ChatViewModel: ObservableObject {
         voice.stopRecording()
         guard let captured = voice.takeCapturedAudio() else { return }
         let seconds = Double(captured.samples.count) / captured.format.sampleRate
-        let backendName = STTManager.shared.activeBackend.displayName
+        let backendName = "JaegerAgent Whisper"
 
         // Skip very short captures — usually accidental taps.
         guard seconds >= 0.4 else {
@@ -242,39 +242,27 @@ final class ChatViewModel: ObservableObject {
             seconds, backendName
         ))
         isTranscribing = true
-        STTManager.shared.transcribe(
-            samples: captured.samples,
-            format: captured.format
-        ) { [weak self] result in
-            // STTManager / backends guarantee the completion runs on
-            // the main queue.  ``MainActor.assumeIsolated`` is the
-            // ergonomic way to tell the compiler that without forcing
-            // a Task hop — the runtime asserts in debug builds if the
-            // guarantee is wrong.
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.isTranscribing = false
-                switch result {
-                case .success(let r):
-                    // Append to the composer rather than replacing —
-                    // if the operator was already mid-typing, we don't
-                    // clobber their work.  A space joins the two
-                    // pieces cleanly.
-                    if self.composerText.isEmpty {
-                        self.composerText = r.text
-                    } else {
-                        self.composerText += " " + r.text
-                    }
-                    self.appendSystem(String(
-                        format: "✓ transcribed in %.1fs · review and hit send",
-                        r.elapsedSeconds
-                    ))
-                case .failure(let err):
-                    self.appendSystem(
-                        "⚠ transcription failed — \(err.localizedDescription)"
-                    )
-                }
+        let pcm = captured.samples.withUnsafeBufferPointer { Data(buffer: $0) }
+        let sampleRate = Int(captured.format.sampleRate)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isTranscribing = false }
+            let started = Date()
+            let result = await self.agent.command("transcribe_audio", args: [
+                "pcm": pcm.base64EncodedString(), "sample_rate": sampleRate,
+            ])
+            guard result.ok, let data = result.json,
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let text = object["text"] as? String
+            else {
+                self.appendSystem("⚠ transcription failed — \(result.error ?? "invalid agent response")")
+                return
             }
+            self.composerText += (self.composerText.isEmpty || text.isEmpty ? "" : " ") + text
+            self.appendSystem(String(
+                format: "✓ transcribed in %.1fs · review and hit send",
+                Date().timeIntervalSince(started)
+            ))
         }
     }
 

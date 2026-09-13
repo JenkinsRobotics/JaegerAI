@@ -40,7 +40,9 @@ def test_multimodal_turn_preserves_provider_content(monkeypatch) -> None:
         *,
         content=None,
         system_prompt_addon="",
+        output_mode=None,
     ):
+        assert output_mode == "dynamic"
         received.update(
             text=text,
             session=session_key,
@@ -192,6 +194,46 @@ def test_multimodal_clear_evicts_only_its_session(monkeypatch) -> None:
     runtime = _runtime()
     runtime.clear_session("multimodal:2")
     assert evicted == ["multimodal:2"]
+
+
+def test_mode_switch_preserves_media_and_tool_pairs_without_aliasing(monkeypatch):
+    import jaeger_ai.main as app
+
+    original = [
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "image"}}]},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "one"}]},
+        {"role": "tool", "content": "file created", "tool_call_id": "one"},
+        {"role": "assistant", "content": "Saved it."},
+    ]
+    agentic = SimpleNamespace(messages=original)
+    chatbot = SimpleNamespace(messages=[])
+    monkeypatch.setattr(app, "_jaeger_agents_by_session", {"session": agentic})
+    runtime = _runtime()
+    runtime._activate_conversation("session", chatbot)
+    assert chatbot.messages == original
+    assert chatbot.messages is not original
+    chatbot.messages.append({"role": "user", "content": "My name is Ada"})
+    runtime._activate_conversation("session", agentic)
+    assert agentic.messages[-1]["content"] == "My name is Ada"
+    assert len(agentic.messages) == 5
+    assert agentic.messages is not chatbot.messages
+    runtime._activate_conversation("session", agentic)
+    assert len(agentic.messages) == 5
+
+
+def test_clear_removes_both_modes_without_resurrecting_history(monkeypatch):
+    import jaeger_ai.main as app
+
+    evicted = []
+    monkeypatch.setattr(app, "evict_session", evicted.append)
+    runtime = _runtime()
+    other = object()
+    runtime._chatbot_sessions = {"one": object(), "other": other}
+    runtime._conversation_owners = {"one": object(), "other": other}
+    runtime.clear_chatbot_session("one")
+    assert evicted == ["one"]
+    assert runtime._chatbot_sessions == {"other": other}
+    assert runtime._conversation_owners == {"other": other}
 
 
 def test_runtime_bridge_keeps_image_blocks_in_the_agent_transcript() -> None:

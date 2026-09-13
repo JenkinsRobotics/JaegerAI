@@ -26,7 +26,7 @@ from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
 # Page order for grouped output — the eight spec groups, then any spill-over.
 GROUP_ORDER = [
-    "model", "display", "voice", "tts", "autonomy",
+    "model", "multimodal", "display", "voice", "tts", "autonomy",
     "permissions", "retention", "interaction", "general",
 ]
 
@@ -114,7 +114,7 @@ def _walk(model_cls: type, instance: Any, prefix: str,
         kind, choices = _kind_and_choices(field_info.annotation)
         if kind is None:
             continue  # unrenderable type (Path, list) — skip, don't fabricate
-        default = field_info.get_default(call_default_factory=False)
+        default = field_info.get_default(call_default_factory=True)
         desc: dict[str, Any] = {
             "path": path,
             "label": _label(path),
@@ -123,7 +123,7 @@ def _walk(model_cls: type, instance: Any, prefix: str,
             "default": default,
             "current": value,
             "description": (field_info.description or "").strip(),
-            "restart": bool(extra.get("restart", False)),
+            "restart": path.startswith("multimodal.") or bool(extra.get("restart", False)),
             "advanced": bool(extra.get("advanced", False)),
             "validation": _validation(field_info),
         }

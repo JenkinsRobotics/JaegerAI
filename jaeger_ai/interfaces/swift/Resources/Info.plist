@@ -27,13 +27,15 @@
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
 	<key>LSUIElement</key>
-	<true/>
+	<false/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Jaeger AI uses AppleScript to open its Terminal-hosted rich TUI surface.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jaeger AI uses the microphone for push-to-talk dictation. Audio is processed locally — it never leaves your Mac.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Jaeger AI uses camera frames as visual input in the Multimodal window. You can turn the camera off in that window.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Jaeger AI uses on-device speech recognition to transcribe dictation locally.</string>
 </dict>

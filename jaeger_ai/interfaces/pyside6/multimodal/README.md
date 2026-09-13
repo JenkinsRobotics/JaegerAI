@@ -73,3 +73,15 @@ mute/disable the devices without stopping the agent. Changing the audio pipeline
 rebuilds only the face's audio resources while the bridge-owned agent stays up.
 Barge is a live, per-session floor-policy control; it does not change whether
 full-duplex capture remains active.
+
+Device startup is coordinated: video waits for the first real microphone PCM
+block, including after audio-resource restarts. If the microphone is muted or
+fails, camera-only operation is available. Permission failures and capture
+failures appear next to the microphone, with a retry action on its button.
+
+`Mic: Live` means audio frames are actually arriving. The input panel shows
+the device, block count, and dBFS meter; silence still counts as working capture.
+`Mic: No audio` means no new frames have arrived for five seconds, not merely
+that the room is quiet. The optional **Record** checkbox saves a WAV; it does
+not need to be checked for listening or transcription. The camera preview
+fits its layout allocation and cannot grow the window with successive frames.

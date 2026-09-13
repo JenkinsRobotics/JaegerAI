@@ -1,21 +1,29 @@
-# interfaces/ — drivers (TUI / voice / REPL)
+# interfaces/ — Jaeger AI user interfaces and transports
 
-> **Modification tier: C — Framework core.** UI plumbing. Edits here
-> affect how the user talks to the agent. Test the affected interface
-> interactively after any change. Full policy:
-> [`/docs/SELF_MODIFICATION_BOUNDARIES.md`](../../../docs/SELF_MODIFICATION_BOUNDARIES.md).
+These are application surfaces. They present Jaeger AI, while JaegerOS and
+JaegerAgent remain framework dependencies.
 
-## What's in here
-
-| Dir | Driver |
+| Area | Responsibility |
 |---|---|
-| [`tui/`](tui/) | The interactive TUI (the `jaeger-os` command). prompt_toolkit-based pinned status bar, slash commands, live activity indicator. |
-| [`voice/`](voice/) | Always-listening voice loop — STT (whisper.cpp) + TTS (Kokoro / ElevenLabs / Edge) + the wake-word + barge-in cancel path. |
+| [swift/](swift/) | Native macOS app, menu bar, chat, avatar windows, and multimodal launcher |
+| [pyside6/](pyside6/) | Qt windows, settings, tray helpers, and shared desktop branding |
+| [pyside6/multimodal/](pyside6/multimodal/) | Attached text/audio/video face and explicit standalone development mode |
+| [tui/](tui/) | Terminal interface reached through the `jaeger` command |
+| [avatar/](avatar/), [avatar_chat/](avatar_chat/), [avatar_player/](avatar_player/) | Avatar rendering, conversation, and playback surfaces |
+| [bridge.py](bridge.py) | NDJSON bridge and attached multimodal session transport |
+| [client.py](client.py), [mcp_server.py](mcp_server.py) | Python bridge client and MCP transport |
 
-## Common contracts
+## Ownership and verification
 
-Each driver calls into `main.py:run_command` / `main.py:run_for_voice`
-— they're the canonical turn entry. Drivers shouldn't reach inside the
-agent loop directly; if you need a hook the loop doesn't expose,
-extend `AgentCallbacks` in `agent/callbacks.py` rather than reaching
-around it.
+Opening an attached multimodal window must not create a second agent, model,
+or memory store. The bridge hosts the runtime; the face handles device capture
+and presentation. Standalone mode is an explicit development/benchmark option,
+not the desktop application's default.
+
+Shared model ownership does not yet establish identical end-to-end behavior
+for every front door. The [0.12.0 release evidence](../../dev/docs/releases/0.12.0/)
+tracks remaining routing and live-device gaps. Do not treat a UI mock test as
+proof of microphone, camera, or acoustic duplex operation.
+
+Tests live under [dev/tests/jaeger_ai/interfaces/](../../dev/tests/jaeger_ai/interfaces/).
+Run the affected tests and an interactive check when changing a surface.
