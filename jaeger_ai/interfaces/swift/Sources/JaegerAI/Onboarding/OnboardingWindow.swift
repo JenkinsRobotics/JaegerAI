@@ -279,6 +279,7 @@ private struct OnboardingRootView: View {
         ZStack {
             switch model.step {
             case .welcome: WelcomeStep()
+            case .os1: OS1Step(model: model)
             case .character: CharacterStep(model: model)
             case .identity: IdentityStep(model: model)
             case .model: ModelStep(model: model)
@@ -357,6 +358,134 @@ private struct WelcomeStep: View {
                 .foregroundStyle(Term.inkDim)
             Spacer()
         }
+    }
+}
+
+private struct OS1Step: View {
+    @ObservedObject var model: OnboardingModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            StepTitle("OS 1 Initialization",
+                      subtitle: "Personalized system initialization and baseline calibration.")
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("OPERATOR: \(operatorName.uppercased())")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Term.accent)
+                    .kerning(1.2)
+                Text("Welcome to OS 1. To configure your system to your personal needs, set your baseline acoustic and interaction preferences below.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Term.inkDim)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Term.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.06), lineWidth: 1))
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("VOICE PROFILE")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(Term.inkDim)
+
+                HStack(spacing: 14) {
+                    OS1OptionCard(
+                        title: "Female Voice",
+                        subtitle: "Warm, attentive tone\n(af_heart / Samantha)",
+                        icon: "waveform.circle.fill",
+                        selected: model.answers.voiceProfile == "female"
+                    ) {
+                        model.answers.voiceProfile = "female"
+                    }
+
+                    OS1OptionCard(
+                        title: "Male Voice",
+                        subtitle: "Even-keeled, grounded tone\n(am_michael / Daniel)",
+                        icon: "waveform.circle",
+                        selected: model.answers.voiceProfile == "male"
+                    ) {
+                        model.answers.voiceProfile = "male"
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("INTERACTION POSTURE")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(Term.inkDim)
+
+                HStack(spacing: 14) {
+                    OS1OptionCard(
+                        title: "Attentive & Collaborative",
+                        subtitle: "Conversational pacing, empathetic feedback",
+                        icon: "person.wave.2.fill",
+                        selected: model.answers.interactionPosture == "attentive"
+                    ) {
+                        model.answers.interactionPosture = "attentive"
+                    }
+
+                    OS1OptionCard(
+                        title: "Pragmatic & Focused",
+                        subtitle: "Direct, succinct, boundary-respecting",
+                        icon: "bolt.shield.fill",
+                        selected: model.answers.interactionPosture == "pragmatic"
+                    ) {
+                        model.answers.interactionPosture = "pragmatic"
+                    }
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private var operatorName: String {
+        let full = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !full.isEmpty { return full }
+        let user = NSUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        return user.isEmpty ? "Matthew" : user.capitalized
+    }
+}
+
+private struct OS1OptionCard: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(selected ? Term.accent : Term.inkDim)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Term.ink)
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Term.inkDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Term.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(selected ? Term.accent : Color.white.opacity(0.08),
+                        lineWidth: selected ? 2 : 1))
+            .shadow(color: selected ? Term.accent.opacity(0.25) : .clear, radius: 6)
+        }
+        .buttonStyle(.plain)
     }
 }
 

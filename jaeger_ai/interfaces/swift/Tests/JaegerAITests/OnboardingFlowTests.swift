@@ -23,7 +23,7 @@ final class OnboardingFlowTests: XCTestCase {
             seen.append(step)
             if step == .done { break }
         }
-        XCTAssertEqual(seen, [.welcome, .character, .identity, .model,
+        XCTAssertEqual(seen, [.welcome, .os1, .character, .identity, .model,
                               .permissions, .review, .creating, .done])
         XCTAssertEqual(OnboardingStep.done.next, .done)         // clamped
         XCTAssertEqual(OnboardingStep.welcome.previous, .welcome)
@@ -31,7 +31,7 @@ final class OnboardingFlowTests: XCTestCase {
 
     func testDottedStepsAreTheInteractiveOnes() {
         XCTAssertEqual(OnboardingStep.dotted,
-                       [.welcome, .character, .identity, .model,
+                       [.welcome, .os1, .character, .identity, .model,
                         .permissions, .review])
         XCTAssertFalse(OnboardingStep.dotted.contains(.creating))
     }
