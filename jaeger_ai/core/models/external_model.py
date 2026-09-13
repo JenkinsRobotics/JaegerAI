@@ -370,6 +370,29 @@ class ExternalModelClient:
         return ExtChatResult(text=text.strip(), latency_s=time.perf_counter() - started)
 
     def _chat_openai(self, messages, max_tokens, temperature, top_p) -> str:
+        completion = self._chat_openai_completion(messages, max_tokens, temperature, top_p)
+        return completion.choices[0].message.content or ""
+
+    def verify_inference(self) -> None:
+        """Verify generation without mistaking capped reasoning for a dead model."""
+        messages = [{"role": "user", "content": "Reply with OK."}]
+        if self.provider in _OPENAI_COMPATIBLE:
+            completion = self._chat_openai_completion(messages, 512, 0.0, 0.95)
+            choice = completion.choices[0]
+            if (choice.message.content or "").strip():
+                return
+            # Reasoning models may spend the entire probe budget thinking.
+            # Actual generated tokens prove inference works; this is not an
+            # empty answer from a broken model, nor text to show the operator.
+            usage = getattr(completion, "usage", None)
+            generated = getattr(usage, "completion_tokens", 0) or 0
+            if choice.finish_reason == "length" and generated > 0:
+                return
+            raise ExternalModelError("The provider returned no generated answer or reasoning tokens")
+        if not self.chat(messages, max_tokens=512, temperature=0.0).text.strip():
+            raise ExternalModelError("The provider returned an empty response")
+
+    def _chat_openai_completion(self, messages, max_tokens, temperature, top_p):
         from openai import OpenAI
 
         key = self._api_key or ("lm-studio" if self.provider == "lmstudio" else "")
@@ -388,8 +411,7 @@ class ExternalModelClient:
         # Cloud already loads at max — ``self.num_ctx`` stays None there.
         if self.num_ctx:
             kwargs["extra_body"] = {"options": {"num_ctx": self.num_ctx}}
-        completion = client.chat.completions.create(**kwargs)
-        return completion.choices[0].message.content or ""
+        return client.chat.completions.create(**kwargs)
 
     def _autodetect_ollama_context(self) -> None:
         """Fill ``loaded_ctx`` / ``num_ctx`` from ``/api/show`` for Ollama."""
