@@ -93,7 +93,7 @@ def _kickstart(label: str) -> bool:
 def _bridge_ready() -> bool:
     try:
         from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-        result = BridgeClient("jaeger").health()
+        result = BridgeClient().health()
         return bool(result.get("ok") and result.get("ready", {}).get("agent") == "ready")
     except Exception:  # noqa: BLE001
         return False

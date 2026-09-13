@@ -253,7 +253,7 @@ _native_lock = threading.Lock()
 def dispatcher_turn(run, workspace=None):
     from jaeger_ai.core.runtime.dispatcher import DispatcherStore
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-    store = DispatcherStore(BridgeClient('jaeger').layout)
+    store = DispatcherStore(BridgeClient().layout)
     store.repair_projections()
     run.native_session = store.route(run.session, run.message)
     return jaeger_turn(run, workspace)
@@ -275,7 +275,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
     def create_native_run(self, body):
         from jaeger_ai.core.runtime.dispatcher import DispatcherStore
         from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-        binding = DispatcherStore(BridgeClient('jaeger').layout).overview()['dispatcher_session']
+        binding = DispatcherStore(BridgeClient().layout).overview()['dispatcher_session']
         if binding and (body.get('session_id') or self.headers.get('X-Hermes-Session-Id')) == binding:
             body = {**body, 'session_id': 'dispatcher'}
         return super().create_native_run(body)
@@ -297,7 +297,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
             from jaeger_ai.core.runtime.dispatcher import DispatcherStore
             from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
             try:
-                bridge = BridgeClient('jaeger')
+                bridge = BridgeClient()
                 conversation = Conversation(DispatcherStore(bridge.layout), self.native_runs(),
                     lambda: bridge.query('dispatcher_conversation', timeout_s=10))
                 action = path.removeprefix('/v1/dispatcher/conversation').strip('/')
@@ -326,7 +326,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         from jaeger_ai.core.runtime.dispatcher import DispatcherStore
         from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
         try:
-            bridge = BridgeClient('jaeger')
+            bridge = BridgeClient()
             store = DispatcherStore(bridge.layout)
             if method == 'GET' and path in queries:
                 result = bridge.query(queries[path], timeout_s=10)

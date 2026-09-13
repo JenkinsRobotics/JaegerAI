@@ -11,7 +11,7 @@ def local_connection(layout):
     import yaml
     from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
     try:
-        expected = BridgeClient('jaeger').layout
+        expected = BridgeClient().layout
     except Exception:
         expected = None
     config_file = Path.home() / '.hermes/profiles/jaeger/config.yaml'

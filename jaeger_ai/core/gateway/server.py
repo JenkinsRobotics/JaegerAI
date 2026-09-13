@@ -48,7 +48,7 @@ class JaegerGatewayApp:
         # to the operator's running bridge unless a client is supplied.
         if background_client is None and store is None:
             from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
-            background_client = BridgeClient("jaeger")
+            background_client = BridgeClient()
         self._background_client = background_client
         self._background_task: asyncio.Task | None = None
         self._background_status: dict[str, Any] = {"enabled": background_client is not None}

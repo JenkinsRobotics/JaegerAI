@@ -10,14 +10,18 @@ from pathlib import Path
 import plistlib
 import runpy
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 LABEL = "com.jenkinsrobotics.hermes-native-api"
 
 
 def configuration():
-    logs = ROOT / ".jaeger_ai/shared/logs"
-    return {"Label": LABEL, "ProgramArguments": [str(ROOT/".venv/bin/python"), str(ROOT/"scripts/hermes-native-api-service.py")],
+    from jaeger_ai.core.instance.instance import operator_state_root
+    logs = operator_state_root() / "shared/logs"
+    python_bin = Path.home() / ".jaeger/venv/bin/python"
+    python_path = str(python_bin) if python_bin.exists() else sys.executable
+    return {"Label": LABEL, "ProgramArguments": [python_path, str(ROOT/"scripts/hermes-native-api-service.py")],
             "WorkingDirectory": str(ROOT), "RunAtLoad": True, "KeepAlive": True,
             "ThrottleInterval": 20, "StandardOutPath": str(logs/(LABEL+".log")),
             "StandardErrorPath": str(logs/(LABEL+".err.log"))}
