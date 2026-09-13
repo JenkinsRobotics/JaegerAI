@@ -118,6 +118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a launched app is not a launched microphone.
             AmbientCoordinator.shared.activate()
 
+            if ProcessInfo.processInfo.arguments.contains("--setup") || ProcessInfo.processInfo.arguments.contains("--onboard") {
+                OnboardingWindowController.shared.show(agent: AgentBridge.shared)
+            }
+
             if ProcessInfo.processInfo.arguments.contains("--chat") {
                 ChatWindowController.show(agent: AgentBridge.shared)
             }

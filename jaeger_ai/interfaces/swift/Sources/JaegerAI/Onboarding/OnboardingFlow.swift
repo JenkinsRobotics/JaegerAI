@@ -20,7 +20,7 @@ import Foundation
 /// One screen per step, iOS-new-device style. ``creating``/``done`` sit
 /// past the interactive run and don't count toward the progress dots.
 enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
-    case welcome, character, identity, model, permissions, review
+    case welcome, os1, character, identity, model, permissions, review
     case creating, done
 
     static func < (lhs: OnboardingStep, rhs: OnboardingStep) -> Bool {
@@ -37,11 +37,12 @@ enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
 
     /// Steps that show as progress dots (the interactive ones).
     static let dotted: [OnboardingStep] =
-        [.welcome, .character, .identity, .model, .permissions, .review]
+        [.welcome, .os1, .character, .identity, .model, .permissions, .review]
 
     var title: String {
         switch self {
         case .welcome: return "Welcome"
+        case .os1: return "OS 1"
         case .character: return "Character"
         case .identity: return "Identity"
         case .model: return "Model"
@@ -58,6 +59,8 @@ enum OnboardingStep: Int, CaseIterable, Sendable, Comparable {
 /// ``protocol_v1_fixtures.json``.
 struct OnboardingAnswers: Sendable, Equatable {
     var userName: String = ""
+    var voiceProfile: String = "female"
+    var interactionPosture: String = "attentive"
     var customPrimeDirective: String = ""
     var characterId: String = ""
     var displayName: String = ""
@@ -105,6 +108,8 @@ struct OnboardingAnswers: Sendable, Equatable {
             ("display_name", displayName),
             ("role", role),
             ("voice_id", voiceId),
+            ("voice_profile", voiceProfile),
+            ("interaction_posture", interactionPosture),
             ("awake_model", awakeModel),
             ("asleep_model", asleepModel),
         ]
