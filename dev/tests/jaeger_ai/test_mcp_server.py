@@ -177,3 +177,28 @@ def test_mcp_passes_explicit_tool_grant_to_bridge():
             assert kwargs['turn_id'] == 'identity'
             return {'text': 'done'}
     assert _bridge_chat(Bridge(), 'task', 'specialist:test', 'identity', []) == 'done'
+
+
+def test_main_stdio_attaches_to_live_bridge(monkeypatch):
+    from jaeger_ai.interfaces import mcp_server
+
+    class DummyBridge:
+        def health(self):
+            return {"ok": True, "instance": "jaeger-test"}
+
+        def query(self, what, args=None):
+            return {"model": "test-model"}
+
+    ran = []
+
+    class DummyServer:
+        def run(self):
+            ran.append("run")
+
+    monkeypatch.setattr("jaeger_ai.interfaces.hermes_webui_adapter.bridge_client.BridgeClient", lambda instance: DummyBridge())
+    monkeypatch.setattr(mcp_server, "build_server", lambda client, inst, model, bridge: DummyServer())
+
+    ret = mcp_server.main(["jaeger-test"])
+    assert ret == 0
+    assert ran == ["run"]
+
