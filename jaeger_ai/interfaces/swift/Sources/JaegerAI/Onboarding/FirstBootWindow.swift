@@ -43,7 +43,7 @@ final class FirstBootWindowController {
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
         panel.isMovableByWindowBackground = true
-        panel.setContentSize(NSSize(width: 560, height: 360))
+        panel.setContentSize(NSSize(width: 620, height: 480))
         panel.center()
         panel.isReleasedWhenClosed = false
         // No close button: the sequence ends by completing or by the
@@ -81,6 +81,18 @@ struct FirstBootView: View {
     @State private var busy = false
     @State private var errorText: String?
     @State private var spoken = false
+    @State private var personaArrived = false
+
+    // Hybrid: live hardware bench stream + character fork
+    @State private var benchId: String?
+    @State private var benchStatus: String = "idle"
+    @State private var benchCurrent: String = ""
+    @State private var benchProgress: Double = 0
+    @State private var benchEta: Int = 0
+    @State private var benchLog: [(name: String, detail: String, value: String, ok: Bool)] = []
+    @State private var benchTier: String = ""
+    @State private var characters: [(id: String, name: String)] = []
+    @State private var benchTask: Task<Void, Never>?
 
     private let tts = TTSManager.shared
     private let ambient = AmbientCoordinator.shared
@@ -104,6 +116,8 @@ struct FirstBootView: View {
     /// Which question the current turn is asking, in the backend's terms.
     private var questionKey: String {
         switch gate.status {
+        case "AWAITING_BENCH":     return "bench"
+        case "AWAITING_CHARACTER": return "character"
         case "AWAITING_SOCIAL":    return "social"
         case "AWAITING_HESITANCE": return "hesitance"
         case "AWAITING_Q2":        return "q2"
@@ -111,9 +125,22 @@ struct FirstBootView: View {
         }
     }
 
+    private var isBenchTurn: Bool { gate.status == "AWAITING_BENCH" || questionKey == "bench" }
+    private var isCharacterTurn: Bool { gate.status == "AWAITING_CHARACTER" }
+
+    private var visibleLines: [String] {
+        guard turn.isPersonaHandoff else { return turn.lines }
+        return personaArrived ? Array(turn.lines.dropFirst()) : Array(turn.lines.prefix(1))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            ForEach(Array(turn.lines.enumerated()), id: \.offset) { _, line in
+            Text("JENKINS ROBOTICS · JAEGER AI OS1")
+                .font(.system(size: 10, weight: .semibold))
+                .kerning(1.6)
+                .foregroundStyle(.secondary)
+
+            ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
                 Text(line)
                     .font(line == turn.lines.first && turn.lines.count > 1
                           ? .system(size: 15, weight: .regular)
@@ -123,12 +150,24 @@ struct FirstBootView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if turn.awaitsReply && !turn.isPersonaHandoff {
+            if isBenchTurn {
+                benchPanel
+            }
+
+            if isCharacterTurn {
+                characterPanel
+            }
+
+            if turn.awaitsReply && !turn.isPersonaHandoff && !isCharacterTurn && !isBenchTurn {
                 TextField("", text: $reply, prompt: Text("Your answer"))
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 15))
                     .onSubmit { submit() }
                     .disabled(busy)
+            }
+
+            if turn.isPersonaHandoff, let record = gate.personaNameRecord {
+                namingPanel(record)
             }
 
             if let errorText {
@@ -141,27 +180,233 @@ struct FirstBootView: View {
             Spacer(minLength: 0)
 
             HStack {
-                // Deferring is allowed and recorded — first boot resumes
-                // where it left off. Silently abandoning it is not.
                 Button("Not now") { onFinish() }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                Button(turn.isPersonaHandoff ? "Continue" : "Send") { submit() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(busy || (!turn.isPersonaHandoff && reply.trimmingCharacters(
-                        in: .whitespacesAndNewlines).isEmpty))
+                if isBenchTurn {
+                    Text(benchStatus == "done" ? "Bench complete" : "Measuring…")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                } else if !isCharacterTurn {
+                    Button(turn.isPersonaHandoff ? "Continue" : "Send") { submit() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(busy || (turn.isPersonaHandoff && !personaArrived) || (!turn.isPersonaHandoff && reply.trimmingCharacters(
+                            in: .whitespacesAndNewlines).isEmpty))
+                }
             }
         }
         .padding(28)
-        .frame(minWidth: 520, minHeight: 320, alignment: .topLeading)
-        .onAppear { speakCurrentTurn() }
+        .frame(minWidth: 580, minHeight: 420, alignment: .topLeading)
+        .onAppear {
+            speakCurrentTurn()
+            if isBenchTurn { startBenchIfNeeded() }
+            if isCharacterTurn { loadCharactersIfNeeded() }
+        }
+        .onChange(of: gate.status) { _, newStatus in
+            if newStatus == "AWAITING_BENCH" { startBenchIfNeeded() }
+            if newStatus == "AWAITING_CHARACTER" { loadCharactersIfNeeded() }
+        }
+        .onDisappear {
+            truncationWatch?.cancel()
+            benchTask?.cancel()
+            tts.stop()
+            tts.enterVoiceStage(.persona)
+        }
+    }
+
+    private var benchPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ProgressView(value: benchProgress)
+                .progressViewStyle(.linear)
+            HStack {
+                Text(benchCurrent.isEmpty ? "Starting hardware bench…" : benchCurrent)
+                    .font(.system(size: 13, weight: .medium))
+                Spacer()
+                if benchEta > 0 {
+                    Text("ETA ~\(benchEta)s")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !benchTier.isEmpty {
+                Text(benchTier)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(benchLog.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.ok ? "✓" : "!")
+                        .foregroundStyle(row.ok ? .green : .orange)
+                        .font(.system(size: 12, weight: .bold))
+                    Text(row.detail)
+                        .font(.system(size: 12))
+                    Spacer()
+                    Text(row.value)
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
+    }
+
+    private var characterPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Preset or custom")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(characters, id: \.id) { character in
+                        Button(character.name) {
+                            pickCharacter(path: "preset", id: character.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(busy)
+                    }
+                }
+            }
+            Button("Custom — calibrate with mic questions") {
+                pickCharacter(path: "custom", id: "assistant")
+            }
+            .keyboardShortcut(.defaultAction)
+            .disabled(busy)
+        }
+    }
+
+    private func namingPanel(_ record: [String: Any]) -> some View {
+        let name = record["name"] as? String ?? ""
+        let reason = record["reason"] as? String ?? ""
+        let source = record["reason_source"] as? String ?? "corpus"
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Self-naming")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            if !name.isEmpty {
+                Text(name)
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            if !reason.isEmpty {
+                Text(reason)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(source == "model" ? "Reason: live model" : "Reason: name corpus (model soft-failed or offline)")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.05)))
+    }
+
+
+    private func startBenchIfNeeded() {
+        guard benchTask == nil else { return }
+        benchTask = Task { @MainActor in
+            busy = true
+            defer { busy = false }
+            guard let started = await gate.startHardwareBench() else {
+                errorText = "Hardware bench could not start."
+                return
+            }
+            benchId = started["id"] as? String
+            applyBenchPayload(started)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let snap = await gate.hardwareBenchStatus(id: benchId) else { continue }
+                applyBenchPayload(snap)
+                let status = snap["status"] as? String ?? ""
+                if status == "done" || status == "error" {
+                    if status == "error" {
+                        errorText = snap["error"] as? String ?? "Hardware bench failed"
+                    }
+                    let outcome = await gate.completeBench(benchId: benchId)
+                    switch outcome {
+                    case .success(let next):
+                        guard let next else { onFinish(); return }
+                        turn = next
+                        spoken = false
+                        speakCurrentTurn()
+                        loadCharactersIfNeeded()
+                    case .failure(let failure):
+                        errorText = failure.message
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private func applyBenchPayload(_ snap: [String: Any]) {
+        benchStatus = snap["status"] as? String ?? benchStatus
+        benchCurrent = snap["current"] as? String ?? benchCurrent
+        if let p = snap["progress"] as? Double { benchProgress = p }
+        else if let p = snap["progress"] as? NSNumber { benchProgress = p.doubleValue }
+        if let eta = snap["eta_s"] as? Int { benchEta = eta }
+        else if let eta = snap["eta_s"] as? NSNumber { benchEta = eta.intValue }
+        if let rec = snap["recommendation"] as? [String: Any] {
+            let tier = rec["tier_label"] as? String ?? ""
+            var mem = ""
+            if let n = rec["host_memory_gb"] as? Double { mem = String(format: "%.0f", n) }
+            else if let n = rec["host_memory_gb"] as? NSNumber { mem = String(format: "%.0f", n.doubleValue) }
+            let awake = (rec["awake"] as? [String: Any])?["display_name"] as? String ?? ""
+            benchTier = [tier, mem.isEmpty ? "" : "\(mem) GB", awake]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        if let log = snap["log"] as? [[String: Any]] {
+            benchLog = log.map { row in
+                (
+                    name: row["name"] as? String ?? "",
+                    detail: row["detail"] as? String ?? "",
+                    value: row["value"] as? String ?? "",
+                    ok: row["ok"] as? Bool ?? true
+                )
+            }
+        }
+    }
+
+    private func loadCharactersIfNeeded() {
+        guard characters.isEmpty else { return }
+        Task { @MainActor in
+            let result = await AgentBridge.shared.query("characters")
+            guard result.ok, let data = result.json,
+                  let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+            else { return }
+            characters = arr.compactMap { row in
+                guard let id = row["id"] as? String else { return nil }
+                let name = (row["name"] as? String) ?? (row["display_name"] as? String) ?? id
+                return (id: id, name: name)
+            }
+        }
+    }
+
+    private func pickCharacter(path: String, id: String) {
+        guard !busy else { return }
+        busy = true
+        errorText = nil
+        Task { @MainActor in
+            let outcome = await gate.chooseCharacter(path: path, characterId: id)
+            busy = false
+            switch outcome {
+            case .success(let next):
+                guard let next else { onFinish(); return }
+                turn = next
+                spoken = false
+                speakCurrentTurn()
+            case .failure(let failure):
+                errorText = failure.message
+            }
+        }
     }
 
     /// Speak the turn in the stage's voice.
     ///
-    /// States 1–2 are the flat installer. State 3 swaps to the calibrated
+    /// Setup uses a fixed technical Kokoro voice. State 3 swaps the same
+    /// speech engine to the calibrated agent voice
     /// persona immediately before the handoff line, so the first thing the
     /// operator hears in the new voice is "*(clears throat)* Hello, I'm
     /// here." — the change of voice is the moment, not a side effect of it.
@@ -175,13 +420,23 @@ struct FirstBootView: View {
         if questionKey == "q2" { startTruncationWatch() }
 
         if turn.isPersonaHandoff {
-            // Flushes the installer's audio at a word boundary first, so
-            // the swap does not click.
-            tts.enterVoiceStage(.persona)
+            // The installer finishes its own farewell before the new voice
+            // arrives. Do not speak both speakers as one utterance.
+            tts.enterVoiceStage(.installer)
+            if let profile = gate.voiceProfile {
+                gate.applyVoiceProfile(profile, to: tts)
+            }
+            Task { @MainActor in
+                let completed = await tts.speakAndWait(turn.lines.first ?? "")
+                guard completed else { return }
+                tts.enterVoiceStage(.persona)
+                personaArrived = true
+                tts.speak(turn.lines.dropFirst().joined(separator: "\n\n"))
+            }
         } else {
             tts.enterVoiceStage(.installer)
+            tts.speak(turn.text)
         }
-        tts.speak(turn.text)
     }
 
     /// Cut the operator off mid-narrative once Probe 3 has yielded enough.
@@ -284,8 +539,13 @@ struct FirstBootView: View {
 
     private func finishHandoff() async {
         busy = true
-        _ = await gate.complete()
+        let completed = await gate.complete()
         busy = false
-        onFinish()
+        if completed {
+            onFinish()
+            ChatWindowController.show(agent: AgentBridge.shared)
+        } else {
+            errorText = "Could not finish initiation. Please try again."
+        }
     }
 }

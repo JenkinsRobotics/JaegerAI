@@ -57,6 +57,9 @@ final class FirstBootGate: ObservableObject {
     @Published private(set) var decision: Decision?
     @Published private(set) var status: String = "unknown"
     @Published private(set) var voiceProfile: String?
+    @Published private(set) var personaNameRecord: [String: Any]?
+    @Published private(set) var characterPath: String?
+    @Published private(set) var characterId: String?
 
     private let bridge: AgentBridge
 
@@ -86,6 +89,9 @@ final class FirstBootGate: ObservableObject {
 
         status = object["status"] as? String ?? "unknown"
         voiceProfile = object["voice_profile"] as? String
+        personaNameRecord = object["persona_name_record"] as? [String: Any]
+        characterPath = object["character_path"] as? String
+        characterId = object["character_id"] as? String
 
         let complete = object["complete"] as? Bool ?? false
         if complete {
@@ -157,6 +163,71 @@ final class FirstBootGate: ObservableObject {
             status = "COMPLETED"
         }
         return result.ok
+    }
+
+
+    // MARK: - Hardware bench (live probes)
+
+    /// Start the CoS hardware bench. Prefer ``hardware_bench_start``; falls
+    /// back to ``hardware_bench`` action=start when the alias is unavailable.
+    func startHardwareBench() async -> [String: Any]? {
+        var result = await bridge.query("hardware_bench_start")
+        if !result.ok {
+            result = await bridge.query("hardware_bench", args: ["action": "start"])
+        }
+        guard result.ok, let data = result.json,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object
+    }
+
+    func hardwareBenchStatus(id: String? = nil) async -> [String: Any]? {
+        var args: [String: any Sendable] = [:]
+        if let id, !id.isEmpty { args["id"] = id }
+        var result = await bridge.query("hardware_bench_status", args: args)
+        if !result.ok {
+            var legacy = args
+            legacy["action"] = "status"
+            result = await bridge.query("hardware_bench", args: legacy)
+        }
+        guard result.ok, let data = result.json,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object
+    }
+
+    /// Advance past the bench turn. Bridge stamps the latest hardware_bench
+    /// recommendation into first_boot.yaml (no nested payload required).
+    func completeBench(benchId: String? = nil) async -> Result<Turn?, Failure> {
+        var args: [String: any Sendable] = ["question": "bench", "reply": "done"]
+        if let benchId, !benchId.isEmpty { args["bench_id"] = benchId }
+        let result = await bridge.command("first_boot_answer", args: args)
+        guard result.ok else {
+            return .failure(Failure(message: result.error ?? "bench advance rejected"))
+        }
+        switch await evaluate() {
+        case .onboard(let next): return .success(next)
+        case .proceed: return .success(Turn?.none)
+        case .unavailable(let reason): return .failure(Failure(message: reason))
+        }
+    }
+
+    /// Preset (optional character id) or custom → mic stance.
+    func chooseCharacter(path: String, characterId: String = "") async -> Result<Turn?, Failure> {
+        var args: [String: any Sendable] = [
+            "question": "character",
+            "reply": path == "custom" ? "custom" : (characterId.isEmpty ? "preset" : "preset:\(characterId)"),
+        ]
+        if !characterId.isEmpty { args["character_id"] = characterId }
+        let result = await bridge.command("first_boot_answer", args: args)
+        guard result.ok else {
+            return .failure(Failure(message: result.error ?? "character choice rejected"))
+        }
+        switch await evaluate() {
+        case .onboard(let next): return .success(next)
+        case .proceed: return .success(Turn?.none)
+        case .unavailable(let reason): return .failure(Failure(message: reason))
+        }
     }
 
     // MARK: - Voice

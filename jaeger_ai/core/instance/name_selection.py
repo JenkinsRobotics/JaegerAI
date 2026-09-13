@@ -195,11 +195,207 @@ def explain_selection(record: dict[str, Any]) -> str:
     )
 
 
+
+def propose_live_name(
+    instance_root: Path | Any,
+    *,
+    voice_profile: str | None = None,
+    q2_response: str = "",
+    q2_refused: bool = False,
+    register_override: str | None = None,
+    stance: dict[str, Any] | None = None,
+    bench: dict[str, Any] | None = None,
+    character_id: str = "",
+    character_path: str = "",
+) -> dict[str, Any] | None:
+    """Pick a name with live model reasoning, or the corpus path.
+
+    The model is asked to choose from the gendered corpus subset and give
+    a one-to-two sentence why. On any failure the corpus selector runs
+    and ``reason_source`` is ``"corpus"`` so the UI can say it fell back
+    instead of pretending live reasoning happened.
+    """
+    fallback = select_name(
+        instance_root,
+        voice_profile=voice_profile,
+        q2_response=q2_response,
+        q2_refused=q2_refused,
+        register_override=register_override,
+    )
+    if fallback is None:
+        return None
+    live = _try_live_pick(
+        fallback,
+        voice_profile=voice_profile or "",
+        stance=stance or {},
+        bench=bench or {},
+        q2_response=q2_response,
+        character_id=character_id,
+        character_path=character_path,
+    )
+    if live:
+        return live
+    out = dict(fallback)
+    out["reason"] = explain_selection(out)
+    out["reason_source"] = "corpus"
+    return out
+
+
+def enrich_with_model_reason(
+    record: dict[str, Any],
+    *,
+    stance: dict[str, Any] | None = None,
+    voice_profile: str = "",
+    bench: dict[str, Any] | None = None,
+    q2_response: str = "",
+    character_id: str = "",
+    character_path: str = "",
+) -> dict[str, Any]:
+    """Attach a live naming reason. Soft-fails honestly to the corpus note."""
+    out = dict(record or {})
+    if out.get("reason") and out.get("reason_source"):
+        return out
+    live = _try_live_pick(
+        out,
+        voice_profile=voice_profile,
+        stance=stance or {},
+        bench=bench or {},
+        q2_response=q2_response,
+        character_id=character_id,
+        character_path=character_path,
+    )
+    if live:
+        return live
+    out["reason"] = explain_selection(out)
+    out["reason_source"] = "corpus"
+    return out
+
+
+def _candidate_pool(record: dict[str, Any]) -> list[NameCandidate]:
+    profile = str(record.get("gender") or "").strip().lower()
+    corpus = load_corpus()
+    pool = [c for c in corpus if c.gender == profile] if profile in {"male", "female"} else list(corpus)
+    return pool or list(corpus)
+
+
+def _try_live_pick(
+    record: dict[str, Any],
+    *,
+    voice_profile: str,
+    stance: dict[str, Any],
+    bench: dict[str, Any],
+    q2_response: str,
+    character_id: str,
+    character_path: str,
+) -> dict[str, Any] | None:
+    """Ask Ollama to pick a corpus name + why. Never raises."""
+    import json
+    import os
+    import urllib.request
+
+    pool = _candidate_pool(record)
+    if not pool:
+        return None
+    # Keep the prompt small: a dozen names is enough to choose among.
+    names = pool[:12]
+    listing = "; ".join(
+        f"{c.name} ({c.origin}, {c.meaning}, {c.register})" for c in names
+    )
+    tier = str((bench or {}).get("tier_label") or "")
+    awake = ((bench or {}).get("awake") or {})
+    awake_name = str(awake.get("display_name") or awake.get("key") or "")
+    stance_label = str((stance or {}).get("stance") or "")
+    register = str((stance or {}).get("register") or record.get("register") or "")
+    prompt = (
+        "You are naming a Jenkins Robotics Jaeger AI OS1 persona. "
+        "Pick exactly one name from this list and explain why in 1-2 short "
+        "sentences. Reply as JSON only: {\"name\": \"...\", \"why\": \"...\"}. "
+        f"List: {listing}. "
+        f"Voice: {voice_profile or 'unspecified'}. "
+        f"Character: {character_path or 'unset'} {character_id or ''}. "
+        f"Host: {tier} {awake_name}. Stance: {stance_label}/{register}. "
+        f"Operator style sample: {(q2_response or '')[:180] or 'none'}."
+    )
+    url = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
+    model = (
+        os.environ.get("JAEGER_ONBOARD_REASON_MODEL")
+        or os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL")
+        or "qwen2.5:3b"
+    )
+    body = json.dumps({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Return JSON only. No markdown."},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "options": {"num_predict": 90, "temperature": 0.5},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{url}/api/chat",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    text = str((payload.get("message") or {}).get("content") or payload.get("response") or "").strip()
+    parsed = _parse_name_json(text)
+    if parsed is None:
+        return None
+    chosen_name, why = parsed
+    match = next((c for c in pool if c.name.lower() == chosen_name.lower()), None)
+    if match is None:
+        return None
+    why = why.strip().strip('"').strip("'")
+    if len(why) < 8:
+        return None
+    if len(why) > 280:
+        why = why[:277].rstrip() + "…"
+    return {
+        **match.as_dict(),
+        "selected_from": len(load_corpus()),
+        "considered": len(pool),
+        "register_signal": str(record.get("register_signal") or match.register),
+        "register_confidence": record.get("register_confidence", 0.5),
+        "origin_note": f"{match.name} — {match.origin}, {match.meaning}",
+        "reason": why,
+        "reason_source": "model",
+    }
+
+
+def _parse_name_json(text: str) -> tuple[str, str] | None:
+    import json
+    import re
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    fence = re.search(r"\{.*\}", raw, re.DOTALL)
+    blob = fence.group(0) if fence else raw
+    try:
+        data = json.loads(blob)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    name = str(data.get("name") or "").strip()
+    why = str(data.get("why") or data.get("reason") or "").strip()
+    if not name or not why:
+        return None
+    return name, why
+
+
 __all__ = [
     "CORPUS_PATH",
     "REGISTERS",
     "NameCandidate",
     "explain_selection",
+    "enrich_with_model_reason",
+    "propose_live_name",
     "load_corpus",
     "read_register",
     "select_name",

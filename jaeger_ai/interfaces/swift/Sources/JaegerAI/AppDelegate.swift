@@ -28,6 +28,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the operator sees what is happening instead of waiting on a blank UI.
         Task { @MainActor in
             let splash = SplashWindowController.shared
+            let forceOnboard = ProcessInfo.processInfo.arguments.contains("--onboard")
+            let setupOnly = ProcessInfo.processInfo.arguments.contains("--setup") || forceOnboard
+            if setupOnly {
+                await AgentBridge.shared.tryConnect(setupOnly: true)
+                await splash.finish(forceOnboard ? "OS 1 first boot" : "Setup")
+                if forceOnboard {
+                    // Hybrid conversational path (Hello → bench → character →
+                    // mic stance → naming). Form wizard remains for --setup.
+                    await presentHybridOnboard(agent: AgentBridge.shared)
+                } else {
+                    OnboardingWindowController.shared.show(agent: AgentBridge.shared)
+                }
+                return
+            }
 
             splash.start("interface", "Interface core",
                          detail: "Preparing menu bar, resources, and splash surface",
@@ -42,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          detail: "Starting JaegerAI bridge and waiting for model readiness",
                          progress: 0.32)
             await AgentBridge.shared.tryConnect()
+            if AgentBridge.shared.needsOnboarding {
+                await splash.finish("Setup")
+                OnboardingWindowController.shared.show(agent: AgentBridge.shared)
+                return
+            }
             if AgentBridge.shared.isConnected {
                 // Fast-ready: the transport connects in ~0.5s while the
                 // model (gemma + whisper + kokoro warm) loads BEHIND it.
@@ -139,6 +158,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 _ = await SettingsStore.shared.checkForUpdates()
                 try? await Task.sleep(for: .seconds(24 * 3600))
             }
+        }
+    }
+
+
+    /// Hybrid OS1 first-boot for ``--onboard``: ensure an instance exists
+    /// (minimal create_instance if needed), reset first_boot so the sequence
+    /// is testable, then open FirstBootWindow — not the form wizard.
+    @MainActor
+    private func presentHybridOnboard(agent: AgentBridge) async {
+        if agent.needsOnboarding {
+            NSLog("[Onboard] no instance — creating minimal hybrid defaults")
+            var args: [String: any Sendable] = [
+                "character_id": "assistant",
+                "permission_mode": "confirm",
+                "interaction_mode": "gui",
+            ]
+            if let defaultsData = await agent.query("setup_defaults").json,
+               let defaults = try? JSONSerialization.jsonObject(with: defaultsData) as? [String: Any],
+               let awake = defaults["awake"] as? [String: Any],
+               let key = awake["key"] as? String {
+                args["awake_model"] = key
+            }
+            let created = await agent.command("create_instance", args: args)
+            if !created.ok {
+                NSLog("[Onboard] create_instance failed: \(created.error ?? "?") — falling back to form")
+                OnboardingWindowController.shared.show(agent: agent)
+                return
+            }
+            // Reconnect so first_boot queries hit the new layout.
+            await agent.tryConnect(setupOnly: true)
+        }
+
+        _ = await agent.command("first_boot_reset")
+        let gate = FirstBootGate(bridge: agent)
+        switch await gate.evaluate() {
+        case .onboard(let turn):
+            FirstBootWindowController.show(gate: gate, turn: turn)
+            NSLog("[Onboard] hybrid FirstBootWindow presented (status=\(gate.status))")
+        case .proceed:
+            NSLog("[Onboard] first boot already complete after reset? unexpected")
+            ChatWindowController.show(agent: agent)
+        case .unavailable(let reason):
+            NSLog("[Onboard] first_boot unavailable: \(reason) — form fallback")
+            OnboardingWindowController.shared.show(agent: agent)
         }
     }
 
