@@ -88,7 +88,7 @@ def test_bridge_first_boot_query_returns_the_current_turn(tmp_path):
     out = _query("first_boot", {}, boot)
     assert out["complete"] is False
     assert out["turn"]["speaker"] == "os1"
-    assert "Welcome to OS 1." in out["turn"]["text"]
+    assert "Welcome to" in out["turn"]["text"] and "OS 1" in out["turn"]["text"]
     assert "mother" not in out["turn"]["text"].lower()
 
 
@@ -157,7 +157,7 @@ def test_status_json_is_machine_readable(tmp_path, monkeypatch, capsys):
     assert onboarding_cmd.main(["status", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     # begin() now opens on Probe 1, not the voice question.
-    assert payload["status"] == "AWAITING_SOCIAL"
+    assert payload["status"] == "AWAITING_BENCH"
     assert payload["schema_version"] == fb.SCHEMA_VERSION
 
 
@@ -234,3 +234,19 @@ def test_malformed_telemetry_is_ignored_not_fatal(tmp_path):
         "latency_ms": "not-a-number", "energy_variance": None,
     }, boot)
     assert ok
+
+
+def test_bridge_replay_preserves_instance_configuration(tmp_path):
+    from types import SimpleNamespace
+    from jaeger_ai.interfaces.bridge import _command, _query
+    (tmp_path / "config.yaml").write_text("model: preserved\n")
+    boot = SimpleNamespace(layout=tmp_path)
+    fb.begin(tmp_path)
+    fb.record_voice(tmp_path, "female")
+    fb.record_q2(tmp_path, "skip")
+    fb.complete(tmp_path)
+    assert _command("first_boot_reset", {}, boot) == (True, None)
+    state = _query("first_boot", {}, boot)
+    assert not state["complete"]
+    assert state["status"] == "AWAITING_BENCH"
+    assert (tmp_path / "config.yaml").read_text() == "model: preserved\n"

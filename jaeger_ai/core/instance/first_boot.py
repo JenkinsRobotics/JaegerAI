@@ -11,7 +11,8 @@ someone who finished it months ago.
 State machine (one direction only, never backwards without an explicit
 reset):
 
-    NOT_STARTED ──► AWAITING_VOICE ──► AWAITING_Q2 ──► INITIALIZING_PERSONA ──► COMPLETED
+    NOT_STARTED ──► AWAITING_BENCH ──► AWAITING_CHARACTER ──► AWAITING_SOCIAL
+                 ──► AWAITING_VOICE ──► AWAITING_Q2 ──► INITIALIZING_PERSONA ──► COMPLETED
 
 Storage is ``<instance>/first_boot.yaml`` — the same shape as the persona
 drift file and the person index: one small hand-editable YAML under the
@@ -54,13 +55,17 @@ STATE_FILENAME = "first_boot.yaml"
 #: so its status may be a state this build no longer defines; readers fall
 #: back to NOT_STARTED, and ``ensure_migrated`` still protects established
 #: identities from being walked through the welcome again.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class FirstBootStatus(str, Enum):
     """Where this identity is in the welcome sequence."""
 
     NOT_STARTED = "NOT_STARTED"
+    #: Live hardware bench (host probes + model tier) before character pick.
+    AWAITING_BENCH = "AWAITING_BENCH"
+    #: Character preset | custom — before mic stance probes.
+    AWAITING_CHARACTER = "AWAITING_CHARACTER"
     #: Probe 1 — social polarity, and how steadily it is answered.
     AWAITING_SOCIAL = "AWAITING_SOCIAL"
     #: Reflexive interjection, entered ONLY when Probe 1 showed hesitance.
@@ -74,6 +79,8 @@ class FirstBootStatus(str, Enum):
 #: Forward order. Used to reject backwards transitions.
 _ORDER: tuple[FirstBootStatus, ...] = (
     FirstBootStatus.NOT_STARTED,
+    FirstBootStatus.AWAITING_BENCH,
+    FirstBootStatus.AWAITING_CHARACTER,
     FirstBootStatus.AWAITING_SOCIAL,
     FirstBootStatus.AWAITING_HESITANCE,
     FirstBootStatus.AWAITING_VOICE,
@@ -187,6 +194,27 @@ def snapshot(instance_root: Path | Any) -> dict[str, Any]:
     return doc
 
 
+def needs_model_selection(instance_root: Path | Any) -> bool:
+    """An unfinished setup must not boot an old or unconfirmed default."""
+    doc = _read(instance_root)
+    return bool(doc) and not is_complete(instance_root) and not doc.get("model_selection")
+
+
+def record_model_selection(instance_root: Path | Any, provider: str, model: str) -> None:
+    doc = _read(instance_root)
+    doc["model_selection"] = {"provider": provider, "model": model, "confirmed_at": _now()}
+    _write(instance_root, doc)
+
+
+def record_setup_preferences(instance_root: Path | Any, *, voice_profile: str = "", interaction_posture: str = "") -> None:
+    doc = _read(instance_root)
+    if voice_profile:
+        doc["voice_profile"] = voice_profile
+    if interaction_posture:
+        doc["interaction_posture"] = interaction_posture
+    _write(instance_root, doc)
+
+
 def voice_profile(instance_root: Path | Any) -> str | None:
     """The chosen voice experience (``male``/``female``), or ``None``."""
     value = _read(instance_root).get("voice_profile")
@@ -224,11 +252,63 @@ def begin(instance_root: Path | Any) -> FirstBootStatus:
     correct check on a crashed-and-restarted process.
     """
     doc = _read(instance_root)
-    if _advance(doc, FirstBootStatus.AWAITING_SOCIAL):
-        doc["status"] = FirstBootStatus.AWAITING_SOCIAL.value
+    if _advance(doc, FirstBootStatus.AWAITING_BENCH):
+        doc["status"] = FirstBootStatus.AWAITING_BENCH.value
         doc.setdefault("started_at", _now())
         _write(instance_root, doc)
     return status(instance_root)
+
+
+def record_bench(
+    instance_root: Path | Any,
+    recommendation: dict[str, Any] | None = None,
+) -> FirstBootStatus:
+    """Record live hardware bench results and advance to character pick."""
+    doc = _read(instance_root)
+    if recommendation:
+        doc["hardware_bench"] = recommendation
+    doc.setdefault("hardware_bench_at", _now())
+    if _advance(doc, FirstBootStatus.AWAITING_CHARACTER):
+        doc["status"] = FirstBootStatus.AWAITING_CHARACTER.value
+    _write(instance_root, doc)
+    return status(instance_root)
+
+
+def record_character(
+    instance_root: Path | Any,
+    choice: str,
+    *,
+    character_id: str = "",
+) -> FirstBootStatus:
+    """Record preset|custom character path, then enter mic stance probes."""
+    path = str(choice or "").strip().lower()
+    if path not in {"preset", "custom"}:
+        # Free text: "custom" / "preset" / a character id treated as preset.
+        lowered = path
+        if "custom" in lowered:
+            path = "custom"
+        else:
+            path = "preset"
+            if not character_id and lowered and lowered not in {"preset", "character"}:
+                character_id = str(choice).strip()
+    doc = _read(instance_root)
+    doc["character_path"] = path
+    if character_id:
+        doc["character_id"] = str(character_id).strip()
+    elif path == "custom":
+        doc.setdefault("character_id", "assistant")
+    doc.setdefault("character_recorded_at", _now())
+    if _advance(doc, FirstBootStatus.AWAITING_SOCIAL):
+        doc["status"] = FirstBootStatus.AWAITING_SOCIAL.value
+    _write(instance_root, doc)
+    return status(instance_root)
+
+
+def _after_social_target(doc: dict[str, Any]) -> FirstBootStatus:
+    """Do not ask for a voice that unified onboarding already recorded."""
+    if doc.get("voice_profile") in VOICE_PROFILES:
+        return FirstBootStatus.AWAITING_Q2
+    return FirstBootStatus.AWAITING_VOICE
 
 
 def record_social(
@@ -262,7 +342,7 @@ def record_social(
 
     hesitant = bool(signals["hesitance"]["value"])
     target = (FirstBootStatus.AWAITING_HESITANCE if hesitant
-              else FirstBootStatus.AWAITING_VOICE)
+              else _after_social_target(doc))
     if _advance(doc, target):
         doc["status"] = target.value
     _write(instance_root, doc)
@@ -291,8 +371,9 @@ def record_hesitance_reply(instance_root: Path | Any, response: str) -> FirstBoo
         signals["hesitance"]["confidence"] = 0.15
         signals["hesitance"]["evidence_source"] = "probe.social.denied"
         doc["social_signals"] = signals
-    if _advance(doc, FirstBootStatus.AWAITING_VOICE):
-        doc["status"] = FirstBootStatus.AWAITING_VOICE.value
+    target = _after_social_target(doc)
+    if _advance(doc, target):
+        doc["status"] = target.value
     _write(instance_root, doc)
     return status(instance_root)
 
@@ -433,6 +514,8 @@ def initialize_persona_name(instance_root: Path | Any) -> str | None:
     # stance already folded in Probe 1's delivery, which the Q2 text alone
     # cannot see.
     stance = doc.get("latent_stance") or {}
+    from jaeger_ai.core.instance.name_selection import enrich_with_model_reason
+
     record = select_name(
         instance_root,
         voice_profile=doc.get("voice_profile"),
@@ -442,6 +525,11 @@ def initialize_persona_name(instance_root: Path | Any) -> str | None:
     )
     if record is None:
         return None
+    record = enrich_with_model_reason(
+        record,
+        stance=stance if isinstance(stance, dict) else {},
+        voice_profile=str(doc.get("voice_profile") or ""),
+    )
 
     chosen = record_persona_name(instance_root, record["name"])
     # Keep the provenance beside the name: "what's your name?" is answered
@@ -583,6 +671,8 @@ __all__ = [
     "VOICE_PROFILES",
     "FirstBootStatus",
     "begin",
+    "record_bench",
+    "record_character",
     "classify_existing",
     "complete",
     "ensure_migrated",

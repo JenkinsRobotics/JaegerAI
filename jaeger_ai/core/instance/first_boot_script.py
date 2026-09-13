@@ -7,12 +7,20 @@ of what it withholds: two questions, one per turn, no form, no model picker,
 no provider setup, and a handoff where the installer's voice stops and the
 SI's begins.
 
+The hybrid conversational sequence (Matthew / OS1):
+
+1. Hello
+2. live hardware bench (what / scores / ETA) — UI streams progress
+3. character preset | custom
+4. custom mic questions that write stance (social → voice → q2)
+5. live self-naming with reasons
+
 The rules the sequence must never break:
 
-* the welcome and question one arrive together, then it **stops**
+* Hello and the hardware bench open first; mic probes come after character
+* one mic question per turn — never combined into a form
 * question two is never shown in the same turn as question one
 * question two is never asked before question one is answered
-* the questions are never combined into a form
 * nothing technical is appended to the persona's first utterance
 
 :func:`next_turn` is a pure function of the durable state — given a status
@@ -34,8 +42,20 @@ from jaeger_ai.core.instance.first_boot import FirstBootStatus
 # ── the copy ─────────────────────────────────────────────────────────
 
 WELCOME = (
-    "Welcome to OS 1. To configure your system to your personal needs, "
-    "please answer a few baseline questions."
+    "Welcome to Jenkins Robotics Jaeger AI OS 1. To configure your system "
+    "to your personal needs, please answer a few baseline questions."
+)
+
+#: Spoken while the Mac UI streams live hardware_bench progress.
+BENCH_NARRATION = (
+    "I'm measuring this host — memory, cores, disk, and the local model "
+    "endpoint — so your OS starts on the right footing."
+)
+
+#: Character fork before mic stance probes.
+QUESTION_CHARACTER = (
+    "Would you like a character preset, or a custom build we calibrate "
+    "together?"
 )
 
 #: Probe 1. Blunt and slightly odd on purpose — a question with no correct
@@ -103,15 +123,31 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
     if current is FirstBootStatus.COMPLETED:
         return None
 
-    if current in (FirstBootStatus.NOT_STARTED, FirstBootStatus.AWAITING_SOCIAL):
-        # Greeting by name (read from the host, never asked for) + Probe 1,
-        # then stop. Later probes are NOT in this turn — one question per
-        # turn is what makes the delivery of each answer measurable.
+    if current in (FirstBootStatus.NOT_STARTED, FirstBootStatus.AWAITING_BENCH):
+        # Hello + bench narration. The Mac UI streams hardware_bench progress
+        # beside this turn and advances when probes finish — no typed reply.
         from jaeger_ai.core.instance.host_context import greeting_address
 
         return Turn(
             speaker="os1",
-            lines=(greeting_address(), WELCOME, QUESTION_SOCIAL),
+            lines=(greeting_address(), WELCOME, BENCH_NARRATION),
+            awaits_reply=False,
+            status=FirstBootStatus.AWAITING_BENCH,
+        )
+
+    if current is FirstBootStatus.AWAITING_CHARACTER:
+        return Turn(
+            speaker="os1",
+            lines=(QUESTION_CHARACTER,),
+            awaits_reply=True,
+            status=FirstBootStatus.AWAITING_CHARACTER,
+        )
+
+    if current is FirstBootStatus.AWAITING_SOCIAL:
+        # Mic stance Probe 1 alone — Hello already happened on the bench turn.
+        return Turn(
+            speaker="os1",
+            lines=(QUESTION_SOCIAL,),
             awaits_reply=True,
             status=FirstBootStatus.AWAITING_SOCIAL,
         )
@@ -147,9 +183,19 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
     # first. Emitted as one turn because the pause between them is the
     # transition — splitting it invites a progress indicator, and a
     # progress indicator is exactly what this moment must not be.
+    # Naming reason (corpus or soft-failed model path) rides as an optional
+    # middle line so the Mac UI can show live self-naming with reasons.
+    record = first_boot.persona_name_record(instance_root) or {}
+    reason = str(record.get("reason") or "").strip()
+    name = str(record.get("name") or first_boot.persona_name(instance_root) or "").strip()
+    naming_line = ()
+    if reason:
+        naming_line = (reason,)
+    elif name:
+        naming_line = (f"I chose the name {name}.",)
     return Turn(
         speaker="persona",
-        lines=(HANDOFF, PERSONA_FIRST_WORDS, PERSONA_OPENING_QUESTION),
+        lines=(HANDOFF, *naming_line, PERSONA_FIRST_WORDS, PERSONA_OPENING_QUESTION),
         awaits_reply=True,
         status=FirstBootStatus.INITIALIZING_PERSONA,
     )
@@ -225,6 +271,30 @@ def should_truncate(
             or clause_count >= TRUNCATE_AFTER_CLAUSES)
 
 
+def parse_character_answer(reply: str) -> tuple[str, str]:
+    """Return ``(path, character_id)`` for preset|custom free text or UI tags.
+
+    UI may send ``preset:<id>``, ``custom``, or plain language. Soft-fail to
+    custom when unclear so mic stance still runs.
+    """
+    text = (reply or "").strip()
+    lowered = text.lower()
+    if lowered.startswith("preset:"):
+        return "preset", text.split(":", 1)[1].strip()
+    if lowered in {"custom", "custom build", "calibrate", "build custom"}:
+        return "custom", "assistant"
+    if lowered.startswith("custom"):
+        return "custom", "assistant"
+    if "preset" in lowered and ":" in text:
+        return "preset", text.split(":", 1)[1].strip()
+    if lowered in {"preset", "character preset", "a preset"}:
+        return "preset", ""
+    # Bare character id from a card tap.
+    if text and " " not in text and lowered not in {"male", "female"}:
+        return "preset", text
+    return "custom", "assistant"
+
+
 __all__ = [
     "HANDOFF",
     "INTERJECTION_HESITANCE",
@@ -237,6 +307,9 @@ __all__ = [
     "QUESTION_Q2",
     "QUESTION_VOICE",
     "WELCOME",
+    "parse_character_answer",
+    "QUESTION_CHARACTER",
+    "BENCH_NARRATION",
     "Turn",
     "looks_like_refusal",
     "next_turn",

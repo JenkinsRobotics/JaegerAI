@@ -34,16 +34,24 @@ def _established(tmp_path):
 
 # 1 ── fresh identity enters first boot ───────────────────────────────
 
+def _through_character(root):
+    """Hello → bench → character, ready for mic stance probes."""
+    fb.begin(root)
+    fb.record_bench(root, recommendation={"tier_label": "test"})
+    fb.record_character(root, "custom", character_id="assistant")
+    return fb.status(root)
+
+
 def _to_voice(root):
     """Walk Probe 1 with a steady answer so we land on the voice question."""
-    fb.begin(root)
+    _through_character(root)
     fb.record_social(root, "Social.", latency_ms=400)
     return fb.status(root)
 
 
 def test_fresh_identity_enters_first_boot(inst):
     assert fb.status(inst) is FirstBootStatus.NOT_STARTED
-    assert fb.begin(inst) is FirstBootStatus.AWAITING_SOCIAL
+    assert fb.begin(inst) is FirstBootStatus.AWAITING_BENCH
     assert script.next_turn(inst) is not None
 
 
@@ -72,9 +80,21 @@ def test_opening_turn_greets_by_name_and_asks_probe_one(inst):
     turn = script.next_turn(inst)
     assert turn.lines[0].startswith("Hello")      # host-derived, never asked
     assert turn.lines[1] == script.WELCOME
-    assert turn.lines[2] == script.QUESTION_SOCIAL
-    assert turn.awaits_reply is True
+    assert turn.lines[2] == script.BENCH_NARRATION
+    assert turn.awaits_reply is False
     assert turn.speaker == "os1"
+    assert turn.status is FirstBootStatus.AWAITING_BENCH
+
+
+def test_hybrid_sequence_bench_then_character_then_social(inst):
+    fb.begin(inst)
+    assert script.QUESTION_SOCIAL not in script.next_turn(inst).text
+    fb.record_bench(inst, recommendation={"tier_label": "32 GB"})
+    assert fb.status(inst) is FirstBootStatus.AWAITING_CHARACTER
+    assert script.next_turn(inst).lines == (script.QUESTION_CHARACTER,)
+    fb.record_character(inst, "preset", character_id="jarvis")
+    assert fb.status(inst) is FirstBootStatus.AWAITING_SOCIAL
+    assert script.next_turn(inst).lines == (script.QUESTION_SOCIAL,)
 
 
 def test_opening_turn_withholds_later_probes(inst):
@@ -102,6 +122,23 @@ def test_voice_preference_persists(inst):
     _to_voice(inst)
     fb.record_voice(inst, "female")
     assert fb.voice_profile(inst) == "female"
+
+
+def test_unified_onboarding_does_not_ask_for_voice_twice(inst):
+    _through_character(inst)
+    fb.record_setup_preferences(inst, voice_profile="female")
+    fb.record_social(inst, "Social.", latency_ms=400)
+    assert fb.status(inst) is FirstBootStatus.AWAITING_Q2
+    assert script.next_turn(inst).lines == (script.QUESTION_Q2,)
+
+
+def test_hesitance_probe_also_skips_an_already_selected_voice(inst):
+    _through_character(inst)
+    fb.record_setup_preferences(inst, voice_profile="male")
+    fb.record_social(inst, "I suppose.", latency_ms=2400)
+    assert fb.status(inst) is FirstBootStatus.AWAITING_HESITANCE
+    fb.record_hesitance_reply(inst, "No.")
+    assert fb.status(inst) is FirstBootStatus.AWAITING_Q2
 
 
 def test_voice_profile_is_vendor_neutral(inst):
@@ -240,8 +277,11 @@ def test_persona_first_words_are_exact(inst):
     assert turn.speaker == "persona"
     assert turn.lines[0] == script.HANDOFF
     assert "Please wait" in turn.lines[0]
-    assert turn.lines[1] == "*(clears throat)* Hello, I'm here."
+    assert script.PERSONA_FIRST_WORDS in turn.lines
     assert "(clears throat)" in turn.text
+    # Live self-naming with reasons sits between handoff and first words.
+    assert any("chose" in line.lower() or "name" in line.lower()
+               for line in turn.lines[1:-1]) or fb.persona_name(inst)
 
 
 def test_nothing_technical_is_appended_to_the_handoff(inst):
@@ -269,6 +309,14 @@ def test_transitions_are_idempotent(inst):
     """Double clicks, retried posts and SSE replays must not double-fire."""
     for _ in range(3):
         fb.begin(inst)
+    assert fb.status(inst) is FirstBootStatus.AWAITING_BENCH
+
+    for _ in range(3):
+        fb.record_bench(inst, recommendation={"tier_label": "test"})
+    assert fb.status(inst) is FirstBootStatus.AWAITING_CHARACTER
+
+    for _ in range(3):
+        fb.record_character(inst, "custom", character_id="assistant")
     assert fb.status(inst) is FirstBootStatus.AWAITING_SOCIAL
 
     for _ in range(3):
@@ -358,4 +406,4 @@ def test_reset_survives_the_migration_guard(tmp_path):
     # The next boot runs the guard again — and must NOT re-suppress.
     assert fb.ensure_migrated(root) is FirstBootStatus.NOT_STARTED
     assert script.next_turn(root) is not None
-    assert "Welcome to OS 1." in script.next_turn(root).text
+    assert "Welcome to" in script.next_turn(root).text and "OS 1" in script.next_turn(root).text
