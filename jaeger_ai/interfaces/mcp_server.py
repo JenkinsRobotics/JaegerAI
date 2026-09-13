@@ -389,10 +389,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from jaeger_ai.core.instance.instance import default_instance_name
-    from jaeger_ai.interfaces.bridge import _model_name
-    from jaeger_ai.main import boot_for_tui
+    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
 
     instance = instance or default_instance_name()
+    bridge = BridgeClient(instance=instance)
+    health = bridge.health()
+    if health.get("ok"):
+        model = None
+        try:
+            ident = bridge.query("identity")
+            if isinstance(ident, dict):
+                model = ident.get("model")
+        except Exception:  # noqa: BLE001
+            model = None
+        server = build_server(None, instance, model, bridge=bridge)
+        server.run()
+        return 0
+
+    from jaeger_ai.interfaces.bridge import _model_name
+    from jaeger_ai.main import boot_for_tui
 
     # Boot the agent with all noise on stderr; MCP owns stdout.
     with contextlib.redirect_stdout(sys.stderr):
