@@ -117,6 +117,41 @@ enum SlashRouting {
         return (String(head).lowercased(), rest)
     }
 
+    /// True if the submitted line is an explicit interruption command (voice or typed).
+    static func isStopPhrase(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .trimmingCharacters(in: .punctuationCharacters)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed == "stop" || trimmed == "/stop" || trimmed == "cancel" || trimmed == "/cancel" || trimmed == "pause" || trimmed == "halt" {
+            return true
+        }
+        let prefixPhrases = [
+            "stop speaking",
+            "stop talking",
+            "stop speech",
+            "stop agent from talking",
+            "stop agent from speaking",
+            "stop the agent from talking",
+            "stop the agent from speaking",
+            "stop agent",
+            "shut up",
+            "be quiet",
+            "be silent"
+        ]
+        for p in prefixPhrases {
+            if trimmed == p || trimmed.hasPrefix(p + " ") || trimmed.hasPrefix(p + ",") {
+                return true
+            }
+        }
+        let exactPhrases: Set<String> = [
+            "quiet",
+            "silence",
+            "hush"
+        ]
+        return exactPhrases.contains(trimmed)
+    }
+
     /// Map a submitted composer line onto a windowed action.
     ///
     /// ``/goal <job>`` is a real turn (the bridge keeps going until the
@@ -124,6 +159,7 @@ enum SlashRouting {
     /// they must not bounce off the bridge as "TUI only".
     static func action(for text: String) -> Action {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isStopPhrase(trimmed) { return .stop }
         if isBareModelPicker(trimmed) { return .modelPicker }
         if let use = modelUseArgs(trimmed) {
             return .modelUse(provider: use.provider, model: use.model)

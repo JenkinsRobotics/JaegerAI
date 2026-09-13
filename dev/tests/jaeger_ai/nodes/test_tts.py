@@ -35,13 +35,18 @@ class _MockSynth:
         raise_on_speak: Exception | None = None,
     ) -> None:
         self.calls: list[str] = []
+        self.voice = "default"
+        self.voices_at_call: list[str] = []
+        self.rates_at_call: list[float] = []
         self.shutdown_called = False
         self._result = result or {"spoken": True, "elapsed_s": 0.01}
         self._delay_s = delay_s
         self._raise = raise_on_speak
 
-    def speak(self, text: str) -> dict[str, Any]:
+    def speak(self, text: str, *, rate: float = 1.0) -> dict[str, Any]:
         self.calls.append(text)
+        self.voices_at_call.append(self.voice)
+        self.rates_at_call.append(rate)
         if self._delay_s:
             time.sleep(self._delay_s)
         if self._raise is not None:
@@ -88,6 +93,35 @@ def test_speech_command_triggers_synthesizer(bus):
                 break
             time.sleep(0.05)
         assert synth.calls == ["hello world"]
+    finally:
+        _stop_node(node, thread)
+
+
+def test_voice_override_applies_for_one_utterance_and_restores(bus):
+    synth = _MockSynth()
+    node, thread = _start_node(bus, synth)
+    try:
+        bus.publish(topics.SpeechCommand(text="setup", voice="am_adam"))
+        for _ in range(20):
+            if synth.calls:
+                break
+            time.sleep(0.05)
+        assert synth.voices_at_call == ["am_adam"]
+        assert synth.voice == "default"
+    finally:
+        _stop_node(node, thread)
+
+
+def test_rate_override_reaches_synthesizer(bus):
+    synth = _MockSynth()
+    node, thread = _start_node(bus, synth)
+    try:
+        bus.publish(topics.SpeechCommand(text="slightly brisk", rate=1.1))
+        for _ in range(20):
+            if synth.calls:
+                break
+            time.sleep(0.05)
+        assert synth.rates_at_call == [pytest.approx(1.1)]
     finally:
         _stop_node(node, thread)
 
@@ -246,7 +280,7 @@ class _StoppableSynth:
         self._stop_event = threading.Event()
         self.stops_received = 0
 
-    def speak(self, text):
+    def speak(self, text, *, rate=1.0):
         self._stop_event.clear()
         stopped = self._stop_event.wait(timeout=5.0)
         return {
@@ -343,7 +377,7 @@ def test_speech_stop_synthesizer_without_stop_method_logs_and_continues(bus):
     """If the synthesizer doesn't implement stop() (older Synthesizer
     surface), the node logs but doesn't crash."""
     class _NoStopSynth:
-        def speak(self, text):
+        def speak(self, text, *, rate=1.0):
             return {"spoken": True, "elapsed_s": 0.0}
         # NO stop() method
         def shutdown(self):

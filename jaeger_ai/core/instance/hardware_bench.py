@@ -114,7 +114,6 @@ def _run(job_id: str) -> None:
     n = len(probes)
     try:
         mem_gb = 0.0
-        ollama_ok = False
         for i, (name, detail) in enumerate(probes):
             t0 = time.time()
             job.progress = i / n
@@ -136,14 +135,13 @@ def _run(job_id: str) -> None:
                     ok = free_gb >= 20
                 elif name == "ollama":
                     ok, value = _probe_ollama()
-                    ollama_ok = ok
                 elif name == "tier":
                     tier = classify_tier(mem_gb)
                     rec = recommend_for_tier(tier)
                     value = rec.tier_label
-                    # Ollama online → use the locked local endpoint as
-                    # the serving provider; otherwise the in-process GGUF.
-                    provider = "ollama-local" if ollama_ok else "in-process"
+                    # Recommended picks are GGUF registry keys. Ollama
+                    # reachability is a probe reading, not a provider switch.
+                    provider = "in-process"
                     job.recommendation = {
                         "host_memory_gb": round(mem_gb, 1),
                         "tier_label": rec.tier_label,
@@ -180,12 +178,6 @@ def _run(job_id: str) -> None:
 
 
 def _probe_ollama() -> tuple[bool, str]:
-    import urllib.request
-
-    url = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
-    try:
-        with urllib.request.urlopen(f"{url}/api/tags", timeout=2.5) as resp:
-            ok = 200 <= getattr(resp, "status", 200) < 300
-            return ok, f"{url} {'online' if ok else 'bad status'}"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"{url} unreachable ({type(exc).__name__})"
+    from jaeger_ai.core.models.discovery import discover_ollama
+    result = discover_ollama()
+    return bool(result.get("online")), str(result.get("endpoint") or "Ollama unavailable")

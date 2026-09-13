@@ -60,6 +60,7 @@ final class ChatWindowController {
     }
 
     private func showOrRaise(agent: AgentBridge) {
+        NSApp.setActivationPolicy(.regular)
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)

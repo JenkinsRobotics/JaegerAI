@@ -199,3 +199,37 @@ def test_dispatch_now_coerces_arrays_before_pydantic_validation():
     result = tool.dispatch({"tags": "single"})
     assert result == {"ok": True}
     assert captured["seen"] == ["single"]
+
+
+def test_alias_coercion_url_to_target():
+    schema = {
+        "type": "object",
+        "properties": {"target": {"type": "string"}},
+        "required": ["target"],
+    }
+    assert coerce_args({"url": "https://youtube.com"}, schema) == {
+        "target": "https://youtube.com"
+    }
+
+
+def test_alias_coercion_q_to_query():
+    schema = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    }
+    assert coerce_args({"q": "what is youtube"}, schema) == {
+        "query": "what is youtube"
+    }
+
+
+def test_unkeyed_value_coercion_to_single_required():
+    schema = {
+        "type": "object",
+        "properties": {"target": {"type": "string"}, "app": {"type": "string"}},
+        "required": ["target"],
+    }
+    assert coerce_args({"value": "https://youtube.com"}, schema) == {
+        "target": "https://youtube.com"
+    }
+

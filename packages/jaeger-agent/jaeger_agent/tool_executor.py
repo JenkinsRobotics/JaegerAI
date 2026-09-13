@@ -127,6 +127,11 @@ class HookedToolExecutor:
     def __init__(self, inner: ToolExecutor | None = None) -> None:
         self._inner = inner or DirectToolExecutor()
 
+    def bind_run(self, run_id: str | None) -> None:
+        binder = getattr(self._inner, "bind_run", None)
+        if callable(binder):
+            binder(run_id)
+
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         args = dict(arguments)
         from jaeger_agent import shell_hooks
@@ -197,6 +202,11 @@ class CheckpointingToolExecutor:
 
     def __init__(self, inner: ToolExecutor | None = None) -> None:
         self._inner = inner or DirectToolExecutor()
+
+    def bind_run(self, run_id: str | None) -> None:
+        binder = getattr(self._inner, "bind_run", None)
+        if callable(binder):
+            binder(run_id)
 
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         if tool.name in MUTATING_TOOLS:

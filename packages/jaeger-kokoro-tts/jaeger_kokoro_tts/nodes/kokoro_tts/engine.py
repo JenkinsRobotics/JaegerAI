@@ -30,6 +30,7 @@ import re
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.audio import FarEndReference
@@ -222,7 +223,13 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r"\*+", "", text)
     text = re.sub(r"^[\-\*\d\.\)]+\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    return re.sub(r"\s+", " ", text).strip()
+    # Keep paragraph boundaries. KPipeline uses newlines as phrase breaks;
+    # flattening all whitespace made multi-line onboarding copy sound like a
+    # single run-on sentence with no natural reset between ideas.
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _resample_to_reference_rate(audio_f32):
@@ -297,6 +304,18 @@ class KokoroTTS:
     ) -> None:
         self.voice = voice
         self.lang = lang
+        bundled = os.environ.get("JAEGER_KOKORO_ASSETS", "").strip()
+        self._bundled_assets = Path(bundled).expanduser().resolve() if bundled else None
+        if self._bundled_assets is not None:
+            required = (
+                self._bundled_assets / "config.json",
+                self._bundled_assets / "kokoro-v1_0.pth",
+                self._bundled_assets / "voices",
+            )
+            if not all(path.exists() for path in required):
+                raise FileNotFoundError(
+                    f"Incomplete bundled Kokoro assets at {self._bundled_assets}"
+                )
         self._pipeline: Any = None
         self._pipeline_lock = threading.Lock()
         # AEC decoupling (0.9): this engine IMPLEMENTS the
@@ -399,7 +418,8 @@ class KokoroTTS:
                 # Boot-never-blocks-on-network: decide offline vs. online
                 # BEFORE touching kokoro/huggingface_hub at all. See
                 # ensure_hf_offline_if_cached()'s docstring.
-                ensure_hf_offline_if_cached("hexgrad/Kokoro-82M", self.voice)
+                if self._bundled_assets is None:
+                    ensure_hf_offline_if_cached("hexgrad/Kokoro-82M", self.voice)
 
                 # Kokoro's model build emits noisy torch UserWarnings
                 # (LSTM dropout) and FutureWarnings (weight_norm deprecation).
@@ -420,12 +440,31 @@ class KokoroTTS:
                     # misaki's own call clobbers it. See
                     # ensure_short_espeak_paths()'s docstring for the
                     # full root-cause writeup.
-                    from kokoro import KPipeline
+                    from kokoro import KModel, KPipeline
                     ensure_short_espeak_paths()
-                    self._pipeline = KPipeline(
-                        lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
-                    )
+                    if self._bundled_assets is not None:
+                        model = KModel(
+                            repo_id="hexgrad/Kokoro-82M",
+                            config=str(self._bundled_assets / "config.json"),
+                            model=str(self._bundled_assets / "kokoro-v1_0.pth"),
+                        )
+                        self._pipeline = KPipeline(
+                            lang_code=self.lang,
+                            repo_id="hexgrad/Kokoro-82M",
+                            model=model,
+                        )
+                    else:
+                        self._pipeline = KPipeline(
+                            lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
+                        )
         return self._pipeline
+
+    def _pipeline_voice(self) -> str:
+        """Resolve a Kokoro voice id to the packaged asset when present."""
+        if self._bundled_assets is None or self.voice.endswith(".pt"):
+            return self.voice
+        bundled = self._bundled_assets / "voices" / f"{self.voice}.pt"
+        return str(bundled) if bundled.is_file() else self.voice
 
     def warm(self) -> dict[str, Any]:
         """Pre-load Kokoro, prime the synthesis pipeline, AND open the
@@ -465,7 +504,7 @@ class KokoroTTS:
             pipe = self._ensure_pipeline()
             # Drain ONE chunk so the model object's internal lazy
             # state is touched — still no real inference.
-            for _ in pipe(" ", voice=self.voice):
+            for _ in pipe(" ", voice=self._pipeline_voice()):
                 break
             load_s = time.perf_counter() - t0
         except Exception as exc:
@@ -494,7 +533,7 @@ class KokoroTTS:
             primer = "Hello, this is a warm-up pass. One, two, three."
             import numpy as np
             chunks: list[Any] = []
-            for r in pipe(primer, voice=self.voice):
+            for r in pipe(primer, voice=self._pipeline_voice()):
                 if r.audio is not None:
                     chunks.append(np.asarray(r.audio, dtype=np.float32))
             # Touch the concatenation path too — the synthesis side of
@@ -531,7 +570,7 @@ class KokoroTTS:
         if has_ssml:
             for kind, value in _ssml_segments(text):
                 if kind == "text":
-                    for r in pipe(value, voice=self.voice):
+                    for r in pipe(value, voice=self._pipeline_voice()):
                         if r.audio is not None:
                             chunks.append(np.asarray(r.audio, dtype=np.float32))
                 else:
@@ -539,14 +578,14 @@ class KokoroTTS:
                     if n > 0:
                         chunks.append(np.zeros(n, dtype=np.float32))
         else:
-            for r in pipe(text, voice=self.voice):
+            for r in pipe(text, voice=self._pipeline_voice()):
                 if r.audio is not None:
                     chunks.append(np.asarray(r.audio, dtype=np.float32))
         if not chunks:
             return None, has_ssml
         return np.concatenate(chunks), has_ssml
 
-    def speak(self, text: str) -> dict[str, Any]:
+    def speak(self, text: str, *, rate: float = 1.0) -> dict[str, Any]:
         """Synthesize speech with Kokoro and play through the persistent
         sounddevice output.  Supports minimal SSML: <speak>,
         <break time="Xms"/>, <breath/>.
@@ -564,6 +603,16 @@ class KokoroTTS:
         was producing PortAudio errors + exit segfaults on macOS 26.5.
         """
         import numpy as np
+
+        try:
+            speed = float(rate)
+        except (TypeError, ValueError):
+            return {"spoken": False, "reason": "speech rate must be a number"}
+        if not 0.5 <= speed <= 2.0:
+            return {
+                "spoken": False,
+                "reason": "speech rate must be between 0.5 and 2.0",
+            }
 
         cleaned = clean_for_tts(text)
         if not cleaned:
@@ -608,7 +657,9 @@ class KokoroTTS:
             if has_ssml:
                 for kind, value in _ssml_segments(cleaned):
                     if kind == "text":
-                        for r in pipe(value, voice=self.voice):
+                        for r in pipe(
+                            value, voice=self._pipeline_voice(), speed=speed,
+                        ):
                             if r.audio is None:
                                 continue
                             _enqueue_chunk(
@@ -618,7 +669,9 @@ class KokoroTTS:
                         if n > 0:
                             _enqueue_chunk(np.zeros(n, dtype=np.float32))
             else:
-                for r in pipe(cleaned, voice=self.voice):
+                for r in pipe(
+                    cleaned, voice=self._pipeline_voice(), speed=speed,
+                ):
                     if r.audio is None:
                         continue
                     _enqueue_chunk(np.asarray(r.audio, dtype=np.float32))
@@ -729,7 +782,7 @@ class KokoroTTS:
                         if self._cancel.is_set():
                             return
                         if kind == "text":
-                            for r in pipe(value, voice=self.voice):
+                            for r in pipe(value, voice=self._pipeline_voice()):
                                 if self._cancel.is_set():
                                     return
                                 if r.audio is None:
@@ -742,7 +795,7 @@ class KokoroTTS:
                                 _enqueue_async_chunk(
                                     np.zeros(n, dtype=np.float32))
                 else:
-                    for r in pipe(cleaned, voice=self.voice):
+                    for r in pipe(cleaned, voice=self._pipeline_voice()):
                         if self._cancel.is_set():
                             return
                         if r.audio is None:

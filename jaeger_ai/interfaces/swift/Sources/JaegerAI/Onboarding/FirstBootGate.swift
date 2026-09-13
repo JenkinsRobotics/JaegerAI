@@ -60,6 +60,79 @@ final class FirstBootGate: ObservableObject {
     @Published private(set) var personaNameRecord: [String: Any]?
     @Published private(set) var characterPath: String?
     @Published private(set) var characterId: String?
+    @Published var modelMatrix: ModelMatrixPayload?
+    @Published var selectedProvider = "in-process"
+    @Published var selectedModel = ""
+    @Published var setupError: String?
+    @Published var bundledModelPath = ""
+    @Published var providerKey = ""
+
+    func loadModelChoices() async {
+        let result = await bridge.query("onboarding_model_matrix")
+        if result.ok, let data = result.json {
+            modelMatrix = try? ModelMatrixPayload.decode(data)
+            if selectedModel.isEmpty, let configured = modelMatrix?.configured {
+                selectedProvider = configured.primaryProvider
+                selectedModel = configured.primaryModel
+            }
+        }
+        let utility = await bridge.query("system_utility_status")
+        if let data = utility.json,
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           object["available"] as? Bool == true {
+            bundledModelPath = object["path"] as? String ?? ""
+        }
+        if selectedModel.isEmpty {
+            let defaultsResult = await bridge.query("setup_defaults")
+            if let data = defaultsResult.json,
+               let defaults = try? SetupDefaults.decode(data), defaults.awake.foundLocally {
+                selectedModel = defaults.awake.key
+                selectedProvider = "in-process"
+            }
+        }
+        if selectedModel.isEmpty {
+            selectedModel = bundledModelPath
+            selectedProvider = "in-process"
+        }
+    }
+
+    func startSelectedModel() async -> Bool {
+        setupError = nil
+        if !providerKey.isEmpty {
+            let calibrated = await bridge.command("calibrate_provider", args: [
+                "provider": selectedProvider, "api_key": providerKey,
+            ])
+            guard calibrated.ok else { setupError = calibrated.error; return false }
+            providerKey = ""
+        }
+        guard !selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            setupError = "Choose a model to continue."
+            return false
+        }
+        let saved = await bridge.command("complete_setup", args: [
+            "awake_model": selectedModel, "awake_provider": selectedProvider,
+            "permission_mode": "confirm", "resume_onboarding": true,
+        ])
+        guard saved.ok else { setupError = saved.error; return false }
+        let started = ContinuousClock.now
+        while ContinuousClock.now - started < .seconds(180) {
+            switch bridge.agentState {
+            case .ready:
+                bridge.onboardingRuntimeReady()
+                return true
+            case .failed(let reason):
+                if ContinuousClock.now - started > .seconds(2) {
+                    setupError = reason
+                    return false
+                }
+            case .booting: break
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+            if Task.isCancelled { return false }
+        }
+        setupError = "The model did not become ready. Choose another model or retry."
+        return false
+    }
 
     private let bridge: AgentBridge
 
@@ -241,6 +314,36 @@ final class FirstBootGate: ObservableObject {
     func applyVoiceProfile(_ profile: String, to tts: TTSManager) {
         voiceProfile = profile
         tts.preferredVoiceProfile = profile
+    }
+
+    // MARK: - Backwards navigation
+
+    /// One step backwards in the welcome. The backend owns what "back"
+    /// means — including which recorded answers a rewind invalidates —
+    /// and the client just re-asks for the turn to show, exactly like a
+    /// forward answer. A rewind into a question the operator already
+    /// answered re-asks it; nothing is silently skipped on re-advance.
+    func stepBack() async -> Result<Turn?, Failure> {
+        let result = await bridge.command("first_boot_back")
+        guard result.ok else {
+            return .failure(Failure(message: result.error ?? "step back rejected"))
+        }
+        switch await evaluate() {
+        case .onboard(let next):      return .success(next)
+        case .proceed:                return .success(Turn?.none)
+        case .unavailable(let reason): return .failure(Failure(message: reason))
+        }
+    }
+
+    // MARK: - Speech warmup
+
+    /// Pre-launch the neural speech engine so the welcome's first words
+    /// are not delayed by cold-start. Fire-and-forget: a warmup failure
+    /// must never block onboarding — the speech layer surfaces its own
+    /// fallbacks, and an operator who can't hear the greeting can still
+    /// read it.
+    func warmUpSpeech() async {
+        _ = await bridge.command("tts_warmup")
     }
 
     // MARK: - Decoding

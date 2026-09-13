@@ -177,6 +177,50 @@ if [[ -d "$SPM_BUNDLE_SRC" ]]; then
 EOF
 fi
 
+# OS 1 utility intelligence. This model is part of the product runtime, not
+# operator state: it must be available before Ollama, credentials, or a main
+# agent model exists. Development builds may omit it (manual setup remains
+# available); release/install builds fail rather than publishing an app that
+# claims offline onboarding but downloads weights on first launch.
+SYSTEM_MODEL_FILENAME="Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+SYSTEM_MODEL_SHA256="72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb"
+SYSTEM_MODEL_SOURCE="${JAEGER_SYSTEM_MODEL:-$HOME/.jaeger/models/qwen3-1.7b-system-q4_k_m/$SYSTEM_MODEL_FILENAME}"
+if [[ -f "$SYSTEM_MODEL_SOURCE" ]]; then
+    ACTUAL_SYSTEM_MODEL_SHA256="$(shasum -a 256 "$SYSTEM_MODEL_SOURCE" | awk '{print $1}')"
+    if [[ "$ACTUAL_SYSTEM_MODEL_SHA256" != "$SYSTEM_MODEL_SHA256" ]]; then
+        echo "[build-app] ERROR — OS utility model checksum mismatch" >&2
+        exit 1
+    fi
+    mkdir -p "$APP_BUNDLE/Contents/Resources/Models"
+    cp "$SYSTEM_MODEL_SOURCE" "$APP_BUNDLE/Contents/Resources/Models/$SYSTEM_MODEL_FILENAME"
+elif [[ "$CONFIG" == "release" ]]; then
+    echo "[build-app] ERROR — release requires bundled OS utility model at $SYSTEM_MODEL_SOURCE" >&2
+    exit 1
+else
+    echo "[build-app] WARN — utility model absent; conversational setup unavailable" >&2
+fi
+
+# The setup guide and the created agent use the same neural speech model
+# with different voice packs. Package the exact Kokoro revision and three
+# voices required by that handoff so a clean, offline Mac never falls back
+# to the legacy system synthesizer.
+KOKORO_REVISION="f3ff3571791e39611d31c381e3a41a3af07b4987"
+KOKORO_SOURCE="${JAEGER_KOKORO_ASSETS:-$HOME/.cache/huggingface/hub/models--hexgrad--Kokoro-82M/snapshots/$KOKORO_REVISION}"
+KOKORO_DEST="$APP_BUNDLE/Contents/Resources/Kokoro"
+if [[ -f "$KOKORO_SOURCE/config.json" && -f "$KOKORO_SOURCE/kokoro-v1_0.pth" ]]; then
+    mkdir -p "$KOKORO_DEST/voices"
+    cp -L "$KOKORO_SOURCE/config.json" "$KOKORO_DEST/config.json"
+    cp -L "$KOKORO_SOURCE/kokoro-v1_0.pth" "$KOKORO_DEST/kokoro-v1_0.pth"
+    for voice in am_adam am_michael af_heart; do
+        cp -L "$KOKORO_SOURCE/voices/$voice.pt" "$KOKORO_DEST/voices/$voice.pt"
+    done
+elif [[ "$CONFIG" == "release" ]]; then
+    echo "[build-app] ERROR — release requires bundled Kokoro assets at $KOKORO_SOURCE" >&2
+    exit 1
+else
+    echo "[build-app] WARN — Kokoro assets absent; setup voice unavailable offline" >&2
+fi
+
 # Stamp the bundle with the commit it was built from — update/launch paths
 # compare this against the Swift tree to decide staleness (rebuilds keyed to
 # "what did this pull change" miss manual pulls and failed builds). Must be
@@ -197,7 +241,9 @@ SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
 echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
 codesign --force --sign "$SIGN_IDENTITY" \
     "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
-codesign --force --options runtime --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
+codesign --force --options runtime --entitlements \
+    "$APP_ROOT/Resources/JaegerAI.entitlements" \
+    --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
     echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
 
 # Keep the app VISIBLE at the repo root (gitignored symlink) — the

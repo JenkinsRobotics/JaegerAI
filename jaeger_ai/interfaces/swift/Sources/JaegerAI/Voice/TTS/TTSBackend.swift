@@ -140,6 +140,16 @@ enum TTSText {
             options: .regularExpression
         )
 
+        // Sentence breaks become a spoken pause. The synthesizer honours
+        // whitespace between sentences; a single space reads as a run-on
+        // and the narration arrives as one breathless line. This is the
+        // text-layer half of "natural wording and spacing".
+        s = s.replacingOccurrences(
+            of: "([.!?])\\s+",
+            with: "$1  ",
+            options: .regularExpression
+        )
+
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -2,22 +2,23 @@
 
 The words here are a product invariant, not strings to tune. First boot is
 the only moment where the product's actual claim — *this one is yours* — is
-legible to someone who has not read the architecture, and it works because
-of what it withholds: two questions, one per turn, no form, no model picker,
-no provider setup, and a handoff where the installer's voice stops and the
-SI's begins.
+legible to someone who has not read the architecture. Ready-made characters
+arrive fully defined; the neutral Assistant uses one question per turn for
+its calibration. The handoff works because the installer's voice stops and
+the SI's begins.
 
 The hybrid conversational sequence (Matthew / OS1):
 
 1. Hello
 2. live hardware bench (what / scores / ETA) — UI streams progress
 3. character preset | custom
-4. custom mic questions that write stance (social → voice → q2)
-5. live self-naming with reasons
+4. preset → initialize directly; custom → mic stance questions
+   (social → voice → q2)
+5. custom Assistant self-names; presets retain their authored identity
 
 The rules the sequence must never break:
 
-* Hello and the hardware bench open first; mic probes come after character
+* Hello and the hardware bench open first; mic probes follow only a custom pick
 * one mic question per turn — never combined into a form
 * question two is never shown in the same turn as question one
 * question two is never asked before question one is answered
@@ -41,9 +42,14 @@ from jaeger_ai.core.instance.first_boot import FirstBootStatus
 
 # ── the copy ─────────────────────────────────────────────────────────
 
+#: Spoken the instant the welcome window appears, before any click. It
+#: must do three jobs in two sentences: name the product, put voice first
+#: as the primary interface, and make typing an equal — the operator
+#: should never discover mid-flow that they could have been talking the
+#: whole time.
 WELCOME = (
-    "Welcome to Jenkins Robotics Jaeger AI OS 1. To configure your system "
-    "to your personal needs, please answer a few baseline questions."
+    "Welcome to OS 1 — I'm yours to set up. Just talk to me the whole way "
+    "through, or type whenever you'd rather. Either works."
 )
 
 #: Spoken while the Mac UI streams live hardware_bench progress.
@@ -52,15 +58,31 @@ BENCH_NARRATION = (
     "endpoint — so your OS starts on the right footing."
 )
 
-#: Character fork before mic stance probes.
+#: Character fork before mic stance probes. Voice-first phrasing: saying
+#: "Jarvis" or "make me my own" must be a first-class answer, not a
+#: fallback for people who find the mouse.
 QUESTION_CHARACTER = (
-    "Would you like a character preset, or a custom build we calibrate "
-    "together?"
+    "Now, who should I be? You can say a character's name — Jarvis, Lilith, "
+    "Anakin — or tell me to build one just for you."
 )
 
 #: Probe 1. Blunt and slightly odd on purpose — a question with no correct
 #: answer produces delivery worth measuring, which a neutral one would not.
 QUESTION_SOCIAL = "Are you social or anti-social?"
+
+#: Spoken once, ahead of the first calibration probe — the operator is
+#: asked to answer personal questions by a machine they met a minute ago,
+#: and the honest reason (state-of-the-art behavioural calibration from
+#: how they answer, not what they answer) is the only framing that makes
+#: that request feel credible. It also tells them the mic work is real:
+#: pace and pauses are measured, which is exactly what the signals
+#: pipeline does with latency_ms and energy_variance.
+CALIBRATION_PREAMBLE = (
+    "Now the calibration — a few questions, one at a time, and there are "
+    "no right answers. What I'm listening for is how you answer: your "
+    "pace, your pauses, your word choices. That's how your assistant "
+    "learns to meet you the way you actually are."
+)
 
 #: Reflexive interjection. Shown ONLY when Probe 1 read as hesitant, and
 #: phrased as a question because the system is checking an observation, not
@@ -71,7 +93,7 @@ INTERJECTION_HESITANCE = (
 
 QUESTION_VOICE = "Would you like your OS to have a male or female voice?"
 
-QUESTION_Q2 = "Next: how would you describe your relationship with your mother?"
+QUESTION_Q2 = "How would you describe your relationship with your mother?"
 
 #: Clinical exit. Delivered the moment enough signal is captured — often
 #: mid-sentence. The truncation is the point: the installer is an
@@ -144,10 +166,12 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
         )
 
     if current is FirstBootStatus.AWAITING_SOCIAL:
-        # Mic stance Probe 1 alone — Hello already happened on the bench turn.
+        # The calibration preamble rides the first probe's turn — spoken
+        # once, before the question, never repeated. Not a question of its
+        # own, so the one-question-per-turn rule is untouched.
         return Turn(
             speaker="os1",
-            lines=(QUESTION_SOCIAL,),
+            lines=(CALIBRATION_PREAMBLE, QUESTION_SOCIAL),
             awaits_reply=True,
             status=FirstBootStatus.AWAITING_SOCIAL,
         )
@@ -298,6 +322,7 @@ def parse_character_answer(reply: str) -> tuple[str, str]:
 __all__ = [
     "HANDOFF",
     "INTERJECTION_HESITANCE",
+    "CALIBRATION_PREAMBLE",
     "QUESTION_SOCIAL",
     "TRUNCATE_AFTER_CLAUSES",
     "TRUNCATE_AFTER_SECONDS",
@@ -315,3 +340,4 @@ __all__ = [
     "next_turn",
     "parse_voice_answer",
 ]
+

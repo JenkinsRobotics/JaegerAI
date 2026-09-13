@@ -1,18 +1,24 @@
-"""OS 1 first boot — the durable state behind the two-question welcome.
+"""OS 1 first boot — durable state behind the conversational welcome.
 
-First boot is the moment a person meets their SI for the first time. It asks
-exactly two questions, one turn each, then hands off to the initialized
-persona. That sequence is a product invariant, and the only thing that makes
-it survivable is this file: a small, durable record of where the person got
-to, so a crash, a reload, a double-click or a bridge reconnect never replays
-a question they already answered — and never replays the welcome at all for
-someone who finished it months ago.
+First boot is the moment a person meets their SI for the first time. A named
+character preset already contains its calibration and goes straight to the
+handoff. The neutral Assistant takes the short conversational calibration,
+one question per turn. That branching sequence is a product invariant, and
+the only thing that makes it survivable is this file: a small, durable record
+of where the person got to, so a crash, reload, double-click or bridge
+reconnect never replays a question they already answered — and never replays
+the welcome at all for someone who finished it months ago.
 
 State machine (one direction only, never backwards without an explicit
 reset):
 
-    NOT_STARTED ──► AWAITING_BENCH ──► AWAITING_CHARACTER ──► AWAITING_SOCIAL
-                 ──► AWAITING_VOICE ──► AWAITING_Q2 ──► INITIALIZING_PERSONA ──► COMPLETED
+    NOT_STARTED ──► AWAITING_BENCH ──► AWAITING_CHARACTER
+                                             ├─ preset ─► INITIALIZING_PERSONA
+                                             └─ custom ─► AWAITING_SOCIAL
+                                                  ─► AWAITING_VOICE
+                                                  ─► AWAITING_Q2
+                                                  ─► INITIALIZING_PERSONA
+    INITIALIZING_PERSONA ──► COMPLETED
 
 Storage is ``<instance>/first_boot.yaml`` — the same shape as the persona
 drift file and the person index: one small hand-editable YAML under the
@@ -64,7 +70,8 @@ class FirstBootStatus(str, Enum):
     NOT_STARTED = "NOT_STARTED"
     #: Live hardware bench (host probes + model tier) before character pick.
     AWAITING_BENCH = "AWAITING_BENCH"
-    #: Character preset | custom — before mic stance probes.
+    #: Character preset | custom. Presets skip the mic stance probes because
+    #: their complete personality profile is the calibration.
     AWAITING_CHARACTER = "AWAITING_CHARACTER"
     #: Probe 1 — social polarity, and how steadily it is answered.
     AWAITING_SOCIAL = "AWAITING_SOCIAL"
@@ -280,7 +287,13 @@ def record_character(
     *,
     character_id: str = "",
 ) -> FirstBootStatus:
-    """Record preset|custom character path, then enter mic stance probes."""
+    """Record the character path and enter the appropriate next stage.
+
+    A named preset already carries identity, voice, disposition, values,
+    behavioral defaults, and speech style. Asking its operator the custom
+    calibration interview would mix two conflicting sources of truth. The
+    neutral Assistant is the custom path and still enters those probes.
+    """
     path = str(choice or "").strip().lower()
     if path not in {"preset", "custom"}:
         # Free text: "custom" / "preset" / a character id treated as preset.
@@ -291,16 +304,26 @@ def record_character(
             path = "preset"
             if not character_id and lowered and lowered not in {"preset", "character"}:
                 character_id = str(choice).strip()
+    if path == "preset" and not str(character_id or "").strip():
+        raise ValueError("a preset character requires a character_id")
+
     doc = _read(instance_root)
     doc["character_path"] = path
     if character_id:
         doc["character_id"] = str(character_id).strip()
     elif path == "custom":
         doc.setdefault("character_id", "assistant")
+    doc["calibration_source"] = "character_preset" if path == "preset" else "guided_interview"
     doc.setdefault("character_recorded_at", _now())
-    if _advance(doc, FirstBootStatus.AWAITING_SOCIAL):
-        doc["status"] = FirstBootStatus.AWAITING_SOCIAL.value
+    target = (
+        FirstBootStatus.INITIALIZING_PERSONA
+        if path == "preset"
+        else FirstBootStatus.AWAITING_SOCIAL
+    )
+    if _advance(doc, target):
+        doc["status"] = target.value
     _write(instance_root, doc)
+    commit_to_instance(instance_root)
     return status(instance_root)
 
 
@@ -398,6 +421,7 @@ def record_voice(instance_root: Path | Any, profile: str) -> FirstBootStatus:
     if _advance(doc, FirstBootStatus.AWAITING_Q2):
         doc["status"] = FirstBootStatus.AWAITING_Q2.value
     _write(instance_root, doc)
+    commit_to_instance(instance_root)
     return status(instance_root)
 
 
@@ -460,6 +484,7 @@ def _calibrate_stance(instance_root: Path | Any) -> dict[str, Any] | None:
     doc["relational_signals"] = relational
     doc["latent_stance"] = stance.as_dict()
     _write(instance_root, doc)
+    commit_to_instance(instance_root)
     return doc["latent_stance"]
 
 
@@ -483,13 +508,135 @@ def record_persona_name(
     """
     doc = _read(instance_root)
     existing = doc.get("persona_name")
+    chosen = str(existing or name).strip()
     if existing:
-        return str(existing)
-    doc["persona_name"] = str(name)
+        _promote_persona_name_to_identity(instance_root, chosen)
+        return chosen
+    doc["persona_name"] = chosen
     doc["persona_name_origin"] = origin
     doc["persona_name_created_at"] = _now()
     _write(instance_root, doc)
-    return str(name)
+
+    # The custom Assistant sheet is deliberately neutral, so identity.yaml
+    # is the authoritative name used by the runtime prompt and every native
+    # surface.  Keeping the generated name only in first_boot.yaml creates a
+    # split identity: onboarding introduces "Iris", then the app and model
+    # revert to "Assistant".  Promote the first-write-wins name at its source.
+    # A bare unit-test fixture may not have an identity yet; instance setup
+    # always does.
+    _promote_persona_name_to_identity(instance_root, chosen)
+    return chosen
+
+
+def _promote_persona_name_to_identity(instance_root: Path | Any, name: str) -> None:
+    """Make the custom persona's chosen name the runtime/UI identity."""
+    try:
+        from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
+
+        root = instance_dir(instance_root)
+        identity_path = root / "identity.yaml"
+        if identity_path.is_file():
+            identity = load_yaml(identity_path, Identity)
+            if identity.name != name:
+                dump_yaml(identity_path, identity.model_copy(update={"name": name}))
+    except Exception:
+        # first_boot.yaml already owns the durable choice. A malformed or
+        # externally edited identity must not erase it; validation on normal
+        # boot will surface the identity error with its full context.
+        pass
+
+
+#: Custom-path stance → expression sliders on persona_state.yaml.
+#: Preset characters keep their sheet; only guided interview writes these.
+_STANCE_EXPRESSION: dict[str, dict[str, float]] = {
+    "grounded": {"directness": 0.72, "warmth": 0.62, "verbosity": 0.38, "empathy": 0.58},
+    "pragmatic": {"directness": 0.82, "verbosity": 0.22, "warmth": 0.35, "formality": 0.45},
+    "disarming": {"warmth": 0.78, "humor": 0.68, "formality": 0.22, "directness": 0.48},
+    "attentive": {"empathy": 0.72, "directness": 0.62, "verbosity": 0.58, "warmth": 0.55},
+}
+
+
+def _kokoro_voice(profile: str) -> str | None:
+    if profile == "female":
+        return "af_heart"
+    if profile == "male":
+        return "am_michael"
+    return None
+
+
+def commit_to_instance(instance_root: Path | Any) -> None:
+    """Flush first_boot.yaml into identity, config, character bind, persona state.
+
+    first_boot.yaml is the conversation record. This is the single write
+    into the files the running agent actually reads. Missing instance
+    files are skipped — a pre-instance probe must not invent a config.
+    """
+    root = instance_dir(instance_root)
+    doc = _read(instance_root)
+    cid = str(doc.get("character_id") or "").strip()
+    if cid:
+        try:
+            from jaeger_ai.personality.character import bind_character
+            bind_character(root, cid)
+        except Exception:
+            pass
+
+    name = str(doc.get("persona_name") or "").strip()
+    # Custom interview: the SI named itself. A preset already has a
+    # character-sheet name — do not overwrite lilith/Jarvis with a corpus pick.
+    if name and doc.get("calibration_source") != "character_preset":
+        _promote_persona_name_to_identity(instance_root, name)
+
+    profile = doc.get("voice_profile") if doc.get("voice_profile") in VOICE_PROFILES else None
+    voice_id = _kokoro_voice(profile) if profile else None
+    if voice_id and doc.get("calibration_source") != "character_preset":
+        try:
+            from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
+            identity_path = root / "identity.yaml"
+            if identity_path.is_file():
+                identity = load_yaml(identity_path, Identity)
+                if identity.voice_id != voice_id:
+                    dump_yaml(identity_path, identity.model_copy(update={"voice_id": voice_id}))
+        except Exception:
+            pass
+        try:
+            from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+            config_path = root / "config.yaml"
+            if config_path.is_file():
+                config = load_yaml(config_path, Config)
+                if getattr(config.kokoro_tts, "voice", None) != voice_id:
+                    config.kokoro_tts.voice = voice_id
+                    dump_yaml(config_path, Config.model_validate(config.model_dump()))
+        except Exception:
+            pass
+
+    selection = doc.get("model_selection") if isinstance(doc.get("model_selection"), dict) else {}
+    provider = str(selection.get("provider") or "").strip()
+    model = str(selection.get("model") or "").strip()
+    if provider and model:
+        try:
+            from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+            from jaeger_ai.core.models.configuration import selected_model_config
+            config_path = root / "config.yaml"
+            if config_path.is_file():
+                config = load_yaml(config_path, Config)
+                updated, _, _ = selected_model_config(config, provider=provider, model=model)
+                dump_yaml(config_path, Config.model_validate(updated.model_dump()))
+        except Exception:
+            pass
+
+    stance = doc.get("latent_stance") if isinstance(doc.get("latent_stance"), dict) else {}
+    if cid and doc.get("calibration_source") == "guided_interview":
+        overrides = _STANCE_EXPRESSION.get(str(stance.get("stance") or ""))
+        if overrides:
+            try:
+                from jaeger_ai.personality import persona_state
+                for field_name, value in overrides.items():
+                    persona_state.set_trait_override(
+                        root, cid, "expression", field_name, value,
+                    )
+            except Exception:
+                pass
 
 
 def initialize_persona_name(instance_root: Path | Any) -> str | None:
@@ -507,29 +654,26 @@ def initialize_persona_name(instance_root: Path | Any) -> str | None:
     if existing:
         return existing
 
-    from jaeger_ai.core.instance.name_selection import select_name
+    from jaeger_ai.core.instance.name_selection import propose_live_name
 
     doc = _read(instance_root)
     # Prefer the calibrated register over re-reading the raw answer: the
     # stance already folded in Probe 1's delivery, which the Q2 text alone
     # cannot see.
     stance = doc.get("latent_stance") or {}
-    from jaeger_ai.core.instance.name_selection import enrich_with_model_reason
-
-    record = select_name(
+    record = propose_live_name(
         instance_root,
         voice_profile=doc.get("voice_profile"),
         q2_response=str(doc.get("q2_response") or ""),
         q2_refused=bool(doc.get("q2_refused")),
-        register_override=stance.get("register"),
+        register_override=stance.get("register") if isinstance(stance, dict) else None,
+        stance=stance if isinstance(stance, dict) else {},
+        bench=doc.get("hardware_bench") if isinstance(doc.get("hardware_bench"), dict) else {},
+        character_id=str(doc.get("character_id") or ""),
+        character_path=str(doc.get("character_path") or ""),
     )
     if record is None:
         return None
-    record = enrich_with_model_reason(
-        record,
-        stance=stance if isinstance(stance, dict) else {},
-        voice_profile=str(doc.get("voice_profile") or ""),
-    )
 
     chosen = record_persona_name(instance_root, record["name"])
     # Keep the provenance beside the name: "what's your name?" is answered
@@ -553,6 +697,81 @@ def complete(instance_root: Path | Any) -> FirstBootStatus:
         doc["status"] = FirstBootStatus.COMPLETED.value
         doc.setdefault("completed_at", _now())
         _write(instance_root, doc)
+    commit_to_instance(instance_root)
+    return status(instance_root)
+
+
+#: Rewind table for ``step_back``. Each entry: the status being left →
+#: (status to land on, keys written by the answer that left it). Clearing
+#: the keys is not cosmetic: ``_after_social_target`` reads
+#: ``voice_profile`` to decide whether the voice question is needed, so a
+#: stale value would silently skip a question on re-advance. Landing
+#: statuses are the question the operator actually saw last — VOICE
+#: rewinds past the interjection only when the interjection really
+#: happened (``hesitance_reply`` is written exactly when it was asked).
+_STEP_BACK: dict[FirstBootStatus, tuple[FirstBootStatus, tuple[str, ...]]] = {
+    FirstBootStatus.AWAITING_Q2: (
+        FirstBootStatus.AWAITING_VOICE,
+        ("q2_response", "q2_refused", "q2_recorded_at"),
+    ),
+    FirstBootStatus.AWAITING_VOICE: (
+        FirstBootStatus.AWAITING_HESITANCE,  # corrected below when it never ran
+        ("voice_profile", "voice_recorded_at"),
+    ),
+    FirstBootStatus.AWAITING_HESITANCE: (
+        FirstBootStatus.AWAITING_SOCIAL,
+        ("hesitance_reply", "hesitance_confirmed"),
+    ),
+    FirstBootStatus.AWAITING_SOCIAL: (
+        FirstBootStatus.AWAITING_CHARACTER,
+        ("social_response", "social_signals", "social_recorded_at"),
+    ),
+    FirstBootStatus.AWAITING_CHARACTER: (
+        FirstBootStatus.AWAITING_BENCH,
+        ("character_path", "character_id", "calibration_source",
+         "character_recorded_at"),
+    ),
+    FirstBootStatus.AWAITING_BENCH: (
+        FirstBootStatus.NOT_STARTED,
+        (),
+    ),
+}
+
+
+def step_back(instance_root: Path | Any) -> FirstBootStatus:
+    """Rewind one answered question and clear the answer it recorded.
+
+    The operator may go backwards in the welcome the same way they go
+    forward: a correction ("I picked the wrong voice") replays the
+    question rather than being treated as an attack on the record. Only
+    pending-question statuses may rewind — once the persona has begun
+    arriving (INITIALIZING_PERSONA, COMPLETED) the sequence is past the
+    point where a step back has a defined meaning, and a late frame must
+    never drag a finished identity into the welcome (same reasoning as
+    :func:`_advance`).
+
+    Voice's landing status depends on durable state: the interjection is
+    only "the previous question" when it actually ran, so the rewind
+    checks ``hesitance_reply`` before choosing.
+    """
+    doc = _read(instance_root)
+    try:
+        current = FirstBootStatus(str(doc.get("status") or FirstBootStatus.NOT_STARTED.value))
+    except ValueError:
+        return status(instance_root)
+
+    entry = _STEP_BACK.get(current)
+    if entry is None:
+        return status(instance_root)
+
+    target, keys = entry
+    if current is FirstBootStatus.AWAITING_VOICE and not doc.get("hesitance_reply"):
+        target = FirstBootStatus.AWAITING_SOCIAL
+    for key in keys:
+        doc.pop(key, None)
+    doc["status"] = target.value
+    doc["last_back_step_at"] = _now()
+    _write(instance_root, doc)
     return status(instance_root)
 
 
@@ -663,6 +882,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "initialize_persona_name",
     "latent_stance",
+    "step_back",
     "record_hesitance_reply",
     "record_social",
     "persona_name_record",
@@ -674,6 +894,7 @@ __all__ = [
     "record_bench",
     "record_character",
     "classify_existing",
+    "commit_to_instance",
     "complete",
     "ensure_migrated",
     "is_complete",

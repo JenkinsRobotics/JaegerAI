@@ -50,11 +50,34 @@ def open_on_host(target: str, kind: str = "auto", app: str = "") -> dict[str, An
     (``open -a <app> <url>``), e.g. "Safari"; empty = default browser.
     """
     clean = (target or "").strip()
+    app = (app or "").strip()
+    if not clean and app:
+        clean = app
+        kind = "app"
+
     if not clean:
         return {"error": "empty target"}
     kind = (kind or "auto").strip().lower()
 
+    # Well-known web destinations normalization
+    _WELL_KNOWN = {
+        "youtube": "https://www.youtube.com",
+        "google": "https://www.google.com",
+        "github": "https://github.com",
+        "reddit": "https://www.reddit.com",
+        "twitter": "https://x.com",
+        "x": "https://x.com",
+        "wikipedia": "https://www.wikipedia.org",
+    }
+    if clean.lower() in _WELL_KNOWN:
+        clean = _WELL_KNOWN[clean.lower()]
+        kind = "url"
+
     is_url = clean.startswith("http://") or clean.startswith("https://")
+    if not is_url and "." in clean and not clean.startswith("/") and " " not in clean:
+        clean = "https://" + clean
+        is_url = True
+
     if kind == "auto":
         if is_url:
             kind = "url"
@@ -69,8 +92,8 @@ def open_on_host(target: str, kind: str = "auto", app: str = "") -> dict[str, An
 
     if kind == "url":
         if not is_url:
-            return {"error": "URL must start with http:// or https://", "url": clean}
-        app = (app or "").strip()
+            clean = "https://" + clean
+            is_url = True
         if app:
             return _run_open(["-a", app, clean], {"url": clean, "app": app})
         return _run_open([clean], {"url": clean})

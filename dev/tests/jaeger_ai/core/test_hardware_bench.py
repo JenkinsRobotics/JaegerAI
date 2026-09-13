@@ -24,13 +24,16 @@ def test_hardware_bench_start_and_status():
     rec = snap.get("recommendation") or {}
     assert "tier_label" in rec
     assert "host_memory_gb" in rec
+    # A reachable Ollama server does not prove the recommended GGUF has
+    # been imported under that registry key.
+    assert rec["provider"] == "in-process"
 
 
 def test_name_enrich_soft_fails_to_corpus(monkeypatch):
     from jaeger_ai.core.instance.name_selection import enrich_with_model_reason
 
     monkeypatch.setattr(
-        "jaeger_ai.core.instance.name_selection._try_model_reason",
+        "jaeger_ai.core.instance.name_selection._try_live_pick",
         lambda *a, **k: None,
     )
     record = {

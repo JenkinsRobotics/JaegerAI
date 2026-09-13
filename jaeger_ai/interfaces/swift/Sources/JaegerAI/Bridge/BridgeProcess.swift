@@ -109,7 +109,10 @@ actor BridgeProcess {
     // Timeouts. ``ready`` is fast now (no model boot ahead of it) so a
     // short fuse catches a wedged child instead of hanging the splash.
     static let readyTimeout: Duration = .seconds(20)
-    static let requestTimeout: Duration = .seconds(15)
+    // The first bundled Qwen request includes loading its GGUF on machines
+    // slower than the development Mac. Keep setup narration from falling back
+    // while that one-time cold start completes.
+    static let requestTimeout: Duration = .seconds(30)
     static let turnTimeout: Duration = .seconds(7200)  // autonomous batches run long
 
     private var process: Process?
@@ -162,11 +165,14 @@ actor BridgeProcess {
     }
 
     /// Run a mutation (select/make-default/save…). ``ok``/``error`` on the result.
-    func command(_ cmd: String, args: [String: any Sendable] = [:]) async -> QueryResult {
-        await request(["op": "command", "cmd": cmd, "args": args])
+    func command(_ cmd: String, args: [String: any Sendable] = [:],
+                 timeout: Duration? = nil) async -> QueryResult {
+        await request(["op": "command", "cmd": cmd, "args": args],
+                      timeout: timeout)
     }
 
-    private func request(_ base: [String: any Sendable]) async -> QueryResult {
+    private func request(_ base: [String: any Sendable],
+                         timeout: Duration? = nil) async -> QueryResult {
         reqCounter += 1
         let id = "r\(reqCounter)"
         var obj = base
@@ -175,11 +181,11 @@ actor BridgeProcess {
               let data = try? JSONSerialization.data(withJSONObject: obj) else {
             return QueryResult(ok: false, error: "bridge not running", json: nil)
         }
-        let timeout = Task {
-            try? await Task.sleep(for: Self.requestTimeout)
-            await self.expireRequest(id)
+        let timeoutTask = Task {
+            try? await Task.sleep(for: timeout ?? Self.requestTimeout)
+            self.expireRequest(id)
         }
-        defer { timeout.cancel() }
+        defer { timeoutTask.cancel() }
         return await withCheckedContinuation { cont in
             resultConts[id] = cont
             var line = data
@@ -224,12 +230,44 @@ actor BridgeProcess {
         return (repo as NSString).appendingPathComponent("jaeger")
     }
 
+    static func launchArguments(instance: String?, setupOnly: Bool) -> [String] {
+        var args = ["bridge"]
+        if let instance { args.append(instance) }
+        args.append(setupOnly ? "--setup" : "--attach")
+        return args
+    }
+
+    static let systemModelFilename = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+
+    /// Release builds carry OS 1's utility intelligence beside the app.
+    /// Development builds may use the same file from the operator model
+    /// cache. Passing the exact path keeps Python from downloading or
+    /// silently substituting a different model during first launch.
+    static func bundledSystemModelPath() -> String? {
+        let fm = FileManager.default
+        if let resources = Bundle.main.resourceURL {
+            let bundled = resources.appendingPathComponent("Models")
+                .appendingPathComponent(systemModelFilename).path
+            if fm.fileExists(atPath: bundled) { return bundled }
+        }
+        let cached = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".jaeger/models/qwen3-1.7b-system-q4_k_m/\(systemModelFilename)")
+        return fm.fileExists(atPath: cached) ? cached : nil
+    }
+
+    static func bundledKokoroAssetsPath() -> String? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let root = resources.appendingPathComponent("Kokoro")
+        let model = root.appendingPathComponent("kokoro-v1_0.pth").path
+        return FileManager.default.fileExists(atPath: model) ? root.path : nil
+    }
+
     /// Launch the bridge and await its ``ready`` frame (or ``fatal``).
     /// FAST: ready means the transport is up, not that the model is loaded
     /// — watch ``onAgentState`` for booting → ready. ``instance`` pins the
     /// bridge to a named instance (the dev app passes ``jaeger-dev`` via
     /// LSEnvironment); nil lets the bridge resolve its own default.
-    func start(instance: String? = nil) async throws -> BridgeReady {
+    func start(instance: String? = nil, setupOnly: Bool = false) async throws -> BridgeReady {
         guard process == nil else { throw BridgeError.launchFailed("already running") }
 
         let path = Self.jaegerPath()
@@ -239,7 +277,15 @@ actor BridgeProcess {
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = instance.map { ["bridge", $0, "--attach"] } ?? ["bridge", "--attach"]
+        proc.arguments = Self.launchArguments(instance: instance, setupOnly: setupOnly)
+        var environment = ProcessInfo.processInfo.environment
+        if let systemModel = Self.bundledSystemModelPath() {
+            environment["JAEGER_SYSTEM_MODEL"] = systemModel
+        }
+        if let kokoroAssets = Self.bundledKokoroAssetsPath() {
+            environment["JAEGER_KOKORO_ASSETS"] = kokoroAssets
+        }
+        proc.environment = environment
         proc.currentDirectoryURL =
             URL(fileURLWithPath: (path as NSString).deletingLastPathComponent)
 

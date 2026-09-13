@@ -33,13 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if setupOnly {
                 await AgentBridge.shared.tryConnect(setupOnly: true)
                 await splash.finish(forceOnboard ? "OS 1 first boot" : "Setup")
-                if forceOnboard {
-                    // Hybrid conversational path (Hello → bench → character →
-                    // mic stance → naming). Form wizard remains for --setup.
-                    await presentHybridOnboard(agent: AgentBridge.shared)
-                } else {
-                    OnboardingWindowController.shared.show(agent: AgentBridge.shared)
-                }
+                await presentHybridOnboard(agent: AgentBridge.shared)
                 return
             }
 
@@ -58,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await AgentBridge.shared.tryConnect()
             if AgentBridge.shared.needsOnboarding {
                 await splash.finish("Setup")
-                OnboardingWindowController.shared.show(agent: AgentBridge.shared)
+                await presentHybridOnboard(agent: AgentBridge.shared)
                 return
             }
             if AgentBridge.shared.isConnected {
@@ -137,12 +131,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a launched app is not a launched microphone.
             AmbientCoordinator.shared.activate()
 
-            if ProcessInfo.processInfo.arguments.contains("--setup") || ProcessInfo.processInfo.arguments.contains("--onboard") {
-                OnboardingWindowController.shared.show(agent: AgentBridge.shared)
-            }
-
-            if ProcessInfo.processInfo.arguments.contains("--chat") {
-                ChatWindowController.show(agent: AgentBridge.shared)
+            let args = ProcessInfo.processInfo.arguments
+            // --setup / --onboard already returned through presentHybridOnboard.
+            if args.contains("--avatar") {
+                ChatWindowController.show(agent: AgentBridge.shared, tab: .avatar)
+            } else {
+                ChatWindowController.show(agent: AgentBridge.shared, tab: .chat)
             }
         }
 
@@ -162,42 +156,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
 
-    /// Hybrid OS1 first-boot for ``--onboard``: ensure an instance exists
-    /// (minimal create_instance if needed), reset first_boot so the sequence
-    /// is testable, then open FirstBootWindow — not the form wizard.
+    /// One resumable conversation for first install, --setup and --onboard.
+    /// Only the explicit replay flag clears previously recorded answers.
     @MainActor
     private func presentHybridOnboard(agent: AgentBridge) async {
-        if agent.needsOnboarding {
-            NSLog("[Onboard] no instance — creating minimal hybrid defaults")
-            var args: [String: any Sendable] = [
-                "character_id": "assistant",
-                "permission_mode": "confirm",
-                "interaction_mode": "gui",
-            ]
-            if let defaultsData = await agent.query("setup_defaults").json,
-               let defaults = try? JSONSerialization.jsonObject(with: defaultsData) as? [String: Any],
-               let awake = defaults["awake"] as? [String: Any],
-               let key = awake["key"] as? String {
-                args["awake_model"] = key
-            }
-            let created = await agent.command("create_instance", args: args)
-            if !created.ok {
-                NSLog("[Onboard] create_instance failed: \(created.error ?? "?") — falling back to form")
-                OnboardingWindowController.shared.show(agent: agent)
-                return
-            }
-            // Reconnect so first_boot queries hit the new layout.
-            await agent.tryConnect(setupOnly: true)
+        if ProcessInfo.processInfo.arguments.contains("--replay-onboarding") {
+            _ = await agent.command("first_boot_reset")
         }
-
-        _ = await agent.command("first_boot_reset")
         let gate = FirstBootGate(bridge: agent)
         switch await gate.evaluate() {
         case .onboard(let turn):
+            if gate.status != "AWAITING_BENCH" && gate.status != "NOT_STARTED" {
+                await gate.loadModelChoices()
+                if !(await gate.startSelectedModel()) {
+                    NSLog("[Onboard] resume model failed: \(gate.setupError ?? "unknown")")
+                }
+            }
             FirstBootWindowController.show(gate: gate, turn: turn)
             NSLog("[Onboard] hybrid FirstBootWindow presented (status=\(gate.status))")
         case .proceed:
-            NSLog("[Onboard] first boot already complete after reset? unexpected")
+            // Explicit --onboard launches the transport in setup-only mode.
+            // A completed welcome still needs its saved runtime attached.
+            await gate.loadModelChoices()
+            if !(await gate.startSelectedModel()) {
+                NSLog("[Onboard] saved model failed: \(gate.setupError ?? "unknown")")
+            }
             ChatWindowController.show(agent: agent)
         case .unavailable(let reason):
             NSLog("[Onboard] first_boot unavailable: \(reason) — form fallback")

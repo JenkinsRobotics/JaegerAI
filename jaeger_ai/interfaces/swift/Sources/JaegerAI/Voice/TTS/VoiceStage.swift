@@ -4,8 +4,8 @@
 //
 //  Which voice is speaking, and when it is allowed to change.
 //
-//  OS 1's handoff works because the operator HEARS it. States 1 and 2 are
-//  a flat system installer; State 3 is their SI. If the persona voice
+//  OS 1's handoff works because the operator HEARS it. States 1 and 2 use
+//  a precise technical Kokoro voice; State 3 is their agent. If the agent voice
 //  arrives early — the moment they answer the voice question, say — the
 //  handoff line lands in a voice they have already been listening to and
 //  the transition is spent before it happens.
@@ -26,7 +26,7 @@ import Foundation
 
 /// Acoustic stage of the first-boot sequence.
 enum VoiceStage: String, Sendable, Equatable {
-    /// Neutral system baseline. Deliberately unremarkable.
+    /// Technical system guide, spoken by Kokoro with a fixed voice.
     case installer
     /// The initialized SI, calibrated to the operator's preference.
     case persona
@@ -35,32 +35,19 @@ enum VoiceStage: String, Sendable, Equatable {
 /// Resolves a stage (+ preference) to concrete synthesis settings.
 enum VoiceStageResolver {
 
-    /// Installer candidates, best first.
-    ///
-    /// Eloquence leads deliberately. It is Apple's old formant synthesiser
-    /// — unmistakably machine-like — which is exactly right for a system
-    /// installer and guarantees the State 3 swap to a natural voice is
-    /// heard as a change rather than inferred.
-    ///
-    /// It also solves a real problem on stock hardware: premium and
-    /// enhanced voices are downloadable and frequently absent, so an
-    /// installer pinned to compact Samantha resolves to the SAME voice the
-    /// female persona falls back to, and the handoff becomes silent-
-    /// identical. Eloquence ships with the OS, so the contrast survives a
-    /// machine with nothing else installed.
+    /// Natural Apple voices used only if the bundled Kokoro service is
+    /// unavailable. The normal installer path never reaches these.
     static let installerVoices = [
-        "com.apple.eloquence.en-US.Reed",
-        "com.apple.eloquence.en-US.Sandy",
-        "com.apple.voice.compact.en-US.Samantha",
+        "com.apple.voice.premium.en-GB.Daniel",
+        "com.apple.voice.enhanced.en-GB.Daniel",
+        "com.apple.voice.compact.en-GB.Daniel",
     ]
 
     static var installerVoiceIdentifier: String {
         firstInstalled(from: installerVoices) ?? installerVoices[installerVoices.count - 1]
     }
 
-    /// Slightly under the default. Reads as measured and machine-like,
-    /// and leaves headroom for the persona to sound more natural.
-    static let installerRate: Float = 0.48
+    static let installerRate: Float = AVSpeechUtteranceDefaultSpeechRate
 
     /// Preferred neural voices per profile, best first. Resolution walks
     /// the list and takes the first installed one — premium voices are
@@ -89,6 +76,11 @@ enum VoiceStageResolver {
 
     static let personaRate: Float = AVSpeechUtteranceDefaultSpeechRate
 
+    /// Kokoro uses a multiplier where 1.0 is the recorded pace. Keep this
+    /// separate from AVSpeechUtterance's unrelated 0...1 rate scale.
+    static let installerKokoroRate: Float = 1.10
+    static let personaKokoroRate: Float = 1.04
+
     /// Kokoro-82M voice packs, by profile.
     ///
     /// Kokoro is the persona's real voice: open-source, on-device, neural,
@@ -96,18 +88,23 @@ enum VoiceStageResolver {
     /// the weight of a cloning model. The Apple identifiers above are the
     /// FALLBACK for when the bridge daemon is unreachable, not the target.
     ///
-    /// Deliberately absent for `.installer`: States 1–2 must never reach
-    /// the neural engine. The installer is supposed to sound synthetic, and
-    /// routing it through Kokoro would erase the handoff entirely.
+    /// The setup guide and agent deliberately share Kokoro-82M. The audible
+    /// handoff comes from switching voice packs, not switching engines.
+    static let installerKokoroVoice = "am_adam"
     static let kokoroVoices: [String: String] = [
         "female": "af_heart",
         "male": "am_michael",
     ]
 
-    /// The Kokoro pack for a stage, or nil when Kokoro must not be used.
+    /// The Kokoro pack for a stage.
     static func kokoroVoice(for stage: VoiceStage, profile: String?) -> String? {
-        guard stage == .persona, let profile else { return nil }
-        return kokoroVoices[profile.lowercased()]
+        switch stage {
+        case .installer:
+            return installerKokoroVoice
+        case .persona:
+            guard let profile else { return nil }
+            return kokoroVoices[profile.lowercased()]
+        }
     }
 
     /// The voice identifier for a stage, or nil to let the synth fall back.
@@ -133,6 +130,10 @@ enum VoiceStageResolver {
         stage == .installer ? installerRate : personaRate
     }
 
+    static func kokoroRate(for stage: VoiceStage) -> Float {
+        stage == .installer ? installerKokoroRate : personaKokoroRate
+    }
+
     /// First identifier actually present on this machine.
     static func firstInstalled(from candidates: [String]) -> String? {
         for identifier in candidates
@@ -149,8 +150,8 @@ enum VoiceStageResolver {
     /// compact voice, and a dramatic silence before an identical voice is
     /// worse than no pause at all.
     static func isAudiblyDistinct(profile: String?) -> Bool {
-        let installer = voiceIdentifier(for: .installer, profile: profile)
-        let persona = voiceIdentifier(for: .persona, profile: profile)
+        let installer = kokoroVoice(for: .installer, profile: profile)
+        let persona = kokoroVoice(for: .persona, profile: profile)
         return installer != persona
     }
 }

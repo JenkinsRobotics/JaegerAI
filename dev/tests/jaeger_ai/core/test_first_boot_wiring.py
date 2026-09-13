@@ -67,6 +67,12 @@ def test_bridge_declares_the_first_boot_operations():
     assert "first_boot_complete" in BRIDGE_COMMANDS
 
 
+def test_bridge_declares_back_and_warmup_ops():
+    """v22: backwards navigation + TTS warmup are first-class ops."""
+    assert "first_boot_back" in BRIDGE_COMMANDS
+    assert "tts_warmup" in BRIDGE_COMMANDS
+
+
 def test_every_declared_op_has_a_handler():
     """Declared-but-unhandled is an unmounted route; catch it here."""
     import pathlib
@@ -188,6 +194,37 @@ def test_bridge_routes_the_social_probe_with_telemetry(tmp_path):
     signals = fb.snapshot(root)["social_signals"]
     assert signals["latency_ms"] == 2600
     assert signals["hesitance"]["value"] is True
+
+
+def test_bridge_preset_character_skips_the_custom_interview(tmp_path):
+    """A complete preset is the calibration; the bridge must preserve that fork."""
+    import json
+
+    from jaeger_ai.interfaces.bridge import _command, _query
+
+    root = tmp_path / "inst"
+    root.mkdir()
+    boot = type("B", (), {"layout": type("L", (), {"root": root})()})()
+    fb.begin(root)
+    fb.record_bench(root)
+
+    ok, error = _command(
+        "first_boot_answer",
+        {"question": "character", "reply": "preset:jarvis", "character_id": "jarvis"},
+        boot,
+    )
+
+    assert ok, error
+    state = _query("first_boot", {}, boot)
+    assert state["status"] == FirstBootStatus.INITIALIZING_PERSONA.value
+    assert state["character_path"] == "preset"
+    assert state["character_id"] == "jarvis"
+    assert state["turn"]["speaker"] == "persona"
+    assert "social or anti-social" not in state["turn"]["text"]
+    assert (root / "active_character").read_text(encoding="utf-8") == "jarvis"
+    assert json.loads((root / "manifest.json").read_text(encoding="utf-8"))[
+        "bound_character"
+    ] == "jarvis"
 
 
 def test_bridge_routes_the_hesitance_reply(tmp_path):

@@ -1325,13 +1325,17 @@ def _register_builtins(client: Any) -> None:
         """List Claude, Codex, Grok, Gemini, Hermes, OpenClaw and other
         external agent delegates, including live availability, locality and
         capability information used by Jaeger's routing guard."""
-        from jaeger_agent.delegates import get_delegate_registry
+        from jaeger_agent.delegates import (
+            get_delegate_registry,
+            register_builtin_delegates,
+        )
         from jaeger_agent.delegates.health import (
             DelegateHealthService,
             get_delegate_health_store,
         )
 
         async def _probe_all() -> list[dict[str, Any]]:
+            register_builtin_delegates()
             registry = get_delegate_registry()
             health = get_delegate_health_store()
             rows: list[dict[str, Any]] = []
@@ -1614,9 +1618,11 @@ def _delegate_external(
         DelegateExecutor,
         DelegateRequest,
         get_delegate_registry,
+        register_builtin_delegates,
     )
     from jaeger_agent.delegates.routing import DelegateRouter
 
+    register_builtin_delegates()
     registry = get_delegate_registry()
     try:
         estimated_cost = float(estimated_cost_usd)
@@ -2302,6 +2308,16 @@ def request_turn_cancel(session_key: str | None = None) -> None:
             agent.interrupt()
         except Exception:  # noqa: BLE001 — cancel must be best-effort
             pass
+    try:
+        from jaeger_os.contract import topics
+        from jaeger_os.nodes import runtime
+        runtime.get_bus().publish(topics.SpeechStop(
+            node_id="jaeger-ai-cancel",
+            correlation_id="",
+            reason="turn cancelled",
+        ))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ── memory: facts snapshot + background review ──────────────────────
@@ -4452,6 +4468,7 @@ def run_for_voice(
     display_text: str | None = None,
     model: str | None = None,
     provider: str | None = None,
+    local_only: bool = False,
 ) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
@@ -4463,21 +4480,26 @@ def run_for_voice(
     for the voice consumer to speak."""
     session = session_key or "voice"
     from jaeger_ai.core.models.session_selection import select_client
-    # Sensitivity gate: private → local gemma; public → cloud flash.
-    # Runs before any cloud-bound model selection.
-    try:
-        from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
-        s_model, s_provider, _decision = apply_sensitivity_routing(
-            user_text,
-            config=_pipeline.get("config"),
-            model=model,
-            provider=provider,
-        )
-        if _decision.classification == "private" or model:
-            model = s_model
-            provider = s_provider
-    except Exception:  # noqa: BLE001 — gate must never break a turn
-        pass
+    # The standalone voice daemon owns a local client and promises that no
+    # transcript leaves the machine. Other transports retain dynamic routing.
+    if local_only:
+        model = provider = None
+    else:
+        # Sensitivity gate: private → local gemma; public → selected lane.
+        # Runs before any cloud-bound model selection.
+        try:
+            from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
+            s_model, s_provider, _decision = apply_sensitivity_routing(
+                user_text,
+                config=_pipeline.get("config"),
+                model=model,
+                provider=provider,
+            )
+            if _decision.classification == "private" or model:
+                model = s_model
+                provider = s_provider
+        except Exception:  # noqa: BLE001 — gate must never break a turn
+            pass
     signature = (id(client), model or None, provider or None)
     cached = _session_model_clients.get(session)
     if cached is None or cached[0] != signature:

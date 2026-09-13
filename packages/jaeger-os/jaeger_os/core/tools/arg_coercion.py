@@ -33,6 +33,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Common parameter name aliases emitted by open-weight models (Gemma, Qwen, etc.)
+COMMON_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
+    "target": ("url", "uri", "link", "path", "site", "website"),
+    "query": ("q", "search_query", "text", "prompt", "term"),
+    "url": ("target", "uri", "link"),
+    "path": ("file_path", "filepath", "filename", "file"),
+    "command": ("cmd", "script"),
+    "expression": ("expr", "formula", "math"),
+    "location": ("city", "place", "loc"),
+}
+
 
 def coerce_args(args: Any, schema: dict[str, Any] | None) -> dict[str, Any]:
     """Coerce ``args`` toward the types declared in ``schema``.
@@ -59,6 +70,32 @@ def coerce_args(args: Any, schema: dict[str, Any] | None) -> dict[str, Any]:
         return args
 
     out = dict(args)  # don't mutate caller's dict — adapters reuse it
+
+    # Parameter alias resolution for local-model drift
+    for target_prop, aliases in COMMON_PARAM_ALIASES.items():
+        if target_prop in properties and target_prop not in out:
+            for alias in aliases:
+                if alias in out and alias not in properties:
+                    out[target_prop] = out.pop(alias)
+                    break
+
+    # Unkeyed single-value payload resolution (e.g. {"value": ...} or {"text": ...})
+    if len(out) == 1 and any(k in out for k in ("value", "text", "_raw_arguments")):
+        for unkeyed in ("value", "text", "_raw_arguments"):
+            if unkeyed in out and unkeyed not in properties:
+                unkeyed_val = out[unkeyed]
+                req = [r for r in (schema.get("required") or []) if r in properties]
+                if len(req) == 1 and req[0] not in out:
+                    out[req[0]] = unkeyed_val
+                    out.pop(unkeyed, None)
+                    break
+                elif len(properties) == 1:
+                    prop_name = next(iter(properties.keys()))
+                    if prop_name not in out:
+                        out[prop_name] = unkeyed_val
+                        out.pop(unkeyed, None)
+                        break
+
     for key, value in list(out.items()):
         prop_schema = properties.get(key)
         if not isinstance(prop_schema, dict):
