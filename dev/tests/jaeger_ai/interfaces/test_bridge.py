@@ -317,7 +317,11 @@ def test_integration_contract_is_versioned_and_self_describing():
     # sidebars that otherwise treat a mid-run cron session as completed.
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
     # v15 adds the Dispatcher projection over native facts and board memory.
-    assert contract["contract_version"] == 16
+    # v18 exposes the bundled OS utility for setup, diagnostics, and recovery.
+    assert contract["contract_version"] == 18
+    assert "system_utility_status" in contract["operations"]["queries"]
+    assert "system_utility" in contract["operations"]["queries"]
+    assert "onboarding_guide" in contract["operations"]["queries"]
     assert "background_messages" in contract["operations"]["queries"]
     assert "acknowledge_background" in contract["operations"]["commands"]
     assert 'dispatcher_memory' in contract['operations']['queries']
@@ -2177,3 +2181,53 @@ def test_protocol_bridge_does_not_mutate_default_permission_provider(monkeypatch
         assert permissions._DEFAULT_POLICY.confirmation is before
     finally:
         permissions._current_policy.reset(token)
+
+
+def test_setup_transport_emits_real_catalog_without_boot(monkeypatch, _instance_on_disk):
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
+    dump_yaml(_instance_on_disk / "config.yaml", Config(
+        instance_name="test-inst", model=ModelConfig(model_path="/models/custom.gguf")))
+    calls = []
+    monkeypatch.setattr(bridge, "_boot_agent", lambda *args: calls.append(args))
+    rc, frames, _ = _run(monkeypatch, '\n'.join([
+        json.dumps({"op": "query", "what": "onboarding_model_matrix", "id": "catalog"}),
+        json.dumps({"op": "quit"}), ""]), argv=["--setup"])
+    assert rc == 0
+    assert not calls
+    assert frames[0]["agent"] == "setup"
+    result = next(f for f in frames if f.get("id") == "catalog")
+    assert result["ok"], result
+    assert result["data"]["configured"]["primary_model"] == "/models/custom.gguf"
+    assert result["data"]["models"]
+    assert not any(f.get("type") == "agent_state" and f.get("state") == "ready" for f in frames)
+
+
+def test_setup_commits_to_existing_instance_before_any_boot(monkeypatch, _instance_on_disk):
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml, load_yaml
+    dump_yaml(_instance_on_disk / "config.yaml", Config(
+        instance_name="test-inst", model=ModelConfig(model_path="/models/original.gguf")))
+    identity = (_instance_on_disk / "identity.yaml").read_bytes()
+    calls = []
+    def selected_boot(proto, ctx, instance):
+        cfg = load_yaml(ctx.layout.config_path, Config)
+        calls.append((cfg.external_model.provider, cfg.external_model.model))
+        ctx.booted.set()
+    monkeypatch.setattr(bridge, "_boot_agent", selected_boot)
+    rc, frames, _ = _run(monkeypatch, '\n'.join([
+        json.dumps({"op": "command", "cmd": "complete_setup", "id": "save", "args": {
+            "awake_provider": "openai", "awake_model": "gpt-test"}}),
+        json.dumps({"op": "quit"}), ""]), argv=["--setup"])
+    assert rc == 0
+    assert calls == [("openai", "gpt-test")]
+    assert next(f for f in frames if f.get("id") == "save")["ok"]
+    assert (_instance_on_disk / "identity.yaml").read_bytes() == identity
+
+
+def test_incomplete_unconfirmed_instance_does_not_autoboot(monkeypatch, _instance_on_disk):
+    from jaeger_ai.core.instance.first_boot import begin
+    begin(_instance_on_disk)
+    calls = []
+    monkeypatch.setattr(bridge, "_boot_agent", lambda *args: calls.append(args))
+    _, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
+    assert frames[0]["agent"] == "setup"
+    assert not calls

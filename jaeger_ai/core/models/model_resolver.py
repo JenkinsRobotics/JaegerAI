@@ -52,6 +52,27 @@ from typing import Any
 #                  jaeger_os.main.switch_model when the robot enters
 #                  Deep Think; swapped back out on wake.
 MODEL_REGISTRY: dict[str, dict[str, Any]] = {
+    # ── OS utility tier (bundled with the native installer) ─────────
+    # This is OS 1's small, always-available intelligence.  It guides
+    # setup, explains diagnostics, and remains the offline recovery model
+    # when the operator's selected agent model cannot start.  Release
+    # bundles carry the pinned GGUF, so first launch never depends on
+    # Ollama, a provider key, or a network download.
+    "qwen3-1.7b-system-q4_k_m": {
+        "hf_repo": "bartowski/Qwen_Qwen3-1.7B-GGUF",
+        "hf_file": "Qwen_Qwen3-1.7B-Q4_K_M.gguf",
+        "sha256": "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb",
+        "size_gb": 1.28,
+        "ctx": 32768,
+        "role": "system",
+        "verified": True,
+        "license": "Apache-2.0",
+        "description": (
+            "Qwen3 1.7B, Q4_K_M. Bundled OS utility intelligence for "
+            "offline setup, model recovery, diagnostics, and concise "
+            "system help. It is not the operator's selected agent model."
+        ),
+    },
     # ── Light tier (real-time, tight hosts) ─────────────────────────
     # Snappy small awake model — the light/real-time default. Fastest
     # in the library (3m47s bench, 100% routing on the corpus 1.1
@@ -61,6 +82,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "hf_repo": "lmstudio-community/gemma-4-E4B-it-GGUF",
         "hf_file": "gemma-4-E4B-it-Q4_K_M.gguf",
         "size_gb": 5.3,
+        "ctx": 131072,
         "role": "realtime",
         "verified": True,
         "description": (
@@ -81,6 +103,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "hf_repo": "lmstudio-community/gemma-4-26B-A4B-it-GGUF",
         "hf_file": "gemma-4-26B-A4B-it-Q4_K_M.gguf",
         "size_gb": 15.7,
+        "ctx": 262144,
         "role": "deep_think",
         "verified": True,
         "description": (
@@ -101,6 +124,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "hf_repo": "lmstudio-community/gemma-4-26B-A4B-it-QAT-GGUF",
         "hf_file": "gemma-4-26B-A4B-it-QAT-Q4_0.gguf",
         "size_gb": 14.4,
+        "ctx": 262144,
         "role": "deep_think",
         "verified": True,
         "description": (
@@ -126,6 +150,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "hf_repo": "lmstudio-community/Qwen3-30B-A3B-GGUF",
         "hf_file": "Qwen3-30B-A3B-Q4_K_M.gguf",
         "size_gb": 17.3,
+        "ctx": 131072,
         "role": "deep_think",
         "verified": True,
         "description": (
@@ -147,6 +172,7 @@ MODEL_REGISTRY: dict[str, dict[str, Any]] = {
         "hf_repo": "lmstudio-community/gemma-4-12B-it-GGUF",
         "hf_file": "gemma-4-12B-it-Q4_K_M.gguf",
         "size_gb": 6.9,
+        "ctx": 131072,
         "role": "deep_think",
         "verified": True,
         "description": (
@@ -462,8 +488,8 @@ def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
         if result != target:
             shutil.move(str(result), str(target))
         return target
-    except ImportError:
-        pass  # fall through to urllib
+    except Exception:
+        pass  # fall through to direct HTTPS urllib fallback
 
     # Fallback: urllib. HF Hub's resolve endpoint is a plain HTTP GET.
     # ponytail: not resumable (urlretrieve restarts on failure); the HF path

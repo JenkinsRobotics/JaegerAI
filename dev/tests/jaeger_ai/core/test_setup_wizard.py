@@ -17,6 +17,17 @@ from jaeger_ai.core.instance import setup_wizard as W
 from jaeger_ai.core.instance.schemas import Config, InteractionConfig
 
 
+def test_model_matrix_distinguishes_ollama_cloud_from_local(monkeypatch):
+    """A configured ``provider: ollama`` model keeps its discovered lane."""
+    models = [
+        {"id": "glm-test:cloud", "provider": "ollama-cloud"},
+        {"id": "gemma-test", "provider": "ollama-local"},
+    ]
+    assert W._configured_provider_lane("ollama", "glm-test:cloud", models) == "ollama-cloud"
+    assert W._configured_provider_lane("ollama", "gemma-test", models) == "ollama-local"
+    assert W._configured_provider_lane("anthropic", "claude", models) == "anthropic"
+
+
 # ── WIZ-2: role truncation + SOUL.md overflow ───────────────────────
 
 
@@ -353,3 +364,35 @@ def test_create_instance_blank_name_and_display_name_falls_back_to_jaeger(
 # which doesn't chain into ``tui_main`` so there's no argparse
 # collision to defend against. The original WIZ-1 tests pinned the
 # strip-from-sys.argv defence; they're deleted with the flag.
+
+
+def test_new_onboarding_identity_reaches_welcome_and_preserves_provider(tmp_path, monkeypatch):
+    from jaeger_ai.core.instance.schemas import Config, load_yaml
+    from jaeger_ai.main import _ensure_first_boot_state
+    from jaeger_ai.interfaces.bridge import _query, _command
+    from types import SimpleNamespace
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+    monkeypatch.setattr("jaeger_ai.core.models.configuration._ollama_base_url",
+                        lambda: "http://model-host:11434/v1")
+    layout = W.create_instance(character_id="assistant", name="initiation-test",
+                               awake_model="gemini-test:cloud", awake_provider="ollama-local")
+    cfg = load_yaml(layout.config_path, Config)
+    assert cfg.external_model.provider == "ollama"
+    assert cfg.external_model.model == "gemini-test:cloud"
+    assert cfg.external_model.base_url == "http://model-host:11434/v1"
+    assert not cfg.external_model.fallback  # asleep weights aren't API fallbacks
+    _ensure_first_boot_state(layout)
+    boot = SimpleNamespace(layout=layout)
+    state = _query("first_boot", {}, boot)
+    assert state["status"] == "AWAITING_SOCIAL"
+    assert "Are you social or anti-social?" in state["turn"]["text"]
+    for question, reply in [("social", "social"), ("voice", "female"), ("q2", "prefer not")]:
+        ok, error = _command("first_boot_answer", {"question": question, "reply": reply}, boot)
+        assert ok, error
+    state = _query("first_boot", {}, boot)
+    assert state["turn"]["speaker"] == "persona"
+    assert "Hello, I'm here." in state["turn"]["text"]
+    assert state["complete"] is False
+    assert layout.root.is_relative_to(tmp_path)

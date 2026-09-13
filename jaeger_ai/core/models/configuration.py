@@ -35,6 +35,9 @@ _CREDENTIALS = {
 
 
 def _local_model(model: str) -> tuple[str, str]:
+    from jaeger_ai.core.models.model_resolver import MODEL_REGISTRY
+    if model in MODEL_REGISTRY:
+        return model, "llama_cpp_python"
     from jaeger_ai.core.models.model_discovery import discover_local_gguf, discover_local_mlx
 
     for row in discover_local_gguf():
@@ -111,6 +114,29 @@ def configure_model(
     context_length: Any = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    current = load_yaml(layout.config_path, Config)
+    validated, selected_provider, selected_model = selected_model_config(
+        current, provider=provider, model=model, base_url=base_url,
+        context_length=context_length)
+    changed = validated != current
+    if changed and not dry_run:
+        dump_yaml(layout.config_path, validated)
+    return {
+        "ok": True,
+        "owner": "jaeger",
+        "provider": selected_provider,
+        "model": selected_model,
+        "changed": changed,
+        "restart_required": changed,
+        "dry_run": bool(dry_run),
+    }
+
+
+def selected_model_config(
+    current: Config, *, provider: Any, model: Any,
+    base_url: Any = None, context_length: Any = None,
+) -> tuple[Config, str, str]:
+    """Validate a model selection without writing or touching a live client."""
     selected_provider = str(provider or "").strip().lower()
     selected_model = str(model or "").strip()
     if not selected_model:
@@ -133,7 +159,6 @@ def configure_model(
     if selected_provider not in {"local", *_BASE_URLS}:
         raise ValueError(f"unsupported Jaeger provider: {selected_provider!r}")
 
-    current = load_yaml(layout.config_path, Config)
     updated = current.model_copy(deep=True)
     if selected_provider == "local":
         path, backend = _local_model(selected_model)
@@ -182,19 +207,7 @@ def configure_model(
             except Exception:  # noqa: BLE001 — best-effort; config still writes
                 pass
 
-    validated = Config.model_validate(updated.model_dump())
-    changed = validated != current
-    if changed and not dry_run:
-        dump_yaml(layout.config_path, validated)
-    return {
-        "ok": True,
-        "owner": "jaeger",
-        "provider": selected_provider,
-        "model": selected_model,
-        "changed": changed,
-        "restart_required": changed,
-        "dry_run": bool(dry_run),
-    }
+    return Config.model_validate(updated.model_dump()), selected_provider, selected_model
 
 
 def configure_fallback_chain(
@@ -285,3 +298,40 @@ def dead_brain_reason(reason: str) -> bool:
 
 
 __all__ = ["configure_model", "configure_fallback_chain", "dead_brain_reason"]
+
+
+def update_configured_stack(layout: Any, args: dict[str, Any]) -> dict[str, Any]:
+    """Validate all onboarding changes, then write one runtime configuration."""
+    from jaeger_ai.core.instance.schemas import FallbackModel
+    current = load_yaml(layout.config_path, Config)
+    updated = current.model_copy(deep=True)
+    if args.get("primary_model"):
+        updated, _, _ = selected_model_config(
+            updated, provider=args.get("primary_provider"),
+            model=args["primary_model"], base_url=args.get("primary_endpoint"))
+    if "fallback_model" in args:
+        model = str(args["fallback_model"] or "").strip()
+        if model:
+            fallback, provider, model = selected_model_config(
+                updated, provider=args.get("fallback_provider"), model=model,
+                base_url=args.get("fallback_endpoint"))
+            if provider == "local":
+                raise ValueError("Choose an external fallback; local models belong in the asleep role")
+            updated.external_model.fallback = [FallbackModel(
+                provider=provider, model=model, base_url=fallback.external_model.base_url)]
+        else:
+            updated.external_model.fallback = []
+    for key, section, field in (
+        ("coder_model", "deep_think", "coder_model"),
+        ("tts_voice", "kokoro_tts", "voice"),
+        ("stt_fast_model", "whisper_stt", "fast_model_name"),
+        ("stt_accurate_model", "whisper_stt", "accurate_model_name"),
+    ):
+        if args.get(key):
+            setattr(getattr(updated, section), field, str(args[key]).strip())
+    updated = Config.model_validate(updated.model_dump())
+    changed = updated != current
+    if changed:
+        dump_yaml(layout.config_path, updated)
+    return {"saved": True, "changed": changed, "restart_required": changed,
+            "instance": layout.root.name}

@@ -941,6 +941,385 @@ def setup_defaults() -> dict:
     }
 
 
+def _configured_provider_lane(
+    provider: str, model_id: str, models: list[dict],
+) -> str:
+    """Map a stored provider name onto the catalog lane that owns its model."""
+    if provider != "ollama":
+        return provider
+    matching_providers = {m["provider"] for m in models if m["id"] == model_id}
+    return "ollama-cloud" if "ollama-cloud" in matching_providers else "ollama-local"
+
+
+def onboarding_model_matrix(layout: InstanceLayout | None = None) -> dict:
+    """Complete provider and model matrix for first-run onboarding."""
+    from jaeger_ai.core.models.discovery import discover_ollama
+    from jaeger_ai.core.models.host_recommendation import (
+        classify_tier,
+        detect_total_memory_gb,
+        recommend_for_tier,
+    )
+    from jaeger_ai.core.models.model_resolver import (
+        MODEL_REGISTRY,
+        _resolve_provider_key,
+    )
+
+    detected_gb = detect_total_memory_gb()
+    rec = recommend_for_tier(classify_tier(detected_gb))
+
+    ollama_res = discover_ollama()
+    ollama_online = bool(ollama_res.get("online"))
+    ollama_models = ollama_res.get("models") or []
+
+    anthropic_key = _resolve_provider_key("anthropic")
+    openai_key = _resolve_provider_key("openai")
+    gemini_key = _resolve_provider_key("gemini")
+    xai_key = _resolve_provider_key("xai")
+    ollama_cloud_key = _resolve_provider_key("ollama-cloud")
+
+    providers = [
+        {
+            "id": "ollama-local",
+            "name": "Ollama (Local)",
+            "kind": "local",
+            "status": "connected" if ollama_online else "offline",
+            "endpoint": str(ollama_res.get("endpoint") or "http://localhost:11434"),
+            "requires_key": False,
+            "env_var": "OLLAMA_HOST",
+            "description": "Local neural server running on this Mac",
+        },
+        {
+            "id": "in-process",
+            "name": "Local GGUF / MLX",
+            "kind": "local",
+            "status": "available",
+            "endpoint": "Apple Silicon Unified Memory",
+            "requires_key": False,
+            "env_var": "",
+            "description": "In-process native execution via Metal acceleration",
+        },
+        {
+            "id": "ollama-cloud",
+            "name": "Ollama Cloud",
+            "kind": "cloud",
+            "status": "connected" if (ollama_online or ollama_cloud_key) else "offline",
+            "endpoint": "https://ollama.com",
+            "requires_key": False,
+            "env_var": "OLLAMA_API_KEY",
+            "description": "Cloud frontier models through Ollama",
+        },
+        {
+            "id": "anthropic",
+            "name": "Anthropic",
+            "kind": "cloud",
+            "status": "configured" if anthropic_key else "needs_key",
+            "endpoint": "https://api.anthropic.com",
+            "requires_key": True,
+            "env_var": "ANTHROPIC_API_KEY",
+            "description": "Claude 3.5 Sonnet, Haiku, Opus",
+        },
+        {
+            "id": "openai",
+            "name": "OpenAI",
+            "kind": "cloud",
+            "status": "configured" if openai_key else "needs_key",
+            "endpoint": "https://api.openai.com",
+            "requires_key": True,
+            "env_var": "OPENAI_API_KEY",
+            "description": "GPT-4o, GPT-4o-mini, o1, o3-mini",
+        },
+        {
+            "id": "gemini",
+            "name": "Google Gemini",
+            "kind": "cloud",
+            "status": "configured" if gemini_key else "needs_key",
+            "endpoint": "https://generativelanguage.googleapis.com",
+            "requires_key": True,
+            "env_var": "GEMINI_API_KEY",
+            "description": "Gemini 2.5 Pro, Flash (1M+ context)",
+        },
+        {
+            "id": "xai",
+            "name": "xAI Grok",
+            "kind": "cloud",
+            "status": "configured" if xai_key else "needs_key",
+            "endpoint": "https://api.x.ai",
+            "requires_key": True,
+            "env_var": "XAI_API_KEY",
+            "description": "Grok 2 real-time frontier reasoning",
+        },
+    ]
+
+    models: list[dict] = []
+    rec_awake_key = rec.awake.registry_key
+    rec_asleep_key = rec.asleep.registry_key
+
+    def _probe_ollama_ctx(endpoint: str, model_name: str) -> int:
+        import urllib.request
+        try:
+            url = endpoint.rstrip("/") + "/api/show"
+            req = urllib.request.Request(
+                url,
+                data=json.dumps({"name": model_name}).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=0.8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                for k, v in (data.get("model_info") or {}).items():
+                    if "context_length" in k and isinstance(v, int) and v > 0:
+                        return v
+        except Exception:
+            pass
+        low = model_name.lower()
+        if "gemini" in low or "glm" in low:
+            return 1048576
+        if "26b" in low or "35b" in low or "31b" in low or "mlx" in low:
+            return 262144
+        if "gemma" in low or "qwen3" in low:
+            return 131072
+        return 32768
+
+    for key, info in MODEL_REGISTRY.items():
+        # The bundled OS utility model is infrastructure, not the identity's
+        # primary/fallback intelligence. Surface it through
+        # system_utility_status, not as a misleading agent-model choice.
+        if info.get("role") == "system":
+            continue
+        is_awake = (key == rec_awake_key)
+        is_asleep = (key == rec_asleep_key)
+        ctx_len = info.get("ctx") or 131072
+        models.append({
+            "id": key,
+            "name": info.get("hf_file", key).replace(".gguf", ""),
+            "provider": "in-process",
+            "provider_label": "Local GGUF",
+            "location": "local",
+            "size_gb": info.get("size_gb"),
+            "context_length": ctx_len,
+            "role": info.get("role", "general"),
+            "speed": "Real-Time (<200ms)" if info.get("role") == "realtime" else "Deep Reasoning",
+            "description": info.get("description", ""),
+            "is_recommended_primary": is_awake,
+            "is_recommended_fallback": is_asleep,
+            "is_chat_model": True,
+        })
+
+    ollama_ep = str(ollama_res.get("endpoint") or "http://localhost:11434")
+
+    for m in ollama_models:
+        name = m.get("name", "")
+        if not name:
+            continue
+        caps = m.get("capabilities", [])
+        remote = bool(m.get("remote_host") or m.get("remote_model")) or name.endswith(":cloud") or name.endswith("-cloud")
+        role = "general"
+        if "embedding" in caps:
+            role = "embedding"
+        elif "vision" in caps and not ("completion" in caps or "chat" in caps or "tools" in caps):
+            role = "vision"
+        elif "thinking" in caps:
+            role = "deep_think"
+        elif remote:
+            role = "general"
+        elif (m.get("size_gb") or 0) > 15:
+            role = "deep_think"
+        else:
+            role = "realtime"
+
+        ctx_len = _probe_ollama_ctx(ollama_ep, name)
+        is_chat = (role != "embedding")
+
+        if remote:
+            models.append({
+                "id": name,
+                "name": name,
+                "provider": "ollama-cloud",
+                "provider_label": "Ollama Cloud",
+                "location": "cloud",
+                "size_gb": None,
+                "context_length": ctx_len,
+                "role": role,
+                "speed": f"Fast Cloud ({ctx_len // 1024}K ctx)",
+                "description": f"Ollama Cloud model ({', '.join(caps) or 'cloud'}). Native context: {ctx_len:,} tokens.",
+                "is_recommended_primary": False,
+                "is_recommended_fallback": False,
+                "is_chat_model": is_chat,
+            })
+        else:
+            size = m.get("size_gb")
+            models.append({
+                "id": name,
+                "name": name,
+                "provider": "ollama-local",
+                "provider_label": "Ollama (Local)",
+                "location": "local",
+                "size_gb": size,
+                "context_length": ctx_len,
+                "role": role,
+                "speed": "Local Metal Acceleration",
+                "description": f"Installed in local Ollama daemon ({size or '?'} GB). Capabilities: {', '.join(caps) or 'chat'}. Native context: {ctx_len:,} tokens.",
+                "is_recommended_primary": False,
+                "is_recommended_fallback": False,
+                "is_chat_model": is_chat,
+            })
+
+    cloud_curated_specs = [
+        ("claude-3-5-sonnet-latest", "Claude 3.5 Sonnet", "anthropic", "Anthropic", 200000, "deep_think", "Fast & Intelligent", "Frontier reasoning, state-of-the-art coding and agentic tool execution."),
+        ("claude-3-5-haiku-latest", "Claude 3.5 Haiku", "anthropic", "Anthropic", 200000, "realtime", "Ultra-Fast (<150ms)", "High-speed conversational turns with exceptional responsiveness and tool use."),
+        ("claude-3-opus-latest", "Claude 3 Opus", "anthropic", "Anthropic", 200000, "deep_think", "Deep Reasoning", "Complex deep analysis, long-form synthesis, and deep research."),
+        ("gpt-4o", "GPT-4o", "openai", "OpenAI", 128000, "general", "Fast (<250ms)", "Flagship multimodal intelligence, balanced high speed and reasoning."),
+        ("gpt-4o-mini", "GPT-4o mini", "openai", "OpenAI", 128000, "realtime", "Ultra-Fast (<150ms)", "Fast, lightweight, low-latency companion model for continuous turns."),
+        ("o1", "o1 (Reasoning)", "openai", "OpenAI", 200000, "deep_think", "Deep Reasoning", "Advanced STEM, algorithmic and multi-step reasoning with thinking tokens."),
+        ("o3-mini", "o3-mini", "openai", "OpenAI", 200000, "deep_think", "Fast Reasoning", "High-throughput STEM and coding reasoning model."),
+        ("gemini-2.5-pro", "Gemini 2.5 Pro", "gemini", "Google Gemini", 1048576, "deep_think", "Deep Reasoning", "Massive 1M+ context window with leading multimodal understanding and coding."),
+        ("gemini-2.5-flash", "Gemini 2.5 Flash", "gemini", "Google Gemini", 1048576, "realtime", "Ultra-Fast (<150ms)", "High throughput, lightweight, low-latency turns with 1M context."),
+        ("gemini-2.0-flash", "Gemini 2.0 Flash", "gemini", "Google Gemini", 1048576, "realtime", "Ultra-Fast (<150ms)", "Next-generation fast multimodal foundation model."),
+        ("grok-2-latest", "Grok 2", "xai", "xAI Grok", 131072, "deep_think", "Fast (<300ms)", "State-of-the-art reasoning with real-time knowledge and tool use."),
+        ("grok-beta", "Grok Beta", "xai", "xAI Grok", 131072, "general", "Fast (<250ms)", "Direct, unfiltered analytical intelligence."),
+    ]
+
+    for model_id, name, prov_id, prov_label, ctx, role, speed, desc in cloud_curated_specs:
+        models.append({
+            "id": model_id,
+            "name": name,
+            "provider": prov_id,
+            "provider_label": prov_label,
+            "location": "cloud",
+            "size_gb": None,
+            "context_length": ctx,
+            "role": role,
+            "speed": speed,
+            "description": desc,
+            "is_recommended_primary": False,
+            "is_recommended_fallback": False,
+            "is_chat_model": True,
+        })
+
+    # Read live configured stack from active instance
+    configured_stack = None
+    try:
+        from jaeger_ai.core.instance.instance import read_active_instance, resolve_instance_dir
+        from jaeger_ai.core.instance.schemas import load_yaml, Config
+        active_name = layout.root.name if layout is not None else (read_active_instance() or "jaeger")
+        active_dir = layout.root if layout is not None else resolve_instance_dir(active_name)
+        active_cfg_path = active_dir / "config.yaml"
+        if active_cfg_path.is_file():
+            cfg = load_yaml(active_cfg_path, Config)
+            primary_model = cfg.external_model.model if (cfg.external_model and cfg.external_model.enabled and cfg.external_model.model) else (cfg.model.model_path or "")
+            primary_model = str(primary_model)
+            primary_provider = cfg.external_model.provider if (cfg.external_model and cfg.external_model.enabled) else "in-process"
+            primary_endpoint = cfg.external_model.base_url if (cfg.external_model and cfg.external_model.enabled) else "Local Engine"
+            fallback_model = ""
+            fallback_provider = ""
+            if cfg.external_model and cfg.external_model.fallback:
+                fb = cfg.external_model.fallback[0]
+                fallback_model = getattr(fb, "model", "")
+                fallback_provider = getattr(fb, "provider", "")
+
+            coder_model = str(cfg.deep_think.coder_model or "") if cfg.deep_think else ""
+            tts_engine = cfg.voice.speech_engine if cfg.voice else "kokoro"
+            tts_voice = cfg.kokoro_tts.voice if cfg.kokoro_tts else "af_heart"
+            tts_lang = cfg.kokoro_tts.lang if cfg.kokoro_tts else "a"
+            stt_engine = "whisper_stt"
+            stt_mode = cfg.whisper_stt.stt_mode if cfg.whisper_stt else "two_pass"
+            stt_fast = cfg.whisper_stt.fast_model_name if cfg.whisper_stt else "base.en"
+            stt_accurate = cfg.whisper_stt.accurate_model_name if cfg.whisper_stt else "medium.en"
+            voice_enabled = bool(cfg.voice and cfg.voice.enabled)
+
+            # Vision & Embedding models from discovered Ollama models
+            vision_model = next((m.get("name") for m in ollama_models if "vision" in m.get("capabilities", [])), "minicpm-v:latest")
+            embedding_model = next((m.get("name") for m in ollama_models if "embedding" in m.get("capabilities", [])), "mxbai-embed-large:latest")
+
+            configured_stack = {
+                "instance_name": active_name,
+                "primary_model": primary_model,
+                "primary_provider": primary_provider,
+                "primary_endpoint": primary_endpoint,
+                "fallback_model": fallback_model,
+                "fallback_provider": fallback_provider,
+                "coder_model": coder_model,
+                "tts_engine": tts_engine,
+                "tts_voice": tts_voice,
+                "tts_lang": tts_lang,
+                "stt_engine": stt_engine,
+                "stt_mode": stt_mode,
+                "stt_fast_model": stt_fast,
+                "stt_accurate_model": stt_accurate,
+                "vision_model": vision_model,
+                "embedding_model": embedding_model,
+                "voice_enabled": voice_enabled,
+            }
+    except Exception:
+        pass
+
+    if configured_stack:
+        # Ollama is both a local server and a gateway to hosted models.
+        # Resolve the provider from discovery rather than labeling every
+        # Ollama-backed selection as local.
+        configured_provider = _configured_provider_lane(
+            configured_stack["primary_provider"],
+            configured_stack["primary_model"],
+            models,
+        )
+        configured_stack["primary_provider"] = configured_provider
+        if not any(m["id"] == configured_stack["primary_model"] and
+                   m["provider"] == configured_provider for m in models):
+            models.append({
+                "id": configured_stack["primary_model"],
+                "name": configured_stack["primary_model"],
+                "provider": configured_provider,
+                "provider_label": configured_provider,
+                "location": "local" if configured_provider in {"in-process", "ollama-local"} else "cloud",
+                "size_gb": None, "context_length": None, "role": "general",
+                "speed": "", "description": "Currently configured model",
+                "is_recommended_primary": False, "is_recommended_fallback": False,
+                "is_chat_model": True,
+            })
+
+    # Mark configured state on discovered models
+    for m in models:
+        m["is_configured"] = bool(configured_stack and (
+            m["id"] == configured_stack.get("primary_model") or
+            m["id"] == configured_stack.get("fallback_model") or
+            m["id"] == configured_stack.get("coder_model")
+        ))
+
+    available_tts_voices = [
+        {"id": "af_heart", "label": "Heart (American Warm Female)"},
+        {"id": "af_bella", "label": "Bella (American Soft Female)"},
+        {"id": "af_nicole", "label": "Nicole (American Whisper Female)"},
+        {"id": "af_sky", "label": "Sky (American Clear Female)"},
+        {"id": "am_adam", "label": "Adam (American Deep Male)"},
+        {"id": "am_michael", "label": "Michael (American Crisp Male)"},
+        {"id": "bm_george", "label": "George (British Neutral Male)"},
+        {"id": "bm_lewis", "label": "Lewis (British Resonant Male)"},
+    ]
+
+    available_stt_models = [
+        {"id": "tiny.en", "label": "Whisper Tiny (Ultra-Fast Wake)"},
+        {"id": "base.en", "label": "Whisper Base (Fast & Balanced)"},
+        {"id": "small.en", "label": "Whisper Small (Enhanced Accuracy)"},
+        {"id": "medium.en", "label": "Whisper Medium (High Accuracy)"},
+        {"id": "large-v3-turbo", "label": "Whisper Large Turbo (Max Accuracy)"},
+    ]
+
+    return {
+        "host_memory_gb": round(float(detected_gb), 1),
+        "tier_label": rec.tier_label,
+        "tier_description": rec.description,
+        # These keys describe the host recommendation. The active selection
+        # is carried separately in ``configured``; conflating the two made
+        # clients display contradictory recommendations.
+        "recommended_primary_key": rec_awake_key,
+        "recommended_fallback_key": rec_asleep_key,
+        "providers": providers,
+        "models": models,
+        "configured": configured_stack,
+        "available_tts_voices": available_tts_voices,
+        "available_stt_models": available_stt_models,
+    }
+
+
 def create_instance(
     *,
     character_id: str,
@@ -952,11 +1331,13 @@ def create_instance(
     personality: str | None = None,
     voice_id: str | None = None,
     awake_model: str | None = None,
+    awake_provider: str | None = None,
     asleep_model: str | None = None,
     permission_mode: str = "confirm",
     interaction_mode: str = "gui",
     voice_enabled: bool = False,
     make_default: bool = True,
+    overwrite: bool = False,
 ) -> InstanceLayout:
     """Create a complete instance non-interactively — THE single write
     path for first-run setup. ``run_wizard`` collects answers in the
@@ -967,8 +1348,7 @@ def create_instance(
     tier recommendation.
 
     Raises ``LookupError`` for an unknown character and
-    ``FileExistsError`` when the target instance already exists (the
-    caller decides about backups — this function never destroys)."""
+    ``FileExistsError`` when the target instance already exists and overwrite is False."""
     shim = _character_shim(character_id)
     # Never-empty guarantee: an explicit display_name wins, else the
     # character's, else the hard-coded "Jaeger" — a malformed character
@@ -984,10 +1364,14 @@ def create_instance(
     voice_id = (voice_id or "").strip() or shim.voice_id or _VOICES[0][0]
     name = (name or "").strip() or _slug(display_name)
 
+    from jaeger_ai.core.instance.instance import backup_instance_dir
     layout = InstanceLayout(root=resolve_instance_dir(name))
     if layout.exists():
-        raise FileExistsError(
-            f"instance {name!r} already exists at {layout.root}")
+        if overwrite:
+            backup_instance_dir(layout)
+        else:
+            raise FileExistsError(
+                f"instance {name!r} already exists at {layout.root}")
 
     # Models: fall back to the host-tier recommendation; when a chosen
     # registry key already exists on disk (LM Studio, HF cache, …),
@@ -1001,6 +1385,7 @@ def create_instance(
     )
     from jaeger_ai.core.models.model_resolver import (
         ensure_symlink_in_repo_models,
+        MODEL_REGISTRY,
     )
     rec = recommend_for_tier(classify_tier(detect_total_memory_gb()))
     awake_model = (awake_model or "").strip() or rec.awake.registry_key
@@ -1016,14 +1401,15 @@ def create_instance(
         voice_tone=shim.voice_tone or "clear, even-keeled",
         voice_id=voice_id,
     )
-    # WIZ-5: ctx default raised 16384 → 32768 — the 0.1.0 default plus
-    # the full tool surface guaranteed a ContextOverflow on message #1.
-    # Warm-up policy is fixed (TTS+STT on, heavy vision opt-in via
-    # config.yaml) — same as the wizard's Step 5.
     from jaeger_ai.core.instance.schemas import DeepThinkConfig, VoiceConfig
+
+    is_in_process = awake_model in MODEL_REGISTRY or awake_model.endswith(".gguf")
+    # Native capacity is not an allocation budget: keep first boot at 32K.
+    awake_ctx = min(MODEL_REGISTRY.get(awake_model, {}).get("ctx") or 32768, 32768)
+
     config = Config(
         instance_name=name,
-        model=ModelConfig(model_path=awake_model, ctx=32768, gpu_layers=-1),
+        model=ModelConfig(model_path=awake_model, ctx=awake_ctx, gpu_layers=-1),
         display=DisplayConfig(),
         skills=SkillsConfig(),
         retention=RetentionConfig(),
@@ -1035,6 +1421,28 @@ def create_instance(
         interaction=InteractionConfig(default_mode=interaction_mode),
         voice=VoiceConfig(enabled=voice_enabled),
     )
+
+    # The selected provider is part of the model identity. Never infer a
+    # vendor from an Ollama tag (e.g. gemini/claude cloud models).
+    from jaeger_ai.core.models.configuration import selected_model_config
+    provider = (awake_provider or "").strip()
+    if not provider:
+        if is_in_process:
+            provider = "local"
+        elif ":" in awake_model or awake_model.endswith("-cloud"):
+            provider = "ollama"
+        elif awake_model.startswith("claude"):
+            provider = "anthropic"
+        elif awake_model.startswith(("gpt", "o1", "o3")):
+            provider = "openai"
+        elif awake_model.startswith("gemini"):
+            provider = "gemini"
+        elif awake_model.startswith("grok"):
+            provider = "xai"
+        else:
+            provider = "ollama"
+    config, _, _ = selected_model_config(config, provider=provider, model=awake_model)
+    # The asleep model is a background role, not an external failover target.
     manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION,
                         bound_character=character_id)
 
@@ -1043,6 +1451,11 @@ def create_instance(
     dump_yaml(layout.identity_path, identity)
     dump_yaml(layout.config_path, config)
     dump_json(layout.manifest_path, manifest)
+    # Mark new identities before migration can mistake identity.yaml for
+    # evidence that this operator has already completed the welcome.
+    from jaeger_ai.core.instance.first_boot import begin, record_model_selection
+    begin(layout)
+    record_model_selection(layout, provider, awake_model)
     # Characters are the persona — wire the instance to the chosen one
     # so the running agent plays it (identity / soul / traits / voice).
     from jaeger_ai.personality.character import set_active_character
