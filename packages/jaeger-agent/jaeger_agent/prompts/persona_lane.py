@@ -222,9 +222,18 @@ COMPOSE_RULES = (
     "VERBATIM — change only tone and phrasing. Keep every piece of "
     "information from the result; dropping content is failure. Never "
     "mention a tool, a delegation, or 'perform_task' — just answer as "
-    "yourself. Plain terminal text: no markdown emphasis.\n\n"
+    "yourself. Do not add questions, new claims, or commentary. "
+    "Keep a brief answer brief. Plain terminal text: no markdown emphasis.\n\n"
     "RESULT:\n"
 )
+
+
+def wants_verbatim_output(request: str) -> bool:
+    """An explicit output-format constraint takes precedence over restyling."""
+    return bool(re.search(
+        r"\b(?:reply|respond|answer|return|output|say)\b[^\n.]{0,80}\b(?:exactly|only)\b"
+        r"|\bnothing else\b|\bverbatim\b", request, flags=re.IGNORECASE,
+    ))
 
 # History budget (design: "last ~6 user/assistant pairs, char-budget them
 # — aux_ctx 4096; the persona system prompt + character block already eat
@@ -388,9 +397,8 @@ def _messaging_channel_status(channel: str, layout: Any) -> str:
     if not has_credential:
         return "✗ (needs token)"
     try:
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
-        cfg = load_yaml(layout.config_path, Config)
-        autostart = {n.strip().lower() for n in (cfg.plugins.autostart or [])}
+        from jaeger_agent.core.instance import plugin_autostart
+        autostart = plugin_autostart(layout)
     except Exception:  # noqa: BLE001 — self-model is best-effort
         autostart = set()
     return "✓ active" if channel in autostart else "✓ available"
@@ -407,7 +415,7 @@ def _messaging_configured_state() -> str | None:
     if not channels:
         return None
     try:
-        from jaeger_agent.workspace import get_layout
+        from jaeger_agent.core.workspace import get_layout
         layout = get_layout()
     except Exception:  # noqa: BLE001 — no bound instance yet
         layout = None
@@ -521,11 +529,20 @@ def _budget_history(
     tool results are the clean agent's business, never the id's), the
     last ``max_pairs`` pairs, then the oldest of those dropped until the
     total fits ``max_chars``. Order preserved (oldest first)."""
-    turns = [
-        {"role": m.get("role"), "content": (m.get("content") or "").strip()}
-        for m in history
-        if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
-    ]
+    turns = []
+    for message in history:
+        if message.get("role") not in ("user", "assistant"):
+            continue
+        content = message.get("content") or ""
+        if isinstance(content, list):
+            # The auxiliary persona context is text-only. Keep captions here;
+            # the authoritative worker transcript retains every image block.
+            content = "\n".join(
+                str(part.get("text") or "") for part in content
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+        if isinstance(content, str) and content.strip():
+            turns.append({"role": message["role"], "content": content.strip()})
     turns = turns[-(max_pairs * 2):]
     total = sum(len(t["content"]) for t in turns)
     while turns and total > max_chars:
@@ -626,6 +643,8 @@ def run_persona_turn(
     agent_name: str,
     history: list[dict[str, Any]],
     perform_task: Callable[[str], str],
+    system_prompt_addon: str = "",
+    requires_grounding: bool = False,
 ) -> str | None:
     """Drive one Mode-C turn on the aux lane. See the module docstring for
     the id/ego framing and the None-only-before-delegation contract.
@@ -642,10 +661,18 @@ def run_persona_turn(
     if not text or not block:
         return None
 
+    from jaeger_agent.core.cancellation import current_cancellation
+    from jaeger_agent.core.outputs import split_output_directive
+
+    cancel = current_cancellation()
+    if cancel is not None and cancel.is_set():
+        return ""
     system = (
         block + "\n\n" + self_model_block() + "\n\n"
         + LANE_CONTRACT + "\n\n" + LANE_TOOLS_BLOCK
     )
+    if system_prompt_addon:
+        system += "\n\n" + system_prompt_addon
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     messages.extend(
         {"role": t["role"], "content": t["content"]}
@@ -661,16 +688,17 @@ def run_persona_turn(
         # an unparseable malformed emission for this exact model
         # (20260710 gate). Native tool_calls stays a bonus path in
         # _decide in case a future client populates it anyway.
-        first = client.chat(
-            messages,
-            max_tokens=400,
-            temperature=0.4,
-            top_p=0.9,
+        first = None if requires_grounding else client.chat(
+            messages, max_tokens=400, temperature=0.4, top_p=0.9,
         )
     except Exception:  # noqa: BLE001 — the id is optional, the turn is not
         return None
 
-    args = _decide(first)
+    if cancel is not None and cancel.is_set():
+        return ""
+    # Media and engine-routed turns must reach the worker that owns perception,
+    # tools and the output directive before the persona composes its voice.
+    args = {"request": text} if requires_grounding else _decide(first)
     if args is None:
         # Tool-free: the id answered itself. No content-survival guard —
         # there is nothing upstream to preserve; this text IS the answer.
@@ -693,6 +721,11 @@ def run_persona_turn(
     # From here on the turn HAS run — every path below returns a string,
     # never None (see the module docstring's contract).
     raw = str(perform_task(request) or "").strip()
+    if cancel is not None and cancel.is_set():
+        return ""
+    channel, body = split_output_directive(raw)
+    if channel == "SILENT" or not body:
+        return raw
 
     # Refusal preservation (runway item 1 fix 2): a refusal is pass-
     # through content, never restyled — the same pass-through CLASS as
@@ -705,7 +738,7 @@ def run_persona_turn(
     # (jaeger_os.core.bench.scenarios._is_refusal) — imported, not
     # duplicated, so the lane's idea of "refusal" can never drift from
     # the gate's.
-    if _is_refusal(raw):
+    if _is_refusal(raw) or wants_verbatim_output(text):
         return raw
 
     compose_text = ""
@@ -713,9 +746,9 @@ def run_persona_turn(
         composed = client.chat(
             [
                 {"role": "system", "content": block},
-                {"role": "user", "content": COMPOSE_RULES + raw},
+                {"role": "user", "content": COMPOSE_RULES + body},
             ],
-            max_tokens=min(600, max(120, len(raw) // 2)),
+            max_tokens=min(600, max(120, len(body) // 2)),
             temperature=0.3,
             top_p=0.9,
         )
@@ -723,8 +756,11 @@ def run_persona_turn(
     except Exception:  # noqa: BLE001 — compose is optional, the answer is not
         compose_text = ""
 
-    if compose_text and _preserves_content(raw, compose_text):
-        return compose_text
+    if cancel is not None and cancel.is_set():
+        return ""
+    _, compose_text = split_output_directive(compose_text)
+    if compose_text and _preserves_content(body, compose_text):
+        return f"[OUTPUT:{channel}] {compose_text}" if channel else compose_text
     return raw  # compose failed, empty, or gutted content — raw survives unstyled
 
 

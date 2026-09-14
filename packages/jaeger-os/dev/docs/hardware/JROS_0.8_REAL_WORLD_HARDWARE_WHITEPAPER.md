@@ -483,36 +483,64 @@ telemetry_ref: optional trace id
 
 ## 9. Topics and Message Areas
 
-JROS should keep topic families readable and stable:
+> **Superseded on the category list (branch `0.9.0`, `40b091f`).** This
+> section proposed eight top-level families. The shipped contract has
+> **three**. The rest of the section — the specific hardware topics —
+> stands, re-spelled under the grammar. See
+> `jaeger_os/contract/paths.py` for the implementation.
+
+Eight families were one per *concern*. That reads well in a table and
+fails in practice: every new topic needs a judgement call about which
+concern owns it, and nothing routes on the answer. Is a servo fault
+`/safety/` or `/sense/`? Is a bridge's frame rate `/telemetry/` or
+`/middleware/`? Two people answer differently and both are defensible,
+which is the definition of a bad axis.
+
+Direction is the axis that never becomes debatable. A camera frame flows
+in; a pixel buffer flows out; no amount of argument moves either.
 
 | Family | Purpose |
 |---|---|
-| `/act/*` | Commands to act on the world |
-| `/sense/*` | Sensor and perception outputs |
-| `/sys/*` | lifecycle, health, node status, boot state |
-| `/control/*` | operator commands, mode changes, approvals |
-| `/telemetry/*` | high-rate or structured robot telemetry |
-| `/safety/*` | e-stop, safety envelope, fault events |
-| `/sequence/*` | sequence playback, timeline state, cue events |
-| `/middleware/*` | bridge status and external node discovery |
+| `/sense/*` | input devices — camera, mic, touch, encoders, plus derived readings |
+| `/act/*` | output devices — motor, display, speaker, light, estop |
+| `/sys/*` | the framework's own traffic — health, node meta, tracing |
 
-Recommended first hardware topics:
+Where the five dropped families went:
 
-- `/act/speech`
-- `/act/motion`
-- `/act/light`
-- `/act/display`
-- `/act/sequence`
-- `/sense/audio_in`
-- `/sense/transcript`
-- `/sense/camera_frame`
-- `/sense/vision_analysis`
-- `/sense/joint_state`
-- `/sense/device_state`
-- `/sys/node_health`
-- `/sys/package_health`
-- `/safety/estop`
-- `/telemetry/power`
+| Proposed | Landed as | Why |
+|---|---|---|
+| `/control/*` | the control plane, not a topic | Operator verbs (start/stop/restart/publish) are request/response, not pub/sub. They live on a ZMQ REP socket — `jaeger_os/app/control.py`. |
+| `/safety/*` | `/act/estop/trigger` | An e-stop is a command flowing outward. Its urgency is expressed as QoS (`RELIABLE`, depth 256), not as a namespace. |
+| `/telemetry/*` | the device's own prefix | Render telemetry is `/act/display/stats`, beside the display it describes. Framework telemetry is `/sys/`. |
+| `/sequence/*` | `/act/timeline/run` + `/act/timeline/progress` | A timeline is an output device's schedule. |
+| `/middleware/*` | `/sys/node/meta` | Bridge status and node discovery are the framework describing itself. |
+
+Recommended first hardware topics, under the grammar:
+
+- `/act/speech/say`
+- `/act/motor/command`
+- `/act/light/set`
+- `/act/display/play`
+- `/act/timeline/run`
+- `/act/estop/trigger`
+- `/sense/mic/pcm`
+- `/sense/stt/transcript`
+- `/sense/camera/image_raw`
+- `/sense/vision/analysis`
+- `/sense/proprio/state`
+- `/sys/node/health`
+
+Instanced where there is more than one of a thing:
+`/sense/camera/cam0/image_raw`, `/act/display/face0/frame`. The instance
+id is stable and opaque (`cam0`, never `left_camera`) so the operator can
+rename the device without breaking a subscriber.
+
+Two proposed topics are dropped rather than re-spelled:
+`/sense/device_state` and `/sys/package_health` both restate what
+`/sys/node/health` already carries, now that `NodeHealth` has severity
+levels (`OK`/`WARN`/`ERROR`/`STALE`) and per-node rates. `/telemetry/power`
+stays **(planned)** — nothing measures power yet, and a topic nothing
+publishes is spec ahead of code.
 - `/telemetry/thermal`
 - `/telemetry/link`
 
@@ -580,8 +608,8 @@ where useful.
 External middleware should appear to JROS as a node or adapter:
 
 ```
-ROS 2 joint state topic -> ros2_bridge node -> /sense/joint_state
-JROS /act/motion -> ros2_bridge node -> ROS 2 command topic
+ROS 2 joint state topic -> ros2_bridge node -> /sense/proprio/state
+JROS /act/motor/command -> ros2_bridge node -> ROS 2 command topic
 MAVLink telemetry -> mavlink_bridge node -> /telemetry/flight
 JROS takeoff capability -> mavlink_bridge node -> flight controller command
 ```

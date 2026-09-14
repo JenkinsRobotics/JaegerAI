@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import get_layout
+from jaeger_agent.core.workspace import get_layout
 
 
 def _reflections_md(layout: Any) -> Path:

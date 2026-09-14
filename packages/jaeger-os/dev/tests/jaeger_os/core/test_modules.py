@@ -13,7 +13,13 @@ import pathlib
 
 import pytest
 
-from jaeger_os.core.modules import ModuleSpec, discover_modules, load_module
+from jaeger_os.core.modules import (
+    ModuleSpec,
+    discover_modules,
+    load_module,
+    resolve_application_module,
+    set_application_package,
+)
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -25,6 +31,10 @@ _PLUGINS_ROOT = _REPO_ROOT / "jaeger_os" / "plugins"
 
 
 _GOOD_YAML = """
+id: org.example.widgets.widget
+name: Example Widget
+type: module
+implementation: widget
 module: widget
 slot: widgets
 version: 2.0.0
@@ -52,6 +62,10 @@ def test_load_module_happy_path(tmp_path):
     spec = load_module(_write_module(tmp_path))
     assert isinstance(spec, ModuleSpec)
     assert spec.module == "widget"
+    assert spec.id == "org.example.widgets.widget"
+    assert spec.name == "Example Widget"
+    assert spec.type == "module"
+    assert spec.implementation == "widget"
     assert spec.slot == "widgets"
     assert spec.tools == ["use_widget"]
     assert spec.requires_libraries == []
@@ -87,6 +101,25 @@ def test_load_module_refuses_unknown_field(tmp_path):
     bad = _GOOD_YAML.replace("version:", "vershun:")
     with pytest.raises(ValueError, match="module.yaml"):
         load_module(_write_module(tmp_path, text=bad))
+
+
+def test_load_module_refuses_non_module_type(tmp_path):
+    bad = _GOOD_YAML.replace("type: module", "type: application")
+    with pytest.raises(ValueError, match="must be 'module'"):
+        load_module(_write_module(tmp_path, text=bad))
+
+
+def test_identity_metadata_is_backward_compatible(tmp_path):
+    old = """\
+module: legacy
+slot: widgets
+factory: pkg.mod:make_widget
+"""
+    spec = load_module(_write_module(tmp_path, text=old))
+    assert spec.id == ""
+    assert spec.name == ""
+    assert spec.type == "module"
+    assert spec.implementation == ""
 
 
 def test_load_module_refuses_empty_slot(tmp_path):
@@ -148,11 +181,27 @@ def test_discover_modules_missing_root_returns_empty(tmp_path):
     assert discover_modules(tmp_path / "does_not_exist") == {}
 
 
+def test_application_module_binding_is_separate_from_mind_discovery():
+    set_application_package("json")
+    try:
+        assert resolve_application_module().__name__ == "json"
+        assert resolve_application_module("decoder").__name__ == "json.decoder"
+    finally:
+        set_application_package(None)
+    assert resolve_application_module("decoder") is None
+
+
+def test_application_binding_accepts_a_manifest_factory_reference():
+    set_application_package("json.tool:main")
+    try:
+        assert resolve_application_module("decoder").__name__ == "json.decoder"
+    finally:
+        set_application_package(None)
+
+
 
 
 # ── 0.8 M3b: messaging — the first multi-module slot, multi-root ───
-
-
 
 
 

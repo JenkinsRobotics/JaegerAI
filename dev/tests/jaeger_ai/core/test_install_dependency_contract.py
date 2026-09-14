@@ -112,7 +112,7 @@ def test_installer_installs_in_repo_packages_before_the_root_package():
     assert "--no-deps" not in installer
     loop = 'for pkg in jaeger-os jaeger-agent jaeger-kokoro-tts jaeger-whisper-stt'
     assert loop in installer
-    assert installer.index(loop) < installer.index('-e "$REPO_ROOT"')
+    assert installer.index(loop) < installer.index('scripts/install-packages.py" "$REPO_ROOT"')
 
 
 def test_installer_no_longer_lets_a_sibling_checkout_shadow_the_repo():

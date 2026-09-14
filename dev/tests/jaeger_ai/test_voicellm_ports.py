@@ -61,7 +61,7 @@ def _mk_worker(**over):
     """Construct a _VadWorker with stub deps — only the block math is
     under test, no audio."""
     pytest.importorskip("webrtcvad")
-    from jaeger_whisper_stt.nodes.whisper_stt.engine.two_pass.pipeline import _VadWorker
+    from jaeger_whisper_stt.engine.two_pass.pipeline import _VadWorker
     import queue
     import threading
 
@@ -74,6 +74,7 @@ def _mk_worker(**over):
         silence_hangover_ms=700, min_speech_ms=400,
         max_speech_ms=8000, barge_in_ms=200,
         short_phrase_max_ms=1500, short_phrase_hangover_ms=350,
+        language="en",
     )
     params.update(over)
     return _VadWorker(

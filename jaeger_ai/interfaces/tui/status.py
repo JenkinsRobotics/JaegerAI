@@ -1,4 +1,4 @@
-"""Status panel + status bar renderers for the Jaeger-OS TUI.
+"""Status panel + status bar renderers for the Jaeger AI TUI.
 
 Hermes-agent-style: a "boot panel" right after the banner showing
 version, tools-by-category, skills, session info; and a one-line
@@ -115,7 +115,7 @@ def boot_panel(
     hermes-agent screenshot (right column with version, tools by
     category, session info)."""
     header = Text()
-    header.append(f"Jaeger-OS {version}", style=ACCENT_BOLD)
+    header.append(f"Jaeger AI {version}", style=ACCENT_BOLD)
     header.append(f"  ·  instance: {instance_name}", style="dim")
     header.append(f"  ·  model: {model_name}", style="dim")
 

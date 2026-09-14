@@ -1,67 +1,66 @@
-# Pipeline: Persona (character → system prompt)
+# Pipeline: character → user-facing voice
 
-**What it is:** how the agent's *character* (Lilith, Jarvis, …) becomes the
-system prompt it runs on, how the active character is chosen, and how a change
-takes effect live. Verified in code; cite the source before changing.
+**What it is:** how a portable character pack becomes Jaeger AI's user-facing
+persona without contaminating the agent's tool arguments, plans, or code.
 
-## Model
-A **character** = a `Personality` + identity + assets (`personality/character.py`
-`Character`). On disk: `characters/<id>/character.yaml` (identity · prompt · traits
-· lore) + `card.png` + `assets/`. Traits are four layers — `hexaco · special ·
-expression · domains` — floats 0–1 (`personality/schema.py`).
+## Character state
 
-Two selections, distinct:
-- **active** — the character the instance is *playing right now*
-  (`set_active_character` → `<instance>/active_character`). Session-level.
-- **bound / default** — the canonical character (`bind_character` → `manifest.json`;
-  also sets active). The persistent identity.
+A character is a direct child of `jaeger_ai/characters/` containing a
+`character.yaml`. The shared `character/v1` fields carry identity, provenance,
+typed assets and an optional render half. Jaeger AI adds `traits`, `level`, and
+`revision` for personality compilation and progression.
 
-## Character → prompt
+The Python model lives in `jaeger_ai/characters/character.py`; the normalized
+HEXACO, SPECIAL, expression, and domain layers live in
+`jaeger_ai/characters/schema.py`.
 
+Two selections remain distinct:
+
+- **Active**: the character this instance plays now, stored in
+  `<instance>/active_character`.
+- **Bound**: the instance's canonical character in `manifest.json`; rebinding
+  also makes it active.
+
+## Runtime flow
+
+```text
+character.yaml
+    │ load_character()
+    ▼
+Character + structured traits
+    │ character_block()
+    ▼
+user-facing persona lane / final response filter
+    │
+    ├── ordinary conversational turn: answer directly in character
+    └── tool task: perform_task(request) runs the clean JaegerAgent loop
+                                   │
+                                   ▼
+                         literal tools, plans and code
+                                   │
+                                   ▼
+                          final answer re-voiced once
 ```
-character.yaml ──load_character──► Character(personality, role, soul, backstory, …)
-        │
-   assemble the LIVE system prompt (a SHORT brief, not the full lore):
-     • identity_block()   → "You are <name>. <role>."          (character.py)
-     • compose_block(p)   → core directive + traits            (personality/compose.py)
-     • soul_block()       → the soul narrative                 (character.py)
-        │
-   build_system_prompt(layout)  → the agent's system prompt     (agent/prompts.py)
-```
 
-Note: `Character.prompt()` returns the **full** in-depth persona (directive +
-soul + all lore) — that's for the **Studio profile**, NOT the live model. The live
-turn uses the short brief above (identity + traits + soul) to keep turns lean; the
-rich lore (ideals/mannerisms/quotes/backstory) stays on the sheet for display/future.
+The JaegerAgent worker prompt is deliberately persona-free. Numeric traits are
+compiled to behavioral prose only for the user-facing voice. Rich lore remains
+available to character interfaces without being dumped into every worker turn.
 
-## Live reload (change takes effect without a restart)
-- `active_character_signature(instance_root)` = `f"{id}:{mtime}"` — changes when the
-  character **switches** OR its **traits/profile are edited** (revision bump).
-- The agent loop compares it each turn (`main.py :: _refresh_character_prompt`); on
-  mismatch it rebuilds the system prompt via `build_system_prompt(layout)` and
-  swaps it in — **next turn uses the new persona**.
-- Identity edits (name/role in `identity.yaml`) reload via `refresh_identity()`
-  (`main.py`), called by self-modifying tools.
+## Live updates
 
-## Key functions (`personality/character.py` unless noted)
-- Load: `load_character(folder)`, `list_characters()`, `characters_root()`.
-- Active/bound: `active_character(root)`, `active_character_id`, `bound_character_id`,
-  `set_active_character` (session), `bind_character` (canonical + active).
-- Signature: `active_character_signature`.
-- Edit/persist: `save_character_traits(folder, traits)`,
-  `save_character_profile(folder, role=…, soul=…, …)`, `icon_path()`, `card_path()`.
-- Prompt fragments: `identity_block`, `soul_block`, `prompt` (full);
-  `personality/compose.py :: compose_block`.
+`active_character_signature(instance_root)` combines the active identifier and
+manifest modification time. Selection or profile edits therefore take effect
+on the next turn without reloading model weights.
 
-## Surfaces that use this
-- **Settings HUD** (PySide6 `agent_settings`, Swift `AgentSettingsHUD` via the
-  bridge query/command API) — reads/writes character profile, traits, select/
-  make-default.
-- **Tray / avatar / chat** — display name + icon come from the active character
-  (`resolve_character(ctx)`; the `jaeger bridge` `ready` frame carries name + icon
-  for the Swift app).
+## Main functions
 
-## Related
-- Character bundle / Studio ownership split: `project-studio-jros-ownership-split`
-  (memory) — Studio authors + sends a self-contained character bundle; JROS owns
-  the runtime.
+- Loading/library: `load_character`, `list_characters`, `characters_root`.
+- Active/bound state: `active_character`, `active_character_id`,
+  `bound_character_id`, `set_active_character`, `bind_character`.
+- Editing: `save_character_profile`, `save_character_traits`.
+- Presentation: `character_block`, `prompt`, `icon_path`, `card_path`.
+- Trait prose: `jaeger_ai/characters/compose.py`.
+
+The PySide6 and Swift settings surfaces use the same bridge commands for
+selection and edits. Tray, chat, and avatar surfaces resolve the same active
+character and card; there is no second UI-only character registry.

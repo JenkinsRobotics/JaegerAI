@@ -111,6 +111,10 @@ class TestGatewayAgentsAPI(AioHTTPTestCase):
         os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
         self.temp_store = GatewaySessionStore(self.db_path)
         self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        # Catalog tests are independent of the operator's running backends.
+        from unittest.mock import AsyncMock
+        self.gateway_app._probe_http = AsyncMock(return_value={"ok": True})
+        self.gateway_app._probe_native_mcp = AsyncMock(return_value={"ok": True})
         return self.gateway_app.app
 
     async def tearDownAsync(self):
@@ -199,6 +203,10 @@ class TestGatewayHandoffAPI(AioHTTPTestCase):
         os.environ["JAEGER_STATE_DIR"] = str(self.state_root)
         self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
         self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        # Catalog tests are independent of the operator's running backends.
+        from unittest.mock import AsyncMock
+        self.gateway_app._probe_http = AsyncMock(return_value={"ok": True})
+        self.gateway_app._probe_native_mcp = AsyncMock(return_value={"ok": True})
 
         async def _fake_specialist(session_id, text):
             return f"SPECIALIST:{text[:40]}", "mcp:test"
@@ -344,6 +352,10 @@ class TestGatewaySessionHandoff(AioHTTPTestCase):
         )
         self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
         self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        # Catalog tests are independent of the operator's running backends.
+        from unittest.mock import AsyncMock
+        self.gateway_app._probe_http = AsyncMock(return_value={"ok": True})
+        self.gateway_app._probe_native_mcp = AsyncMock(return_value={"ok": True})
         return self.gateway_app.app
 
     async def tearDownAsync(self):
@@ -779,6 +791,10 @@ class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
         )
         self.temp_store = GatewaySessionStore(self.state_root / "sessions.sqlite3")
         self.gateway_app = JaegerGatewayApp(store=self.temp_store)
+        # Catalog tests are independent of the operator's running backends.
+        from unittest.mock import AsyncMock
+        self.gateway_app._probe_http = AsyncMock(return_value={"ok": True})
+        self.gateway_app._probe_native_mcp = AsyncMock(return_value={"ok": True})
         return self.gateway_app.app
 
     async def tearDownAsync(self):

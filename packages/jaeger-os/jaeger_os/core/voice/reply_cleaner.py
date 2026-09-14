@@ -37,7 +37,7 @@ def clean_voice_reply(text: str | None) -> str:
             # Mind's own package (jaeger_ai today) — resolved via
             # resolve_mind_module instead of a hardcoded dotted import.
             from jaeger_os.core.modules import resolve_mind_module
-            dialects_mod = resolve_mind_module("agent.dialects")
+            dialects_mod = resolve_mind_module("dialects")
 
             _calls, answer = dialects_mod.parse_harmony(cleaned)
             if answer:

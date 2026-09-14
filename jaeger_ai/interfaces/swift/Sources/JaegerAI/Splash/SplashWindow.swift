@@ -199,13 +199,13 @@ private struct SplashWindowView: View {
         HStack(alignment: .bottom, spacing: 24) {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("REAL-WORLD LOCAL AGENTIC AGENT FRAMEWORK")
+                    Text("LOCAL MULTIMODAL AGENT APPLICATION")
                         .font(.system(size: 10, weight: .semibold))
                         .kerning(1.0)
                         .foregroundStyle(Color.white.opacity(0.65))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                    Text("JAEGER OS")
+                    Text("JAEGER AI")
                         .font(.system(size: 36, weight: .heavy))
                         .foregroundStyle(.white)
                 }

@@ -37,8 +37,91 @@ openai = ["openai>=1.0"]
 # Kept as a no-op alias so `jaeger-agent[local]` still resolves for
 # anyone who pinned it before llama.cpp became the default.
 local = []
-mlx = ["mlx-lm>=0.21"]
+mlx = ["mlx-lm>=0.21", "mlx-vlm>=0.1"]
+
+# ── capability extras ──────────────────────────────────────────────
+# Tools that need heavy or platform-specific wheels. Each import site is
+# guarded, so a missing extra degrades that ONE tool instead of breaking
+# the install — but until 1.0.9 none of them were written down, so the
+# only way to learn what `look_at` or `search_memory` needed was to call
+# it and read the traceback.
+#
+# Anything a CORE tool needs is a real dependency above, not an extra.
+
+# Semantic memory: search_memory's embeddings + the sqlite vector store.
+# Without it, recall by exact key still works and search_memory does not.
+embeddings = ["sentence-transformers>=3", "sqlite-vec>=0.1", "numpy>=1.26"]
+
+# look_at / ocr_image — a local VLM.
+vision = ["torch>=2", "transformers>=4.40", "pillow>=10", "numpy>=1.26"]
+
+# Image generation (the media toolset).
+image_gen = ["diffusers>=0.30", "torch>=2", "pillow>=10"]
+
+# The verified VoiceLLM-derived perception/speech pipeline.  These remain
+# optional because the implementation is lazy: a headless text agent must not
+# import or install neural audio runtimes merely to use the agent loop.
+multimodal = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12",
+    "pywhispercpp>=1.2",
+    "kokoro>=0.9.4",
+    # Misaki English needs this model at startup; install it with the extra
+    # instead of attempting a package download in the audio worker thread.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+    "onnxruntime>=1.17",
+]
+
+# Compatibility alias retained for callers that previously requested
+# ``jaeger-agent[audio]``.  It now installs the complete half-duplex stack.
+audio = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12",
+    "pywhispercpp>=1.2",
+    "kokoro>=0.9.4",
+    # Misaki English needs this model at startup; install it with the extra
+    # instead of attempting a package download in the audio worker thread.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+    "onnxruntime>=1.17",
+]
+
+# Quasi/full audio additionally need Speex AEC.  Extras cannot depend on
+# another extra in core metadata, so the complete list is repeated here.
+multimodal-duplex = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12",
+    "pywhispercpp>=1.2",
+    "kokoro>=0.9.4",
+    # Misaki English needs this model at startup; install it with the extra
+    # instead of attempting a package download in the audio worker thread.
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85",
+    "onnxruntime>=1.17",
+    "pyaec>=1.0.1",
+]
+
+# browse_page — a real browser engine.
+browser = ["playwright>=1.44"]
+
+# ocr_screen on macOS, via the system Vision framework.
+ocr_macos = ["pyobjc-framework-Vision>=10", "pyobjc-framework-Quartz>=10",
+             "pyobjc-framework-Cocoa>=10"]
+
+# The DuckDuckGo search backends. web_search still works without them —
+# the backend chain falls through to the HTML and Wikipedia backends,
+# which is why these are optional and requests is not.
+search = ["ddgs>=6", "duckduckgo-search>=6"]  # ddgs is the current name; the legacy
+                                          # package stays for the fallback backend
+
 dev = ["pytest>=8", "pyyaml>=6", "ruff>=0.4"]
+
+[project.entry-points."jaeger_os.module_roots"]
+jaeger_agent = "jaeger_agent.core.module_roots:roots"
 
 [tool.setuptools.dynamic]
 version = {attr = "jaeger_agent.__version__"}
@@ -48,14 +131,16 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 include = ["jaeger_agent*"]
-exclude = ["jaeger_agent.__pycache__", "jaeger_agent.*.__pycache__"]
-namespaces = false
+# Skill and node resource trees are valid PEP 420 namespace packages.  Keep
+# namespace discovery while excluding local interpreter-cache packages.
+exclude = ["jaeger_agent*.__pycache__", "jaeger_agent*.__pycache__.*"]
 
 [tool.setuptools.package-data]
 # "**/*" and not an extension allowlist. setuptools auto-includes only
 # .py for a found package, and this package is 528 non-.py files:
-# module.yaml, the prompt .md files, thinking_runner.yaml, and — the big
-# one — every SKILL.md under skills/, which IS the 107-recipe corpus.
+# module.yaml, the prompt .md files, thinking_runner.yaml, every node.json plus
+# its weights/stats lineage, and — the big one — every SKILL.md under skills/,
+# which IS the 107-recipe corpus.
 #
 # The 0.11 move made this load-bearing. While the agent lived inside
 # JaegerAI it rode that project's `jaeger_ai = ["**/*"]`; the moment it
@@ -73,6 +158,9 @@ jaeger_agent = [
     "skills/**/*.pdf", "skills/**/*.html", "skills/**/*.txt",
     "skills/**/*.js", "skills/**/*.ini", "skills/**/*.sh",
     "skills/**/LICENSE", "skills/**/Makefile",
+    "module.yaml", "prompts/**/*.md", "prompts/**/*.yaml",
+    "nodes/*/node.json", "nodes/*/weights/*.md", "nodes/*/stats/*.md",
+    "assets/silero/*.onnx", "assets/silero/*.txt", "assets/silero/*.md",
 ]
 
 [tool.pytest.ini_options]

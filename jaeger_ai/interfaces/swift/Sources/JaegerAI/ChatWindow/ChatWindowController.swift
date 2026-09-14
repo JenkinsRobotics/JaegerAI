@@ -48,8 +48,8 @@ final class ChatWindowController {
     /// Window title is who the agent answers to right now: "Jaeger — Clanker".
     /// Falls back to a bare "Jaeger" until identity has loaded.
     private static func title(for status: AgentStatus?) -> String {
-        if let name = status?.displayName { return "Jaeger — \(name)" }
-        return "Jaeger"
+        if let name = status?.displayName { return "Jaeger AI — \(name)" }
+        return "Jaeger AI"
     }
 
     /// Show (or raise) the chat window, wiring the SwiftUI ``ChatView``
@@ -82,7 +82,7 @@ final class ChatWindowController {
         // The content is a hard dark terminal canvas regardless of the
         // system theme — pin the WINDOW to dark too, or under the light
         // appearance the titlebar draws near-black title text over the
-        // dark canvas ("Jaeger — …" was unreadable) and system-coloured
+        // dark canvas ("Jaeger AI — …" was unreadable) and system-coloured
         // controls collapse the same way.
         win.appearance = NSAppearance(named: .darkAqua)
         win.backgroundColor = NSColor(

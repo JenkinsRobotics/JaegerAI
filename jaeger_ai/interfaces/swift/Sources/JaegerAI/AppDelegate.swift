@@ -218,6 +218,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag { ChatWindowController.show(agent: AgentBridge.shared) }
+        return true
+    }
+
     /// The app's ONE exit door (Quit from the tray card, Cmd-Q): hold
     /// termination until the core shuts down orderly — model freed,
     /// ``bye`` emitted, clean exit code — then let the app go. Bounded by
@@ -227,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if shutdownStarted { return .terminateNow }
         shutdownStarted = true
+        MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()
             sender.reply(toApplicationShouldTerminate: true)

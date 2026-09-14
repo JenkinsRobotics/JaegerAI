@@ -3,7 +3,7 @@
 The behavioral framework prompt (what you are, how you work, memory, files,
 tools, output) is now a single editable document — ``framework_agent.md``,
 loaded by :func:`context_blocks.load_framework_prompt`. The Three Laws safety
-contract is ``three_laws.md``, loaded via :mod:`jaeger_agent.safety`.
+contract is ``three_laws.md``, loaded via :mod:`jaeger_agent.core.safety`.
 
 What remains here are the two SHORT, mutually-exclusive tool-surface notes
 that :func:`context_blocks.build_runtime_tail` picks between at runtime, based

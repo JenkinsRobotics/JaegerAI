@@ -7,7 +7,7 @@ from typing import Any
 from jaeger_os.core.modules import load_module
 
 from jaeger_agent import AgentBridge, ChatMessage, ChatReply, MindNode, TurnResult
-from jaeger_agent.messages import AgentActivity, AgentState, ToolEvent
+from jaeger_agent.core.messages import AgentActivity, AgentState, ToolEvent
 
 
 class FakeBus:
@@ -107,7 +107,7 @@ def test_reusable_package_never_imports_jaeger_ai_at_module_scope() -> None:
     whole agent surface across — tools, skills, prompts, the skill
     registry — and a handful of those still reach back for a memory
     backend, a credential store, a venv manager. Those are listed in
-    ``jaeger_agent/host.py`` and bound lazily, so a missing host costs
+    ``jaeger_agent/core/host.py`` and bound lazily, so a missing host costs
     one tool rather than the package.
 
     What must never come back is a MODULE-SCOPE import: one of those

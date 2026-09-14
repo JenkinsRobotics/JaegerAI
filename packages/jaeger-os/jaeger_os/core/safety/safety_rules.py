@@ -5,9 +5,9 @@ loop: an append-only, hash-chained audit log of every gated decision.
 
 The 4-pillar safety stack splits by whether a pillar needs an agent:
 
-  1. Identity prompt (Three Laws)  — :mod:`jaeger_agent.safety`  (agent)
+  1. Identity prompt (Three Laws)  — :mod:`jaeger_agent.core.safety`  (agent)
   2. Tier gating                   — :mod:`.permissions`            (core)
-  3. Safety review (LLM-as-judge)  — :mod:`jaeger_agent.safety`  (agent)
+  3. Safety review (LLM-as-judge)  — :mod:`jaeger_agent.core.safety`  (agent)
   4. Audit log                     — :class:`AuditLogger`, here     (core)
 
 Pillars 1 & 3 require an LLM to interpret them, so they live in

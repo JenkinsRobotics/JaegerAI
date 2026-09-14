@@ -1,10 +1,16 @@
 """Character — a library preset on top of :class:`Personality`.
 
-``personality/`` IS the character logic: :mod:`schema` holds the trait model
+``characters/`` owns the character library and its logic: :mod:`schema` holds
+the trait model
 (HEXACO/SPECIAL/Expression/Domains + custom_instructions) and :mod:`compose`
 renders it into the system prompt. A *character* is just that ``Personality``
 plus the library extras — identity (role/voice), backstory, and assets
-(card/avatar) — stored as a folder ``personality/characters/<id>/``.
+(card/avatar) — stored as a folder ``characters/<id>/``.
+
+The folder manifest follows the ecosystem ``character/v1`` package shape used
+by Mochi and JaegerAnimation.  Jaeger AI owns the speaking/agentic half and
+retains its trait/progression extensions; render-capable consumers can use the
+same pack's typed assets and render declaration without a conversion step.
 
 The live character view compiles these fields into behavioral language. Raw
 trait ratings remain structured state for editing and evaluation; the model
@@ -21,9 +27,36 @@ from typing import Any
 import msgspec
 import yaml
 
+<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
 from jaeger_ai.features.personality.schema import (
     HEXACO, SPECIAL, Domains, Expression, Personality,
+========
+from jaeger_ai.features.personality.schema import (
+    HEXACO,
+    SPECIAL,
+    Domains,
+    Expression,
+    Personality,
+>>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
 )
+
+CHARACTER_SCHEMA = "character/v1"
+
+
+def _asset_reference(spec: Any) -> str:
+    """Return a relative path from either generation of asset declaration.
+
+    Older Jaeger AI sheets use ``assets: {card: card.png}``; the ecosystem
+    format uses ``assets: {primary: {file: card.png, type: image, ...}}``.
+    Reading both keeps operator-created packs working while every newly written
+    pack is portable.
+    """
+    if isinstance(spec, str):
+        return spec
+    if isinstance(spec, dict):
+        return str(spec.get("file") or spec.get("root") or "")
+    return ""
+
 
 
 def _u(x: Any) -> float:
@@ -44,6 +77,9 @@ class Character:
 
     id: str
     personality: Personality
+    version: str = "0.0.0"
+    author: str = ""
+    license: str = "Unspecified"
     role: str = ""
     voice_tone: str = ""
     voice_id: str = "af_heart"
@@ -55,7 +91,17 @@ class Character:
     behaviors: tuple[str, ...] = ()
     card: str = ""
     avatar_dir: str = "avatar"
-    assets: dict = field(default_factory=dict)   # manifest: role -> relative path
+    # ``character/v1`` assets are typed mappings (``file`` or ``root``).
+    # String values remain accepted for pre-standard Jaeger AI packs.
+    assets: dict[str, Any] = field(default_factory=dict)
+    kind: str = ""
+    default_asset: str = ""
+    render: dict[str, Any] = field(default_factory=dict)
+    expressions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    mouth_states: dict[str, int] = field(default_factory=dict)
+    default_expression: str = ""
+    default_mouth: str = ""
+    motion_scripts: dict[str, Any] = field(default_factory=dict)
     level: int = 1                               # progression stat; everyone starts at 1
     revision: float = 1.0                        # definition version; bumps on edit (vs level)
     neutral: bool = False                        # see below — the no-persona default
@@ -133,7 +179,11 @@ class Character:
         prompt), so this runs on edit, not per turn. Main agent only — a
         sub-agent gets no persona (its preamble is its whole identity).
         See dev/docs/reality/persona_compiler.md."""
+<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
         from jaeger_ai.features.personality.compose import (
+========
+        from jaeger_ai.features.personality.compose import (
+>>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
             PERSONA_BOUNDARY, disposition_clauses, domain_lens,
             expression_clauses,
         )
@@ -205,10 +255,10 @@ class Character:
 
     def asset(self, role: str) -> Path | None:
         """Resolve a manifest asset by ROLE (e.g. 'model', 'idle', 'sprites') —
-        the character's own ``assets/`` first, then the shared jaeger_os/assets/
+        the character's own ``assets/`` first, then the shared jaeger_ai/assets/
         library. Returns a Path or None. Nodes call this so they never hardcode
         a filename: ``character.asset('idle')``."""
-        rel = self.assets.get(role)
+        rel = _asset_reference(self.assets.get(role))
         return self._resolve_asset(rel) if rel else None
 
     def asset_dir(self, role: str) -> Path | None:
@@ -263,6 +313,14 @@ def load_character(folder: Path) -> Character:
     """Load ``<folder>/character.yaml`` → a :class:`Character`."""
     folder = Path(folder)
     data = yaml.safe_load((folder / "character.yaml").read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise TypeError(f"{folder / 'character.yaml'}: manifest must be a mapping")
+    schema = data.get("schema")
+    if schema not in (None, CHARACTER_SCHEMA):
+        raise ValueError(
+            f"{folder / 'character.yaml'}: schema must be {CHARACTER_SCHEMA!r}, "
+            f"got {schema!r}"
+        )
     ident = data.get("identity", {}) or {}
     pr = data.get("prompt", {}) or {}
     tr = data.get("traits", {}) or {}
@@ -281,8 +339,13 @@ def load_character(folder: Path) -> Character:
     lore_dir = folder / "lore"
     backstory = _read_text_file(lore_dir / "backstory.md") or pr.get("backstory", "")
     return Character(
-        id=data.get("id", folder.name),
+        # ``id`` was Jaeger AI's pre-standard spelling. It remains a read-only
+        # compatibility alias; writers and bundled packs use ``character``.
+        id=data.get("character") or data.get("id") or folder.name,
         personality=personality,
+        version=str(data.get("version", "0.0.0")),
+        author=str(data.get("author", "")),
+        license=str(data.get("license", "Unspecified")),
         role=ident.get("role", ""),
         voice_tone=ident.get("voice_tone", ""),
         voice_id=ident.get("voice_id", "af_heart"),
@@ -292,9 +355,18 @@ def load_character(folder: Path) -> Character:
         mannerisms=_load_lore_field(folder, "mannerisms.md", lore.get("mannerisms", [])),
         ideals=_load_lore_field(folder, "ideals.md", lore.get("ideals", [])),
         behaviors=_load_lore_field(folder, "behaviors.md", lore.get("behaviors", [])),
-        card=assets.get("card", ""),
-        avatar_dir=assets.get("avatar", "avatar"),
+        card=str(data.get("card") or _asset_reference(assets.get("card"))
+                 or _asset_reference(assets.get(data.get("default_asset", "primary"))) or ""),
+        avatar_dir=_asset_reference(assets.get("avatar")) or "avatar",
         assets=assets,
+        kind=str(data.get("kind", "")),
+        default_asset=str(data.get("default_asset", "")),
+        render=dict(data.get("render") or {}),
+        expressions=dict(data.get("expressions") or {}),
+        mouth_states=dict(data.get("mouth_states") or {}),
+        default_expression=str(data.get("default_expression", "")),
+        default_mouth=str(data.get("default_mouth", "")),
+        motion_scripts=dict(data.get("motion_scripts") or {}),
         level=int(data.get("level", 1) or 1),
         revision=float(data.get("revision", 1.0) or 1.0),
         neutral=bool(data.get("neutral", False)),
@@ -303,14 +375,14 @@ def load_character(folder: Path) -> Character:
 
 
 def shared_assets_dir() -> Path:
-    """The shared asset library — ``jaeger_os/assets/``. A character's own assets
+    """The shared asset library — ``jaeger_ai/assets/``. A character's own assets
     win; this is the fallback so common/generic assets aren't copied per
     character (mirrors the avatar tool's character-first resolution)."""
-    return Path(__file__).resolve().parent.parent / "assets"
+    return Path(__file__).resolve().parents[2] / "assets"
 
 
 def characters_root() -> Path:
-    """The bundled character library — ``personality/characters/``."""
+    """The bundled character library — ``characters/``."""
     return Path(__file__).resolve().parent / "characters"
 
 
@@ -326,7 +398,7 @@ def list_characters(root: Path | None = None) -> list[Character]:
         if d.is_dir() and (d / "character.yaml").exists():
             try:
                 out.append(load_character(d))
-            except Exception:  # noqa: BLE001 — one bad sheet never breaks the library
+            except Exception:  # noqa: BLE001,S112 — one bad sheet cannot break library
                 continue
     return sorted(out, key=lambda c: (not c.neutral, c.name.lower()))
 
@@ -394,7 +466,11 @@ def active_character_signature(instance_root: Path) -> str:
     """id + sheet mtime + runtime-override mtime — changes when the
     character switches, when its sheet is edited, or when this instance
     adapts a trait, so instant-apply rebuilds the prompt for all three."""
+<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
     from jaeger_ai.features.personality import persona_state
+========
+    from jaeger_ai.features.personality import persona_state
+>>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
     cid = active_character_id(instance_root)
     try:
         mt = (characters_root() / cid / "character.yaml").stat().st_mtime
@@ -409,9 +485,9 @@ def set_active_character(instance_root: Path, cid: str) -> None:
     (root / _ACTIVE_FILE).write_text(cid.strip(), encoding="utf-8")
 
 
-def active_character(instance_root: Path) -> "Character | None":
+def active_character(instance_root: Path) -> Character | None:
     """The character this instance plays — the agent's real persona; its prompt
-    REPLACES the instance persona files (see agent/prompts/assemble.py). Falls
+    REPLACES the instance persona files (see jaeger_agent/prompts/). Falls
     back to the default character if the picked one is missing or broken, so a
     running agent always has a persona. None only if no character loads at all.
 
@@ -419,8 +495,13 @@ def active_character(instance_root: Path) -> "Character | None":
     (``persona_state.yaml`` — what ``adjust_trait`` learned) are applied
     on top. The definition file itself is never written by the runtime,
     so the same character stays identical for every other instance
+<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
     playing it. See :mod:`jaeger_ai.features.personality.persona_state`."""
     from jaeger_ai.features.personality import persona_state
+========
+    playing it. See :mod:`jaeger_ai.features.personality.persona_state`."""
+    from jaeger_ai.features.personality import persona_state
+>>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
     for cid in (active_character_id(instance_root), DEFAULT_CHARACTER_ID):
         folder = characters_root() / cid
         if (folder / "character.yaml").exists():
@@ -516,16 +597,19 @@ def save_character_profile(folder: Path, *, role: str | None = None,
 
 def generate_card(folder: Path, name: str) -> str:
     """Write a placeholder profile card (distinct color + initial + name).
-    Returns the relative path written into the sheet's assets.card."""
-    import colorsys, hashlib
+    Returns the relative path used by the sheet's top-level ``card`` field."""
+    import colorsys
+    import hashlib
+
     import numpy as np
     from PIL import Image, ImageDraw, ImageFont
+
     def _font(sz: int):
         for fp in ("/System/Library/Fonts/Helvetica.ttc",
                    "/System/Library/Fonts/Supplemental/Arial.ttf"):
             try:
                 return ImageFont.truetype(fp, sz)
-            except Exception:
+            except Exception:  # noqa: BLE001,S110 — try the next platform font
                 pass
         return ImageFont.load_default()
     W, H = 320, 420
@@ -551,7 +635,7 @@ def generate_card(folder: Path, name: str) -> str:
 
 
 def create_character(name: str, *, role: str = "", custom_instructions: str = "",
-                     root: Path | None = None) -> "Character":
+                     root: Path | None = None) -> Character:
     """Create a new character folder + sheet (default traits) + a card."""
     import re
     cid = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "character"
@@ -561,12 +645,25 @@ def create_character(name: str, *, role: str = "", custom_instructions: str = ""
     (folder / "avatar").mkdir(exist_ok=True)
     card = generate_card(folder, name)
     doc = {
-        "schema": "character/v1", "id": cid, "name": name, "description": "",
+        "schema": CHARACTER_SCHEMA, "character": cid, "name": name,
+        "version": "0.1.0", "author": "Jenkins Robotics",
+        "license": "Unspecified", "description": "",
+        "kind": "clip_set",
+        "assets": {
+            "primary": {"file": card, "type": "image", "adapter": "image"},
+        },
+        "default_asset": "primary",
+        "render": {"adapter": "image", "asset": card,
+                   "ideal_size": [320, 420], "framing": "fit",
+                   "scaling": "smooth"},
+        "expressions": {"idle": {"clips": card, "loop": False}},
+        "default_expression": "idle", "default_mouth": "",
+        "card": card,
         "identity": {"role": role, "voice_tone": "", "voice_id": "af_heart"},
         "prompt": {"custom_instructions": custom_instructions, "soul": "",
                    "backstory": "", "speech_patterns": []},
         "traits": {}, "lore": {"quotes": [], "mannerisms": [], "ideals": [], "behaviors": []},
-        "assets": {"card": card, "avatar": "avatar"},
+        "level": 1, "revision": 1.0,
     }
     (folder / "character.yaml").write_text(
         yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")

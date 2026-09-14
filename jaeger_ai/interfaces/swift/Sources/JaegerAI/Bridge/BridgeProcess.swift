@@ -334,13 +334,23 @@ actor BridgeProcess {
 
     /// Send one turn and await the agent's reply. ``session`` keeps each
     /// window/conversation isolated on the Python side (sessions.db).
-    func runTurn(_ text: String, session: String = "desktop-app")
+    func runTurn(
+        _ text: String,
+        session: String = "desktop-app",
+        agenticTools: Bool = true,
+        imageDataURI: String? = nil,
+        imageDataURIs: [String] = [],
+        speakReplies: Bool = false
+    )
         async -> TurnResult
     {
         guard process != nil else {
             return TurnResult(text: "", error: "agent bridge not running")
         }
-        write(["op": "send", "text": text, "session": session, "source": "app"])
+        let request = Self.chatRequest(text: text, session: session,
+                                       agenticTools: agenticTools,
+                                       images: imageDataURIs + (imageDataURI.map { [$0] } ?? []),
+                                       speakReplies: speakReplies)
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
             await self.expireTurn()
@@ -348,7 +358,23 @@ actor BridgeProcess {
         defer { timeout.cancel() }
         return await withCheckedContinuation { cont in
             self.replyCont = cont
+            write(request)
         }
+    }
+
+    nonisolated static func chatRequest(text: String, session: String,
+                                       agenticTools: Bool, images: [String],
+                                       speakReplies: Bool) -> [String: Any] {
+        var request: [String: Any] = ["op": "send", "text": text, "session": session,
+                                     "source": "app", "agentic_tools": agenticTools,
+                                     "client_owned_speech": true,
+                                     "output_mode": speakReplies ? "speech" : "text"]
+        if !images.isEmpty {
+            request["content"] = [["type": "text", "text": text]] + images.map {
+                ["type": "image_url", "image_url": ["url": $0]] as [String: Any]
+            }
+        }
+        return request
     }
 
     /// Fire-and-forget ``cancel`` — the stdin thread on the Python side

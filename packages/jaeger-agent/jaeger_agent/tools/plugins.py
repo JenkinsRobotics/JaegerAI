@@ -17,7 +17,7 @@ import pathlib
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import _require_layout
+from jaeger_agent.core.workspace import _require_layout
 
 try:
     import yaml as _yaml  # PyYAML is already a hard dep
@@ -37,7 +37,7 @@ def _plugins_root() -> pathlib.Path:
 
     A plugin here is a JaegerAI concept (messaging bridges, MCP, home
     assistant), so this tool is a candidate to move back to the
-    application — see jaeger_agent/host.py.
+    application — see jaeger_agent/core/host.py.
     """
     try:
         import jaeger_ai
@@ -128,7 +128,7 @@ def _credential_status(env_names: list[str]) -> dict[str, bool]:
         layout = _require_layout()
     except Exception:
         return {name: False for name in env_names or []}
-    from jaeger_agent import credentials as creds_mod
+    from jaeger_agent.core import credentials as creds_mod
     try:
         # Case-insensitive: credentials are saved under the env-var name
         # (TELEGRAM_BOT_TOKEN, uppercase, as set_credential / the manifest use),

@@ -778,7 +778,7 @@ def _resolve_provider_key(provider: str) -> str:
 
     # Last resort: read the active instance credentials off disk
     try:
-        from jaeger_agent import credentials as creds
+        from jaeger_agent.core import credentials as creds
 
         from jaeger_ai.core.instance.instance import (
             InstanceLayout,

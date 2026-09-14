@@ -47,11 +47,11 @@ The plan builds on these. Citations are to files read on 2026-06-12.
 | Existing piece | Path | What it gives the framework |
 |---|---|---|
 | Node lifecycle | `jaeger_os/nodes/base.py` (241 lines) | `setup/tick/teardown/health`, `NodeState` enum (`INIT…RUNNING…RESTARTING…FAILED`), SIGTERM = graceful stop, SIGUSR1 = request-restart, thread-or-process agnostic `run()` |
-| Generic motor node | `jaeger_os/nodes/motor/node.py` | SUB `/act/motion` → `MotorAdapter`; docstring: "Per-instance hardware adapter (JP01-MC01 ESP32, etc.) plugs in via the constructor" |
+| Generic motor node | `jaeger_os/nodes/motor/node.py` | SUB `/act/motor/command` → `MotorAdapter`; docstring: "Per-instance hardware adapter (JP01-MC01 ESP32, etc.) plugs in via the constructor" |
 | Motor adapter seam | `jaeger_os/nodes/motor/adapters.py` | `MotorAdapter` Protocol (`start/stop/send_velocity/send_waypoint`) + `SerialMotorAdapter` reference with overridable `_format_*` line builders |
 | Generic light node | `jaeger_os/nodes/light/{node,adapters}.py` | Same shape — `LightAdapter` Protocol, ASCII-line reference impl |
 | Generic vision node | `jaeger_os/nodes/vision/{node,adapters}.py` | Same shape — `FrameEnvelope`, adapter Protocol; docstring: "hardware integrations (JP01-VCC01 Jetson) land at INSTANCE level" |
-| Typed topics | `jaeger_os/topics.py` | msgspec `TopicMessage` structs; `MotionCommand` (`/act/motion`) already documents "Brain → motor_ctrl (JP01-MC01 ESP32)" |
+| Typed topics | `jaeger_os/topics.py` | msgspec `TopicMessage` structs; `MotionCommand` (`/act/motor/command`) already documents "Brain → motor_ctrl (JP01-MC01 ESP32)" |
 | Bus | `jaeger_os/transport/zmq_bus.py`, `transport/broker.py` | Real pub/sub, per-subscriber queues, slow-joiner guard, in-proc + ZMQ variants behind one `Bus` interface |
 | Node boot singleton | `jaeger_os/nodes/runtime.py` | Lazy `ensure_*_node()` pattern; notes Track A.7 will add the multi-process broker variant |
 | Permission tiers | `jaeger_os/core/safety/permissions.py` | `READ_ONLY / WRITE_LOCAL / EXTERNAL_EFFECT / HARDWARE / PRIVILEGED` — a HARDWARE tier already exists for exactly this |
@@ -127,11 +127,11 @@ HardwareNode (= nodes.base.Node + hardware conventions)
 │                 topics those capabilities map to
 └─ telemetry      publishes its controller's heartbeat/telemetry as
                   typed topics (§2.6) at the rate the wire provides;
-                  publishes /sense/node_health on a fixed cadence
+                  publishes /sys/node/health on a fixed cadence
 ```
 
 Why capabilities do **not** live on the node class: the generic
-`MotorNode` is robot-agnostic ("subscribe `/act/motion`, forward to
+`MotorNode` is robot-agnostic ("subscribe `/act/motor/command`, forward to
 adapter"). What JP01's motors can *do* (two drive motors, two servo
 joints, 40–150° limits) is robot knowledge — it belongs in the JP01
 package, next to the adapter that encodes it. A future quadruped
@@ -176,7 +176,7 @@ capabilities:                      # what the AGENT sees (§2.6)
     tier: HARDWARE
     schema: jp01.capabilities:MoveJointsArgs
 safety:
-  estop_scope: [mc01]              # nodes that must honor /act/estop
+  estop_scope: [mc01]              # nodes that must honor /act/estop/trigger
 ```
 
 Loader behavior (`hardware/package.py`): parse + validate against a
@@ -270,9 +270,9 @@ wire boundary            Protocol.encode → bytes (package-owned)
 
 **Commands (down):** agent tool call → typed topic publish → node
 subscriber → adapter → builder → wire. `MotionCommand` on
-`/act/motion` already exists (`topics.py:286`); the framework adds
-the missing act topics as packages need them (`/act/lights`,
-`/act/servo`), each a msgspec struct with a validator-backed schema.
+`/act/motor/command` already exists (`topics.py:286`); the framework adds
+the missing act topics as packages need them (`/act/light/set`,
+`/act/servo/command`), each a msgspec struct with a validator-backed schema.
 Request/response capabilities (e.g. `GT` telemetry pull) use the
 bus's existing `request(…, ack_topic=…)` correlation pattern
 (`SpeechCommand`/`SpokenAck` precedent in `nodes/kokoro_tts/node.py`).
@@ -280,7 +280,7 @@ bus's existing `request(…, ack_topic=…)` correlation pattern
 **Telemetry (up):** push-primary. Nodes parse controller heartbeats
 (AVC01/MC01 emit a status line every 30 s per their `.ino` files;
 VCC01 publishes `telemetry.*` ZMQ topics at ~5 Hz) and republish as
-typed bus topics (`/sense/motor_state`, `/sense/controller_health`).
+typed bus topics (`/sense/motor/state`, `/sys/node/health`).
 Pull exists only as cached-last-value: each node's `health()` embeds
 the latest telemetry snapshot, and the Tier-3 supervisor's status
 surface (daemon-arch plan's HostMonitor analog) serves "current
@@ -328,7 +328,7 @@ what each node guarantees so that supervisor can be generic:
   lights blanked (the `LightAdapter.stop()` docstring already
   mandates this), motors stopped (`DC` already de-activates MC01 and
   its firmware neutralizes motors).
-- **Health** — `/sense/node_health` heartbeat per node (cadence
+- **Health** — `/sys/node/health` heartbeat per node (cadence
   configurable, default 1 s) carrying `NodeState` + link state +
   last controller-heartbeat age. Supervisor distinguishes
   crashed (heartbeat stale, process dead) from intentionally-off
@@ -362,7 +362,7 @@ is a link-hygiene timeout, not a safety system.
 |---|---|---|---|
 | **L0 — firmware watchdog** | MC01 (and any motion firmware) | If no valid command/heartbeat within N ms (proposed 250 ms while activated), firmware AUTONOMOUSLY neutralizes all actuators. The ONLY layer that can promise a hard latency bound — it survives host crash, Python GC, cable pull. | **Absent today — required firmware work**, tracked in `JP01_Firmware` (§4.3). The existing 2 s motor-duration clamp is the embryo of this. |
 | **L1 — node-local e-stop** | Each motion-capable Tier-3 node | `estop()` writes the stop command on a path that BYPASSES the normal command queue (dedicated immediate write on the open transport). Never routes through Tier 1, never waits on the agent loop. | Framework contract (`hardware/safety.py`, PROPOSED). |
-| **L2 — system e-stop** | Bus topic `/act/estop` (PROPOSED) | Any publisher (hardware button node, operator UI, agent tool, supervisor) latches system e-stop; every node in `safety.estop_scope` executes L1 on receipt; the latch state is itself a topic; motion capabilities refuse (`fail closed`) while latched; un-latch is an explicit operator action, never automatic. | Framework contract. |
+| **L2 — system e-stop** | Bus topic `/act/estop/trigger` (PROPOSED) | Any publisher (hardware button node, operator UI, agent tool, supervisor) latches system e-stop; every node in `safety.estop_scope` executes L1 on receipt; the latch state is itself a topic; motion capabilities refuse (`fail closed`) while latched; un-latch is an explicit operator action, never automatic. | Framework contract. |
 
 What the framework explicitly does **not** promise: millisecond-bound
 e-stop latency through Python tiers. Honest budget statement: L2 → L1
@@ -531,7 +531,7 @@ of this plan's implementation either.
 
 | JP01-CC01 today (verified paths) | Maps to | Notes |
 |---|---|---|
-| `plugins/Core/serial_handler.py` | `hardware/transport.py:SerialTransport` | Same verbs; monitor/logging becomes node-level logging + `/sense/node_health` |
+| `plugins/Core/serial_handler.py` | `hardware/transport.py:SerialTransport` | Same verbs; monitor/logging becomes node-level logging + `/sys/node/health` |
 | `comms/zmq_client.py` (note: brief said `plugins/Core/zmq_client.py` — actual location is `comms/`) | `hardware/transport.py:ZmqReqTransport` + VCC01 adapter streams | Qt signals → bus topics |
 | `plugins/Core/main_controller.py` | package loader + Link dual-path + Tier-3 supervisor | The relay logic (`_has_live_zmq()`) becomes the `relay:` topology block |
 | `plugins/Core/motion_control.py` | `packages/jp01/adapters/mc01.py` + `devices/motor.py` + `motion(…)` tool | Waypoint/jog/sequence UI logic → agent capabilities + Tier-4 panel |
@@ -614,7 +614,7 @@ capability. **May override:** transports, protocols, device builders,
 capability naming below the subsystem level, telemetry topic shapes
 (by contributing new TopicMessage structs). **May never override:**
 the Node lifecycle contract, the safety layer contract
-(`/act/estop` semantics, latch behavior), the capability→ToolDef
+(`/act/estop/trigger` semantics, latch behavior), the capability→ToolDef
 registration path (tiers, availability, beta gating), and the rule
 that all state-of-record lives in Tier 1 (nodes are stateless
 drivers — daemon brief Rule 2).
@@ -634,7 +634,7 @@ drivers — daemon brief Rule 2).
 | 7 | Telemetry | Push-primary (typed bus topics from controller heartbeats/streams) + cached-last-value pull via node health | Wire already pushes (30 s firmware heartbeats, 5 Hz VCC01 telemetry); polling adds nothing |
 | 8 | Wire protocol abstraction | Yes — `Protocol` ABC with `AsciiBracketProtocol` first-class, separate from `Transport` | JP01's dual-path proves protocol and transport are independent axes (same brackets over serial or ZMQ relay) |
 | 9 | Hot-reload lifecycle | Defer to daemon-arch supervisor; nodes already speak SIGTERM/SIGUSR1 + NodeState; topology `enabled:` is the config surface | The lifecycle API exists in `nodes/base.py`; this plan adds only the hardware-safe teardown guarantees |
-| 10 | Health/failure | `/sense/node_health` heartbeat + link state in `health()`; tools fail closed with typed retryable errors; backstops prevent retry-spin | Reuses loop error-result contract + existing guardrails |
+| 10 | Health/failure | `/sys/node/health` heartbeat + link state in `health()`; tools fail closed with typed retryable errors; backstops prevent retry-spin | Reuses loop error-result contract + existing guardrails |
 | 11 | Simulation | `simulated: true` per controller → MockTransport behind the same adapter; whole-package sim for desktop dev + bench | The seam already exists (`write_line` injection in `SerialMotorAdapter`); MockTransport formalizes it |
 | 12 | Repo boundary | Two repos; wire protocol is the versioned contract; host-side moves to JROS, firmware + Jetson internals + diagnostic app stay | Firmware is flashed, hardware-versioned, and non-Python; absorbing it buys nothing |
 | 13 | Versioning | `requires_framework` in topology (load-time refusal) + `protocol_version` in firmware handshake `(planned)` | Refuse loudly beats degrade silently |

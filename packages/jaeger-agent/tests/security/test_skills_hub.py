@@ -19,7 +19,7 @@ def instance(tmp_path, monkeypatch):
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.skills_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("jaeger_agent.workspace.get_layout", lambda: layout)
+    monkeypatch.setattr("jaeger_agent.core.workspace.get_layout", lambda: layout)
     monkeypatch.delenv("JAEGER_SKILL_LEDGER", raising=False)
     return layout
 

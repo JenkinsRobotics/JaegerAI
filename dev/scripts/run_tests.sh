@@ -109,26 +109,24 @@ export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
 # ── pytest invocation ──────────────────────────────────────────────
 
-PYTEST="${HOME}/.jaeger/venv/bin/pytest"
-if [ ! -x "$PYTEST" ]; then
-    PYTEST=".venv/bin/pytest"
+PYTHON="${JAEGER_VENV:-$HOME/.jaeger/venv}/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON="python3"
 fi
-if [ ! -x "$PYTEST" ]; then
-    PYTEST="pytest"
-fi
+PYTEST=("$PYTHON" -m pytest)
 
 # pytest-xdist parallel workers if installed — falls back to serial.
 # ``-n auto`` uses every core; that's noisy on a dev laptop and
 # exposes CI-vs-local differences (test ordering, fixture races).
 # ``JaegerAI_TEST_WORKERS`` pins the count for reproducibility; export
 # it = 1 to debug a flake.
-if "$PYTEST" --help 2>/dev/null | grep -q -- '-n NUMPROCESSES'; then
+if "${PYTEST[@]}" --help 2>/dev/null | grep -q -- '-n NUMPROCESSES'; then
     XDIST_ARGS=(-n "${JaegerAI_TEST_WORKERS:-4}")
 else
     XDIST_ARGS=()
 fi
 
-CMD=("$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"})
+CMD=("${PYTEST[@]}" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"})
 if [ -n "$MARKER_EXPR" ]; then
     CMD+=(-m "$MARKER_EXPR")
 fi

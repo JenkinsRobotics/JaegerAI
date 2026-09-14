@@ -149,7 +149,7 @@ def _walk(model_cls: type, instance: Any, prefix: str,
             "default": "" if secret else _display_value(default, kind),
             "current": "" if secret else _display_value(value, kind),
             "description": (field_info.description or "").strip(),
-            "restart": bool(extra.get("restart", False)),
+            "restart": path.startswith("multimodal.") or bool(extra.get("restart", False)),
             "advanced": bool(extra.get("advanced", False)),
             "validation": _validation(field_info),
         }

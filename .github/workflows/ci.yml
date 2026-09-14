@@ -6,6 +6,7 @@ env:
   JAEGER_NO_ATTACH: "1"
   JAEGER_TEST_HEADLESS: "1"
   PYTHONHASHSEED: "0"
+  PYTHONDONTWRITEBYTECODE: "1"
 jobs:
   webui-assembly:
     name: First-party Jaeger WebUI
@@ -68,11 +69,11 @@ jobs:
           # though it is only a build dependency of Jaeger.
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
-            root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e '.[test]' ;;
-            agent) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent pytest ;;
-            os) python -m pip install -e packages/jaeger-os pytest ;;
-            kokoro) python -m pip install -e packages/jaeger-os -e packages/jaeger-kokoro-tts pytest ;;
-            whisper) python -m pip install -e packages/jaeger-os -e packages/jaeger-whisper-stt pytest ;;
+            root) python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]' ;;
+            agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest ;;
+            os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
+            kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
+            whisper) python scripts/install-packages.py packages/jaeger-os packages/jaeger-whisper-stt; python -m pip install pytest ;;
           esac
       - name: Test suite
         run: |
@@ -113,11 +114,9 @@ jobs:
       - run: python -m pip install build
       - name: Build distributions from clean checkout
         run: |
-          mkdir -p dist/all
-          for project in packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .; do
-            python -m build "$project" --outdir "$PWD/dist/all"
-          done
+          python scripts/install-packages.py --no-install --sdist --wheel-dir "$RUNNER_TEMP/jaeger-dist" \
+            packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .
       - name: Reject unsafe artifact contents
-        run: python dev/scripts/inspect_release_artifacts.py dist/all
+        run: python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/jaeger-dist"
       - name: Installer and test-runner syntax
         run: bash -n install.sh scripts/*.sh dev/scripts/*.sh

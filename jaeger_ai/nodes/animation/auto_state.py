@@ -50,19 +50,19 @@ class AvatarAutoStateDriver:
     def start(self) -> None:
         if self._started.is_set():
             return
-        self.bus.subscribe(topics.ACT_SPEECH, self._on_speech_start)
-        self.bus.subscribe(topics.SENSE_SPOKEN, self._on_speech_done)
+        self.bus.subscribe(topics.ACT_SPEECH_SAY, self._on_speech_start)
+        self.bus.subscribe(topics.ACT_SPEECH_SPOKEN, self._on_speech_done)
         self._started.set()
 
     def stop(self) -> None:
         if not self._started.is_set():
             return
         try:
-            self.bus.unsubscribe(topics.ACT_SPEECH, self._on_speech_start)
+            self.bus.unsubscribe(topics.ACT_SPEECH_SAY, self._on_speech_start)
         except Exception:  # noqa: BLE001
             pass
         try:
-            self.bus.unsubscribe(topics.SENSE_SPOKEN, self._on_speech_done)
+            self.bus.unsubscribe(topics.ACT_SPEECH_SPOKEN, self._on_speech_done)
         except Exception:  # noqa: BLE001
             pass
         self._started.clear()
@@ -98,7 +98,7 @@ class AvatarAutoStateDriver:
             return
         asset_path = str(_FRAMEWORK_AVATAR_DEFAULTS / mapping["asset"])
         try:
-            self.bus.publish(topics.AnimationCommand(
+            self.bus.publish(topics.DisplayCommand(
                 adapter=mapping["adapter"],
                 asset_path=asset_path,
                 duration_ms=0,

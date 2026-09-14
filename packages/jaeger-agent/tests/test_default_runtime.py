@@ -14,8 +14,8 @@ import pytest
 from pydantic import ValidationError
 
 from jaeger_agent import AgentConfig, Message, ProviderAdapter, ToolCall
-from jaeger_agent.node import DEFAULT_RUNTIME_FACTORY, MindNode, resolve_runtime_factory
-from jaeger_agent.runtime import DefaultAgentRuntime, build_adapter, create_runtime
+from jaeger_agent.core.node import DEFAULT_RUNTIME_FACTORY, MindNode, resolve_runtime_factory
+from jaeger_agent.core.runtime import DefaultAgentRuntime, build_adapter, create_runtime
 
 
 class ScriptedAdapter(ProviderAdapter):
@@ -27,6 +27,7 @@ class ScriptedAdapter(ProviderAdapter):
         self.turn = 0
         self.tool = tool
         self.seen_tools: list[str] = []
+        self.closed = False
 
     def format_messages(self, messages, tools, system):
         self.seen_tools = [t.name for t in tools]
@@ -47,6 +48,9 @@ class ScriptedAdapter(ProviderAdapter):
     def supports(self, feature: str) -> bool:
         return False
 
+    def close(self) -> None:
+        self.closed = True
+
 
 # ── config → adapter ────────────────────────────────────────────────
 
@@ -54,6 +58,7 @@ class ScriptedAdapter(ProviderAdapter):
 def test_llama_cpp_is_the_default_provider() -> None:
     """No server, no key, no network is the out-of-the-box posture."""
     assert AgentConfig().provider == "llama_cpp"
+    assert AgentConfig().tools_enabled is True
 
 
 def test_llama_cpp_without_a_path_says_what_to_do() -> None:
@@ -129,6 +134,47 @@ def test_runtime_runs_a_turn_with_an_injected_adapter() -> None:
     result = rt.run_turn("hello", session_key="s1")
     assert result.error is None and result.text == "done"
     rt.close()
+
+
+def test_chatbot_toggle_keeps_runtime_history_but_exposes_no_tools() -> None:
+    adapter = ScriptedAdapter()
+    rt = DefaultAgentRuntime(config={"tools_enabled": False}, adapter=adapter)
+
+    assert rt.run_turn("hello", session_key="chat").text == "done"
+    agent = rt.agent_for("chat")
+    assert adapter.seen_tools == []
+    assert agent.all_tools == []
+    assert [message["role"] for message in agent.messages] == ["user", "assistant"]
+    rt.close()
+
+
+def test_runtime_warmup_does_not_add_a_fake_turn() -> None:
+    class WarmAdapter(ScriptedAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.warmed = None
+
+        def warmup(self, *, system_prompt, tools) -> None:
+            self.warmed = (system_prompt, [tool.name for tool in tools])
+
+    adapter = WarmAdapter()
+    rt = DefaultAgentRuntime(
+        config={"tools_enabled": False},
+        adapter=adapter,
+    )
+
+    assert rt.warmup(session_key="voice", system_prompt="voice system") is True
+    assert adapter.warmed == ("voice system", [])
+    assert rt.agent_for("voice").messages == []
+    rt.close()
+
+
+def test_runtime_close_closes_owned_adapter() -> None:
+    adapter = ScriptedAdapter()
+    rt = DefaultAgentRuntime(adapter=adapter)
+    rt.close()
+    rt.close()
+    assert adapter.closed is True
 
 
 def test_sessions_keep_separate_transcripts() -> None:
@@ -264,7 +310,7 @@ def test_no_tools_also_suppresses_skill_registered_tools(monkeypatch) -> None:
     computer_read_screen. An embedder that declined tools was handed
     those anyway. Caught reviewing a chat-only embedder.
     """
-    from jaeger_agent.runtime import _load_skills
+    from jaeger_agent.core.runtime import _load_skills
 
     monkeypatch.setenv("JAEGER_AGENT_NO_TOOLS", "1")
     assert _load_skills(object()) is None

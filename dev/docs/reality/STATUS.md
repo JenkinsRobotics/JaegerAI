@@ -1,6 +1,10 @@
 # Jaeger-OS — Pipeline Runtime-Verification Status
 
-**Current: `0.8.0` (2026-07-11) — the modular-runtime + persona_first
+**Current: `0.12.0` release candidate (2026-09-13).** See the
+[candidate report](../releases/0.12.0/RELEASE_CANDIDATE_20260913.md) for current
+verification and shipment gates. The July status below is historical.
+
+**Historical: `0.8.0` (2026-07-11) — the modular-runtime + persona_first
 release.** Phase U (runtime unification) and Phase M (engine-modules)
 COMPLETE; persona_first shipped as the default agentic pipeline, hardened
 and re-gated after a real-front-door regression; RC battery ALL GATES PASS.

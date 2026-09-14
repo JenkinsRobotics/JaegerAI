@@ -26,7 +26,7 @@ def main(argv: list[str]) -> int:
         ack = bus.request(
             topics.SpeechCommand(text=text, node_id="probe",
                                  correlation_id=uuid.uuid4().hex),
-            ack_topic=topics.SENSE_SPOKEN, timeout_s=60.0)
+            ack_topic=topics.ACT_SPEECH_SPOKEN, timeout_s=60.0)
         print("spoken ack:", getattr(ack, "ok", None) if ack else "timeout")
         return 0
     except Exception as exc:  # noqa: BLE001

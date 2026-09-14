@@ -33,12 +33,12 @@ class LightNode(Node):
 
     def setup(self) -> None:
         self.adapter.start()
-        self.bus.subscribe(topics.ACT_LIGHT, self._on_light_command)
-        self._log(f"subscribed to {topics.ACT_LIGHT}")
+        self.bus.subscribe(topics.ACT_LIGHT_SET, self._on_light_command)
+        self._log(f"subscribed to {topics.ACT_LIGHT_SET}")
 
     def teardown(self) -> None:
         try:
-            self.bus.unsubscribe(topics.ACT_LIGHT, self._on_light_command)
+            self.bus.unsubscribe(topics.ACT_LIGHT_SET, self._on_light_command)
         except Exception:  # noqa: BLE001
             pass
         try:

@@ -13,7 +13,7 @@ truth.
 Uses a full attribute mirror rather than ``import *`` because the historical
 ``__all__`` here predates several topic families (animation, timeline,
 media, skill-tree) and was never backfilled — plain attribute access
-(``topics.ACT_ANIMATION``) must keep working for all of them.
+(``topics.ACT_DISPLAY_PLAY``) must keep working for all of them.
 """
 
 from __future__ import annotations

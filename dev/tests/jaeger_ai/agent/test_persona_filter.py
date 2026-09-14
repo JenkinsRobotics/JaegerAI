@@ -136,3 +136,13 @@ def test_rewrite_dropping_half_the_facts_returns_original():
     gutted = "I looked into it and there are some details you should know."
     c = _Client(gutted)
     assert apply_persona_voice(c, original, BLOCK) == original
+
+
+def test_restyle_cannot_drop_counts_or_change_identifiers():
+    from jaeger_agent.prompts.persona_filter import _preserves_content
+
+    assert not _preserves_content("There are three blue circles.", "The shapes are blue circles.")
+    assert not _preserves_content("Build R731 has 4 failures.", "Build R732 has 4 failures.")
+    assert _preserves_content("There are 3 blue circles.", "Indeed, three blue circles are visible.")
+    original = "There are three blue circles."
+    assert apply_persona_voice(_Client("The shapes are circles, and they are blue."), original, BLOCK) == original

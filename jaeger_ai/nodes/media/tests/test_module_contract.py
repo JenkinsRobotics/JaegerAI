@@ -39,9 +39,9 @@ def test_module_yaml_validates() -> None:
     spec = load_module(_MODULE_DIR)
     assert spec.module == "media"
     assert spec.slot == "media"
-    assert spec.version == "1.0.0"
-    assert spec.consumes == ["/act/media"]
-    assert spec.produces == ["/sense/media_frame", "/sense/media_state"]
+    assert spec.version == "0.12.0"
+    assert spec.consumes == ["/act/display/play"]
+    assert spec.produces == ["/act/display/frame", "/act/display/state"]
     assert spec.tools == []
     assert spec.factory == "jaeger_ai.nodes.media:make_media_node"
     assert spec.config == ""   # no config.py — deliberately unset
@@ -65,29 +65,31 @@ def test_command_frame_round_trip_with_a_tiny_image(tmp_path) -> None:
             time.sleep(0.01)
         assert node.state == NodeState.RUNNING
 
-        frames: list[topics.MediaFrame] = []
-        states: list[topics.MediaState] = []
+        frames: list[topics.DisplayFrame] = []
+        states: list[topics.DisplayState] = []
         done = threading.Event()
 
         def _on_frame(msg: topics.TopicMessage) -> None:
-            assert isinstance(msg, topics.MediaFrame)
+            assert isinstance(msg, topics.DisplayFrame)
             frames.append(msg)
 
         def _on_state(msg: topics.TopicMessage) -> None:
-            assert isinstance(msg, topics.MediaState)
+            assert isinstance(msg, topics.DisplayState)
             states.append(msg)
             if len(states) >= 2:  # playing=True, then playing=False
                 done.set()
 
-        bus.subscribe(topics.SENSE_MEDIA_FRAME, _on_frame)
-        bus.subscribe(topics.SENSE_MEDIA_STATE, _on_state)
-        bus.publish(topics.MediaCommand(path=str(img_path), loop=False))
+        bus.subscribe(topics.ACT_DISPLAY_FRAME, _on_frame)
+        bus.subscribe(topics.ACT_DISPLAY_STATE, _on_state)
+        bus.publish(topics.DisplayCommand(
+            asset_path=str(img_path), params={"loop": False},
+        ))
 
         assert done.wait(timeout=2.0), "no terminal MediaState pair"
         assert len(frames) == 1
         assert (frames[0].width, frames[0].height) == (2, 2)
-        assert states[0].playing is True and states[0].kind == "image"
-        assert states[-1].playing is False
+        assert states[0].state == "playing" and states[0].adapter == "image"
+        assert states[-1].state == "idle"
     finally:
         node.stop()
         thread.join(timeout=2.0)

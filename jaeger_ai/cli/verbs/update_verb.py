@@ -37,6 +37,9 @@ from typing import Any
 def _detect_method() -> str:
     """Same detection as ``instance.detect_install_method`` —
     re-imported here for clarity at call sites."""
+    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
+    if (PACKAGE_ROOT.parent / ".jaeger-product-install").is_file():
+        return "product-checkout"
     from jaeger_ai.core.instance.instance import detect_install_method
     return detect_install_method()
 
@@ -373,7 +376,9 @@ def _update_editable(*, ref: str | None = None) -> int:
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:
-    if method == "dev-checkout":            # editable / clone install (default 0.6+)
+    if method in ("dev-checkout", "product-checkout"):
+        # Both are editable Git trees. The product marker changes routing and
+        # ensures this full updater (including instance migration) is used.
         return _update_editable(ref=ref)
     cmd = _upgrade_command(method)
     if cmd is None:
@@ -518,9 +523,11 @@ def _cmd_update_argv(argv: list[str]) -> int:
     # but a clean curl install has no .git and updates by tarball —
     # label it honestly so operators don't think they're on a git clone.
     label = method
-    if method == "dev-checkout":
+    if method in ("dev-checkout", "product-checkout"):
         from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-        if not (PACKAGE_ROOT.parent / ".git").exists():
+        if method == "product-checkout":
+            label = "Jaeger AI product install"
+        elif not (PACKAGE_ROOT.parent / ".git").exists():
             label = "clean install (download + apply)"
     print(f"[jaeger update] install method: {label}")
 

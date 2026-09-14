@@ -58,17 +58,22 @@ _DB_FILENAME = "state.db"
 # ── connection lifecycle ───────────────────────────────────────────
 
 
-# Per-process singleton connection. The agent loop is single-threaded
-# (one model call at a time, gated by the LLM lock), and SQLite in
-# WAL mode tolerates many threads sharing one connection if we
-# serialize writes ourselves. We pass ``check_same_thread=False``
-# and guard writes with ``_write_lock``.
+# One connection per thread, all pointed at the active instance database.
+# A SQLite connection cannot safely service an overlapping SELECT and
+# transaction from different threads: ``check_same_thread=False`` only
+# disables Python's guard; it does not make a connection concurrent. WAL's
+# reader/writer concurrency also requires separate connections. Writes remain
+# process-serialised by ``_write_lock``.
 _state: dict[str, Any] = {
     "path": None,           # absolute path to state.db
-    "conn": None,           # sqlite3.Connection
+    "conn": None,           # owner thread's sqlite3.Connection
+    "owner_thread_id": None,
+    "connections": [],      # every connection, for deterministic shutdown
     "vec_loaded": False,    # did sqlite-vec successfully load?
 }
 _write_lock = threading.Lock()
+_connections_lock = threading.Lock()
+_thread_local = threading.local()
 
 
 def bind(layout: Any) -> None:
@@ -90,6 +95,8 @@ def bind(layout: Any) -> None:
     conn = _open(db_path)
     _state["path"] = str(db_path)
     _state["conn"] = conn
+    _state["owner_thread_id"] = threading.get_ident()
+    _state["connections"] = [conn]
     _state["vec_loaded"] = _try_load_vec(conn)
     _ensure_schema(conn)
     from jaeger_agent.memory.sqlite_search import ensure_fts5_schema
@@ -99,16 +106,23 @@ def bind(layout: Any) -> None:
 def close() -> None:
     """Close the active connection if any. Used at shutdown and
     when ``bind`` swaps instances."""
-    conn = _state.get("conn")
-    if conn is not None:
+    with _connections_lock:
+        connections = list(_state.get("connections") or ())
+        _state["connections"] = []
+        _state["conn"] = None
+        _state["owner_thread_id"] = None
+        _state["path"] = None
+        _state["vec_loaded"] = False
+    for conn in connections:
         with contextlib.suppress(sqlite3.Error):
             conn.close()
-    _state["conn"] = None
-    _state["path"] = None
-    _state["vec_loaded"] = False
+    # The current thread's cached handle is no longer live. Handles cached in
+    # other threads are rejected by their stored path after the next bind.
+    _thread_local.conn = None
+    _thread_local.path = None
 
 
-def _open(path: Path) -> sqlite3.Connection:
+def _open(path: Path, *, set_journal_mode: bool = True) -> sqlite3.Connection:
     """Open the DB with the production pragmas: WAL journal, NORMAL
     sync, foreign keys ON, busy-timeout 5s.
 
@@ -124,7 +138,8 @@ def _open(path: Path) -> sqlite3.Connection:
         check_same_thread=False,        # see _write_lock
     )
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    if set_journal_mode:
+        conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -910,11 +925,38 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 
 def connection() -> sqlite3.Connection:
-    """Get the live connection. Raises if ``bind`` hasn't been called."""
+    """Get this thread's connection to the bound instance store.
+
+    The thread that called :func:`bind` owns the bootstrap connection. Worker
+    threads receive lazy connections of their own, which is what allows a WAL
+    reader to overlap a writer without sharing transaction state.
+    """
     conn = _state.get("conn")
     if conn is None:
         raise RuntimeError("sqlite_store not bound — call bind(layout) first")
-    return conn
+    if _state.get("owner_thread_id") == threading.get_ident():
+        return conn
+
+    path = _state.get("path")
+    local_conn = getattr(_thread_local, "conn", None)
+    if local_conn is not None and getattr(_thread_local, "path", None) == path:
+        return local_conn
+
+    # WAL was selected by bind's bootstrap connection. Reissuing the mutating
+    # journal_mode pragma while another thread owns a transaction can itself
+    # report SQLITE_BUSY, so worker connections only apply per-connection
+    # pragmas here.
+    local_conn = _open(Path(path), set_journal_mode=False)
+    with _connections_lock:
+        # A concurrent shutdown may have unbound the store while this
+        # connection opened. Close it rather than returning a zombie handle.
+        if _state.get("path") != path:
+            local_conn.close()
+            raise RuntimeError("sqlite_store was unbound while opening a connection")
+        _state["connections"].append(local_conn)
+    _thread_local.conn = local_conn
+    _thread_local.path = path
+    return local_conn
 
 
 @contextlib.contextmanager

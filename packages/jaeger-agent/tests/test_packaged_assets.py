@@ -17,10 +17,61 @@ in a routing score nobody reads until Friday.
 from __future__ import annotations
 
 import pathlib
-
 import pytest
 
 PACKAGE = pathlib.Path(__file__).parents[1] / "jaeger_agent"
+NODES = (
+    "audio-duplex-io",
+    "llm-gemma",
+    "stt-streaming",
+    "stt-whisper",
+    "tts-kokoro",
+    "vision-mmproj",
+)
+CORE_MODULES = (
+    "availability",
+    "bridge",
+    "config",
+    "context",
+    "contracts",
+    "credentials",
+    "engine",
+    "errors",
+    "events",
+    "host",
+    "instance",
+    "messages",
+    "module_roots",
+    "node",
+    "policy",
+    "runner",
+    "runtime",
+    "safety",
+    "selfcheck",
+    "trace",
+    "usage",
+    "workspace",
+)
+
+
+def test_core_implementation_has_one_home_beside_extension_surfaces() -> None:
+    core = PACKAGE / "core"
+    assert core.is_dir()
+    assert all((core / f"{name}.py").is_file() for name in CORE_MODULES)
+    for surface in ("nodes", "tools", "skills", "memory"):
+        assert (PACKAGE / surface).is_dir()
+
+
+def test_package_root_contains_only_public_entry_surfaces() -> None:
+    assert {path.name for path in PACKAGE.iterdir() if path.is_file()} == {
+        "__init__.py",
+        "__main__.py",
+        "module.yaml",
+        # Incoming runtime services remain public module entry points.
+        "tool_executor.py", "subagent_worktree.py", "tirith.py",
+        "checkpoints.py", "delegation_context.py", "instance_config.py",
+        "shell_hooks.py",
+    }
 
 
 def test_core_skills_dir_resolves_inside_the_package() -> None:
@@ -66,9 +117,25 @@ def test_the_shipped_skill_corpus_is_present() -> None:
         "prompts/agent_system_prompt.md",
         "background/thinking_runner.yaml",
         "module.yaml",
+        "nodes/audio-duplex-io/node.json",
+        "nodes/llm-gemma/node.json",
+        "nodes/stt-streaming/node.json",
+        "nodes/stt-whisper/node.json",
+        "nodes/tts-kokoro/node.json",
+        "nodes/vision-mmproj/node.json",
+        "nodes/audio-duplex-io/weights/README.md",
+        "nodes/vision-mmproj/stats/README.md",
     ],
 )
 def test_non_python_assets_ship_with_the_code(relative: str) -> None:
     """setuptools only auto-includes .py for a found package. Every one of
     these is read at runtime by a module beside it."""
     assert (PACKAGE / relative).is_file(), f"missing packaged asset: {relative}"
+
+
+@pytest.mark.parametrize("node", NODES)
+def test_flat_node_registry_entries_are_complete(node: str) -> None:
+    root = PACKAGE / "nodes" / node
+    assert root.is_dir()
+    for relative in ("runtime.py", "node.json", "weights/README.md", "stats/README.md"):
+        assert (root / relative).is_file(), f"{node} missing {relative}"

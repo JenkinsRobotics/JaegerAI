@@ -61,7 +61,7 @@ class UpdateDialog(QDialog):
 
     def __init__(self, jaeger_exe: Path, target: str = "", parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"Update Jaeger → {target}" if target else "Update Jaeger")
+        self.setWindowTitle(f"Update Jaeger AI → {target}" if target else "Update Jaeger AI")
         self.resize(640, 400)
         v = QVBoxLayout(self)
         self._status = QLabel(

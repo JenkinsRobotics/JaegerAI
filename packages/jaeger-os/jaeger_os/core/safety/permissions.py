@@ -528,6 +528,28 @@ def install_policy(policy: PermissionPolicy) -> None:
     _current_policy.set(policy)
 
 
+def install_confirmation_provider(
+    provider: ConfirmationProvider,
+) -> PermissionPolicy:
+    """Install ``provider`` without ever mutating the fail-safe sentinel.
+
+    Application bridges need to replace the interactive confirmation route at
+    runtime. Mutating ``current_policy().confirmation`` directly is unsafe when
+    no application policy has been installed yet: in that case
+    :func:`current_policy` returns the process-wide ``_DEFAULT_POLICY`` object,
+    permanently converting the supposedly deny-all default into a live bus
+    prompt. Build and install a real policy for that case; retain the active
+    policy's mode in both cases.
+    """
+    policy = current_policy()
+    if policy is _DEFAULT_POLICY:
+        policy = PermissionPolicy(mode=policy.mode, confirmation=provider)
+        install_policy(policy)
+    else:
+        policy.confirmation = provider
+    return policy
+
+
 # --- requires_tier decorator --------------------------------------------------
 
 
@@ -644,6 +666,7 @@ __all__ = [
     "current_policy",
     "get_permission_request",
     "get_tier",
+    "install_confirmation_provider",
     "install_policy",
     "is_tier_decorated",
     "requires_tier",

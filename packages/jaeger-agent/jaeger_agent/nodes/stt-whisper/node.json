@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "jaeger_agent_node",
+  "runtime": "stt_whisper",
+  "id": "stt-whisper",
+  "slot": "stt",
+  "enabled_by_default": true,
+  "consumes": [
+    "utterance_pcm_f32_16khz"
+  ],
+  "produces": [
+    "transcript_text"
+  ],
+  "status": "verified_2026-09-02",
+  "implementation": "runtime.py:build",
+  "lineage": "gemma_multimodal-decomposition",
+  "notes": "large-v3-turbo, ceiling-exact on the turn path (2.78/1.18% clean WER). One lock: preview and final share the model."
+}

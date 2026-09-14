@@ -106,7 +106,7 @@ def test_onboarding_stack_invalid_fallback_is_atomic(tmp_path):
 
 def test_onboarding_credentials_survive_process_environment(tmp_path, monkeypatch):
     from jaeger_ai.core.models import onboarding_credentials as onboarding
-    from jaeger_agent.credentials import get_credential
+    from jaeger_agent.core.credentials import get_credential
     layout = _layout(tmp_path)
     monkeypatch.setattr(onboarding, "_pending", {})
     monkeypatch.setenv("OPENAI_API_KEY", "")

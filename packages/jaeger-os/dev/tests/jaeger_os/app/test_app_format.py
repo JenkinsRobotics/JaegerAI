@@ -91,7 +91,9 @@ def make_dying(bus: Any, config: dict[str, Any]) -> Node:
 
 _GOOD_MANIFEST = """
 [app]
+id = "org.example.app.conftest"
 name = "conftest-app"
+type = "application"
 version = "0.0.1"
 requires_framework = ">=0.1"
 mode = "fused"
@@ -120,7 +122,9 @@ def _write_app(tmp_path: pathlib.Path, manifest: str = _GOOD_MANIFEST,
 
 def test_manifest_happy_path(tmp_path):
     spec = load_manifest(_write_app(tmp_path))
+    assert spec.id == "org.example.app.conftest"
     assert spec.name == "conftest-app"
+    assert spec.type == "application"
     assert spec.bus.backend == "inproc"
     assert spec.nodes[0].id == "ticker"
     assert spec.nodes[0].restart == "never"
@@ -130,6 +134,22 @@ def test_manifest_refuses_unknown_keys(tmp_path):
     bad = _GOOD_MANIFEST.replace('mode = "fused"', 'modee = "fused"')
     with pytest.raises(ValueError, match="modee"):
         load_manifest(_write_app(tmp_path, bad))
+
+
+def test_manifest_refuses_non_application_type(tmp_path):
+    bad = _GOOD_MANIFEST.replace(
+        'type = "application"', 'type = "module"')
+    with pytest.raises(ValueError, match="must be 'application'"):
+        load_manifest(_write_app(tmp_path, bad))
+
+
+def test_app_identity_metadata_is_backward_compatible(tmp_path):
+    old = _GOOD_MANIFEST.replace(
+        'id = "org.example.app.conftest"\n', '').replace(
+        'type = "application"\n', '')
+    spec = load_manifest(_write_app(tmp_path, old))
+    assert spec.id == ""
+    assert spec.type == "application"
 
 
 def test_manifest_refuses_bad_enums(tmp_path):
@@ -565,7 +585,7 @@ def test_slot_bound_node_resolves_factory_and_boots(tmp_path, monkeypatch):
         factory=f"{__name__}:make_ticker",
     )
     monkeypatch.setattr(
-        modules_mod, "discover_modules", lambda root=None: {
+        modules_mod, "discover_modules", lambda root=None, **kw: {
             "widgets": [fake_spec]})
 
     app = JaegerApp(_write_slot_app(tmp_path)).boot()
@@ -590,7 +610,7 @@ def test_slot_bound_node_picks_deterministically_when_multiple_modules(
     alpha = modules_mod.ModuleSpec(
         module="alpha_engine", slot="widgets", factory=f"{__name__}:make_ticker")
     monkeypatch.setattr(
-        modules_mod, "discover_modules", lambda root=None: {
+        modules_mod, "discover_modules", lambda root=None, **kw: {
             "widgets": [zeta, alpha]})
 
     app = JaegerApp(_write_slot_app(tmp_path)).boot()
@@ -606,7 +626,7 @@ def test_slot_bound_node_unknown_slot_raises_naming_the_slot(tmp_path, monkeypat
     node must resolve, never silently vanish."""
     from jaeger_os.core import modules as modules_mod
 
-    monkeypatch.setattr(modules_mod, "discover_modules", lambda root=None: {})
+    monkeypatch.setattr(modules_mod, "discover_modules", lambda root=None, **kw: {})
 
     with pytest.raises(ValueError, match="widgets"):
         JaegerApp(_write_slot_app(tmp_path)).boot()
@@ -682,7 +702,7 @@ def test_node_health_message_shape():
     in ``app/health.py`` (on the different, unpublished ``/sys/node_health``
     topic) is gone — every ``nodes.base.Node`` now heartbeats this type."""
     h = topics.NodeHealth(node="x", state="running", detail="ok")
-    assert h.topic == "/sense/node_health"
+    assert h.topic == "/sys/node/health"
     assert h.node == "x" and h.state == "running" and h.detail == "ok"
 
 
@@ -702,7 +722,7 @@ def test_health_cache_receives_a_real_base_node_heartbeat():
                           timeout_s=3.0)
         latest = cache.latest(node.name)
         assert latest.state == "running"
-        assert latest.topic == "/sense/node_health"
+        assert latest.topic == "/sys/node/health"
         age = cache.age_s(node.name)
         assert age is not None and age >= 0.0
     finally:

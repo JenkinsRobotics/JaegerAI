@@ -1,4 +1,9 @@
-# JaegerWhisperSTT runtime dependencies.
+# ── the framework ────────────────────────────────────────────────
+# A VERSION SPEC, not a git URL, and the difference is not cosmetic.
+# A URL pin forces pip to reinstall that exact source even when a
+# newer, satisfying jaeger-os is already present — so installing this
+# module would DOWNGRADE the framework under a running app and take
+# its topics with it.
 #
 # Engine-tier only — pins jaeger-os (framework substrate: transport,
 # nodes.base, core.audio, core.voice, core.instance.setting_meta) and

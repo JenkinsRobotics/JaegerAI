@@ -23,7 +23,7 @@ the empty-string default, same fail-soft shape as before.
 
 from __future__ import annotations
 
-from jaeger_os.core.modules import resolve_mind_module, resolve_slot_symbols
+from jaeger_os.core.modules import resolve_application_module, resolve_slot_symbols
 
 
 def _module_default_voice() -> str:
@@ -36,12 +36,12 @@ def _module_default_voice() -> str:
     config.yaml actually changes the spoken default; falls back to the
     module's own dataclass default when there's no instance to read
     yet (fresh boot, no layout bound)."""
-    context_mod = resolve_mind_module("core.context")
+    context_mod = resolve_application_module("core.context")
     KokoroTTSConfig = resolve_slot_symbols("tts", ("KokoroTTSConfig",)).get(
         "KokoroTTSConfig")
     try:
         layout = context_mod._require_layout()
-        schemas_mod = resolve_mind_module("core.instance.schemas")
+        schemas_mod = resolve_application_module("core.instance.schemas")
         return schemas_mod.load_yaml(layout.config_path,
                                       schemas_mod.Config).kokoro_tts.voice
     except Exception:
@@ -57,20 +57,20 @@ def resolve_voice() -> str:
     Kokoro with the right voice for the active instance (Jarvis vs.
     Lilith etc.) without each speak() call needing to know which
     instance is active."""
-    context_mod = resolve_mind_module("core.context")
+    context_mod = resolve_application_module("core.context")
     try:
         layout = context_mod._require_layout()
     except Exception:
         return _module_default_voice()
     try:
-        personality_mod = resolve_mind_module("personality.character")
+        personality_mod = resolve_application_module("personality.character")
         ch = personality_mod.active_character(layout.root)
         if ch is not None and ch.voice_id:
             return ch.voice_id.strip()
     except Exception:
         pass
     try:
-        schemas_mod = resolve_mind_module("core.instance.schemas")
+        schemas_mod = resolve_application_module("core.instance.schemas")
         identity = schemas_mod.load_yaml(layout.identity_path, schemas_mod.Identity)
     except Exception:
         return _module_default_voice()

@@ -49,7 +49,7 @@ class EchoNode(Node):
     hardware or models."""
 
     def setup(self) -> None:
-        self.bus.subscribe(topics.SENSE_TRANSCRIPT, self._on_transcript)
+        self.bus.subscribe(topics.SENSE_STT_TRANSCRIPT, self._on_transcript)
 
     def _on_transcript(self, msg: topics.Transcript) -> None:
         self.bus.publish(topics.SpeechCommand(
@@ -81,7 +81,7 @@ def verify_monolithic(*, timeout_s: float = 5.0) -> bool:
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.ACT_SPEECH, on_speech)
+    bus.subscribe(topics.ACT_SPEECH_SAY, on_speech)
     cid = uuid.uuid4().hex
     bus.publish(topics.Transcript(
         text="hello from monolithic",
@@ -153,7 +153,7 @@ def _run_child_echo_node(endpoint: str) -> int:
         if msg.pattern == "off":
             stop_event.set()
 
-    bus.subscribe(topics.ACT_LIGHT, on_stop)
+    bus.subscribe(topics.ACT_LIGHT_SET, on_stop)
     stop_event.wait(timeout=30.0)  # safety timeout
 
     node.stop()
@@ -210,7 +210,7 @@ def verify_multiprocess(*, timeout_s: float = 8.0) -> bool:
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.ACT_SPEECH, on_speech)
+    bus.subscribe(topics.ACT_SPEECH_SAY, on_speech)
     time.sleep(0.1)
 
     cid = uuid.uuid4().hex

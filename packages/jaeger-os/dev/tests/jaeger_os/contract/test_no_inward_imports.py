@@ -75,3 +75,45 @@ def test_contract_imports_nothing_from_jaeger_os():
         "jaeger_os/contract/ must import nothing from jaeger_os outside "
         f"itself (nervous-system rule): {violations}"
     )
+
+
+# ── vendored modules must stay stdlib-only ────────────────────────────────
+# JP01_Firmware's VCC01 (Jetson, JetPack-lean) vendors ports.py and wire.py
+# verbatim (controllers/JP01-VCC01/core/contract/, sha256-synced). Any
+# third-party import in these two files becomes a forced dependency in that
+# repo's requirements.txt — which is exactly what happened when wire.py
+# briefly declared JP01CommandEnvelope as a msgspec.Struct (4.0 P1 review,
+# IMPORTANT-3). Other contract modules (topics.py etc.) may use msgspec;
+# they are not vendored.
+
+VENDORED_MODULES = ("ports.py", "wire.py")
+
+import sys  # noqa: E402
+
+
+def _third_party_imports(path: pathlib.Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            names = [node.module or ""]
+        for name in names:
+            top = name.split(".")[0]
+            if top and top not in sys.stdlib_module_names:
+                offenders.append(name)
+    return offenders
+
+
+def test_vendored_contract_modules_are_stdlib_only():
+    violations: dict[str, list[str]] = {}
+    for module_name in VENDORED_MODULES:
+        offenders = _third_party_imports(CONTRACT_DIR / module_name)
+        if offenders:
+            violations[module_name] = offenders
+    assert not violations, (
+        "contract modules vendored by JP01_Firmware/VCC01 must import "
+        f"stdlib only (JetPack zero-dep vendoring): {violations}"
+    )

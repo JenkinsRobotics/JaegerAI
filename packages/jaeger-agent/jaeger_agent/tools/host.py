@@ -19,7 +19,7 @@ from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_agent.tools.time_and_math import system_status
-from jaeger_agent.workspace import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 

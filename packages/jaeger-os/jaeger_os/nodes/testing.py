@@ -13,8 +13,8 @@ nodes get vetted before anything wires them into the live runtime.
     from jaeger_os.transport import topics
     with NodeHarness(lambda bus: MediaNode(bus=bus,
                                            install_signal_handlers=False)) as h:
-        states = h.capture(topics.SENSE_MEDIA_STATE)
-        h.publish(topics.MediaCommand(path="clip.mp4"))
+        states = h.capture(topics.ACT_DISPLAY_STATE)
+        h.publish(topics.DisplayCommand(path="clip.mp4"))
         h.wait(lambda: states)
         print(states[-1])
 

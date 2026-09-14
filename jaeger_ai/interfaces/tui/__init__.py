@@ -1,6 +1,6 @@
-"""Jaeger-OS TUI — hermes-agent-inspired terminal interface.
+"""Jaeger AI TUI — hermes-agent-inspired terminal interface.
 
-A focused interactive surface for `python -m jaeger_os.interfaces.tui`.
+A focused interactive surface for ``jaeger dev --tui``.
 Replaces the bare-bones jaeger CLI chat loop with:
 
   * ASCII banner + identity at boot

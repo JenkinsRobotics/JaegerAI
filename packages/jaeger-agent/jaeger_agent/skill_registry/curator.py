@@ -140,7 +140,7 @@ def assess(
         skills = discover_playbooks()
     if usage is None:
         try:
-            from jaeger_ai.core.runtime.usage_stats import snapshot
+            from jaeger_agent.core.usage import snapshot
             usage = snapshot().get("skills", {})
         except Exception:  # noqa: BLE001
             usage = {}
@@ -165,7 +165,7 @@ def _archive_dir() -> Path:
     """Where archived skills live — always *outside* the scanned skills
     tree so an archived skill is not re-discovered."""
     try:
-        from jaeger_agent.workspace import get_layout
+        from jaeger_agent.core.workspace import get_layout
         return get_layout().root / "skills_archived"
     except Exception:  # noqa: BLE001
         from jaeger_agent.skill_registry.playbook_skills import _SKILLS_DIR

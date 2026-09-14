@@ -33,7 +33,7 @@ def bus():
 def test_empty_timeline_completes_immediately(bus) -> None:
     progress: list[topics.TopicMessage] = []
     bus.subscribe(
-        topics.SENSE_TIMELINE_PROGRESS,
+        topics.ACT_TIMELINE_PROGRESS,
         lambda msg: progress.append(msg),
     )
     runner = TimelineRunner(bus, Timeline(name="empty"))
@@ -54,9 +54,9 @@ def test_empty_timeline_completes_immediately(bus) -> None:
 # ── animation track dispatch ──────────────────────────────────────
 
 def test_animation_clips_dispatch_at_offsets(bus) -> None:
-    received: list[topics.AnimationCommand] = []
+    received: list[topics.DisplayCommand] = []
     bus.subscribe(
-        topics.ACT_ANIMATION,
+        topics.ACT_DISPLAY_PLAY,
         lambda msg: received.append(msg),
     )
     tl = Timeline(name="anim", tracks=[
@@ -84,7 +84,7 @@ def test_animation_clips_dispatch_at_offsets(bus) -> None:
 
 def test_speech_clips_dispatch(bus) -> None:
     received: list[topics.SpeechCommand] = []
-    bus.subscribe(topics.ACT_SPEECH, lambda msg: received.append(msg))
+    bus.subscribe(topics.ACT_SPEECH_SAY, lambda msg: received.append(msg))
     tl = Timeline(name="speak", tracks=[
         TimelineTrack(kind="speech", clips=[
             TimelineClip(t_offset_ms=0, duration_ms=200,
@@ -105,9 +105,9 @@ def test_speech_clips_dispatch(bus) -> None:
 def test_unknown_track_kind_does_not_break(bus) -> None:
     """Future-looking timelines with motion/light tracks should
     schedule for timing fidelity but not crash."""
-    received_anim: list[topics.AnimationCommand] = []
+    received_anim: list[topics.DisplayCommand] = []
     bus.subscribe(
-        topics.ACT_ANIMATION,
+        topics.ACT_DISPLAY_PLAY,
         lambda msg: received_anim.append(msg),
     )
     tl = Timeline(name="mixed", tracks=[
@@ -134,7 +134,7 @@ def test_unknown_track_kind_does_not_break(bus) -> None:
 def test_stop_interrupts_mid_run(bus) -> None:
     progress: list[topics.TimelineProgress] = []
     bus.subscribe(
-        topics.SENSE_TIMELINE_PROGRESS,
+        topics.ACT_TIMELINE_PROGRESS,
         lambda msg: progress.append(msg),
     )
     # 5-second timeline; we stop it after ~100 ms.
@@ -163,9 +163,9 @@ def test_stop_interrupts_mid_run(bus) -> None:
 
 def test_clips_dispatched_in_time_order(bus) -> None:
     """Even when authored out-of-order, clips fire at correct times."""
-    received: list[topics.AnimationCommand] = []
+    received: list[topics.DisplayCommand] = []
     bus.subscribe(
-        topics.ACT_ANIMATION,
+        topics.ACT_DISPLAY_PLAY,
         lambda msg: received.append(msg),
     )
     tl = Timeline(name="ordered", tracks=[

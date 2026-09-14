@@ -117,7 +117,7 @@ def test_frame_becomes_camera_frame_message(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_CAMERA_FRAME, on_frame)
+    bus.subscribe(topics.SENSE_CAMERA_IMAGE_RAW, on_frame)
     node, thread = _start_node(bus, cam, camera_id="test-cam")
     try:
         cam.feed(FrameEnvelope(
@@ -148,13 +148,16 @@ def test_frame_seq_monotonic_across_frames(bus):
         if len(received) >= 3:
             target.set()
 
-    bus.subscribe(topics.SENSE_CAMERA_FRAME, on_frame)
+    bus.subscribe(topics.SENSE_CAMERA_IMAGE_RAW, on_frame)
     node, thread = _start_node(bus, cam)
     try:
-        for _ in range(3):
+        for expected_count in range(1, 4):
             cam.feed(FrameEnvelope(
                 width=320, height=240, encoding="jpeg", data=b"f",
             ))
+            deadline = time.monotonic() + 1.0
+            while len(received) < expected_count and time.monotonic() < deadline:
+                time.sleep(0.01)
         assert target.wait(timeout=3.0), f"only got {received}"
         assert received[:3] == [1, 2, 3]
     finally:
@@ -168,7 +171,7 @@ def test_no_frame_no_publish(bus):
     def on_frame(msg):
         received.append(msg)
 
-    bus.subscribe(topics.SENSE_CAMERA_FRAME, on_frame)
+    bus.subscribe(topics.SENSE_CAMERA_IMAGE_RAW, on_frame)
     node, thread = _start_node(bus, cam, poll_timeout_s=0.05)
     try:
         time.sleep(0.2)

@@ -366,7 +366,7 @@ def isolated_child(subagent_id: str | None = None) -> Iterator[dict[str, Any] | 
     The finalize payload is attached to the yielded dict as ``result`` so the
     caller can surface commits/dirty/pruned to the parent agent.
     """
-    from jaeger_agent import workspace as _ws
+    from jaeger_agent.core import workspace as _ws
 
     if not isolation_enabled():
         yield None

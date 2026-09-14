@@ -140,7 +140,7 @@ def test_phrase_becomes_transcript_message(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.1)
     try:
         adapter.feed_phrase("hello world")
@@ -167,7 +167,7 @@ def test_multiple_phrases_publish_in_order(bus):
         if len(received) >= 2:
             second.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.1)
     try:
         adapter.feed_phrase("first")
@@ -194,7 +194,7 @@ def test_empty_phrase_not_published(bus):
     def on_transcript(msg):
         received.append(msg)
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.1)
     try:
         time.sleep(0.3)  # let several ticks fire
@@ -213,7 +213,7 @@ def test_no_phrase_doesnt_publish(bus):
     def on_transcript(msg):
         received.append(msg)
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.05)
     try:
         time.sleep(0.2)
@@ -233,7 +233,7 @@ def test_user_speech_start_published_from_callback(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_USER_SPEECH_START, on_start)
+    bus.subscribe(topics.SENSE_STT_SPEECH_START, on_start)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.1)
     try:
         adapter.fire_speech_start()
@@ -267,7 +267,7 @@ def test_transcript_publish_latency_smoke_bench(bus):
         elapsed["s"] = time.perf_counter() - t0["value"]
         event.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     node, thread = _start_node(bus, adapter, poll_timeout_s=0.01)
     try:
         t0["value"] = time.perf_counter()

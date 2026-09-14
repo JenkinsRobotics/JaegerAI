@@ -158,10 +158,13 @@ Sorted by routing % (then p50 asc). A single great run doesn't make a model grea
 
 ## Full chronological log
 
-Every run we have data for (71 total), newest first. ``vs peak`` shows the route% delta from this model's all-time best (0.0% = this run IS the peak).
+Every run we have data for (74 total), newest first. ``vs peak`` shows the route% delta from this model's all-time best (0.0% = this run IS the peak).
 
 | Date | Model | Route% | p50 s | TPS | Cases | vs peak | Source |
 |---|---|---:|---:|---:|---:|---:|---|
+| 2026-09-03 09:57 | `gemma-4-e4b-it-q4-k-m` | 100.0% | 2.73 | 18.2 | 81 | **peak** | flat |
+| 2026-08-29 23:50 | `gemma-4-e4b-it-q4-k-m` | 93.7% | 3.18 | 16.6 | 81 | -6.3pp | flat |
+| 2026-08-29 23:39 | `gemma-4-e4b-it-q4-k-m` | 100.0% | 2.82 | 16.9 | 81 | **peak** | flat |
 | 2026-08-25 19:51 | `gemma-4-e4b-it-q4-k-m` | 100.0% | 2.66 | 17.4 | 81 | **peak** | flat |
 | 2026-08-05 09:06 | `gemma-4-e4b-it-q4-k-m` | 100.0% | 2.68 | 20.3 | 81 | **peak** | flat |
 | 2026-08-04 23:56 | `gemma-4-e4b-it-q4-k-m` | 100.0% | 2.57 | 21.0 | 81 | **peak** | flat |

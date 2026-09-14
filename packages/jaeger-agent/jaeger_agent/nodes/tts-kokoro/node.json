@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "jaeger_agent_node",
+  "runtime": "tts_kokoro",
+  "id": "tts-kokoro",
+  "slot": "mouth",
+  "enabled_by_default": true,
+  "consumes": [
+    "reply_text"
+  ],
+  "produces": [
+    "pcm_f32_24khz_chunks"
+  ],
+  "status": "verified_2026-09-02",
+  "implementation": "runtime.py:build",
+  "lineage": "gemma_multimodal-decomposition",
+  "notes": "Kokoro af_heart at native 24 kHz; playback device + barge policy belong to the audio nodes."
+}

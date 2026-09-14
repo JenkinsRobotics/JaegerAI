@@ -103,7 +103,7 @@ def test_animation_command_renders_to_websocket_client(
 
     try:
         # Issue the command.
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="image",
             asset_path=str(asset),
             duration_ms=100,

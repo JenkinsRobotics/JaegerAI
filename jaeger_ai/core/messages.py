@@ -4,7 +4,7 @@ JaegerAI owned these messages through 0.9.  JaegerAgent owns them from 0.10
 forward so every embedding application speaks the same mind contract.
 """
 
-from jaeger_agent.messages import (
+from jaeger_agent.core.messages import (
     AgentActivity,
     AgentRequest,
     AgentResponse,

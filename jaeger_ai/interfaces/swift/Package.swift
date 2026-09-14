@@ -41,9 +41,9 @@ let package = Package(
             ]
         ),
         // The boundary's regression net: decodes every frame in
-        // ../../../contract/protocol_v1_fixtures.json — the SAME file pytest
-        // asserts the Python builders against. Change a frame shape → both
-        // suites fail.
+        // jaeger_os/contract/protocol_v1_fixtures.json from the sibling
+        // checkout or active venv — the SAME file pytest asserts the Python
+        // builders against. Change a frame shape → both suites fail.
         .testTarget(
             name: "JaegerAITests",
             dependencies: ["JaegerAI"],

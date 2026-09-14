@@ -98,13 +98,20 @@ class ThreadHandle(NodeHandle):
         thread = threading.Thread(target=node.run,
                                   name=f"node-{self.spec.id}", daemon=True)
         thread.start()
+        # Record the node BEFORE waiting on it. Assigning after meant
+        # that during a slow setup the handle held no reference, so
+        # alive() answered False for a node that was merely starting —
+        # and anything asking mid-boot got "off" for a live node.
+        self._node, self._thread = node, thread
+        self.started_at = time.monotonic()
+        # Still wait, so start() keeps its synchronous meaning for the
+        # common case. Exceeding this is no longer fatal: the watch
+        # loop now tolerates SETTING_UP.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             if node.state in (NodeState.RUNNING, NodeState.FAILED):
                 break
             time.sleep(0.01)
-        self._node, self._thread = node, thread
-        self.started_at = time.monotonic()
         if node.state == NodeState.FAILED:
             self.last_error = str(node.health().get("error") or "setup failed")
 
@@ -118,8 +125,24 @@ class ThreadHandle(NodeHandle):
             thread.join(timeout=3.0)
 
     def alive(self) -> bool:
-        return (self._node is not None
-                and self._node.state == NodeState.RUNNING)
+        """Alive means NOT DEAD — not "has finished starting".
+
+        A node in SETTING_UP is starting, and setup is legitimately
+        slow for exactly the nodes worth having: opening the audio
+        device on macOS measures 3.6s (0.8 output + 2.8 input), and
+        loading a TTS or Whisper model is longer.
+
+        This used to be ``state == RUNNING``. The watch loop ticks
+        every 0.25s, so any node whose setup outlived the start
+        deadline was declared dead and restarted — forever, since the
+        restart had the same slow setup. The failure was invisible
+        until a node with a genuinely slow setup ran for real.
+        """
+        if self._node is None or self._thread is None:
+            return False
+        if not self._thread.is_alive():
+            return False          # the thread exited: really dead
+        return self._node.state not in (NodeState.FAILED, NodeState.STOPPED)
 
     def state(self) -> str:
         if self._node is None:

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import SandboxError, _resolve_read
+from jaeger_agent.core.workspace import SandboxError, _resolve_read
 from jaeger_agent.util.lazy_deps import FeatureUnavailable, ensure
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 

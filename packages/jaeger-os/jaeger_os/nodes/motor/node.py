@@ -1,6 +1,6 @@
 """node.py — MotorNode.
 
-Subscribes to ``/act/motion`` (:class:`MotionCommand`) and
+Subscribes to ``/act/motor/command`` (:class:`MotionCommand`) and
 forwards each command to a :class:`MotorAdapter`.
 
 Per-instance hardware adapter (JP01-MC01 ESP32, etc.) plugs in
@@ -17,7 +17,7 @@ from jaeger_os.transport import Bus
 
 
 class MotorNode(Node):
-    """SUB ``/act/motion`` → adapter → hardware.
+    """SUB ``/act/motor/command`` → adapter → hardware.
 
     Subscribe callback runs on the Bus delivery thread so we keep
     the dispatch FAST (single adapter call); if your adapter does
@@ -42,12 +42,12 @@ class MotorNode(Node):
 
     def setup(self) -> None:
         self.adapter.start()
-        self.bus.subscribe(topics.ACT_MOTION, self._on_motion_command)
-        self._log(f"subscribed to {topics.ACT_MOTION}")
+        self.bus.subscribe(topics.ACT_MOTOR_COMMAND, self._on_motion_command)
+        self._log(f"subscribed to {topics.ACT_MOTOR_COMMAND}")
 
     def teardown(self) -> None:
         try:
-            self.bus.unsubscribe(topics.ACT_MOTION, self._on_motion_command)
+            self.bus.unsubscribe(topics.ACT_MOTOR_COMMAND, self._on_motion_command)
         except Exception:  # noqa: BLE001
             pass
         try:

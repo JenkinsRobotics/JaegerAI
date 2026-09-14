@@ -17,13 +17,25 @@ publish; throughput is bounded by the Python GIL + delivery thread.
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 
+from jaeger_os.contract.paths import SEP
+from jaeger_os.contract.qos import RELIABLE, qos_for
 from jaeger_os.transport import topics
 from jaeger_os.transport.bus import Bus, SubscriberFn
 
 
 class InProcBusOverflowError(RuntimeError):
+    """No longer raised. Kept only so an ``except`` clause naming it
+    still imports.
+
+    The single-queue bus raised this at the PUBLISHER when the shared
+    delivery queue filled. Per-subscriber queues made that the wrong
+    shape: overflow is now one subscriber falling behind, and it drops
+    its oldest message and counts it in ``InProcBus.stats()``. Raising
+    would make one slow subscriber everyone else's problem.
+    """
     """Raised when the in-process delivery queue is full.
 
     This preserves the Bus contract that ``publish()`` must not block:
@@ -36,64 +48,127 @@ class InProcBus(Bus):
 
     Threading model
     ---------------
-    * One delivery thread drains the queue and fans out to
-      subscribers.  Subscribers run on the delivery thread, so a
-      blocking subscriber will back-pressure the entire Bus.
-      Subscribers that need to do work should hand off to their
-      own thread / queue.
-    * :meth:`publish` is thread-safe and non-blocking. If the queue
-      is full it raises :class:`InProcBusOverflowError` immediately.
-    * :meth:`subscribe` / :meth:`unsubscribe` are thread-safe via
-      a coarse-grained lock — these are setup / teardown operations,
-      not hot-path.
+    * **One queue and one worker thread PER SUBSCRIBER.** A slow
+      callback starves only itself. Before this the bus had a single
+      shared delivery thread, and a 50 ms handler on one topic delayed
+      an unrelated message on another by 534 ms — measured. In a robot
+      that means one slow renderer delaying e-stop delivery.
+    * :meth:`publish` fans the message into each subscriber's queue and
+      returns. It never runs a callback, so publishing cost does not
+      depend on how slow any subscriber is.
+    * **Ordering** is per-subscriber, not global. Each subscriber sees
+      its own messages in publish order; two different subscribers may
+      observe interleavings differently. This is what ROS/DDS gives and
+      is the necessary price of not letting them block each other.
+    * **Overflow drops the OLDEST** message for that subscriber and
+      counts it (:meth:`stats`). Blocking the publisher would reinstate
+      exactly the coupling this design removes, and for frames or
+      telemetry a stale message is worth less than the newest one.
+    * :meth:`subscribe` / :meth:`unsubscribe` are thread-safe via a
+      coarse-grained lock — setup/teardown, not hot path.
     """
 
-    def __init__(self, maxsize: int = 2048) -> None:
-        self._q: "queue.Queue[topics.TopicMessage | None]" = queue.Queue(
-            maxsize=maxsize
-        )
-        # topic → list of callbacks.  Tuple of (str, list) so we can
-        # swap the list atomically when adding/removing without
-        # holding the lock through delivery.
+    def __init__(self, maxsize: int | None = None) -> None:
+        # Per-subscriber depth OVERRIDE. None (the default) means each
+        # subscription is sized by its topic's declared QoS, which is
+        # where the policy belongs — a video frame and an e-stop should
+        # not share a depth. Passing a number forces every subscription
+        # to it, which tests use to provoke overflow deterministically.
+        self._depth_override = max(1, int(maxsize)) if maxsize else None
         self._subs_lock = threading.Lock()
-        self._subscribers: dict[str, list[SubscriberFn]] = {}
-        # Lifecycle.
+        self._subscribers: dict[str, list["_Subscription"]] = {}
+        # Prefix subscriptions kept separate so the exact-match path
+        # stays a single dict lookup.
+        self._prefix_subs: dict[str, list["_Subscription"]] = {}
         self._closed = False
-        self._delivery_thread = threading.Thread(
-            target=self._delivery_loop,
-            name="inproc-bus-delivery",
-            daemon=True,
-        )
-        self._delivery_thread.start()
 
     # ── publish / subscribe ──────────────────────────────────────
 
     def publish(self, msg: topics.TopicMessage) -> None:
-        """Enqueue ``msg`` for delivery to ``msg.topic`` subscribers.
-        Drops the message on a closed Bus (silent — closing happens
-        during shutdown and we don't want a flurry of errors then)."""
+        """Hand ``msg`` to every matching subscriber's queue and return.
+
+        Matching is PREFIX-based, mirroring ZMQ SUB semantics exactly, so
+        a hierarchy behaves the same on both transports:
+
+            /sense/                    every input
+            /sense/camera/             every camera
+            /sense/camera/cam0/        one camera
+
+        Behaviour diverging between ``inproc`` and ``zmq`` would be a
+        trap — code that worked fused would break the moment a node was
+        moved to its own process.
+
+        Never runs a callback, so publish latency is independent of how
+        slow any subscriber is. Drops on a closed bus (shutdown is not
+        the time for a flurry of errors).
+        """
         if self._closed:
             return
-        try:
-            self._q.put_nowait(msg)
-        except queue.Full as exc:
-            raise InProcBusOverflowError(
-                f"in-process bus queue full while publishing {msg.topic}"
-            ) from exc
+        topic = msg.topic
+        with self._subs_lock:
+            # Exact subscribers are the overwhelmingly common case and
+            # cost one dict hit. Prefix subscriptions are scanned only
+            # if any exist at all, so a system that never uses the
+            # hierarchy pays nothing for it.
+            subs = list(self._subscribers.get(topic, ()))
+            if self._prefix_subs:
+                for prefix, plist in self._prefix_subs.items():
+                    if topic.startswith(prefix):
+                        subs.extend(plist)
+        for sub in subs:
+            sub.offer(msg)
 
     def subscribe(self, topic: str, callback: SubscriberFn) -> None:
+        """Subscribe to an exact topic, or to a PREFIX ending in "/".
+
+        A trailing separator is what distinguishes the two, and it is
+        required for prefixes: without it ``/sense/cam`` would match
+        ``/sense/camera/...`` and silently deliver a stream nobody
+        asked for.
+        """
+        policy = qos_for(topic)
+        depth = self._depth_override or policy.depth
+        sub = _Subscription(topic, callback, depth, policy.reliability)
         with self._subs_lock:
-            self._subscribers.setdefault(topic, []).append(callback)
+            if topic.endswith(SEP):
+                self._prefix_subs.setdefault(topic, []).append(sub)
+            else:
+                self._subscribers.setdefault(topic, []).append(sub)
+        sub.start()
 
     def unsubscribe(self, topic: str, callback: SubscriberFn) -> None:
+        table = (self._prefix_subs if topic.endswith(SEP)
+                 else self._subscribers)
         with self._subs_lock:
-            subs = self._subscribers.get(topic)
+            subs = table.get(topic)
             if not subs:
                 return
-            try:
-                subs.remove(callback)
-            except ValueError:
-                return  # not registered — silent no-op per the Bus contract
+            match = next((s for s in subs if s.callback == callback), None)
+            if match is None:
+                return  # not registered — silent, per the Bus contract
+            subs.remove(match)
+        match.stop()
+
+    def stats(self) -> dict[str, dict]:
+        """Per-topic delivery counters.
+
+        ``dropped`` rising is the signal that a subscriber cannot keep
+        up — invisible otherwise, because dropping is silent by design.
+        """
+        with self._subs_lock:
+            items = [(t, list(s)) for t, s in self._subscribers.items()]
+            items += [(t, list(s)) for t, s in self._prefix_subs.items()]
+        out: dict[str, dict[str, int]] = {}
+        for topic, subs in items:
+            out[topic] = {
+                "subscribers": len(subs),
+                "delivered": sum(s.delivered for s in subs),
+                "dropped": sum(s.dropped for s in subs),
+                "queued": sum(s.queue_depth for s in subs),
+                "depth": max((s._q.maxsize for s in subs), default=0),
+                "reliability": subs[0].reliability if subs else "",
+            }
+        return out
 
     # ── tool-RPC: request → ack ──────────────────────────────────
 
@@ -103,13 +178,13 @@ class InProcBus(Bus):
         ack_topic: str,
         timeout_s: float = 10.0,
     ) -> topics.TopicMessage | None:
-        """Publish ``request_msg``, subscribe to ``ack_topic``, wait
-        for an ack carrying the matching ``correlation_id``.
+        """Publish ``request_msg``, wait for an ack on ``ack_topic``
+        carrying the matching ``correlation_id``.
 
-        The caller is responsible for setting
-        ``request_msg.correlation_id`` to something reasonably unique
-        — typically a uuid4 hex.  If it's blank the wait still works
-        but a concurrent unrelated ack could satisfy it (don't do this)."""
+        The caller sets ``request_msg.correlation_id`` — typically a
+        uuid4 hex. Blank still works, but a concurrent unrelated ack
+        could satisfy the wait, so don't.
+        """
         target_cid = request_msg.correlation_id
         ack_event = threading.Event()
         received: list[topics.TopicMessage] = []
@@ -131,50 +206,105 @@ class InProcBus(Bus):
     # ── lifecycle ────────────────────────────────────────────────
 
     def close(self) -> None:
-        """Stop the delivery thread + drop subscribers.  Idempotent."""
+        """Stop every subscriber worker and drop them. Idempotent."""
         if self._closed:
             return
         self._closed = True
-        # Sentinel wakes the delivery thread out of queue.get().
-        try:
-            self._q.put_nowait(None)
-        except queue.Full:
-            pass  # delivery thread is alive — sentinel will be picked up next drain
-        self._delivery_thread.join(timeout=2.0)
         with self._subs_lock:
+            subs = [s for lst in self._subscribers.values() for s in lst]
+            subs += [s for lst in self._prefix_subs.values() for s in lst]
             self._subscribers.clear()
+            self._prefix_subs.clear()
+        for sub in subs:
+            sub.stop()
 
-    # ── delivery loop ────────────────────────────────────────────
 
-    def _delivery_loop(self) -> None:
-        """Drain the queue and fan out to subscribers.  Exceptions
-        in subscriber callbacks are caught + printed (we don't want
-        one buggy subscriber to wedge the whole bus)."""
-        while True:
+
+
+class _Subscription:
+    """One subscriber: its own bounded queue and its own worker thread.
+
+    This is the isolation unit. Everything about how a slow callback is
+    contained lives here — the bus itself just fans messages in.
+    """
+
+    __slots__ = ("topic", "callback", "_q", "_thread", "_stop",
+                 "delivered", "dropped", "reliability")
+
+    def __init__(self, topic: str, callback: SubscriberFn,
+                 depth: int, reliability: str = "best_effort") -> None:
+        self.topic = topic
+        self.callback = callback
+        self.reliability = reliability
+        self._q: "queue.Queue[topics.TopicMessage]" = queue.Queue(
+            maxsize=depth)
+        self._stop = threading.Event()
+        self.delivered = 0
+        self.dropped = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"bus-sub:{topic}",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2.0)
+
+    @property
+    def queue_depth(self) -> int:
+        return self._q.qsize()
+
+    def offer(self, msg: topics.TopicMessage) -> None:
+        """Enqueue without ever blocking the publisher.
+
+        On overflow, evict the OLDEST and keep the newest: for a frame
+        or a telemetry tick the freshest value is the useful one, and
+        blocking here would recreate exactly the cross-subscriber
+        coupling this class exists to remove.
+        """
+        try:
+            self._q.put_nowait(msg)
+            return
+        except queue.Full:
+            pass
+        if self.reliability == RELIABLE:
+            # A dropped e-stop is a safety event, not a dropped update.
+            # We still cannot block the publisher without recreating the
+            # coupling per-subscriber queues exist to remove — so the
+            # message is lost either way. What changes is that it is
+            # IMPOSSIBLE TO MISS rather than a silent counter.
+            self.dropped += 1
+            print(f"[bus] RELIABLE topic {self.topic} overflowed a "
+                  f"subscriber queue (depth {self._q.maxsize}); a message "
+                  f"was LOST. The subscriber is not keeping up.",
+                  file=sys.stderr, flush=True)
+            return
+        try:
+            self._q.get_nowait()       # evict oldest
+            self._q.put_nowait(msg)
+        except (queue.Empty, queue.Full):
+            pass                        # raced the worker; nothing to do
+        self.dropped += 1
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
             try:
-                msg = self._q.get(timeout=0.5)
+                msg = self._q.get(timeout=0.2)
             except queue.Empty:
-                if self._closed:
-                    return
                 continue
-            if msg is None:
-                # Close sentinel.
-                return
-            # Snapshot the subscriber list outside the delivery
-            # lock — subscribe/unsubscribe operates on a separate
-            # list mutation under that lock, so a snapshot via copy
-            # is consistent.
-            with self._subs_lock:
-                snapshot = list(self._subscribers.get(msg.topic, ()))
-            for cb in snapshot:
-                try:
-                    cb(msg)
-                except Exception as exc:  # noqa: BLE001
-                    # Don't let a subscriber bug take down the bus.
-                    # Print to stderr so it shows up in normal logs.
-                    import sys
-                    print(
-                        f"[inproc-bus] subscriber exception on "
-                        f"{msg.topic}: {type(exc).__name__}: {exc}",
-                        file=sys.stderr, flush=True,
-                    )
+            try:
+                self.callback(msg)
+                self.delivered += 1
+            except Exception as exc:  # noqa: BLE001
+                # One buggy subscriber must not take down its own
+                # worker, let alone anyone else's.
+                print(f"[bus] subscriber error on {self.topic}: "
+                      f"{type(exc).__name__}: {exc}",
+                      file=sys.stderr, flush=True)
+
+
+__all__ = ["InProcBus", "InProcBusOverflowError"]

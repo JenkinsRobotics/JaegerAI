@@ -10,10 +10,10 @@ operator wires their actual robot — JP01-MC01 (ESP32) today,
 something else tomorrow.  This package doesn't ship board-specific
 code.
 
-The node subscribes to :data:`jaeger_os.transport.topics.ACT_MOTION`
+The node subscribes to :data:`jaeger_os.transport.topics.ACT_MOTOR_COMMAND`
 (:class:`MotionCommand`) and forwards each command to the adapter.
 Future work (Track D / per-instance): proprio feedback published
-on :data:`jaeger_os.transport.topics.SENSE_PROPRIO`.
+on :data:`jaeger_os.transport.topics.SENSE_PROPRIO_STATE`.
 """
 
 from .adapters import MotorAdapter, SerialMotorAdapter

@@ -7,29 +7,34 @@
 # Pin to a branch / release:
 #   JAEGER_REF=0.9.0 curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/0.9.0/scripts/install.sh | bash
 #
-# Custom install location:
-#   JAEGER_HOME=/opt/jaeger curl -fsSL .../install.sh | bash
-#
-# What this does:
-#   1. Verify prereqs (git, python 3.11/3.12, C toolchain).
-#   2. Clone (or update) the JaegerAI repo into $JAEGER_HOME — the repo
-#      root IS the clean product (0.9 four-way split: JaegerAI is its
-#      own top-level package + pyproject.toml, no monorepo assembly
-#      step needed).
-#   3. Run the in-repo ./install.sh — .venv, deps (pyproject's git
-#      dependencies pull jaeger-os / jaeger-kokoro-tts /
-#      jaeger-whisper-stt straight from GitHub — one install resolves
-#      the whole 4-package stack), app build, scaffold $JAEGER_HOME/
-#      .jaeger_ai/ for instance state.
-#   4. Print next steps.
-#
-# Re-running refreshes JaegerAI from the latest ref (git pull + editable
-# reinstall) while leaving .venv/ and .jaeger_ai/ instance state
-# untouched.
+# Custom checkout: JAEGER_INSTALL_ROOT=/opt/JaegerAI
+# Runtime state: JAEGER_STATE_DIR (or JAEGER_HOME), default ~/.jaeger.
+# Clones the source, installs the monorepo packages, and builds the native app.
+# Re-running updates the selected ref while keeping operator state external.
 
 set -euo pipefail
 
-JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
+# Since 0.12 the product name and default folder agree: Jaeger AI lives at
+# ~/JaegerAI. 0.9.x used ~/jaeger. A normal install detects that legacy tree,
+# copies its operator state after the new checkout is created, and leaves the
+# old tree untouched as a rollback copy. Explicit JAEGER_INSTALL_ROOT always wins.
+JAEGER_INSTALL_ROOT_WAS_SET=0
+[[ -n "${JAEGER_INSTALL_ROOT+x}" ]] && JAEGER_INSTALL_ROOT_WAS_SET=1
+JAEGER_INSTALL_ROOT="${JAEGER_INSTALL_ROOT:-$HOME/JaegerAI}"
+LEGACY_JAEGER_HOME="${JAEGER_LEGACY_HOME:-$HOME/jaeger}"
+JAEGER_STATE_DEST="${JAEGER_STATE_DIR:-${JAEGER_HOME:-$HOME/.jaeger}}"
+MIGRATE_LEGACY=0
+if [[ "$JAEGER_INSTALL_ROOT_WAS_SET" -eq 0 \
+      && "${JAEGER_MIGRATE_LEGACY:-1}" != "0" \
+      && ! -e "$JAEGER_STATE_DEST" \
+      && -d "$LEGACY_JAEGER_HOME/.jaeger_os" ]]; then
+  # Also resume after a clone succeeded but state copying was interrupted.
+  # Never overwrite a target that already has its own operator-state root.
+  if [[ ! -e "$JAEGER_INSTALL_ROOT" \
+        || (-d "$JAEGER_INSTALL_ROOT/.git" && ! -e "$JAEGER_STATE_DEST") ]]; then
+    MIGRATE_LEGACY=1
+  fi
+fi
 JAEGER_REF="${JAEGER_REF:-master}"
 REPO_URL="${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}"
 # Raw URL for the upgrade hint (github.com → raw.githubusercontent.com, no .git).
@@ -39,10 +44,37 @@ cat <<EOF
 ╔══════════════════════════════════════════════╗
 ║  JaegerAI — one-line installer                ║
 ╚══════════════════════════════════════════════╝
-  install location: $JAEGER_HOME
+  install location: $JAEGER_INSTALL_ROOT
   ref:              $JAEGER_REF
 
 EOF
+
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  echo "  legacy install:  $LEGACY_JAEGER_HOME"
+  echo "  migration:       instances + settings → $JAEGER_STATE_DEST"
+  echo
+
+  # Never copy live SQLite/WAL state. Match commands that START inside the
+  # legacy tree; unlike a broad pgrep, this does not match this installer just
+  # because the legacy path appears in its environment or arguments.
+  # macOS may report /private/var paths through their /var alias in `ps`.
+  LEGACY_PROCESS_ALIAS="${LEGACY_JAEGER_HOME#/private}"
+  LEGACY_PROCESS="$(ps -axo pid=,command= 2>/dev/null | while read -r pid command; do
+    if [[ "$command" == "$LEGACY_JAEGER_HOME/"* \
+          || ("$LEGACY_PROCESS_ALIAS" != "$LEGACY_JAEGER_HOME" \
+              && "$command" == "$LEGACY_PROCESS_ALIAS/"*) ]]; then
+      printf '%s %s\n' "$pid" "$command"
+      # Drain the process table: an early break can SIGPIPE ps under pipefail
+      # and exit before explaining why migration was refused.
+    fi
+  done)"
+  if [[ -n "$LEGACY_PROCESS" ]]; then
+    echo "✗ Jaeger AI 0.9 is still running from $LEGACY_JAEGER_HOME" >&2
+    echo "  Quit the old app, then run this installer again." >&2
+    echo "  running: $LEGACY_PROCESS" >&2
+    exit 1
+  fi
+fi
 
 # 1. Prereqs — git is required
 if ! command -v git >/dev/null 2>&1; then
@@ -125,19 +157,41 @@ export PY   # the in-repo install.sh picks up the same interpreter
 
 # 2. Clone (or update) JaegerAI directly into the install dir — the repo
 #    root already IS the clean product (0.9 split; no monorepo copy step).
-if [[ -d "$JAEGER_HOME/.git" ]]; then
-  echo "→ updating $JAEGER_HOME"
-  git -C "$JAEGER_HOME" fetch origin --tags --quiet
-  git -C "$JAEGER_HOME" checkout "$JAEGER_REF" --quiet
-  git -C "$JAEGER_HOME" pull --ff-only origin "$JAEGER_REF" --quiet 2>/dev/null || true
+if [[ -d "$JAEGER_INSTALL_ROOT/.git" ]]; then
+  echo "→ updating $JAEGER_INSTALL_ROOT"
+  git -C "$JAEGER_INSTALL_ROOT" fetch origin --tags --quiet
+  git -C "$JAEGER_INSTALL_ROOT" checkout "$JAEGER_REF" --quiet
+  git -C "$JAEGER_INSTALL_ROOT" pull --ff-only origin "$JAEGER_REF" --quiet 2>/dev/null || true
 else
-  if [[ -e "$JAEGER_HOME" ]]; then
-    echo "✗ $JAEGER_HOME exists but is not a git repo — move it aside or set JAEGER_HOME" >&2
+  if [[ -e "$JAEGER_INSTALL_ROOT" ]]; then
+    echo "✗ $JAEGER_INSTALL_ROOT exists but is not a git repo — move it aside or set JAEGER_INSTALL_ROOT" >&2
     exit 1
   fi
-  echo "→ cloning JaegerAI into $JAEGER_HOME"
-  mkdir -p "$(dirname "$JAEGER_HOME")"
-  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_HOME" --quiet
+  echo "→ cloning JaegerAI into $JAEGER_INSTALL_ROOT"
+  mkdir -p "$(dirname "$JAEGER_INSTALL_ROOT")"
+  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_INSTALL_ROOT" --quiet
+fi
+
+# Carry the complete operator-state root into the correctly named install.
+# This includes every agent instance, memory database, settings, credentials,
+# and the active-instance selector. The source remains intact for rollback.
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  echo "→ migrating Jaeger AI state from $LEGACY_JAEGER_HOME"
+  mkdir -p "$(dirname "$JAEGER_STATE_DEST")"
+  STATE_STAGE="$(mktemp -d "$(dirname "$JAEGER_STATE_DEST")/.jaeger-state-migration.XXXXXX")"
+  trap '[[ -z "${STATE_STAGE:-}" ]] || rm -rf -- "$STATE_STAGE"' EXIT
+  if command -v ditto >/dev/null 2>&1; then
+    ditto "$LEGACY_JAEGER_HOME/.jaeger_os" "$STATE_STAGE/state"
+  else
+    mkdir -p "$STATE_STAGE/state"
+    cp -a "$LEGACY_JAEGER_HOME/.jaeger_os/." "$STATE_STAGE/state/"
+  fi
+  printf '%s\n' "$LEGACY_JAEGER_HOME" \
+    > "$STATE_STAGE/state/.migrated-from"
+  mv "$STATE_STAGE/state" "$JAEGER_STATE_DEST"
+  rmdir "$STATE_STAGE"
+  STATE_STAGE=""
+  echo "  ✓ instances and settings copied; legacy install retained for rollback"
 fi
 
 # 3. Run the in-repo installer (.venv + deps incl. the git-resolved
@@ -147,24 +201,36 @@ fi
 #    has a dev/ tree now (0.9 split), so that can no longer be the
 #    dev-vs-product signal on its own.
 echo "→ running local installer..."
-bash "$JAEGER_HOME/install.sh" --product
+bash "$JAEGER_INSTALL_ROOT/install.sh" --product
 
 cat <<EOF
 
 ╔══════════════════════════════════════════════╗
-║  ✓ JaegerAI installed at $JAEGER_HOME
+║  ✓ JaegerAI installed at $JAEGER_INSTALL_ROOT
 ╚══════════════════════════════════════════════╝
 
 Instance state lives under .jaeger_ai/; the code stays writable in
 place (editable install — the agent self-modifies its own skills).
 
 Next steps:
-  cd $JAEGER_HOME
+  cd $JAEGER_INSTALL_ROOT
   ./jaeger agent create    # create your first agent
   ./jaeger                 # run it   (--tui for terminal)
   ./jaeger doctor          # environment + readiness check
 
 Upgrade later:
-  curl -fsSL $RAW_URL | JAEGER_HOME=$JAEGER_HOME JAEGER_REF=$JAEGER_REF bash
+  curl -fsSL $RAW_URL | JAEGER_INSTALL_ROOT=$JAEGER_INSTALL_ROOT JAEGER_REF=$JAEGER_REF bash
 
 EOF
+
+if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+  cat <<EOF
+Migration complete:
+  New app:       $JAEGER_INSTALL_ROOT
+  Rollback copy: $LEGACY_JAEGER_HOME
+
+Launch Jaeger AI and confirm your agents, memory, and settings. Only then may
+you remove the old folder; the installer deliberately does not delete it.
+
+EOF
+fi

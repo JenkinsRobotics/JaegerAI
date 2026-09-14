@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -39,6 +40,19 @@ def _agent_state_outside_the_repo(tmp_path):
         os.chdir(previous)
 
 
+_PREVIOUS_STATE = os.environ.get("JAEGER_STATE_DIR")
+_TEST_STATE = tempfile.mkdtemp(prefix="jaeger-agent-tests-", dir="/tmp")
+os.environ["JAEGER_STATE_DIR"] = _TEST_STATE
+
+
+def pytest_unconfigure(config):
+    if _PREVIOUS_STATE is None:
+        os.environ.pop("JAEGER_STATE_DIR", None)
+    else:
+        os.environ["JAEGER_STATE_DIR"] = _PREVIOUS_STATE
+    shutil.rmtree(_TEST_STATE, ignore_errors=True)
+
+
 _registry_snapshot: dict | None = None
 
 
@@ -68,3 +82,17 @@ def _restore_tool_registry() -> None:
     yield
     if _registry_snapshot is not None:
         restore_registry(_registry_snapshot)
+
+
+def _register_tool_surface() -> None:
+    """Restore the captured built-in surface without reloading module state."""
+    from jaeger_os.core.tools.tool_registry import restore_registry
+    if _registry_snapshot is not None:
+        restore_registry(_registry_snapshot)
+
+
+@pytest.fixture()
+def live_tools():
+    _register_tool_surface()
+    from jaeger_os.core.tools.tool_registry import get_tools
+    return {tool.name: tool for tool in get_tools()}

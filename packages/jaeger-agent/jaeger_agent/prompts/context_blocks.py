@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # annotations only — no runtime dependency on a host
-    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_agent.core.instance import Layout as InstanceLayout
 
 from ._doc import load_prompt_doc
 from .rules import RUNTIME_TOOLSET_SCOPED, RUNTIME_TOOLSET_UNSCOPED
@@ -175,9 +175,8 @@ def load_v2_self_improvement(layout: InstanceLayout) -> str:
     """The opt-in skill-authoring contract. Empty string when the
     config flag is off or the file is missing."""
     try:
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
-        cfg = load_yaml(layout.config_path, Config)
-        if not cfg.skills.include_self_improvement_contract:
+        from jaeger_agent.core.instance import include_self_improvement_contract
+        if not include_self_improvement_contract(layout):
             return ""
     except Exception:  # noqa: BLE001
         return ""

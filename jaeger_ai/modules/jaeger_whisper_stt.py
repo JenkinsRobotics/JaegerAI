@@ -29,8 +29,8 @@ PACKAGE = "jaeger_whisper_stt"
 
 #: Topics a surface watches to follow the listening path.
 WATCH = (
-    topics.SENSE_USER_SPEECH_START,  # someone started talking — barge-in cue
-    topics.SENSE_TRANSCRIPT,         # what was heard
+    topics.SENSE_STT_SPEECH_START,  # someone started talking — barge-in cue
+    topics.SENSE_STT_TRANSCRIPT,         # what was heard
 )
 
 

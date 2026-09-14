@@ -92,7 +92,7 @@ def _kanban_mode() -> bool:
 
 def _board():
     from jaeger_agent.background.board import board_for_layout
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return board_for_layout(get_layout())
 
@@ -440,7 +440,7 @@ def kanban_attach(path: str, task_id: str = "", content_type: str = "") -> dict:
     tid = _resolve(task_id)
     if (err := _need_id(tid, "kanban_attach")):
         return err
-    from jaeger_agent.workspace import SandboxError, _resolve_read
+    from jaeger_agent.core.workspace import SandboxError, _resolve_read
     try:
         resolved = _resolve_read(path)
     except SandboxError as e:
