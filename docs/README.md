@@ -18,7 +18,7 @@ them without creating another copy.
 | [Integration status](../integrations/hermes_webui/RELEASE_PROGRESS.md) | Implemented, verified, and pending integration work |
 | [Security](../SECURITY.md) | Security guidance |
 | [Changelog](../CHANGELOG.md) | Release history |
-| [Repair log](../FIXES.md) | Dated operational repairs |
+| [Repair log](reports/FIXES.md) | Dated operational repairs |
 
 ## Architecture and implementation
 
