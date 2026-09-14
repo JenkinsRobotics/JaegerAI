@@ -28,7 +28,7 @@ while [ -L "$SELF" ]; do
   [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
-VENV_PY="${HOME}/.jaeger/venv/bin/python"
+VENV_PY="${JAEGER_VENV:-$HOME/.jaeger/venv}/bin/python"
 if [ ! -x "$VENV_PY" ]; then
   VENV_PY="$REPO_ROOT/.venv/bin/python"
 fi
@@ -41,6 +41,7 @@ fi
 # Keep repo completely clean of __pycache__ junk (mirroring OpenClaw standard)
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
+export JAEGER_INSTALL_ROOT="$REPO_ROOT"
 
 # Dispatch now lives in jaeger_ai.cli.entry — ONE routing table behind both
 # this wrapper and the installed `jaeger` console script. It re-execs the same

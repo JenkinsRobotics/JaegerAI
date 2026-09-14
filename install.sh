@@ -21,6 +21,8 @@ if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
   exec bash "$JAEGER_INSTALL_ROOT/install.sh" "$@"
 fi
 VENV="${JAEGER_VENV:-$HOME/.jaeger/venv}"
+export JAEGER_VENV="$VENV"
+export JAEGER_INSTALL_ROOT="$REPO_ROOT"
 
 SKIP_DEPS=0
 PRODUCT_MODE=0

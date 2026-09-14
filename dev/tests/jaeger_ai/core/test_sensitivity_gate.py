@@ -115,3 +115,26 @@ def test_private_uses_config_fallback(tmp_path, monkeypatch):
     assert decision.classification == "private"
     assert decision.model == "gemma-4-26b:latest"
     assert decision.provider == "ollama"
+
+
+def test_private_turn_keeps_loaded_in_process_model_even_with_cloud_selection():
+    from types import SimpleNamespace
+    from jaeger_ai.core.models.router import decide, select_client
+
+    local = SimpleNamespace(kind="local", model_name="loaded.gguf")
+    decision = decide("Find saved API keys", default_client=local,
+                      model="gpt-example", provider="openai")
+    assert decision.classification == "private"
+    assert decision.provider == "local"
+    assert select_client(local, None, None, decision.model, decision.provider) is local
+
+
+def test_private_turn_does_not_reuse_an_external_client():
+    from types import SimpleNamespace
+    from jaeger_ai.core.models.router import decide
+
+    decision = decide("Find saved API keys",
+                      default_client=SimpleNamespace(kind="external"))
+    assert decision.classification == "private"
+    assert decision.provider == "ollama"
+    assert decision.model != "local"

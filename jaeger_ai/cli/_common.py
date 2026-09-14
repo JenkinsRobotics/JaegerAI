@@ -115,7 +115,7 @@ def swift_app_is_stale(repo: Path, bundle: Path) -> bool:
 
     The bundle carries a ``Contents/Resources/build-commit`` stamp written by
     build-app.sh. The app is stale when the Swift tree
-    (``jaeger_os/interfaces/swift/``) differs between that commit and HEAD —
+    (``jaeger_ai/interfaces/swift/``) differs between that commit and HEAD —
     which catches manual ``git pull``s that no update command saw. Missing
     executable or missing stamp (pre-stamp build) → stale. No ``.git``
     (clean/tarball install) → False; the tarball updater rebuilds explicitly
@@ -137,7 +137,7 @@ def swift_app_is_stale(repo: Path, bundle: Path) -> bool:
         return True
     diff = subprocess.run(
         ["git", "-C", str(repo), "diff", "--quiet", have, "HEAD",
-         "--", "jaeger_os/interfaces/swift"],
+         "--", "jaeger_ai/interfaces/swift"],
         capture_output=True,
     )
     # 0 = tree unchanged since the build; anything else (1 = differs,

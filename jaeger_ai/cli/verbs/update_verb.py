@@ -31,6 +31,8 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
+
+from jaeger_ai.core.native_app import swift_app_bundle
 from typing import Any
 
 
@@ -252,7 +254,7 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
     if not script.exists():
         return
     flag = "--dev" if (home / "dev").exists() else "--release"
-    built = swift_dir / ".build" / "JaegerAI.app"
+    built = swift_app_bundle(home)
     if only_if_stale:
         from jaeger_ai.cli._common import swift_app_is_stale
         if not swift_app_is_stale(home, built):

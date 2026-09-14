@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>JaegerAI</string>
+	<string>Jaeger AI</string>
 	<key>CFBundleExecutable</key>
 	<string>JaegerAI</string>
 	<key>CFBundleIconFile</key>

@@ -246,11 +246,20 @@ def decide(
     config: Any | None = None,
     model: str | None = None,
     provider: str | None = None,
+    default_client: Any | None = None,
 ) -> SensitivityDecision:
     """Decide model target based on privacy classification."""
     classification, reason = classify(text)
     tokens = estimate_tokens(text)
     if classification == "private":
+        # The in-process GGUF/MLX clients already satisfy the local-only
+        # boundary. Keep their loaded model instead of inventing an Ollama
+        # dependency (which breaks offline/private turns on local installs).
+        if getattr(default_client, "kind", None) == "local":
+            return SensitivityDecision(
+                classification="private", model="local", provider="local",
+                reason=reason, tokens_est=tokens,
+            )
         return SensitivityDecision(
             classification="private",
             model=_local_model(config),
@@ -277,10 +286,12 @@ def apply_sensitivity_routing(
     config: Any | None = None,
     model: str | None = None,
     provider: str | None = None,
+    default_client: Any | None = None,
     log: bool = True,
 ) -> tuple[str | None, str | None, SensitivityDecision]:
     """Classify input text, enforce local execution for private queries, and log decision."""
-    decision = decide(text, config=config, model=model, provider=provider)
+    decision = decide(text, config=config, model=model, provider=provider,
+                      default_client=default_client)
     if log:
         log_decision(decision, text_preview=text)
     return decision.model, decision.provider, decision
@@ -437,4 +448,3 @@ __all__ = [
     "resolve_ollama_base_url",
     "select_client",
 ]
-

@@ -262,6 +262,12 @@ def _drive_turn_front_door(client: Any, session_key: str, prompt: str,
     elapsed = time.perf_counter() - started
 
     if th.is_alive():
+        # redirect_stdout is process-wide while the worker is running. Keep
+        # timeout diagnostics on stderr so a stuck turn cannot swallow its
+        # own failure report when the scenario runner aborts the process.
+        import faulthandler
+        sys.stderr.write(f"Scenario turn exceeded {timeout_s:.0f}s: {session_key}\n")
+        faulthandler.dump_traceback(file=sys.stderr)
         return Turn(prompt=prompt, answer="", timed_out=True,
                     error=f"turn exceeded {timeout_s:.0f}s"), elapsed
     if "err" in box:
