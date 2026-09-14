@@ -290,6 +290,25 @@ def apply_sensitivity_routing(
 # 3. Dynamic Session Model Selection
 # ---------------------------------------------------------------------------
 
+def _infer_provider_for_model(model_name: str) -> str | None:
+    """Infer the hosting provider when a caller only passes a model name."""
+    if not model_name:
+        return None
+    raw = model_name.strip().lower()
+    bare = raw.rsplit("/", 1)[-1]
+    if ":" in bare or bare.endswith((":cloud", "-cloud")):
+        return "ollama"
+    if bare.startswith(("gpt-", "o1-", "o3-", "chatgpt-", "text-embedding-")):
+        return "openai"
+    if bare.startswith("claude"):
+        return "anthropic"
+    if bare.startswith("gemini"):
+        return "gemini"
+    if bare.startswith("grok"):
+        return "xai"
+    return None
+
+
 def select_client(default: Any, config: Any, layout: Any, model: str | None = None, provider: str | None = None) -> Any:
     """Select or reconfigure an LLM client dynamically for this conversation turn."""
     if not model or model == "default":
@@ -299,11 +318,22 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
     from jaeger_ai.core.models.external_model import ExternalModelClient
 
     selected = str(model).strip()
+    current = str(getattr(default, "model_name", "") or "")
+    if selected.lower() in ("default", "jaeger", "local", "none") or selected == current:
+        return default
+
     owner = normalize_ollama_provider(str(provider or "").strip().lower())
     ext = config.external_model.model_copy(deep=True)
-    owner = owner or (ext.provider if ext.enabled else "local")
+
+    if not owner or owner in ("local", "cli"):
+        inferred = _infer_provider_for_model(selected)
+        if inferred:
+            owner = inferred
+        elif ext.enabled and ext.provider:
+            owner = ext.provider
+        else:
+            owner = "local"
     owner = normalize_ollama_provider(owner)
-    current = str(getattr(default, "model_name", "") or "")
 
     if selected == current and owner == getattr(default, "provider", owner):
         return default
@@ -316,7 +346,7 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
 
     _reject_cross_vendor_pair(owner, selected)
 
-    if owner != ext.provider:
+    if owner != ext.provider or not ext.enabled:
         if owner == "ollama":
             ext.base_url = resolve_ollama_base_url()
             ext.api_key_credential = ""

@@ -45,7 +45,8 @@ def main():
     focus='verification-focus-'+uuid.uuid4().hex
     worker=turn(focus, f'Use the native read_file tool to read the first line of {REPO_ROOT / "README.md"} and quote it. Do not write files, browse, or use memory tools.')
     assert 'JaegerAI' in worker['output']
-    receipt = json.loads((Path(__file__).resolve().parents[1] / '.jaeger_ai/shared/webui-runs/jaeger' / (worker['run_id'] + '.json')).read_text())
+    from jaeger_ai.core.instance.instance import operator_state_root
+    receipt = json.loads((operator_state_root() / 'shared/webui-runs/jaeger' / (worker['run_id'] + '.json')).read_text())
     assert any(e['event'] == 'tool.completed' and e.get('tool') == 'read_file' for e in receipt['events'])
     state=request('/v1/dispatcher')
     report=next(r for r in state['reports'] if r['run_id']==worker['run_id'])

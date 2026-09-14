@@ -456,3 +456,205 @@ def backfill_jaeger_titles(store) -> int:
         if title and store.set_title(session_id, title):
             updated += 1
     return updated
+
+
+def sync_jaeger_sessions_to_hermes_webui(
+    layout: Any = None,
+    *,
+    operator_home: Path | None = None,
+) -> dict[str, int]:
+    """Mirror native Jaeger CLI / app conversation sessions and messages into
+    the Hermes profile state.db (~/.hermes/profiles/jaeger/state.db) so that
+    the Hermes Web UI lists them in the CLI sessions tab with full transcripts.
+    """
+    from jaeger_ai.core.instance.instance import operator_state_root, read_active_instance
+
+    root = operator_home if operator_home is not None else operator_state_root()
+    hermes_jaeger_dir = Path.home() / ".hermes" / "profiles" / "jaeger"
+    hermes_jaeger_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    dest_db = hermes_jaeger_dir / "state.db"
+
+    src_db: Path | None = None
+    if layout is not None and getattr(layout, "memory_dir", None):
+        candidate = layout.memory_dir / "sessions.db"
+        if candidate.exists():
+            src_db = candidate
+    if not src_db:
+        inst_name = read_active_instance() or "jaeger"
+        candidate = root / "instances" / inst_name / "memory" / "sessions.db"
+        if candidate.exists():
+            src_db = candidate
+        else:
+            default_cand = root / "instances" / "jaeger" / "memory" / "sessions.db"
+            if default_cand.exists():
+                src_db = default_cand
+
+    if not src_db or not src_db.exists():
+        return {"sessions": 0, "messages": 0}
+
+    dest = sqlite3.connect(str(dest_db))
+    try:
+        with dest:
+            dest.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    source TEXT,
+                    title TEXT,
+                    model TEXT,
+                    cwd TEXT,
+                    started_at REAL,
+                    ended_at REAL,
+                    end_reason TEXT,
+                    parent_session_id TEXT,
+                    message_count INTEGER
+                )
+            """)
+            dest.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    role TEXT,
+                    content TEXT,
+                    timestamp REAL
+                )
+            """)
+            dest.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp)"
+            )
+
+        src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
+        try:
+            src.row_factory = sqlite3.Row
+            rows = src.execute(
+                "SELECT id, title, preview, created_at, last_active, model, provider, origin, ended_at "
+                "FROM sessions"
+            ).fetchall()
+
+            synced_sessions = 0
+            synced_messages = 0
+
+            for r in rows:
+                sid = str(r["id"] or "").strip()
+                if not sid or sid.startswith("focus:"):
+                    continue
+
+                msg_rows = src.execute(
+                    "SELECT role, text, ts FROM messages WHERE session_id = ? ORDER BY ts ASC, id ASC",
+                    (sid,),
+                ).fetchall()
+                msg_count = len(msg_rows)
+                if msg_count == 0:
+                    continue
+
+                title = str(r["title"] or "").strip() or title_from_text(str(r["preview"] or "")) or sid
+                junk, _reason = is_junk(
+                    session_id=sid,
+                    title=title,
+                    preview=str(r["preview"] or ""),
+                    messages=msg_count,
+                )
+                if junk:
+                    continue
+
+                model_name = str(r["model"] or "").strip() or "default"
+                started = float(r["created_at"] or time.time())
+                ended = float(r["ended_at"]) if r["ended_at"] is not None else None
+
+                with dest:
+                    dest.execute("""
+                        INSERT INTO sessions (id, source, title, model, cwd, started_at, ended_at, message_count)
+                        VALUES (?, 'cli', ?, ?, '/workspace', ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            source='cli',
+                            title=excluded.title,
+                            model=excluded.model,
+                            started_at=excluded.started_at,
+                            ended_at=excluded.ended_at,
+                            message_count=excluded.message_count
+                    """, (sid, title, model_name, started, ended, msg_count))
+
+                    dest.execute("DELETE FROM messages WHERE session_id = ?", (sid,))
+                    dest.executemany("""
+                        INSERT INTO messages (session_id, role, content, timestamp)
+                        VALUES (?, ?, ?, ?)
+                    """, [(sid, str(m["role"] or "user"), str(m["text"] or ""), float(m["ts"] or started)) for m in msg_rows])
+
+                synced_sessions += 1
+                synced_messages += msg_count
+
+            return {"sessions": synced_sessions, "messages": synced_messages}
+        finally:
+            src.close()
+    finally:
+        dest.close()
+
+
+def sync_single_session_to_hermes_webui(
+    session_id: str,
+    *,
+    store: Any = None,
+    layout: Any = None,
+) -> bool:
+    """Incrementally mirror a single session turn to ~/.hermes/profiles/jaeger/state.db."""
+    sid = str(session_id or "").strip()
+    if not sid or sid.startswith("focus:"):
+        return False
+    try:
+        hermes_jaeger_dir = Path.home() / ".hermes" / "profiles" / "jaeger"
+        if not hermes_jaeger_dir.exists():
+            return False
+        dest_db = hermes_jaeger_dir / "state.db"
+        if not dest_db.exists():
+            sync_jaeger_sessions_to_hermes_webui(layout)
+            return True
+
+        if store is not None and getattr(store, "_conn", None):
+            conn = store._conn
+            row = conn.execute(
+                "SELECT id, title, preview, created_at, model, ended_at FROM sessions WHERE id = ?",
+                (sid,),
+            ).fetchone()
+            if not row:
+                return False
+            msg_rows = conn.execute(
+                "SELECT role, text, ts FROM messages WHERE session_id = ? ORDER BY ts ASC, id ASC",
+                (sid,),
+            ).fetchall()
+            msg_count = len(msg_rows)
+            if msg_count == 0:
+                return False
+            title = str(row[1] or "").strip() or title_from_text(str(row[2] or "")) or sid
+            junk, _ = is_junk(session_id=sid, title=title, preview=str(row[2] or ""), messages=msg_count)
+            if junk:
+                return False
+            started = float(row[3] or time.time())
+            model_name = str(row[4] or "").strip() or "default"
+            ended = float(row[5]) if row[5] is not None else None
+
+            dest = sqlite3.connect(str(dest_db))
+            try:
+                with dest:
+                    dest.execute("""
+                        INSERT INTO sessions (id, source, title, model, cwd, started_at, ended_at, message_count)
+                        VALUES (?, 'cli', ?, ?, '/workspace', ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            source='cli',
+                            title=excluded.title,
+                            model=excluded.model,
+                            started_at=excluded.started_at,
+                            ended_at=excluded.ended_at,
+                            message_count=excluded.message_count
+                    """, (sid, title, model_name, started, ended, msg_count))
+                    dest.execute("DELETE FROM messages WHERE session_id = ?", (sid,))
+                    dest.executemany("""
+                        INSERT INTO messages (session_id, role, content, timestamp)
+                        VALUES (?, ?, ?, ?)
+                    """, [(sid, str(m[0] or "user"), str(m[1] or ""), float(m[2] or started)) for m in msg_rows])
+                return True
+            finally:
+                dest.close()
+        else:
+            sync_jaeger_sessions_to_hermes_webui(layout)
+            return True
+    except Exception:
+        return False

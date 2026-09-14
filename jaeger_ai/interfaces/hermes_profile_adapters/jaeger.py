@@ -348,7 +348,8 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         global _native_runs
         with _native_lock:
             if _native_runs is None:
-                root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/jaeger"
+                from jaeger_ai.core.instance.instance import operator_state_root
+                root = operator_state_root() / "shared/webui-runs/jaeger"
                 _native_runs = Runs(root, dispatcher_turn, reconciler=jaeger_reconcile)
             return _native_runs
 
@@ -356,6 +357,11 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         if os.environ.get("JAEGERS_ADAPTER_NATIVE_RUNS", "true").lower() in {"1", "true"} and self.native_route("GET"):
             return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
+            try:
+                from jaeger_ai.features.hermes_webui.session_unify import sync_jaeger_sessions_to_hermes_webui
+                sync_jaeger_sessions_to_hermes_webui()
+            except Exception:
+                pass
             self._send_json(200, {"ok": True, "status": "ready"})
         elif self.path == "/v1/capabilities":
             self._send_json(200, {
