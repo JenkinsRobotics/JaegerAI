@@ -49,8 +49,8 @@ _USAGE = (
 
 
 def _install_root() -> Path:
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    return PACKAGE_ROOT.parent
+    from jaeger_ai.core.instance.instance import install_root
+    return install_root()
 
 
 def _jaeger_exe(home: Path) -> Path:

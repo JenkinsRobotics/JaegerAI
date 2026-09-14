@@ -99,6 +99,25 @@ def test_upgrade_command_unknown_returns_none():
     assert U._upgrade_command("unknown") is None
 
 
+def test_update_refreshes_every_wheel_in_selected_external_environment(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    venv = tmp_path / "external venv"
+    monkeypatch.setenv("JAEGER_VENV", str(venv))
+    calls = []
+    from types import SimpleNamespace
+    monkeypatch.setattr(U.subprocess, "run", lambda args, **kw:
+                        calls.append(args) or SimpleNamespace(returncode=0))
+    assert U._reinstall_deps(root) == 0
+    args = calls[0]
+    assert args[:4] == [str(venv / "bin/python"), str(root / "scripts/install-packages.py"),
+                        "--python", str(venv / "bin/python")]
+    assert args[4:] == [str(root / "packages/jaeger-os"),
+                       str(root / "packages/jaeger-agent") + "[multimodal-duplex]",
+                       str(root / "packages/jaeger-kokoro-tts"),
+                       str(root / "packages/jaeger-whisper-stt"), str(root)]
+    assert "-e" not in args
+
+
 def test_detect_method_marks_product_git_checkout(tmp_path, monkeypatch):
     root = tmp_path / "product"
     package = root / "jaeger_ai"
@@ -224,7 +243,9 @@ def test_update_dev_checkout_clean_pulls_and_reinstalls(tmp_path, monkeypatch, c
     code = U._cmd_update_argv(["--no-migrate"])
     assert code == 0
     assert any("pull" in c and "--ff-only" in c for c in calls)   # fast-forward pull
-    assert any("-e" in c for c in calls)                          # editable reinstall
+    refresh = next(c for c in calls if any("install-packages.py" in a for a in c))
+    assert "-e" not in refresh
+    assert sum("/packages/" in a for a in refresh) == 4
     assert "Restart" in capsys.readouterr().out
 
 

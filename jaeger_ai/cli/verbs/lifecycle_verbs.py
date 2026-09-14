@@ -125,8 +125,9 @@ def _find_app_pids() -> list[int]:
 
 def _find_app_bundle() -> Path | None:
     """Find installed or built JaegerAI.app."""
+    from jaeger_ai.core.instance.instance import install_root
     candidates = (
-        swift_app_bundle(REPO_ROOT),
+        swift_app_bundle(install_root()),
         Path.home() / "Applications" / "JaegerAI.app",
         Path("/Applications/JaegerAI.app"),
         Path("/Applications/Jaeger AI.app"),

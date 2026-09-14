@@ -788,9 +788,11 @@ def cmd_update() -> int:
     after = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
     if before != after or any(f in ("pyproject.toml",) for f in changed):
         say("dependencies changed — reinstalling…", prefix="update")
-        subprocess.run([str(VENV_PY), "-m", "pip", "install", "-q",
-                        "-r", str(req), "-e", str(REPO)], cwd=str(REPO))
-        ok("deps reinstalled")
+        from jaeger_ai.cli.verbs.update_verb import _reinstall_deps
+        if _reinstall_deps(REPO):
+            fail("package refresh failed — rerun ./install.sh")
+            return 1
+        ok("packages refreshed")
     # Staleness beats "what did THIS pull change": the bundle's build-commit
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.

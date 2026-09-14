@@ -36,7 +36,7 @@ final class MultimodalWindowController {
         base: [String: String],
         instance: String
     ) -> [String: String] {
-        var environment = base
+        var environment = BridgeProcess.launchEnvironment(base: base)
         environment["JAEGER_INSTANCE_NAME"] = instance
         environment["JAEGER_DESKTOP_HELPER"] = "1"
         return environment

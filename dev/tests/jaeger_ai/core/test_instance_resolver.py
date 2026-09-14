@@ -16,6 +16,30 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.instance import instance as instance_module
+
+
+def test_installed_wheel_keeps_checkout_separate_from_state(tmp_path, monkeypatch):
+    checkout = tmp_path / "source"
+    checkout.mkdir()
+    (checkout / ".git").write_text("gitdir: /external/worktree\n")
+    monkeypatch.setenv("JAEGER_INSTALL_ROOT", str(checkout))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "legacy-state"))
+    monkeypatch.setattr(instance_module, "PACKAGE_ROOT",
+                        tmp_path / "venv/lib/python3.11/site-packages/jaeger_ai")
+    assert instance_module.is_pip_installed()
+    assert instance_module.install_root() == checkout
+    assert instance_module.detect_install_method() == "dev-checkout"
+    assert instance_module.operator_state_root() == tmp_path / "state"
+    (checkout / ".jaeger-product-install").touch()
+    assert instance_module.detect_install_method() == "product-checkout"
+
+
+def test_state_override_cannot_become_update_destination(tmp_path, monkeypatch):
+    monkeypatch.delenv("JAEGER_INSTALL_ROOT", raising=False)
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(instance_module, "PACKAGE_ROOT", tmp_path / "source/jaeger_ai")
+    assert instance_module.install_root() == tmp_path / "source"
 from jaeger_ai.core.instance import legacy_state
 
 

@@ -5756,7 +5756,8 @@ def _swift_app_binary() -> "Path | None":
     (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
     from jaeger_ai.core.native_app import swift_app_bundle
-    built = swift_app_bundle(_P(__file__).resolve().parent.parent)
+    from jaeger_ai.core.instance.instance import install_root
+    built = swift_app_bundle(install_root())
     candidates = [
         _P("/Applications/JaegerAI.app"),
         _P("/Applications/Jaeger AI.app"),

@@ -39,14 +39,14 @@ _USAGE = (
 
 
 def _install_root() -> Path:
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    return PACKAGE_ROOT.parent
+    from jaeger_ai.core.instance.instance import install_root
+    return install_root()
 
 
 def _jaeger_exe(home: Path) -> Path:
     """The command the launcher execs — venv console script if present, else
     the install's ``./jaeger`` wrapper."""
-    venv = home / ".venv" / "bin" / "jaeger"
+    venv = Path(os.environ.get("JAEGER_VENV") or home / ".venv") / "bin" / "jaeger"
     return venv if venv.exists() else home / "jaeger"
 
 
