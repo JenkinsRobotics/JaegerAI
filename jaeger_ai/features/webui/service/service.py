@@ -550,10 +550,6 @@ class HermesWebUIService:
         env["JAEGER_GATEWAY_URL"] = (
             os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810"
         ).rstrip("/")
-        env["HERMES_WEBUI_GATEWAY_BASE_URL"] = (
-            os.environ.get("HERMES_WEBUI_GATEWAY_BASE_URL")
-            or env["JAEGER_GATEWAY_URL"]
-        ).rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.vendor_webui_port)
         env["JAEGER_WEBUI_HOST"] = os.environ.get("JAEGER_WEBUI_HOST", "0.0.0.0")
         hermes_agent_src = Path(

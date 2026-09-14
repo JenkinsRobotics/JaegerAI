@@ -62,7 +62,8 @@ class TableService:
         self.runs = Runs(root / 'table-runs', self._turn, run_type=TableRun,
                          reconciler=self._reconcile_native)
 
-    def start(self, session, message, workspace=None, *, options=None):
+    def start(self, session, message, workspace=None, *, options=None, on_admitted=None,
+              model=None, provider=None):
         if not isinstance(session, str) or not session or len(session) > 512:
             raise ValueError('A durable Roundtable session identity is required')
         # Do not silently drop a requested workspace while native adapters lack
@@ -78,7 +79,9 @@ class TableService:
             self.store.create_turn(run, selected)
             run.table = {key: selected[key] for key in ('mode', 'participants', 'chair', 'budgets')}
             run.persist()
-        return self.runs.start(session, message, on_admitted=admitted)
+            if on_admitted is not None:
+                on_admitted(run)
+        return self.runs.start(session, message, on_admitted=admitted, model=model, provider=provider)
 
     def get(self, identity):
         return self.runs.get(identity)
@@ -156,7 +159,8 @@ class TableService:
             def admitted(child, member=member):
                 parent.children[member + ':' + phase] = child
             try:
-                info = self.members[member].start(session, prompt, run_id=identity, on_admitted=admitted)
+                info = self.members[member].start(session, prompt, run_id=identity, on_admitted=admitted,
+                    model=getattr(parent, 'model', None), provider=getattr(parent, 'provider', None))
                 child = self.members[member].get(info['run_id'])
                 active[member] = {'run': child, 'cursor': 0, 'progress': Progress(policy)}
             except Exception as exc:

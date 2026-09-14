@@ -63,6 +63,15 @@ def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
         assert "use_hermes_webui" in denied["error"]
 
         with patch(
+            "jaeger_ai.features.hermes_webui.service.cs.container_status",
+            return_value={"found": False},
+        ), patch(
+            "jaeger_ai.features.hermes_webui.service.cs.stop_container",
+            return_value={"ok": True},
+        ) as stop_ctn, patch(
+            "jaeger_ai.features.hermes_webui.service.ensure_webui_profile_layout",
+            return_value=None,
+        ), patch(
             "jaeger_ai.features.hermes_webui.service.cs.start_container",
             return_value={"ok": True, "id": "hermes-webui-hermes-webui"},
         ) as start_ctn, patch.object(
@@ -78,6 +87,7 @@ def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
             allowed = svc.start(force=True)
             assert allowed["ok"] is True
             start_ctn.assert_called_once_with("hermes-webui-hermes-webui")
+            stop_ctn.assert_not_called()
 
 
 def test_webui_dispatch_registered():

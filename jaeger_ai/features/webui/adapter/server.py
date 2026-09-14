@@ -1,8 +1,8 @@
 """Loopback runtime adapter for Jaeger's pinned Hermes WebUI fork.
 
 This process does not serve the browser application. The pinned WebUI owns port
-8790 and calls this service through ``runner-local``. Jaeger remains the sole
-owner of inference, tools, sessions, approvals, heartbeat, and schedules.
+8790 and calls this service through ``runner-local``. The selected framework
+owns inference, tools, sessions and controls; this service translates events.
 """
 
 from __future__ import annotations
@@ -186,6 +186,9 @@ class RunStore:
                 "active_controls": list(record.get("active_controls") or []),
                 "pending_approval_id": record.get("pending_approval_id"),
                 "pending_clarify_id": record.get("pending_clarify_id"),
+                "profile": record.get("profile"),
+                "native": record.get("native", {}),
+                "execution_unknown": record.get("execution_unknown", False),
             }
 
     def records_for_session(self, session_id: str) -> list[dict[str, Any]]:
@@ -196,6 +199,10 @@ class RunStore:
                 if str(record.get("session_id") or "") == session_id
             ]
         return sorted(rows, key=lambda row: float(row.get("updated_at") or 0), reverse=True)
+
+    def records(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(record) for record in self._runs.values()]
 
     def _require(self, run_id: str) -> dict[str, Any]:
         if run_id not in self._runs:
@@ -236,14 +243,33 @@ class RunnerBroker:
         self.approvals = approvals
         self.store = store
         self.clarifications = clarifications or ClarifyBroker()
+        from .profile_runner import ProfileRunner
+        self.profiles = ProfileRunner(store)
+        from .profile_catalog import ProfileCatalog, native_ready
+        self.profile_catalog = ProfileCatalog(lambda name: native_ready(name, bridge))
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
+        from .profile_runner import canonical_profile
+        profile = canonical_profile(request.get("profile"))
+        with self.profiles.lock:
+            session = str(request.get("session_id") or "").strip()
+            rows = self.store.records_for_session(session)
+            if any(canonical_profile(row.get("profile")) != profile for row in rows):
+                raise ValueError("This conversation belongs to another runtime; start a new conversation for this profile")
+            if any(not row.get("terminal_state") for row in rows):
+                raise ValueError("This conversation already has an active run")
+            if profile != "jaeger":
+                return self.profiles.start(request)
+            return self._start_jaeger(request)
+
+    def _start_jaeger(self, request: dict[str, Any]) -> dict[str, Any]:
         text = str(request.get("message") or "").strip()
         session_id = str(request.get("session_id") or "").strip()
         if not text or not session_id:
             raise ValueError("message and session_id are required")
         run_id = uuid.uuid4().hex
         self.store.create(run_id=run_id, session_id=session_id, prompt=text)
+        self.store.set_state(run_id, profile="jaeger")
         threading.Thread(
             target=self._worker,
             args=(run_id, request),
@@ -339,8 +365,13 @@ class RunnerBroker:
                 finally:
                     self.store.set_state(run_id, pending_approval_id=None)
 
-            result = self.bridge.turn(text, session_id, on_event, on_request)
-            error = str(result.get("error") or "").strip()
+            result = self.bridge.turn(text, session_id, on_event, on_request, turn_id=run_id)
+            if result.get("cancelled"):
+                self.store.append(run_id, "apperror", {"message": "Run cancelled", "status": "cancelled",
+                    "session_id": session_id, "stream_id": run_id})
+                self.store.set_state(run_id, status="cancelled", terminal_state="cancelled", active_controls=[])
+                return
+            error = str(result.get("error") or result.get("halt_reason") or "").strip()
             answer = str(result.get("text") or "")
             if error:
                 self.store.append(run_id, "apperror", {
@@ -482,14 +513,20 @@ class RunnerBroker:
 
     def cancel(self, run_id: str) -> dict[str, Any]:
         status = self.store.status(run_id)
+        if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
+            return self.profiles.cancel(run_id)
         if status["terminal_state"]:
             return {"ok": False, "status": "not-active", "message": "Run is not active."}
-        self.bridge.control("cancel")
+        self.bridge.control("cancel", turn_id=run_id)
         self.store.set_state(run_id, status="cancelling")
         return {"ok": True, "status": "accepted"}
 
     def approve(self, run_id: str, approval_id: str, choice: str) -> dict[str, Any]:
-        self.store.status(run_id)
+        status = self.store.status(run_id)
+        if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
+            return self.profiles.approve(run_id, approval_id, choice)
+        if status.get("pending_approval_id") != approval_id:
+            return {"ok": False, "status": "not-active", "message": "Approval does not belong to this run."}
         bridge_choice = "once" if choice == "session" else choice
         accepted = self.approvals.respond(approval_id, bridge_choice)
         return {
@@ -764,6 +801,8 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path in {"/health", "/api/health"}:
                 return self._json(self.bridge.health())
+            if parsed.path == "/v1/profiles":
+                return self._json({'profiles': self.runner.profile_catalog.list()})
             if parsed.path in {"/v1/agents", "/api/agents"}:
                 # Native + third-party catalog for remote WebUI list/switch.
                 from jaeger_ai.core.agent_registry import AgentRegistry

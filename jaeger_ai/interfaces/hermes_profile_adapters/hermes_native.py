@@ -40,7 +40,11 @@ def hermes_turn(run, workspace=None):
     # Hermes chooses its run ID. Persist send intent before the request; a lost
     # acceptance response must leave ownership uncertain, never retry the POST.
     run.dispatch(session_id=run.session, run_id=None)
-    with request('/v1/runs', {'session_id': run.session, 'input': run.message}) as response:
+    body = {'session_id': run.session, 'input': run.message}
+    for name in ('model', 'provider'):
+        if getattr(run, name, None):
+            body[name] = getattr(run, name)
+    with request('/v1/runs', body) as response:
         accepted = json.load(response)
     native_id = accepted.get('run_id', '')
     if not re.fullmatch(r'run_[0-9a-f]{32}', native_id):
