@@ -122,6 +122,15 @@ def _preserves_content(original: str, styled: str) -> bool:
     if not orig_words:
         return True
     styled_words = _content_words(styled)
+    # A caveat can contain more words than the answer itself. Overall overlap
+    # used to accept a rewrite that kept only the caveat ("it depends") and
+    # dropped the main fact. Preserve that leading claim when one is qualified.
+    clauses = re.split(r",\s*(?:but|though|although|however|while|yet|except)\b",
+                       original, maxsplit=1, flags=re.IGNORECASE)
+    if len(clauses) == 2:
+        claim = _content_words(clauses[0]) - {"typically", "usually", "generally", "normally"}
+        if not claim.issubset(styled_words):
+            return False
     overlap = len(orig_words & styled_words) / len(orig_words)
     return overlap >= _OVERLAP_THRESHOLD
 
