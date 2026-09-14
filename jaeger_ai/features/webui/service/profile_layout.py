@@ -15,14 +15,10 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+from ..adapter.profile_catalog import PROFILES
 
 # Canonical id → chat/profile label (matches vendor static FALLBACK maps).
-PROFILE_DISPLAY_NAMES: dict[str, str] = {
-    "default": "Hermes Agent",
-    "jaeger": "Jaeger",
-    "openclaw": "OpenClaw",
-    "roundtable": "Roundtable",
-}
+PROFILE_DISPLAY_NAMES: dict[str, str] = {name: label for name, _, label in PROFILES}
 
 
 def profile_display_name(profile_id: str | None) -> str:
@@ -304,6 +300,22 @@ def prepare_vendor_webui_home(
                 named_written[folder] = label
     schema = ensure_agent_state_schema(agent)
     config = ensure_vendor_config_yaml(agent)
+    # A catalog entry must be selectable even on a fresh installation. Seed
+    # only model selection, never another profile's credentials or history.
+    import yaml
+    source = yaml.safe_load((agent / 'config.yaml').read_text()) or {}
+    model = source.get('model') if isinstance(source, dict) else None
+    for name, label in PROFILE_DISPLAY_NAMES.items():
+        if name == 'default':
+            continue
+        path = agent_profiles / name
+        _write_display_name(path, display_name=label)
+        named_written[name] = label
+        target = path / 'config.yaml'
+        if not target.exists():
+            seeded = {key: model[key] for key in ('default', 'provider') if key in model} if isinstance(model, dict) else model
+            target.write_text(yaml.safe_dump({'model': seeded} if seeded else {}))
+            target.chmod(0o600)
     schemas = ensure_profile_state_schemas(agent, shared_profiles=hermes / "profiles")
     return {
         "agent_home": str(agent),

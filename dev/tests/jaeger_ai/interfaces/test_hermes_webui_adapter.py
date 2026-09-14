@@ -31,7 +31,7 @@ class _Bridge:
         self.commands.append((command, args or {}))
         return {"ok": True, "command": command}
 
-    def turn(self, text, session, on_event=None, on_request=None):
+    def turn(self, text, session, on_event=None, on_request=None, **kwargs):
         if on_event:
             on_event({"type": "delta", "text": "hello "})
             on_event({"type": "reasoning", "text": "checked"})
@@ -317,7 +317,7 @@ def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
 
 
 class _ClarifyBridge(_Bridge):
-    def turn(self, text, session, on_event=None, on_request=None):
+    def turn(self, text, session, on_event=None, on_request=None, **kwargs):
         answer = ""
         if on_request is not None:
             answer = on_request({

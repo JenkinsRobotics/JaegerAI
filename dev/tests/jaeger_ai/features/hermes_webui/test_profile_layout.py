@@ -117,7 +117,7 @@ def test_prepare_writes_vendor_default_and_named_display_names(tmp_path: Path) -
     result = prepare_vendor_webui_home(agent, hermes_home=hermes)
 
     assert result["display_names"]["default"] == "Hermes Agent"
-    assert result["display_names"]["jaeger"] == "Jaeger"
+    assert result["display_names"]["jaeger"] == "Jaeger AI"
     assert result["display_names"]["openclaw"] == "OpenClaw"
     assert result["display_names"]["roundtable"] == "Roundtable"
     agent_yaml = (agent / "profile.yaml").read_text(encoding="utf-8")
@@ -132,6 +132,22 @@ def test_profile_display_name_helper() -> None:
 
     assert profile_display_name("default") == "Hermes Agent"
     assert profile_display_name(None) == "Hermes Agent"
-    assert profile_display_name("jaeger") == "Jaeger"
+    assert profile_display_name("jaeger") == "Jaeger AI"
     assert profile_display_name("openclaw") == "OpenClaw"
     assert profile_display_name("roundtable") == "Roundtable"
+
+
+def test_prepare_creates_selectable_runtime_profiles_without_cloning_credentials(tmp_path):
+    import yaml
+    agent = tmp_path / 'agent'
+    agent.mkdir()
+    (agent / 'config.yaml').write_text('model:\n  default: example\n  provider: ollama\nsecret: private\n')
+    hermes = tmp_path / 'hermes'
+    prepare_vendor_webui_home(agent, hermes_home=hermes)
+    for name in ('jaeger', 'openclaw', 'roundtable'):
+        cfg = yaml.safe_load((agent / 'profiles' / name / 'config.yaml').read_text())
+        assert cfg == {'model': {'default': 'example', 'provider': 'ollama'}}
+    target = agent / 'profiles' / 'openclaw' / 'config.yaml'
+    target.write_text('model: custom\n')
+    prepare_vendor_webui_home(agent, hermes_home=hermes)
+    assert target.read_text() == 'model: custom\n'

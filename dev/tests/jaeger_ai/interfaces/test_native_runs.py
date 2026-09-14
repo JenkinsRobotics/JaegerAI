@@ -306,7 +306,7 @@ def test_jaeger_preserves_unknown_native_receipt(tmp_path, monkeypatch):
 def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monkeypatch):
     controls = []
     class Bridge:
-        def __init__(self, instance):
+        def __init__(self, instance="jaeger"):
             assert instance == "jaeger"
         def control(self, op, **payload):
             controls.append((op, payload))

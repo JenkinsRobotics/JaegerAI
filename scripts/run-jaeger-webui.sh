@@ -27,9 +27,12 @@ export HERMES_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
 export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
 export HERMES_WEBUI_RUNTIME_ADAPTER=runner-local
+export HERMES_WEBUI_RUNNER_PROFILES=1
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 export HERMES_WEBUI_RUNNER_BASE_URL="${JAEGER_RUNNER_BASE_URL:-http://127.0.0.1:8791}"
-# Prefer Jaeger Gateway :8810 for /api/health/agent remote probe (falls back to runner).
-export HERMES_WEBUI_GATEWAY_BASE_URL="${HERMES_WEBUI_GATEWAY_BASE_URL:-${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}}"
+# Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
+# override: named profiles own their individual native gateway addresses.
 export JAEGER_GATEWAY_URL="${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
@@ -46,7 +49,7 @@ fi
 # Shared Hermes profiles + current-schema state.db for the :8790 vendor home.
 # Leftover real profile dirs are renamed aside and replaced with a symlink.
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
-  "from jaeger_ai.features.hermes_webui.profile_layout import prepare_vendor_webui_home; prepare_vendor_webui_home()"
+  "import os; from pathlib import Path; from jaeger_ai.features.hermes_webui.profile_layout import prepare_vendor_webui_home; prepare_vendor_webui_home(Path(os.environ['HERMES_HOME']))"
 
 
 cd "$webui_root"
