@@ -112,7 +112,10 @@ def main() -> int:
                          "sample_rate": 16000},
             }) + "\n")
             process.stdin.flush()
-            native_probe = native_responses.get(timeout=30)
+            # A fresh installation initializes Kokoro and compiles Whisper's
+            # Metal kernels here. Apply the same cold-start budget as audio
+            # requests on the attached face; report actual latency below.
+            native_probe = native_responses.get(timeout=180)
             native_probe["elapsed_ms"] = round((time.perf_counter() - native_started) * 1000, 2)
             if not native_probe.get("ok"):
                 raise RuntimeError(f"native dictation probe failed: {native_probe}")

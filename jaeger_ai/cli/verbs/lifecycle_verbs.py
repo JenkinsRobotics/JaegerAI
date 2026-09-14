@@ -19,6 +19,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from jaeger_ai.core.native_app import swift_app_bundle
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
@@ -124,9 +126,11 @@ def _find_app_pids() -> list[int]:
 def _find_app_bundle() -> Path | None:
     """Find installed or built JaegerAI.app."""
     candidates = (
-        REPO_ROOT / "jaeger_ai" / "interfaces" / "swift" / ".build" / "JaegerAI.app",
+        swift_app_bundle(REPO_ROOT),
         Path.home() / "Applications" / "JaegerAI.app",
         Path("/Applications/JaegerAI.app"),
+        Path("/Applications/Jaeger AI.app"),
+        Path.home() / "Applications" / "Jaeger AI.app",
     )
     for c in candidates:
         if c.exists():

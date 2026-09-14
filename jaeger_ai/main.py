@@ -3830,6 +3830,7 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
         model, provider, _decision = apply_sensitivity_routing(
             user_text,
             config=_pipeline.get("config"),
+            default_client=client,
         )
         if _decision.classification == "private" or model:
             client = select_client(
@@ -4177,6 +4178,7 @@ def run_for_voice(
                 config=_pipeline.get("config"),
                 model=model,
                 provider=provider,
+                default_client=client,
             )
             if _decision.classification == "private" or model:
                 model = s_model
@@ -5753,11 +5755,14 @@ def _swift_app_binary() -> "Path | None":
     pinned to jaeger-dev via its environment. Running the inner binary
     (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
-    swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
+    from jaeger_ai.core.native_app import swift_app_bundle
+    built = swift_app_bundle(_P(__file__).resolve().parent.parent)
     candidates = [
-        swift / "JaegerAI.app",
-        _P.home() / "Applications" / "JaegerAI.app",
         _P("/Applications/JaegerAI.app"),
+        _P("/Applications/Jaeger AI.app"),
+        _P.home() / "Applications/Jaeger AI.app",
+        _P.home() / "Applications/JaegerAI.app",
+        built,
     ]
     for app in candidates:
         binary = app / "Contents" / "MacOS" / "JaegerAI"

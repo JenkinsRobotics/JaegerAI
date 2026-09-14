@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <!-- The repository-backed Python helper loads this installation's Python,
-         Qt, and native extension libraries, which have different signers. -->
-    <key>com.apple.security.cs.disable-library-validation</key><true/>
-    <key>com.apple.security.cs.allow-jit</key><true/>
-</dict></plist>
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <!-- The local Python environment supplies Qt and numerical extensions
+         signed by their own distributors, rather than this application's team. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

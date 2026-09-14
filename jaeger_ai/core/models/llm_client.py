@@ -224,6 +224,8 @@ class LlamaCppPythonClient:
         up front (same as reference).
     """
 
+    kind = "local"
+
     def __init__(
         self,
         model_path: Path = DEFAULT_GGUF_PATH,

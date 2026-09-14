@@ -215,6 +215,14 @@ actor BridgeProcess {
     static func jaegerPath() -> String {
         let env = ProcessInfo.processInfo.environment
         if let cmd = env["JAEGER_BRIDGE_CMD"], !cmd.isEmpty { return cmd }
+        if let venv = env["JAEGER_VENV"], !venv.isEmpty {
+            let command = URL(fileURLWithPath: venv).appendingPathComponent("bin/jaeger").path
+            if FileManager.default.isExecutableFile(atPath: command) { return command }
+        }
+        if let command = Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String,
+           FileManager.default.isExecutableFile(atPath: command) {
+            return command
+        }
         var dir = URL(fileURLWithPath: Bundle.main.bundlePath)
             .deletingLastPathComponent()
         for _ in 0..<8 {

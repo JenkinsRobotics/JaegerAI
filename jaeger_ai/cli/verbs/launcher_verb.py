@@ -19,6 +19,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from jaeger_ai.core.native_app import swift_app_bundle
+
 _APP_NAME = "Jaeger AI.app"
 _LEGACY_APP_NAMES = ("Jaeger.app",)
 _BUNDLE_ID = "com.jenkinsrobotics.JaegerAI"
@@ -146,8 +148,8 @@ def _macos_install() -> int:
     swift = home / "jaeger_ai/interfaces/swift"
     try:
         subprocess.run(["bash", str(swift / "Scripts/build-app.sh"), "--dev"], check=True)
-        source = swift / ".build/JaegerOS.app"
-        subprocess.run([str(source / "Contents/MacOS/JaegerOS"), "--verify-launch"], check=True)
+        source = swift_app_bundle(home)
+        subprocess.run([str(source / "Contents/MacOS/JaegerAI"), "--verify-launch"], check=True)
         from jaeger_ai.core.instance.instance import operator_state_root
         backup = _install_native_bundle(source, app, operator_state_root() / "launcher-backups")
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:

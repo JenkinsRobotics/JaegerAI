@@ -52,8 +52,8 @@ from __future__ import annotations
 import os as _os
 import sys as _sys
 from pathlib import Path as _Path
-_REPO_ROOT = _Path(__file__).resolve().parents[2]
-_VENV_DIR = _Path.home() / ".jaeger" / "venv"
+_REPO_ROOT = _Path(_os.environ.get("JAEGER_INSTALL_ROOT") or _Path(__file__).resolve().parents[2])
+_VENV_DIR = _Path(_os.environ.get("JAEGER_VENV") or _Path.home() / ".jaeger" / "venv")
 if not _VENV_DIR.exists():
     _VENV_DIR = _REPO_ROOT / ".venv"
 _VENV_PY = _VENV_DIR / "bin" / "python"
@@ -69,9 +69,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jaeger_ai.core.native_app import swift_app_bundle
+
 from jaeger_ai.core.instance.instance import operator_state_root
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = _REPO_ROOT
 DEV_INSTANCE = operator_state_root() / "instances" / "jaeger-dev"
 VENV_PY = _VENV_PY
 INSTANCE_NAME = "jaeger-dev"
@@ -735,7 +737,7 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     from its own bundle path, so no PATH injection is needed."""
     if not (SWIFT_DIR / "Package.swift").exists():
         return None
-    bundle = SWIFT_DIR / ".build" / "JaegerAI.app"
+    bundle = swift_app_bundle(REPO)
     bundle_bin = bundle / "Contents" / "MacOS" / "JaegerAI"
     # Rebuild when forced, missing, OR stale (build-commit stamp older than
     # the Swift tree) — the stale case is what keeps a station that pulls by
@@ -793,7 +795,7 @@ def cmd_update() -> int:
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
     from jaeger_ai.cli._common import swift_app_is_stale
-    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerAI.app"):
+    if swift_app_is_stale(REPO, swift_app_bundle(REPO)):
         say("Swift app lags the tree — rebuilding JaegerAI.app…",
             prefix="update")
         subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),
