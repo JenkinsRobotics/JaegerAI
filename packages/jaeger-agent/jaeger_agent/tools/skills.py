@@ -16,7 +16,7 @@ from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_agent.skill_registry import playbook_skills as _pb
-from jaeger_agent.workspace import get_layout
+from jaeger_agent.core.workspace import get_layout
 
 # Recognised linked-file categories inside a skill folder.
 _FILE_CATEGORIES = ("scripts", "references", "templates", "assets")
@@ -94,7 +94,7 @@ def skill(action: str, name: str = "", query: str = "",
     act = (action or "").strip().lower()
 
     if act in ("stats", "usage"):
-        from jaeger_ai.core.runtime.usage_stats import top_skills, top_tools
+        from jaeger_agent.core.usage import top_skills, top_tools
         return {"ok": True, "tools": top_tools(12), "skills": top_skills(12)}
 
     if act in ("curate", "curation", "cleanup"):
@@ -182,7 +182,7 @@ def skill(action: str, name: str = "", query: str = "",
         except Exception:  # noqa: BLE001 — never let preprocessing break view
             pass
         try:
-            from jaeger_ai.core.runtime.usage_stats import record_skill
+            from jaeger_agent.core.usage import record_skill
             record_skill(s.name)
         except Exception:  # noqa: BLE001
             pass
@@ -466,7 +466,7 @@ def reload_skills() -> dict:
     from jaeger_agent.skill_registry.skill_loader import (
         _REGISTERED_KEYS, load_and_register,
     )
-    from jaeger_agent.workspace import _require_layout
+    from jaeger_agent.core.workspace import _require_layout
 
     before = set(_REGISTERED_KEYS)
     report = load_and_register(None, _require_layout())

@@ -49,7 +49,9 @@ class Message(TypedDict, total=False):
     """
 
     role: Role
-    content: str | None
+    # Text for ordinary turns; provider-native typed blocks for multimodal
+    # user turns (for example OpenAI-style image_url + text blocks).
+    content: Any
     tool_calls: list[ToolCall] | None
     tool_call_id: str | None        # for role="tool"
     name: str | None                # for role="tool"

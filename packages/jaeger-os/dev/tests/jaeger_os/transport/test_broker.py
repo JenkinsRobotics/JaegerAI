@@ -97,7 +97,7 @@ def test_pub_in_one_bus_reaches_sub_in_another(endpoints):
         received.append(msg)
         event.set()
 
-    subscriber.subscribe(topics.SENSE_TRANSCRIPT, on_transcript)
+    subscriber.subscribe(topics.SENSE_STT_TRANSCRIPT, on_transcript)
     # ZMQ late-joiner: let the subscription propagate through
     # the broker before publishing.
     time.sleep(0.3)

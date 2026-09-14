@@ -63,9 +63,9 @@ def captured_animation_cmds(instance):
     """Replace the bus with one we control; capture all
     AnimationCommand publishes."""
     bus = InProcBus()
-    received: list[topics.AnimationCommand] = []
+    received: list[topics.DisplayCommand] = []
     bus.subscribe(
-        topics.ACT_ANIMATION,
+        topics.ACT_DISPLAY_PLAY,
         lambda msg: received.append(msg),
     )
     # Stub ensure_animation_node so we don't spin a real node —

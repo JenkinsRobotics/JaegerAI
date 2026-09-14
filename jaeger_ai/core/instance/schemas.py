@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from jaeger_agent.core.config import MultimodalConfig
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 try:
@@ -554,20 +556,19 @@ class VoiceConfig(BaseModel):
         False,
         json_schema_extra=_setting("voice"),
         description=(
-            "Allow interrupting the agent mid-sentence by speaking. Uses "
-            "echo cancellation (speexdsp) so the open mic doesn't hear the "
-            "agent itself; falls back to mic-pause when speexdsp is absent.  "
-            "Off (default) = mic-paused-during-TTS — matches the proven "
-            "VoiceLLM reference's self-speech rejection strategy."
+            "Allow interrupting the agent mid-sentence by speaking. Requires "
+            "live echo control (native AVAudio voice processing or AEC); "
+            "otherwise the runtime safely falls back to sequential "
+            "half-duplex. Off (default) matches the reference pipeline."
         ),
     )
     follow_up_seconds: float = Field(
-        10.0, ge=2.0, le=120.0,
+        15.0, ge=2.0, le=120.0,
         json_schema_extra=_setting("voice"),
         description=(
-            "Length of the no-wake-word follow-up window.  Reduced from "
-            "15s to 10s in 0.4.x to match the proven reference (shorter "
-            "window = less time for stale noise between turns)."
+            "Length of the no-wake-word follow-up window. The sequential "
+            "half-duplex reference uses 15 seconds, beginning only after "
+            "speech and the follow-up chime have fully completed."
         ),
     )
     speech_engine: Literal["kokoro", "apple"] = Field(
@@ -1021,7 +1022,7 @@ class PersonaConfig(BaseModel):
 # imports catalog metadata from ``setting_meta.py``, never from
 # ``schemas.py`` directly.
 try:
-    from jaeger_kokoro_tts.nodes.kokoro_tts.config import KokoroTTSConfig
+    from jaeger_kokoro_tts.config import KokoroTTSConfig
 except ImportError:
     # 0.8 M2a: the kokoro_tts directory (config.py included) can be
     # deleted entirely. This stand-in is structurally identical to the
@@ -1042,7 +1043,7 @@ except ImportError:
 # ImportError fallback so a deleted ``nodes/whisper_stt/`` directory
 # degrades instead of breaking config load).
 try:
-    from jaeger_whisper_stt.nodes.whisper_stt.config import WhisperSTTConfig
+    from jaeger_whisper_stt.config import WhisperSTTConfig
 except ImportError:
     # Structurally identical to the real leaf (same fields/defaults) so
     # an existing config.yaml's ``whisper_stt:`` block — or the
@@ -1151,6 +1152,7 @@ class Config(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    multimodal: MultimodalConfig = Field(default_factory=MultimodalConfig)
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
     containers: ContainersConfig = Field(default_factory=ContainersConfig)

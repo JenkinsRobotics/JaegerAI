@@ -70,7 +70,7 @@ def test_report_and_boot_warning_surface_fixes():
 
     warning = boot_warning(checks)
     assert "kokoro" in warning and "PortAudio" in warning
-    assert "--doctor" in warning  # boot points at the doctor to fix
+    assert "`jaeger doctor`" in warning  # boot points at the doctor to fix
 
 
 def _write_config(tmp_path, *, model_path="dummy.gguf", ctx=8192):

@@ -10,14 +10,14 @@ from typing import Any
 
 
 def list_credentials(layout: Any) -> dict[str, Any]:
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     names = sorted(str(name) for name in credentials.list_credentials(layout))
     return {"credentials": names, "count": len(names)}
 
 
 def set_credential(layout: Any, name: Any, value: Any) -> dict[str, Any]:
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     credential_name = str(name or "").strip()
     credential_value = str(value or "").strip()
@@ -30,7 +30,7 @@ def set_credential(layout: Any, name: Any, value: Any) -> dict[str, Any]:
 
 
 def delete_credential(layout: Any, name: Any) -> dict[str, Any]:
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     credential_name = str(name or "").strip()
     if not credential_name:

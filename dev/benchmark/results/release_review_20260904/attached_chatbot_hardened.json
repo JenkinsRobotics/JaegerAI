@@ -1,0 +1,370 @@
+{
+  "schema": "multimodal-agent-result-v1",
+  "benchmark": "gemma-multimodal-comparison-v1",
+  "engine": "jaeger-ai-attached-bridge",
+  "suite": "full",
+  "created_at": "2026-09-04T22:55:24-0700",
+  "load_ms": 28140.34,
+  "cases": [
+    {
+      "id": "text_math",
+      "modality": "text",
+      "response": "Seventeen plus twenty-eight equals forty-five.",
+      "transcript": null,
+      "total_ms": 818.53,
+      "first_audio_ms": 818.46,
+      "audio_samples": 76200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "text_fact",
+      "modality": "text",
+      "response": "The capital of Japan is Tokyo. It is a very large and bustling city.",
+      "transcript": null,
+      "total_ms": 1118.67,
+      "first_audio_ms": 1118.63,
+      "audio_samples": 122400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "text_sequence",
+      "modality": "text",
+      "response": "The next number in the sequence is 32. Each number is double the one before it.",
+      "transcript": null,
+      "total_ms": 1208.08,
+      "first_audio_ms": 1208.04,
+      "audio_samples": 130200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "text_instruction",
+      "modality": "text",
+      "response": "amber comet",
+      "transcript": null,
+      "total_ms": 419.51,
+      "first_audio_ms": 419.47,
+      "audio_samples": 39000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "memory_two_facts",
+      "modality": "memory",
+      "response": "You asked me to remember the codename Violet and the build number 731.",
+      "transcript": null,
+      "total_ms": 1224.96,
+      "first_audio_ms": 1224.91,
+      "audio_samples": 131400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "vision_red_square",
+      "modality": "vision",
+      "response": "The central shape is a square, and its color is red.",
+      "transcript": null,
+      "total_ms": 1560.38,
+      "first_audio_ms": 1560.34,
+      "audio_samples": 85800,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "vision_three_blue_circles",
+      "modality": "vision",
+      "response": "There are three shapes shown, they are circles, and they are blue.",
+      "transcript": null,
+      "total_ms": 1443.53,
+      "first_audio_ms": 1443.48,
+      "audio_samples": 83400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q00",
+      "modality": "spoken",
+      "response": "Two plus two equals four.",
+      "transcript": "What is 2 plus 2?",
+      "total_ms": 1702.74,
+      "first_audio_ms": 1702.7,
+      "audio_samples": 52200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q01",
+      "modality": "spoken",
+      "response": "The sky is usually blue on a clear day. It can appear other colors depending on the time of day or weather.",
+      "transcript": "What color is the sky?",
+      "total_ms": 2061.91,
+      "first_audio_ms": 2061.86,
+      "audio_samples": 168600,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q02",
+      "modality": "spoken",
+      "response": "There are seven days in a week. These days include Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, and Saturday.",
+      "transcript": "How many days in a week?",
+      "total_ms": 2255.07,
+      "first_audio_ms": 2255.04,
+      "audio_samples": 188400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q03",
+      "modality": "spoken",
+      "response": "The capital of France is Paris. It's a beautiful city known for its art and history.",
+      "transcript": "What is the capital of France?",
+      "total_ms": 1794.15,
+      "first_audio_ms": 1794.1,
+      "audio_samples": 133200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q04",
+      "modality": "spoken",
+      "response": "Ten minus three is seven.",
+      "transcript": "What is 10 minus 3?",
+      "total_ms": 1082.96,
+      "first_audio_ms": 1082.92,
+      "audio_samples": 50400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q05",
+      "modality": "spoken",
+      "response": "A spider has eight legs. They are arachnids, which is why they have that many.",
+      "transcript": "How many legs does a spider have?",
+      "total_ms": 1700.0,
+      "first_audio_ms": 1699.97,
+      "audio_samples": 117000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q06",
+      "modality": "spoken",
+      "response": "Jupiter is the largest planet in our solar system. It is a massive gas giant.",
+      "transcript": "What is the largest planet?",
+      "total_ms": 1593.32,
+      "first_audio_ms": 1593.28,
+      "audio_samples": 129600,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q07",
+      "modality": "spoken",
+      "response": "Five times five is twenty-five.",
+      "transcript": "What is 5 times 5?",
+      "total_ms": 1141.66,
+      "first_audio_ms": 1141.62,
+      "audio_samples": 62400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q08",
+      "modality": "spoken",
+      "response": "Autumn comes after summer. It is also sometimes called fall.",
+      "transcript": "What season comes after summer?",
+      "total_ms": 1406.57,
+      "first_audio_ms": 1406.53,
+      "audio_samples": 97200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q09",
+      "modality": "spoken",
+      "response": "There are twenty-four hours in a day. That's how we measure the time passing each day.",
+      "transcript": "How many hours in a day?",
+      "total_ms": 1732.4,
+      "first_audio_ms": 1732.37,
+      "audio_samples": 122400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q10",
+      "modality": "spoken",
+      "response": "The freezing point of water is zero degrees Celsius or thirty-two degrees Fahrenheit.",
+      "transcript": "What is the freezing point of water?",
+      "total_ms": 1677.44,
+      "first_audio_ms": 1677.41,
+      "audio_samples": 138000,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    },
+    {
+      "id": "spoken_q11",
+      "modality": "spoken",
+      "response": "William Shakespeare wrote Romeo and Juliet. It is considered one of the greatest plays ever written.",
+      "transcript": "who wrote Romeo and Juliet.",
+      "total_ms": 1840.62,
+      "first_audio_ms": 1840.58,
+      "audio_samples": 157200,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text",
+        "speech"
+      ],
+      "output_source": "configured-speech",
+      "error": null
+    }
+  ],
+  "configuration": {
+    "model": "jaeger_ai/models/gemma-4-E4B-it-Q4_K_M.gguf",
+    "model_precision": "Q4_K_M",
+    "audio_mode": "plain",
+    "play": false,
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "ctx": 32768,
+    "agentic_tools": false,
+    "toolset_scoping": true,
+    "selected_ids": [],
+    "visible_tools": null,
+    "available_tools": null,
+    "memory_owner": "AgentRuntime",
+    "audio_output": "synthesized Kokoro af_heart PCM at 24000 Hz",
+    "instance_config": {
+      "backend": "llama_cpp_python",
+      "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+      "ctx": 32768,
+      "aux_ctx": 4096,
+      "gpu_layers": -1,
+      "n_batch": 512,
+      "n_ubatch": 512,
+      "flash_attn": true,
+      "threads": null,
+      "max_tokens": 4096,
+      "extra_gguf_dirs": [],
+      "stall_timeout_s": null
+    },
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_8v9q58yg/instance",
+    "benchmark_boundary": "completed endpoint; no live devices"
+  },
+  "environment": {
+    "jaeger_agent": "1.2.0",
+    "python": "3.11.9",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "engine_load_ms": 952.66,
+  "bridge_boot_and_vision_ms": 27187.68,
+  "native_dictation_probe": {
+    "type": "result",
+    "id": "native-stt-probe",
+    "ok": true,
+    "data": {
+      "model": "large-v3-turbo",
+      "text": "What is 2 plus 2?"
+    },
+    "error": null,
+    "elapsed_ms": 557.94
+  },
+  "lifecycle": {
+    "exit_code": 0,
+    "bye_received": true,
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_8v9q58yg/instance"
+  }
+}

@@ -219,6 +219,18 @@ def test_configured_tool_budget_replaces_legacy_global_limit():
     assert agent.run_turn("read the complete batch") == "all inspected"
     assert len(executed) == configured
     assert agent.last_halt_reason == f"made {configured} tool calls in a single turn"
+def test_parallel_memory_reads_are_forced_serial() -> None:
+    """Two recalls must not concurrently use the singleton SQLite handle."""
+    @register_tool("recall", "Recall.", _SmallArgs, side_effect="read")
+    def _recall(value: str = "x") -> dict:
+        return {"value": value}
+
+    agent = JaegerAgent(adapter=_ScriptedAdapter([]))
+    calls = [
+        {"id": "c1", "name": "recall", "arguments": {"value": "a"}},
+        {"id": "c2", "name": "recall", "arguments": {"value": "b"}},
+    ]
+    assert agent._batch_is_parallel_safe(calls) is False
 
 
 # ── tool error paths ───────────────────────────────────────────────
@@ -568,24 +580,27 @@ def test_call_counters_reset_between_turns():
 
 
 def _install_fake_usage_stats(monkeypatch) -> list[tuple]:
-    """Stand in for ``jaeger_ai.core.runtime.usage_stats``.
+    """Capture what dispatch records.
 
-    The loop imports it lazily and jaeger-ai is not a dependency of this
-    package, so injecting the module keeps the assertion honest whether
-    or not the app tier happens to be installed alongside.
+    Until 1.0.3 this had to fabricate a whole ``jaeger_ai.core.runtime``
+    module tree, because the loop imported the app's usage_stats directly
+    and jaeger-ai is not a dependency of this package. The counters are
+    the module's own now (``jaeger_agent.core.usage``), so the test patches one
+    function and the fake package tree is gone — which is the coupling
+    removal showing up as less test scaffolding.
     """
-    import sys
-    import types
+    from jaeger_agent.core import usage
 
     calls: list[tuple] = []
-    mod = types.ModuleType("jaeger_ai.core.runtime.usage_stats")
-    mod.record_tool = lambda name, *, ok=True, elapsed=0.0: calls.append(  # type: ignore[attr-defined]
-        (name, ok, round(elapsed, 6) >= 0.0)
+    monkeypatch.setattr(
+        usage,
+        "record_tool",
+        lambda name, *, ok=True, elapsed=0.0: calls.append(
+            (name, ok, round(elapsed, 6) >= 0.0)
+        ),
     )
-    for part in ("jaeger_ai", "jaeger_ai.core", "jaeger_ai.core.runtime"):
-        monkeypatch.setitem(sys.modules, part, types.ModuleType(part))
-    monkeypatch.setitem(sys.modules, "jaeger_ai.core.runtime.usage_stats", mod)
     return calls
+
 
 
 def test_dispatch_counts_a_successful_tool_call(monkeypatch):

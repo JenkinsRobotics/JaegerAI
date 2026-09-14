@@ -34,7 +34,12 @@ def remember(key: str, value: str, category: str = "", subject: str = "",
     add context (the 5W1H). Re-remembering the same key keeps the history."""
     cat = (category or "").strip().lower() or None
     subj = (subject or "").strip() or None
-    mem.remember(key, value, category=cat, subject=subj, tags=tags, note=note)
+    from jaeger_agent.memory.fact_policy import UnsafeMemoryFact
+
+    try:
+        mem.remember(key, value, category=cat, subject=subj, tags=tags, note=note)
+    except UnsafeMemoryFact as exc:
+        return {"ok": False, "remembered": False, "error": str(exc)}
     return {"remembered": True, "key": key, "value": value,
             "subject": subj or "user", "category": cat or "general"}
 

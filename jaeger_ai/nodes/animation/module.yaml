@@ -1,8 +1,8 @@
 module: animation
 slot: animation
-version: 1.0.0
-consumes: [/act/animation, /act/animation_stop, /sense/tts_chunk]
-produces: [/sense/animation_state]
+version: 0.12.0
+consumes: [/act/display/play, /act/display/stop, /act/speech/chunk]
+produces: [/act/display/state]
 tools: [set_avatar_state, play_timeline, warm_avatar]
 factory: jaeger_ai.nodes.animation:make_animation_node
 config: avatar        # its group/key in the settings catalog

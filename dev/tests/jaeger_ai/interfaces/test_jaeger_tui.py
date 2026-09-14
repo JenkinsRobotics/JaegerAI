@@ -26,7 +26,8 @@ from jaeger_ai.interfaces.tui.app import JaegerTUI
 def test_banner_is_non_empty() -> None:
     assert banner.JAEGER_ASCII.count("\n") >= 5
     assert "JAEGER" not in banner.JAEGER_ASCII  # block-letters render
-    assert banner.TAGLINE
+    assert "application" in banner.TAGLINE
+    assert "framework" not in banner.TAGLINE
 
 
 # ── Status bar / panels ─────────────────────────────────────────────
@@ -72,7 +73,7 @@ def test_boot_panel_contains_tools_block() -> None:
     with console.capture() as cap:
         console.print(panel)
     rendered = cap.get()
-    assert "Jaeger-OS 0.5.0" in rendered
+    assert "Jaeger AI 0.5.0" in rendered
     assert "Available Tools" in rendered
     assert "memory:" in rendered
     assert "abc12345" in rendered
@@ -120,8 +121,17 @@ def test_quit_command_returns_quit_true() -> None:
 
 
 def test_help_command_does_not_quit() -> None:
-    result = slash.dispatch("/help", _ctx())
+    console = Console(width=80)
+    ctx = slash.SlashContext(
+        console=console,
+        instance_dir=Path("/tmp/fake_instance"),
+    )
+    with console.capture() as cap:
+        result = slash.dispatch("/help", ctx)
     assert result.quit is False
+    rendered = cap.get()
+    assert "Jaeger AI · slash commands" in rendered
+    assert "Jaeger-OS" not in rendered
 
 
 def test_unknown_slash_returns_noop() -> None:

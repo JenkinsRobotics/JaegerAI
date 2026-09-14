@@ -75,7 +75,7 @@ def test_summary_reports_every_integration() -> None:
 def test_jaeger_ai_supplies_its_own_runtime_not_the_module_default() -> None:
     """JaegerAI owns instances/memory/personas, so it must NOT ride the
     config-built default runtime — that is the embed path for other apps."""
-    from jaeger_agent.node import DEFAULT_RUNTIME_FACTORY
+    from jaeger_agent.core.node import DEFAULT_RUNTIME_FACTORY
 
     assert jaeger_agent.RUNTIME_FACTORY != DEFAULT_RUNTIME_FACTORY
     module_name, _, attribute = jaeger_agent.RUNTIME_FACTORY.partition(":")

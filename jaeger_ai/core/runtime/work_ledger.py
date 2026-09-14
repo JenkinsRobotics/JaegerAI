@@ -500,7 +500,7 @@ def _resolve_verify_path(raw: str) -> Path | None:
     if not text:
         return None
     try:
-        from jaeger_agent.workspace import _resolve_write
+        from jaeger_agent.core.workspace import _resolve_write
         return _resolve_write(text)
     except Exception:  # noqa: BLE001 — unbound layout or sandbox miss
         return Path(text).expanduser()

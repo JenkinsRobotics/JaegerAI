@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent import credentials as creds
-from jaeger_agent.workspace import _require_layout
+from jaeger_agent.core import credentials as creds
+from jaeger_agent.core.workspace import _require_layout
 
 
 def get_credential(name: str) -> dict[str, Any]:

@@ -45,12 +45,18 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import logging
 import pathlib
 import sys
 
 import msgspec
 
-from jaeger_os.contract.modules import ModuleSpec
+from jaeger_os.contract.modules import MODULE_KINDS, ModuleSpec
+
+# stdlib logging, not jaeger_os.app.logging: core/ does not import app/
+# (the layering test enforces the tiers) and discovery runs at boot,
+# before any bus exists to publish a LogLine on.
+_log = logging.getLogger(__name__)
 
 # The directories module.yaml files live under (or, for AGENT_DIR, IS
 # one). Derived the same way (relative to this file, not cwd) so
@@ -65,6 +71,29 @@ PLUGINS_DIR = pathlib.Path(__file__).resolve().parents[1] / "plugins"
 AGENT_DIR = pathlib.Path(__file__).resolve().parents[1] / "agent"
 
 _MODULE_ROOTS_GROUP = "jaeger_os.module_roots"
+
+# Applications and mind modules are different roles. JaegerAI, JP01, and
+# Mochi are applications; JaegerAgent is a reusable mind they may compose.
+# App-owned config/identity lookups use this explicit process-local binding.
+_application_package: str | None = None
+
+#: A project's own module directory. Anything here SHADOWS an
+#: installed module claiming the same slot — ROS's workspace overlay,
+#: where ``~/ws/src`` wins over ``/opt/ros``.
+#:
+#: The point is that nothing you are actively working on is hidden.
+#: Install the common case and never look at it; the day you need to
+#: change one, copy it in here and it takes over. No repo surgery, no
+#: reinstall, and deleting the folder puts the installed one back.
+PROJECT_MODULES_DIRNAME = "modules"
+
+
+def project_module_root(project_dir) -> pathlib.Path | None:
+    """``<project>/modules`` if it exists, else ``None``."""
+    if project_dir is None:
+        return None
+    root = pathlib.Path(project_dir) / PROJECT_MODULES_DIRNAME
+    return root if root.is_dir() else None
 
 
 def _external_module_roots() -> tuple[pathlib.Path, ...]:
@@ -86,12 +115,27 @@ def _external_module_roots() -> tuple[pathlib.Path, ...]:
     roots: list[pathlib.Path] = []
     try:
         eps = importlib.metadata.entry_points(group=_MODULE_ROOTS_GROUP)
-    except Exception:  # noqa: BLE001 — a broken metadata index shouldn't
-        return ()      # take down discovery for everyone else.
+    except Exception as exc:  # noqa: BLE001 — a broken metadata index
+        _log.warning(                     # shouldn't take down discovery
+            "module discovery: cannot read the entry-point index (%s: %s)"
+            " — no out-of-tree modules will be found",
+            type(exc).__name__, exc,
+        )
+        return ()
     for ep in eps:
         try:
             contributed = ep.load()()
-        except Exception:  # noqa: BLE001 — one bad contributor, not fatal
+        except Exception as exc:  # noqa: BLE001 — one bad contributor,
+            # not fatal for the others, but NEVER silent: an installed
+            # package whose entry point raises is a broken install, and
+            # before this it vanished from discovery with no symptom
+            # beyond a KeyError at some unrelated call site.
+            _log.warning(
+                "module discovery: %r is installed but its entry point "
+                "%s failed to load (%s: %s) — its modules will not be "
+                "found. This is a broken install, not a missing package.",
+                ep.name, ep.value, type(exc).__name__, exc,
+            )
             continue
         for r in contributed:
             roots.append(pathlib.Path(r))
@@ -124,6 +168,17 @@ def load_module(dir: pathlib.Path) -> ModuleSpec:
         raise ValueError(f"{p}: {exc}") from None
     if not spec.slot.strip():
         raise ValueError(f"{p}: slot must be non-empty")
+    if spec.type != "module":
+        raise ValueError(
+            f"{p}: type {spec.type!r} must be 'module' for module.yaml"
+        )
+    if spec.kind and spec.kind not in MODULE_KINDS:
+        # Named here rather than left to msgspec so the error points at
+        # the file the operator has to fix.
+        raise ValueError(
+            f"{p}: kind {spec.kind!r} is not one of "
+            f"{sorted(MODULE_KINDS)}"
+        )
     _check_factory(spec.factory, path=p)
     return spec
 
@@ -140,6 +195,8 @@ def module_platform_ok(spec: ModuleSpec) -> bool:
 
 def discover_modules(
     roots: pathlib.Path | tuple[pathlib.Path, ...] | None = None,
+    *,
+    project_dir=None,
 ) -> dict[str, list[ModuleSpec]]:
     """Scan one or more roots for ``module.yaml`` and return every
     module found across ALL roots, keyed by slot. Default roots:
@@ -169,27 +226,71 @@ def discover_modules(
     multiple modules across roots (e.g. ``messaging`` — discord,
     telegram, imessage all live under ``plugins/`` and share the
     slot); callers doing ANY-OF readiness must consult every entry."""
+    local_root = project_module_root(project_dir)
     if roots is None:
         roots = (NODES_DIR, PLUGINS_DIR, AGENT_DIR) + _external_module_roots()
+        # LAST, so the overlay pass below sees it as the local one.
+        if local_root is not None:
+            roots = roots + (local_root,)
     elif isinstance(roots, (str, pathlib.Path)):
         roots = (pathlib.Path(roots),)
+
     by_slot: dict[str, list[ModuleSpec]] = {}
     for root in roots:
         root = pathlib.Path(root)
         if not root.is_dir():
             continue
-        if (root / "module.yaml").is_file():
-            spec = load_module(root)
+        found = [root] if (root / "module.yaml").is_file() else [
+            c for c in sorted(root.iterdir())
+            if c.is_dir() and (c / "module.yaml").is_file()
+        ]
+        for directory in found:
+            spec = load_module(directory)
+            spec.source_dir = directory
+            spec.local = local_root is not None and _is_within(directory, local_root)
             by_slot.setdefault(spec.slot, []).append(spec)
+
+    return _apply_overlay(by_slot) if local_root is not None else by_slot
+
+
+def _is_within(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _apply_overlay(
+    by_slot: dict[str, list[ModuleSpec]],
+) -> dict[str, list[ModuleSpec]]:
+    """Drop installed modules from any slot a LOCAL module claims.
+
+    Shadowing is per-SLOT, not per-module-name, because the slot is
+    what the app binds. Two animation engines both answering
+    ``slot = "animation"`` is ambiguity the app cannot resolve at
+    runtime, and silently picking one is how you end up debugging the
+    wrong copy of a file.
+
+    Always logged. An override that takes effect without saying so is
+    the hidden behaviour this feature exists to remove.
+    """
+    out: dict[str, list[ModuleSpec]] = {}
+    for slot, specs in by_slot.items():
+        local = [s for s in specs if getattr(s, "local", False)]
+        if not local:
+            out[slot] = specs
             continue
-        for child in sorted(root.iterdir()):
-            if not child.is_dir():
-                continue
-            if not (child / "module.yaml").is_file():
-                continue
-            spec = load_module(child)
-            by_slot.setdefault(spec.slot, []).append(spec)
-    return by_slot
+        shadowed = [s for s in specs if not getattr(s, "local", False)]
+        for s in shadowed:
+            _log.info(
+                "slot %r: using LOCAL %s (shadows installed %s)",
+                slot, local[0].source_dir, s.module,
+            )
+        if not shadowed:
+            _log.info("slot %r: using LOCAL %s", slot, local[0].source_dir)
+        out[slot] = local
+    return out
 
 
 def resolve_mind_module(suffix: str = ""):
@@ -228,6 +329,35 @@ def resolve_mind_module(suffix: str = ""):
         full = f"{top}.{suffix}" if suffix else top
         return importlib.import_module(full)
     except Exception:  # noqa: BLE001 — inert absence, not a crash
+        return None
+
+
+def set_application_package(package_or_factory: str | None) -> None:
+    """Bind the active application's top-level package.
+
+    Accepts either ``"jaeger_ai"`` or a manifest factory reference such as
+    ``"jaeger_ai.core.agent_core:make_core"``. Passing ``None`` clears it.
+    """
+    global _application_package
+    if package_or_factory is None:
+        _application_package = None
+        return
+    module_path = str(package_or_factory).partition(":")[0].strip()
+    package = module_path.split(".")[0]
+    if not package or not package.isidentifier():
+        raise ValueError(f"invalid application package/factory: {package_or_factory!r}")
+    _application_package = package
+
+
+def resolve_application_module(suffix: str = ""):
+    """Resolve an app-owned module without conflating app and mind roles."""
+    package = _application_package
+    if not package:
+        return None
+    full = f"{package}.{suffix}" if suffix else package
+    try:
+        return importlib.import_module(full)
+    except Exception:  # noqa: BLE001 — optional application seam
         return None
 
 
@@ -294,5 +424,6 @@ def resolve_slot_symbols(slot: str, names: tuple[str, ...]) -> dict:
 __all__ = [
     "ModuleSpec", "load_module", "discover_modules", "module_platform_ok",
     "resolve_slot_module", "resolve_slot_symbols", "resolve_mind_module",
+    "resolve_application_module", "set_application_package",
     "NODES_DIR", "PLUGINS_DIR", "AGENT_DIR",
 ]

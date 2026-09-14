@@ -209,7 +209,7 @@ def restore_instance(archive: Path, *,
         raise RestoreError(
             f"archive was created by a newer framework "
             f"(core {archive_core!r} > installed {SCHEMA_VERSION!r}). "
-            "Upgrade jaeger-os before restoring."
+            "Run `jaeger update` before restoring."
         )
 
     name = name_override or manifest.get("instance_name") or _name_from_archive(archive)

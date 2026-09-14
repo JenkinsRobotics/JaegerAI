@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_agent.workspace import _require_layout, get_layout
+from jaeger_agent.core.workspace import _require_layout, get_layout
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 _LAYERS = ("hexaco", "special", "expression", "domains")

@@ -121,7 +121,7 @@ def _install_schedule_delivery() -> None:
         if not deliver or not isinstance(result, dict) or not result.get("scheduled"):
             return result
         try:
-            from jaeger_agent.workspace import get_layout
+            from jaeger_agent.core.workspace import get_layout
 
             from jaeger_ai.core.runtime import cron_delivery
 

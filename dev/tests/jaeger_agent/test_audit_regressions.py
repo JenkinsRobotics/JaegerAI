@@ -1,9 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from jaeger_agent import workspace
-from jaeger_agent.safety import _DESTRUCTIVE_COMMAND_RE
-from jaeger_agent.trace import Tracer
+from jaeger_agent.core import workspace
+from jaeger_agent.core.safety import _DESTRUCTIVE_COMMAND_RE
+from jaeger_agent.core.trace import Tracer
 
 
 def test_destructive_commands_are_detected():

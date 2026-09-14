@@ -28,8 +28,9 @@ pip-wheel-metadata/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+.jaeger-product-install
 
-# Pytest / coverage
+# Test / lint / coverage caches
 .pytest_cache/
 .ruff_cache/
 .coverage
@@ -121,11 +122,9 @@ sandbox/
 /JaegerAI-dev.app
 /JaegerAI.app
 
-# Agent workspace. jaeger_agent creates <cwd>/.jaeger_agent on first use
-# — deliberately in the project rather than $HOME, so it is inspectable
-# and deletable with the code. That also means running anything from a
-# repo root mints one here: runtime state (memory db, logs, workspace
-# files), never source.
+# Standalone-agent fallback workspace. A correctly hosted JaegerAI process
+# binds JaegerAgent to .jaeger_os/instances/<name> and does not use this;
+# direct jaeger_agent commands launched from this checkout may create it.
 .jaeger_agent/
 
 # Claude Code agent worktrees — real git worktrees checked out inside the

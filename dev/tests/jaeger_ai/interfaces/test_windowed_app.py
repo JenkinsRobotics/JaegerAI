@@ -143,7 +143,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         client=object(), cleanup=lambda: cleaned.append(True)))
     monkeypatch.setattr(
         m, "run_for_voice",
-        lambda c, t, session_key="gui": {"text": f"echo: {t}", "error": None})
+        lambda c, t, session_key="gui", output_mode="dynamic": {"text": f"echo: {t}", "error": None})
 
     from jaeger_os.nodes import runtime as node_runtime
 
@@ -179,7 +179,7 @@ def test_windowed_manifest_boots_agent_core_over_chassis(qapp, monkeypatch):
         tts_spec = next(n for n in app.spec.nodes if n.id == "tts")
         assert tts_spec.slot == "tts"
         assert tts_spec.factory == (
-            "jaeger_kokoro_tts.nodes.kokoro_tts:make_tts_node"
+            "jaeger_kokoro_tts:make_tts_node"
         )
         # ensure_*_node() (what the agent's speak/avatar tools call)
         # must delegate to the SAME supervisor-managed objects — no

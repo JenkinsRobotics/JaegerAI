@@ -1,0 +1,11 @@
+name: ares
+version: 1
+description: |
+  Optional Jaeger AI integration for the local ARES controller, WebUI, Mac
+  application, and companion extensions. ARES remains an external application;
+  this plugin owns its discovery and launch boundary.
+requires:
+  env_optional: [JAEGER_ARES_URL]
+  notes: The controller defaults to http://127.0.0.1:8788.
+provides:
+  bridges: [ares-http, ares-macos-app]

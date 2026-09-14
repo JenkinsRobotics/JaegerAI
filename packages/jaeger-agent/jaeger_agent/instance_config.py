@@ -40,7 +40,7 @@ def load(layout: Any = None) -> Any | None:
     """
     try:
         if layout is None:
-            from jaeger_agent.workspace import get_layout
+            from jaeger_agent.core.workspace import get_layout
             layout = get_layout()
         path = Path(layout.config_path)
     except Exception:

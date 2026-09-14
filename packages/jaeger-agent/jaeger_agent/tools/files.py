@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import (
+from jaeger_agent.core.workspace import (
     SandboxError,
     _audit,
     _display_path,
@@ -494,7 +494,7 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         # walk $HOME, which is both a credential sweep and an uninterruptible
         # DoS. Explicit paths remain ``_resolve_read``-gated either way.
         if path == ".":
-            from jaeger_agent.workspace import get_project_root
+            from jaeger_agent.core.workspace import get_project_root
 
             project = get_project_root()
             root = project if project is not None else layout.skills_dir

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "jaeger_audio_node",
+  "runtime": "stt_streaming",
+  "id": "stt-streaming",
+  "slot": "audio_perception",
+  "enabled_by_default": true,
+  "consumes": [
+    "pcm_f32_16khz_mono_30ms"
+  ],
+  "produces": [
+    "committed_sentences",
+    "speaker_labels"
+  ],
+  "status": "verified_2026-09-01",
+  "implementation": "runtime.py",
+  "lineage": "voice-family-verified",
+  "notes": "Monotonic commit-and-trim engine with DriftAnchor (improved or tied every WER stream), StreamAnnotator per-commit labels, UtteranceAggregator. Verified: drift benchmark + 04 sim 5/5."
+}

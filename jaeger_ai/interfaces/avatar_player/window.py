@@ -224,6 +224,9 @@ class AvatarWindow(QWidget):
 
     def __init__(self, ctx: Any = None) -> None:
         super().__init__()
+        from jaeger_ai.interfaces.pyside6.branding import apply_app_identity
+
+        apply_app_identity(self)
         self.ctx = ctx
         from jaeger_ai.interfaces.pyside6.rich_tui.window import (
             _CANVAS, _INK_DIM, _MONO, _PANEL, _RULE,

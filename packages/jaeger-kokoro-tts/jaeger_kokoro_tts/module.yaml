@@ -1,0 +1,47 @@
+id: org.jenkinsrobotics.tts.kokoro
+name: JaegerKokoroTTS
+type: module
+implementation: kokoro
+module: kokoro_tts
+slot: tts
+version: 2.0.0
+
+# The OWNERSHIP axis (TAXONOMY.md "Module KINDS") — orthogonal to
+# `slot`, which says what ROLE this fills. `engine` is the kind that
+# fills a capability slot; swapping in Piper or a cloud TTS means
+# swapping this module, not editing anything that talks to it.
+kind: engine
+
+# Topics follow the hierarchy: /<category>/<class>/<message>, with an
+# optional instance segment. Everything about the speech device lives
+# under one prefix — the request, the audio in flight, and the done-ack
+# coming back — so subscribing to /act/speech/ shows the whole
+# conversation. A system with two voices instances them as
+# /act/speech/voice0/say and /act/speech/voice1/say.
+#
+# This module NO LONGER OPENS THE SPEAKER. It publishes synthesised
+# audio on /act/speaker/pcm and jaeger_os.nodes.audio_io plays it —
+# which is what lets the wake chimes share the same device (they were
+# always a second producer, each opening it independently), and what
+# gives the echo canceller the played audio for free.
+#
+# /act/speaker/state is the price of that: a publisher cannot tell
+# "my audio finished being SENT" from "my audio finished PLAYING", and
+# only the device knows the second. The done-ack on
+# /act/speech/spoken waits for it.
+consumes: [/act/speech/say, /act/speech/stop, /act/speaker/state]
+produces: [/act/speech/spoken, /act/speech/chunk,
+           /act/speaker/pcm, /act/speaker/stop]
+tools: [text_to_speech]
+factory: jaeger_kokoro_tts:make_tts_node
+config: kokoro_tts        # its group/key in the settings catalog
+# Carried over from the old plugin.yaml's `requires.libraries` block
+# (pre-0.8 M1, jaeger_os/plugins/kokoro_tts/plugin.yaml) — the
+# libraries the engine actually imports at runtime. The availability
+# gate (jaeger_os/agent/availability.py) probes these with
+# importlib.util.find_spec before reporting text_to_speech available.
+# The app path publishes PCM to JaegerOS and never imports a hardware
+# backend. ``sounddevice`` is only an optional standalone/dev backend;
+# requiring it here would incorrectly make the TTS engine unavailable on a
+# deployment whose AudioIONode uses AVAudio or remote hardware.
+requires_libraries: [kokoro, numpy]

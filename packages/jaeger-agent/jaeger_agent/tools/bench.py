@@ -35,7 +35,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from jaeger_agent.workspace import _require_layout
+from jaeger_agent.core.workspace import _require_layout
 from jaeger_os.core.safety.permissions import (
     ConfirmationProvider,
     PermissionPolicy,

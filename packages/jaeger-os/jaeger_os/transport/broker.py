@@ -44,7 +44,7 @@ from typing import Optional
 
 import zmq
 
-from jaeger_os.transport.zmq_bus import ZMQBus
+from jaeger_os.transport.zmq_bus import ZMQBus, term_context
 
 
 DEFAULT_XSUB_ENDPOINT = "ipc:///tmp/jros-xsub.sock"
@@ -67,13 +67,33 @@ class Broker:
     ) -> None:
         self.xsub_endpoint = xsub_endpoint
         self.xpub_endpoint = xpub_endpoint
-        self._ctx_owned = ctx is None
+        # NEVER claim ownership of the shared context. The fallback is
+        # zmq.Context.instance() — the PROCESS-WIDE singleton — and
+        # term() blocks until every socket in a context is closed. A bus
+        # terminating "its" context while a broker still holds XSUB/XPUB
+        # in the same one deadlocks, which is exactly what happened the
+        # first time a zmq-backed app tried to shut down. pyzmq cleans
+        # the singleton up at exit; nothing here should.
+        self._ctx_owned = False
         self._ctx = ctx or zmq.Context.instance()
         self._xsub: zmq.Socket | None = None
         self._xpub: zmq.Socket | None = None
         self._thread: threading.Thread | None = None
         self._stopped = threading.Event()
         self._started = False
+
+    def env(self) -> dict[str, str]:
+        """Endpoints as environment variables for a CHILD process.
+
+        A subprocess node cannot be told where the bus is any other way
+        — it is a fresh interpreter with no reference to this object.
+        :func:`make_bus_for_node` reads exactly these two names, so this
+        is the whole parent/child contract.
+        """
+        return {
+            "JAEGER_TRANSPORT_XSUB": self.xsub_endpoint,
+            "JAEGER_TRANSPORT_XPUB": self.xpub_endpoint,
+        }
 
     # ── lifecycle ─────────────────────────────────────────────────
 
@@ -116,10 +136,7 @@ class Broker:
             thread.join(timeout=2.0)
             self._thread = None
         if self._ctx_owned:
-            try:
-                self._ctx.term()
-            except Exception:  # noqa: BLE001
-                pass
+            term_context(self._ctx, "broker")
 
     def __enter__(self) -> "Broker":
         self.start()
@@ -211,7 +228,14 @@ class _BrokerZMQBus(ZMQBus):
         # ZMQBus is the rule.
         import threading as _threading
         self._endpoint = f"{pub_endpoint} ↔ {sub_endpoint}"
-        self._ctx_owned = ctx is None
+        # NEVER claim ownership of the shared context. The fallback is
+        # zmq.Context.instance() — the PROCESS-WIDE singleton — and
+        # term() blocks until every socket in a context is closed. A bus
+        # terminating "its" context while a broker still holds XSUB/XPUB
+        # in the same one deadlocks, which is exactly what happened the
+        # first time a zmq-backed app tried to shut down. pyzmq cleans
+        # the singleton up at exit; nothing here should.
+        self._ctx_owned = False
         self._ctx = ctx or zmq.Context.instance()
         self._hwm = hwm
         self._recv_timeout_ms = recv_timeout_ms

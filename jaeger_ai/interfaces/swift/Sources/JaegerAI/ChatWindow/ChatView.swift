@@ -957,6 +957,10 @@ struct ChatView: View {
 
     private var floatingComposer: some View {
         VStack(alignment: .leading, spacing: 6) {
+            Toggle("Agent tools", isOn: $chat.agenticTools)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("Turn off for a conversation without tool execution")
             if !attachedURLs.isEmpty {
                 attachmentChips
             }
@@ -1367,15 +1371,23 @@ struct ChatView: View {
     }
 
     private func sendCurrent() {
-        var text = chat.composerText
-        if !attachedURLs.isEmpty {
-            let listing = attachedURLs.map { "- \($0.path)" }.joined(separator: "\n")
-            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            text = "Attached files:\n\(listing)" + (body.isEmpty ? "" : "\n\n\(body)")
+        do {
+            let attachments = try ChatAttachments.prepare(attachedURLs)
+            var text = chat.composerText
+            if !attachedURLs.isEmpty {
+                let listing = attachedURLs.map { "- \($0.path)" }.joined(separator: "\n")
+                let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                text = "Attached files:\n\(listing)" + (body.isEmpty ? "" : "\n\n\(body)")
+            }
             attachedURLs = []
+            chat.composerText = ""
+            Task { await chat.send(text, imageDataURIs: attachments) }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't attach image"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
         }
-        chat.composerText = ""
-        Task { await chat.send(text) }
     }
 
     private func startNewChat() {

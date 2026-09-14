@@ -26,7 +26,7 @@ import jaeger_ai.main as m
 from jaeger_agent import tools
 from jaeger_agent.prompts import persona_lane
 from jaeger_agent.tools import credentials as creds_tool
-from jaeger_agent import credentials as creds
+from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
 

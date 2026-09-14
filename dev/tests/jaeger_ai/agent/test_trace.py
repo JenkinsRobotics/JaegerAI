@@ -6,7 +6,7 @@ import time
 import os
 from pathlib import Path
 
-from jaeger_agent import trace
+from jaeger_agent.core import trace
 from jaeger_os.transport import topics
 from jaeger_os.transport.inproc_bus import InProcBus
 
@@ -41,7 +41,7 @@ def test_bus_delivery():
     d = Path(tempfile.mkdtemp())
     bus = InProcBus()
     rec = trace.TraceRecorder(d / "trace.jsonl")
-    bus.subscribe(topics.SENSE_TRACE_STEP, rec.on_step)
+    bus.subscribe(topics.SYS_TRACE_STEP, rec.on_step)
     bus.publish(topics.TraceStep(turn_id=9, step_seq=1, kind="input", detail="ping"))
     # Delivery runs on the bus thread — wait briefly for the append.
     path = d / "trace.jsonl"

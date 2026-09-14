@@ -46,6 +46,7 @@ def _get_model(name: str) -> Any:
         if _cached_model is not None and _cached_model_name == name:
             return _cached_model
         from pywhispercpp.model import Model
+
         _cached_model = Model(
             name,
             print_realtime=False,
@@ -88,6 +89,7 @@ def warm_listen() -> dict[str, Any]:
         t1 = time.perf_counter()
         try:
             import numpy as np
+
             silence = np.zeros(_SAMPLE_RATE, dtype=np.float32)
             # pywhispercpp's transcribe() signature — quietly absorb
             # any unexpected exception so a priming failure can't
@@ -99,7 +101,8 @@ def warm_listen() -> dict[str, Any]:
     except Exception as exc:
         return {"warmed": False, "model": _DEFAULT_MODEL, "reason": str(exc)}
     return {
-        "warmed": True, "model": _DEFAULT_MODEL,
+        "warmed": True,
+        "model": _DEFAULT_MODEL,
         "seconds": round(time.perf_counter() - started, 3),
         "load_s": round(load_s, 3),
         "prime_s": round(prime_s, 3),
@@ -122,7 +125,7 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
         return {
             "ok": False,
             "error": f"seconds capped at {_MAX_SECONDS}; longer captures "
-                     "should use the --voice daemon",
+            "should use the --voice daemon",
         }
     try:
         import numpy as np
@@ -138,10 +141,14 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
     try:
         import sys as _sys
         from jaeger_ai.main import voice_warm_status
+
         status = voice_warm_status()
         if status == "voice: warming…":
-            print(f"[jaeger] {status} — listen() will wait for it to finish",
-                  file=_sys.stderr, flush=True)
+            print(
+                f"[jaeger] {status} — listen() will wait for it to finish",
+                file=_sys.stderr,
+                flush=True,
+            )
     except Exception:  # noqa: BLE001 — status feedback is best-effort
         pass
 
@@ -157,12 +164,16 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
     # PortAudio wedging bug class.  Falls back to sounddevice on
     # other platforms or if the bridge can't load.
     import sys as _sys
+
     if _sys.platform == "darwin":
         try:
             audio = _record_via_avaudio(seconds, np)
         except Exception as exc:  # noqa: BLE001
-            print(f"[listen] avaudio backend unavailable ({exc}); "
-                  "falling back to sounddevice", file=_sys.stderr, flush=True)
+            print(
+                f"[listen] avaudio backend unavailable ({exc}); falling back to sounddevice",
+                file=_sys.stderr,
+                flush=True,
+            )
 
     if audio is None:
         try:
@@ -171,7 +182,7 @@ def listen(seconds: int = 5, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
             return {
                 "ok": False,
                 "error": f"audio capture deps missing ({exc}); "
-                         "install with `pip install -e \".[voice]\"`",
+                'install with `pip install -e ".[voice]"`',
             }
         try:
             audio = sd.rec(
@@ -235,9 +246,7 @@ def _record_via_avaudio(seconds: int, np_module):
     try:
         stream.start()
         if not done.wait(timeout=seconds + 3.0):
-            raise RuntimeError(
-                f"avaudio capture timed out after {seconds + 3.0:.1f}s"
-            )
+            raise RuntimeError(f"avaudio capture timed out after {seconds + 3.0:.1f}s")
     finally:
         stream.close()
 

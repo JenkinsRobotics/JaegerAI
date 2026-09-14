@@ -136,9 +136,9 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
                 try:
                     # 0.9 step 4 split: core.context moved to the
                     # Mind's own package (jaeger_ai today) — resolved
-                    # via resolve_mind_module.
-                    from jaeger_os.core.modules import resolve_mind_module
-                    resolve_mind_module("core.context")._audit(
+                    # via the active application's package binding.
+                    from jaeger_os.core.modules import resolve_application_module
+                    resolve_application_module("core.context")._audit(
                         "hardline_block",
                         {"command": str(cmd)[:500], "reason": reason})
                 except Exception:  # noqa: BLE001 — audit is best-effort

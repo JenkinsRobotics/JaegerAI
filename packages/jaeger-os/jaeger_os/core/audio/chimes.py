@@ -85,6 +85,7 @@ class ChimePlayer:
         sample_rate: int = CHIME_SAMPLE_RATE,
         volume: float = CHIME_VOLUME,
         tail_sleep_s: float = TTS_TAIL_SLEEP_S,
+        bus: Any = None,
         reference_buffer: Any = None,
     ) -> None:
         self.enabled_master = enabled
@@ -92,9 +93,18 @@ class ChimePlayer:
         self.followup_enabled = followup_enabled
         self.sample_rate = sample_rate
         self.tail_sleep_s = tail_sleep_s
-        # Optional: when set, chime audio is also pushed to the AEC reference
-        # buffer so the STT plugin can cancel chime echo out of mic capture.
-        # Without it, callers should pause the mic around play() calls.
+        # With a bus, chimes go to /act/speaker/pcm and the audio_io
+        # driver plays them — the same device Kokoro's speech goes to,
+        # instead of a second output stream opened behind its back.
+        #
+        # This does NOT move the decision. Whether a wake match earns a
+        # beep is the APP's policy (jaeger_ai's voice_loop owns the
+        # --no-chimes flag); all that changes is where the sound lands.
+        self.bus = bus
+        # Only used on the no-bus path. With a bus the driver writes its
+        # own AEC reference from what it actually plays, so this stops
+        # being the caller's problem — including the 24k->16k resample
+        # that used to live here.
         self.reference_buffer = reference_buffer
         self._wake = _make_chime(
             WAKE_CHIME_FREQ, WAKE_CHIME_DURATION_MS,
@@ -121,6 +131,9 @@ class ChimePlayer:
         elif kind == "followup":
             audio = self._followup
         else:
+            return
+        if self.bus is not None:
+            self._publish(audio)
             return
         if self.reference_buffer is not None:
             # Push to AEC reference at the reference buffer's sample rate
@@ -155,6 +168,26 @@ class ChimePlayer:
             time.sleep(self.tail_sleep_s)
         except Exception as exc:
             print(f"[chime] playback failed: {exc}", file=sys.stderr, flush=True)
+
+    def _publish(self, audio) -> None:
+        """Hand the chime to the audio driver.
+
+        Returns as soon as it is published, not when it finishes
+        sounding. That is a real behaviour change: the device-owning
+        path blocked for the tone's duration plus a tail. Nothing
+        needed it to block — the voice loop plays a chime and carries
+        on — and blocking here would mean waiting on a round trip to
+        another node.
+        """
+        from jaeger_os.transport import topics
+        try:
+            self.bus.publish(topics.AudioOutFrame(
+                samples=np.asarray(audio, dtype=np.float32).tobytes(),
+                sample_rate=self.sample_rate,
+                channels=1,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[chime] publish failed: {exc}", file=sys.stderr, flush=True)
 
     def _play_via_avaudio(self, audio) -> None:
         """Blocking chime playback through the avaudio_io bridge.

@@ -99,6 +99,18 @@ def test_upgrade_command_unknown_returns_none():
     assert U._upgrade_command("unknown") is None
 
 
+def test_detect_method_marks_product_git_checkout(tmp_path, monkeypatch):
+    root = tmp_path / "product"
+    package = root / "jaeger_ai"
+    package.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / ".jaeger-product-install").write_text("")
+    monkeypatch.setattr(
+        "jaeger_ai.core.instance.instance.PACKAGE_ROOT", package,
+    )
+    assert U._detect_method() == "product-checkout"
+
+
 # ── ``--check`` mode ───────────────────────────────────────────────
 
 

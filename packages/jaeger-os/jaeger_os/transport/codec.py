@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import msgspec
 
+from jaeger_os.contract.paths import canonical
+
 from jaeger_os.transport import topics
 
 
@@ -37,18 +39,22 @@ from jaeger_os.transport import topics
 # formats is also a single line.
 
 BINARY_TOPICS: frozenset[str] = frozenset({
-    topics.SENSE_AUDIO_IN,
-    topics.ACT_AUDIO_OUT,
-    # /sense/camera_frame (CameraFrame) carries JPEG/PNG/raw bytes as the
+    topics.SENSE_MIC_PCM,
+    topics.ACT_SPEAKER_PCM,
+    # /sense/camera/image_raw (CameraFrame) carries JPEG/PNG/raw bytes as the
     # main payload — MessagePack avoids the base64 hop JSON would
     # require, and the smaller wire form matters at 10-30 fps.
-    topics.SENSE_CAMERA_FRAME,
+    topics.SENSE_CAMERA_IMAGE_RAW,
 })
 
 
 def is_binary_topic(topic: str) -> bool:
-    """True if ``topic`` rides MessagePack on the wire, False if JSON."""
-    return topic in BINARY_TOPICS
+    """True if ``topic`` rides MessagePack on the wire, False if JSON.
+
+    Instance-aware: every instance of a binary topic is binary, so
+    /sense/camera/cam0/image_raw resolves through its canonical form
+    rather than silently falling back to JSON for a frame of pixels."""
+    return topic in BINARY_TOPICS or canonical(topic) in BINARY_TOPICS
 
 
 # ── encode / decode ────────────────────────────────────────────────
@@ -73,9 +79,19 @@ def decode(data: bytes, topic: str) -> topics.TopicMessage:
     payload that doesn't match the class schema (wire corruption
     or a publisher bug)."""
     cls = topics.class_for_topic(topic)
-    if is_binary_topic(topic):
-        return msgspec.msgpack.decode(data, type=cls)
-    return msgspec.json.decode(data, type=cls)
+    msg = (msgspec.msgpack.decode(data, type=cls) if is_binary_topic(topic)
+           else msgspec.json.decode(data, type=cls))
+    # Replaces what `topic: Literal[...]` used to enforce for free, and
+    # is strictly stronger: it permits any INSTANCE of the canonical
+    # topic while still refusing a payload whose topic belongs to a
+    # different class. Without it, a publisher bug could put a
+    # CameraFrame's bytes on /act/speech and nothing would notice.
+    declared, actual = canonical(topic), canonical(msg.topic)
+    if actual != declared:
+        raise msgspec.ValidationError(
+            f"payload topic {msg.topic!r} (canonical {actual!r}) does not "
+            f"belong to {declared!r} — wire corruption or a publisher bug")
+    return msg
 
 
 def decode_with_topic_sniff(data: bytes) -> topics.TopicMessage:

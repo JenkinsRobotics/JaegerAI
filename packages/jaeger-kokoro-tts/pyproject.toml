@@ -2,7 +2,7 @@
 #
 # Split out of the JROS monorepo (0.9 four-way split): the tts-slot
 # engine module. The module IS the engine (see
-# jaeger_kokoro_tts/nodes/kokoro_tts/__init__.py). Two real consumers
+# jaeger_kokoro_tts/__init__.py). Two real consumers
 # (JaegerAI product + JP01 non-AI console) triggered the graduation to
 # its own repo (THREE_TIER_STRUCTURE.md's split triggers). Pins
 # jaeger-os ONLY — never jaeger-ai — a robot must be able to speak
@@ -23,6 +23,12 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
+[project.scripts]
+# Standalone dev/demo driver — `speak`, `save`, `voices`, `devices`,
+# `bench`. Lets the module be exercised without an app around it;
+# see jaeger_kokoro_tts/cli.py.
+jaeger-kokoro-tts = "jaeger_kokoro_tts.cli:main"
+
 [project.entry-points."jaeger_os.module_roots"]
 # The out-of-tree discover_modules() seam (0.9 step 4 split) — see
 # jaeger_kokoro_tts/module_roots.py. JaegerOS finds this WITHOUT ever
@@ -38,25 +44,52 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 include = ["jaeger_kokoro_tts*"]
-exclude = ["jaeger_kokoro_tts.__pycache__", "jaeger_kokoro_tts.*.__pycache__"]
-namespaces = false
+# Tests are not part of the distribution. They are also the largest
+# source of generated __pycache__, so excluding them keeps bytecode out
+# of the wheel for free.
+exclude = ["jaeger_kokoro_tts.tests*", "jaeger_kokoro_tts*.__pycache__*"]
 
 [tool.setuptools.package-data]
-# Non-.py assets under the package (module.yaml at minimum) — setuptools
-# only auto-includes .py files for a found package; everything else
-# needs an explicit glob or it silently vanishes from a REAL (non
-# -editable) install. Caught via a real git-dependency install (`pip
-# install jaeger-kokoro-tts @ git+...`): editable installs mask this
-# because they point back at the source tree, module.yaml "works" by
-# accident. "**/*" is deliberately broad (redundant with .py, harmless)
-# rather than an extension allowlist that silently misses the next
-# asset type this module grows.
-jaeger_kokoro_tts = ["**/*.yaml"]
+# module.yaml is not a .py file, so setuptools does NOT pick it up
+# automatically — it ships only because this line says so. An editable
+# install masks its absence completely: the import path points back at
+# the source tree, so the manifest "works" by accident and every local
+# test passes. The failure appears only in a REAL install (`pip install
+# jaeger-kokoro-tts @ git+...`), where the module imports fine, claims no
+# slot, and the app boots one node short with no error.
+#
+# ALLOWLIST, not a recursive glob. This was `["**/*"]` plus an
+# exclude-package-data block undoing it; the glob swept __pycache__ into
+# the wheel — measured at 12 .pyc files including pytest-versioned test
+# bytecode. A .pyc whose .py no longer matches is still importable, so
+# that is a stale-code hazard, not just weight. Naming the assets is
+# shorter than sweeping and then subtracting, and it makes the artifact
+# reproducible. Add real assets here as the module grows them.
+jaeger_kokoro_tts = ["module.yaml"]
 
 [tool.pytest.ini_options]
 cache_dir = "~/.cache/pytest"
-testpaths = ["dev/tests", "jaeger_kokoro_tts/nodes/kokoro_tts/tests"]
+# One location. `dev/tests` went away in the 0.12.0 flattening —
+# leaving it here made pytest silently collect nothing from a path
+# that no longer exists, which is how a deleted suite stays deleted.
+testpaths = ["jaeger_kokoro_tts/tests"]
 markers = [
     "slow: tests that fork real processes or do real network I/O.",
     "model: tests that load the real Kokoro model weights.",
+]
+
+[project.optional-dependencies]
+# For a machine with NO framework installed. JaegerOS is not on PyPI,
+# so `jaeger-os>=0.10` alone cannot resolve from nothing.
+#
+# Kept OPTIONAL on purpose: a URL dependency forces pip to reinstall
+# that exact source even when a newer, satisfying jaeger-os is already
+# present. As a normal dependency that silently downgrades the
+# framework under a running app. As an extra, you only get it when you
+# ASK for it, which is exactly when you have nothing to lose.
+#
+#   pip install -e .              framework already present
+#   pip install -e ".[bootstrap]" fresh machine
+bootstrap = [
+  "jaeger-os @ git+https://github.com/JenkinsRobotics/JaegerOS@master",
 ]

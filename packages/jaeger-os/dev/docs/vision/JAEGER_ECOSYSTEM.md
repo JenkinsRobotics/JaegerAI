@@ -122,12 +122,20 @@ Read directly from the shipped `module.yaml` / `plugin.yaml` files (0.8 M1–M3
 graduations; no shims remain — `plugins/kokoro_tts`, `nodes/tts`, and the old
 `audio_session` split are gone):
 
+**Two contracts are live at once.** The framework's topic namespace
+migrated to the hierarchy on branch `0.9.0` (see §4.1). Every module
+below still declares the FLAT 0.9.0 names, because each pins
+`jaeger-os@0.9.0` by git tag and is therefore unaffected until its pin
+is deliberately bumped. The `Consumes`/`Produces` columns are read from
+the shipped `module.yaml` files and are accurate as written — they are
+not stale, they target the pinned contract.
+
 | Module | Slot | What it does | Consumes | Produces | Tools | Requires |
 |---|---|---|---|---|---|---|
 | `kokoro_tts` | `tts` | Kokoro speech synthesis | `/act/speech`, `/act/speech_stop` | `/sense/spoken`, `/sense/tts_chunk` | `text_to_speech` | `kokoro, sounddevice, numpy` |
 | `whisper_stt` | `stt` | Mic capture + Whisper transcription (audio_session node + engine consolidated 0.8 M2b) | — | `/sense/transcript`, `/sense/user_speech_start` | `listen` | `pywhispercpp, webrtcvad, sounddevice, numpy` |
-| `animation` | `animation` | Avatar/animatronic playback (bitmap/sprite/GIF/image adapters, websocket bridge) | `/act/animation`, `/act/animation_stop`, `/sense/tts_chunk` | `/sense/animation_state` | `set_avatar_state`, `play_timeline`, `warm_avatar` | `websockets, PIL, numpy` |
-| `media` | `media` | Media decode/playback (no settings-catalog config yet; not in the boot set — exists for a future Studio Media tab) | `/act/media` | `/sense/media_frame`, `/sense/media_state` | (none) | `PIL, numpy` |
+| `animation` | `animation` | Avatar/animatronic playback (bitmap/sprite/GIF/image adapters, websocket bridge). Lives in JaegerAI. | `/act/animation`, `/act/animation_stop`, `/sense/tts_chunk` | `/sense/animation_state` | `set_avatar_state`, `play_timeline`, `warm_avatar` | `websockets, PIL, numpy` |
+| `media` | `media` | Media decode/playback (no settings-catalog config yet; not in the boot set — exists for a future Studio Media tab). Lives in JaegerAI. | `/act/media` | `/sense/media_frame`, `/sense/media_state` | (none) | `PIL, numpy` |
 | `discord` | `messaging` (multi) | Discord bridge (agent-side thread, not a chassis node) | — | — | `send_message` | `discord` (import name; pip name `discord.py`) |
 | `telegram` | `messaging` (multi) | Telegram bridge | — | — | `send_message` | `telegram` (import name; pip name `python-telegram-bot`) |
 | `imessage` | `messaging` (multi) | Drives Messages.app via AppleScript, reads `chat.db` directly | — | — | `send_message` | none (stdlib); `requires_platform: [darwin]` |
@@ -169,6 +177,57 @@ controller `simulated: true` until live-walked):
   hardware-package loader, not `discover_modules()`. Gaining a `module.yaml`
   (slot `hardware`, multi-module slot) so it's uniform with the engine
   modules is 0.9 work **(planned)**, per the capability-layer design.
+
+### 4.1 The topic namespace
+
+Topics are hierarchical paths, subscribable at any level. The transport —
+both in-process and ZMQ — filters by prefix, so a consumer that wants one
+camera never *receives* the other:
+
+```
+/sense/camera/cam0/image_raw
+ └cat─┘ └class┘ └inst┘ └─msg─┘
+
+/sense/                  every input
+/sense/camera/           every camera
+/sense/camera/cam0/      just that one
+```
+
+Three categories, split by **direction relative to the brain** — the one
+property of a topic that never becomes debatable:
+
+| | |
+|---|---|
+| `/sense/` | input devices — camera, mic, touch, encoders, plus derived readings (transcript, detections) |
+| `/act/` | output devices — motor, display, speaker, light, estop. A display is an actuator that takes pixels the way a motor is one that takes velocity. |
+| `/sys/` | the framework's own traffic — health, node meta, tracing |
+
+The class segment names the **device**, and one device's whole
+conversation lives under one prefix — command, data and feedback
+together (`/act/display/face0/{play,frame,state,stats}`). Splitting
+feedback into its own category would scatter one device across two trees.
+
+Two rules make instances work:
+
+- **The instance id is stable and opaque** — `cam0`, not `left_camera`.
+  Human-facing names live in the topology manifest and can be renamed
+  freely because nothing routes on them. This is a deliberate departure
+  from common ROS practice, where a semantic name in a topic means you
+  can never rename the thing without breaking every subscriber. JP01
+  already names controllers `cc01`/`vcc01`/`mc01` — same instinct, one
+  tier down.
+- **The last segment names the type**, so the instance segment can be
+  runtime data the contract has never seen. The contract registers one
+  canonical (instance-free) path; a live path resolves to it by dropping
+  its instance.
+
+**Migration state.** The framework contract migrated on branch `0.9.0`
+(`40b091f`). Every other module repo still targets the flat 0.9.0 names
+and pins `jaeger-os@0.9.0` by git tag, so nothing is broken — but nothing
+except JaegerAnimation runs against the branch either. Bumping each pin
+is a deliberate, schedulable step, listed in §8.
+
+Source: `jaeger_os/contract/paths.py`, `jaeger_os/contract/topics.py`.
 
 ## 5. Jaeger AI in detail
 

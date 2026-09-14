@@ -356,8 +356,10 @@ def resolve_toolsets(
     The special name ``"*"`` returns every tool in every registered
     toolset — convenience for ``--all-tools`` style invocations.
     """
+    runtime = _runtime_toolsets()
+
     if "*" in names:
-        names = set(JAEGER_TOOLSETS.keys())
+        names = set(JAEGER_TOOLSETS) | set(runtime)
 
     tools: set[str] = set()
     visited: set[str] = set()
@@ -366,9 +368,19 @@ def resolve_toolsets(
         if name in visited:
             return
         visited.add(name)
-        if name not in JAEGER_TOOLSETS:
-            raise KeyError(f"unknown toolset: {name!r}")
-        definition = JAEGER_TOOLSETS[name]
+        definition = JAEGER_TOOLSETS.get(name)
+        if definition is None:
+            # Registered at RUNTIME rather than declared here — a skill
+            # that brought its own tools, or a host application that
+            # contributed some. Those are real toolsets and a caller
+            # naming one is not making a mistake, so they resolve the
+            # same way. Before 1.0.7 only this static dict was consulted
+            # and any of them raised "unknown toolset".
+            members = runtime.get(name)
+            if members is None:
+                raise KeyError(f"unknown toolset: {name!r}")
+            tools.update(members)
+            return
         for t in definition.get("tools", []):
             tools.add(t)
         for inc in definition.get("includes", []):
@@ -379,11 +391,19 @@ def resolve_toolsets(
     return tools
 
 
+
 def list_toolsets() -> dict[str, dict[str, Any]]:
     """Return a copy of :data:`JAEGER_TOOLSETS` with the resolved tool
     list expanded for each entry — what the ``/toolsets`` slash command
     or a TUI catalogue display would show."""
     out: dict[str, dict[str, Any]] = {}
+    for name, members in _runtime_toolsets().items():
+        if name not in JAEGER_TOOLSETS:
+            out[name] = {
+                "description": "registered at runtime (skill or host application)",
+                "tools": sorted(members),
+                "includes": [],
+            }
     for name, definition in JAEGER_TOOLSETS.items():
         try:
             resolved = sorted(resolve_toolsets({name}))
@@ -395,6 +415,7 @@ def list_toolsets() -> dict[str, dict[str, Any]]:
             "includes": list(definition.get("includes", [])),
         }
     return out
+
 
 
 def toolset_for_tool(tool_name: str) -> str | None:
@@ -409,6 +430,7 @@ def toolset_for_tool(tool_name: str) -> str | None:
     return None
 
 
+
 __all__ = [
     "JAEGER_TOOLSETS",
     "ToolsetDef",
@@ -416,3 +438,18 @@ __all__ = [
     "resolve_toolsets",
     "toolset_for_tool",
 ]
+
+
+def _runtime_toolsets() -> dict[str, frozenset[str]]:
+    """Toolsets registered while running, keyed by name.
+
+    Skills register their own membership through the loader, and a host
+    application can do the same for tools it contributes. Read through a
+    function rather than imported once, because registration happens
+    after this module is imported.
+    """
+    try:
+        from jaeger_agent.skill_registry.toolset_scoping import _SKILL_TOOLSETS
+    except Exception:  # noqa: BLE001 — no scoping module, no runtime sets
+        return {}
+    return dict(_SKILL_TOOLSETS)

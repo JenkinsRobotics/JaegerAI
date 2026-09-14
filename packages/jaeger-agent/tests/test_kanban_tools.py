@@ -25,7 +25,7 @@ def board(tmp_path, monkeypatch):
     layout = InstanceLayout(root=tmp_path)
     layout.memory_dir.mkdir(parents=True, exist_ok=True)
     layout.skills_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("jaeger_agent.workspace.get_layout", lambda: layout)
+    monkeypatch.setattr("jaeger_agent.core.workspace.get_layout", lambda: layout)
     b = Board(layout.memory_dir / "board.json")
     # Dispatched-worker mode so the tools are live for the test.
     monkeypatch.setenv("JAEGER_KANBAN_TASK", "")
@@ -246,7 +246,7 @@ def test_attach_file_from_workspace(board, tmp_path, monkeypatch):
     target = tmp_path / "skills" / "artifact.txt"
     target.write_text("out", encoding="utf-8")
     monkeypatch.setattr(
-        "jaeger_agent.workspace._resolve_read", lambda p: target)
+        "jaeger_agent.core.workspace._resolve_read", lambda p: target)
 
     out = k.kanban_attach("artifact.txt", c.id)
     assert out["ok"] is True
@@ -254,14 +254,14 @@ def test_attach_file_from_workspace(board, tmp_path, monkeypatch):
 
 
 def test_attach_rejects_a_path_outside_the_sandbox(board, monkeypatch):
-    from jaeger_agent.workspace import SandboxError
+    from jaeger_agent.core.workspace import SandboxError
 
     c = _card(board)
 
     def boom(_p):
         raise SandboxError("outside the workspace")
 
-    monkeypatch.setattr("jaeger_agent.workspace._resolve_read", boom)
+    monkeypatch.setattr("jaeger_agent.core.workspace._resolve_read", boom)
     out = k.kanban_attach("../../etc/passwd", c.id)
     assert out["ok"] is False
     assert "outside the workspace" in out["error"]

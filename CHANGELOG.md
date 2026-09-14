@@ -235,9 +235,9 @@ They live beside `core/windowed.py`, which already referenced
 `jaeger_ai.agent.*` call sites now import `jaeger_agent` directly.
 
 Also gone: `agent/personas/`, the wizard-prefill templates retired at
-0.5.0 and superseded by `personality/characters/` — the character YAML
+0.5.0 and superseded by `characters/` — the character YAML
 carries the same soul text plus traits, lore and assets. Lilith's avatar
-bundle moved to `personality/characters/lilith/avatar/`, which is where
+bundle moved to `characters/lilith/avatar/`, which is where
 the character schema's own `assets.avatar` pointer always said it was.
 `core/instance/personas.py`, the v1 loader for those templates, had zero
 callers and pointed at a directory that no longer existed.
@@ -792,7 +792,7 @@ ROS-in-`nodes/` + a shared `transport/` that lets them talk.
   produces the system-prompt fragment the brain reads every turn.
 - **Characters are the persona** (imported from Mochi).  A `Character`
   (identity + lore + traits + assets + level/revision) the instance
-  *plays*; `personality/characters/` ships 14 (GLaDOS, HAL, Jarvis,
+  *plays*; `characters/` ships 14 (GLaDOS, HAL, Jarvis,
   Mochi, Kamina, Simon, …).  The agent's identity / soul / personality / name / voice
   all resolve from the **active character** — instance `personality.json`
   / `soul.md` / `identity.yaml` are no longer read.  Every instance

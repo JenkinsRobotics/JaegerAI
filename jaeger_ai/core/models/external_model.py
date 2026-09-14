@@ -1,6 +1,6 @@
 """External-model pipeline — run the agent on a non-local brain.
 
-Jaeger-OS is local-first: the default brain is the in-process
+Jaeger AI is local-first: the default brain is the in-process
 llama-cpp model wrapped by :class:`jaeger_os.core.llm_model.LlamaCppModel`.
 This module is the opt-in alternative — when ``config.external_model``
 is enabled, the agent runs on an external provider instead:
@@ -192,7 +192,7 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     if layout is not None:
         try:
             from pathlib import Path
-            from jaeger_agent import credentials as creds
+            from jaeger_agent.core import credentials as creds
 
             # Collect candidate credential names to check in order
             candidates: list[str] = []
@@ -354,7 +354,7 @@ class ExternalModelClient:
         Cloud calls are wrapped in :func:`cloud_errors.retry_call` — a
         rate-limit or transient 5xx is retried with jittered backoff; a
         bad key / unknown model is raised straight through (audit A8)."""
-        from jaeger_agent.errors import retry_call
+        from jaeger_agent.core.errors import retry_call
 
         is_oai = self.provider in _OPENAI_COMPATIBLE
 
@@ -604,7 +604,7 @@ class ExternalModelClient:
         except Exception as exc:  # noqa: BLE001
             # Classify the failure so the user sees "bad API key" rather
             # than a raw exception repr (audit A8).
-            from jaeger_agent.errors import classify_exception, friendly_message
+            from jaeger_agent.core.errors import classify_exception, friendly_message
             return {
                 "ok": False,
                 "detail": friendly_message(exc, provider=self.provider),

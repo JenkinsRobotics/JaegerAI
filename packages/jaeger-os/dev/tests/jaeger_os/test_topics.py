@@ -8,6 +8,7 @@ validation.
 
 from __future__ import annotations
 
+import pathlib
 import time
 
 import msgspec
@@ -30,17 +31,53 @@ def test_all_topics_are_unique():
     assert len(set(topics.ALL_TOPICS)) == len(topics.ALL_TOPICS)
 
 
-def test_topic_namespace_shape():
-    """Every topic begins with ``/sense/`` or ``/act/``.  The
-    ``/health/*`` namespace is reserved for Track D; it shouldn't
-    appear here yet."""
+def test_every_topic_obeys_the_path_grammar():
+    """A topic that doesn't parse can't be subscribed to by prefix and
+    can't carry an instance — the two things the hierarchy exists for.
+    Checking the grammar itself beats checking a prefix whitelist,
+    which silently stops covering anything a new category adds."""
+    from jaeger_os.contract.paths import parse
     for name in topics.ALL_TOPICS:
-        assert name.startswith("/sense/") or name.startswith("/act/"), (
-            f"topic {name!r} doesn't follow /sense/* | /act/* convention"
-        )
-        assert not name.startswith("/health/"), (
-            f"{name!r} uses the /health/* namespace reserved for Track D"
-        )
+        parse(name)          # raises TopicPathError, naming the rule
+
+
+def test_every_topic_is_canonical():
+    """Constants must be instance-FREE. Baking an instance into the
+    contract would make one registration serve one device."""
+    from jaeger_os.contract.paths import instance_of
+    for name in topics.ALL_TOPICS:
+        assert instance_of(name) == "", (
+            f"{name!r} names an instance; the contract registers "
+            f"canonical paths and callers build instances with "
+            f"paths.for_instance()")
+
+
+def test_every_declared_constant_is_registered_or_reserved():
+    """The gap this closes: ``ALL_TOPICS`` is DERIVED from the registry,
+    so testing one against the other proves nothing. A constant with a
+    message class but no registry entry decodes to KeyError at runtime
+    — which is exactly how ``/act/speech/chunk`` shipped undecodable."""
+    import re
+    src = pathlib.Path(topics.__file__).read_text()
+    declared = set(re.findall(r'^([A-Z][A-Z0-9_]*) = "/', src, re.M))
+    accounted = set(topics.TOPIC_TO_CLASS) | topics.RESERVED_TOPICS
+    orphans = {n for n in declared if getattr(topics, n) not in accounted}
+    assert not orphans, (
+        f"declared but neither registered nor reserved: {sorted(orphans)}")
+
+
+def test_every_message_class_is_reachable():
+    """The mirror image: a class nothing maps to can be constructed and
+    published, then fails to decode on the far side of a ZMQ hop."""
+    import inspect
+    classes = {
+        obj for _, obj in inspect.getmembers(topics, inspect.isclass)
+        if issubclass(obj, topics.TopicMessage) and obj is not topics.TopicMessage
+    }
+    unreachable = classes - set(topics.TOPIC_TO_CLASS.values())
+    assert not unreachable, (
+        f"message classes no topic resolves to: "
+        f"{sorted(c.__name__ for c in unreachable)}")
 
 
 def test_class_for_topic_returns_topicmessage_subclass():
@@ -63,10 +100,10 @@ def test_class_for_topic_raises_on_unknown():
 
 def test_raw_camera_frame_topic_is_not_generic_vision():
     """Raw camera bytes should not occupy the future analysis topic."""
-    assert topics.SENSE_CAMERA_FRAME == "/sense/camera_frame"
-    assert topics.SENSE_VISION == topics.SENSE_CAMERA_FRAME
-    assert topics.SENSE_VISION_ANALYSIS == "/sense/vision_analysis"
-    assert topics.CameraFrame().topic == topics.SENSE_CAMERA_FRAME
+    assert topics.SENSE_CAMERA_IMAGE_RAW == "/sense/camera/image_raw"
+    assert topics.SENSE_CAMERA_IMAGE_RAW == topics.SENSE_CAMERA_IMAGE_RAW
+    assert topics.SENSE_VISION_ANALYSIS == "/sense/vision/analysis"
+    assert topics.CameraFrame().topic == topics.SENSE_CAMERA_IMAGE_RAW
     assert topics.SENSE_VISION_ANALYSIS not in topics.TOPIC_TO_CLASS
 
 
@@ -154,17 +191,69 @@ def test_extra_fields_are_rejected_at_decode(cls):
 
 @pytest.mark.parametrize("cls", _REGISTERED)
 def test_topic_field_rejected_when_mismatched(cls):
-    """A wire payload claiming the wrong topic for the class must
-    fail decode — msgspec validates Literal types."""
-    canonical = msgspec.json.encode(cls())
-    # Replace the topic value with a known-different one.
-    other_topic = next(t for t in topics.ALL_TOPICS if t != cls().topic)
-    bad = canonical.replace(
-        f'"topic":"{cls().topic}"'.encode(),
-        f'"topic":"{other_topic}"'.encode(),
-    )
-    with pytest.raises(msgspec.ValidationError):
-        msgspec.json.decode(bad, type=cls)
+    """A wire payload claiming the wrong topic for its class must fail
+    decode.
+
+    This used to be free: ``topic`` was ``Literal[ONE_VALUE]`` and
+    msgspec enforced it. That pin had to go so a hierarchy could work —
+    ``/sense/camera/cam0/image_raw`` must decode as the same class as
+    ``/sense/camera/image_raw``, and a Literal cannot express "this
+    value or any instance of it".
+
+    The guarantee did not go with it. It moved to ``codec.decode``,
+    which compares CANONICAL forms — so this tests the path a message
+    actually travels rather than a raw msgspec call, and is strictly
+    stronger: it still refuses a mismatch, and now also permits
+    instances.
+    """
+    from jaeger_os.transport.codec import decode, is_binary_topic
+
+    own_topic = cls().topic
+    other_topic = next(t for t in topics.ALL_TOPICS if t != own_topic)
+    # Encode in the format DECODE will use. encode() picks JSON vs
+    # msgpack from msg.topic, decode() from its argument — so using
+    # encode() here would trip a FORMAT mismatch before the topic check
+    # and prove nothing about the topic check.
+    msg = cls(topic=other_topic)
+    wire = (msgspec.msgpack.encode(msg) if is_binary_topic(own_topic)
+            else msgspec.json.encode(msg))
+    with pytest.raises(msgspec.ValidationError, match="does not belong"):
+        decode(wire, own_topic)
+
+
+def test_an_instance_path_decodes_as_its_canonical_class():
+    """The capability the Literal pin blocked: an instance id is
+    runtime data the contract has never seen, and must still decode."""
+    from jaeger_os.transport.codec import decode, encode
+
+    topics.TOPIC_TO_CLASS.setdefault(
+        "/sense/camera/image_raw", topics.CameraFrame)
+    live = "/sense/camera/cam7/image_raw"
+    msg = topics.CameraFrame(topic=live, camera_id="cam7",
+                             frame_bytes=b"\x00" * 16)
+    back = decode(encode(msg), live)
+    assert isinstance(back, topics.CameraFrame)
+    assert back.topic == live and back.camera_id == "cam7"
+
+
+def test_a_binary_topic_stays_binary_for_every_instance():
+    """Otherwise a frame of pixels would silently fall back to JSON.
+
+    Uses a hierarchical name registered here rather than a shipped one:
+    the path machinery is in place, but the contract's own topics are
+    still flat. Migrating them is the next step, and this pins the
+    behaviour it depends on."""
+    from jaeger_os.transport import codec
+
+    canon = "/sense/camera/image_raw"
+    original = codec.BINARY_TOPICS
+    codec.BINARY_TOPICS = frozenset(original | {canon})
+    try:
+        assert codec.is_binary_topic(canon)
+        assert codec.is_binary_topic("/sense/camera/cam0/image_raw")
+        assert not codec.is_binary_topic("/sense/camera/cam0/some_text")
+    finally:
+        codec.BINARY_TOPICS = original
 
 
 # ── per-class field semantics ─────────────────────────────────────

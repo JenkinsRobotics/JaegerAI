@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
-from jaeger_agent.credentials import get_credential, set_credential
+from jaeger_agent.core.credentials import get_credential, set_credential
 
 from jaeger_ai.core.instance.instance import InstanceLayout
 

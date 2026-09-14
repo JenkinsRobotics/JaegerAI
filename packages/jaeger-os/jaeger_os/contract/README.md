@@ -43,12 +43,15 @@ declarative source of truth for JP01's own wiring) and
 JP01_Firmware's zmq_client.py / vision server code is where the SAME
 numbers currently live a second time, on the other side of the wire.
 
-Ports **5560, 5570, 5571** appeared in the operator's original grep list
-for this task but were NOT found anywhere in this repo (code, YAML, or
-docs) — grepped `5555|5556|5558|5560|5001|5003|5570|5571|8765` across
-`jaeger_os/` and found no hits for 5560/5570/5571. If JP01_Firmware uses
-them, they're firmware-repo-only today; add them to `contract.ports` when
-that session identifies the real call sites (don't guess the values here).
+**Update, 4.0 P1:** ports 5560/5570/5571 — flagged above as grepped-for-but-
+not-found in this repo — were confirmed against JP01_Firmware branch 4.0
+(`controllers/JP01-VCC01/core/network_zmq.py`'s `CommsServer.__init__`
+defaults, `core/audio_manager.py`'s `AUDIO_MIC_PORT`/`AUDIO_SPK_PORT`) and
+now live in `contract.ports`:
+
+* `JP01_VCC01_VISION_REP_PORT` = 5560 — ZMQ REP vision-stream commands
+* `JP01_VCC01_AUDIO_MIC_UDP_PORT` = 5570 — raw UDP, Jetson mic -> Mac
+* `JP01_VCC01_AUDIO_SPK_UDP_PORT` = 5571 — raw UDP, Mac -> Jetson speaker
 
 From `contract.wire`:
 
@@ -60,6 +63,21 @@ From `contract.wire`:
   before assuming.
 * `AUDIO_IN_SAMPLE_RATE_HZ` / `AUDIO_OUT_SAMPLE_RATE_HZ` — not JP01-specific
   (voice pipeline, Mac-side), listed for completeness.
+* `JP01_VIDEO_FRAG_HEADER` (`"!IHHI"`) / `JP01_VIDEO_FRAG_HEADER_SIZE` /
+  `JP01_VIDEO_UDP_MTU_BYTES` (1200) — 4.0 P1, confirmed byte-identical
+  against VCC01 `core/vision_tx.py` and CC01 `core/videorx.py`.
+* `JP01_AUDIO_PACKET_HEADER` (`"<BIQ"`) / `JP01_AUDIO_PACKET_HEADER_SIZE` /
+  `JP01_AUDIO_SAMPLE_RATE_HZ` (48 kHz) / `JP01_AUDIO_CHANNELS` /
+  `JP01_AUDIO_SAMPLE_WIDTH_BYTES` / `JP01_AUDIO_CHUNK_SAMPLES` — 4.0 P1,
+  confirmed byte-identical against VCC01 `core/audio_manager.py` and CC01
+  `core/audio.py`. Distinct from the voice-pipeline sample rates above.
+* `JP01CommandEnvelope` — the `{target, cmd, params}` ZMQ command shape,
+  documented as a stdlib `@dataclass` for readers/validators (`wire.py`
+  stays stdlib-only because VCC01 vendors it — a msgspec import here would
+  force msgspec into that repo's JetPack requirements). CC01's
+  `nodes/jetson_link.py::command_payload` keeps building the raw dict
+  itself (a documented key-order byte-identity guarantee), so it is not
+  repointed to construct-then-encode this struct.
 
 ### What did NOT move
 

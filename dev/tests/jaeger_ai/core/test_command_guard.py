@@ -120,7 +120,7 @@ def test_run_shell_lets_a_safe_command_reach_the_tier_layer(monkeypatch):
         PermissionPolicy,
         use_policy,
     )
-    from jaeger_agent import workspace
+    from jaeger_agent.core import workspace
     from jaeger_agent.tools import code
 
     # This test is about hardline/tier flow, not persistence. Give it an

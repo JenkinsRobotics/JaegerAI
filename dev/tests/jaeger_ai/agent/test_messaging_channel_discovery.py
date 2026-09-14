@@ -96,8 +96,8 @@ def test_setup_plugin_channel_path_stores_the_right_credential_names(tmp_path) -
     list_plugins must flip that channel's status to reflect it — proving
     the name setup_plugin surfaces is EXACTLY the name the credential
     store / activate_plugin's plugin_credential lookup reads back."""
-    from jaeger_agent import workspace as agent_workspace
-    from jaeger_agent.credentials import set_credential
+    from jaeger_agent.core import workspace as agent_workspace
+    from jaeger_agent.core.credentials import set_credential
 
     layout = InstanceLayout(root=tmp_path)
     layout.ensure_dirs()

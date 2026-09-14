@@ -143,7 +143,7 @@ def test_run_shell_honors_interrupt(bindable_instance_root, monkeypatch) -> None
     # Privileged shell execution fails closed unless an instance audit log is
     # bound. Request the shared fixture explicitly instead of relying on a
     # preceding test to leave global workspace state behind.
-    from jaeger_agent import workspace
+    from jaeger_agent.core import workspace
 
     bound_instance = workspace.DefaultWorkspace(bindable_instance_root).create()
     monkeypatch.setattr(workspace, "_layout", bound_instance)

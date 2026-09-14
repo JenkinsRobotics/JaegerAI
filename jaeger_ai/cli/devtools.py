@@ -9,10 +9,8 @@ utility verbs.
 
 Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 
-   ./launch          Windowed app — the Swift app if available, otherwise
-                     the PySide6 shell.
-   ./launch --tui    CLI/TUI — the in-process TUI agent (this terminal
-                     becomes the TUI).
+   jaeger dev          Windowed Jaeger AI app.
+   jaeger dev --tui    Jaeger AI TUI (this terminal becomes the TUI).
 
 The in-process TUI loads the plugin stack directly:
 
@@ -116,7 +114,7 @@ def _load_tui_banner() -> str:
         from jaeger_ai.interfaces.tui.banner import JAEGER_ASCII, TAGLINE
         from jaeger_ai import __version__ as JAEGER_VERSION
     except Exception:  # noqa: BLE001
-        return "\n\033[36m\033[1mJAEGER-OS\033[0m\n\n"
+        return "\n\033[36m\033[1mJAEGER AI\033[0m\n\n"
 
     banner_lines = JAEGER_ASCII.splitlines()
     banner_w = max(len(ln) for ln in banner_lines)
@@ -236,7 +234,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_whisper_stt.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
+    ``jaeger_whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401
@@ -270,7 +268,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_kokoro_tts.nodes.kokoro_tts.persistent_player import (
+        from jaeger_kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401
@@ -824,7 +822,7 @@ def main() -> int:
                         help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",
                         help="rebuild the Swift app before launching it "
-                             "(a bare ./launch runs the existing build)")
+                             "(a bare `jaeger dev` runs the existing build)")
     # Housekeeping
     parser.add_argument("--reset-audio", action="store_true",
                         help="sudo killall coreaudiod — unwedge CoreAudio")

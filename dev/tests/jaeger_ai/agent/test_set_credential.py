@@ -12,7 +12,7 @@ import tempfile
 
 import pytest
 
-from jaeger_agent import credentials as creds
+from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 

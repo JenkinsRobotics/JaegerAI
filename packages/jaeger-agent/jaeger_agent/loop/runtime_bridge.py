@@ -264,6 +264,7 @@ def build_jaeger_agent(
     client: Any,
     *,
     system_prompt: str = "",
+    tools_enabled: bool = True,
     toolsets: set[str] | frozenset[str] | list[str] | None = None,
     skip_final_tools: set[str] | frozenset[str] | None = None,
     callbacks: AgentCallbacks | None = None,
@@ -277,6 +278,7 @@ def build_jaeger_agent(
     turn_max_elapsed_s: float | None = None,
     turn_max_tokens: int | None = None,
     turn_max_tool_cost: float | None = None,
+    scope_tools: bool = False,
 ) -> JaegerAgent:
     """Construct a :class:`JaegerAgent` wired against the provided
     JROS client. The skip-final finalizer is the legacy bounded-chat
@@ -290,6 +292,16 @@ def build_jaeger_agent(
     is filtered to just those Hermes-style groups. When ``None``
     (default) every registered tool is exposed — useful for the
     transition period but burns ~10K tokens of schema per turn.
+
+    ``tools_enabled=False`` is the explicit chatbot lane. It locks the
+    catalogue to an empty list while retaining the same JaegerAgent loop and
+    per-session transcript. The default is deliberately ``True`` so existing
+    JaegerAI agentic callers are unchanged.
+
+    ``scope_tools=True`` opts this agent into the registered CORE +
+    ``load_tools`` visibility gate even when process-wide
+    ``JAEGER_TOOLSET_SCOPING`` is off. This is intended for context-tight
+    embedded faces; it never changes registration or dispatch authority.
 
     ``ctx_window`` plumbs the SERVING model's context window into the
     agent's pre-flight :class:`ContextGuard` — ``external_model.ctx``
@@ -310,7 +322,10 @@ def build_jaeger_agent(
     the legacy behaviour, fine for bench / tests with no layout bound.
     """
     from jaeger_agent.schemas.tool_bundles import resolve_toolsets
-    from jaeger_agent.skill_registry.toolset_scoping import tool_visible
+    from jaeger_agent.skill_registry.toolset_scoping import (
+        scoped_tool_visible,
+        tool_visible,
+    )
     from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
 
     def _reset_turn_state() -> None:
@@ -378,6 +393,7 @@ def build_jaeger_agent(
         adapter=adapter,
         fallback_adapters=_fallback_adapters_for(client),
         system_prompt=system_prompt,
+        tools=None if tools_enabled else [],
         toolsets=toolsets,
         skip_final_tools=frozenset(skip_final_tools or ()),
         skip_final_finalizer=_make_fast_finalize_finalizer(client),
@@ -385,7 +401,7 @@ def build_jaeger_agent(
         max_iterations=max_iterations,
         context_guard=guard,
         toolset_resolver=resolve_toolsets,
-        tool_visibility=tool_visible,
+        tool_visibility=scoped_tool_visible if scope_tools else tool_visible,
         turn_start_hook=_reset_turn_state,
         turn_budget_limits=TurnBudgetLimits(
             max_tool_calls=max(1, int(max_tool_calls or max_iterations)),
@@ -436,12 +452,13 @@ def _first_decision_from(messages: list[Message]) -> dict[str, Any] | None:
     return None
 
 
-def _run_turn_with_executive(agent: JaegerAgent, user_text: str) -> str:
+def _run_turn_with_executive(agent: JaegerAgent, user_text: str, *, content: Any = None) -> str:
     """Persist the run when state.db is bound; otherwise just the loop."""
     from jaeger_agent.memory import sqlite_store
 
+    options = {"content": content} if content is not None else {}
     if not sqlite_store.is_bound():
-        return agent.run_turn(user_text)
+        return agent.run_turn(user_text, **options)
     from jaeger_agent.cognition.executive import TurnExecutive
     from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
@@ -455,12 +472,14 @@ def _run_turn_with_executive(agent: JaegerAgent, user_text: str) -> str:
         claims=SqliteKnowledgeStore(),
         world_event=getattr(agent, "_world_event", None),
         prepare_world_context=False,  # host turn preparation already added it
-    ).run_turn(user_text)
+    ).run_turn(user_text, **options)
 
 
 def drive_one_turn(
     agent: JaegerAgent,
     user_text: str,
+    *,
+    content: Any = None,
 ) -> dict[str, Any]:
     """Run one turn through the new agent and return a dict shaped like
     the legacy ``_run_with_fix_loop`` output (the bits the latency log
@@ -476,12 +495,12 @@ def drive_one_turn(
       • ``new_messages``   — the ``Message`` slice produced this turn
         (for history extension)
     """
-    from jaeger_agent.errors import friendly_overflow_text
+    from jaeger_agent.core.errors import friendly_overflow_text
     from jaeger_agent.util.context_guard import ContextOverflow
 
     started = time.perf_counter()
     try:
-        answer = _run_turn_with_executive(agent, user_text)
+        answer = _run_turn_with_executive(agent, user_text, content=content)
     except ContextOverflow as overflow:
         # Pre-flight refusal — often tool schemas alone exceed a small
         # local model's usable prompt room. Slim to CORE once and retry
@@ -492,7 +511,7 @@ def drive_one_turn(
             and agent._slim_tools_to_core_for_overflow()
         ):
             try:
-                answer = _run_turn_with_executive(agent, user_text)
+                answer = _run_turn_with_executive(agent, user_text, content=content)
             except ContextOverflow as overflow:
                 elapsed = time.perf_counter() - started
                 return {

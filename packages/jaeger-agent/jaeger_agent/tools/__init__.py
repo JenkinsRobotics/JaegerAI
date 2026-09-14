@@ -25,7 +25,7 @@ Categories:
 from __future__ import annotations
 
 # Framework wiring (call bind() once at startup)
-from jaeger_agent.workspace import (
+from jaeger_agent.core.workspace import (
     SandboxError,
     _audit,
     _require_layout,

@@ -72,9 +72,13 @@ It includes JaegerOS (the runtime foundation: bus, nodes, modules, supervisor,
 safety, wire contract, and capability layer) and builds the assistant platform
 on top:
 
-- **`agent/`** — JaegerAI's product integration for JaegerAgent: toolsets,
-  availability gates, prompts, skills, safety policy, and the
-  **`persona_first`** pipeline (default since 0.8.0): an id/ego split
+- **`modules/`** — optional provider-named application integrations.
+  JaegerKokoroTTS and JaegerWhisperSTT remain available for explicit tools or
+  app-specific features. The attached Multimodal face uses JaegerAgent's own
+  speech nodes; the legacy TUI retains a separate capture/STT adapter while
+  sharing agent-owned final speech.
+- **`core/`** — Jaeger AI's application lifecycle, instance integration,
+  policy, diagnostics, and the **`persona_first`** pipeline: an id/ego split
   where a persona lane speaks to the user directly, in character, and
   has exactly one tool — `perform_task(request)` — which runs the full
   clean inner agentic loop (persona-off, all tools, hardened prompt).
@@ -103,7 +107,7 @@ on top:
   `runtime`, `agent create/list/use/inspect/delete`, `update`, …).
   JaegerAgent ships no product CLI — this application repo is where it lives.
 
-Engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
+Optional engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
 [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
 are independently usable components. They allow deployments to add speech
 without coupling the underlying runtime to the complete assistant product.
@@ -116,17 +120,19 @@ The standard method is the same as pre-split JaegerAI: clone, run
 ```bash
 git clone https://github.com/JenkinsRobotics/JaegerAI.git
 cd JaegerAI
-./install.sh                       # venv + editable install of jaeger-os + jaeger-ai
+./install.sh                       # external venv + all five monorepo packages
 ./jaeger update                    # later: git pull + reinstall deps, non-interactive
 ```
 
-`pip` is the machinery underneath: it resolves the dependency chain
-across the five ecosystem packages (`jaeger-os`, `jaeger-agent`,
-`jaeger-ai`, `jaeger-kokoro-tts`, `jaeger-whisper-stt`) — using sibling
-editable checkouts for development and the git refs in `requirements.txt`
-otherwise. JaegerAI installs **editable** (PEP 660), same model as
-JaegerAI: the code stays writable in place because the agent
-self-modifies its own skills.
+The installer builds wheels from this checkout's `packages/` directory in
+external temporary directories, then installs JaegerOS, JaegerAgent, the voice
+engines, and JaegerAI in dependency order. The environment defaults to
+`~/.jaeger/venv` (`JAEGER_VENV` overrides it). Run the installer after source
+updates to refresh installed code. Writable skills and operator state live
+under `~/.jaeger`, or the configured state directory.
+
+For the one-line installer, `JAEGER_INSTALL_ROOT` selects the source checkout;
+`JAEGER_STATE_DIR` (then `JAEGER_HOME`) selects operator state.
 
 The supported install is the repository installer above (or the one-line
 installer in [`scripts/install.sh`](scripts/install.sh)). It creates an
@@ -134,12 +140,9 @@ isolated environment, installs the in-repository packages, builds the native
 app when Swift is available, and preserves instance state across upgrades.
 Direct `pip install jaeger-ai` from PyPI is not currently the release path.
 
-Voice is optional — pull in the engine extras when you want speech:
-
-```bash
-pip install -e '.[kokoro_tts]'     # speak (JaegerKokoroTTS)
-pip install -e '.[whisper_stt]'    # listen (JaegerWhisperSTT)
-```
+The application installs JaegerAgent's `multimodal-duplex` dependencies by
+default. The standalone JaegerAgent library keeps neural audio optional.
+There are no `kokoro_tts` or `whisper_stt` extras on the JaegerAI package.
 
 ## Quick start
 
@@ -147,6 +150,12 @@ pip install -e '.[whisper_stt]'    # listen (JaegerWhisperSTT)
 ./jaeger agent create              # opens the setup wizard (character, model, permissions)
                                     # --tui for the terminal wizard
 ./jaeger                           # launch the default agent
+./jaeger multimodal --check        # preflight models, mic, camera, engine
+./jaeger multimodal --audio full --check  # also require the duplex AEC runtime
+./jaeger multimodal                # attach the multimodal face to a running Jaeger AI
+# Or double-click "Jaeger AI.app" at the repository root.
+# Install a Spotlight/Launchpad launcher with one command:
+./jaeger launcher install
 ```
 
 Manage multiple agents — a character is the persona; an agent is a

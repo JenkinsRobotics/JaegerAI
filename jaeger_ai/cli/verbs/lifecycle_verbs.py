@@ -257,7 +257,10 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
     if failures:
         print("  Shutdown incomplete; dependent containers and gateway preserved.")
         return 1
-    if names:
+    if names and args.dry_run:
+        for name in names:
+            print(f"  [dry-run] Would stop container {name}")
+    elif names:
         cli = _get_container_cli()
         if cli is None:
             failures.append("container CLI unavailable")

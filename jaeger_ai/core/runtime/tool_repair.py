@@ -81,6 +81,8 @@ def extract_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
         if name_match:
             name = name_match.group(1)
 
+    if not name:
+        return None
     args = safe_parse_tool_arguments(body)
     return name, args
 

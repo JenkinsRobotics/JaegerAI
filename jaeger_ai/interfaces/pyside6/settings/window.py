@@ -53,6 +53,9 @@ class SettingsWindow(QWidget):
     def __init__(self, layout: InstanceLayout | None = None,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        from ..branding import apply_app_identity
+
+        apply_app_identity(self)
         self.layout_ = layout or InstanceLayout(root=resolve_instance_dir())
         self._cfg: Config = load_yaml(self.layout_.config_path, Config)
         self._ident: Identity = load_yaml(self.layout_.identity_path, Identity)

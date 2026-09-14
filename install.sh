@@ -1,36 +1,24 @@
 #!/bin/bash
 # JaegerAI — local installer (runs from inside the cloned repo).
 #
-# Idempotent — safe to re-run after a `git pull`:
-#   - first run:  creates .venv, installs dependencies, scaffolds .jaeger_ai/
-#   - re-run:     upgrades dependencies, leaves .jaeger_ai/ alone
-#
-# Usage:
-#   ./install.sh                  # default — runs all steps
-#   ./install.sh --skip-deps      # only scaffold; don't touch .venv
-#
-# Prereqs: python3 (3.11 or 3.12), git.
-#
-# 0.9 four-way split: JaegerAI's own pyproject.toml declares git
-# dependencies on jaeger-os / jaeger-kokoro-tts / jaeger-whisper-stt
-# (requirements.txt, release-locked for 0.9) — installing JaegerAI (editable,
-# below) pulls the whole stack from GitHub automatically, no manual
-# multi-repo assembly needed. A dev machine with sibling checkouts at
-# ~/GITHUB/{JaegerOS,jaeger-agent,JaegerKokoroTTS,JaegerWhisperSTT} gets those
-# installed EDITABLE instead (step 3b below) — local changes to the
-# framework/engines are live without a push+reinstall round-trip.
+# Re-run after git pull to install all five packages from this checkout.
+# Builds and virtual environments stay outside source; operator state persists.
+# Usage: ./install.sh [--skip-deps] [--product]
+# Prerequisites: Python 3.11/3.12, git, and a native compiler toolchain.
 
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/jaeger/pycache"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" && pwd)"
 # One-line install: `curl -fsSL <raw-url>/install.sh | bash` runs this
 # OUTSIDE a checkout — detect that (no pyproject beside us), clone, and
 # re-exec inside the fresh clone.
 if [[ ! -f "$REPO_ROOT/pyproject.toml" ]]; then
-  JAEGER_HOME="${JAEGER_HOME:-$HOME/jaeger}"
-  echo "no checkout here — cloning JaegerAI to $JAEGER_HOME"
-  git clone "${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}" "$JAEGER_HOME"
-  exec bash "$JAEGER_HOME/install.sh" "$@"
+  JAEGER_INSTALL_ROOT="${JAEGER_INSTALL_ROOT:-$HOME/JaegerAI}"
+  echo "no checkout here — cloning JaegerAI to $JAEGER_INSTALL_ROOT"
+  git clone "${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}" "$JAEGER_INSTALL_ROOT"
+  exec bash "$JAEGER_INSTALL_ROOT/install.sh" "$@"
 fi
 VENV="${JAEGER_VENV:-$HOME/.jaeger/venv}"
 
@@ -114,46 +102,16 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
     echo "→ Installing uv..."
     "$PIP" install uv --quiet || true
   fi
-  # 3a. In-repo packages FIRST. JaegerOS, jaeger-agent and the two voice
-  # engines live at packages/ and are installed from those paths before the
-  # root package resolves its own requirements. Order matters: jaeger-agent
-  # and the engines each require `jaeger-os`, and installing JaegerOS first
-  # means that requirement is already satisfied locally rather than sending
-  # pip to the network. Editable so a change under packages/ is live without
-  # a reinstall — they are this repository's own source now, not third-party
-  # pins, so the hermetic-station argument below does not apply to them.
+  # Build each package in an external scratch directory; install wheels in
+  # dependency order so our own code always comes from this checkout.
   echo "→ Installing in-repo packages (JaegerOS, agent, voice engines)..."
   for pkg in jaeger-os jaeger-agent jaeger-kokoro-tts jaeger-whisper-stt; do
-    PKG_DIR="$REPO_ROOT/packages/$pkg"
-    if [[ ! -f "$PKG_DIR/pyproject.toml" ]]; then
-      echo "  ✗ packages/$pkg is missing — the checkout is incomplete" >&2
-      exit 1
-    fi
-    if [[ -x "$UV" ]]; then
-      "$UV" pip install --python "$VENV/bin/python" -e "$PKG_DIR" --quiet
-    else
-      "$PIP" install -e "$PKG_DIR" --quiet
-    fi
+    PKG_SPEC="$REPO_ROOT/packages/$pkg"
+    [[ "$pkg" == "jaeger-agent" ]] && PKG_SPEC="$PKG_SPEC[multimodal-duplex]"
+    "$VENV/bin/python" "$REPO_ROOT/scripts/install-packages.py" "$PKG_SPEC"
     echo "  ✓ $pkg"
   done
-
-  if [[ -x "$UV" ]]; then
-    echo "→ Installing JaegerAI (editable) via uv..."
-    "$UV" pip install --python "$VENV/bin/python" -e "$REPO_ROOT" --quiet
-  else
-    echo "→ uv unavailable — installing JaegerAI (editable) via pip..."
-    "$PIP" install -e "$REPO_ROOT" --quiet
-  fi
-
-  # 3b. Sibling-checkout detection: REMOVED in the monorepo absorption.
-  # It used to editable-install ~/GITHUB/{JaegerOS,jaeger-agent,
-  # JaegerKokoroTTS,JaegerWhisperSTT} over the git-resolved copies so local
-  # framework changes went live. That override now has nothing to override:
-  # those four ARE this repository, installed editable from packages/ in 3a,
-  # so edits are already live. Worse, keeping it would let a stale sibling
-  # checkout silently shadow the in-repo source — the exact ambiguity this
-  # restructure removed. Point JAEGER_SIBLING_ROOT at nothing; edit
-  # packages/ instead.
+  "$VENV/bin/python" "$REPO_ROOT/scripts/install-packages.py" "$REPO_ROOT"
 
   # 3c. Playwright chromium — the `browser` tool needs a chromium build
   # matching the installed playwright package. Idempotent: skips the
@@ -171,6 +129,14 @@ STATE_ROOT="${JAEGER_STATE_DIR:-$HOME/.jaeger}"
 mkdir -p "$STATE_ROOT/instances"
 if [[ -f "$REPO_ROOT/scripts/migrate-webui-config.py" ]]; then
   "$VENV/bin/python" "$REPO_ROOT/scripts/migrate-webui-config.py" --state-root "$STATE_ROOT"
+fi
+
+# A one-line product install is intentionally still a Git checkout so the
+# public installer can refresh it efficiently. Mark it explicitly so the CLI
+# does not mistake it for a developer's working tree and bypass the full
+# end-user update + instance-migration workflow.
+if [[ "$PRODUCT_MODE" -eq 1 ]]; then
+  : > "$REPO_ROOT/.jaeger-product-install"
 fi
 
 # 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
@@ -222,10 +188,16 @@ else
       && echo "✓ JaegerAI.app ready" \
       || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
   fi
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo; echo "installing Jaeger AI in Applications/Launchpad…"
+    "$REPO_ROOT/jaeger" launcher install \
+      || echo "⚠ App launcher install failed — retry with: ./jaeger launcher install"
+  fi
   echo
   echo "Next steps:"
   echo "  ./jaeger agent create   # create your first agent"
   echo "  ./jaeger                # run it   (--tui for terminal)"
+  echo "  ./jaeger launcher install  # refresh the Applications/Launchpad icon"
   echo "  ./jaeger doctor         # environment + readiness check"
   echo
   echo "Optional:"

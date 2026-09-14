@@ -35,13 +35,22 @@ set -euo pipefail
 
 CONFIG="debug"
 INSTALL=0
+DISTRIBUTION=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
         --dev)     ;;   # accepted for compat — debug config (the default)
+        --distribution) DISTRIBUTION=1; CONFIG="release" ;;
+        *) echo "Unknown build argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
+if [[ "$DISTRIBUTION" == "1" && "$SIGN_IDENTITY" != "Developer ID Application:"* ]]; then
+    echo "Distribution requires JAEGER_SIGN_IDENTITY with a Developer ID Application certificate." >&2
+    exit 2
+fi
 
 # ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
 # split): dev is a launch STATE, not a separate bundle. `jaeger dev`
@@ -96,6 +105,7 @@ ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
 icon_needs_rebuild() {
     [[ ! -f "$ICNS_PATH" ]] && return 0
+    [[ "$ASSETS_DIR/jaeger_app_icon.png" -nt "$ICNS_PATH" ]] && return 0
     for size in 16 32 64 128 256 512; do
         local src="$ASSETS_DIR/jaeger_app_icon_${size}.png"
         if [[ -f "$src" && "$src" -nt "$ICNS_PATH" ]]; then
@@ -155,6 +165,18 @@ rm -rf "$BUILD_DIR/JaegerAI-dev.app"
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerAI"
 chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerAI"
+
+# The Qt face must execute inside THIS app bundle. Launching .venv/bin/python
+# leaves NSBundle.main without privacy strings, so Qt refuses camera consent.
+# Reuse the development environment's interpreter and site packages; this is
+# still a repo-backed development app, not a self-contained Python distribution.
+cp -L "$REPO_ROOT/.venv/bin/python" "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+JAEGER_PYTHON_BASE="$("$REPO_ROOT/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')"
+JAEGER_PYTHON_SITE="$("$REPO_ROOT/.venv/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+/usr/libexec/PlistBuddy -c "Add :JaegerPythonHome string $JAEGER_PYTHON_BASE" \
+    -c "Add :JaegerPythonSite string $JAEGER_PYTHON_SITE" \
+    "$APP_BUNDLE/Contents/Info.plist"
 
 # Icon.
 cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
@@ -269,9 +291,9 @@ rm -f "$REPO_ROOT/JaegerAI-dev.app"
 ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerAI.app"
 
 if [[ "$INSTALL" == "1" ]]; then
-    echo "[build-app] installing -> /Applications/$APP_NAME.app"
-    rm -rf "/Applications/$APP_NAME.app"
-    ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
+    echo "[build-app] installing -> /Applications/$DISPLAY_APP_NAME.app"
+    rm -rf "/Applications/$DISPLAY_APP_NAME.app"
+    ditto "$APP_BUNDLE" "/Applications/$DISPLAY_APP_NAME.app"
 fi
 
 echo "$APP_BUNDLE"

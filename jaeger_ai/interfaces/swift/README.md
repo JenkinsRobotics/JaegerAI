@@ -13,7 +13,7 @@ the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
 ## Build, test, run
 
 ```bash
-cd jaeger_os/interfaces/swift
+cd jaeger_ai/interfaces/swift
 swift build            # debug build
 swift test             # ProtocolFixtureTests — the wire contract
 Scripts/build-app.sh --dev   # .build/JaegerAI-dev.app (pins the jaeger-dev instance)

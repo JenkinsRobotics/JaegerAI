@@ -39,7 +39,7 @@ def self_check(deep: bool = False) -> dict[str, Any]:
     Returns ``{ok, passed, total, deep, checks: [...], failures: [...]}``.
     ``ok`` is True only when every check passed.
     """
-    from jaeger_agent import workspace as _tcommon
+    from jaeger_agent.core import workspace as _tcommon
     from jaeger_ai.core.diagnostics import doctor_summary
     layout = getattr(_tcommon, "_layout", None)
     return doctor_summary(layout, deep=bool(deep))
