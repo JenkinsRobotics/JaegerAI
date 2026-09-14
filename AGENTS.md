@@ -83,7 +83,7 @@ build system. The type-safe client layer is Swift `Decodable`.
 ```bash
 jaeger gateway daemon                       # :8810 — start first
 ./scripts/run-jaeger-webui.sh               # :8790
-open jaeger_ai/interfaces/swift/.build/JaegerAI.app
+open JaegerAI.app                           # shortcut to the external native build cache
 
 jaeger onboarding status --json             # OS 1 first-boot state
 jaeger onboarding reset                     # replay the welcome (narrow)

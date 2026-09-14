@@ -39,8 +39,8 @@ from typing import Any
 def _detect_method() -> str:
     """Same detection as ``instance.detect_install_method`` —
     re-imported here for clarity at call sites."""
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    if (PACKAGE_ROOT.parent / ".jaeger-product-install").is_file():
+    from jaeger_ai.core.instance.instance import install_root
+    if (install_root() / ".jaeger-product-install").is_file():
         return "product-checkout"
     from jaeger_ai.core.instance.instance import detect_install_method
     return detect_install_method()
@@ -66,7 +66,7 @@ def _upgrade_command(method: str) -> list[str] | None:
 # allowlist — keep the two in sync.
 
 _PRODUCT = (
-    "jaeger_ai",
+    "jaeger_ai", "packages", "scripts", "vendor", "apps", ".gitmodules",
     "install.sh", "run.sh", "jaeger",
     "requirements.txt", "pyproject.toml",
     "jaeger.toml", "jaeger.windowed.toml",
@@ -81,17 +81,16 @@ _LATEST_BRANCH = "master"   # the `latest` channel = development HEAD
 
 
 def _reinstall_deps(home: Path) -> int:
-    """Editable-reinstall into the install's own ``.venv`` (prefer ``uv``,
-    fall back to the venv's pip, then the current interpreter) to resync deps
-    after the product files change. Returns the process exit code."""
-    venv = home / ".venv"
-    uv, py = venv / "bin" / "uv", venv / "bin" / "python"
-    if uv.exists():
-        cmd = [str(uv), "pip", "install", "--python", str(py), "-e", str(home)]
-    else:
-        base = str(py) if py.exists() else sys.executable
-        cmd = [base, "-m", "pip", "install", "-e", str(home)]
-    print(f"[jaeger update] resyncing deps: {' '.join(cmd)}")
+    """Refresh all coordinated wheels in the active external environment."""
+    venv = Path(os.environ.get("JAEGER_VENV") or sys.prefix).expanduser()
+    py = venv / "bin" / "python"
+    cmd = [str(py), str(home / "scripts/install-packages.py"), "--python", str(py)]
+    cmd.extend(str(home / "packages" / name) + extra for name, extra in (
+        ("jaeger-os", ""), ("jaeger-agent", "[multimodal-duplex]"),
+        ("jaeger-kokoro-tts", ""), ("jaeger-whisper-stt", ""),
+    ))
+    cmd.append(str(home))
+    print(f"[jaeger update] refreshing installed packages from {home}")
     return subprocess.run(cmd, check=False).returncode
 
 
@@ -282,9 +281,9 @@ def jaeger_exe() -> Path:
     PySide6 update dialog (``interfaces/pyside6/widgets/update_banner.py``)
     and the app-bridge ``run_update`` command below, so both spawn the SAME
     executable a hand-typed ``jaeger update`` would run."""
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    home = PACKAGE_ROOT.parent
-    venv = home / ".venv" / "bin" / "jaeger"
+    from jaeger_ai.core.instance.instance import install_root
+    home = install_root()
+    venv = Path(os.environ.get("JAEGER_VENV") or home / ".venv") / "bin" / "jaeger"
     return venv if venv.exists() else home / "jaeger"
 
 
@@ -353,15 +352,15 @@ def _update_editable(*, ref: str | None = None) -> int:
     clone) → fast-forward pull + editable reinstall, refusing a dirty tree.
     Without ``.git`` (clean curl/product install) → download + apply the
     release in place."""
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    repo = PACKAGE_ROOT.parent  # jaeger_ai/ -> install root
+    from jaeger_ai.core.instance.instance import install_root
+    repo = install_root()  # jaeger_ai/ -> install root
     if not (repo / ".git").exists():
         return _update_download(repo, ref=ref)
     dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True)
     if dirty.stdout.strip():
         print("[jaeger update] working tree has uncommitted changes — pull yourself:")
-        print(f"                 cd {repo} && git pull --ff-only && uv pip install -e .")
+        print(f"                 cd {repo} && git pull --ff-only && ./install.sh")
         return 0
     print(f"[jaeger update] pulling latest in {repo}…")
     pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only"], check=False)
@@ -517,8 +516,8 @@ def _cmd_update_argv(argv: list[str]) -> int:
         return 0
 
     if args.rollback:
-        from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-        return _do_rollback(PACKAGE_ROOT.parent)
+        from jaeger_ai.core.instance.instance import install_root
+        return _do_rollback(install_root())
 
     method = _detect_method()
     # ``dev-checkout`` is the detector's name for ANY source-tree run,
@@ -526,10 +525,10 @@ def _cmd_update_argv(argv: list[str]) -> int:
     # label it honestly so operators don't think they're on a git clone.
     label = method
     if method in ("dev-checkout", "product-checkout"):
-        from jaeger_ai.core.instance.instance import PACKAGE_ROOT
+        from jaeger_ai.core.instance.instance import install_root
         if method == "product-checkout":
             label = "Jaeger AI product install"
-        elif not (PACKAGE_ROOT.parent / ".git").exists():
+        elif not (install_root() / ".git").exists():
             label = "clean install (download + apply)"
     print(f"[jaeger update] install method: {label}")
 
@@ -596,8 +595,8 @@ def _cmd_reinstall_argv(argv: list[str]) -> int:
         )
         return 0
 
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    home = PACKAGE_ROOT.parent
+    from jaeger_ai.core.instance.instance import install_root
+    home = install_root()
     if (home / ".git").exists():
         print(f"[jaeger reinstall] dev clone at {home} — repairing the editable "
               "install (code is your working tree; not re-fetching).")

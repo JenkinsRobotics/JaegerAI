@@ -85,15 +85,12 @@ OPERATOR_STATE_DIR_NAME = ".jaeger_ai"
 
 
 def install_root() -> Path:
-    """The directory containing this install — ``$JAEGER_HOME`` when
-    set, else the parent of the framework package.
+    """Source installation location, independent of the operator-state root.
 
-    ``run.sh`` exports ``JAEGER_HOME=$REPO_ROOT`` before invoking
-    python, so the env var carries the install location through. The
-    PACKAGE_ROOT fallback covers test contexts that import ``jaeger_os``
-    directly without going through the launcher.
+    Launchers preserve JAEGER_INSTALL_ROOT when using installed wheels.
+    Direct source imports fall back to the package's parent directory.
     """
-    override = os.environ.get("JAEGER_HOME", "").strip()
+    override = os.environ.get("JAEGER_INSTALL_ROOT", "").strip()
     if override:
         return Path(override).expanduser().resolve()
     return PACKAGE_ROOT.parent
@@ -236,7 +233,10 @@ def detect_install_method() -> str:
         ``~/.local/pipx/venvs/<app>/...``).
       - Otherwise pip-installed → ``"pip"``.
     """
-    if not is_pip_installed():
+    root = install_root()
+    if (root / ".jaeger-product-install").is_file():
+        return "product-checkout"
+    if (root / ".git").exists() or not is_pip_installed():
         return "dev-checkout"
     for p in PACKAGE_ROOT.parents:
         if p.name == "pipx" or "pipx" in p.parts:

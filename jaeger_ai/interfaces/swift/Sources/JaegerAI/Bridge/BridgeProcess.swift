@@ -245,6 +245,18 @@ actor BridgeProcess {
         return args
     }
 
+    static func launchEnvironment(base: [String: String], bundle: Bundle = .main) -> [String: String] {
+        var environment = base
+        for (variable, key) in [("JAEGER_INSTALL_ROOT", "JaegerInstallRoot"),
+                                ("JAEGER_VENV", "JaegerVenv")] {
+            if environment[variable]?.isEmpty != false,
+               let value = bundle.object(forInfoDictionaryKey: key) as? String, !value.isEmpty {
+                environment[variable] = value
+            }
+        }
+        return environment
+    }
+
     static let systemModelFilename = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
 
     /// Release builds carry OS 1's utility intelligence beside the app.
@@ -286,7 +298,7 @@ actor BridgeProcess {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = Self.launchArguments(instance: instance, setupOnly: setupOnly)
-        var environment = ProcessInfo.processInfo.environment
+        var environment = Self.launchEnvironment(base: ProcessInfo.processInfo.environment)
         if let systemModel = Self.bundledSystemModelPath() {
             environment["JAEGER_SYSTEM_MODEL"] = systemModel
         }

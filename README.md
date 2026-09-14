@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.11.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.12.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
 </p>
@@ -133,6 +133,13 @@ under `~/.jaeger`, or the configured state directory.
 
 For the one-line installer, `JAEGER_INSTALL_ROOT` selects the source checkout;
 `JAEGER_STATE_DIR` (then `JAEGER_HOME`) selects operator state.
+
+Native builds use `~/.cache/jaeger/swift/<checkout-id>/`;
+`JAEGER_SWIFT_BUILD_DIR` overrides that location. The builder creates a
+`JaegerAI.app` shortcut at the checkout root and uses the same `JAEGER_VENV`
+as the installer. A release build requires the OS utility model and Kokoro
+assets in their configured caches. The locally built app depends on that
+Python installation; copying the app alone to another Mac is unsupported.
 
 The supported install is the repository installer above (or the one-line
 installer in [`scripts/install.sh`](scripts/install.sh)). It creates an

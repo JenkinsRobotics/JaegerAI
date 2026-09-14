@@ -184,6 +184,8 @@ JAEGER_PYTHON_SITE="$("$BUILD_PYTHON" -c 'import sysconfig; print(sysconfig.get_
 /usr/libexec/PlistBuddy -c "Add :JaegerPythonHome string $JAEGER_PYTHON_BASE" \
     -c "Add :JaegerPythonSite string $JAEGER_PYTHON_SITE" \
     -c "Add :JaegerLauncher string $(dirname "$BUILD_PYTHON")/jaeger" \
+    -c "Add :JaegerInstallRoot string $REPO_ROOT" \
+    -c "Add :JaegerVenv string $(dirname "$(dirname "$BUILD_PYTHON")")" \
     "$APP_BUNDLE/Contents/Info.plist"
 
 # Icon.

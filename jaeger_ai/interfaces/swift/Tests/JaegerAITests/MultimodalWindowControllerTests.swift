@@ -4,6 +4,26 @@ import AVFoundation
 
 @MainActor
 final class MultimodalWindowControllerTests: XCTestCase {
+    func testInstalledLaunchRetainsSourceAndPythonLocations() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".bundle")
+        let contents = root.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let data = try PropertyListSerialization.data(fromPropertyList: [
+            "CFBundleIdentifier": "test.jaeger.installation",
+            "CFBundleName": "InstallTest", "CFBundlePackageType": "BNDL",
+            "JaegerInstallRoot": "/a source checkout", "JaegerVenv": "/external/python"
+        ], format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+        let bundle = try XCTUnwrap(Bundle(url: root))
+        let environment = BridgeProcess.launchEnvironment(base: ["PATH": "/usr/bin"], bundle: bundle)
+        XCTAssertEqual(environment["JAEGER_INSTALL_ROOT"], "/a source checkout")
+        XCTAssertEqual(environment["JAEGER_VENV"], "/external/python")
+        XCTAssertEqual(environment["PATH"], "/usr/bin")
+        let override = BridgeProcess.launchEnvironment(base: ["JAEGER_VENV": "/selected/python"], bundle: bundle)
+        XCTAssertEqual(override["JAEGER_VENV"], "/selected/python")
+    }
+
     func testCameraConsentIsRequestedOnlyWhenUndetermined() async {
         for status: AVAuthorizationStatus in [.authorized, .denied, .restricted] {
             var requested = false
