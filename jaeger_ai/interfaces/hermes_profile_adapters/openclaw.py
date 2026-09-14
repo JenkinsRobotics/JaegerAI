@@ -77,7 +77,8 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
         from .openclaw_native import openclaw_turn
         with _native_lock:
             if _native_runs is None:
-                root = Path(__file__).resolve().parents[3] / ".jaeger_ai/shared/webui-runs/openclaw"
+                from jaeger_ai.core.instance.instance import operator_state_root
+                root = operator_state_root() / "shared/webui-runs/openclaw"
                 _native_runs = Runs(root, openclaw_turn)
             return _native_runs
 

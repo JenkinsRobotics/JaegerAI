@@ -19,6 +19,7 @@ from jaeger_ai.features.hermes_webui.session_unify import (
     is_system_nudge,
     reconcile_keep,
     stamp_ended_at,
+    sync_jaeger_sessions_to_hermes_webui,
     title_from_text,
 )
 from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs, TERMINAL
@@ -212,3 +213,34 @@ def test_profile_badge_one_library_labels() -> None:
     assert profile_badge_for_session("roundtable-hermes:abc") == "Roundtable"
     assert profile_badge_for_session("x", profile="openclaw") == "OpenClaw"
     assert infer_session_profile("web-only", origin="webui") == "jaeger"
+
+
+def test_sync_jaeger_sessions_to_hermes_webui(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    root = tmp_path / "state_root"
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(root))
+
+    mem = root / "instances" / "test_inst" / "memory"
+    mem.mkdir(parents=True, exist_ok=True)
+    active_file = root / "active_instance"
+    active_file.write_text("test_inst")
+
+    store = SessionStore(mem / "sessions.db")
+    store.record("s1", "user", "What is Jaeger?", model="glm-5.3-flash:cloud")
+    store.record("s1", "assistant", "Jaeger is a local agentic OS.", model="glm-5.3-flash:cloud")
+
+    res = sync_jaeger_sessions_to_hermes_webui(operator_home=root)
+    assert res["sessions"] == 1
+    assert res["messages"] == 2
+
+    dest_db = fake_home / ".hermes" / "profiles" / "jaeger" / "state.db"
+    assert dest_db.exists()
+    conn = sqlite3.connect(dest_db)
+    s_row = conn.execute("SELECT id, source, title, message_count FROM sessions").fetchone()
+    assert s_row[0] == "s1"
+    assert s_row[1] == "cli"
+    assert "Jaeger" in s_row[2]
+    assert s_row[3] == 2
+    conn.close()

@@ -152,6 +152,11 @@ class SessionStore:
                 "UPDATE sessions SET execution_state='interrupted' "
                 "WHERE execution_state='running'"
             )
+        try:
+            from jaeger_ai.features.hermes_webui.session_unify import sync_jaeger_sessions_to_hermes_webui
+            sync_jaeger_sessions_to_hermes_webui()
+        except Exception:
+            pass
 
     def _ensure_brain_columns(self) -> None:
         """Sessions record the brain that served them so get_mode /
@@ -352,6 +357,11 @@ class SessionStore:
                     "provider=COALESCE(?, provider) WHERE id=?",
                     (model or None, provider or None, session_id),
                 )
+        try:
+            from jaeger_ai.features.hermes_webui.session_unify import sync_single_session_to_hermes_webui
+            sync_single_session_to_hermes_webui(session_id, store=self)
+        except Exception:
+            pass
 
     def record_background(self, delivery_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Commit an unsolicited reply and its delivery obligation together.
