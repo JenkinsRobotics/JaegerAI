@@ -99,14 +99,15 @@ def main() -> int:
         with tempfile.NamedTemporaryFile(prefix="jaeger-denied-", mode="w") as canary:
             canary.write("unchanged")
             canary.flush()
-            reads = [Path(sys.base_prefix), REPO / "jaeger_ai", REPO / "dev", REPO / ".venv",
-                     REPO / "pyproject.toml", REPO / "requirements.txt"]
-            for sibling in ("jaeger-agent", "JaegerOS", "JaegerKokoroTTS", "JaegerWhisperSTT"):
-                path = REPO.parent / sibling
-                # Dependencies are readable code, not their local runtime state.
-                reads.extend(p for p in path.iterdir() if p.name not in {
-                    ".git", ".jaeger_os", ".jaeger_agent", ".env", ".venv", "tests", "dev", "benchmark_results",
-                } and not p.name.startswith(".env."))
+            reads = [Path(sys.prefix), Path(sys.base_prefix), REPO / "jaeger_ai",
+                     REPO / "dev", REPO / "pyproject.toml", REPO / "requirements.txt"]
+            # The integrated product owns its dependencies under packages/.
+            # Include installed wheels too; never require sibling checkouts.
+            for package in (REPO / "packages").iterdir():
+                if package.is_dir():
+                    reads.extend(path for path in package.iterdir()
+                                 if not path.name.startswith(".")
+                                 and path.name not in {"tests", "dev", "build", "dist"})
             model = Path(config.model.model_path).expanduser().resolve()
             reads.append(model)
             from jaeger_agent import MultimodalConfig
@@ -123,7 +124,7 @@ def main() -> int:
                    if not any(word in k.upper() for word in ("TOKEN", "SECRET", "PASSWORD", "API_KEY"))
                    and k not in {"GIT_ASKPASS", "SSH_AUTH_SOCK"}}
             env.update(JAEGER_INSTANCE_DIR=str(seed), JAEGER_INSTANCE_NAME="release-audit",
-                       JAEGER_HOME=str(root), TMPDIR=str(root / "tmp"),
+                       JAEGER_HOME=str(root), JAEGER_STATE_DIR=str(root), TMPDIR=str(root / "tmp"),
                        JAEGER_TEST_HEADLESS="1", PYTHONDONTWRITEBYTECODE="1",
                        HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1",
                        JAEGER_SANDBOX_CANARY=canary.name)
