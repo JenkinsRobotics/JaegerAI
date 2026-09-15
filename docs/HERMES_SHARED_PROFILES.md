@@ -40,20 +40,20 @@ unanimous agreement, majority positions, minority objections, evidence, and
 unknowns separate. Timeouts may not be described as outages without a concrete
 health check.
 
-The source lives in `jaeger_ai/interfaces/hermes_profile_adapters/`. Generated
+The source lives in `jaeger_ai/core/frameworks/`. Generated
 LaunchAgents and Hermes profile configuration remain machine-local runtime
 state; no adapter source code is copied into `~/workspace`.
 
 Install or repair all three services:
 
 ```bash
-python -m jaeger_ai.interfaces.hermes_profile_adapters.setup install
+python -m jaeger_ai.core.frameworks.setup install
 ```
 
 Check their launchd state:
 
 ```bash
-python -m jaeger_ai.interfaces.hermes_profile_adapters.setup status
+python -m jaeger_ai.core.frameworks.setup status
 ```
 
 The default bridge address is `192.168.64.1`, the macOS host address visible

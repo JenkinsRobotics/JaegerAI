@@ -4,17 +4,17 @@ from io import BytesIO
 from types import SimpleNamespace
 import json
 
-from jaeger_ai.interfaces.hermes_profile_adapters import roundtable
-from jaeger_ai.interfaces.hermes_profile_adapters import jaeger
-from jaeger_ai.interfaces.hermes_profile_adapters import setup
+from jaeger_ai.features.roundtable import roundtable
+from jaeger_ai.core.frameworks import jaeger
+from jaeger_ai.core.frameworks import setup
 
 
 def test_runs_protocol_matches_webui_and_closes_connection(monkeypatch):
     import threading
     import urllib.request
     from http.server import ThreadingHTTPServer
-    from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
-    monkeypatch.setattr('jaeger_ai.interfaces.hermes_profile_adapters.native_runs.profile_key', lambda profile: 'test-key')
+    from jaeger_ai.core.frameworks import openclaw
+    monkeypatch.setattr('jaeger_ai.core.frameworks.native_runs.profile_key', lambda profile: 'test-key')
     monkeypatch.setattr(openclaw, 'profile_key', lambda profile: 'test-key')
 
     # Jaeger's durable/native Runs API is exercised by test_native_runs.py;
@@ -270,7 +270,7 @@ def test_quick_mode_selects_one_best_member(monkeypatch):
 
 
 def test_setup_adds_shared_workspace_roots_without_erasing_existing_grants(tmp_path):
-    grants = tmp_path / ".ares" / "capabilities" / "grants.json"
+    grants = tmp_path / ".jaeger" / "capabilities" / "grants.json"
     grants.parent.mkdir(parents=True)
     grants.write_text(json.dumps({
         "version": 1,
@@ -320,7 +320,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
     jaeger.parent.mkdir(parents=True)
     jaeger.write_text("external_model:\n  enabled: true\n  model: old:cloud\n")
-    openclaw = tmp_path / ".ares" / "openclaw" / "openclaw.json"
+    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text(json.dumps({"agents": {"defaults": {"model": {"primary": "old/model"}}}, "models": {"providers": {"ollama-cloud-via-host": {"models": []}}}}))
 
@@ -353,7 +353,7 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
     ]:
         profile_home.mkdir(parents=True, exist_ok=True)
         profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")
-    openclaw = tmp_path / ".ares" / "openclaw" / "openclaw.json"
+    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text("{}")
 
@@ -372,7 +372,7 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
 
 
 def test_setup_removes_openclaw_ares_system_8813_default(tmp_path):
-    openclaw = tmp_path / ".ares" / "openclaw" / "openclaw.json"
+    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text(json.dumps({
         "mcp": {

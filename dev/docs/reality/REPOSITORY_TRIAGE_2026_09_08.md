@@ -110,9 +110,9 @@ Root install.sh installs a checkout; scripts/install.sh is the public curl boots
 | `scripts/install.sh` | 7.5 KiB | KEEP | .github/workflows/ci.yml:126, CHANGELOG.md:304, CHANGELOG.md:478; c4f1cfa 2026-09-05 |
 | `scripts/prepare-hermes-webui.py` | 1.6 KiB | KEEP | .github/workflows/ci.yml:28, integrations/agent_workspaces/README.md:101, integrations/hermes_webui/NATIVE_RUNS.md:142; 737935d 2026-09-06 |
 | `scripts/run-hermes-native-api.py` | 3.7 KiB | KEEP | dev/tests/jaeger_ai/interfaces/test_hermes_native_launcher.py:9, dev/tests/jaeger_ai/interfaces/test_hermes_native_launcher.py:37, scripts/hermes-native-api-service.py:15; 90b212f 2026-09-06 |
-| `scripts/run-host-capability-server.py` | 15.6 KiB | KEEP | FIXES.md:26, jaeger_ai/interfaces/hermes_profile_adapters/setup.py:238, scripts/setup-agent-workspaces.py:90; 35a3872 2026-09-06 |
-| `scripts/run-host-tools-gateway.sh` | 0.4 KiB | KEEP | jaeger_ai/interfaces/hermes_profile_adapters/setup.py:414; c4f1cfa 2026-09-05 |
-| `scripts/run-jaeger-webui.sh` | 1.3 KiB | KEEP | README.md:199, README.md:285, jaeger_ai/features/hermes_webui/service.py:37; 5cd3c27 2026-08-29 |
+| `scripts/run-host-capability-server.py` | 15.6 KiB | KEEP | FIXES.md:26, jaeger_ai/core/frameworks/setup.py:238, scripts/setup-agent-workspaces.py:90; 35a3872 2026-09-06 |
+| `scripts/run-host-tools-gateway.sh` | 0.4 KiB | KEEP | jaeger_ai/core/frameworks/setup.py:414; c4f1cfa 2026-09-05 |
+| `scripts/run-jaeger-webui.sh` | 1.3 KiB | KEEP | README.md:199, README.md:285, jaeger_ai/features/webui/service/service.py:37; 5cd3c27 2026-08-29 |
 | `scripts/setup-agent-workspaces.py` | 10.0 KiB | KEEP | integrations/agent_workspaces/README.md:109, integrations/agent_workspaces/README.md:118, integrations/hermes_webui/ROUNDTABLE_AUDIT_AND_PROMPT.md:185; ed44b61 2026-09-06 |
 | `scripts/setup-hermes-native-api.py` | 2.0 KiB | KEEP | dev/tests/jaeger_ai/interfaces/test_hermes_native_launcher.py:77; 90b212f 2026-09-06 |
 | `scripts/setup-native-runs.py` | 1.8 KiB | KEEP | dev/tests/jaeger_ai/interfaces/test_roundtable_ingress.py:85, integrations/hermes_webui/NATIVE_RUNS.md:139; 07cffd8 2026-09-06 |

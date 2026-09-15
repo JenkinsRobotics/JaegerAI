@@ -103,7 +103,7 @@ package, is shared by every instance playing that character, and is what
 the marketplace distributes. One robot's mid-conversation drift became
 everyone's personality and fought the next upgrade. Adjustments now
 persist to `<instance>/persona_state.yaml`
-(`jaeger_ai.personality.persona_state`, same storage shape as the person
+(`jaeger_ai.features.personality.persona_state`, same storage shape as the person
 index) and are applied over the definition at load. The Studio's trait
 editor still writes the sheet — an operator editing a character is
 authoring, not adapting.
@@ -1286,7 +1286,7 @@ The 0.2.3–0.2.5 cycle shipped reactive patches on wizard friction.
   to `(≤256 chars)` so it stops colliding with the `[default]`
   suffix.
 - **Step 2 redesign — auto-discover GGUFs + separate awake/asleep:**
-  - New `core/models/local_discovery.py` scans `~/.lmstudio/models`,
+  - New `core/models/discovery.py` scans `~/.lmstudio/models`,
     `~/Library/.../LM Studio/models`, `~/.cache/huggingface/hub`,
     `~/Models`, the in-tree models dir, the operator-state cache,
     and `$JAEGER_MODEL_SCAN_PATHS`. Found 16 GGUFs on the dev
@@ -1354,7 +1354,7 @@ Last user-facing strings still pointing at them:
 - `main.py` `./run.sh list` empty-state hint
 - `daemon/instance_verbs.py` × 3 empty-state hints + 1 "instance
   not found" recovery suggestion
-- `plugins/messaging_gateway.py` + `plugins/voice_loop.py` "not
+- `plugins/messaging_daemon.py` + `plugins/voice_loop.py` "not
   initialized" recovery hint
 - `core/runtime/preflight.py` pip-install method advice + missing
   `config.yaml` check
@@ -1464,7 +1464,7 @@ of remaining strings that still told users to run them:
 - ``daemon/instance_verbs.py`` — three empty-state hints + one
   "instance not found" recovery suggestion updated to ``./run.sh
   setup [NAME]``.
-- ``plugins/messaging_gateway.py`` + ``plugins/voice_loop.py`` —
+- ``plugins/messaging_daemon.py`` + ``plugins/voice_loop.py`` —
   "instance not initialized; run ``jaeger setup`` first" → "run
   ``./run.sh setup NAME`` first".
 - ``core/runtime/preflight.py`` — pip-install method check no

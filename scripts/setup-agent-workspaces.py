@@ -19,7 +19,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import yaml
 from jaeger_ai.core.runtime import agent_workspaces as aw
-from jaeger_ai.interfaces.hermes_profile_adapters.setup import _configure_webui_workspaces, _set_yaml_section_value
+from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces, _set_yaml_section_value
 
 ENGINE = "/opt/homebrew/bin/container"
 
@@ -75,7 +75,7 @@ def configure(backup):
         index.append(entry)
         atomic_write(index_path, json.dumps(index, indent=2))
 
-    gateway_path = home / ".ares/gateway/config.yaml"
+    gateway_path = home / ".jaeger/gateway/config.yaml"
     gateway = yaml.safe_load(gateway_path.read_text())
     targets = gateway["mcp"]["targets"]
     if not any(t.get("name") == "host-hermes" for t in targets):
@@ -115,7 +115,7 @@ def configure(backup):
     _configure_webui_workspaces(home)
 
     block = (aw.REPO_ROOT / "integrations/agent_workspaces/AGENT_CONTEXT.md").read_text()
-    for path in (home / ".hermes/SOUL.md", home / ".ares/openclaw/workspace/TOOLS.md"):
+    for path in (home / ".hermes/SOUL.md", home / ".jaeger/openclaw/workspace/TOOLS.md"):
         save(path)
         atomic_write(path, managed_context(path.read_text() if path.exists() else "", block))
 

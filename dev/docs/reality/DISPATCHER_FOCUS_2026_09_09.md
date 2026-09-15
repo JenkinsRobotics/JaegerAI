@@ -2,14 +2,14 @@
 
 ## Implemented
 
-- `core/runtime/dispatcher.py` owns a per-instance SQLite routing/report ledger. One WebUI session binds to native `dispatcher`; other Jaeger profile sessions route to separate `focus:<session>` agents. It never merges another conversation into the Dispatcher transcript.
+- `features/dispatcher/store.py` owns a per-instance SQLite routing/report ledger. One WebUI session binds to native `dispatcher`; other Jaeger profile sessions route to separate `focus:<session>` agents. It never merges another conversation into the Dispatcher transcript.
 - `main.py` resumes the Dispatcher's native history after restart and gives Focus agents a 16,384-token context cap and coding/research/audit/general tool bundles. Native persona, operator facts, permission handling and tool execution remain in Jaeger. Model overrides preserve each conversation and do not rewrite instance configuration.
 - `core/sessions.py` protects the Dispatcher from ordinary session-retention pruning. Explicit session deletion is not overridden.
 - The native bridge publishes Focus results before its terminal reply, rather than relying on a WebUI observer to stay connected. Full outputs remain in `dispatcher.sqlite3`; bounded, worker-attributed result excerpts are projected onto the native board. A completed turn is not proof that an entire objective was achieved.
 - Bridge contract version 15 adds `dispatcher_memory`, projecting native SQLite operator facts, the existing JSON board and Focus reports. Skills use the existing native skill service; **106 skills** were returned by the running instance. Legacy `facts.json` is not treated as the active facts database.
 - `jaeger.py` exposes authenticated `/v1/dispatcher`, `/bind`, `/skills`, `/memory` and `/models` routes under the Dispatcher namespace. Existing native run model/provider and structured-input wiring remains intact.
 - `assets/jaeger_dispatcher.js` and `jaeger_webui_extensions.json` use Hermes' official extension mechanism. They add Dispatcher/Focus cues and Jaeger-owned memory/skills views. Other profiles retain their handlers. The extension does not overwrite upstream source or intercept global network functions.
-- `features/hermes_webui/dispatcher_sidecar.py` implements the official token-v1 proxy boundary on container loopback port 8646. It validates the injected token and permits only its fixed native routes. The overlay assembler installs the extension and starts the sidecar alongside WebUI.
+- `features/dispatcher/sidecar.py` implements the official token-v1 proxy boundary on container loopback port 8646. It validates the injected token and permits only its fixed native routes. The overlay assembler installs the extension and starts the sidecar alongside WebUI.
 
 ## Runtime verification
 

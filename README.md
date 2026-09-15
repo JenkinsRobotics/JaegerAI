@@ -181,7 +181,7 @@ heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
 launch path runs `vendor/hermes-webui/server.py` directly: it does not discover,
 run, or import Hermes Agent and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
-`jaeger_ai/interfaces/hermes_webui_adapter/THIRD_PARTY_NOTICES.md`.
+`jaeger_ai/features/webui/adapter/THIRD_PARTY_NOTICES.md`.
 
 #### Alternative containerized WebUI
 

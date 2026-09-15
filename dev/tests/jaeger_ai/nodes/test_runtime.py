@@ -26,7 +26,10 @@ class _MockSynth:
         self.warm_raises = warm_raises
         self.reference_buffer = None
 
-    def speak(self, text: str):
+    # Mirrors the real engine signature (engine.py / node.py); the node
+    # passes rate= on every call, so a mock without it fails the turn
+    # with a TypeError the SpokenAck reports as ok=False.
+    def speak(self, text: str, *, rate: float = 1.0):
         self.calls.append(text)
         return {"spoken": True, "elapsed_s": 0.01}
 

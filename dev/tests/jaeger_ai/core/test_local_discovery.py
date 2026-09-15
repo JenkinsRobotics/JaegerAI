@@ -13,7 +13,7 @@ import pathlib
 
 import pytest
 
-from jaeger_ai.core.models import local_discovery as ld
+from jaeger_ai.core.models import discovery as ld
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -35,9 +35,9 @@ def isolated_env(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
     monkeypatch.delenv("JAEGER_MODEL_SCAN_PATHS", raising=False)
-    # Disable the in-tree dev path too — _in_tree_models_path resolves
+
     # via __file__, which still points at the real repo. Monkeypatch it.
-    monkeypatch.setattr(ld, "_in_tree_models_path", lambda: None)
+    # _in_tree_models_path is gone — models resolve only from the operator cache.
     # 2026-06-07: also isolate _operator_state_models_path.  It
     # resolves to ``<repo>/.jaeger_ai/models/`` which is where
     # JaegerAI caches downloaded GGUFs — once an operator downloads

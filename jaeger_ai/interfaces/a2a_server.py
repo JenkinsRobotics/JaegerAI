@@ -98,9 +98,9 @@ class JaegerBridgeExecutor(AgentExecutor):
     def _bridge(self) -> Any:
         if self._client is not None:
             return self._client
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
 
-        self._client = BridgeClient()
+        self._client = jaeger_bridge()
         return self._client
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     client = None
     if args.instance:
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
 
         client = BridgeClient(instance=args.instance)
     app = build_app(client=client)

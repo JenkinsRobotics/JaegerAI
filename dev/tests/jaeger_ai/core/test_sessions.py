@@ -12,6 +12,7 @@ import threading
 
 import pytest
 
+from jaeger_ai.contract.frameworks import display_name
 from jaeger_ai.core.sessions import SessionStore, canonical_session_id
 
 
@@ -373,7 +374,7 @@ def test_list_sessions_includes_profile_badge_and_null_ended_at(tmp_path):
         store.record("cli", "user", "tui chat", profile="openclaw")
         by_id = {row["id"]: row for row in store.list_sessions()}
         assert by_id["dispatcher"]["profile"] == "jaeger"
-        assert by_id["dispatcher"]["profile_badge"] == "Jaeger"
+        assert by_id["dispatcher"]["profile_badge"] == display_name("jaeger")
         assert by_id["dispatcher"]["ended_at"] is None
         assert by_id["roundtable-hermes:abc"]["profile_badge"] == "Roundtable"
         assert by_id["cli"]["profile"] == "openclaw"
@@ -392,7 +393,7 @@ def test_profile_first_writer_wins(tmp_path):
         store.record("aabbcc01", "user", "later", profile="openclaw")
         row = store.list_sessions()[0]
         assert row["profile"] == "jaeger"
-        assert row["profile_badge"] == "Jaeger"
+        assert row["profile_badge"] == display_name("jaeger")
         again = store.create("aabbcc01", profile="roundtable")
         assert again["created"] is False
         assert again["profile"] == "jaeger"

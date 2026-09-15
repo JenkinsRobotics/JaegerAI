@@ -38,7 +38,7 @@ change those permissions.
 
 - `jaeger_ai/core/sessions.py` owns the durable transcript and stable message IDs.
 - The existing bridge exposes read-only transcript/connection queries.
-- `hermes_profile_adapters/conversation.py` exposes the shared chat/control view
+- `core.frameworks/conversation.py` exposes the shared chat/control view
   over the existing Runs service, with durable request deduplication.
 - `integrations/hermes_webui/conversation.patch` and `jaeger_conversation.py`
   project native history only for the bound Jaeger Dispatcher. Upstream profile

@@ -15,7 +15,7 @@ configuration were changed.
 | Status | Source / defect | Root cause and repair |
 | --- | --- | --- |
 | Verified | `jaeger_ai/interfaces/mcp_server.py`, synchronous tools | The installed MCP SDK invokes synchronous tool functions inline. A blocked chat prevented unrelated initialization. Registered tools now await worker-thread execution, preserving their signatures and MCP HTTP/SSE transport. |
-| Verified | `hermes_profile_adapters/roundtable.py`, `_parallel_turns` | Timed-out workers retained the mutable result dictionary and output callback, so late answers appeared beneath later-round headings. Closing a round now seals its results and output; callers receive a snapshot. A still-running local member worker prevents another dispatch to that same native session. The chair uses the same bounded mechanism. |
+| Verified | `features/roundtable/roundtable.py`, `_parallel_turns` | Timed-out workers retained the mutable result dictionary and output callback, so late answers appeared beneath later-round headings. Closing a round now seals its results and output; callers receive a snapshot. A still-running local member worker prevents another dispatch to that same native session. The chair uses the same bounded mechanism. |
 | Verified | Adapter timeout defaults | Missing environment settings previously meant unlimited waits. Jaeger, OpenClaw, and Roundtable now default to 300 seconds, with finite-positive validation. Existing deployment overrides remain authoritative: Roundtable and OpenClaw use 90 seconds; Jaeger's previously unset setting now uses 300. These are configurable limits, not evidence of an outage. |
 | Verified | Jaeger / Roundtable automatic chat retries | A lost response does not establish that the native agent did not execute its tools. Dispatched chat turns are no longer automatically replayed. Jaeger may retry initialization up to three times and refresh a rejected stale MCP session. Jaeger and OpenClaw briefly fail fast after repeated transport failures using circuit breakers. |
 | Verified | `jaeger.py`, MCP response handling | Plain JSON responses are accepted alongside SSE. JSON-RPC errors and missing responses are raised rather than mistaken for successful tool results. Initialization failures are no longer swallowed. |
@@ -27,7 +27,7 @@ configuration were changed.
 | Verified, already fixed before this repair | Import-time Jaeger MCP initialization | Current source already initializes lazily. Added a regression test that fails if importing the module performs network I/O. |
 
 Adapter paths in the table are beneath `jaeger_ai/interfaces/`. Shared transport
-policy lives in `hermes_profile_adapters/resilience.py`.
+policy lives in `core.frameworks/resilience.py`.
 
 ## Verification receipts
 

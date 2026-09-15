@@ -181,7 +181,7 @@ def _character_rows() -> list[tuple[str, str, str, str, str]]:
     the interactive picker and the non-interactive ``create_instance``
     (the bridge's onboarding path). A broken sheet is skipped."""
     import yaml
-    from jaeger_ai.personality.character import characters_root
+    from jaeger_ai.features.personality.character import characters_root
 
     raw_rows: list[tuple[str, str, str, str, str, bool]] = []
     root = characters_root()
@@ -577,11 +577,11 @@ def run_wizard(
     from jaeger_ai.core.models.host_recommendation import (
         detect_total_memory_gb, classify_tier, recommend_for_tier,
     )
-    from jaeger_ai.core.models.local_discovery import (
+    from jaeger_ai.core.models.discovery import (
         discover_local_gguf_files, match_to_registry,
     )
     from jaeger_ai.core.models.model_resolver import (
-        ensure_symlink_in_repo_models,
+        ensure_symlink_in_model_cache,
     )
     detected_gb = detect_total_memory_gb()
     detected_tier = classify_tier(detected_gb)
@@ -617,7 +617,7 @@ def run_wizard(
     # somewhere we know about, drop a symlink into the in-repo models
     # dir so the resolver finds it without a Hugging Face round-trip.
     if model_path == rec.awake.registry_key and rec.awake.registry_key in by_key:
-        linked = ensure_symlink_in_repo_models(
+        linked = ensure_symlink_in_model_cache(
             by_key[rec.awake.registry_key].path,
             registry_key=rec.awake.registry_key,
         )
@@ -643,7 +643,7 @@ def run_wizard(
     if (asleep_path == rec.asleep.registry_key
             and rec.asleep.registry_key in by_key
             and asleep_path != model_path):
-        linked = ensure_symlink_in_repo_models(
+        linked = ensure_symlink_in_model_cache(
             by_key[rec.asleep.registry_key].path,
             registry_key=rec.asleep.registry_key,
         )
@@ -906,7 +906,7 @@ def setup_defaults() -> dict:
     from jaeger_ai.core.models.host_recommendation import (
         classify_tier, detect_total_memory_gb, recommend_for_tier,
     )
-    from jaeger_ai.core.models.local_discovery import (
+    from jaeger_ai.core.models.discovery import (
         discover_local_gguf_files, match_to_registry,
     )
     detected_gb = detect_total_memory_gb()
@@ -1380,11 +1380,11 @@ def create_instance(
     from jaeger_ai.core.models.host_recommendation import (
         classify_tier, detect_total_memory_gb, recommend_for_tier,
     )
-    from jaeger_ai.core.models.local_discovery import (
+    from jaeger_ai.core.models.discovery import (
         discover_local_gguf_files, match_to_registry,
     )
     from jaeger_ai.core.models.model_resolver import (
-        ensure_symlink_in_repo_models,
+        ensure_symlink_in_model_cache,
         MODEL_REGISTRY,
     )
     rec = recommend_for_tier(classify_tier(detect_total_memory_gb()))
@@ -1393,7 +1393,7 @@ def create_instance(
     by_key = match_to_registry(discover_local_gguf_files())
     for key in dict.fromkeys((awake_model, asleep_model)):  # ordered unique
         if key in by_key:
-            ensure_symlink_in_repo_models(by_key[key].path, registry_key=key)
+            ensure_symlink_in_model_cache(by_key[key].path, registry_key=key)
 
     identity = Identity(
         name=display_name, role=role_final,
@@ -1472,7 +1472,7 @@ def create_instance(
     )
     # Characters are the persona — wire the instance to the chosen one
     # so the running agent plays it (identity / soul / traits / voice).
-    from jaeger_ai.personality.character import set_active_character
+    from jaeger_ai.features.personality.character import set_active_character
     set_active_character(layout.root, character_id)
     # INST-3: record install provenance per instance. ``jaeger update``
     # rewrites ``last_updated_with_framework``; ``jaeger restore``

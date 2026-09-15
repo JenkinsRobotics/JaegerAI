@@ -48,7 +48,7 @@ dispatches here automatically — no flags needed.
 
 This file is NOT a plugin — it's the daemon orchestrator wiring the
 kokoro_tts and whisper_stt plugins to the agent. Same role as
-plugins/messaging_gateway.py.
+plugins/messaging_daemon.py.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ from jaeger_agent import tools as agent_tools
 from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import InstanceLayout, default_instance_name, resolve_instance_dir
 from jaeger_ai.core.instance.schemas import Config, load_yaml
-from jaeger_agent.prompts.prompts import build_system_prompt
+from jaeger_agent.prompts.assemble import build_system_prompt
 
 
 def main() -> int:

@@ -111,7 +111,7 @@ def _active_character(boot: Any) -> tuple[str | None, str | None]:
     (see ``_effective_icon``) — for the native client's tray/header. Best-effort;
     a miss is cosmetic."""
     try:
-        from jaeger_ai.personality.character import active_character
+        from jaeger_ai.features.personality.character import active_character
         root = getattr(getattr(boot, "layout", None), "root", None)
         if root is not None:
             c = active_character(root)
@@ -561,7 +561,7 @@ def _display_name(boot: Any) -> str | None:
     sheet is selected. Best-effort; a miss is cosmetic and the surface
     falls back to ``agent_name``."""
     try:
-        from jaeger_ai.personality.character import (
+        from jaeger_ai.features.personality.character import (
             active_character,
             persona_display_name,
         )
@@ -595,8 +595,8 @@ def _suggested_name(instance: str | None) -> str | None:
 
 
 def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
-    from jaeger_ai.personality.character import layer_items
-    from jaeger_ai.personality.compose import disposition_clauses
+    from jaeger_ai.features.personality.character import layer_items
+    from jaeger_ai.features.personality.compose import disposition_clauses
     stats: list[dict[str, Any]] = []
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -628,7 +628,7 @@ def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
 
 
 def _char_detail(c: Any) -> dict[str, Any]:
-    from jaeger_ai.personality.character import layer_items
+    from jaeger_ai.features.personality.character import layer_items
     traits: dict[str, dict[str, float]] = {}
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -724,7 +724,7 @@ def _runtime_abandon_effect(key: str) -> tuple[bool, str | None]:
 def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     """Read-only accessors for the native settings HUD — the same data the
     PySide6 window reads, over the pipe."""
-    from jaeger_ai.personality.character import (
+    from jaeger_ai.features.personality.character import (
         active_character,
         active_character_id,
         bound_character_id,
@@ -784,7 +784,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return list_skills(lay)
     if what == 'dispatcher_memory':
         from jaeger_agent.memory.memory import list_facts
-        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+        from jaeger_ai.features.dispatcher.store import DispatcherStore
         return {'owner': 'jaeger', 'facts': list_facts(),
                 'board': _query('board', {}, boot),
                 'dispatcher': DispatcherStore(lay).overview()}
@@ -795,7 +795,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             raise ValueError('Conversation storage is unavailable')
         return store.conversation_snapshot('dispatcher')
     if what == 'dispatcher_connection':
-        from jaeger_ai.interfaces.hermes_profile_adapters.conversation import local_connection
+        from jaeger_ai.core.frameworks.conversation import local_connection
         return local_connection(lay)
     if what == "get_skill":
         from jaeger_ai.core.skills.service import get_skill
@@ -1206,7 +1206,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
     try:
-        import jaeger_ai.personality.character as ch
+        import jaeger_ai.features.personality.character as ch
         if cmd == "acknowledge_background":
             from jaeger_ai.core.sessions import get_store
             store = get_store(lay)
@@ -1301,7 +1301,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
                 bind_id = cid or ("assistant" if path == "custom" else "")
                 if bind_id:
                     try:
-                        from jaeger_ai.personality.character import bind_character
+                        from jaeger_ai.features.personality.character import bind_character
                         bind_character(lay.root, bind_id)
                     except Exception as exc:
                         return False, f"Could not apply character: {exc}"
@@ -2242,7 +2242,7 @@ def _cancel_queued_turn(ctx: _Ctx, turn_id: str) -> bool:
         req = ctx.queued_requests.get(turn_id)
         if req is None or ctx.turn_controls.get(turn_id) != "queued":
             return False
-        from jaeger_ai.core.runtime.dispatch import normalize_session_key
+        from jaeger_ai.features.dispatcher.router import normalize_session_key
         session = normalize_session_key(req.get("session"), default="desktop-app")
         frame = {**protocol.reply_frame("", "Cancelled before execution", session),
                  "cancelled": True, "execution_unknown": False}
@@ -2274,7 +2274,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                 ctx.turn_controls[acquired_id] = "active"
         out = req.pop("_out", None) or proto
         text, prompt_error = _request_text(req)
-        from jaeger_ai.core.runtime.dispatch import normalize_session_key
+        from jaeger_ai.features.dispatcher.router import normalize_session_key
         session = normalize_session_key(
             req.get("session"), default="desktop-app",
         )
@@ -2447,11 +2447,12 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     nxt_prompt = next_continuation_prompt(
                         ans, force_ledger=ledger_open(),
                         halt_reason=halt,
+                        objective=text,
                     )
                 elif continuation.enabled() and step < max_continuations:
                     verdict = continuation.classify(ans)
                     if verdict == "continue":
-                        nxt_prompt = continuation.continuation_prompt()
+                        nxt_prompt = continuation.continuation_prompt(text)
 
                 if nxt_prompt and step < max_continuations:
                     step += 1
@@ -2470,7 +2471,7 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
             # confirms interruption; the control flag alone is merely intent.
             cancelled = result.get("halt_reason") == "interrupted"
             if session.startswith('focus:') and turn_id:
-                from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+                from jaeger_ai.features.dispatcher.store import DispatcherStore
                 # Publish from the native runtime before its terminal receipt,
                 # not from a WebUI observer that may disconnect or restart.
                 DispatcherStore(ctx.layout).report(
@@ -3426,7 +3427,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # meant "nowhere to put this" and dropped the text itself —
                 # see ChatViewModel.send's isSending guard). Emit a small
                 # v1-additive ack so a client can render a pending state.
-                from jaeger_ai.core.runtime.dispatch import normalize_session_key
+                from jaeger_ai.features.dispatcher.router import normalize_session_key
                 session = normalize_session_key(req.get('session'), default='desktop-app')
                 turn_id = str(req.get('turn_id') or '')
                 if turn_id:
