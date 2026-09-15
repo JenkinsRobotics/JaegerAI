@@ -150,11 +150,11 @@ class Run:
                 self.persist()
         return True
 
-    def dispatch(self, *, session_id, run_id):
+    def dispatch(self, *, session_id, run_id, **recovery):
         """Record ownership before sending, including an ambiguous lost ACK."""
         with self.condition:
             self.execution_unknown = True
-            self.native = {'session_id': session_id, 'run_id': run_id}
+            self.native = {'session_id': session_id, 'run_id': run_id, **recovery}
             self.persist()
 
 

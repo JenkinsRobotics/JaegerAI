@@ -51,7 +51,22 @@ class ProfileRunner:
         # Replay a saved terminal receipt, but never restart native execution.
         for row in self.store.records():
             profile = row.get('profile')
-            if profile not in {'hermes', 'openclaw', 'roundtable'} or row.get('terminal_state'):
+            if row.get('terminal_state'):
+                continue
+            if profile == 'jaeger':
+                # Jaeger workers die with the adapter process. A leftover
+                # running row would block every later send on that session.
+                self.store.append(row['run_id'], 'apperror', {
+                    'message': 'Runner restarted; the previous Jaeger turn was interrupted.',
+                    'session_id': row.get('session_id'),
+                    'stream_id': row['run_id'],
+                })
+                self.store.set_state(
+                    row['run_id'], status='interrupted', terminal_state='interrupted',
+                    active_controls=[], pending_approval_id=None, execution_unknown=True,
+                )
+                continue
+            if profile not in {'hermes', 'openclaw', 'roundtable'}:
                 continue
             try:
                 saved = self.manager(profile).get(row['run_id'])

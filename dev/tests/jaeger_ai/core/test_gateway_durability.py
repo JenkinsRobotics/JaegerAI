@@ -103,6 +103,12 @@ async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
     calls = []
     async def native(*args, **kwargs):
         calls.append(kwargs)
+        store.bind_native(
+            row["request_id"],
+            native_run_id=row["request_id"],
+            native_session="native-session",
+            status="running",
+        )
         raise TypeError("after effect")
     monkeypatch.setattr(app, "_resolve_session_agent", lambda _: None)
     monkeypatch.setattr(app, "_native_lead_turn", native)

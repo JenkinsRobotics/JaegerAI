@@ -15,6 +15,8 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+
+from jaeger_ai.contract.ports import OLLAMA_OPENAI_URL, OLLAMA_URL
 from jaeger_ai.contract.frameworks import display_name, is_known
 
 from ..adapter.profile_catalog import PROFILES
@@ -217,10 +219,10 @@ def ensure_vendor_config_yaml(agent_home: Path) -> dict[str, Any]:
                 source = str(c)
                 break
     if not raw:
-        raw = """model:
+        raw = f"""model:
   default: glm-5.3-flash:cloud
   provider: ollama
-  base_url: http://192.168.64.1:11434/v1
+  base_url: {OLLAMA_OPENAI_URL}
 providers:
   only_configured: false
 webui:
@@ -229,9 +231,8 @@ webui:
   session_save_mode: deferred
 """
         source = "builtin-default"
-    # Locked overnight spine: Ollama at http://192.168.64.1:11434 (Gateway health).
-    # Only rewrite known-dead hosts; never touch 192.168.64.1.
-    locked_ollama = "http://192.168.64.1:11434"
+    # Rewrite stale hosts to the endpoint owned by the shared contract.
+    locked_ollama = OLLAMA_URL
     for bad in (
         "http://100.78.245.49:11434",
         "http://192.168.65.1:11434",

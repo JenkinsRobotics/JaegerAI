@@ -7,6 +7,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from jaeger_ai.contract.ports import OLLAMA_URL
+
 from .grants import _audit, _grant, _require, _roots, get_current_identity
 
 
@@ -66,12 +68,10 @@ def service_status() -> dict[str, Any]:
             )
             result[name] = {"online": False, "error": detail}
 
-    # Ollama may run on LAN (10.15.0.239:11434) or Tailscale host
+    # Deployment-specific Ollama hosts come from the shared endpoint contract.
     ollama_candidates = [
         os.environ.get("OLLAMA_BASE_URL", "").rstrip("/"),
-        "http://10.15.0.239:11434",
-        "http://100.78.245.49:11434",
-        "http://127.0.0.1:11434",
+        OLLAMA_URL,
     ]
     ollama_found = False
     for candidate in [c for c in ollama_candidates if c]:

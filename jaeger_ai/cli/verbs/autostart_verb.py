@@ -82,6 +82,11 @@ def _launchd_plist(jaeger_exe: Path, home: Path, args: list[str]) -> str:
         '  <array>\n'
         f'{prog}'
         '  </array>\n'
+        '  <key>EnvironmentVariables</key>\n'
+        '  <dict>\n'
+        '    <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>\n'
+        f'    <key>PYTHONPYCACHEPREFIX</key><string>{Path.home() / ".cache" / "jaeger" / "pycache"}</string>\n'
+        '  </dict>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key><true/>\n'
         f'  <key>WorkingDirectory</key><string>{home}</string>\n'
@@ -101,6 +106,8 @@ def _systemd_unit(jaeger_exe: Path, home: Path, args: list[str]) -> str:
         "Wants=network-online.target\n"
         "\n"
         "[Service]\n"
+        "Environment=PYTHONDONTWRITEBYTECODE=1\n"
+        f"Environment=PYTHONPYCACHEPREFIX={Path.home() / '.cache' / 'jaeger' / 'pycache'}\n"
         f"ExecStart={execstart}\n"
         f"WorkingDirectory={home}\n"
         "Restart=on-failure\n"

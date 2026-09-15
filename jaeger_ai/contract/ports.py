@@ -18,6 +18,7 @@ them from there is correct, and re-declaring them here is what created the
 """
 from __future__ import annotations
 
+import os
 from typing import Final
 
 LOOPBACK: Final = "127.0.0.1"
@@ -41,6 +42,24 @@ WEBUI_ADAPTER_PORT: Final = 8791
 MCP_GATEWAY_PORT: Final = 8811
 """Agentgateway's MCP surface — the third-party binary, not the Jaeger
 Gateway above. See ``jaeger_ai/features/agentgateway/``."""
+
+MCP_GATEWAY_URL: Final = os.environ.get(
+    "JAEGERS_MCP_URL", f"http://{LOOPBACK}:{MCP_GATEWAY_PORT}/mcp"
+).rstrip("/")
+"""MCP chat endpoint. Environment overrides are resolved at process start."""
+
+OLLAMA_PORT: Final = 11434
+"""Ollama's native HTTP port."""
+
+_OLLAMA_CONFIGURED = (
+    os.environ.get("JAEGER_OLLAMA_URL") or os.environ.get("OLLAMA_BASE_URL")
+    or f"http://{LOOPBACK}:{OLLAMA_PORT}"
+).rstrip("/")
+OLLAMA_URL: Final = _OLLAMA_CONFIGURED.removesuffix("/v1")
+"""Canonical Ollama native API root with a portable loopback default."""
+
+OLLAMA_OPENAI_URL: Final = OLLAMA_URL + "/v1"
+"""The same Ollama endpoint using its OpenAI-compatible API root."""
 
 A2A_GATEWAY_PORT: Final = 8812
 """Agentgateway's agent-to-agent surface; proxies to :data:`A2A_PORT`."""
@@ -69,6 +88,10 @@ __all__ = [
     "LOOPBACK",
     "OLLAMA_PORT",
     "MCP_GATEWAY_PORT",
+    "MCP_GATEWAY_URL",
+    "OLLAMA_OPENAI_URL",
+    "OLLAMA_PORT",
+    "OLLAMA_URL",
     "WEBUI_ADAPTER_PORT",
     "WEBUI_PORT",
 ]

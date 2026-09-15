@@ -119,7 +119,12 @@ struct ChatView: View {
 
                 switch tabState.currentTab {
                 case .chat:
-                    if chat.messages.isEmpty {
+                    if ChatSurfaceFeatureFlags.useWebUITranscript {
+                        // Spike (card_b1a5afefda): the WebUI renderer is the
+                        // canonical transcript; the native branch below stays
+                        // the default until embedded-view acceptance passes.
+                        WebUIChatContainer()
+                    } else if chat.messages.isEmpty {
                         emptyStateHero
                     } else {
                         messageList

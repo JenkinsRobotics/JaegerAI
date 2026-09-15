@@ -476,6 +476,116 @@ def test_openclaw_native_keeps_rest_session_key_and_filters_peer_events(tmp_path
     assert calls[-1] == ("chat.abort", {"sessionKey": "agent:main:openai-user:hermes:existing-session", "runId": run.id})
 
 
+@pytest.mark.parametrize(
+    ("receipt", "expected"),
+    [
+        ({"runId": "native-run", "status": "ok",
+          "terminalReply": {"disposition": "visible", "text": "finished"}}, "completed"),
+        ({"runId": "native-run", "status": "error", "error": "provider failed"}, "failed"),
+        ({"runId": "native-run", "status": "timeout", "stopReason": "rpc", "endedAt": 123}, "cancelled"),
+    ],
+)
+def test_openclaw_reconcile_accepts_only_terminal_agent_wait_evidence(
+    monkeypatch, receipt, expected
+):
+    from jaeger_ai.core.frameworks import openclaw_native as native
+    calls = []
+
+    class Gateway:
+        def __init__(self, *args): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def request(self, method, params):
+            calls.append((method, params))
+            return receipt
+
+    monkeypatch.setattr(native, "NativeGateway", Gateway)
+    result = native.openclaw_reconcile({
+        "session_id": "agent:main:openai-user:hermes:session",
+        "run_id": "native-run",
+    })
+    assert result["status"] == expected
+    assert result["execution_unknown"] is False
+    assert result["session_id"] == "agent:main:openai-user:hermes:session"
+    assert result["run_id"] == "native-run"
+    assert calls == [("agent.wait", {"runId": "native-run", "timeoutMs": 1})]
+
+
+@pytest.mark.parametrize("status", ["timeout", "pending"])
+def test_openclaw_reconcile_retains_unknown_execution(status, monkeypatch):
+    from jaeger_ai.core.frameworks import openclaw_native as native
+
+    class Gateway:
+        def __init__(self, *args): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def request(self, method, params): return {"runId": "native-run", "status": status}
+
+    monkeypatch.setattr(native, "NativeGateway", Gateway)
+    with pytest.raises(RuntimeError, match="not terminal"):
+        native.openclaw_reconcile({"session_id": "session", "run_id": "native-run"})
+
+
+def test_http_400_and_404_are_not_retried_as_transient():
+    from urllib.error import HTTPError
+    from jaeger_ai.core.frameworks.jaeger import _is_transient_http
+
+    for status in (400, 404):
+        assert _is_transient_http(HTTPError("http://mcp", status, "bad request", {}, None)) is False
+    for status in (502, 503, 504):
+        assert _is_transient_http(HTTPError("http://mcp", status, "unavailable", {}, None)) is True
+
+
+def test_mcp_credential_is_resolved_at_call_time(tmp_path, monkeypatch):
+    from jaeger_ai.core.frameworks import jaeger
+
+    monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
+    monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
+    with pytest.raises(RuntimeError, match="MCP credential missing"):
+        jaeger.mcp_api_key()
+    monkeypatch.setenv("JAEGERS_MCP_API_KEY", "rotated-key")
+    assert jaeger.mcp_api_key() == "rotated-key"
+
+
+def test_operator_recovery_finds_exact_store_and_allows_next_turn(tmp_path, monkeypatch):
+    from jaeger_ai.core.frameworks import recovery
+    from jaeger_ai.contract.frameworks import BackendProtocol
+
+    root = tmp_path / "instances/jaeger/run/hermes-webui-adapter/profiles/hermes"
+    first = Runs(root, lambda run, workspace: "unused")
+    first.ownership.claim("session", "a" * 32)
+    run = Run(root, "session", "work", run_id="a" * 32)
+    run.dispatch(session_id="native-session", run_id="native-run")
+    protocol = BackendProtocol(
+        lambda run, workspace: "next",
+        lambda native: {**native, "status": "completed", "execution_unknown": False},
+    )
+    monkeypatch.setattr(recovery, "backend_protocol", lambda runtime: protocol)
+
+    result = recovery.reconcile_owned_run("hermes", run.id, state_root=tmp_path)
+    assert result["status"] == "completed"
+    assert result["runtime"] == "hermes"
+    first.ownership.claim("session", "b" * 32)
+
+
+def test_operator_abandon_records_override_and_releases_roundtable(tmp_path):
+    from jaeger_ai.core.frameworks import recovery
+
+    root = tmp_path / "profiles/roundtable/table-runs"
+    runs = Runs(root, lambda run, workspace: "unused")
+    runs.ownership.claim("table-session", "a" * 32)
+    run = Run(root, "table-session", "work", run_id="a" * 32)
+    run.dispatch(session_id=run.session, run_id=run.id)
+
+    result = recovery.abandon_owned_run(
+        "roundtable", run.id, "native receipt expired", state_root=tmp_path
+    )
+    assert result["status"] == "failed"
+    assert result["execution_unknown"] is False
+    assert result["reconciliation"]["source"] == "operator_abandon"
+    runs.ownership.claim(run.session, "b" * 32)
+
+
 def test_openclaw_signs_native_challenge_without_changing_grants():
     import base64
     from cryptography.hazmat.primitives import serialization

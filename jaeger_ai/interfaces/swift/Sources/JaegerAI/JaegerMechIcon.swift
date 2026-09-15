@@ -89,12 +89,3 @@ struct JaegerMechIcon: View {
             .frame(width: size, height: size)
     }
 }
-
-#Preview {
-    HStack(spacing: 24) {
-        JaegerMechIcon()                       // menu-bar size
-        JaegerMechIcon(size: 64)               // medium
-        JaegerMechIcon(size: 128)              // large
-    }
-    .padding()
-}

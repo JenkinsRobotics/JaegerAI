@@ -16,6 +16,8 @@ def test_launchd_plist_content():
     assert "/x/jaeger" in txt and "--tui" in txt
     assert "<key>RunAtLoad</key><true/>" in txt
     assert "<key>KeepAlive</key><true/>" in txt
+    assert "PYTHONDONTWRITEBYTECODE" in txt
+    assert "PYTHONPYCACHEPREFIX" in txt
     assert A._LABEL in txt
 
 
@@ -23,6 +25,7 @@ def test_systemd_unit_content():
     txt = A._systemd_unit(Path("/x/jaeger"), Path("/x"), ["--voice"])
     assert "ExecStart=/x/jaeger --voice" in txt
     assert "Restart=on-failure" in txt
+    assert "Environment=PYTHONDONTWRITEBYTECODE=1" in txt
     assert "WantedBy=default.target" in txt
 
 

@@ -247,15 +247,66 @@ class RunnerBroker:
         self.profiles = ProfileRunner(store)
         from .profile_catalog import ProfileCatalog, native_ready
         self.profile_catalog = ProfileCatalog(lambda name: native_ready(name, bridge))
+        self._live_jaeger: set[str] = set()
+
+    def _run_is_live(self, run_id: str, profile: str | None) -> bool:
+        if run_id in self._live_jaeger:
+            return True
+        from .profile_runner import canonical_profile
+        from jaeger_ai.core.frameworks.native_runs import Run, TERMINAL
+        try:
+            runtime = canonical_profile(profile)
+        except ValueError:
+            return False
+        if runtime not in {"hermes", "openclaw", "roundtable"}:
+            return False
+        try:
+            run = self.profiles.manager(runtime).get(run_id)
+        except (KeyError, ValueError, OSError):
+            return False
+        return isinstance(run, Run) and getattr(run, "status", None) not in TERMINAL
+
+    def _interrupt_stale_session_runs(self, session: str) -> None:
+        for row in self.store.records_for_session(session):
+            if row.get("terminal_state"):
+                continue
+            run_id = str(row.get("run_id") or "")
+            if not run_id or self._run_is_live(run_id, row.get("profile")):
+                continue
+            self.store.append(run_id, "apperror", {
+                "message": "Previous turn did not finish; it was marked interrupted so you can send again.",
+                "session_id": session,
+                "stream_id": run_id,
+            })
+            self.store.set_state(
+                run_id,
+                status="interrupted",
+                terminal_state="interrupted",
+                active_controls=[],
+                execution_unknown=True,
+            )
 
     def start(self, request: dict[str, Any]) -> dict[str, Any]:
         from .profile_runner import canonical_profile
         profile = canonical_profile(request.get("profile"))
         with self.profiles.lock:
             session = str(request.get("session_id") or "").strip()
+            self._interrupt_stale_session_runs(session)
             rows = self.store.records_for_session(session)
-            if any(canonical_profile(row.get("profile")) != profile for row in rows):
-                raise ValueError("This conversation belongs to another runtime; start a new conversation for this profile")
+            bound = None
+            for row in rows:
+                raw = row.get("profile")
+                if not raw:
+                    continue
+                try:
+                    bound = canonical_profile(raw)
+                    break
+                except ValueError:
+                    continue
+            if bound and bound != profile:
+                raise ValueError(
+                    f"This conversation belongs to {bound}; start a new chat to talk to {profile}"
+                )
             if any(not row.get("terminal_state") for row in rows):
                 raise ValueError("This conversation already has an active run")
             if profile != "jaeger":
@@ -263,13 +314,19 @@ class RunnerBroker:
             return self._start_jaeger(request)
 
     def _start_jaeger(self, request: dict[str, Any]) -> dict[str, Any]:
-        text = str(request.get("message") or "").strip()
+        from jaeger_ai.core.frameworks.run_input import inline_webui_text_attachments
+
         session_id = str(request.get("session_id") or "").strip()
+        text = inline_webui_text_attachments(
+            request.get("message"), request.get("attachments")
+        )
         if not text or not session_id:
             raise ValueError("message and session_id are required")
+        request = {**request, "message": text, "session_id": session_id}
         run_id = uuid.uuid4().hex
         self.store.create(run_id=run_id, session_id=session_id, prompt=text)
         self.store.set_state(run_id, profile="jaeger")
+        self._live_jaeger.add(run_id)
         threading.Thread(
             target=self._worker,
             args=(run_id, request),
@@ -400,6 +457,8 @@ class RunnerBroker:
                 "stream_id": run_id,
             })
             self.store.set_state(run_id, status="failed", terminal_state="failed", active_controls=[])
+        finally:
+            self._live_jaeger.discard(run_id)
 
     def _jaeger_provider(self, requested: str, model: str) -> str:
         """Translate a WebUI transport provider into Jaeger's model owner."""
