@@ -95,7 +95,7 @@ If you only want the lessons-learned arc, skip to
 | File | Status | Notes |
 |---|---|---|
 | [`native_handler_ab.md`](../core/native_handler_ab.md) | 🔵 REFERENCE | tested native-handler tool selector vs JSON; native won |
-| [`toolset_scoping_ab.md`](../core/toolset_scoping_ab.md) | 🔵 REFERENCE | tested toolset narrowing; informed the v3 skill system |
+| [`toolset_scoping_ab.md`](../MOVED_TO_JAEGER_AGENT.md) | 🔵 REFERENCE | tested toolset narrowing; informed the v3 skill system |
 | [`hermes_internals_audit.md`](../history/hermes_internals_audit.md) | 🔴 WALKED BACK | audited Hermes's internals for porting; the "port hermes architecture" path was abandoned; some patterns (supervisor) absorbed at 0.4 |
 | [`hermes_cui_port.md`](../history/hermes_cui_port.md) | 🔴 WALKED BACK | planned Hermes-CUI port; walked back from |
 | [`hermes_tool_skill_audit.md`](../history/hermes_tool_skill_audit.md) | 🔴 WALKED BACK | what tools Hermes had vs JROS; informed the early skill v1/v2 work |
