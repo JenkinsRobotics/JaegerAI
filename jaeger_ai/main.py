@@ -50,6 +50,7 @@ from jaeger_ai.core.instance.instance import (
     InstanceLock,
     check_manifest,
     default_instance_name,
+    operator_state_root,
     resolve_instance_dir,
     touch_manifest_started,
 )
@@ -5466,8 +5467,9 @@ def _swift_app_binary() -> "Path | None":
     from pathlib import Path as _P
     swift = _P(__file__).resolve().parent / "interfaces" / "swift" / ".build"
     candidates = [
-        _P("/Applications/JaegerAI.app"),
         swift / "JaegerAI.app",
+        _P.home() / "Applications" / "JaegerAI.app",
+        _P("/Applications/JaegerAI.app"),
     ]
     for app in candidates:
         binary = app / "Contents" / "MacOS" / "JaegerAI"
@@ -5501,8 +5503,12 @@ def _launch_swift_app(binary: "Path", instance_name: str) -> int:
               "menu-bar tray + chat window…", file=sys.stderr, flush=True)
         return _sp.run([str(binary)]).returncode
     from pathlib import Path as _P
-    log = (_P(__file__).resolve().parent.parent
-           / ".jaeger_ai" / "logs" / "JaegerAI.log")
+    # Runtime state belongs to the operator state root (~/.jaeger or
+    # $JAEGER_STATE_DIR) — never the source tree. Deriving the path from
+    # __file__ made `jaeger` write <repo>/.jaeger_ai/logs/ when launched
+    # from a dev checkout (doctrine rule 1 / test_ci_hygiene).
+    log = (operator_state_root()
+           / "logs" / "JaegerAI.log")
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "ab") as fh:
         _sp.Popen([str(binary)], stdout=fh, stderr=fh,
