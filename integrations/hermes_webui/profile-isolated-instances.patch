@@ -1,0 +1,637 @@
+From 0c79c12bd3831ca99dc526788cfa9847de7d0d31 Mon Sep 17 00:00:00 2001
+From: shuwalker <88289370+shuwalker@users.noreply.github.com>
+Date: Mon, 14 Sep 2026 22:55:35 -0700
+Subject: [PATCH] fix(webui): isolate profile instances and session rosters in
+ sidebar
+
+---
+ api/config.py        |   2 +-
+ api/jaeger_agents.py |  36 +++++++++++-
+ api/profiles.py      |  12 ++--
+ api/routes.py        |   6 +-
+ static/boot.js       |   3 +-
+ static/index.html    |  36 ++++++------
+ static/panels.js     |  70 +++++++++++-----------
+ static/sessions.js   |  25 +++++++-
+ static/style.css     |  33 +++++++++++
+ static/sw.js         |   6 +-
+ static/ui.js         | 137 +++++++++++++++++++++++++++++++++++--------
+ 11 files changed, 273 insertions(+), 93 deletions(-)
+
+diff --git a/api/config.py b/api/config.py
+index de37e22d..bd70e29c 100644
+--- a/api/config.py
++++ b/api/config.py
+@@ -9828,7 +9828,7 @@ _SETTINGS_DEFAULTS = {
+     "structured_code_default_view": "auto",  # JSON/YAML fenced-block default render: auto | on | off (#484 follow-up). auto => Tree when line count >= structured_code_auto_tree_lines, else Raw.
+     "structured_code_auto_tree_lines": 10,  # in 'auto' mode, minimum line count to default a JSON/YAML block to Tree view (preserves the original hardcoded >=10 behavior)
+     "session_endless_scroll": False,  # auto-load older transcript pages while scrolling upward
+-    "chat_activity_display_mode": "compact_worklog",  # compact_worklog | transparent_stream | hide_all_activity
++    "chat_activity_display_mode": "transparent_stream",  # compact_worklog | transparent_stream | hide_all_activity
+     "transparent_stream_event_timestamps": True,  # show per-event timestamp chips inside Transparent Stream
+     "auto_scroll_follow": True,  # follow new output to the bottom while streaming (Codex/Claude-Code-style sticky bottom); the user scrolling up unpins and is respected
+     "worklog_details_expanded_default": False,  # opt-in: expand Worklog details by default; default remains folded
+diff --git a/api/jaeger_agents.py b/api/jaeger_agents.py
+index 761f8f2f..a6b1dfbf 100644
+--- a/api/jaeger_agents.py
++++ b/api/jaeger_agents.py
+@@ -11,6 +11,20 @@ from urllib.error import HTTPError, URLError
+ from urllib.request import Request, urlopen
+ 
+ 
++def runner_base() -> str:
++    """The Jaeger runner (:8791), which owns per-framework execution.
++
++    Distinct from :func:`gateway_base` (:8810). The session index lives on the
++    runner because that is the process holding the framework adapters; sending
++    it to the gateway would 404, and the two ports are one digit apart.
++    """
++    return (
++        os.environ.get("HERMES_WEBUI_RUNNER_BASE_URL")
++        or os.environ.get("JAEGER_RUNNER_BASE_URL")
++        or "http://127.0.0.1:8791"
++    ).rstrip("/")
++
++
+ def gateway_base() -> str:
+     return (
+         os.environ.get("JAEGER_GATEWAY_URL")
+@@ -19,10 +33,11 @@ def gateway_base() -> str:
+     ).rstrip("/")
+ 
+ 
+-def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
++def _proxy(handler, method: str, path: str, body: bytes | None = None,
++           base: str | None = None) -> bool:
+     from api.helpers import bad, j
+ 
+-    url = f"{gateway_base()}{path}"
++    url = f"{base or gateway_base()}{path}"
+     data = body if method.upper() in {"POST", "PUT", "PATCH"} else None
+     req = Request(url, data=data, method=method.upper())
+     req.add_header("Accept", "application/json")
+@@ -52,6 +67,23 @@ def route(handler, parsed, method: str) -> bool:
+     path = parsed.path or ""
+     method = (method or "GET").upper()
+ 
++    # Sessions, the SSE stream and approvals live in the sibling overlay.
++    # Chained here rather than patched into the vendored routes.py because
++    # this function is ALREADY the mounted hook for both GET and POST — one
++    # dispatch point, no extra patch to keep rebasing against upstream.
++    try:
++        from api.jaeger_sessions import route as _sessions_route
++    except ImportError:  # pragma: no cover — overlay not installed
++        _sessions_route = None
++    if _sessions_route is not None and _sessions_route(handler, parsed, method):
++        return True
++
++    # Per-framework session index — each backend's own conversations, split by
++    # where they were started. Served by the RUNNER, not the gateway.
++    if method == "GET" and path in {"/api/profile-sessions", "/v1/profile-sessions"}:
++        qs = ("?" + parsed.query) if parsed.query else ""
++        return _proxy(handler, "GET", f"/v1/profile-sessions{qs}", base=runner_base())
++
+     if method == "GET" and path in {"/api/agents", "/v1/agents"}:
+         qs = ("?" + parsed.query) if parsed.query else ""
+         return _proxy(handler, "GET", f"/v1/agents{qs}")
+diff --git a/api/profiles.py b/api/profiles.py
+index d6adca05..76c07c5a 100644
+--- a/api/profiles.py
++++ b/api/profiles.py
+@@ -440,10 +440,9 @@ def _is_root_profile(name: str) -> bool:
+ def _profiles_match(row_profile, active_profile) -> bool:
+     """Return True if a session/project row's profile matches the active profile.
+ 
+-    Treats both the literal alias 'default' and any renamed-root display name
+-    (per _is_root_profile) as equivalent, so legacy rows tagged 'default'
+-    still surface when the user has renamed the root profile to e.g. 'kinni',
+-    and vice versa.
++    Treats both the literal alias 'default', 'hermes', and any renamed-root
++    display name (per _is_root_profile) as equivalent, so legacy rows tagged
++    'default' or 'hermes' surface when either is active, and vice versa.
+ 
+     A row with no profile (`None` or empty string) is treated as belonging to
+     the root profile — that's the convention used by the legacy backfill at
+@@ -458,8 +457,11 @@ def _profiles_match(row_profile, active_profile) -> bool:
+     active = active_profile or 'default'
+     if row == active:
+         return True
++    # 'hermes' and 'default' are canonical aliases for the Hermes Agent profile
++    if row in ('default', 'hermes') and active in ('default', 'hermes'):
++        return True
+     # Cross-alias the renamed root.
+-    if _is_root_profile(row) and _is_root_profile(active):
++    if (_is_root_profile(row) or row == 'hermes') and (_is_root_profile(active) or active == 'hermes'):
+         return True
+     return False
+ 
+diff --git a/api/routes.py b/api/routes.py
+index 80760f20..49617ed3 100644
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -2488,7 +2488,11 @@ def _build_session_list_cache_payload(
+         scoped = merged
+         other_profile_count = 0
+     else:
+-        scoped = [s for s in merged if _profiles_match(s.get("profile"), active_profile)]
++        scoped = [
++            s for s in merged
++            if _profiles_match(s.get("profile"), active_profile)
++            and not _is_profile_agnostic_foreign_session(s)
++        ]
+         other_profile_count = 0 if _is_isolated_profile_mode() else len(merged) - len(scoped)
+     diag_stage("messaging_dedupe")
+     archived_scoped = _keep_latest_messaging_session_per_source(
+diff --git a/static/boot.js b/static/boot.js
+index a6170a16..2773b859 100644
+--- a/static/boot.js
++++ b/static/boot.js
+@@ -3764,7 +3764,8 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
+       if(localStorage.getItem('hermes-webui-session')===_savedLocalBeforeProfileSwitch) localStorage.removeItem('hermes-webui-session');
+     }catch(_){}
+   }
+-  const savedLocal=localStorage.getItem('hermes-webui-session');
++  const _bootProf=S.activeProfile||'default';
++  const savedLocal=localStorage.getItem('hermes-webui-session:'+_bootProf)||localStorage.getItem('hermes-webui-session');
+   const saved=urlSession||savedLocal;
+   if(saved){
+     try{
+diff --git a/static/index.html b/static/index.html
+index ddf25e79..f7f26d56 100644
+--- a/static/index.html
++++ b/static/index.html
+@@ -26,8 +26,8 @@
+ <script>(function(){try{var t=localStorage.getItem('hermes-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#141425':'#FAF7F0';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
+ <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('hermes-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
+ <script>(function(){try{if(localStorage.getItem('hermes-webui-sidebar-collapsed')==='1')document.documentElement.dataset.sidebarCollapsed='1';}catch(e){}})()</script>
+-<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd4" as="script">
+-<script src="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd4"></script>
++<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd6" as="script">
++<script src="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd6"></script>
+ <script>window.__HERMES_CONFIG__={maxUploadBytes:__MAX_UPLOAD_BYTES__,csrfToken:__CSRF_TOKEN_JSON__};</script>
+ <script>window.__HERMES_WEBUI_BUNDLE_VERSION__='__WEBUI_VERSION__';</script>
+ <script>(function(){
+@@ -69,7 +69,7 @@
+     };
+   }
+ })()</script>
+-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__.jaegerpd4">
++<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__.jaegerpd6">
+   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
+   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
+   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
+@@ -98,7 +98,7 @@
+   <script>
+     if ('serviceWorker' in navigator) {
+       window.addEventListener('load', function() {
+-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__.jaegerpd4').catch(function(err) {
++        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__.jaegerpd6').catch(function(err) {
+           console.warn('[pwa] Service worker registration failed:', err);
+         });
+       });
+@@ -1769,20 +1769,20 @@
+   </div>
+ </div>
+ <div class="toast" id="toast"></div>
+-<script src="static/i18n.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/icons.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/ui.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/workspace.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/terminal.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/sessions.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/commands.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/messages.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/extension_settings.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/panels.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/onboarding.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/boot.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
+-<script src="static/outline.js?v=__WEBUI_VERSION__.jaegerpd4" defer></script>
++<script src="static/i18n.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/icons.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/ui.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/workspace.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/terminal.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/sessions.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/commands.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/messages.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/extension_settings.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/panels.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/onboarding.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/boot.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
++<script src="static/outline.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
+ 
+ <!-- Kanban: create/rename board modal — used for both flows. -->
+ <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">
+diff --git a/static/panels.js b/static/panels.js
+index 6edbe276..b9d1143c 100644
+--- a/static/panels.js
++++ b/static/panels.js
+@@ -7205,10 +7205,24 @@ async function switchToProfile(name) {
+     }
+ 
+     // ── Session ────────────────────────────────────────────────────────────
+-    // Keep the all-profiles sidebar scope sticky across profile switches. It is
+-    // a navigation preference shared by the browser session, not a per-profile flag.
++    // Ensure profile isolation: switching profiles scopes the sidebar strictly
++    // to the active profile's own sessions.
++    if (typeof _setShowAllProfiles === 'function') {
++      _setShowAllProfiles(false);
++    } else if (typeof _showAllProfiles !== 'undefined') {
++      _showAllProfiles = false;
++      try { localStorage.setItem('hermes-show-all-profiles', '0'); } catch (_) {}
++    }
+     if (typeof animateNextSessionListRefresh === 'function') animateNextSessionListRefresh();
+ 
++    const _prevActiveProf = _prevProfileName || 'default';
++    const _targetActiveProf = S.activeProfile || name || 'default';
++    if (S.session && S.session.session_id) {
++      try {
++        localStorage.setItem('hermes-webui-session:' + _prevActiveProf, S.session.session_id);
++      } catch (_) {}
++    }
++
+     if (sessionInProgress && _openingExistingSidebarSession) {
+       // The caller will immediately load the clicked session after this profile
+       // cookie switch. Avoid creating/retagging an intermediate blank chat.
+@@ -7218,51 +7232,33 @@ async function switchToProfile(name) {
+       if (_switchGen !== _profileSwitchGeneration) return false;
+       if (workspaceVisible && typeof clearWorkspaceTreeSkeleton === 'function') clearWorkspaceTreeSkeleton();
+       showToast(t('profile_switched', name));
+-    } else if (sessionInProgress) {
+-      // The current session has messages and belongs to the previous profile.
+-      // Start a new session for the new profile so nothing gets cross-tagged.
++    } else {
+       const workspaceVisible = typeof _workspacePanelMode !== 'undefined' && _workspacePanelMode !== 'closed';
+-      await newSession(false, {awaitWorkspaceLoad: workspaceVisible, worktree: false});
++      let _savedProfileSid = null;
++      try { _savedProfileSid = localStorage.getItem('hermes-webui-session:' + _targetActiveProf); } catch (_) {}
++      let restoredSavedSession = false;
++      if (_savedProfileSid && typeof loadSession === 'function') {
++        try {
++          await loadSession(_savedProfileSid);
++          restoredSavedSession = !!(S.session && S.session.session_id === _savedProfileSid);
++        } catch (_) {
++          restoredSavedSession = false;
++        }
++      }
++      if (!restoredSavedSession) {
++        await newSession(false, {awaitWorkspaceLoad: workspaceVisible, worktree: false});
++      }
+       if (_switchGen !== _profileSwitchGeneration) return false;
+-      // Keep topbar chips (workspace/profile) in sync after creating the
+-      // new profile-scoped session.
+       syncTopbar();
+-      // #4671: lift the embargo immediately before the switch-owned render — JS is
+-      // single-threaded so nothing interleaves between this clear and the call, making
+-      // this render the first allowed to paint the new profile's rows.
+       if (typeof _setProfileSwitchListEmbargo === 'function') _setProfileSwitchListEmbargo(false);
+       await renderSessionList();
+-      // Re-check generation after the awaited list render: a newer switch can be
+-      // started while renderSessionList() is in flight, and without this guard
+-      // the superseded switch would clear the newer switch's workspace skeleton
+-      // and pop a stale toast. Mirrors the no-messages branch guard below.
+-      // (@rodboev/greptile review, #4662)
+       if (_switchGen !== _profileSwitchGeneration) return false;
+       if (typeof _openProfileSwitchSessionBrowser === 'function') _openProfileSwitchSessionBrowser();
+-      // Safety net: if the new session has no workspace, newSession() won't have
+-      // painted the file tree — clear the up-front skeleton so it can't strand
+-      // (#4662 Opus gate). No-op when a real tree already rendered.
+       if ((!S.session || !S.session.workspace) && typeof clearWorkspaceTreeSkeleton === 'function') {
+         clearWorkspaceTreeSkeleton();
+       }
+-      showToast(t('profile_switched_new_conversation', name));
+-    } else {
+-      // No messages yet — refresh the list and topbar in place, then the
+-      // workspace tree. The loading skeletons shown up front (top of this
+-      // function) already give immediate cross-surface feedback, so we keep the
+-      // workspace refresh AFTER the stale-switch guard: loadDir() paints the
+-      // file tree as soon as its fetch resolves with only a session-id check,
+-      // and empty-session switches reuse the same session id — so starting it
+-      // before the guard could let an older switch's /api/list paint over a
+-      // newer one (Codex gate #4662). renderSessionList() is the slow fetch and
+-      // has its own internal generation guard, so awaiting it first is fine.
+-      const workspaceVisible = typeof _workspacePanelMode !== 'undefined' && _workspacePanelMode !== 'closed';
+-      // #4671: lift the embargo immediately before the switch-owned render (see above).
+-      if (typeof _setProfileSwitchListEmbargo === 'function') _setProfileSwitchListEmbargo(false);
+-      await renderSessionList();
+-      if (_switchGen !== _profileSwitchGeneration) return;
+-      if (typeof _openProfileSwitchSessionBrowser === 'function') _openProfileSwitchSessionBrowser();
+-      syncTopbar();
++      showToast(restoredSavedSession ? t('profile_switched', name) : t('profile_switched_new_conversation', name));
++    }
+       // Refresh workspace file tree so the right panel shows the new
+       // profile's workspace, not the previous one (#1214).
+       if (S.session && S.session.workspace) {
+diff --git a/static/sessions.js b/static/sessions.js
+index b7a59359..69f6139a 100644
+--- a/static/sessions.js
++++ b/static/sessions.js
+@@ -1512,7 +1512,15 @@ async function newSession(flash, options={}){
+     S.lastUsage={...(data.session.last_usage||{})};
+     if(!(options&&options.worktree)) _rememberNewChatDraftSession(S.session);
+     if(flash)S.session._flash=true;
+-    try{localStorage.setItem('hermes-webui-session',S.session.session_id);}catch(_){}
++    function _persistActiveSession(sid){
++      if(!sid) return;
++      try{
++        localStorage.setItem('hermes-webui-session', sid);
++        const prof = (typeof S !== 'undefined' && S && S.activeProfile) ? S.activeProfile : 'default';
++        localStorage.setItem('hermes-webui-session:' + prof, sid);
++      }catch(_){}
++    }
++    _persistActiveSession(S.session.session_id);
+     _setActiveSessionUrl(S.session.session_id);
+     if(typeof startSessionStream==='function') startSessionStream(S.session.session_id);
+     _setSessionViewedCount(S.session.session_id, S.session.message_count || 0);
+@@ -2062,7 +2070,11 @@ async function loadSession(sid){
+     Number(data.session.message_count || 0),
+     Number(data.session.last_message_at || data.session.updated_at || 0)
+   );
+-  try{localStorage.setItem('hermes-webui-session',S.session.session_id);}catch(_){}
++  try{
++    localStorage.setItem('hermes-webui-session',S.session.session_id);
++    const _p = (typeof S !== 'undefined' && S && S.activeProfile) ? S.activeProfile : 'default';
++    localStorage.setItem('hermes-webui-session:' + _p, S.session.session_id);
++  }catch(_){}
+   _setActiveSessionUrl(S.session.session_id);
+   if(typeof startSessionStream==='function') startSessionStream(S.session.session_id);
+ 
+@@ -7551,6 +7563,15 @@ function _partitionSidebarSessionRows(allMatched, activeSidForSidebar){
+   let cliArchivedCount=0;
+   for(const s of allMatched){
+     if(!_sidebarRowHasVisibleMessages(s, activeSidForSidebar)) continue;
++    if(!_showAllProfiles){
++      const activeProf = String(S.activeProfile || 'default').trim().toLowerCase();
++      const sProf = String(s.profile || '').trim().toLowerCase();
++      const isExternalAgent = s.session_source === 'external_agent' || s.source_tag === 'claude_code' || s.raw_source === 'claude_code';
++      if (isExternalAgent) continue;
++      const isHermes = (p) => p === 'default' || p === 'hermes' || (!p && !isExternalAgent);
++      const matches = (sProf === activeProf) || (isHermes(sProf) && isHermes(activeProf));
++      if (!matches) continue;
++    }
+     const isCli=_isCliSession(s);
+     if(isCli) cliSessionCount++;
+     if(s.default_hidden&&!(_activeProject&&_activeProject!==NO_PROJECT_FILTER&&s.project_id===_activeProject)) continue;
+diff --git a/static/style.css b/static/style.css
+index 98f6b7f0..69edfea3 100644
+--- a/static/style.css
++++ b/static/style.css
+@@ -4433,6 +4433,39 @@ body.resizing .sidebar{transition:none!important;}
+ .transparent-event-row[data-transparent-fade]{transition:opacity .22s ease;}
+ .transparent-event-row[data-transparent-fade]:hover{opacity:1;}
+ 
++/* ── Collapsible "Worked for …" chip (Transparent Stream) ── */
++.worked-for-chip{
++  display:inline-flex;
++  align-items:center;
++  gap:8px;
++  margin:2px 0 10px var(--msg-rail);
++  max-width:var(--msg-max);
++  padding:5px 12px 5px 14px;
++  border:1px solid color-mix(in srgb, var(--accent, #6ea8ff) 55%, var(--border2, #3a3a40));
++  border-radius:999px;
++  background:transparent;
++  color:var(--text);
++  font:inherit;
++  font-size:13px;
++  font-weight:500;
++  line-height:1.3;
++  cursor:pointer;
++  user-select:none;
++}
++.worked-for-chip:hover{
++  background:rgba(255,255,255,.04);
++  border-color:color-mix(in srgb, var(--accent, #6ea8ff) 80%, var(--border2, #3a3a40));
++}
++.worked-for-label{white-space:nowrap;}
++.worked-for-chevron{
++  display:inline-flex;
++  opacity:.55;
++  transition:transform .18s ease;
++}
++.assistant-turn:not([data-transparent-turn-collapsed="1"]) .worked-for-chevron{
++  transform:rotate(90deg);
++}
++
+ /* ── Collapsible Hermes chat name tag ───────── */
+ .assistant-turn[data-transparent-turn-collapsed="1"] .transparent-event-row,
+ .assistant-turn[data-transparent-turn-collapsed="1"] .transparent-event-controls,
+diff --git a/static/sw.js b/static/sw.js
+index cc832590..a19e379e 100644
+--- a/static/sw.js
++++ b/static/sw.js
+@@ -7,11 +7,11 @@
+ 
+ // Cache version is injected by the server at request time (routes.py /sw.js handler).
+ // Bumps automatically whenever the git commit changes — no manual edits needed.
+-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd4';
++const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd6';
+ 
+ // Static assets that form the app shell.
+ //
+-// Versioned assets (CSS + JS) include `?v=__WEBUI_VERSION__.jaegerpd4` to match the
++// Versioned assets (CSS + JS) include `?v=__WEBUI_VERSION__.jaegerpd6` to match the
+ // query string the page sends — see index.html. Without the version query
+ // here, every cache lookup against `?v=...` URLs would miss and fall through
+ // to network, defeating the pre-cache.
+@@ -20,7 +20,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd4';
+ // either the authenticated app shell or login code, and stale cached responses
+ // can make valid password submits fail until the user clears browser cache.
+ // Navigations populate './' only after a successful non-redirect network load.
+-const VQ = '?v=__WEBUI_VERSION__.jaegerpd4';
++const VQ = '?v=__WEBUI_VERSION__.jaegerpd6';
+ const SHELL_ASSETS = [
+   './static/style.css' + VQ,
+   './static/pwa-startup.js' + VQ,
+diff --git a/static/ui.js b/static/ui.js
+index 6440f289..091694a7 100644
+--- a/static/ui.js
++++ b/static/ui.js
+@@ -12086,6 +12086,7 @@ function _syncTransparentEventControls(turn){
+   const stashedTotal=Number(turn.getAttribute('data-transparent-total-tool-count'));
+   const toolCount=(Number.isFinite(stashedTotal)&&stashedTotal>mountedToolCount)?stashedTotal:mountedToolCount;
+   let bar=blocks.querySelector(':scope > .transparent-event-controls');
++  _ensureWorkedForChip(turn);
+   if(!rows.length){
+     if(bar) bar.remove();
+     return;
+@@ -12115,10 +12116,15 @@ function _syncTransparentEventControls(turn){
+     bar.appendChild(label);
+     bar.appendChild(expand);
+     bar.appendChild(collapse);
+-    // Guard: firstChild may be null (empty blocks) or orphaned from a prior
+-    // DOM rebuild. Only insertBefore when it is still a child of blocks.
+-    if(blocks.firstChild&&blocks.firstChild.parentNode===blocks) blocks.insertBefore(bar, blocks.firstChild);
+-    else blocks.appendChild(bar);
++    const chip=blocks.querySelector(':scope > .worked-for-chip');
++    if(chip&&chip.parentNode===blocks){
++      if(chip.nextSibling) blocks.insertBefore(bar, chip.nextSibling);
++      else blocks.appendChild(bar);
++    }else if(blocks.firstChild&&blocks.firstChild.parentNode===blocks){
++      blocks.insertBefore(bar, blocks.firstChild);
++    }else{
++      blocks.appendChild(bar);
++    }
+   }
+   const expand=bar.querySelector('[data-transparent-expand-all]');
+   if(expand){
+@@ -12419,9 +12425,99 @@ function _setTransparentRowsExpanded(root, expanded){
+ // max-height transition used by individual event cards. Persisted via
+ // data-attribute only — the turn's render path reads it on rebuild.
+ const _transparentTurnCollapsedStates={}; // key: `${sid}:${turnMsgIdx}` → boolean
++let _workedForTimer=null;
++let _workedForTimerTurn=null;
++function _transparentTurnCollapseKey(turn){
++  if(!turn||!S.session) return '';
++  const segs=turn.querySelectorAll('.assistant-segment[data-msg-idx]');
++  const seg=segs.length?segs[segs.length-1]:turn.querySelector('.assistant-segment[data-msg-idx]');
++  const mi=seg&&seg.getAttribute('data-msg-idx');
++  return mi!=null?`${S.session.session_id}:${mi}`:'';
++}
++function _isLiveAssistantTurn(turn){
++  return !!(turn&&(turn.id==='liveAssistantTurn'||turn.getAttribute('data-live-assistant-turn')==='1'));
++}
++function _setTransparentTurnCollapsed(turn, collapsed){
++  if(!turn) return;
++  const next=collapsed?'1':'0';
++  turn.setAttribute('data-transparent-turn-collapsed',next);
++  const role=turn.querySelector('.msg-role.assistant');
++  if(role) role.setAttribute('aria-expanded',collapsed?'false':'true');
++  const chip=turn.querySelector('.worked-for-chip');
++  if(chip) chip.setAttribute('aria-expanded',collapsed?'false':'true');
++  const key=_transparentTurnCollapseKey(turn);
++  if(key) _transparentTurnCollapsedStates[key]=!!collapsed;
++}
++function _toggleTransparentTurnCollapsed(turn){
++  if(!turn) return;
++  _setTransparentTurnCollapsed(turn, turn.getAttribute('data-transparent-turn-collapsed')!=='1');
++}
++function _workedForChipLabel(turn){
++  if(_isLiveAssistantTurn(turn)){
++    const started=Number(
++      turn.getAttribute('data-turn-started-at')||
++      (S.session&&S.session.pending_started_at)
++    );
++    if(Number.isFinite(started)&&started>0){
++      const text=_formatTurnDuration(_activityNowSeconds()-started);
++      return text?`Working for ${text}`:'Working…';
++    }
++    return 'Working…';
++  }
++  const msg=typeof _transparentTurnMetaMessage==='function'?_transparentTurnMetaMessage(turn):null;
++  const duration=msg&&msg._turnDuration!=null?_formatTurnDuration(msg._turnDuration):'';
++  return duration?`Worked for ${duration}`:'Worked';
++}
++function _startWorkedForTimer(turn){
++  if(!_isLiveAssistantTurn(turn)) return;
++  _workedForTimerTurn=turn;
++  if(!_workedForTimer) _workedForTimer=setInterval(function(){
++    const live=_workedForTimerTurn;
++    if(!live||!live.isConnected||!_isLiveAssistantTurn(live)){
++      if(_workedForTimer){clearInterval(_workedForTimer);_workedForTimer=null;}
++      _workedForTimerTurn=null;
++      return;
++    }
++    _ensureWorkedForChip(live);
++  },1000);
++}
++function _ensureWorkedForChip(turn){
++  if(!turn||!isTransparentStream()) return null;
++  const blocks=_assistantTurnBlocks(turn);
++  if(!blocks) return null;
++  const hasRows=!!blocks.querySelector(':scope > .transparent-event-row');
++  let chip=blocks.querySelector(':scope > .worked-for-chip');
++  if(!hasRows){
++    if(chip) chip.remove();
++    return null;
++  }
++  if(_isLiveAssistantTurn(turn)&&!turn.getAttribute('data-turn-started-at')&&S.session&&S.session.pending_started_at){
++    turn.setAttribute('data-turn-started-at',String(S.session.pending_started_at));
++  }
++  if(!chip){
++    chip=document.createElement('button');
++    chip.type='button';
++    chip.className='worked-for-chip';
++    chip.innerHTML=`<span class="worked-for-label"></span><span class="worked-for-chevron">${li('chevron-right',12)}</span>`;
++    chip.addEventListener('click',function(ev){
++      ev.preventDefault();
++      ev.stopPropagation();
++      _toggleTransparentTurnCollapsed(turn);
++    });
++    if(blocks.firstChild&&blocks.firstChild.parentNode===blocks) blocks.insertBefore(chip, blocks.firstChild);
++    else blocks.appendChild(chip);
++  }
++  const label=chip.querySelector('.worked-for-label');
++  if(label) label.textContent=_workedForChipLabel(turn);
++  chip.setAttribute('aria-expanded',turn.getAttribute('data-transparent-turn-collapsed')==='1'?'false':'true');
++  chip.setAttribute('aria-label',label?label.textContent:'Worked');
++  if(_isLiveAssistantTurn(turn)) _startWorkedForTimer(turn);
++  return chip;
++}
+ function _wireTransparentTurnToggle(turn){
+   if(!turn) return;
+   if(!isTransparentStream()) return;
++  _ensureWorkedForChip(turn);
+   const role=turn.querySelector('.msg-role.assistant');
+   if(!role) return;
+   turn.setAttribute('data-transparent-turn-toggle-bound','1');
+@@ -12437,17 +12533,7 @@ function _wireTransparentTurnToggle(turn){
+   role.setAttribute('aria-expanded',turn.getAttribute('data-transparent-turn-collapsed')==='1'?'false':'true');
+   const toggle=function(ev){
+     if(ev&&ev.target&&ev.target.closest&&ev.target.closest('.msg-tps-inline')) return;
+-    const collapsed=turn.getAttribute('data-transparent-turn-collapsed')==='1';
+-    turn.setAttribute('data-transparent-turn-collapsed',collapsed?'0':'1');
+-    role.setAttribute('aria-expanded',collapsed?'true':'false');
+-    // Persist state across DOM rebuilds.
+-    if(S.session){
+-      const seg=turn.querySelector('.assistant-segment');
+-      if(seg){
+-        const mi=seg.getAttribute('data-msg-idx');
+-        if(mi!=null) _transparentTurnCollapsedStates[`${S.session.session_id}:${mi}`]=!collapsed;
+-      }
+-    }
++    _toggleTransparentTurnCollapsed(turn);
+   };
+   role.onclick=toggle;
+   role.onkeydown=function(ev){
+@@ -17970,15 +18056,16 @@ function renderMessages(options){
+       const hasTransparentRows=blocks.querySelector(':scope > .transparent-event-row');
+       _wireTransparentTurnToggle(turn);
+       // Restore collapse state from the map (survives DOM rebuild).
+-      const seg=turn.querySelector('.assistant-segment');
+-      if(seg&&sid){
+-        const mi=seg.getAttribute('data-msg-idx');
+-        if(mi!=null&&_transparentTurnCollapsedStates[`${sid}:${mi}`]){
+-          turn.setAttribute('data-transparent-turn-collapsed','1');
+-          const role=turn.querySelector('.msg-role.assistant');
+-          if(role) role.setAttribute('aria-expanded','false');
+-        }
++      // Settled turns default collapsed so the final answer is primary
++      // ("Worked for Xm" chip expands chronological thoughts + tools).
++      const collapseKey=_transparentTurnCollapseKey(turn);
++      const savedCollapsed=collapseKey?_transparentTurnCollapsedStates[collapseKey]:undefined;
++      if(hasTransparentRows&&savedCollapsed!==false){
++        _setTransparentTurnCollapsed(turn, true);
++      }else if(savedCollapsed===false){
++        _setTransparentTurnCollapsed(turn, false);
+       }
++      _ensureWorkedForChip(turn);
+       _applyTransparentRowFading(turn);
+       if(hasTransparentRows){
+         // Read turn metadata from the final metadata-bearing assistant segment,
+@@ -19243,6 +19330,10 @@ function ensureLiveWorklogShell(){
+   if(!blocks) return null;
+   if(isTransparentStream()){
+     _moveLiveRunStatusToTurnEnd();
++    if(turn){
++      _setTransparentTurnCollapsed(turn, false);
++      _ensureWorkedForChip(turn);
++    }
+     scrollIfPinned();
+     return blocks;
+   }
+-- 
+2.50.1 (Apple Git-155)
+
