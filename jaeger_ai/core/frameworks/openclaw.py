@@ -87,12 +87,13 @@ class Handler(RunsHTTP, BaseHTTPRequestHandler):
 
     def native_runs(self):
         global _native_runs
-        from .openclaw_native import openclaw_turn
+        from .backends import backend
         with _native_lock:
             if _native_runs is None:
                 from jaeger_ai.core.instance.instance import operator_state_root
                 root = operator_state_root() / "shared/webui-runs/openclaw"
-                _native_runs = Runs(root, openclaw_turn)
+                registration = backend("openclaw")
+                _native_runs = Runs(root, registration.turn, reconciler=registration.reconcile)
             return _native_runs
 
     def native_enabled(self):

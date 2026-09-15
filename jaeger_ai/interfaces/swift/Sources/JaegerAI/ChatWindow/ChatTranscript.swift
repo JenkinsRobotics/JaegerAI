@@ -134,14 +134,14 @@ struct TranscriptRow: View {
                                 .foregroundColor(Term.inkDim.opacity(0.8))
                         }
                         Spacer()
-                        // Smile reaction
-                        Button(action: {}) {
-                            Image(systemName: "face.smiling")
-                                .font(.system(size: 11))
-                                .foregroundColor(Term.inkDim)
-                        }
-                        .buttonStyle(.plain)
-                        .help("React")
+                        // Hidden until reactions have a persisted gateway action.
+                        // Button(action: {}) {
+                        //     Image(systemName: "face.smiling")
+                        //         .font(.system(size: 11))
+                        //         .foregroundColor(Term.inkDim)
+                        // }
+                        // .buttonStyle(.plain)
+                        // .help("React")
 
                         // Copy reply
                         Button(action: {

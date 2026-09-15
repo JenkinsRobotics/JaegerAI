@@ -11,9 +11,8 @@ import threading
 import time
 import uuid
 
-from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL, jaeger_turn, jaeger_reconcile
-from jaeger_ai.core.frameworks.hermes_native import hermes_turn, hermes_reconcile
-from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
+from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL
+from jaeger_ai.core.frameworks.backends import BACKENDS
 from jaeger_ai.core.frameworks.resilience import ClassifiedError, failure_category
 from .policy import MEMBERS, COLLABORATION_TASKS, assign_owners, plan, chair_for, decide, peer_context
 from .progress import Progress
@@ -52,13 +51,12 @@ class TableService:
     def __init__(self, root: Path, backends=None):
         self.root = root
         self.store = TableStore(root)
-        selected = backends or {'jaeger': jaeger_turn, 'hermes': hermes_turn, 'openclaw': openclaw_turn}
+        selected = backends or {member: BACKENDS[member].turn for member in MEMBERS}
         if set(selected) != set(MEMBERS):
             raise ValueError('All native member backends are required')
-        reconcilers = {'jaeger': jaeger_reconcile, 'hermes': hermes_reconcile}
         # Hermes deliberately reuses the existing Roundtable receipt directory.
         self.members = {member: Runs(root / (member + '-runs'), backend,
-            reconciler=reconcilers.get(member) if backends is None else None)
+            reconciler=BACKENDS[member].reconcile if backends is None else None)
             for member, backend in selected.items()}
         self.runs = Runs(root / 'table-runs', self._turn, run_type=TableRun,
                          reconciler=self._reconcile_native)

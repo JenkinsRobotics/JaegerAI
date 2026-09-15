@@ -34,6 +34,56 @@ def test_native_hermes_streams_tool_and_text_with_pinned_controls(monkeypatch, t
     run.cancel_native()
     assert calls[-1].full_url == f'http://native/v1/runs/{RID}/stop'
     assert all(req.get_header('Authorization') == 'Bearer private-key' for req in calls)
+    assert calls[0].get_header('Idempotency-key') == run.id
+
+
+def test_hermes_lost_acceptance_is_recovered_by_idempotency_key(monkeypatch):
+    calls = []
+
+    class Response(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    def request(path, body=None, timeout=10, headers=None):
+        calls.append((path, body, headers))
+        if path == '/v1/runs':
+            return Response(json.dumps({'run_id': RID}).encode())
+        return Response(json.dumps({
+            'run_id': RID, 'session_id': 'session', 'status': 'completed', 'output': 'done'
+        }).encode())
+
+    monkeypatch.setattr(hermes_native, 'hermes_request', request)
+    local_id = 'b' * 32
+    result = hermes_native.hermes_reconcile({
+        'session_id': 'session', 'run_id': local_id,
+        'request': {'session_id': 'session', 'input': 'do once'},
+    })
+    assert result['run_id'] == local_id
+    assert result['source_native_run_id'] == RID
+    assert result['status'] == 'completed'
+    assert calls[0] == (
+        '/v1/runs', {'session_id': 'session', 'input': 'do once'},
+        {'Idempotency-Key': local_id},
+    )
+
+
+@pytest.mark.parametrize('wrong_field', ['run_id', 'session_id'])
+def test_hermes_reconcile_rejects_receipt_for_another_execution(monkeypatch, wrong_field):
+    class Response(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+
+    receipt = {
+        'run_id': RID, 'session_id': 'session', 'status': 'completed', 'output': 'wrong'
+    }
+    receipt[wrong_field] = 'other'
+    monkeypatch.setattr(
+        hermes_native,
+        'hermes_request',
+        lambda *args, **kwargs: Response(json.dumps(receipt).encode()),
+    )
+    with pytest.raises(hermes_native.ClassifiedError, match='another'):
+        hermes_native.hermes_reconcile({'session_id': 'session', 'run_id': RID})
 
 
 @pytest.mark.parametrize('event', [None, {'event': 'message.delta', 'delta': 'partial'},

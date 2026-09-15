@@ -349,11 +349,13 @@ def _try_ollama_reason(prompt: str) -> str | None:
     import os
     import urllib.request
 
-    url = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
+    from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
+    from jaeger_ai.contract.ports import OLLAMA_URL
+    url = OLLAMA_URL
     model = (
         os.environ.get("JAEGER_ONBOARD_REASON_MODEL")
         or os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL")
-        or "qwen2.5:3b"
+        or DEFAULT_AGENT_MODEL
     )
     body = json.dumps({
         "model": model,

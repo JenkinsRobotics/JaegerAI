@@ -126,6 +126,31 @@ def test_a_debate_is_unavailable_when_a_member_is_down() -> None:
     assert rows["jaeger"]["runtime_status"] == "Ready"
 
 
+def test_every_solo_runtime_has_one_complete_backend_registration() -> None:
+    from jaeger_ai.core.frameworks.backends import BACKENDS
+
+    assert set(BACKENDS) == set(fw.SOLO_RUNTIMES)
+    for runtime, registration in BACKENDS.items():
+        assert registration.runtime == runtime
+        assert callable(registration.turn)
+        assert callable(registration.reconcile)
+        assert registration.capabilities.reconciliation is True
+
+
+def test_incomplete_backend_registration_is_rejected() -> None:
+    capabilities = fw.BackendCapabilities(True, True, True, True, True)
+    with pytest.raises(TypeError, match="requires runtime, turn, and reconcile"):
+        fw.BackendRegistration("broken", lambda run, workspace: "", None, capabilities)  # type: ignore[arg-type]
+
+
+def test_chat_endpoint_defaults_are_defined_once_and_use_loopback(monkeypatch) -> None:
+    from jaeger_ai.contract import ports
+
+    assert ports.MCP_GATEWAY_URL == f"http://{ports.LOOPBACK}:{ports.MCP_GATEWAY_PORT}/mcp"
+    assert ports.OLLAMA_URL == f"http://{ports.LOOPBACK}:{ports.OLLAMA_PORT}"
+    assert ports.OLLAMA_OPENAI_URL == ports.OLLAMA_URL + "/v1"
+
+
 def test_roundtables_jaeger_seat_is_pinned_to_the_jaeger_instance() -> None:
     """Roundtable's Jaeger member must not follow the UI's active delegate.
 

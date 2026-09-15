@@ -79,9 +79,10 @@ def test_service_definition_uses_repo_code_and_no_embedded_credentials():
     import sys
     from jaeger_ai.core.instance.instance import operator_state_root
     python_bin = Path.home()/'.jaeger/venv/bin/python'
-    assert config['ProgramArguments'] == [str(python_bin) if python_bin.exists() else sys.executable, str(root/'scripts/hermes-native-api-service.py')]
+    assert config['ProgramArguments'] == [str(python_bin) if python_bin.exists() else sys.executable, '-B', str(root/'scripts/hermes-native-api-service.py')]
     assert config['KeepAlive'] is True and config['ThrottleInterval'] >= 20
-    assert 'EnvironmentVariables' not in config
+    assert config['EnvironmentVariables']['PYTHONDONTWRITEBYTECODE'] == '1'
+    assert config['EnvironmentVariables']['PYTHONPYCACHEPREFIX'].endswith('/.cache/jaeger/pycache')
     assert str(operator_state_root()/'shared/logs') in config['StandardErrorPath']
 
 
