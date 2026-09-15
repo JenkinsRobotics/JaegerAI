@@ -29,6 +29,14 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO"
 
+# Prefer the independently installed Git when Apple Git is gated behind an
+# unaccepted Xcode license. Put this checkout first so an editable install from
+# another worktree cannot make package tests import stale source.
+if [ -x /opt/homebrew/bin/git ]; then
+    export PATH="/opt/homebrew/bin:${PATH}"
+fi
+export PYTHONPATH="${REPO}/packages/jaeger-agent:${REPO}/packages/jaeger-os:${REPO}${PYTHONPATH:+:${PYTHONPATH}}"
+
 # ── env hygiene ────────────────────────────────────────────────────
 
 # Deterministic time/locale so date/strftime-based tests don't drift.

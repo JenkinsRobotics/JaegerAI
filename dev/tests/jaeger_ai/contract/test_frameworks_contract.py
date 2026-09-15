@@ -67,6 +67,15 @@ def test_roundtable_composes_the_other_three() -> None:
         assert fw.framework(member).composes == (), f"{member} must answer alone"
 
 
+def test_every_native_backend_registers_turn_and_reconciler() -> None:
+    for runtime in fw.SOLO_RUNTIMES:
+        protocol = fw.backend_protocol(runtime)
+        assert callable(protocol.turn)
+        assert callable(protocol.reconciler)
+    with pytest.raises(RuntimeError, match="no complete native backend protocol"):
+        fw.backend_protocol("roundtable")
+
+
 def test_agent_ids_use_a_known_origin_prefix() -> None:
     """``native:`` is Jaeger's own agent, ``tp:`` a third party. The agent
     registry writes these ids; a new prefix means the roster stops matching."""

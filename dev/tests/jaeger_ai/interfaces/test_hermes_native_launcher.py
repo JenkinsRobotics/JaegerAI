@@ -46,8 +46,7 @@ def test_provision_is_private_and_does_not_rotate_existing_key(tmp_path):
 
 def test_runs_restore_native_history_without_flattening_or_cross_session_fallback():
     from types import SimpleNamespace
-    path = Path(__file__).resolve().parents[4] / 'integrations/hermes_webui/jaeger_hermes_runs.py'
-    resumable = runpy.run_path(str(path))['resumable_adapter']
+    from integrations.hermes_webui.native_adapter import native_adapter_class
     history = [{'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'native-call'}]},
                {'role': 'tool', 'content': 'result', 'tool_call_id': 'native-call'}]
     seen = []
@@ -58,10 +57,16 @@ def test_runs_restore_native_history_without_flattening_or_cross_session_fallbac
             if sid == 'broken': raise OSError('DB unavailable')
             return history if sid == 'child' else []
     class Base:
+        def _http_route_table(self):
+            return [("GET", "/health", None), ("POST", "/v1/runs", None),
+                    ("GET", "/v1/runs/{run_id}", None),
+                    ("GET", "/v1/runs/{run_id}/events", None),
+                    ("GET", "/api/sessions/{session_id}/messages", None)]
         def _ensure_session_db(self): return DB()
-        def _create_agent(self, **kwargs):
+        def _create_agent(self, session_id=None, **kwargs):
+            kwargs['session_id'] = session_id
             return SimpleNamespace(session_id=kwargs['session_id'], run_conversation=lambda **kw: kw)
-    adapter = resumable(Base)()
+    adapter = native_adapter_class(Base)()
     agent = adapter._create_agent(session_id='parent')
     assert agent.session_id == 'child'
     assert agent.run_conversation(user_message='next', conversation_history=[])['conversation_history'] == history
@@ -96,6 +101,7 @@ def test_service_shim_discovers_active_container_without_starting_legacy_one(mon
 
 def test_roundtable_native_api_resumes_existing_named_cli_lineage():
     from types import SimpleNamespace
+    from integrations.hermes_webui.native_adapter import native_adapter_class
     import uuid
     member = 'a' * 32
     legacy = uuid.uuid5(uuid.NAMESPACE_URL, f'jaeger-roundtable:{member}:hermes').hex
@@ -111,11 +117,16 @@ def test_roundtable_native_api_resumes_existing_named_cli_lineage():
             assert sid == 'compressed-child'
             return [{'role': 'user', 'content': 'old context'}]
     class Base:
+        def _http_route_table(self):
+            return [("GET", "/health", None), ("POST", "/v1/runs", None),
+                    ("GET", "/v1/runs/{run_id}", None),
+                    ("GET", "/v1/runs/{run_id}/events", None),
+                    ("GET", "/api/sessions/{session_id}/messages", None)]
         def _ensure_session_db(self): return DB()
-        def _create_agent(self, **kwargs):
+        def _create_agent(self, session_id=None, **kwargs):
+            kwargs['session_id'] = session_id
             return SimpleNamespace(session_id=kwargs['session_id'], run_conversation=lambda **kw: kw)
-    path = Path(__file__).resolve().parents[4] / 'integrations/hermes_webui/jaeger_hermes_runs.py'
-    agent = runpy.run_path(str(path))['resumable_adapter'](Base)()._create_agent(session_id=f'roundtable-hermes:{member}')
+    agent = native_adapter_class(Base)()._create_agent(session_id=f'roundtable-hermes:{member}')
     assert agent.session_id == 'compressed-child'
     assert calls == [f'Roundtable {legacy[:12]} — Hermes']
     assert agent.run_conversation()['conversation_history'][0]['content'] == 'old context'

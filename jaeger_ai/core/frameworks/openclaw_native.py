@@ -157,6 +157,54 @@ def native_session_key(session):
     return f"agent:main:openai-user:hermes:{session}"
 
 
+def openclaw_reconcile(native):
+    """Resolve a lost observer from OpenClaw's durable trajectory receipt."""
+    from .openclaw import _openclaw_home
+
+    run_id = str(native.get("run_id") or "")
+    session_key = str(native.get("session_id") or "")
+    if not run_id or not session_key:
+        raise ClassifiedError("invalid_response", "OpenClaw native identity is incomplete")
+    terminal = None
+    output = ""
+    for path in (_openclaw_home() / "agents/main/sessions").glob("*.trajectory.jsonl"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            with path.open(encoding="utf-8") as rows:
+                for line in rows:
+                    try:
+                        row = json.loads(line)
+                    except (TypeError, ValueError):
+                        continue
+                    if row.get("runId") != run_id or row.get("sessionKey") != session_key:
+                        continue
+                    data = row.get("data") if isinstance(row.get("data"), dict) else {}
+                    texts = data.get("assistantTexts")
+                    if isinstance(texts, list):
+                        output = "\n".join(str(text) for text in texts if text is not None)
+                    if row.get("type") == "session.ended":
+                        terminal = data
+        except OSError:
+            continue
+    if terminal is None:
+        raise RuntimeError("OpenClaw native run has no terminal trajectory receipt")
+    if terminal.get("aborted") or terminal.get("externalAbort"):
+        status = "cancelled"
+    elif terminal.get("status") == "success":
+        status = "completed"
+    else:
+        status = "failed"
+    return {
+        "run_id": run_id,
+        "session_id": session_key,
+        "status": status,
+        "execution_unknown": False,
+        "output": output,
+        "source": "openclaw_trajectory_receipt",
+    }
+
+
 def openclaw_turn(run, workspace=None):
     from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
     # Identical to the existing REST adapter's user=hermes:<session> mapping.
