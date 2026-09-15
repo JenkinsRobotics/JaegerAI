@@ -280,7 +280,7 @@ def resolve_mcp_token(explicit: str | None = None) -> str | None:
     if env:
         return env
     try:
-        from jaeger_ai.features.gateway.constants import mcp_token_path
+        from jaeger_ai.features.agentgateway.constants import mcp_token_path
 
         path = mcp_token_path()
         if os.environ.get("JAEGER_MCP_REQUIRE_TOKEN", "").strip() in {"1", "true", "yes"}:
@@ -362,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.http:
         from jaeger_ai.core.instance.instance import default_instance_name
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
 
         instance = instance or default_instance_name()
         bridge = BridgeClient(instance=instance)
@@ -389,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     from jaeger_ai.core.instance.instance import default_instance_name
-    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
 
     instance = instance or default_instance_name()
     bridge = BridgeClient(instance=instance)

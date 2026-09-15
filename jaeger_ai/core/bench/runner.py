@@ -647,7 +647,7 @@ def run_bench(
         prev_prompt: str | None = None
         pipeline: Any = None
         try:
-            from jaeger_agent.prompts.prompts import build_system_prompt
+            from jaeger_agent.prompts.assemble import build_system_prompt
             from jaeger_ai.main import _pipeline
             layout = _pipeline.get("layout")
             if layout is not None:

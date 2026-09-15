@@ -47,7 +47,7 @@ def test_playback_amplitude_tracks_pcm_and_underrun():
 def test_webui_url_tracks_reassigned_container_ip(monkeypatch):
     import json
     import subprocess
-    from jaeger_ai.features.hermes_webui import service
+    from jaeger_ai.features.webui.service import service
 
     ui = service.HermesWebUIService.__new__(service.HermesWebUIService)
     ui.webui_port = 8787

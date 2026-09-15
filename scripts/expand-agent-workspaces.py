@@ -19,7 +19,7 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jaeger_ai.core.runtime import agent_workspaces as aw
-from jaeger_ai.interfaces.hermes_profile_adapters.setup import _configure_webui_workspaces, _set_yaml_section_value
+from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces, _set_yaml_section_value
 
 helpers = runpy.run_path(str(aw.REPO_ROOT/'scripts/setup-agent-workspaces.py'))
 run, atomic_write = helpers['run'], helpers['atomic_write']
@@ -119,8 +119,8 @@ def deploy():
     for source,target in aw.workspace_mounts(include_personal=True): probe += ['--volume',f'{source}:{target}']
     run(*probe,aw.HERMES_IMAGE,timeout=30)
     with urlopen('http://100.74.2.15:8787/health',timeout=5) as response: health=json.load(response)
-    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import NativeGateway
-    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw import OPENCLAW_BASE_URL,OPENCLAW_TOKEN_FILE
+    from jaeger_ai.core.frameworks.openclaw_native import NativeGateway
+    from jaeger_ai.core.frameworks.openclaw import OPENCLAW_BASE_URL,OPENCLAW_TOKEN_FILE
     with NativeGateway(OPENCLAW_BASE_URL,OPENCLAW_TOKEN_FILE) as gateway:
         native_status=gateway.request('status',{})
     ensure_idle(health,native_status)

@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_ai.features.hermes_webui.profile_layout import (
+from jaeger_ai.features.webui.service.profile_layout import (
     PROFILE_DISPLAY_NAMES,
     ensure_agent_state_schema,
     profile_display_name,

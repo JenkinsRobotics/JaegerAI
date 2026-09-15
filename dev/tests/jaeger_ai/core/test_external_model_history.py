@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from jaeger_ai.core.models.external_model_history import (
+from jaeger_ai.core.models.external_model import (
     _MAX_PER_PROVIDER,
     load_history,
     recent_models,

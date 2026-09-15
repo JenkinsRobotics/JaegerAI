@@ -3,7 +3,7 @@ from contextlib import contextmanager
 import json
 import pytest
 
-from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
 
 
 @pytest.mark.parametrize('flag', [True, False])

@@ -8,8 +8,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters import jaeger, openclaw
-from jaeger_ai.interfaces.hermes_profile_adapters.ingress import ProfileHTTPServer
+from jaeger_ai.core.frameworks import jaeger, openclaw
+from jaeger_ai.core.frameworks.ingress import ProfileHTTPServer
 
 
 @contextmanager
@@ -132,7 +132,8 @@ def test_connection_capacity_is_bounded_and_recovers_after_disconnect():
 
 
 def test_roundtable_sends_the_selected_members_gateway_credential(monkeypatch):
-    from jaeger_ai.interfaces.hermes_profile_adapters import roundtable, native_runs
+    from jaeger_ai.features.roundtable import roundtable
+    from jaeger_ai.core.frameworks import native_runs
     import io
     captured = []
     monkeypatch.setattr(native_runs, 'profile_key', lambda profile: 'test-' + profile)

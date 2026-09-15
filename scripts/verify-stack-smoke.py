@@ -291,7 +291,7 @@ def ensure_started(matrix: Matrix, *, start_runtime: bool) -> None:
         if not ready:
             try:
                 sys.path.insert(0, str(REPO_ROOT))
-                from jaeger_ai.features.hermes_webui import HermesWebUIService
+                from jaeger_ai.features.webui import HermesWebUIService
 
                 st = HermesWebUIService().status()
                 ready = bool((st.get("container") or {}).get("state") == "running")
@@ -414,7 +414,7 @@ def check_profiles_and_sessions(matrix: Matrix, chat_url: str) -> dict[str, str]
     # Apply canonical display-name expectations (API may return raw id).
     try:
         sys.path.insert(0, str(REPO_ROOT))
-        from jaeger_ai.features.hermes_webui.profile_layout import PROFILE_DISPLAY_NAMES
+        from jaeger_ai.features.webui.service.profile_layout import PROFILE_DISPLAY_NAMES
 
         expected_labels = dict(PROFILE_DISPLAY_NAMES)
     except Exception:

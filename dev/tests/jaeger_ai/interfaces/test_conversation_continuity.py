@@ -7,10 +7,10 @@ import uuid
 
 import pytest
 
-from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+from jaeger_ai.features.dispatcher.store import DispatcherStore
 from jaeger_ai.core.sessions import SessionStore
-from jaeger_ai.interfaces.hermes_profile_adapters.conversation import Conversation
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs, Run
+from jaeger_ai.core.frameworks.conversation import Conversation
+from jaeger_ai.core.frameworks.native_runs import Runs, Run
 
 
 def wait_for(predicate):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from jaeger_ai.personality.character import characters_root, list_characters
+from jaeger_ai.features.personality.character import characters_root, list_characters
 
 
 ENGINEERING_IDS = {

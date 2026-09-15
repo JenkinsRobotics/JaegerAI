@@ -576,7 +576,7 @@ def commit_to_instance(instance_root: Path | Any) -> None:
     cid = str(doc.get("character_id") or "").strip()
     if cid:
         try:
-            from jaeger_ai.personality.character import bind_character
+            from jaeger_ai.features.personality.character import bind_character
             bind_character(root, cid)
         except Exception:
             pass
@@ -630,7 +630,7 @@ def commit_to_instance(instance_root: Path | Any) -> None:
         overrides = _STANCE_EXPRESSION.get(str(stance.get("stance") or ""))
         if overrides:
             try:
-                from jaeger_ai.personality import persona_state
+                from jaeger_ai.features.personality import persona_state
                 for field_name, value in overrides.items():
                     persona_state.set_trait_override(
                         root, cid, "expression", field_name, value,

@@ -197,7 +197,7 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
             assert arguments.get("session_id") == "dispatcher"
             return {"content": [{"type": "text", "text": "NATIVE_MCP_OK autonomy=tools"}]}
 
-    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as jaeger_mcp
+    import jaeger_ai.core.frameworks.jaeger as jaeger_mcp
 
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
     monkeypatch.setattr(jaeger_mcp, "MCP_GATEWAY_URL", "http://127.0.0.1:8811/mcp")
@@ -324,7 +324,7 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
 async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch, tmp_path):
     from aiohttp import web
     from aiohttp.test_utils import TestServer
-    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as transport
+    import jaeger_ai.core.frameworks.jaeger as transport
     methods = []
     catalog = []
     async def handler(request):
@@ -352,7 +352,7 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
 
 @pytest.mark.asyncio
 async def test_native_uncertain_result_is_not_reexecuted_under_another_tool(monkeypatch, tmp_path):
-    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as transport
+    import jaeger_ai.core.frameworks.jaeger as transport
     calls = []
     class Client:
         def __init__(self, *args): pass
@@ -370,7 +370,7 @@ async def test_native_uncertain_result_is_not_reexecuted_under_another_tool(monk
 def test_mcp_tool_discovery_follows_catalog_without_calling_tools(monkeypatch):
     import io
     import json
-    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as transport
+    import jaeger_ai.core.frameworks.jaeger as transport
     seen = []
     def respond(request, **kwargs):
         body = json.loads(request.data)

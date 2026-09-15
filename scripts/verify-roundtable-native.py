@@ -13,8 +13,8 @@ import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jaeger_ai.interfaces.hermes_profile_adapters.roundtable_native import TableService
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import TERMINAL
+from jaeger_ai.features.roundtable.service import TableService
+from jaeger_ai.core.frameworks.native_runs import TERMINAL
 
 
 def verify():

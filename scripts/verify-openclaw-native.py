@@ -14,8 +14,8 @@ import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs, TERMINAL
-from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import openclaw_turn, NativeGateway, native_session_key
+from jaeger_ai.core.frameworks.native_runs import Runs, TERMINAL
+from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn, NativeGateway, native_session_key
 
 PROMPTS = {
     'chat': 'Reply exactly OPENCLAW-NATIVE-READY. No tools or memory writes.',
@@ -29,7 +29,7 @@ def check(scenario):
     root = Path(tempfile.mkdtemp(prefix='jaeger-openclaw-native-'))
     def backend(run, workspace):
         if scenario == 'approval-deny':
-            from jaeger_ai.interfaces.hermes_profile_adapters.openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
+            from jaeger_ai.core.frameworks.openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
             # Tighten only this brand-new verification session. Never change
             # default policy or an existing user session to force a test prompt.
             with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE) as gateway:

@@ -242,7 +242,7 @@ def _set_character(layout, cid: str | None) -> None:
     -- so the only honest way to exercise "no character" is to patch the
     single lookup function main.py calls (local-imported fresh every
     turn, so patching the module attribute is enough)."""
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.features.personality.character as character_mod
     global _ORIG_ACTIVE_CHARACTER
     if _ORIG_ACTIVE_CHARACTER is None:
         _ORIG_ACTIVE_CHARACTER = character_mod.active_character
@@ -254,7 +254,7 @@ def _set_character(layout, cid: str | None) -> None:
 
 
 def _restore_character() -> None:
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.features.personality.character as character_mod
     if _ORIG_ACTIVE_CHARACTER is not None:
         character_mod.active_character = _ORIG_ACTIVE_CHARACTER
 
@@ -349,7 +349,7 @@ def _phase_persona_last(source_config, *, warmup: bool) -> dict:
                                       warmup=warmup)
     rows = {}
     try:
-        from jaeger_ai.personality.character import set_active_character
+        from jaeger_ai.features.personality.character import set_active_character
         set_active_character(layout.root, "lilith")
         print("=== [persona_last] lilith -- chat prompts (latency baseline) ===", flush=True)
         for pid, prompt in CHAT_PROMPTS:

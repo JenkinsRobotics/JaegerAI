@@ -126,7 +126,7 @@ def main():
         parser.error("--all-workspaces requires explicit --write-probe")
     output = {"role": args.role, "container_os": platform.system(), "uid": os.getuid(), "checks": {}}
     checks = {
-        "canonical_source": lambda: {"path": str(REPO), "sha256": hashlib.sha256((REPO / "jaeger_ai/interfaces/hermes_profile_adapters/roundtable.py").read_bytes()).hexdigest()},
+        "canonical_source": lambda: {"path": str(REPO), "sha256": hashlib.sha256((REPO / "jaeger_ai/features/roundtable/roundtable.py").read_bytes()).hexdigest()},
         "host_mcp": lambda: host_tools(args.role),
         "jaeger": lambda: request("http://192.168.64.1:8642/health")[0],
         "roundtable": lambda: request("http://192.168.64.1:8643/health")[0],

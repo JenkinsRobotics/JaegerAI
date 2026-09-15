@@ -7,7 +7,7 @@ bind_character moves the binding (the deliberate, verified rebind).
 
 import json
 
-from jaeger_ai.personality.character import (
+from jaeger_ai.features.personality.character import (
     DEFAULT_CHARACTER_ID, active_character_id, bind_character, bound_character_id,
     set_active_character,
 )
@@ -92,7 +92,7 @@ def test_hud_select_applies_to_the_running_agent(tmp_path, monkeypatch):
     layout = InstanceLayout(root=tmp_path)
     monkeypatch.setitem(main._pipeline, "layout", layout)
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: "NEW_CHARACTER",
     )
 
@@ -134,7 +134,7 @@ def test_character_swap_keeps_every_live_session(tmp_path, monkeypatch):
     set_active_character(tmp_path, "clanker")
     monkeypatch.setitem(main._pipeline, "layout", InstanceLayout(root=tmp_path))
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: "NEW_CHARACTER",
     )
 

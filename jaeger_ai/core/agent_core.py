@@ -116,14 +116,14 @@ def _agent_name() -> str:
     """The agent's display name for the window/tray title — the one name
     it answers to: the selected character's, or ``identity.yaml``'s while
     the neutral sheet is selected (see
-    :func:`jaeger_ai.personality.character.persona_display_name`).
+    :func:`jaeger_ai.features.personality.character.persona_display_name`).
     'agent' only if neither is reachable."""
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
         from jaeger_ai.main import _pipeline
         layout = _pipeline.get("layout")
         if layout is not None:
-            from jaeger_ai.personality.character import (
+            from jaeger_ai.features.personality.character import (
                 active_character, persona_display_name,
             )
             try:

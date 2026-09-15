@@ -10,7 +10,7 @@ from jaeger_ai.core.models.configuration import selected_model_config
 def onboarding_identity(layout: Any) -> dict[str, str]:
     if layout is None or not layout.exists():
         return {}
-    from jaeger_ai.personality.character import active_character_id
+    from jaeger_ai.features.personality.character import active_character_id
     from jaeger_ai.core.instance.first_boot import snapshot
     identity = load_yaml(layout.identity_path, Identity)
     state = snapshot(layout)
@@ -63,7 +63,7 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
         if identity is not None and any(args.get(key) for key in ("display_name", "role", "voice_profile", "interaction_posture")):
             dump_yaml(layout.identity_path, identity)
         if character_id:
-            from jaeger_ai.personality.character import bind_character
+            from jaeger_ai.features.personality.character import bind_character
             bind_character(layout.root, character_id)
     else:
         from jaeger_ai.core.instance.setup_wizard import create_instance

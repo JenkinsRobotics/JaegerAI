@@ -111,11 +111,11 @@ def test_status_labels_container_as_runtime_not_chat(capsys, monkeypatch):
             return "http://192.168.64.10:8787/"
 
     monkeypatch.setattr(
-        "jaeger_ai.features.hermes_webui.HermesWebUIService",
+        "jaeger_ai.features.webui.HermesWebUIService",
         FakeService,
     )
     monkeypatch.setattr(
-        "jaeger_ai.features.hermes_webui.service._tailscale_ipv4",
+        "jaeger_ai.features.webui.service.service._tailscale_ipv4",
         lambda: None,
     )
 

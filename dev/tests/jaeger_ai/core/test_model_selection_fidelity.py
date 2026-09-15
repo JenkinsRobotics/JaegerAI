@@ -336,7 +336,7 @@ def test_every_local_client_class_exposes_unload():
         LlamaCppPythonClient as BenchClient,
     )
     from jaeger_ai.core.models.mlx_client import MlxClient
-    from jaeger_ai.core.models.mlx_vlm_client import MlxVlmClient
+    from jaeger_ai.core.models.mlx_client import MlxVlmClient
 
     for cls in (main.LlamaCppPythonClient, BenchClient, MlxClient,
                 MlxVlmClient, em.ExternalModelClient):

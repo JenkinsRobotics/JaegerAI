@@ -58,7 +58,7 @@ def test_webui_chat_url_fails_when_bookmark_is_8787(monkeypatch) -> None:
 
     monkeypatch.setattr(doctor_mod, "HermesWebUIService", Fake, raising=False)
     monkeypatch.setattr(
-        "jaeger_ai.features.hermes_webui.service.HermesWebUIService", Fake
+        "jaeger_ai.features.webui.service.service.HermesWebUIService", Fake
     )
     checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
     assert checks["webui_chat_url"].ok is False
@@ -75,7 +75,7 @@ def test_webui_chat_url_passes_for_8790(monkeypatch) -> None:
             return None
 
     monkeypatch.setattr(
-        "jaeger_ai.features.hermes_webui.service.HermesWebUIService", Fake
+        "jaeger_ai.features.webui.service.service.HermesWebUIService", Fake
     )
     monkeypatch.setattr(
         "jaeger_ai.core.runtime.agent_workspaces.container_name",
@@ -91,8 +91,8 @@ def test_webui_chat_url_passes_for_8790(monkeypatch) -> None:
 
 def test_jaeger_skills_route_is_dispatcher_not_hermes_home() -> None:
     from pathlib import Path
-    import jaeger_ai.interfaces.hermes_profile_adapters.jaeger as jaeger_mod
-    import jaeger_ai.features.hermes_webui.dispatcher_sidecar as sidecar_mod
+    import jaeger_ai.core.frameworks.jaeger as jaeger_mod
+    import jaeger_ai.features.dispatcher.sidecar as sidecar_mod
     text = Path(jaeger_mod.__file__).read_text(encoding="utf-8")
     assert "/v1/dispatcher/skills" in text
     assert "list_skills" in text

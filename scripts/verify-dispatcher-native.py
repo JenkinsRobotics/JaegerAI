@@ -8,7 +8,7 @@ import json,time,uuid,urllib.request,urllib.error
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
+from jaeger_ai.core.frameworks.native_runs import profile_key
 base='http://192.168.64.1:8642'
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

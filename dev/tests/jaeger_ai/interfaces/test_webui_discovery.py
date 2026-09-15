@@ -2,7 +2,7 @@
 import json
 import subprocess
 
-from jaeger_ai.features.hermes_webui import service
+from jaeger_ai.features.webui.service import service
 
 
 def make_service(monkeypatch, **changes):

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jaeger_ai.features.gateway.config import config_is_stale, default_config, ensure_config
-from jaeger_ai.features.gateway.constants import (
+from jaeger_ai.features.agentgateway.config import config_is_stale, default_config, ensure_config
+from jaeger_ai.features.agentgateway.constants import (
     A2A_BACKEND_PORT,
     A2A_GATEWAY_PORT,
     MCP_GATEWAY_PORT,
     MCP_HTTP_PORT,
 )
-from jaeger_ai.features.gateway.service import locate_binary, status
+from jaeger_ai.features.agentgateway.service import locate_binary, status
 
 
 def test_default_config_targets_jaeger_not_archive_ports(tmp_path: Path) -> None:

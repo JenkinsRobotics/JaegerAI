@@ -107,8 +107,8 @@ def test_custom_walk_commits_name_voice_stance_and_character(tmp_path):
     """The hybrid conversation must land in the files the agent actually reads."""
     from jaeger_ai.core.instance.instance import InstanceLayout
     from jaeger_ai.core.instance.schemas import Config, Identity, ModelConfig, dump_yaml, load_yaml
-    from jaeger_ai.personality import persona_state
-    from jaeger_ai.personality.character import active_character_id
+    from jaeger_ai.features.personality import persona_state
+    from jaeger_ai.features.personality.character import active_character_id
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir(parents=True)

@@ -8,8 +8,8 @@ import pytest
 
 from jaeger_ai.interfaces import bridge
 from jaeger_ai.core.runtime.native_turns import NativeTurns
-from jaeger_ai.interfaces.hermes_profile_adapters.run_input import normalize_input, attachment_prompt
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import RunsHTTP
+from jaeger_ai.core.frameworks.run_input import normalize_input, attachment_prompt
+from jaeger_ai.core.frameworks.native_runs import RunsHTTP
 
 
 def test_structured_text_and_private_attachment_bytes(tmp_path):

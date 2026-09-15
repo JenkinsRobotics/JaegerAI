@@ -211,7 +211,7 @@ class LibraryCard(QFrame):
         return row
 
     def _defining_traits(self) -> list[tuple[str, int]]:
-        from jaeger_ai.personality.character import layer_items
+        from jaeger_ai.features.personality.character import layer_items
         allt: list = []
         for layer in _TRAIT_LAYERS:
             sub = getattr(self._char.personality, layer, None)
@@ -314,7 +314,7 @@ class AgentSettingsWindow(QWidget):
     def _id_via(self, fn_name: str) -> Any:
         """The instance's bound (default) or active character id, else current."""
         try:
-            import jaeger_ai.personality.character as ch
+            import jaeger_ai.features.personality.character as ch
             root = getattr(self._inst_layout(), "root", None)
             if root is not None:
                 cid = getattr(ch, fn_name)(root)
@@ -508,7 +508,7 @@ class AgentSettingsWindow(QWidget):
 
     # ── Library (Studio-style card grid → Select / Make Default) ──
     def _library_page(self) -> QWidget:
-        from jaeger_ai.personality.character import list_characters
+        from jaeger_ai.features.personality.character import list_characters
         chars = list_characters()
         inner = QWidget()
         v = QVBoxLayout(inner)
@@ -539,7 +539,7 @@ class AgentSettingsWindow(QWidget):
         """SELECT — this instance is now this character. Session-only
         ``set_active_character`` snapped back to the old binding on the
         next boot, so the HUD looked like it swapped and then didn't."""
-        from jaeger_ai.personality.character import bind_character
+        from jaeger_ai.features.personality.character import bind_character
         try:
             root = getattr(self._inst_layout(), "root", None)
             if root is not None:
@@ -552,7 +552,7 @@ class AgentSettingsWindow(QWidget):
 
     def _make_default(self, ch: Any) -> None:
         """MAKE DEFAULT — bind as the instance's canonical character (+ active)."""
-        from jaeger_ai.personality.character import bind_character
+        from jaeger_ai.features.personality.character import bind_character
         try:
             root = getattr(self._inst_layout(), "root", None)
             if root is not None:
@@ -614,7 +614,7 @@ class AgentSettingsWindow(QWidget):
         return self._scroll(inner)
 
     def _save_character(self) -> None:
-        from jaeger_ai.personality.character import save_character_profile
+        from jaeger_ai.features.personality.character import save_character_profile
         try:
             save_character_profile(
                 self.character.root,
@@ -632,7 +632,7 @@ class AgentSettingsWindow(QWidget):
     def _traits_page(self) -> QWidget:
         if self.character is None:
             return self._no_char_page("Traits")
-        from jaeger_ai.personality.character import layer_items
+        from jaeger_ai.features.personality.character import layer_items
         inner = QWidget()
         v = QVBoxLayout(inner)
         v.setContentsMargins(40, 32, 30, 28)
@@ -673,7 +673,7 @@ class AgentSettingsWindow(QWidget):
         return row
 
     def _save_traits(self) -> None:
-        from jaeger_ai.personality.character import save_character_traits
+        from jaeger_ai.features.personality.character import save_character_traits
         traits: dict[str, dict[str, float]] = {}
         for (layer, key), sld in self._trait_sliders.items():
             traits.setdefault(layer, {})[key] = sld.value() / 100.0

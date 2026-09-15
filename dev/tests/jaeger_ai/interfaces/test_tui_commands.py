@@ -290,7 +290,7 @@ def _wire_model_switch(ctx, monkeypatch):
     """Stub the heavy edges of ``/model use``: discovery, yaml persist,
     and the instance reboot. Returns (cfg, reboots) for assertions."""
     from jaeger_ai.core.instance import schemas as schemas_mod
-    from jaeger_ai.core.models import model_discovery as disc_mod
+    from jaeger_ai.core.models import discovery as disc_mod
     import jaeger_ai.main as main_mod
 
     cfg = schemas_mod.Config(

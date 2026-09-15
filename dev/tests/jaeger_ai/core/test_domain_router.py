@@ -10,7 +10,7 @@ from jaeger_ai.core.runtime.domain_router import (
     domain_block,
     reset,
 )
-from jaeger_ai.core.runtime.dispatch import (
+from jaeger_ai.features.dispatcher.router import (
     is_primary_session,
     normalize_session_key,
     prepare_turn_text,

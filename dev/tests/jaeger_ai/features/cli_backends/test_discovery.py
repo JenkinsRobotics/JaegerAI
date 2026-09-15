@@ -81,7 +81,7 @@ def test_list_registered_models_includes_a_fake_installed_cli(monkeypatch):
     )
     # Avoid live Ollama / xAI probes from the rest of the catalog.
     monkeypatch.setattr(
-        "jaeger_ai.core.models.model_discovery.discover_ollama",
+        "jaeger_ai.core.models.discovery.discover_ollama",
         lambda: {"online": False, "models": []},
     )
     monkeypatch.setattr(

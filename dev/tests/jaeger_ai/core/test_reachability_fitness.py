@@ -134,13 +134,13 @@ KNOWN_ORPHANS = {
     # is precisely why neither the import graph nor the CLI route table found
     # it. "Unreachable by analysis" and "not running" are different claims.
     # Runnable entry points with no caller and no CLI route.
-    "jaeger_ai.plugins.messaging_gateway",
+    "jaeger_ai.plugins.messaging_daemon",
     "jaeger_ai.core.runtime._shakedown",
     # Consumers (interfaces/studio, interfaces/v4) were deleted.
     "jaeger_ai.nodes.animation_dev.mscript.mscript_engine",
     # Engine capability with no client surface.
-    "jaeger_ai.skill_tree.xp_emitter",
-    "jaeger_ai.personality.persona_state",
+    "jaeger_ai.features.skill_tree.xp_emitter",
+    "jaeger_ai.features.personality.persona_state",
 }
 
 
@@ -164,7 +164,7 @@ def test_gateway_daemon_has_a_cli_route():
     # the Agentgateway subcommands must be untouched
     for sub in ("install", "start", "stop", "status"):
         assert _route(["gateway", sub], py) == [
-            py, "-m", "jaeger_ai.features.gateway", sub,
+            py, "-m", "jaeger_ai.features.agentgateway", sub,
         ]
 
 

@@ -7,8 +7,9 @@ from io import BytesIO
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters import jaeger, openclaw, roundtable
-from jaeger_ai.interfaces.hermes_profile_adapters.resilience import CircuitBreaker, CircuitOpen, timeout_setting
+from jaeger_ai.features.roundtable import roundtable
+from jaeger_ai.core.frameworks import jaeger, openclaw
+from jaeger_ai.core.frameworks.resilience import CircuitBreaker, CircuitOpen, timeout_setting
 from jaeger_ai.interfaces.mcp_server import build_server
 
 
@@ -146,7 +147,7 @@ def test_timeout_setting_finite_and_configurable(monkeypatch):
 
 
 def test_circuit_breaker_recovers(monkeypatch):
-    from jaeger_ai.interfaces.hermes_profile_adapters import resilience
+    from jaeger_ai.core.frameworks import resilience
     now = [0.0]
     monkeypatch.setattr(resilience.time, "monotonic", lambda: now[0])
     breaker = CircuitBreaker(threshold=2, cooldown=10)

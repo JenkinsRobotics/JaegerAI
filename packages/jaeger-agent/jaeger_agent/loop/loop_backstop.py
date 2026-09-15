@@ -234,8 +234,9 @@ def tool_budget_warning(
         remaining = max_tool_calls - tool_calls_made
         return (
             f"[tool budget: {remaining} call(s) remain this turn. "
-            "Stop broadening the investigation. Use the results already "
-            "collected and produce the best final answer now. If the remaining "
+            "Prioritize the next concrete implementation or verification step. "
+            "If the limit is reached, checkpoint the same task accurately; do "
+            "not redefine a repair as a report or claim completion. If the remaining "
             "work repeats one operation over many items, use execute_with_tools "
             "for the batch; otherwise call another tool only if essential.]"
         )

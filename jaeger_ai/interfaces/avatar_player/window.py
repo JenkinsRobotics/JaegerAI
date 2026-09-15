@@ -133,7 +133,7 @@ def agent_name(ctx: Any) -> str:
     then identity.yaml's name comes through. Falls back to the core /
     instance name, then a default."""
     try:
-        from jaeger_ai.personality.character import persona_display_name
+        from jaeger_ai.features.personality.character import persona_display_name
         name = persona_display_name(_identity_display_name(ctx),
                                     resolve_character(ctx))
         if name:
@@ -166,7 +166,7 @@ def resolve_character(ctx: Any) -> Any:
     """The character to display — the instance's active one, else the library
     default, else None. Lets a surface show a real card even standalone."""
     try:
-        from jaeger_ai.personality.character import (
+        from jaeger_ai.features.personality.character import (
             DEFAULT_CHARACTER_ID, active_character, list_characters,
         )
         root = getattr(getattr(ctx, "layout", None), "root", None)

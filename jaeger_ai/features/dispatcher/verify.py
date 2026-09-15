@@ -10,7 +10,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
+from jaeger_ai.core.frameworks.native_runs import profile_key
 base='http://192.168.64.1:8642'
 
 def workspace():

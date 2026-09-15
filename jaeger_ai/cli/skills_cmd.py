@@ -98,7 +98,7 @@ def _status_badge(status: str) -> str:
 def _load_registry() -> Any | None:
     """Build a registry from the operator's instance state + seed
     catalog, returning ``None`` if no instance is set up."""
-    from jaeger_ai.skill_tree import SkillTreeRegistry, seed_default_tree
+    from jaeger_ai.features.skill_tree import SkillTreeRegistry, seed_default_tree
 
     layout = c.get_active_instance_layout()
     if layout is None:
