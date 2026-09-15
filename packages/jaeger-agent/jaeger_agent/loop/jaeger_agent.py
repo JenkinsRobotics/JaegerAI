@@ -266,6 +266,9 @@ class JaegerAgent:
         ))
         self.callbacks = callbacks or AgentCallbacks()
         self._run_id: str | None = None
+        #: Set when an adapter streams reasoning for the current step, so the
+        #: post-step fallback does not repeat what was already sent.
+        self._streamed_reasoning = False
         self._effect_checkpoint: Callable[[str, dict[str, Any], dict[str, Any]], None] | None = None
         self._tool_executor: ToolExecutor = tool_executor or _default_tool_executor()
         if self.allowed_tools is not None:
@@ -427,6 +430,15 @@ class JaegerAgent:
         executive owns the durable write.
         """
         self._effect_checkpoint = fn
+
+    def _emit_streamed_reasoning(self, chunk: str) -> None:
+        """Forward one reasoning delta and remember that we did.
+
+        The flag is what keeps the post-step fallback from emitting the same
+        deliberation a second time once the adapter has already streamed it.
+        """
+        self._streamed_reasoning = True
+        self.callbacks.on_reasoning(chunk)
 
     def _bind_turn_run(self) -> None:
         if self._run_id is None:
@@ -646,10 +658,16 @@ class JaegerAgent:
             # every adapter that records ``reasoning`` on its message gets the
             # behaviour for free, and so a surface sees it in turn order —
             # before the tool calls the deliberation led to.
-            if isinstance(assistant_msg, dict):
+            # Fallback ONLY. Adapters that stream reasoning have already sent
+            # it token by token, so re-emitting the finished block here would
+            # show the same thinking twice. Adapters that cannot stream it
+            # (no reasoning channel on the wire) still surface it this way,
+            # which is why the branch stays.
+            if isinstance(assistant_msg, dict) and not self._streamed_reasoning:
                 deliberation = assistant_msg.get("reasoning")
                 if deliberation:
                     self.callbacks.on_reasoning(str(deliberation))
+            self._streamed_reasoning = False
 
             # The post-tool nudge (below) is synthetic — once the model
             # has seen it, take it back off the history so the visible
@@ -683,8 +701,10 @@ class JaegerAgent:
                 if assistant_msg.get("finish_reason") == "thinking_exhausted":
                     note = (
                         "[the model spent its entire output budget "
-                        "thinking and never reached an answer — ask "
-                        "more narrowly, or raise model.max_tokens]"
+                        "thinking and never reached an answer — the task "
+                        "is incomplete. Adjust the active model's output "
+                        "budget (external_model.max_tokens for cloud/API "
+                        "models; model.max_tokens for in-process models).]"
                     )
                     exhausted = {**assistant_msg, "content": note}
                     self._append_message(exhausted)
@@ -973,6 +993,9 @@ class JaegerAgent:
         """Inject one high-confidence recipe before the first model step."""
         import os
 
+        query = self.__dict__.pop("_skill_route_query", user_message)
+        if not query:
+            return user_message
         if os.environ.get("JAEGER_AUTO_SKILLS", "1").strip() == "0":
             return user_message
         try:
@@ -981,7 +1004,7 @@ class JaegerAgent:
                 return user_message
             from jaeger_agent.skill_registry.playbook_skills import match_playbook
             matched, score, reason = match_playbook(
-                user_message,
+                query,
                 available_tools={t.name for t in self._all_tools},
             )
             try:
@@ -1685,6 +1708,15 @@ class JaegerAgent:
                         on_delta=(
                             self.callbacks.on_stream_delta
                             if self.callbacks.stream_delta is not None
+                            else None
+                        ),
+                        # Deliberation, streamed on its own channel as it
+                        # arrives. Without this a surface got the whole answer
+                        # before any of the thinking behind it — see
+                        # _streamed_reasoning below.
+                        on_reasoning=(
+                            self._emit_streamed_reasoning
+                            if self.callbacks.reasoning is not None
                             else None
                         ),
                     )

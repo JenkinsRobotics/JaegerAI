@@ -176,8 +176,19 @@ def test_agent_defaults_to_ledger_executor():
     assert isinstance(outer, HookedToolExecutor)
     assert isinstance(outer._inner, CheckpointingToolExecutor)
     assert isinstance(outer._inner._inner, LedgerToolExecutor)
+    # A run must exist DURING the turn — the ledger needs one to claim keys —
+    # and an ephemeral run (one the agent opened for itself, because no host
+    # bound one) must be released at the end, or its id leaks into the next
+    # turn. This asserted ``agent.run_id`` after the turn, which contradicts
+    # that release and had been failing since it was introduced.
+    seen: list[object] = []
+    original_bind = agent.bind_run
+    agent.bind_run = lambda run_id: (seen.append(run_id), original_bind(run_id))[1]
+
     assert agent.run_turn("hello") == "ok"
-    assert agent.run_id
+
+    assert any(r for r in seen), "no run was opened for the turn"
+    assert agent.run_id is None, "an ephemeral run must be released at turn end"
 
 
 

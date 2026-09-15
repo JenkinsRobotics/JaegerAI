@@ -2,7 +2,41 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
+
+os.environ.setdefault("JAEGER_NO_GUI", "1")
+os.environ.setdefault("JAEGER_NO_ATTACH", "1")
+
+
+@pytest.fixture(autouse=True)
+def _agent_state_outside_the_repo(tmp_path):
+    """Run this suite from a temp directory, not the checkout.
+
+    ``DefaultWorkspace`` roots at ``<cwd>/.jaeger_agent`` deliberately — "a
+    robot's workspace lives with the robot's code" — so the default is right
+    and is not what changes here. What was wrong is the CWD: tests that build
+    an agent without passing ``root=`` inherited the repository root, and the
+    suite wrote logs, memory, skills and a workspace straight into the
+    checkout. That is the in-repo runtime state ``AGENTS.md`` forbids, and
+    ``test_repo_root_has_zero_runtime_junk`` fails on it.
+
+    It went unseen because this suite was not in ``testpaths``: nothing ran it
+    by default, so nothing checked the tree afterwards.
+
+    Per-test, not per-session: a session-scoped version does not restore the
+    directory until the whole run ends, so the application suite executing
+    afterwards inherited this temp CWD and failed.
+    """
+    previous = Path.cwd()
+    os.chdir(tmp_path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 _registry_snapshot: dict | None = None

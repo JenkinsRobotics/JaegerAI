@@ -13,7 +13,8 @@ metadata:
     category: software-development
     related_skills:
     - browser
-    version: 2.0.0
+    - jaeger-webui
+    version: 2.2.0
     platforms:
     - linux
     - macos
@@ -45,6 +46,10 @@ browser(action="back")                      go back
 ```
 Plus file tools for state: `append_file`, `write_file`, `read_file`.
 
+QA ALWAYS RUNS IN THE AGENT'S OWN AUTOMATION BROWSER (`browser`) — never
+`open_on_host` (that opens the USER's real browser, hijacks their session,
+and can crash it).
+
 ## SOP (phased — never skip)
 
 PHASE 1 — PLAN: from the user's scope, list the pages/flows to test (home, nav,
@@ -73,8 +78,15 @@ then `write_file("workspace/qa_report.md", …)`.
 ## ERROR HATCH
 - A page won't load / element not found twice -> snapshot again for fresh
   element refs; don't retry the same stale ref a third time.
+- TargetClosedError (page/context/browser closed) -> the session is dead:
+  `browser(action="open", url=...)` again and snapshot BEFORE any click/type.
+  NEVER retry fill/click on a closed page — that is what crashed the run.
+- HTTP 200 / health-ok / a process listening is NOT a passing result. Snapshot
+  the live page. A "different version" / "hard refresh" / "hard reset" banner
+  is a Critical Functional bug — the site is still broken; do not call it fixed.
 - Console/JS errors are high-value findings — log them, don't skip.
 
 ## DONE WHEN
 `workspace/qa_report.md` exists with an executive summary (issue counts by
-severity) + one section per bug. Then tell the user where the report is.
+severity) + one section per bug. The live snapshot must not show a blocking
+recovery/version-skew banner. Then tell the user where the report is.

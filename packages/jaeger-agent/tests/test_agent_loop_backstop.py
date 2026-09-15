@@ -154,7 +154,7 @@ def test_total_budget_warning_arrives_before_hard_cap():
     warning = tool_budget_warning(WARN_TOOL_CALLS)
     assert warning is not None
     assert str(MAX_TOOL_CALLS - WARN_TOOL_CALLS) in warning
-    assert "produce the best final answer" in warning
+    assert "checkpoint the same task" in warning
     assert tool_budget_warning(MAX_TOOL_CALLS) is None
 
 

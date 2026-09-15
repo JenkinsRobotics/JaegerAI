@@ -704,8 +704,14 @@ class ContextGuard:
         if len(serialised) <= cap:
             return result, False
 
-        preview = serialised[: self.budget.preview_chars]
-        artifact_path = self._persist_artifact(serialised)
+        # File reads already have a source path and paging metadata. Persist
+        # their text directly: serializing another read envelope creates an
+        # endless JSON-inside-JSON chain when the artifact is read next.
+        file_result = (isinstance(result, dict) and result.get("read") is True
+                       and isinstance(result.get("content"), str))
+        artifact_body = result["content"] if file_result else serialised
+        preview = artifact_body[: self.budget.preview_chars]
+        artifact_path = self._persist_artifact(artifact_body)
         marker_msg = (
             f"\n\n[result truncated — original was {len(serialised)} chars "
             f"({len(serialised) // max(1, int(self.budget.chars_per_token))} "
@@ -721,12 +727,18 @@ class ContextGuard:
                 "original_chars": len(serialised),
                 "preview": preview,
             }
+            if file_result:
+                for key in ("read", "path", "offset", "column", "total_lines",
+                            "truncated", "next_offset", "next_column"):
+                    if key in result:
+                        marker_dict[key] = result[key]
             if artifact_path:
                 marker_dict["artifact_path"] = str(artifact_path)
                 marker_dict["hint"] = (
                     "Full result persisted — call read_file with the "
-                    "artifact_path if you need the bytes the preview "
-                    "cut off."
+                    "artifact_path and a small limit (e.g. 40 lines). "
+                    "Page using next_offset/next_column; do not read the "
+                    "whole artifact repeatedly."
                 )
             return marker_dict, True
         return preview + marker_msg, True

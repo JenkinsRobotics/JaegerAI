@@ -270,3 +270,13 @@ __all__ = [
     "PromptMode",
     "PROMPT_FRAGMENTS",
 ]
+
+
+def build_system_prompt(layout: "InstanceLayout") -> str:
+    """Assemble the live-agent system prompt — ``assemble_prompt(mode="agent")``.
+
+    Kept as a named entry because the live turn calls it on every request and
+    the explicit mode is easy to get wrong. New code can call
+    :func:`assemble_prompt` directly.
+    """
+    return assemble_prompt(layout, mode="agent")

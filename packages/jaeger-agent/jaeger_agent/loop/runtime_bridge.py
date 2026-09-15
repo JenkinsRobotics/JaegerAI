@@ -144,6 +144,7 @@ def _adapter_for_client(
         model = getattr(ext, "model", "")
         api_key = getattr(client, "_api_key", "") or ""
         timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0)
+        max_tokens = int(getattr(ext, "max_tokens", 4096) or 4096)
         if provider == "cli":
             return CliBackendAdapter(
                 backend_id=model,
@@ -154,6 +155,7 @@ def _adapter_for_client(
                 api_key=api_key,
                 model=model,
                 timeout_s=timeout_s,
+                max_tokens=max_tokens,
             )
         # Everything else (openai, gemini, ollama, ollama-cloud,
         # lmstudio) rides the OpenAI-compat surface.
@@ -164,6 +166,7 @@ def _adapter_for_client(
             base_url=getattr(ext, "base_url", None),
             num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
+            max_tokens=max_tokens,
         )
 
     # Unknown client shape — caller should have caught this; raise here
@@ -193,6 +196,7 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
     primary_provider = str(getattr(ext, "provider", "") or "openai")
     api_key = getattr(client, "_api_key", "") or ""
     timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0) if ext else 60.0
+    max_tokens = int(getattr(ext, "max_tokens", 4096) or 4096)
     num_ctx = getattr(client, "num_ctx", None)
     primary_base = getattr(ext, "base_url", None) if ext is not None else None
     out: list[ProviderAdapter] = []
@@ -214,12 +218,14 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
         elif provider == "anthropic":
             out.append(AnthropicAdapter(
                 api_key=api_key, model=model, timeout_s=timeout_s,
+                max_tokens=max_tokens,
             ))
         else:
             out.append(OpenAIAdapter(
                 provider=provider, model=model, api_key=api_key,
                 base_url=base_url or None, num_ctx=num_ctx,
                 timeout_s=timeout_s,
+                max_tokens=max_tokens,
             ))
     return out
 

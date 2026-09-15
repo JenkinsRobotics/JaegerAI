@@ -1,19 +1,35 @@
 """``OpenAIAdapter`` — every OpenAI-compatible backend in one class.
 
-One adapter, five backends. The chat-completions wire format is
-identical across:
+Named for the **wire protocol, not the vendor.** "OpenAI-compatible" is the
+industry term for the ``POST /v1/chat/completions`` shape, and nine of the ten
+backends below are not OpenAI. Ollama, vLLM, LM Studio, Groq, DeepSeek,
+Together and OpenRouter each document their own API as OpenAI-compatible, so
+this is the name a reader coming from any of their docs will look for. If you
+are running a local model, you are running it through this file.
 
-  • OpenAI itself (api.openai.com)
-  • Google Gemini's OpenAI-compatible endpoint
-    (generativelanguage.googleapis.com/v1beta/openai/)
-  • Ollama Cloud (ollama.com/v1) — hosted, API-key required
-  • Local Ollama (localhost:11434/v1) — placeholder key accepted
-  • LM Studio (localhost:1234/v1) — placeholder key accepted
+The ten providers in ``KNOWN_PROVIDERS``:
 
-The differences are at construction time (base URL + how the API key
-is sourced), not in the request shape. So one adapter handles all
-five — the ``provider`` slug is recorded for diagnostics and to pick
-the right placeholder key when a real one isn't required.
+  • ``openai``        OpenAI itself (api.openai.com)
+  • ``gemini``        Google's compat endpoint
+                      (generativelanguage.googleapis.com/v1beta/openai/)
+  • ``openrouter``    multi-model broker
+  • ``groq``          hosted inference
+  • ``deepseek``      hosted; streams reasoning as ``reasoning_content``
+  • ``together``      hosted inference
+  • ``ollama-cloud``  ollama.com/v1 — hosted, real API key required
+  • ``ollama``        localhost:11434/v1 — placeholder key accepted
+  • ``lmstudio``      localhost:1234/v1 — placeholder key accepted
+  • ``vllm``          self-hosted server — placeholder key accepted
+
+The differences are at construction time (base URL + how the API key is
+sourced), not in the request shape. So one adapter handles all ten — the
+``provider`` slug is recorded for diagnostics and to pick the right
+placeholder key when a real one isn't required. Adding an eleventh
+OpenAI-compatible host means adding a slug, not a file.
+
+``local_llama.py`` subclasses this adapter rather than reimplementing the
+protocol: llama.cpp also speaks chat-completions, and only its model-loading
+and ``<think>``-block handling differ.
 
 Wire-format quirks vs Anthropic, all handled below:
 
@@ -24,6 +40,9 @@ Wire-format quirks vs Anthropic, all handled below:
     not embedded in a user turn (Anthropic's pattern).
   • System prompt rides inside ``messages`` as ``role="system"`` rather
     than a separate top-level parameter.
+  • Reasoning is a separate delta channel, not a prefix on the content:
+    o-series sends ``delta.reasoning``, DeepSeek-R1 sends
+    ``delta.reasoning_content``. Both are streamed via ``on_reasoning``.
 """
 
 from __future__ import annotations
@@ -339,6 +358,7 @@ class OpenAIAdapter(ProviderAdapter):
         join_on_abandon: float = 0.0,
         progress: CallProgress | None = None,
         on_delta: Any = None,
+        on_reasoning: Any = None,
         **kwargs: Any,
     ) -> Any:
         """Run one ``chat.completions.create`` request, interrupt-aware.
@@ -385,7 +405,7 @@ class OpenAIAdapter(ProviderAdapter):
         def _streamed() -> Any:
             stream = client.chat.completions.create(**api_kwargs)
             return _aggregate_chat_stream(
-                stream, interrupt_event, beacon, on_delta,
+                stream, interrupt_event, beacon, on_delta, on_reasoning,
             )
 
         started = time.perf_counter()
@@ -520,6 +540,7 @@ def _aggregate_chat_stream(
     interrupt_event: threading.Event,
     progress: CallProgress,
     on_delta: Any = None,
+    on_reasoning: Any = None,
 ) -> dict[str, Any]:
     """Drain a chat-completions stream into the non-streaming response
     shape ``parse_response`` reads.
@@ -568,6 +589,16 @@ def _aggregate_chat_stream(
                     reason_piece = _get(delta, "reasoning_content")
                 if reason_piece:
                     reasoning_parts.append(str(reason_piece))
+                    # Reasoning is a SEPARATE channel, streamed as it arrives —
+                    # the same treatment `content` gets two lines up, and what
+                    # every reasoning-model API does (OpenAI o-series
+                    # `reasoning`, DeepSeek-R1 `reasoning_content`, Anthropic
+                    # thinking blocks). Accumulating it and emitting one lump
+                    # after the step finished meant a surface received the
+                    # answer first and the thinking behind it afterwards, which
+                    # is backwards and unreadable.
+                    if on_reasoning is not None:
+                        on_reasoning(str(reason_piece))
                 for tc in _get(delta, "tool_calls") or []:
                     idx = _get(tc, "index")
                     idx = 0 if idx is None else int(idx)
