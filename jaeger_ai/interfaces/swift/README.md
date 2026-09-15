@@ -5,13 +5,10 @@
 > package; `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
 > terminal first-class. (`launch.py` was removed in 0.7.)
 
-One Swift process owns the tray card, the chat window, the avatar orb,
+One Swift process owns the tray card, the native chat window, the avatar orb,
 the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
-(the Python NDJSON stdio child, `jaeger_os/interfaces/bridge.py`) and
-speaks **protocol v1** — the single wire contract in
-`jaeger_os/contract/protocol.py`, pinned cross-language by
-`protocol_v1_fixtures.json` (Python asserts its builders against it;
-`ProtocolFixtureTests` decodes the same bytes here).
+(the Python NDJSON stdio child) and speaks **protocol v1**. Safari WebUI at
+`jaeger webui url` is a separate browser chat (same agent, different renderer).
 
 ## Build, test, run
 
@@ -43,7 +40,7 @@ Sources/JaegerAI/
     AgentBridge.swift     app-facing state machine: state / agentState /
                           status (character identity) / isBusy / requests
   MenuCard/             tray dropdown card + settings HUD (+ store)
-  ChatWindow/           chat surface: controller · view · transcript rows
+  ChatWindow/           native chat: controller · view · transcript rows
                         · view-model (send pipeline, event chips)
   Avatar/               VoiceOrbView (TimelineView+Canvas spectrum ring)
                         + orb-only and orb+chat window controllers

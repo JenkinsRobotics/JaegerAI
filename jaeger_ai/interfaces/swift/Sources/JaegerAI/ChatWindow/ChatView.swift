@@ -589,6 +589,14 @@ struct ChatView: View {
             .popover(isPresented: $showHistory, arrowEdge: .bottom) {
                 historyList
             }
+
+            Button(action: openWebChat) {
+                Image(systemName: "safari")
+                    .font(.system(size: 13))
+                    .foregroundColor(Term.inkDim)
+            }
+            .buttonStyle(.plain)
+            .help("Open WebUI chat in Safari")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -1367,6 +1375,13 @@ struct ChatView: View {
 
     private func startNewChat() {
         Task { await chat.newChat() }
+    }
+
+    private func openWebChat() {
+        Task {
+            let url = (try? await WebUIEndpoint.resolve()) ?? URL(string: "http://127.0.0.1:8790/")!
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func openHistory() {

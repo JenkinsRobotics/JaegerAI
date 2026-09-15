@@ -38,5 +38,12 @@
 	<string>JaegerAI uses your camera only when you enable visual interaction with your agent.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>JaegerAI uses on-device speech recognition to transcribe dictation locally.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

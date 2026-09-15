@@ -49,6 +49,7 @@ struct MenuCard: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             actionBar
+            ServerControlsView()
         }
         .padding(14)
         .frame(width: 300)

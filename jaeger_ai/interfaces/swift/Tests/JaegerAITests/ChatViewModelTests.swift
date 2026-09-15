@@ -59,6 +59,15 @@ final class ChatViewModelTests: XCTestCase {
         XCTAssertNotEqual(a, b)
     }
 
+    func testWebUIProfileCookieUsesHostAndJaegerProfile() {
+        let url = URL(string: "http://100.74.2.15:8790/")!
+        let cookie = WebUIChatController.profileCookie(for: url)
+        XCTAssertEqual(cookie?.name, "hermes_profile")
+        XCTAssertEqual(cookie?.value, "jaeger")
+        XCTAssertEqual(cookie?.domain, "100.74.2.15")
+        XCTAssertEqual(cookie?.path, "/")
+    }
+
     // MARK: SessionSummary.displayTitle — title > preview > placeholder
 
     func testDisplayTitlePrefersTitleOverPreview() {

@@ -35,6 +35,9 @@ let package = Package(
                 // ``Bundle.module``; load with ``NSImage(named:)``
                 // or ``Image("jaeger_icon_22", bundle: .module)``.
                 .process("Resources"),
+            ],
+            linkerSettings: [
+                .linkedFramework("WebKit"),
             ]
         ),
         // The boundary's regression net: decodes every frame in
