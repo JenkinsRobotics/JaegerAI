@@ -6,9 +6,13 @@ agreement; prose, missing votes, and model-generated evidence labels cannot.
 import hashlib
 import json
 import re
+from jaeger_ai.contract.frameworks import DEBATE_MEMBERS
+
 from .progress import budgets
 
-MEMBERS = ('jaeger', 'hermes', 'openclaw')
+#: Who sits at the table. Defined by the contract as the runtimes Roundtable
+#: composes, so adding a framework to the debate is a one-line contract edit.
+MEMBERS = DEBATE_MEMBERS
 MODES = {
     'ask': 'Independent answers, one discussion, then a recorded decision.',
     'collaborate': 'Volunteer for bounded tasks, assign owners, combine results.',

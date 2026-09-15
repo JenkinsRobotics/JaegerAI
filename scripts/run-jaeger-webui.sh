@@ -49,8 +49,30 @@ fi
 # Shared Hermes profiles + current-schema state.db for the :8790 vendor home.
 # Leftover real profile dirs are renamed aside and replaced with a symlink.
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
-  "import os; from pathlib import Path; from jaeger_ai.features.hermes_webui.profile_layout import prepare_vendor_webui_home; prepare_vendor_webui_home(Path(os.environ['HERMES_HOME']))"
+  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import prepare_vendor_webui_home; prepare_vendor_webui_home(Path(os.environ['HERMES_HOME']))"
 
+
+# Warm the model catalogue in the background before anyone opens the page.
+#
+# The stock WebUI builds it lazily on first request and that build costs ~4.2s
+# (measured; warm is ~0.7s). It normally lands on the operator's FIRST send,
+# which reads as the UI freezing just as you hit Enter. Paying it here costs
+# nothing — no one is waiting yet.
+#
+# Deliberately a plain HTTP call from the launcher, not a change to the WebUI:
+# the vendored app stays stock so it can be pulled from upstream.
+(
+  for _ in $(seq 1 60); do
+    if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${HERMES_WEBUI_PORT}/" 2>/dev/null; then
+      curl -fsS -m 90 -o /dev/null "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/models" 2>/dev/null || true
+      # The release-check banner is the same shape: a ~4s network call the
+      # stock UI fires on first load. Warmed here for the same reason.
+      curl -fsS -m 90 -o /dev/null -X POST "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/updates/check" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+) &
 
 cd "$webui_root"
 exec "$python_exe" "$webui_root/server.py"

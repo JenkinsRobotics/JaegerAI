@@ -7,8 +7,9 @@ import sqlite3
 import time
 from pathlib import Path
 
+from jaeger_ai.contract.frameworks import display_name
 from jaeger_ai.core.sessions import SessionStore
-from jaeger_ai.features.hermes_webui.session_unify import (
+from jaeger_ai.features.webui.service.session_unify import (
     ROLLBACK_MIN_KEEP,
     infer_session_profile,
     profile_badge_for_session,
@@ -22,7 +23,7 @@ from jaeger_ai.features.hermes_webui.session_unify import (
     sync_jaeger_sessions_to_hermes_webui,
     title_from_text,
 )
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs, TERMINAL
+from jaeger_ai.core.frameworks.native_runs import Runs, TERMINAL
 
 
 def _hermes_db(path: Path, rows: list[tuple]) -> None:
@@ -138,7 +139,7 @@ def test_reconcile_stamps_ended_at_without_replay(tmp_path: Path, monkeypatch) -
     db.parent.mkdir()
     _hermes_db(db, [("web-session", "webui", "t", 2)])
     monkeypatch.setattr(
-        "jaeger_ai.features.hermes_webui.session_unify.close_reconciled_webui_session",
+        "jaeger_ai.features.webui.service.session_unify.close_reconciled_webui_session",
         lambda sid: stamp_ended_at(db, sid),
     )
     def backend(run, workspace):
@@ -207,7 +208,7 @@ def test_is_system_nudge_and_title() -> None:
 
 
 def test_profile_badge_one_library_labels() -> None:
-    assert profile_badge_for_session("dispatcher") == "Jaeger"
+    assert profile_badge_for_session("dispatcher") == display_name("jaeger")
     assert profile_badge_for_session("x", profile="default") == "Hermes Agent"
     assert profile_badge_for_session("x", profile="hermes") == "Hermes Agent"
     assert profile_badge_for_session("roundtable-hermes:abc") == "Roundtable"

@@ -15,6 +15,8 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+from jaeger_ai.contract.frameworks import display_name, is_known
+
 from ..adapter.profile_catalog import PROFILES
 
 # Canonical id → chat/profile label (matches vendor static FALLBACK maps).
@@ -22,10 +24,20 @@ PROFILE_DISPLAY_NAMES: dict[str, str] = {name: label for name, _, label in PROFI
 
 
 def profile_display_name(profile_id: str | None) -> str:
-    """Return the friendly label for a profile id (default → Hermes Agent)."""
+    """The friendly label for any spelling of a framework name.
+
+    Accepts a profile ("default"), a runtime ("hermes") or an agent id
+    ("tp:hermes") — the contract resolves all three. Before it did, passing a
+    runtime fell through to the title-case fallback below and returned
+    "Hermes" instead of "Hermes Agent", which is why callers grew their own
+    alias maps to work around it.
+
+    The fallback stays for ids that are genuinely not frameworks, such as an
+    operator-created profile.
+    """
     key = str(profile_id or "default").strip().lower() or "default"
-    if key in PROFILE_DISPLAY_NAMES:
-        return PROFILE_DISPLAY_NAMES[key]
+    if is_known(key):
+        return display_name(key)
     return key[:1].upper() + key[1:] if key else PROFILE_DISPLAY_NAMES["default"]
 
 

@@ -19,9 +19,22 @@ from .resilience import CircuitBreaker, timeout_setting, failure_category
 from .native_runs import Runs, RunsHTTP, profile_key
 
 OPENCLAW_BASE_URL = os.environ.get("OPENCLAW_ADAPTER_BASE_URL", "http://127.0.0.1:18789")
+def _openclaw_home() -> Path:
+    """OpenClaw's home, which is also the container's bind-mount source.
+
+    Under Jaeger's state root since the standalone ARES install was retired —
+    it used to sit at ``~/.ares/openclaw`` only because that is where the
+    mount happened to be pointed, and nothing about it was ever ARES state.
+    Resolved through the operator state root so a sandboxed run
+    (``JAEGER_STATE_DIR``) gets its own, exactly like every other store.
+    """
+    from jaeger_ai.core.instance.instance import operator_state_root
+    return operator_state_root() / "openclaw"
+
+
 OPENCLAW_TOKEN_FILE = Path(os.environ.get(
     "OPENCLAW_ADAPTER_TOKEN_FILE",
-    str(Path.home() / ".ares/openclaw/gateway.token"),
+    str(_openclaw_home() / "gateway.token"),
 ))
 ADAPTER_HOST = os.environ.get("OPENCLAW_ADAPTER_HOST", "0.0.0.0")
 ADAPTER_PORT = int(os.environ.get("OPENCLAW_ADAPTER_PORT", "8644"))

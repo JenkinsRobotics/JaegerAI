@@ -11,21 +11,31 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run, Runs, TERMINAL
+from jaeger_ai.contract.sessions import native_session_id
+from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL
 
 
 def canonical_profile(value: Any) -> str:
-    from .profile_catalog import PROFILES
-    name = str(value or 'jaeger').strip().lower()
-    aliases = {profile: owner for profile, owner, _ in PROFILES}
-    name = {**aliases, 'jaegerai': 'jaeger'}.get(name, name)
-    if name not in {owner for _, owner, _ in PROFILES}:
-        raise ValueError(f'No native chat backend configured for profile {name!r}')
-    return name
+    """Resolve any spelling of a framework name to its canonical runtime.
+
+    Delegates to the contract so this and the WebUI's profile list can never
+    disagree about what ``default`` means. Raises ``ValueError`` rather than
+    the contract's ``UnknownFramework`` because callers turn it into a 400.
+    """
+    from jaeger_ai.contract.frameworks import UnknownFramework, canonical_runtime
+    try:
+        return canonical_runtime(value or 'jaeger')
+    except UnknownFramework as exc:
+        raise ValueError(f'No native chat backend configured for profile {value!r}') from exc
 
 
 def native_session(profile: str, session: str) -> str:
-    return 'webui-' + profile + '-' + hashlib.sha256(session.encode()).hexdigest()[:32]
+    """The agent-side session id for a browser conversation.
+
+    Delegates to the contract so the shape stays readable by whatever lists
+    sessions later — the id is how a row's framework is recovered.
+    """
+    return native_session_id(profile, session)
 
 
 class ProfileRunner:
@@ -71,8 +81,8 @@ class ProfileRunner:
                     from jaeger_ai.features.roundtable.service import TableService
                     self.managers[profile] = TableService(root)
                 else:
-                    from jaeger_ai.interfaces.hermes_profile_adapters.hermes_native import hermes_turn
-                    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import openclaw_turn
+                    from jaeger_ai.core.frameworks.hermes_native import hermes_turn
+                    from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
                     self.managers[profile] = Runs(root, {'hermes': hermes_turn, 'openclaw': openclaw_turn}[profile])
             return self.managers[profile]
 
@@ -104,6 +114,12 @@ class ProfileRunner:
             if any(not row.get('terminal_state') for row in rows):
                 raise ValueError('This conversation already has an active run')
             if rows and rows[0].get('execution_unknown'):
+                try:
+                    self.reconcile(rows[0]['run_id'])
+                    rows = self.store.records_for_session(session)
+                except Exception:
+                    pass
+            if rows and rows[0].get('execution_unknown'):
                 raise ValueError('Native execution state is unknown; reconcile the previous run before retrying')
             def admitted(run):
                 self.store.create(run_id=run.id, session_id=session, prompt=message)
@@ -131,6 +147,31 @@ class ProfileRunner:
         if not isinstance(run, Run):
             raise ValueError('Observer restarted; native execution needs reconciliation before control')
         return run
+
+    def reconcile(self, run_id):
+        status = self.store.status(run_id)
+        profile = status.get('profile')
+        if profile not in {'hermes', 'openclaw', 'roundtable'}:
+            raise KeyError('Not a native profile run')
+        manager = self.manager(profile)
+        reconciled = None
+        if hasattr(manager, 'reconcile'):
+            try:
+                reconciled = manager.reconcile(run_id)
+            except Exception:
+                pass
+        if isinstance(reconciled, dict) and not reconciled.get('execution_unknown'):
+            terminal_st = reconciled.get('status', 'failed')
+            self.store.set_state(
+                run_id,
+                status=terminal_st,
+                terminal_state=terminal_st,
+                execution_unknown=False,
+                active_controls=[],
+                pending_approval_id=None,
+            )
+            return self.store.status(run_id)
+        return status
 
     def cancel(self, run_id):
         run = self.run(run_id)

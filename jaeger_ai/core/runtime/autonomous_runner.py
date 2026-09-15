@@ -167,6 +167,8 @@ def ensure_autonomous_ledger(text: str) -> Any:
     existing = active_ledger()
     if existing is not None:
         return existing
+    if continuation.is_continuation_prompt(text):
+        return None
     if not should_run_autonomous(text):
         return None
     from jaeger_ai.core.runtime.work_ledger import work_ledger
@@ -213,7 +215,8 @@ def harness_prompt(ledger: Any = None, *, objective: str = "") -> str:
         f"finished. Update work_ledger as you go. Call complete_task "
         f"with evidence only when every item is done."
     )
-    obj = (objective or execution.run_progress().get("objective") or "").strip()
+    obj = (objective or execution.run_progress().get("objective")
+           or (src.task_name if src is not None else "")).strip()
     if obj:
         return f"{body}\n\nThe objective still in force:\n{obj}"
     return body

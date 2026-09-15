@@ -251,9 +251,9 @@ _native_lock = threading.Lock()
 
 
 def dispatcher_turn(run, workspace=None):
-    from jaeger_ai.core.runtime.dispatcher import DispatcherStore
-    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-    store = DispatcherStore(BridgeClient().layout)
+    from jaeger_ai.features.dispatcher.store import DispatcherStore
+    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    store = DispatcherStore(jaeger_bridge().layout)
     store.repair_projections()
     run.native_session = store.route(run.session, run.message)
     return jaeger_turn(run, workspace)
@@ -273,9 +273,9 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         return profile_key("jaeger")
 
     def create_native_run(self, body):
-        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-        binding = DispatcherStore(BridgeClient().layout).overview()['dispatcher_session']
+        from jaeger_ai.features.dispatcher.store import DispatcherStore
+        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+        binding = DispatcherStore(jaeger_bridge().layout).overview()['dispatcher_session']
         if binding and (body.get('session_id') or self.headers.get('X-Hermes-Session-Id')) == binding:
             body = {**body, 'session_id': 'dispatcher'}
         return super().create_native_run(body)
@@ -294,10 +294,10 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
             if not self.profile_authorized():
                 return True
             from .conversation import Conversation
-            from jaeger_ai.core.runtime.dispatcher import DispatcherStore
-            from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+            from jaeger_ai.features.dispatcher.store import DispatcherStore
+            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
             try:
-                bridge = BridgeClient()
+                bridge = jaeger_bridge()
                 conversation = Conversation(DispatcherStore(bridge.layout), self.native_runs(),
                     lambda: bridge.query('dispatcher_conversation', timeout_s=10))
                 action = path.removeprefix('/v1/dispatcher/conversation').strip('/')
@@ -323,10 +323,10 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
             return super().native_route(method)
         if not self.profile_authorized():
             return True
-        from jaeger_ai.core.runtime.dispatcher import DispatcherStore
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+        from jaeger_ai.features.dispatcher.store import DispatcherStore
+        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
         try:
-            bridge = BridgeClient()
+            bridge = jaeger_bridge()
             store = DispatcherStore(bridge.layout)
             if method == 'GET' and path in queries:
                 result = bridge.query(queries[path], timeout_s=10)
@@ -358,7 +358,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
             return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
             try:
-                from jaeger_ai.features.hermes_webui.session_unify import sync_jaeger_sessions_to_hermes_webui
+                from jaeger_ai.features.webui.service.session_unify import sync_jaeger_sessions_to_hermes_webui
                 sync_jaeger_sessions_to_hermes_webui()
             except Exception:
                 pass

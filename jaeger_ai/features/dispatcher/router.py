@@ -54,6 +54,13 @@ def prepare_turn_text(
     The original ``user_text`` is unchanged for session transcripts —
     callers pass this prepared string only to the model loop.
     """
+    from jaeger_ai.core.runtime.continuation import is_continuation_prompt
+
+    continuing = is_continuation_prompt(user_text)
+    # Skill selection sees the request, never ledger/world scaffolding.
+    agent._skill_route_query = "" if continuing else user_text
+    if not continuing:
+        agent._task_objective = user_text
     compact_agent(agent)
     from jaeger_ai.core.runtime.autonomous_runner import conversation_only
     ledger = ledger and not conversation_only(user_text)
@@ -69,7 +76,7 @@ def prepare_turn_text(
                 parts.append(ACCEPTANCE_GUIDANCE)
         except Exception:  # noqa: BLE001 — setup must never lose the request
             pass
-    if domain and is_primary_session(session_key):
+    if domain and not continuing and is_primary_session(session_key):
         extra = domain_block(user_text, session_key=session_key)
         if extra:
             parts.append(extra)
@@ -77,12 +84,14 @@ def prepare_turn_text(
         block = context_block()
         if block:
             parts.append(block)
+    if continuing and getattr(agent, "_task_objective", ""):
+        parts.append("Original user request still in force:\n" + agent._task_objective)
     parts.append(user_text)
     # World admission sees only the original utterance, never work-ledger or
     # domain prompt scaffolding. Conversation scope is a conservative fallback
     # until authenticated ingress supplies a stronger actor mapping.
     from jaeger_agent.memory import sqlite_store
-    if sqlite_store.is_bound():
+    if sqlite_store.is_bound() and not continuing:
         from jaeger_agent.cognition.world import WorldEvent, WorldModel
         from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
         event = WorldEvent.for_session(user_text, session_key)

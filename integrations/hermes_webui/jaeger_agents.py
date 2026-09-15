@@ -11,6 +11,20 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+def runner_base() -> str:
+    """The Jaeger runner (:8791), which owns per-framework execution.
+
+    Distinct from :func:`gateway_base` (:8810). The session index lives on the
+    runner because that is the process holding the framework adapters; sending
+    it to the gateway would 404, and the two ports are one digit apart.
+    """
+    return (
+        os.environ.get("HERMES_WEBUI_RUNNER_BASE_URL")
+        or os.environ.get("JAEGER_RUNNER_BASE_URL")
+        or "http://127.0.0.1:8791"
+    ).rstrip("/")
+
+
 def gateway_base() -> str:
     return (
         os.environ.get("JAEGER_GATEWAY_URL")
@@ -19,10 +33,11 @@ def gateway_base() -> str:
     ).rstrip("/")
 
 
-def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
+def _proxy(handler, method: str, path: str, body: bytes | None = None,
+           base: str | None = None) -> bool:
     from api.helpers import bad, j
 
-    url = f"{gateway_base()}{path}"
+    url = f"{base or gateway_base()}{path}"
     data = body if method.upper() in {"POST", "PUT", "PATCH"} else None
     req = Request(url, data=data, method=method.upper())
     req.add_header("Accept", "application/json")
@@ -62,6 +77,12 @@ def route(handler, parsed, method: str) -> bool:
         _sessions_route = None
     if _sessions_route is not None and _sessions_route(handler, parsed, method):
         return True
+
+    # Per-framework session index — each backend's own conversations, split by
+    # where they were started. Served by the RUNNER, not the gateway.
+    if method == "GET" and path in {"/api/profile-sessions", "/v1/profile-sessions"}:
+        qs = ("?" + parsed.query) if parsed.query else ""
+        return _proxy(handler, "GET", f"/v1/profile-sessions{qs}", base=runner_base())
 
     if method == "GET" and path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""

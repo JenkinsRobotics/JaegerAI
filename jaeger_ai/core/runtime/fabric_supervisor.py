@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 from .agent_workspaces import container_name
 
+from jaeger_ai.contract.frameworks import FRAMEWORKS
 from jaeger_ai.core.instance.instance import operator_state_root
 
 FAILURE_THRESHOLD = 3
@@ -92,8 +93,8 @@ def _kickstart(label: str) -> bool:
 
 def _bridge_ready() -> bool:
     try:
-        from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-        result = BridgeClient().health()
+        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+        result = jaeger_bridge().health()
         return bool(result.get("ok") and result.get("ready", {}).get("agent") == "ready")
     except Exception:  # noqa: BLE001
         return False
@@ -102,7 +103,7 @@ def _bridge_ready() -> bool:
 def _start_jaeger_gateway() -> bool:
     """Restore Jaeger's own MCP/A2A proxy, never the ARES host-tools proxy."""
     try:
-        from jaeger_ai.features.gateway.service import start, status
+        from jaeger_ai.features.agentgateway.service import start, status
         current = status()
         if current.get("running") and not (_tcp("127.0.0.1", 8811) and _tcp("127.0.0.1", 8812)):
             # A half-responsive gateway may still own an in-flight MCP/A2A
@@ -317,7 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
         "--repair",
-        choices=("jaeger", "hermes", "openclaw", "roundtable", "a2a", "honcho", "ollama"),
+        # Frameworks come from the contract; the rest are plain services.
+        choices=tuple(f.runtime for f in FRAMEWORKS) + ("a2a", "honcho", "ollama"),
         help="explicitly run one component's bounded recovery action",
     )
     args = parser.parse_args(argv)

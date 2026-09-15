@@ -1,6 +1,6 @@
 """Install and inspect the shared Hermes WebUI profile adapter services.
 
-Run with ``python -m jaeger_ai.interfaces.hermes_profile_adapters.setup install``.
+Run with ``python -m jaeger_ai.core.frameworks.setup install``.
 The adapters remain package-owned; only generated launchd definitions and
 machine-specific Hermes profile state are written outside the repository.
 """
@@ -24,7 +24,6 @@ SERVICES = {
 }
 SUPERVISOR_LABEL = "com.jenkinsrobotics.agent-fabric-supervisor"
 SUPERVISOR_MODULE = "jaeger_ai.core.runtime.fabric_supervisor"
-HOST_TOOLS_GATEWAY_LABEL = "com.jenkinsrobotics.ares-agentgateway"
 DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
 AVAILABLE_AGENT_MODELS = (DEFAULT_AGENT_MODEL, "glm-5.3:cloud")
 OPENCLAW_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
@@ -33,13 +32,16 @@ JAEGER_MCP_URL = "http://192.168.64.1:8811/mcp"
 JAEGER_A2A_URL = "http://192.168.64.1:8812"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 HONCHO_WORKSPACE = "jenkins-robotics"
+from jaeger_ai.contract.frameworks import SOLO_RUNTIMES
 from jaeger_ai.core.instance.instance import operator_state_root
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 JAEGER_RUNTIME_ROOT = operator_state_root() / "shared"
 JAEGER_INSTANCE_ROOT = operator_state_root() / "instances" / "jaeger"
 
-WORKSPACE_IDENTITIES = ("jaeger", "hermes", "openclaw")
+#: Frameworks that answer on their own and therefore need their own
+#: workspace. Roundtable is excluded by construction — it delegates.
+WORKSPACE_IDENTITIES = SOLO_RUNTIMES
 
 WEBUI_WORKSPACES = (
     ("/workspace", "General"),
@@ -66,14 +68,14 @@ def _shared_workspace_roots(home: Path | None = None) -> list[Path]:
 
 
 def _configure_workspace_roots(home: Path | None = None) -> Path:
-    """Add shared roots to ARES's identity-scoped host capability registry.
+    """Add shared roots to the identity-scoped host capability registry.
 
     Existing capabilities and identity-specific roots are preserved. Network
     roots remain registered while a share is offline and become usable again
     when macOS remounts it.
     """
     home = (home or Path.home()).expanduser().resolve()
-    grants = home / ".ares" / "capabilities" / "grants.json"
+    grants = home / ".jaeger" / "capabilities" / "grants.json"
     grants.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     document = (
         json.loads(grants.read_text(encoding="utf-8"))
@@ -187,7 +189,7 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text.rstrip() + "\n", encoding="utf-8")
 
-    openclaw_path = home / ".ares" / "openclaw" / "openclaw.json"
+    openclaw_path = home / ".jaeger" / "openclaw" / "openclaw.json"
     if openclaw_path.exists():
         document = json.loads(openclaw_path.read_text(encoding="utf-8"))
         document.setdefault("gateway", {}).pop("mcp", None)
@@ -204,32 +206,11 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
         temporary.chmod(0o600)
         os.replace(temporary, openclaw_path)
 
-    # Keep the upstream ARES checkout clean. Its unchanged capability server
-    # recognizes the Hermes service identity; the Jaeger-owned deployment
-    # config maps OpenClaw's authorized gateway target onto that isolated
-    # service account (both identities receive the same explicit grants).
-    gateway_path = home / ".ares" / "gateway" / "config.yaml"
-    if gateway_path.exists():
-        import yaml
+    # The ARES host-tools gateway was retired with the standalone ARES install
+    # (2026-09-15). OpenClaw reaches host capabilities through Jaeger's own
+    # agentgateway on :8811 instead; there is no second gateway config to
+    # rewrite, and :8813 was never on the chat spine.
 
-        gateway = yaml.safe_load(gateway_path.read_text(encoding="utf-8")) or {}
-        for target in gateway.get("mcp", {}).get("targets", []):
-            if target.get("name") == "host-openclaw":
-                stdio = target.setdefault("stdio", {})
-                venv_py = home / ".jaeger" / "venv" / "bin" / "python"
-                if not venv_py.exists():
-                    venv_py = REPO_ROOT / ".venv" / "bin" / "python"
-                stdio["cmd"] = str(venv_py)
-                stdio["args"] = [str(REPO_ROOT / "scripts" / "run-host-capability-server.py")]
-                env = stdio.setdefault("env", {})
-                env["ARES_CAPABILITY_IDENTITY"] = "hermes"
-                env["OLLAMA_BASE_URL"] = "http://10.15.0.239:11434"
-                env["HONCHO_WORKSPACE"] = HONCHO_WORKSPACE
-                env["HONCHO_API_URL"] = HONCHO_LAN_URL
-        temporary = gateway_path.with_suffix(".yaml.tmp")
-        temporary.write_text(yaml.safe_dump(gateway, sort_keys=False), encoding="utf-8")
-        temporary.chmod(0o600)
-        os.replace(temporary, gateway_path)
 
 
 def _configure_honcho(home: Path | None = None) -> list[Path]:
@@ -312,7 +293,7 @@ def _configure_agent_models(home: Path | None = None) -> None:
         "external_model", "base_url", DEFAULT_OLLAMA_BASE_URL,
     )
 
-    openclaw_path = home / ".ares" / "openclaw" / "openclaw.json"
+    openclaw_path = home / ".jaeger" / "openclaw" / "openclaw.json"
     if openclaw_path.exists():
         document = json.loads(openclaw_path.read_text(encoding="utf-8"))
         provider_name = "ollama-cloud-via-host"
@@ -393,19 +374,6 @@ def _plist(label: str, module: str) -> bytes:
     })
 
 
-def _host_tools_gateway_plist() -> bytes:
-    logs = JAEGER_RUNTIME_ROOT / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    return plistlib.dumps({
-        "Label": HOST_TOOLS_GATEWAY_LABEL,
-        "ProgramArguments": ["/bin/zsh", str(REPO_ROOT / "scripts" / "run-host-tools-gateway.sh")],
-        "RunAtLoad": True,
-        "KeepAlive": True,
-        "StandardOutPath": str(logs / f"{HOST_TOOLS_GATEWAY_LABEL}.log"),
-        "StandardErrorPath": str(logs / f"{HOST_TOOLS_GATEWAY_LABEL}.err.log"),
-    })
-
-
 def install(bridge_host: str) -> int:
     grants = _configure_workspace_roots()
     print(f"workspace access: updated {grants}")
@@ -420,21 +388,9 @@ def install(bridge_host: str) -> int:
     domain = f"gui/{os.getuid()}"
     agents = Path.home() / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
-    host_gateway_path = agents / f"{HOST_TOOLS_GATEWAY_LABEL}.plist"
-    host_gateway_path.write_bytes(_host_tools_gateway_plist())
-    subprocess.run(["/bin/launchctl", "bootout", domain, str(host_gateway_path)], capture_output=True)
-    result = subprocess.run(
-        ["/bin/launchctl", "bootstrap", domain, str(host_gateway_path)],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode:
-        print(f"host tools gateway: launch failed: {result.stderr.strip()}", file=sys.stderr)
-        return 1
-    print("host tools gateway: installed from JaegerAI")
     for profile, (module_name, port) in SERVICES.items():
         label = f"com.jenkinsrobotics.{profile}-hermes-adapter"
-        module = f"jaeger_ai.interfaces.hermes_profile_adapters.{module_name}"
+        module = f"jaeger_ai.core.frameworks.{module_name}"
         path = agents / f"{label}.plist"
         path.write_bytes(_plist(label, module))
         _set_gateway_url(profile, port, bridge_host)

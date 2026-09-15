@@ -45,7 +45,7 @@ def prepare():
                  'jaeger_gateway_console.js',
                  'jaeger_app_icon_16.png', 'jaeger_app_icon_32.png', 'jaeger_app_icon_256.png'):
         shutil.copy2(ROOT / 'jaeger_ai/assets' / name, extensions / name)
-    shutil.copy2(ROOT / 'jaeger_ai/features/hermes_webui/dispatcher_sidecar.py',
+    shutil.copy2(ROOT / 'jaeger_ai/features/dispatcher/sidecar.py',
                  destination / 'jaeger_dispatcher_sidecar.py')
     init = destination / 'docker_init.bash'
     marker = 'cd /app; python server.py || error_exit "hermes-webui failed or exited with an error"'

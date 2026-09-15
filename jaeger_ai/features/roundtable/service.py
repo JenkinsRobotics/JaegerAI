@@ -11,13 +11,13 @@ import threading
 import time
 import uuid
 
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run, Runs, TERMINAL, jaeger_turn, jaeger_reconcile
-from jaeger_ai.interfaces.hermes_profile_adapters.hermes_native import hermes_turn
-from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import openclaw_turn
-from jaeger_ai.interfaces.hermes_profile_adapters.resilience import ClassifiedError, failure_category
+from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL, jaeger_turn, jaeger_reconcile
+from jaeger_ai.core.frameworks.hermes_native import hermes_turn, hermes_reconcile
+from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
+from jaeger_ai.core.frameworks.resilience import ClassifiedError, failure_category
 from .policy import MEMBERS, COLLABORATION_TASKS, assign_owners, plan, chair_for, decide, peer_context
 from .progress import Progress
-from jaeger_ai.interfaces.hermes_profile_adapters.table_store import TableStore
+from jaeger_ai.core.frameworks.table_store import TableStore
 
 
 def member_session(table, member):
@@ -55,9 +55,10 @@ class TableService:
         selected = backends or {'jaeger': jaeger_turn, 'hermes': hermes_turn, 'openclaw': openclaw_turn}
         if set(selected) != set(MEMBERS):
             raise ValueError('All native member backends are required')
+        reconcilers = {'jaeger': jaeger_reconcile, 'hermes': hermes_reconcile}
         # Hermes deliberately reuses the existing Roundtable receipt directory.
         self.members = {member: Runs(root / (member + '-runs'), backend,
-            reconciler=jaeger_reconcile if member == 'jaeger' and backends is None else None)
+            reconciler=reconcilers.get(member) if backends is None else None)
             for member, backend in selected.items()}
         self.runs = Runs(root / 'table-runs', self._turn, run_type=TableRun,
                          reconciler=self._reconcile_native)
@@ -70,7 +71,7 @@ class TableService:
         # per-session workspace negotiation. The UI must omit unsupported values.
         if workspace is not None:
             raise ValueError('Native Roundtable workspace override is not negotiated yet')
-        from jaeger_ai.interfaces.hermes_profile_adapters.run_input import normalize_input
+        from jaeger_ai.core.frameworks.run_input import normalize_input
         text, attachments = normalize_input(message)
         preferences = self.store.preferences(session)
         plan(text or 'Inspect the attached files.', options, preferences)
@@ -100,8 +101,13 @@ class TableService:
             except KeyError:
                 raise RuntimeError('Member dispatch remains unknown') from None
             value = child.snapshot() if isinstance(child, Run) else child
-            if (isinstance(child, Run) and child.worker_active) or value['execution_unknown'] or value['status'] not in TERMINAL:
-                raise RuntimeError('A native member is still active or unknown; no replay is safe')
+            if value.get('execution_unknown') and self.members[attempt['member']].reconciler is not None:
+                try:
+                    value = self.members[attempt['member']].reconcile(attempt['id'])
+                except Exception:
+                    pass
+            if (isinstance(child, Run) and child.worker_active) or value.get('status') not in TERMINAL:
+                raise RuntimeError('A native member is still active; no replay is safe')
         return {**native, 'execution_unknown': False, 'status': 'failed',
                 'source': 'all_native_member_terminal_receipts', 'output': turn['output'] or ''}
 
