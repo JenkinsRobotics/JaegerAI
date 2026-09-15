@@ -8,12 +8,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from jaeger_ai.contract.frameworks import FRAMEWORKS
 from jaeger_ai.core.instance.instance import operator_state_root
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STATE_PATH = operator_state_root() / "shared/container-workspaces.json"
 LEGACY_CONTAINERS = {"hermes": "hermes-webui-hermes-webui", "openclaw": "ares-openclaw"}
-MANAGED_CONTAINERS = {"hermes": "jaeger-hermes-webui", "openclaw": "jaeger-openclaw"}
+# Managed container names come from the framework table so a rename lands in
+# one place. LEGACY_/EXPANDED_ stay literal: they are not the framework's
+# own container, they are a pre-Jaeger name and a side workspace volume.
+MANAGED_CONTAINERS = {f.runtime: f.container for f in FRAMEWORKS if f.container}
 EXPANDED_CONTAINERS = {"hermes": "jaeger-hermes-workspaces", "openclaw": "jaeger-openclaw-workspaces"}
 HERMES_IMAGE = "hermes-webui:jaeger-continuity-20260909"
 

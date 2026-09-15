@@ -23,9 +23,10 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
             "  stop  [--keep-container] [-i NAME]  stop adapter (+ container)\n"
             "  status [--json] [-i NAME]           toggle, ports, health\n"
             "  url [-i NAME]                       print browser URL\n"
+            "  servers [status|start|stop|restart] [all|NAME]  local server controls\n"
             "\n"
             "ports:\n"
-            "  Jaeger WebUI     http://127.0.0.1:8790/   (canonical chat URL)\n"
+            "  Jaeger WebUI     Tailscale IPv4:8790      (canonical chat URL; jaeger webui url)\n"
             "  adapter          http://127.0.0.1:8791/   (runner-local)\n"
             "  Hermes runtime   http://127.0.0.1:8787/   (container; not a chat bookmark)\n"
             "  webhooks         127.0.0.1:8793           (no longer clashes with adapter)\n",
@@ -34,6 +35,9 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
         return 0 if argv else 2
 
     verb, rest = argv[0], list(argv[1:])
+    if verb == "servers":
+        from jaeger_ai.features.webui.server_controls import main
+        return main(rest)
     if verb == "start":
         return _webui_start(rest)
     if verb == "stop":
@@ -54,7 +58,7 @@ def _parse_instance(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
 
 
 def _webui_start(argv: list[str]) -> int:
-    from jaeger_ai.features.hermes_webui import HermesWebUIService
+    from jaeger_ai.features.webui import HermesWebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui start")
@@ -97,7 +101,7 @@ def _webui_start(argv: list[str]) -> int:
 
 
 def _webui_stop(argv: list[str]) -> int:
-    from jaeger_ai.features.hermes_webui import HermesWebUIService
+    from jaeger_ai.features.webui import HermesWebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui stop")
@@ -113,7 +117,7 @@ def _webui_stop(argv: list[str]) -> int:
 
 
 def _webui_status(argv: list[str]) -> int:
-    from jaeger_ai.features.hermes_webui import HermesWebUIService
+    from jaeger_ai.features.webui import HermesWebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui status")
@@ -141,8 +145,19 @@ def _webui_status(argv: list[str]) -> int:
     vd = status["vendor"]
     vd_s = c.green("running") if vd.get("running") else c.dim("stopped")
     print(f"Jaeger WebUI:         {vd_s}  pid={vd.get('pid')}")
-    print(f"  URL:               {vd['url']}")
+    print(f"  Chat URL:          {status.get('chat_url') or vd['url']}")
+    print(f"  Loopback:          {vd['url']}")
     print(f"  Health:            {vd['health']}")
+    identity = (vd.get("health") or {}).get("identity") or {}
+    if identity:
+        ident_s = c.green("ok") if identity.get("ok") else c.red("mismatch")
+        print(
+            f"  Identity:          {ident_s}  "
+            f"bundle={identity.get('bundle_version') or '?'}  "
+            f"settings={identity.get('webui_version') or '?'}"
+        )
+        if identity.get("error"):
+            print(f"  Identity error:    {identity['error']}")
     ports = status["ports"]
     print(
         "Ports:               "
@@ -155,7 +170,7 @@ def _webui_status(argv: list[str]) -> int:
 
 
 def _webui_url(argv: list[str]) -> int:
-    from jaeger_ai.features.hermes_webui import HermesWebUIService
+    from jaeger_ai.features.webui import HermesWebUIService
 
     base, _rest = _parse_instance(argv)
     svc = HermesWebUIService(base.instance)

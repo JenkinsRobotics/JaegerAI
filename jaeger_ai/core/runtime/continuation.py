@@ -220,6 +220,13 @@ def continuation_prompt(objective: str = "") -> str:
     return CONTINUE_NUDGE
 
 
+def is_continuation_prompt(text: str) -> bool:
+    """Recognize control prompts before task/skill inference, not authorization."""
+    return str(text or "").lstrip().startswith((
+        CONTINUE_NUDGE, "[Autonomous Harness]", "VERIFICATION STEP:",
+    ))
+
+
 VERIFY_NUDGE = (
     "VERIFICATION STEP: you reported the objective complete. Check it "
     "before we settle: re-read or list the artefacts you produced, "

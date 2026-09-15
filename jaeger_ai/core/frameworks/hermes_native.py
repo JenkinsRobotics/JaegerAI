@@ -25,15 +25,36 @@ def connection():
     return f'http://{address}:8645', key
 
 
+def hermes_request(path, body=None, timeout=10):
+    base, key = connection()
+    headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
+    return urlopen(Request(base + path, headers=headers,
+                          data=None if body is None else json.dumps(body).encode()), timeout=timeout)
+
+
+def hermes_reconcile(native):
+    native_id = native.get('run_id')
+    if not native_id:
+        raise ClassifiedError('invalid_response', 'Native run identity missing for reconciliation')
+    with hermes_request(f'/v1/runs/{native_id}', timeout=10) as response:
+        receipt = json.load(response)
+    status = receipt.get('status')
+    if status not in {'completed', 'failed', 'cancelled'}:
+        raise RuntimeError(f'Hermes native run is not terminal: {status}')
+    return {
+        'run_id': native_id,
+        'session_id': receipt.get('session_id') or native.get('session_id'),
+        'status': status,
+        'execution_unknown': False,
+        'output': receipt.get('output', ''),
+        'source': 'hermes_native_run_receipt',
+    }
+
+
 def hermes_turn(run, workspace=None):
     run.execution_unknown = False
     if workspace is not None:
         raise ClassifiedError('unsupported', 'Hermes native workspace override has not been negotiated')
-    base, key = connection()
-    headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
-    def request(path, body=None, timeout=10):
-        return urlopen(Request(base + path, headers=headers,
-                              data=None if body is None else json.dumps(body).encode()), timeout=timeout)
     if run.cancelled.is_set():
         run.cancel_confirmed = True
         return ''
@@ -44,20 +65,21 @@ def hermes_turn(run, workspace=None):
     for name in ('model', 'provider'):
         if getattr(run, name, None):
             body[name] = getattr(run, name)
-    with request('/v1/runs', body) as response:
+    with hermes_request('/v1/runs', body) as response:
         accepted = json.load(response)
     native_id = accepted.get('run_id', '')
     if not re.fullmatch(r'run_[0-9a-f]{32}', native_id):
         raise ClassifiedError('invalid_response', 'Hermes returned no valid native run identity')
     run.dispatch(session_id=run.session, run_id=native_id)
+    run.emit('native.state', state='running')
     def stop():
-        with request(f'/v1/runs/{native_id}/stop', {}) as response:
+        with hermes_request(f'/v1/runs/{native_id}/stop', {}) as response:
             response.read()
     run.cancel_native = stop
     if run.cancelled.is_set():
         stop()
     timeout = timeout_setting('HERMES_NATIVE_IDLE_TIMEOUT', 120)
-    with request(f'/v1/runs/{native_id}/events', timeout=timeout) as response:
+    with hermes_request(f'/v1/runs/{native_id}/events', timeout=timeout) as response:
         for raw in response:
             if not raw.startswith(b'data:'):
                 continue
@@ -81,7 +103,7 @@ def hermes_turn(run, workspace=None):
                 if 'deny' not in choices:
                     raise ClassifiedError('invalid_response', 'Native approval cannot be safely denied')
                 choice = run.request_approval(event.get('description') or event.get('command') or 'Hermes tool approval', choices=choices)
-                with request(f'/v1/runs/{native_id}/approval', {'choice': choice, 'all': False}) as answer:
+                with hermes_request(f'/v1/runs/{native_id}/approval', {'choice': choice, 'all': False}) as answer:
                     answer.read()
             elif kind == 'run.completed':
                 run.execution_unknown = False

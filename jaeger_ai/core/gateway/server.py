@@ -20,6 +20,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 from .event_bus import GatewayEventBus, ReplayGap
 from .session_store import GatewaySessionStore, RequestBusy, RequestConflict
+from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
 
 logger = logging.getLogger("jaeger.gateway")
 
@@ -47,8 +48,8 @@ class JaegerGatewayApp:
         # Explicit stores are used by embedded/test gateways and never attach
         # to the operator's running bridge unless a client is supplied.
         if background_client is None and store is None:
-            from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
-            background_client = BridgeClient()
+            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+            background_client = jaeger_bridge()
         self._background_client = background_client
         self._background_task: asyncio.Task | None = None
         self._background_status: dict[str, Any] = {"enabled": background_client is not None}
@@ -211,7 +212,7 @@ class JaegerGatewayApp:
 
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
         """Read-only MCP and native-agent readiness; never executes chat."""
-        from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+        from jaeger_ai.core.frameworks.jaeger import (
             MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
         )
         headers = {"Accept": "application/json, text/event-stream",
@@ -308,11 +309,6 @@ class JaegerGatewayApp:
             "ollama": {**ollama, "required": True},
             "webui": {**webui_chat, "required": False, "chat_execution_verified": False},
             "native_mcp": native_mcp,
-            "ares_agentgateway_8813": {
-                "ok": None,
-                "required": False,
-                "note": "not on chat spine; M9 does not require :8813",
-            },
         }
         required_ok = (
             bool(ollama.get("ok"))
@@ -558,9 +554,19 @@ class JaegerGatewayApp:
         body = await request.json() if request.can_read_body else {}
         session_id = str(body.get("session_id") or uuid.uuid4().hex)
         title = str(body.get("title") or "New Conversation")
-        profile = str(body.get("profile") or "jaeger")
         workspace = str(body.get("workspace") or "")
         metadata = body.get("metadata") or {}
+        # Fall back to what the id says, not to "jaeger". Defaulting here is
+        # why a live store held 65 sessions ALL labelled jaeger, including the
+        # Hermes and OpenClaw ones, so no profile could list its own history.
+        profile = str(body.get("profile") or "").strip()
+        if not profile:
+            profile = runtime_from_session_id(session_id) or "jaeger"
+        # Record where it was started so the sidebar can split browser from
+        # terminal conversations for each framework.
+        surface = normalise_surface(body.get("source") or metadata.get("source"))
+        if surface and "source" not in metadata:
+            metadata = {**metadata, "source": surface}
 
         session = self.store.ensure_session(
             session_id,
@@ -770,7 +776,7 @@ class JaegerGatewayApp:
     def _si_character_prompt() -> str | None:
         """Load the live SI brief from personality/Character.character_block()."""
         try:
-            from jaeger_ai.personality.character import active_character
+            from jaeger_ai.features.personality.character import active_character
 
             character = active_character(JaegerGatewayApp._instance_root())
             if character is None:
@@ -912,7 +918,7 @@ class JaegerGatewayApp:
 
         Shared MCP chat session: literal ``dispatcher`` — same key Mac Chat /
         WebUI / Hermes adapter bind via DispatcherStore (see
-        hermes_profile_adapters/jaeger.py rewrite to session_id='dispatcher',
+        core.frameworks/jaeger.py rewrite to session_id='dispatcher',
         features/webui/service/session_unify.py, features/dispatcher/store.py
         DISPATCHER). Gateway /v1/sessions UUID stays separate for SSE/store;
         only the MCP chat session_id is shared so one self / one transcript.
@@ -923,7 +929,7 @@ class JaegerGatewayApp:
         def _blocking_chat() -> tuple[str, str]:
             from urllib.parse import urlparse
 
-            from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+            from jaeger_ai.core.frameworks.jaeger import (
                 MCPClient,
                 MCP_GATEWAY_URL,
                 MCP_API_KEY,
@@ -1209,7 +1215,7 @@ class JaegerGatewayApp:
 
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
-            from jaeger_ai.interfaces.hermes_profile_adapters.jaeger import (
+            from jaeger_ai.core.frameworks.jaeger import (
                 MCPClient, MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
             )
             def _call() -> bool:

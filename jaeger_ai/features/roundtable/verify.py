@@ -16,7 +16,8 @@ repo_root = Path(__file__).resolve().parents[3]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 from jaeger_ai.features.roundtable.service import TableService
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import TERMINAL
+from jaeger_ai.contract.frameworks import DEBATE_MEMBERS
+from jaeger_ai.core.frameworks.native_runs import TERMINAL
 
 
 def verify():
@@ -81,7 +82,7 @@ def verify():
         assert len(synthesis) == 1 and synthesis[0]['result']['status'] == 'completed', 'Chair synthesis did not complete'
         assert approvals == 0, 'Unexpected tool approval was denied; inspect the native trace'
         if index == 1:
-            assert live == {'jaeger', 'hermes', 'openclaw'}, f'No proven live partial from: {set(service.members) - live}'
+            assert live == set(DEBATE_MEMBERS), f'No proven live partial from: {set(service.members) - live}'
         print(json.dumps({'turn': index, 'status': parent.status, 'native_recall': True,
             'live_partial_members': sorted(live), 'seconds': round(time.monotonic() - started, 2),
             'consensus': service.store.ledger(parent.id)['decision']['consensus']}), flush=True)

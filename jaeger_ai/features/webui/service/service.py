@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -26,6 +27,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from jaeger_ai.core.runtime import container_service as cs
 
@@ -210,6 +212,104 @@ def _http_ok(url: str, timeout: float = 2.0) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+_BUNDLE_VERSION_RE = re.compile(
+    r"__HERMES_WEBUI_BUNDLE_VERSION__\s*=\s*'([^']*)'",
+    re.IGNORECASE,
+)
+_TITLE_RE = re.compile(r"<title>([^<]+)</title>", re.IGNORECASE)
+
+
+def parse_webui_shell(html: str) -> dict[str, str]:
+    """Extract identity fields the stale-client banner compares."""
+    title_match = _TITLE_RE.search(html or "")
+    bundle_match = _BUNDLE_VERSION_RE.search(html or "")
+    bundle = unquote(bundle_match.group(1)) if bundle_match else ""
+    return {
+        "title": (title_match.group(1).strip() if title_match else ""),
+        "bundle_version": bundle,
+    }
+
+
+def webui_identity_ok(shell: dict[str, str], settings: dict[str, Any] | None) -> dict[str, Any]:
+    """HTTP 200 is process-up. Identity match is product-up.
+
+    The browser stamps ``window.__HERMES_WEBUI_BUNDLE_VERSION__`` from the
+    HTML shell and compares it to ``settings.webui_version``. Any extra
+    cache-bust suffix on the stamp (e.g. ``.jaegerpd4``) permanently
+    raises the 'different WebUI version / hard refresh' banner.
+    """
+    title = str(shell.get("title") or "")
+    bundle = str(shell.get("bundle_version") or "").strip()
+    server = unquote(str((settings or {}).get("webui_version") or "")).strip()
+    title_ok = "jaeger" in title.lower()
+    skew = bool(bundle and server and bundle != server)
+    ok = title_ok and bool(bundle) and bool(server) and not skew
+    error = None
+    if not title_ok:
+        error = f"unexpected title {title!r} (want Jaeger)"
+    elif not bundle or not server:
+        error = "missing bundle or settings.webui_version"
+    elif skew:
+        error = f"version skew: running {bundle} → server {server}"
+    return {
+        "ok": ok,
+        "title": title,
+        "bundle_version": bundle,
+        "webui_version": server,
+        "skew": skew,
+        "error": error,
+    }
+
+
+def probe_vendor_identity(url: str, timeout: float = 5.0) -> dict[str, Any]:
+    """Fetch the chat shell + /api/settings and report identity honesty."""
+    base = url.rstrip("/")
+    try:
+        with urllib.request.urlopen(base + "/", timeout=timeout) as response:
+            html = response.read().decode("utf-8", errors="replace")
+            status = int(getattr(response, "status", 200) or 200)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
+    if status >= 400:
+        return {"ok": False, "error": f"shell HTTP {status}"}
+    shell = parse_webui_shell(html)
+    settings: dict[str, Any] | None = None
+    try:
+        with urllib.request.urlopen(base + "/api/settings", timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            if isinstance(payload, dict):
+                settings = payload
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "title": shell.get("title", ""),
+            "bundle_version": shell.get("bundle_version", ""),
+            "webui_version": "",
+            "skew": False,
+            "error": f"settings: {exc}",
+        }
+    return webui_identity_ok(shell, settings)
+
+
+def _listening_pid(port: int) -> int | None:
+    try:
+        proc = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for raw in (proc.stdout or "").split():
+        try:
+            return int(raw)
+        except ValueError:
+            continue
+    return None
+
+
 class HermesWebUIService:
     """Start/stop/status for container + adapter under the settings toggle."""
 
@@ -347,6 +447,18 @@ class HermesWebUIService:
         adapter_health = _http_ok(urls.adapter.rstrip("/") + "/api/health")
         if not adapter_health.get("ok"):
             adapter_health = _http_ok(urls.adapter)
+        vendor_health = _http_ok(urls.vendor_ui, timeout=5.0)
+        identity = probe_vendor_identity(urls.vendor_ui) if vendor_health.get("ok") else {
+            "ok": False,
+            "error": vendor_health.get("error") or "vendor ui not reachable",
+        }
+        if vendor_health.get("ok") and not identity.get("ok"):
+            vendor_health = {
+                **vendor_health,
+                "ok": False,
+                "error": identity.get("error") or "webui identity mismatch",
+            }
+        vendor_health = {**vendor_health, "identity": identity}
         return {
             "enabled": self.enabled,
             "instance": self.instance,
@@ -365,7 +477,7 @@ class HermesWebUIService:
             "vendor": {
                 **vendor,
                 "url": urls.vendor_ui,
-                "health": _http_ok(urls.vendor_ui, timeout=5.0),
+                "health": vendor_health,
             },
             "vendor_ui_url": urls.vendor_ui,
             "chat_url": self.browser_url(),
@@ -484,29 +596,40 @@ class HermesWebUIService:
         }
 
     def _adapter_status(self) -> dict[str, Any]:
-        if self.layout is None:
-            return {"running": False, "pid": None}
-        pid_path = _adapter_pid_path(self.layout)
-        pid = _read_pid(pid_path)
+        return self._listener_status(
+            pid_path=_adapter_pid_path(self.layout) if self.layout is not None else None,
+            port=self.adapter_port,
+        )
+
+    def _vendor_status(self) -> dict[str, Any]:
+        return self._listener_status(
+            pid_path=_vendor_pid_path(self.layout) if self.layout is not None else None,
+            port=self.vendor_webui_port,
+        )
+
+    def _listener_status(self, *, pid_path: Path | None, port: int) -> dict[str, Any]:
+        """Pid-file OR a live listener counts as running (launchd may not write the pid file)."""
+        pid = _read_pid(pid_path) if pid_path is not None else None
         running = bool(pid and _pid_alive(pid))
-        if pid and not running:
+        source = "pid_file" if running else None
+        if pid and not running and pid_path is not None:
             try:
                 pid_path.unlink(missing_ok=True)
             except OSError:
                 pass
             pid = None
-        return {"running": running, "pid": pid, "pid_file": str(pid_path)}
-
-    def _vendor_status(self) -> dict[str, Any]:
-        if self.layout is None:
-            return {"running": False, "pid": None}
-        pid_path = _vendor_pid_path(self.layout)
-        pid = _read_pid(pid_path)
-        running = bool(pid and _pid_alive(pid))
-        if pid and not running:
-            pid_path.unlink(missing_ok=True)
-            pid = None
-        return {"running": running, "pid": pid, "pid_file": str(pid_path)}
+        if not running:
+            listener = _listening_pid(port)
+            if listener is not None:
+                pid = listener
+                running = True
+                source = "listener"
+        return {
+            "running": running,
+            "pid": pid,
+            "pid_file": str(pid_path) if pid_path is not None else None,
+            "source": source,
+        }
 
     def _start_vendor(self) -> dict[str, Any]:
         assert self.layout is not None
@@ -614,7 +737,7 @@ class HermesWebUIService:
         cmd = [
             sys.executable,
             "-m",
-            "jaeger_ai.interfaces.hermes_webui_adapter",
+            "jaeger_ai.features.webui.adapter",
             "--host",
             self.adapter_host,
             "--port",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from jaeger_ai.core.instance.schemas import ContainersConfig, WebhookConfig
-from jaeger_ai.features.hermes_webui.service import (
+from jaeger_ai.features.webui.service.service import (
     HermesWebUIService,
     hermes_webui_urls,
 )
@@ -44,7 +44,7 @@ def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
     cfg.containers = ContainersConfig(use_hermes_webui=False)
 
     with patch(
-        "jaeger_ai.features.hermes_webui.service._load_containers_config",
+        "jaeger_ai.features.webui.service.service._load_containers_config",
         return_value={
             "use_hermes_webui": False,
             "hermes_webui_container": "hermes-webui-hermes-webui",
@@ -63,16 +63,16 @@ def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
         assert "use_hermes_webui" in denied["error"]
 
         with patch(
-            "jaeger_ai.features.hermes_webui.service.cs.container_status",
+            "jaeger_ai.features.webui.service.service.cs.container_status",
             return_value={"found": False},
         ), patch(
-            "jaeger_ai.features.hermes_webui.service.cs.stop_container",
+            "jaeger_ai.features.webui.service.service.cs.stop_container",
             return_value={"ok": True},
         ) as stop_ctn, patch(
-            "jaeger_ai.features.hermes_webui.service.ensure_webui_profile_layout",
+            "jaeger_ai.features.webui.service.service.ensure_webui_profile_layout",
             return_value=None,
         ), patch(
-            "jaeger_ai.features.hermes_webui.service.cs.start_container",
+            "jaeger_ai.features.webui.service.service.cs.start_container",
             return_value={"ok": True, "id": "hermes-webui-hermes-webui"},
         ) as start_ctn, patch.object(
             HermesWebUIService, "_start_adapter", return_value={"ok": True, "pid": 1}
@@ -100,7 +100,7 @@ def test_vendor_start_runs_adapter_then_webui_and_can_publish(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.hermes_webui.service._load_containers_config",
+        "jaeger_ai.features.webui.service.service._load_containers_config",
         return_value={
             "use_hermes_webui": False,
             "hermes_webui_container": "unused",
@@ -110,7 +110,7 @@ def test_vendor_start_runs_adapter_then_webui_and_can_publish(tmp_path):
             "instance": "jaeger",
         },
     ), patch(
-        "jaeger_ai.features.hermes_webui.service.prepare_vendor_webui_home",
+        "jaeger_ai.features.webui.service.service.prepare_vendor_webui_home",
         return_value={},
     ):
         svc = HermesWebUIService("jaeger")
@@ -125,11 +125,37 @@ def test_vendor_start_runs_adapter_then_webui_and_can_publish(tmp_path):
     publish.assert_called_once_with()
 
 
+def test_vendor_status_treats_listener_as_running(tmp_path):
+    layout = MagicMock()
+    layout.root = tmp_path
+    with patch(
+        "jaeger_ai.features.webui.service.service._load_containers_config",
+        return_value={
+            "use_hermes_webui": False,
+            "hermes_webui_container": "unused",
+            "hermes_webui_port": 8787,
+            "adapter_port": 8791,
+            "jaeger_webui_port": 8790,
+            "layout": layout,
+            "instance": "jaeger",
+        },
+    ):
+        svc = HermesWebUIService("jaeger")
+        with patch(
+            "jaeger_ai.features.webui.service.service._listening_pid",
+            return_value=78503,
+        ):
+            status = svc._vendor_status()
+    assert status["running"] is True
+    assert status["pid"] == 78503
+    assert status["source"] == "listener"
+
+
 def test_tailscale_publishes_only_vendor_ui(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.hermes_webui.service._load_containers_config",
+        "jaeger_ai.features.webui.service.service._load_containers_config",
         return_value={
             "use_hermes_webui": False,
             "hermes_webui_container": "unused",
@@ -139,10 +165,10 @@ def test_tailscale_publishes_only_vendor_ui(tmp_path):
             "instance": "jaeger",
         },
     ), patch(
-        "jaeger_ai.features.hermes_webui.service.shutil.which",
+        "jaeger_ai.features.webui.service.service.shutil.which",
         return_value="/usr/bin/tailscale",
     ), patch(
-        "jaeger_ai.features.hermes_webui.service.subprocess.run",
+        "jaeger_ai.features.webui.service.service.subprocess.run",
         return_value=MagicMock(returncode=0, stdout="https://jaeger.tailnet/", stderr=""),
     ) as run:
         result = HermesWebUIService("jaeger").publish_tailscale()

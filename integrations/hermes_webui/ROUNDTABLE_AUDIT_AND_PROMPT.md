@@ -23,7 +23,7 @@ complete feature parity or current end-to-end health.
   `control("cancel")` without task/session/turn identity. A mocked bridge
   reproduced exactly `('cancel',) {}`. This can target unrelated active work
   despite the new bridge's support for scoped cancellation.
-- `jaeger_ai/interfaces/hermes_profile_adapters/roundtable.py:446`: cancel only
+- `jaeger_ai/features/roundtable/roundtable.py:446`: cancel only
   changes the in-memory Roundtable status; it does not stop native member work.
   It also reports cancellation for nonexistent IDs.
 - Roundtable calls Hermes through a captured-output subprocess and Jaeger /

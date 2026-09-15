@@ -159,3 +159,25 @@ class _SocketConnection:
             except OSError:
                 pass
         bridge_socket.close_quietly(self.sock)
+
+
+def jaeger_bridge() -> "BridgeClient":
+    """A client bound to Jaeger's OWN instance.
+
+    Use this — never a bare ``BridgeClient()`` — anywhere the target is Jaeger
+    itself. A bare client resolves ``~/.jaeger/active_instance``, which records
+    which delegate a person last selected in a UI: choosing "Everyday" rewrites
+    it, because ``AgentRegistry.set_active()`` writes a sticky instance for
+    native agents.
+
+    That is a real bug, not a hypothetical. Roundtable's Jaeger seat used a bare
+    client, so a delegate click sent it to ``instances/everyday/run/bridge.sock``
+    — no listener, the member failed with no error recorded, and the debate
+    aborted with "a member outcome is unknown" while Hermes and OpenClaw were
+    fine.
+
+    Which delegate someone is looking at, and which instance Jaeger's own
+    machinery talks to, are different questions. This answers only the second.
+    """
+    from jaeger_ai.contract.frameworks import framework
+    return BridgeClient(framework("jaeger").runtime)

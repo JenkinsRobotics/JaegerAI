@@ -26,10 +26,11 @@ import uuid
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
-from jaeger_ai.interfaces.hermes_profile_adapters.ingress import ProfileHTTPServer
+from jaeger_ai.contract.frameworks import DEBATE_MEMBERS
+from jaeger_ai.core.frameworks.ingress import ProfileHTTPServer
 from pathlib import Path
-from jaeger_ai.interfaces.hermes_profile_adapters.resilience import timeout_setting, failure_category
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import RunsHTTP
+from jaeger_ai.core.frameworks.resilience import timeout_setting, failure_category
+from jaeger_ai.core.frameworks.native_runs import RunsHTTP
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,9 @@ AGENT_LABELS = {
     "jaeger": "🟩 Jaeger",
     "openclaw": "🦞 OpenClaw",
 }
-AGENT_ORDER = ("jaeger", "hermes", "openclaw")
+#: Speaking order at the table — the contract's debate membership,
+#: so a framework added to the debate is seated automatically.
+AGENT_ORDER = DEBATE_MEMBERS
 TURN_MODES = ("ask", "collaborate", "quick", "review", "vote", "incident")
 _OPERATIONAL_WORDS = re.compile(
     r"\b(?:down|broken|error|failed|fix|debug|diagnos|service|container|port|"
@@ -204,8 +207,8 @@ def _native_hermes_runs():
     with _hermes_runs_lock:
         if _hermes_runs is None:
             from jaeger_ai.core.instance.instance import operator_state_root
-            from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Runs
-            from jaeger_ai.interfaces.hermes_profile_adapters.hermes_native import hermes_turn
+            from jaeger_ai.core.frameworks.native_runs import Runs
+            from jaeger_ai.core.frameworks.hermes_native import hermes_turn
             root = operator_state_root() / 'shared/roundtable/hermes-runs'
             _hermes_runs = Runs(root, hermes_turn)
         return _hermes_runs
@@ -216,7 +219,7 @@ def chat_hermes(message: str, session_id: str = "") -> str:
     if not session_id:
         return MemberAnswer('[Hermes error: session identity is required]', 'invalid_request')
     try:
-        from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import TERMINAL
+        from jaeger_ai.core.frameworks.native_runs import TERMINAL
         runs = _native_hermes_runs()
         run = runs.get(runs.start('roundtable-hermes:' + session_id, message)['run_id'])
         denied = False
@@ -303,7 +306,7 @@ def _chat_adapter(label: str, base_url: str, message: str, session_id: str = "")
 
 
 def _chat_adapter_once(label: str, base_url: str, message: str, session_id: str = "") -> str:
-    from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
+    from jaeger_ai.core.frameworks.native_runs import profile_key
     body = json.dumps({
         "model": label.lower(),
         "stream": True,
@@ -500,7 +503,7 @@ class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
         return os.environ.get('ROUNDTABLE_NATIVE_RUNS', '').lower() in {'1', 'true'}
 
     def native_key(self):
-        from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
+        from jaeger_ai.core.frameworks.native_runs import profile_key
         return profile_key('roundtable')
 
     def native_runs(self):
@@ -553,7 +556,7 @@ class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
         return True
 
     def _authorized(self):
-        from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import profile_key
+        from jaeger_ai.core.frameworks.native_runs import profile_key
         expected = profile_key('roundtable')
         origin = self.headers.get('Origin')
         if origin:

@@ -24,7 +24,6 @@ from typing import Any, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SERVICES_ORDERED = (
-    ("com.jenkinsrobotics.ares-agentgateway", "Agentgateway (ARES)", 8813),
     ("com.jenkinsrobotics.jaeger-gateway", "Jaeger Gateway", 8810),
     # The bridge uses a Unix socket; :8791 may belong to the legacy webhook
     # service, so an open HTTP port is not evidence of bridge readiness.
@@ -260,7 +259,7 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would stop Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.hermes_webui import HermesWebUIService
+                from jaeger_ai.features.webui import HermesWebUIService
                 HermesWebUIService().stop(stop_container=False)
                 print("  Stopped Jaeger WebUI")
             except Exception:
@@ -294,7 +293,7 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
         print("  [dry-run] Would stop Jaeger-owned MCP/A2A gateway")
     else:
         try:
-            from jaeger_ai.features.gateway.service import stop
+            from jaeger_ai.features.agentgateway.service import stop
             if not stop().get("ok"):
                 failures.append("Jaeger gateway")
         except Exception:
@@ -437,7 +436,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
         print("  [dry-run] Would start Jaeger-owned MCP/A2A gateway")
     else:
         try:
-            from jaeger_ai.features.gateway.service import start
+            from jaeger_ai.features.agentgateway.service import start
             if not start().get("ok"):
                 failures.append("Jaeger gateway")
             else:
@@ -477,7 +476,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would start Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.hermes_webui import HermesWebUIService
+                from jaeger_ai.features.webui import HermesWebUIService
                 webui_svc = HermesWebUIService()
                 w_status = webui_svc.status()
                 vendor_running = bool(w_status.get("vendor", {}).get("running")) or _is_port_open(8790)
@@ -517,7 +516,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                 if vendor_running and adapter_running:
                     ts = None
                     try:
-                        from jaeger_ai.features.hermes_webui.service import _tailscale_ipv4
+                        from jaeger_ai.features.webui.service.service import _tailscale_ipv4
                         ts = _tailscale_ipv4()
                     except Exception:
                         ts = None
@@ -529,7 +528,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                     if res.get("ok"):
                         ts = None
                         try:
-                            from jaeger_ai.features.hermes_webui.service import _tailscale_ipv4
+                            from jaeger_ai.features.webui.service.service import _tailscale_ipv4
                             ts = _tailscale_ipv4()
                         except Exception:
                             ts = None
@@ -661,8 +660,8 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
     # Collect Web UI status
     hermes_ui = None
     try:
-        from jaeger_ai.features.hermes_webui import HermesWebUIService
-        from jaeger_ai.features.hermes_webui.service import _tailscale_ipv4
+        from jaeger_ai.features.webui import HermesWebUIService
+        from jaeger_ai.features.webui.service.service import _tailscale_ipv4
         wsvc = HermesWebUIService()
         wstatus = wsvc.status()
         webui_running = bool(wstatus.get("vendor", {}).get("running")) or _is_port_open(8790)

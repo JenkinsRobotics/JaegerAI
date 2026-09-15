@@ -9,9 +9,9 @@ from .native_runs import Run, TERMINAL
 
 def local_connection(layout):
     import yaml
-    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
     try:
-        expected = BridgeClient().layout
+        expected = jaeger_bridge().layout
     except Exception:
         expected = None
     config_file = Path.home() / '.hermes/profiles/jaeger/config.yaml'

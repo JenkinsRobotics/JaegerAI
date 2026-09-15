@@ -51,7 +51,7 @@ from jaeger_ai.features.remote_access import RemoteAccessPolicy
 from .bridge_client import BridgeClient, HermesWebUIAdapterBridgeError
 
 MAX_BODY = 1_000_000
-_RUN_ROUTE = re.compile(r"^/v1/runs/([^/]+)(?:/(events|cancel|approval|messages))?$")
+_RUN_ROUTE = re.compile(r"^/v1/runs/([^/]+)(?:/(events|cancel|approval|messages|reconcile))?$")
 _CLARIFY_ROUTE = re.compile(r"^/v1/runs/([^/]+)/clarifications/([^/]+)/respond$")
 _GOAL_ROUTE = re.compile(r"^/v1/sessions/([^/]+)/goal$")
 _SCHEDULE_ACTION_ROUTE = re.compile(
@@ -547,6 +547,26 @@ class RunnerBroker:
             "run_id": run_id,
         }
 
+    def reconcile(self, run_id: str) -> dict[str, Any]:
+        status = self.store.status(run_id)
+        if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
+            return self.profiles.reconcile(run_id)
+        from jaeger_ai.core.frameworks.native_runs import jaeger_reconcile
+        if status.get("execution_unknown"):
+            try:
+                evidence = jaeger_reconcile({"run_id": run_id, "session_id": status.get("session_id")})
+                if not evidence.get("execution_unknown"):
+                    terminal_st = evidence.get("status", "failed")
+                    self.store.set_state(
+                        run_id,
+                        status=terminal_st,
+                        terminal_state=terminal_st,
+                        execution_unknown=False,
+                    )
+            except Exception:
+                pass
+        return self.store.status(run_id)
+
 
 class ScheduleBroker:
     """Translate Hermes WebUI's job shape onto Jaeger's native scheduler."""
@@ -803,6 +823,37 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
                 return self._json(self.bridge.health())
             if parsed.path == "/v1/profiles":
                 return self._json({'profiles': self.runner.profile_catalog.list()})
+            if parsed.path in {"/v1/profile-sessions", "/api/profile-sessions"}:
+                # Each framework's own conversations, split by where they were
+                # started. Jaeger does not own these — Hermes, OpenClaw and
+                # Jaeger's own CLI each keep their history and this indexes it.
+                from jaeger_ai.contract.frameworks import FRAMEWORKS
+                from jaeger_ai.features.session_search.endpoints import by_profile
+
+                limit = int(parse_qs(parsed.query).get("limit", ["50"])[0] or 50)
+                grouped = by_profile()
+                out = []
+                for framework in FRAMEWORKS:
+                    buckets = grouped.get(framework.runtime, {})
+                    out.append({
+                        "runtime": framework.runtime,
+                        "profile": framework.profile,
+                        "display_name": framework.display_name,
+                        "agent_id": framework.agent_id,
+                        "owns_sessions": framework.owns_sessions,
+                        "buckets": {
+                            name: [
+                                {"session_id": r.session_id, "title": r.title,
+                                 "messages": r.message_count, "store": r.store,
+                                 "age_days": round(r.age_days, 1),
+                                 "updated_at": r.updated_at}
+                                for r in rows[:limit]
+                            ]
+                            for name, rows in buckets.items()
+                        },
+                        "counts": {n: len(v) for n, v in buckets.items()},
+                    })
+                return self._json({"profiles": out})
             if parsed.path in {"/v1/agents", "/api/agents"}:
                 # Native + third-party catalog for remote WebUI list/switch.
                 from jaeger_ai.core.agent_registry import AgentRegistry
@@ -955,6 +1006,8 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
                 run_id, action = match.groups()
                 if action == "cancel":
                     return self._json(self.runner.cancel(run_id))
+                if action == "reconcile":
+                    return self._json(self.runner.reconcile(run_id))
                 if action == "approval":
                     return self._json(self.runner.approve(
                         run_id,

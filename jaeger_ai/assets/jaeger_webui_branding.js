@@ -1,8 +1,20 @@
-/* JaegerAI branding + Surfaces chrome for Hermes WebUI (:8790).
+/* JaegerAI branding for the stock Hermes WebUI (:8790).
  *
- * Loaded through Hermes WebUI's extension mechanism. Keeps upstream HTML
- * unmodified while giving Mac-parity AGENTS list (Gateway /api/agents proxy)
- * and Jaeger-facing chrome (not Hermes-first).
+ * SCOPE RULE — this overlay may only do what the stock WebUI cannot:
+ * branding (icons, title) and hiding Hermes chrome Jaeger does not back.
+ * It must NEVER reimplement a stock feature.
+ *
+ * It did once, and that is why this rule is written down. An AGENTS roster
+ * here listed the four frameworks and switched between them — duplicating the
+ * profile switcher the stock composer already has. Two controls for one job:
+ * the sidebar said one framework, the composer said another, and the turn
+ * label said a third, so you could not tell which agent you were talking to.
+ *
+ * Framework switching belongs to the stock profile chip. Jaeger reaches its
+ * backends through the WebUI's own profile config and the loopback adapter —
+ * that is the whole design, and it keeps upstream pulls of hermes-webui
+ * mergeable. Every line added here is a future merge conflict, so add none
+ * that stock could carry instead.
  */
 (() => {
   "use strict";
@@ -41,10 +53,15 @@
       if (apple) apple.setAttribute("content", "Jaeger");
       const titlebar = document.getElementById("appTitlebarTitle");
       if (titlebar) titlebar.textContent = "Jaeger";
-      const msg = document.getElementById("msg");
-      if (msg && /Message Hermes/i.test(msg.getAttribute("placeholder") || "")) {
-        msg.setAttribute("placeholder", "Message Jaeger…");
-      }
+      // The composer placeholder is deliberately NOT touched. Stock derives it
+      // from the ACTIVE PROFILE via assistantDisplayName() — the same function
+      // that labels the profile chip — so it already reads "Message Hermes
+      // Agent…" when Hermes is selected. Overwriting it with a fixed "Message
+      // Jaeger…" made the chip and the placeholder name different agents, which
+      // is the confusion this overlay is supposed to avoid causing.
+      //
+      // The window title below IS branding: the app is Jaeger whichever backend
+      // a message goes to. Who you are talking to is the composer's job.
     } catch (_) {}
   };
 
@@ -80,47 +97,6 @@
     } catch (_) {}
   };
 
-  const ensureAgentsStyles = () => {
-    if (document.getElementById("jaeger-agents-style")) return;
-    const style = document.createElement("style");
-    style.id = "jaeger-agents-style";
-    style.textContent = `
-      #jaegerAgentsSection { padding: 8px 8px 4px; border-bottom: 1px solid var(--border, rgba(255,255,255,0.06)); }
-      #jaegerAgentsSection .jaeger-agents-subhead {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
-        color: var(--muted, #888); padding: 8px 8px 4px; text-transform: uppercase;
-      }
-      #jaegerAgentsSection .jaeger-agents-head {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
-        color: var(--muted, #888); padding: 4px 8px 6px; text-transform: uppercase;
-      }
-      #jaegerAgentsList { display: flex; flex-direction: column; gap: 2px; }
-      #jaegerAgentsList button.jaeger-agent-row {
-        display: flex; align-items: center; gap: 8px; width: 100%;
-        border: 0; background: transparent; color: var(--text, inherit);
-        padding: 6px 10px; border-radius: 8px; cursor: pointer; text-align: left;
-        font: inherit; font-size: 12px; font-weight: 500;
-      }
-      #jaegerAgentsList button.jaeger-agent-row:hover { background: rgba(127,127,127,0.12); }
-      #jaegerAgentsList button.jaeger-agent-row.active { background: rgba(96,165,250,0.16); }
-      #jaegerAgentsList .jaeger-agent-dot {
-        width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
-      }
-      #jaegerAgentsList .jaeger-agent-dot.native { background: #f59e0b; }
-      #jaegerAgentsList .jaeger-agent-dot.third { background: #34d399; }
-      #jaegerAgentsList .jaeger-agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #jaegerAgentsList .jaeger-agent-active-mark {
-        width: 6px; height: 6px; border-radius: 50%; background: var(--accent, #60a5fa);
-      }
-      #jaegerAgentsEmpty { font-size: 11px; color: var(--muted,#888); padding: 4px 10px 8px; }
-      #jaegerAgentsList .jaeger-agent-role {
-        font-size: 10px; color: var(--muted,#888); text-transform: uppercase;
-        letter-spacing: 0.03em; opacity: 0.85;
-      }
-    `;
-    document.head.appendChild(style);
-  };
-
   const escapeHtml = (s) =>
     String(s || "")
       .replace(/&/g, "&amp;")
@@ -128,114 +104,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
 
-  let _agentsBusy = false;
-
-  const agentRowHtml = (a, activeId, leadId) => {
-    const id = a.id || "";
-    const name = a.display_name || a.name || id;
-    const role = a.role || (a.metadata && a.metadata.role) || "";
-    const kind = role === "lead" || id === leadId ? "native" : "third";
-    const isActive = !!a.active || id === activeId;
-    const roleTag = role ? `<span class="jaeger-agent-role">${escapeHtml(role)}</span>` : "";
-    return (
-      `<button type="button" class="jaeger-agent-row${isActive ? " active" : ""}" data-agent-id="${escapeHtml(id)}" data-role="${escapeHtml(role)}" title="${escapeHtml(id)}">` +
-      `<span class="jaeger-agent-dot ${kind}"></span>` +
-      `<span class="jaeger-agent-name">${escapeHtml(name)}</span>` +
-      roleTag +
-      (isActive ? `<span class="jaeger-agent-active-mark" aria-hidden="true"></span>` : "") +
-      `</button>`
-    );
-  };
-
-  const renderAgents = (catalog) => {
-    const list = document.getElementById("jaegerAgentsList");
-    const empty = document.getElementById("jaegerAgentsEmpty");
-    if (!list) return;
-    const lead = catalog && catalog.lead ? catalog.lead : null;
-    const specialists = Array.isArray(catalog && catalog.specialists) ? catalog.specialists : [];
-    const agents = Array.isArray(catalog && catalog.agents) ? catalog.agents : [];
-    const activeId = (catalog && catalog.active && catalog.active.id) || null;
-    const leadId = (lead && lead.id) || null;
-    const rows = [];
-    if (lead) rows.push(lead);
-    if (specialists.length) {
-      for (const s of specialists) if (!leadId || s.id !== leadId) rows.push(s);
-    } else {
-      for (const a of agents) if (!leadId || a.id !== leadId) rows.push(a);
-    }
-    if (!rows.length) {
-      list.innerHTML = "";
-      if (empty) {
-        empty.hidden = false;
-        empty.textContent = "Gateway agents unavailable";
-      }
-      return;
-    }
-    if (empty) empty.hidden = true;
-    let html = "";
-    if (lead) {
-      html += `<div class="jaeger-agents-subhead">Lead</div>` + agentRowHtml(lead, activeId, leadId);
-    }
-    const specs = rows.filter((a) => a !== lead);
-    if (specs.length) {
-      html += `<div class="jaeger-agents-subhead">Specialists</div>`;
-      html += specs.map((a) => agentRowHtml(a, activeId, leadId)).join("");
-    }
-    list.innerHTML = html;
-
-    const label = document.getElementById("titlebarProfileLabel");
-    const active =
-      (catalog && catalog.active) ||
-      rows.find((a) => a.id === activeId) ||
-      rows.find((a) => a.active) ||
-      lead;
-    if (label && active) {
-      const dn = active.display_name || active.name;
-      if (dn) label.textContent = dn;
-    }
-    if (active) setTurnIdentity(active);
-  };
-
-  const activateAgent = async (id) => {
-    if (!id || _agentsBusy) return;
-    _agentsBusy = true;
-    try {
-      const res = await fetch(`/api/agents/${encodeURIComponent(id)}/activate`, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) {
-        console.warn("[jaeger] activate failed", res.status);
-      }
-      await loadAgentsCatalog();
-      // Keep chat panel focused (Mac parity: switch agent → Chat).
-      if (typeof switchPanel === "function") {
-        try {
-          switchPanel("chat", { fromRailClick: true });
-        } catch (_) {}
-      }
-    } catch (err) {
-      console.warn("[jaeger] activate error", err);
-    } finally {
-      _agentsBusy = false;
-    }
-  };
-
-  const loadAgentsCatalog = async () => {
-    try {
-      const res = await fetch("/api/agents", { headers: { Accept: "application/json" } });
-      if (!res.ok) {
-        renderAgents({ agents: [] });
-        return null;
-      }
-      const catalog = await res.json();
-      renderAgents(catalog);
-      return catalog;
-    } catch (_) {
-      renderAgents({ agents: [] });
-      return null;
-    }
-  };
 
 
   const ensureApprovalStyles = () => {
@@ -299,7 +167,6 @@
           console.warn("[jaeger] approval resolve failed", err);
         }
         hideApprovalCard();
-        loadAgentsCatalog();
       });
     }
     _pendingApproval = payload;
@@ -307,70 +174,6 @@
     const to = (payload.metadata && payload.metadata.target_display) || payload.to_agent_id || "specialist";
     body.textContent = `Hand off to ${to}?\n${payload.task || ""}`.trim();
     card.hidden = false;
-  };
-
-  // Explicit gated handoff only — roster clicks must NOT call this.
-  // Approval card shows solely when API returns pending_approval.
-  const requestSpecialistHandoff = async (id, displayName, opts) => {
-    opts = opts || {};
-    const task = opts.task || `Help with current chat as ${displayName || id}`;
-    const requireApproval = !!opts.require_approval;
-    try {
-      const res = await fetch(`/api/agents/${encodeURIComponent(id)}/handoff`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({
-          task,
-          reason: opts.reason || "surfaces-ui",
-          require_approval: requireApproval,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.warn("[jaeger] handoff failed", res.status, data);
-        return activateAgent(id);
-      }
-      if (data.status === "pending_approval" && data.approval_id) {
-        showApprovalCard(data);
-        return data;
-      }
-      await activateAgent(id);
-      return data;
-    } catch (err) {
-      console.warn("[jaeger] handoff error", err);
-      await activateAgent(id);
-      return null;
-    }
-  };
-
-  const installAgentsSection = () => {
-    ensureAgentsStyles();
-    const sessionList = document.getElementById("sessionList");
-    const panelChat = document.getElementById("panelChat");
-    if (!panelChat || !sessionList) return;
-    if (document.getElementById("jaegerAgentsSection")) {
-      loadAgentsCatalog();
-      return;
-    }
-    const section = document.createElement("div");
-    section.id = "jaegerAgentsSection";
-    section.innerHTML =
-      `<div class="jaeger-agents-head">Agents</div>` +
-      `<div id="jaegerAgentsList" role="list"></div>` +
-      `<div id="jaegerAgentsEmpty" hidden></div>`;
-    panelChat.insertBefore(section, sessionList);
-    section.addEventListener("click", (ev) => {
-      const btn = ev.target.closest("button.jaeger-agent-row");
-      if (!btn) return;
-      const id = btn.getAttribute("data-agent-id");
-      // S3: simple roster activate/switch — never open approval loop.
-      // Reserve handoff+approval for gated tool pull-in / explicit pending_approval.
-      activateAgent(id);
-    });
-    loadAgentsCatalog();
-    // Refresh periodically so Mac/WebUI stay aligned when either face switches.
-    setInterval(loadAgentsCatalog, 15000);
-    polishSessionLibrary();
   };
 
   const polishSessionLibrary = () => {
@@ -557,9 +360,14 @@
   const applyIdentityToTurn = (turn, identity) => {
     if (!turn || !identity || !identity.display_name) return;
     ensureTurnChromeStyles();
-    turn.dataset.jaegerAgentId = identity.agent_id || "";
-    turn.dataset.jaegerRole = identity.role || "";
-    turn.dataset.jaegerDisplayName = identity.display_name || "";
+    // MutationObserver calls this function. Writing the same value still
+    // produces attribute/childList mutations, so every write must converge.
+    const stamp = (key, value) => {
+      if (turn.dataset[key] !== value) turn.dataset[key] = value;
+    };
+    stamp("jaegerAgentId", identity.agent_id || "");
+    stamp("jaegerRole", identity.role || "");
+    stamp("jaegerDisplayName", identity.display_name || "");
     const roleEl = turn.querySelector(".msg-role.assistant");
     if (!roleEl) return;
     const nameEl = roleEl.querySelector(".msg-role-name");
@@ -569,15 +377,17 @@
         ? `${identity.display_name} · ${role}`
         : identity.display_name;
     if (nameEl) {
-      nameEl.textContent = label;
-      nameEl.dataset.jaegerLabeled = "1";
-      nameEl.title = [identity.display_name, identity.role, identity.agent_id]
+      if (nameEl.textContent !== label) nameEl.textContent = label;
+      if (nameEl.dataset.jaegerLabeled !== "1") nameEl.dataset.jaegerLabeled = "1";
+      const title = [identity.display_name, identity.role, identity.agent_id]
         .filter(Boolean)
         .join(" · ");
+      if (nameEl.title !== title) nameEl.title = title;
     }
     const icon = roleEl.querySelector(".role-icon.assistant");
     if (icon && identity.display_name) {
-      icon.textContent = identity.display_name.charAt(0).toUpperCase();
+      const initial = identity.display_name.charAt(0).toUpperCase();
+      if (icon.textContent !== initial) icon.textContent = initial;
     }
     // Mac parity: role rides in the name ("Name · role"); drop separate hint chip.
     const hint = roleEl.querySelector(".jaeger-turn-role-hint");
@@ -701,13 +511,22 @@
   const observeHermesTitleLeak = () => {
     const scrub = () => {
       try {
-        if (/Hermes/i.test(document.title)) document.title = "Jaeger";
+        // The app is Jaeger whichever backend a message goes to, so the window
+        // title is a constant, not the active profile. Matching only /Hermes/
+        // made it inconsistent: "Jaeger" on the Hermes profile but "OpenClaw"
+        // or "Roundtable" on the others, because stock sets the title from the
+        // active agent and the scrub only caught one of the four names.
+        if (document.title !== "Jaeger") document.title = "Jaeger";
         const t = document.getElementById("appTitlebarTitle");
-        if (t && /Hermes/i.test(t.textContent || "")) t.textContent = "Jaeger";
-        const msg = document.getElementById("msg");
-        if (msg && /Hermes/i.test(msg.getAttribute("placeholder") || "")) {
-          msg.setAttribute("placeholder", "Message Jaeger…");
-        }
+        if (t && !/^Jaeger/.test(t.textContent || "")) t.textContent = "Jaeger";
+        // The composer placeholder is NOT scrubbed. "Hermes Agent" is a real
+        // profile name, so a /Hermes/ rule here rewrote it to "Message Jaeger…"
+        // every time that profile was selected — and being a MutationObserver,
+        // it did so continuously, fighting stock for the field. The chip said
+        // one agent and the placeholder said another.
+        //
+        // This observer exists to stop UPSTREAM PRODUCT branding leaking into
+        // the window title. A profile name is content, not branding.
         const health = document.getElementById("agentHealthTitle");
         if (health && /Hermes/i.test(health.textContent || "")) {
           health.textContent = "Jaeger agent is not responding";
@@ -746,12 +565,14 @@
     mo.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
   };
 
+  let booted = false;
   const boot = () => {
+    if (booted || !document.body) return;
+    booted = true;
     installJaegerIcons();
     installJaegerSurfaceLabels();
     hideTodosSurfaces();
     hideHermesDashboardChrome();
-    installAgentsSection();
     installStageNav();
     installTurnChrome();
     observeHermesTitleLeak();

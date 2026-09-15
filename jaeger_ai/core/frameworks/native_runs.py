@@ -341,7 +341,7 @@ class Runs:
                 self.ownership.release(run_id)
                 if not saved.get('execution_unknown') and saved.get('status') in TERMINAL:
                     try:
-                        from jaeger_ai.features.hermes_webui.session_unify import close_reconciled_webui_session
+                        from jaeger_ai.features.webui.service.session_unify import close_reconciled_webui_session
                         close_reconciled_webui_session(str(saved.get('session_id') or ''))
                     except Exception:
                         pass
@@ -463,8 +463,8 @@ class RunsHTTP(ProfileIngress):
 
 
 def jaeger_reconcile(native):
-    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
-    receipt = BridgeClient().query('turn_status', {
+    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    receipt = jaeger_bridge().query('turn_status', {
         'turn_id': native['run_id'], 'session_id': native['session_id']}, timeout_s=10)
     if not isinstance(receipt, dict):
         raise RuntimeError('Invalid native turn receipt')
@@ -473,9 +473,23 @@ def jaeger_reconcile(native):
 
 
 def jaeger_turn(run, workspace=None):
-    from jaeger_ai.interfaces.hermes_webui_adapter.bridge_client import BridgeClient
+    """Run a turn on Jaeger's own instance.
+
+    Bound to the ``jaeger`` instance explicitly, NOT to whatever
+    ``~/.jaeger/active_instance`` currently points at. That pointer follows the
+    delegate a person last selected in a UI — switching to the "Everyday"
+    delegate rewrites it — and a bare unpinned client followed it. Roundtable
+    then sent its Jaeger seat to ``instances/everyday/run/bridge.sock``, which
+    has no listener, so the member failed with no error recorded and the whole
+    debate aborted with "a member outcome is unknown".
+
+    Which delegate a person is looking at and which instance Roundtable's
+    Jaeger seat talks to are different questions. Only the second one belongs
+    here, and it has exactly one answer.
+    """
+    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
     run.execution_unknown = False
-    bridge = BridgeClient()
+    bridge = jaeger_bridge()
     if workspace:
         workspace = host_workspace(workspace)
     accepted = threading.Event()
