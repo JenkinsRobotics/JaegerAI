@@ -52,11 +52,25 @@ done
 # (dev-checkout builds pass it) but only means "debug config" now.
 APP_NAME="JaegerAI"
 
-# Resolve paths — APP_ROOT is jaeger_ai/interfaces/swift, REPO_ROOT is the
-# JaegerAI repo root (three levels up: swift → interfaces → jaeger_ai → repo root).
+# Resolve paths — APP_ROOT is the Swift package, REPO_ROOT the JaegerAI checkout.
+#
+# REPO_ROOT is found by walking up to the directory that actually holds
+# jaeger_ai/__init__.py rather than counting "..". The app is reachable by two
+# paths of different depths — jaeger_ai/interfaces/swift (the real one) and the
+# apps/macos symlink that aliases it — and `cd`+`pwd` resolves the symlink, so
+# any fixed count is right for one spelling and wrong for the other. Counting
+# from apps/macos landed REPO_ROOT on jaeger_ai/ and the version lookup then
+# read jaeger_ai/jaeger_ai/__init__.py, which does not exist.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$APP_ROOT/../../.." && pwd)"
+REPO_ROOT="$APP_ROOT"
+while [[ "$REPO_ROOT" != "/" && ! -f "$REPO_ROOT/jaeger_ai/__init__.py" ]]; do
+  REPO_ROOT="$(dirname "$REPO_ROOT")"
+done
+if [[ ! -f "$REPO_ROOT/jaeger_ai/__init__.py" ]]; then
+  echo "[build-app] cannot locate the JaegerAI checkout above $APP_ROOT" >&2
+  exit 1
+fi
 BUILD_DIR="$APP_ROOT/.build"
 ASSETS_DIR="$REPO_ROOT/jaeger_ai/assets"
 

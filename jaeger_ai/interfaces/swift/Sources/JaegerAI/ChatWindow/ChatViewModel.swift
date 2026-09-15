@@ -160,6 +160,15 @@ final class ChatViewModel: ObservableObject {
     /// double-fire while we wait for the agent to reply.
     @Published private(set) var isSending: Bool = false
 
+    /// The answer row of the turn currently running.
+    ///
+    /// It is appended when the turn starts and stays pinned to the bottom:
+    /// ``TranscriptFeed`` inserts every thought and tool run ABOVE it, so
+    /// the reply the operator asked for is always the last thing in the
+    /// turn. Held as an id rather than an index because activity rows
+    /// inserted above it shift its position on nearly every event.
+    private var answerID: UUID?
+
     /// 0.8.1 item 9: messages typed while a turn is already in flight.
     /// The bridge's own turn queue (a FIFO ``queue.Queue``, see
     /// ``interfaces/bridge.py``) never drops a mid-turn send either —
@@ -568,12 +577,7 @@ final class ChatViewModel: ObservableObject {
         case "turn.start":
             return
         case "turn.end":
-            // Close any active streaming thought/tool groups
-            for i in messages.indices {
-                if messages[i].author == .thought || messages[i].author == .toolGroup {
-                    messages[i].isStreaming = false
-                }
-            }
+            TranscriptFeed.closeStreaming(in: &messages)
             return
         case "thought.start", "deep_think.start", "thinking", "thought.delta", "thought":
             guard activityTrace != "off" else { return }
@@ -581,22 +585,9 @@ final class ChatViewModel: ObservableObject {
                 ?? event.payload["thought"]?.get(String.self)
                 ?? event.payload["delta"]?.get(String.self)
                 ?? ""
-            if let i = messages.lastIndex(where: { $0.author == .thought && $0.isStreaming }) {
-                if !text.isEmpty && !messages[i].thoughtText.contains(text) {
-                    messages[i].thoughtText += (messages[i].thoughtText.isEmpty ? "" : "\n\n") + text
-                }
-            } else {
-                messages.append(ChatMessage(
-                    author: .thought,
-                    timestamp: Date(),
-                    isStreaming: true,
-                    thoughtText: text
-                ))
-            }
+            TranscriptFeed.appendThought(text, to: &messages, answerID: answerID)
         case "thought.end", "deep_think.end":
-            if let i = messages.lastIndex(where: { $0.author == .thought && $0.isStreaming }) {
-                messages[i].isStreaming = false
-            }
+            TranscriptFeed.closeThought(in: &messages, answerID: answerID)
         case "tool.call", "tool.start":
             guard activityTrace != "off" else { return }
             let name = event.payload["tool"]?.get(String.self)
@@ -604,33 +595,14 @@ final class ChatViewModel: ObservableObject {
                 ?? "tool"
             if name == "work_ledger" { return }
             let detail = event.payload["detail"]?.get(String.self) ?? ""
-            let item = ToolCallItem(name: name, detail: detail, isStreaming: true)
-
-            let lastUserIdx = messages.lastIndex(where: { $0.author == .user }) ?? -1
-            if let i = messages.lastIndex(where: { $0.author == .toolGroup }), i > lastUserIdx {
-                messages[i].toolItems.append(item)
-                messages[i].isStreaming = true
-            } else {
-                messages.append(ChatMessage(
-                    author: .toolGroup,
-                    timestamp: Date(),
-                    isStreaming: true,
-                    toolItems: [item]
-                ))
-            }
+            TranscriptFeed.beginTool(
+                ToolCallItem(name: name, detail: detail, isStreaming: true),
+                in: &messages, answerID: answerID)
         case "tool.result", "tool.end", "tool.complete":
-            if let i = messages.lastIndex(where: { $0.author == .toolGroup }) {
-                let ok = event.payload["ok"]?.get(Bool.self) ?? true
-                let elapsed = event.payload["elapsed_s"]?.get(Double.self) ?? 0
-                if let itemIdx = messages[i].toolItems.lastIndex(where: { $0.isStreaming }) {
-                    messages[i].toolItems[itemIdx].ok = ok
-                    messages[i].toolItems[itemIdx].elapsed_s = elapsed
-                    messages[i].toolItems[itemIdx].isStreaming = false
-                }
-                if !messages[i].toolItems.contains(where: { $0.isStreaming }) {
-                    messages[i].isStreaming = false
-                }
-            }
+            TranscriptFeed.completeTool(
+                ok: event.payload["ok"]?.get(Bool.self) ?? true,
+                elapsed: event.payload["elapsed_s"]?.get(Double.self) ?? 0,
+                in: &messages, answerID: answerID)
         case "task.progress":
             // Owned by ``AgentBridge.taskProgress`` (the chat drawer and
             // the ⌥Space HUD). Don't turn ledger ticks into tool chips.
@@ -639,10 +611,7 @@ final class ChatViewModel: ObservableObject {
             let delta = event.payload["text"]?.get(String.self)
                 ?? event.payload["delta"]?.get(String.self)
                 ?? ""
-            guard !delta.isEmpty else { return }
-            if let i = messages.lastIndex(where: { $0.author == .assistant }) {
-                messages[i].text += delta
-            }
+            TranscriptFeed.appendAnswerDelta(delta, to: &messages, answerID: answerID)
         default:
             return
         }
@@ -748,16 +717,13 @@ final class ChatViewModel: ObservableObject {
             isStreaming: true
         )
         messages.append(placeholder)
+        answerID = placeholder.id
 
         isSending = true
         defer {
             isSending = false
-            // Close any remaining streaming states
-            for i in messages.indices {
-                if messages[i].isStreaming {
-                    messages[i].isStreaming = false
-                }
-            }
+            answerID = nil
+            TranscriptFeed.closeStreaming(in: &messages)
         }
 
         do {

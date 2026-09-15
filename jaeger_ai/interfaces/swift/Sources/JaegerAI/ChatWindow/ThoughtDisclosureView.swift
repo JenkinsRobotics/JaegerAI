@@ -11,14 +11,24 @@ import SwiftUI
 struct ThoughtDisclosureView: View {
     let thoughtText: String
     let isStreaming: Bool
-    @State private var isExpanded: Bool = false
+
+    /// Same rule as ``ToolCommandGroupView``: open while the agent is
+    /// deliberating, shut once it settles, and the operator's own click wins
+    /// from then on. The two section kinds interleave in one feed, so they
+    /// have to behave identically or expanding one reads as a different
+    /// control from expanding the other.
+    @State private var expandedOverride: Bool?
+
+    private var isExpanded: Bool { expandedOverride ?? isStreaming }
 
     var body: some View {
         if thoughtText.isEmpty && !isStreaming {
             EmptyView()
         } else {
             VStack(alignment: .leading, spacing: 6) {
-                Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) { expandedOverride = !isExpanded }
+                }) {
                     HStack(spacing: 6) {
                         Image(systemName: "clock")
                             .font(.system(size: 11))
@@ -38,6 +48,8 @@ struct ThoughtDisclosureView: View {
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
+                .accessibilityLabel("Thought process")
+                .accessibilityHint(isExpanded ? "Collapse thought process" : "Expand thought process")
                 .buttonStyle(.plain)
 
                 if isExpanded {
