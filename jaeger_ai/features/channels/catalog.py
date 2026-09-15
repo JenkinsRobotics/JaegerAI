@@ -53,7 +53,7 @@ _BUNDLED: tuple[ChannelCatalogEntry, ...] = (
         label="Slack",
         aliases=("slack",),
         status="thin",
-        source="jaeger_ai/features/gateway + messaging stubs",
+        source="jaeger_ai/features/agentgateway + messaging stubs",
         order=40,
     ),
     ChannelCatalogEntry(

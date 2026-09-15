@@ -29,6 +29,43 @@ def _clean():
     work_ledger.reset()
 
 
+def test_continuation_cannot_create_a_task_from_system_nudge():
+    from jaeger_ai.core.runtime.continuation import continuation_prompt
+    assert ensure_autonomous_ledger(continuation_prompt()) is None
+
+
+def test_prepared_continuation_keeps_original_objective_and_skips_skill_routing(monkeypatch):
+    from types import SimpleNamespace
+    from jaeger_ai.features.dispatcher import router
+    from jaeger_ai.core.runtime.continuation import continuation_prompt
+    monkeypatch.setattr(router, "compact_agent", lambda agent: None)
+    agent = SimpleNamespace(messages=[], system_prompt="", context_guard=None)
+    original = "Repair the Web UI chats and verify each framework."
+    router.prepare_turn_text(agent, original, domain=False)
+    prepared = router.prepare_turn_text(agent, continuation_prompt(), domain=False)
+    assert original in prepared
+    assert agent._skill_route_query == ""
+    assert work_ledger.active_ledger() is None
+
+
+def test_skill_router_consumes_only_original_request(monkeypatch):
+    from types import SimpleNamespace
+    from jaeger_agent.loop.jaeger_agent import JaegerAgent
+    from jaeger_agent.skill_registry import playbook_skills, toolset_scoping
+    seen = []
+    monkeypatch.setattr(toolset_scoping, "is_untrusted_content", lambda: False)
+    monkeypatch.setattr(playbook_skills, "match_playbook",
+                        lambda query, **kwargs: (seen.append(query) or (None, 0, "test")))
+    monkeypatch.setenv("JAEGER_AUTO_SKILLS", "1")
+    agent = SimpleNamespace(_skill_route_query="Repair chat routing", _all_tools=[])
+    prepared = "[Work ledger] kanban\nRepair chat routing"
+    assert JaegerAgent._auto_route_skill(agent, prepared) == prepared
+    assert seen == ["Repair chat routing"]
+    agent._skill_route_query = ""
+    JaegerAgent._auto_route_skill(agent, "[Autonomous Harness] kanban")
+    assert seen == ["Repair chat routing"]
+
+
 def test_batch_phrasing_is_detected():
     positives = [
         "process all 50 items and do not stop until done",

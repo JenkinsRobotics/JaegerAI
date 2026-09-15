@@ -18,6 +18,50 @@ from jaeger_agent import tools
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
+def test_search_includes_large_source_file(bound_instance, tmp_path):
+    source = tmp_path / "routes.py"
+    source.write_text("# padding\n" * 110_000 + "build_runtime_adapter()\n")
+    result = tools.search_files("build_runtime_adapter", str(tmp_path))
+    assert result["count"] == 1
+    assert result["matches"][0]["line"] == 110_001
+
+
+def test_search_reports_files_excluded_by_size(bound_instance, tmp_path):
+    source = tmp_path / "huge.txt"
+    with source.open("wb") as stream:
+        stream.truncate(16_000_001)
+    result = tools.search_files("needle", str(source))
+    assert result["truncated"] is True
+    assert result["skipped_count"] == 1
+    assert result["skipped_files"][0]["reason"] == "size limit"
+
+
+def test_read_default_pages_without_losing_content(bound_instance, tmp_path):
+    source = tmp_path / "large.py"
+    original = "".join(f"line {n}\n" for n in range(500))
+    source.write_text(original)
+    result = tools.file_read(str(source))
+    assert result["truncated"] is True
+    chunks = [result["content"]]
+    while result["truncated"]:
+        result = tools.file_read(str(source), offset=result["next_offset"], column=result["next_column"])
+        chunks.append(result["content"])
+    assert "".join(chunks) == original
+
+
+def test_read_long_line_is_pageable(bound_instance, tmp_path):
+    source = tmp_path / "large.json"
+    original = '{"value":"' + "x" * 60_000 + '"}\n'
+    source.write_text(original)
+    result = tools.file_read(str(source))
+    chunks = [result["content"]]
+    assert len(chunks[0]) <= 12_000
+    while result["truncated"]:
+        result = tools.file_read(str(source), offset=result["next_offset"], column=result["next_column"])
+        chunks.append(result["content"])
+    assert "".join(chunks) == original
+
+
 @pytest.fixture()
 def bound_instance(tmp_path):
     """A temp instance with tools bound to it. Yields the layout."""
@@ -300,8 +344,9 @@ def test_file_read_pagination(bound_instance):
 
 
 def test_file_read_whole_file_unchanged(bound_instance):
-    """No offset/limit → original behaviour, no pagination keys."""
+    """Small files still return all content with explicit page metadata."""
     tools.file_write("s.txt", "hello\n")
     result = tools.file_read("skills/s.txt")
     assert result["content"] == "hello\n"
-    assert "total_lines" not in result
+    assert result["total_lines"] == 1
+    assert result["truncated"] is False

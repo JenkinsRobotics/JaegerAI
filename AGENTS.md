@@ -36,7 +36,7 @@ The repository source tree must remain pristine, deterministic, and free of runt
 
 * **Gateway Architecture:**
   * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:8810`, launched by **`jaeger gateway daemon`**. It owns persistent SQLite session state and broadcasts SSE multi-client events.
-  * **`jaeger gateway daemon` and `jaeger gateway` are different processes.** Bare `jaeger gateway` manages the *external* Agentgateway (MCP `:8811`, A2A `:8812`) via `jaeger_ai.features.gateway`. Only the `daemon` subcommand runs the Jaeger Gateway. The two are one word apart and are routinely confused.
+  * **`jaeger gateway daemon` and `jaeger gateway` are different processes.** Bare `jaeger gateway` manages the *external* Agentgateway (MCP `:8811`, A2A `:8812`) via `jaeger_ai.features.agentgateway`. Only the `daemon` subcommand runs the Jaeger Gateway. The two are one word apart and are routinely confused.
   * Native macOS apps (`apps/macos`), Web UIs (`apps/web`), and CLI interfaces connect as decoupled clients to the Gateway. **`apps/macos` and `apps/web` are symlinks**, not separate codebases — they alias `jaeger_ai/interfaces/swift` and `jaeger_ai/features/webui`. Treat the targets as authoritative; the aliases exist so `apps/` reads as the client layer.
   * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
 * **Tool Call Resilience:**
@@ -104,8 +104,44 @@ JaegerAI/
 ├── docs/               # Technical specifications and architectural docs
 ├── integrations/       # External service and platform adapters
 ├── jaeger              # Single operator entrypoint script (executes ~/.jaeger/venv)
-├── jaeger_ai/          # Core engine (gateway, agent, mind, cli)
+├── jaeger_ai/          # Core engine — see STRUCTURE.md for the full map
+│   ├── core/           # Shared engine: gateway (sessions, :8810), frameworks, models
+│   ├── features/       # One folder per feature, each with its own README.md
+│   ├── interfaces/     # Client surfaces ONLY (swift, tui, pyside6, messaging, bridge)
+│   └── assets/         # Icons + the WebUI extension scripts (single mount point)
 ├── packages/           # Monorepo standalone packages (jaeger-os, jaeger-agent, etc.)
 ├── scripts/            # Host and deployment scripts
 └── vendor/             # Isolated upstream submodules (hermes-webui)
 ```
+
+### Where a new file goes
+
+Three homes, one question each. Getting this wrong is how the tree drifted
+before, so answer them in order:
+
+1. **Could the operator switch it off and still have Jaeger?** → `features/<name>/`,
+   and it gets a `README.md` in the same commit. Every feature folder has one;
+   keep it that way.
+2. **Do two or more features need it?** → `jaeger_ai/core/`. `core/frameworks/`
+   (per-framework turn execution) lives there because the WebUI, Roundtable, the
+   Dispatcher and the Gateway all call it.
+3. **Is it only *how a human or peer connects*?** → `jaeger_ai/interfaces/`.
+   A window, a terminal, a socket. Never business logic — that was the mistake
+   that put turn execution under `interfaces/` for months.
+
+**One definition per fact.** A value two layers both need — a framework name,
+a port, a wire constant — is defined in `jaeger_ai/contract/` and imported.
+Never typed twice. Copies do not fail loudly: both files look right and only
+the behaviour is wrong. A dead `ports.py` carried
+`ANIMATION_BRIDGE_DEFAULT_PORT = 9999` against the live `8765` for months, and
+the framework table was re-derived in eight places before two of them
+disagreed and misrouted a conversation.
+
+**No compat shims.** When a module moves, repoint its importers in the same
+change and delete the old path. A re-export left behind doubles the places a
+reader has to look, and twelve of them had accumulated by 2026-09.
+
+**One copy of every file.** If a file must be reachable from two places, it gets
+one home and the other place references it. Never a second copy — four had
+silently diverged from their originals by 2026-09, and editing the stale one
+changed nothing with no error to say so.

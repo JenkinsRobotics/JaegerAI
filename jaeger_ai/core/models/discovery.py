@@ -80,14 +80,6 @@ def _env_override_paths() -> list[tuple[str, str]]:
     return out
 
 
-def _in_tree_models_path() -> tuple[str, str] | None:
-    here = pathlib.Path(__file__).resolve()
-    candidate = here.parent.parent.parent / "models"
-    if candidate.is_dir():
-        return (str(candidate), "JaegerAI in-tree (dev)")
-    return None
-
-
 def _operator_state_models_path() -> tuple[str, str] | None:
     try:
         from jaeger_ai.core.instance.instance import operator_state_root
@@ -107,10 +99,6 @@ def scan_paths() -> list[tuple[pathlib.Path, str]]:
     op_state = _operator_state_models_path()
     if op_state is not None:
         entries.append(op_state)
-
-    in_tree = _in_tree_models_path()
-    if in_tree is not None:
-        entries.append(in_tree)
 
     entries.extend(_DEFAULT_SCAN_PATHS)
 
@@ -205,13 +193,10 @@ def _config_extra_dirs() -> list[str]:
 def discover_local_gguf() -> list[dict[str, Any]]:
     """Every .gguf on disk runnable in-process by JaegerAI."""
     try:
-        from jaeger_ai.core.models.model_resolver import repo_models_dir, user_cache_dir
+        from jaeger_ai.core.models.model_resolver import user_cache_dir
     except Exception:  # noqa: BLE001
         return []
     roots: list[tuple[pathlib.Path, str]] = []
-    repo = repo_models_dir()
-    if repo is not None:
-        roots.append((repo, "repo models/"))
     try:
         roots.append((user_cache_dir(), "jaeger cache"))
     except Exception:  # noqa: BLE001
@@ -236,10 +221,7 @@ def discover_local_mlx() -> list[dict[str, Any]]:
     if hf_cache.is_dir():
         roots.append((hf_cache, "huggingface"))
     try:
-        from jaeger_ai.core.models.model_resolver import repo_models_dir, user_cache_dir
-        repo = repo_models_dir()
-        if repo is not None:
-            roots.append((repo, "repo models/"))
+        from jaeger_ai.core.models.model_resolver import user_cache_dir
         roots.append((user_cache_dir(), "jaeger cache"))
     except Exception:  # noqa: BLE001
         pass

@@ -59,6 +59,14 @@ class _FakeExternalClient:
 # ── Adapter selection ──────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("provider", ["ollama", "openai", "anthropic"])
+def test_cloud_adapter_uses_configured_output_budget(provider):
+    client = _FakeExternalClient(provider)
+    client.ext.max_tokens = 16384
+    adapter = _adapter_for_client(client)
+    assert adapter.max_tokens == 16384
+
+
 def test_local_client_resolves_to_local_llama_adapter():
     client = _FakeLocalClient()
     adapter = _adapter_for_client(client)

@@ -262,11 +262,11 @@ def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):
     for path in configs:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("model:\n  provider: ollama\n  default: keep-this-model\nmcp_servers:\n  jaeger-host:\n    url: http://old-host:8811/mcp\n")
-    gateway = home / ".ares/gateway/config.yaml"
+    gateway = home / ".jaeger/gateway/config.yaml"
     gateway.parent.mkdir(parents=True)
     gateway.write_text(yaml.safe_dump({"mcp": {"policies": {"existing": "preserved"}, "targets": [{"name": "host-openclaw", "stdio": {"env": {"ARES_CAPABILITY_IDENTITY": "hermes"}}}]}}))
     for path, content in [(home / ".hermes/SOUL.md", "USER SOUL"),
-                          (home / ".ares/openclaw/workspace/TOOLS.md", "USER TOOLS"),
+                          (home / ".jaeger/openclaw/workspace/TOOLS.md", "USER TOOLS"),
                           (home / "bin/hermes", "#!/bin/sh\necho original"),
                           (repo / "scripts/hermes-container", "#!/usr/bin/env python3"),
                           (repo / "integrations/agent_workspaces/AGENT_CONTEXT.md", "<!-- JAEGER-MAC-CONNECTION-BEGIN -->\nCURRENT\n<!-- JAEGER-MAC-CONNECTION-END -->"),

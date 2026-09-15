@@ -8,7 +8,10 @@ the always-on OPERATING_DISCIPLINE block, and the optional per-instance
 from __future__ import annotations
 
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_agent.prompts.prompts import _load_soul, build_system_prompt
+from jaeger_agent.prompts.assemble import build_system_prompt
+# load_soul's real home; it used to be re-exported as _load_soul from the
+# deleted prompts/prompts.py shim.
+from jaeger_agent.prompts.context_blocks import load_soul as _load_soul
 
 
 # ── operating discipline ────────────────────────────────────────────
@@ -72,10 +75,10 @@ def test_the_active_character_supplies_the_name(tmp_path, monkeypatch) -> None:
     no-op.
 
     Only the NEUTRAL sheet yields the name back to identity.yaml — see
-    :func:`jaeger_ai.personality.character.persona_display_name` and
+    :func:`jaeger_ai.features.personality.character.persona_display_name` and
     dev/tests/jaeger_ai/core/test_prompt_identity.py.
     """
-    import jaeger_ai.personality.character as character
+    import jaeger_ai.features.personality.character as character
     from jaeger_ai.core.prompt_identity import register_agent_identity
 
     # This file builds prompts through the DEPENDENCY's assembler directly;
@@ -108,7 +111,7 @@ def test_the_neutral_sheet_leaves_the_instance_name_alone(
     """The other half of the same rule: ``assistant`` is nobody in
     particular, so identity.yaml comes through — "Ted, a plain
     assistant" is still expressible, it is just a choice now."""
-    import jaeger_ai.personality.character as character
+    import jaeger_ai.features.personality.character as character
     from jaeger_ai.core.prompt_identity import register_agent_identity
 
     register_agent_identity()

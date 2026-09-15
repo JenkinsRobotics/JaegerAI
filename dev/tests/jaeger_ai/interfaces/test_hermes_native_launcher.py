@@ -76,10 +76,13 @@ def test_service_definition_uses_repo_code_and_no_embedded_credentials():
     root = Path(__file__).resolve().parents[4]
     module = runpy.run_path(str(root/'scripts/setup-hermes-native-api.py'))
     config = module['configuration']()
-    assert config['ProgramArguments'] == [str(root/'.venv/bin/python'), str(root/'scripts/hermes-native-api-service.py')]
+    import sys
+    from jaeger_ai.core.instance.instance import operator_state_root
+    python_bin = Path.home()/'.jaeger/venv/bin/python'
+    assert config['ProgramArguments'] == [str(python_bin) if python_bin.exists() else sys.executable, str(root/'scripts/hermes-native-api-service.py')]
     assert config['KeepAlive'] is True and config['ThrottleInterval'] >= 20
     assert 'EnvironmentVariables' not in config
-    assert str(root/'.jaeger_ai/shared/logs') in config['StandardErrorPath']
+    assert str(operator_state_root()/'shared/logs') in config['StandardErrorPath']
 
 
 def test_service_shim_discovers_active_container_without_starting_legacy_one(monkeypatch):

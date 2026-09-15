@@ -134,4 +134,30 @@ else
 fi
 printf '[run_tests] %s\n' "${CMD[*]}" >&2
 
-exec "${CMD[@]}"
+# Each tree in its OWN pytest process.
+#
+# They cannot share an interpreter: jaeger-os's app tests assert on process
+# singletons (one boots a core, another expects "second instance refused"), and
+# jaeger-agent's chdir into a temp workspace. Combined in one run they fail for
+# reasons that have nothing to do with the code under test.
+#
+# Separate processes also mean a packages failure is visible. Before this, only
+# dev/tests ran by default and one packages test had been failing unnoticed.
+PACKAGE_SUITES=(
+    "packages/jaeger-agent/tests"
+    "packages/jaeger-os/dev/tests"
+)
+
+# `|| STATUS=$?` not a bare call: `set -e` is on, so an unguarded non-zero
+# exit here would end the script before the package suites ever ran — which is
+# exactly what happened, silently, the first time.
+STATUS=0
+"${CMD[@]}" || STATUS=$?
+
+for suite in "${PACKAGE_SUITES[@]}"; do
+    [ -d "$suite" ] || continue
+    printf '[run_tests] %s\n' "$suite" >&2
+    "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
+done
+
+exit "$STATUS"

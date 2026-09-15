@@ -31,7 +31,7 @@ from jaeger_ai.nodes.animation.adapters import MathAdapter, MathScript
 
 _CHARACTER_PATH = (
     Path(__file__).resolve().parents[4]
-    / "jaeger_ai" / "personality" / "characters" / "lilith" / "character.yaml"
+    / "jaeger_ai" / "features" / "personality" / "characters" / "lilith" / "character.yaml"
 )
 
 
@@ -52,7 +52,7 @@ def test_lilith_character_structured_personality_block_valid() -> None:
     data = yaml.safe_load(_CHARACTER_PATH.read_text())
     p_data = data["traits"]
 
-    from jaeger_ai.personality import (
+    from jaeger_ai.features.personality import (
         Domains, Expression, HEXACO, Personality, SPECIAL,
     )
     persona = Personality(
@@ -67,7 +67,7 @@ def test_lilith_character_structured_personality_block_valid() -> None:
         speech_patterns=tuple(data["prompt"].get("speech_patterns", ())),
     )
     # Per the test against the personality module's pinned wording.
-    from jaeger_ai.personality import compose_block
+    from jaeger_ai.features.personality import compose_block
     block = compose_block(persona)
     assert "Lilith" in block
     assert "directness" in block
@@ -79,7 +79,7 @@ def test_lilith_character_structured_personality_block_valid() -> None:
 def test_face_script_loads_via_math_adapter() -> None:
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "jaeger_ai" / "features" / "personality" / "characters" / "lilith"
         / "avatar" / "faces" / "lilith_face.py"
     )
     assert face_path.exists()
@@ -105,7 +105,7 @@ def test_every_emotion_renders(emotion: str) -> None:
     """All 7 emotions render a frame without crashing."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "jaeger_ai" / "features" / "personality" / "characters" / "lilith"
         / "avatar" / "faces" / "lilith_face.py"
     )
     adapter = MathAdapter()
@@ -127,7 +127,7 @@ def test_face_breathes_over_time() -> None:
     breath offset moves the face."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "jaeger_ai" / "features" / "personality" / "characters" / "lilith"
         / "avatar" / "faces" / "lilith_face.py"
     )
     adapter = MathAdapter()
@@ -150,7 +150,7 @@ def test_speaking_amplitude_changes_mouth() -> None:
     different frame than amplitude=0."""
     face_path = (
         Path(__file__).resolve().parents[4]
-        / "jaeger_ai" / "personality" / "characters" / "lilith"
+        / "jaeger_ai" / "features" / "personality" / "characters" / "lilith"
         / "avatar" / "faces" / "lilith_face.py"
     )
     a = MathAdapter()

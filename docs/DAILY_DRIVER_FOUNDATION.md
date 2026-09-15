@@ -9,11 +9,11 @@ boundaries so they can be extracted or reused later.
 
 | Responsibility | Existing implementation |
 | --- | --- |
-| Conversation identity and Focus reports | `jaeger_ai/core/runtime/dispatcher.py` |
+| Conversation identity and Focus reports | `jaeger_ai/features/dispatcher/store.py` |
 | Commitments, runs, checkpoints, action receipts | `packages/jaeger-agent/jaeger_agent/cognition/` |
 | Item progress and completion checks | `jaeger_ai/core/runtime/work_ledger.py` |
 | External worker capabilities and lifecycle | `packages/jaeger-agent/jaeger_agent/delegates/contracts.py` |
-| Native profile transport and cancellation | `jaeger_ai/interfaces/hermes_profile_adapters/` |
+| Native profile transport and cancellation | `jaeger_ai/core/frameworks/` |
 | Facts, claims, beliefs, and history | Native `memory/state.db` |
 | Task board | Native `memory/board.json` |
 | Shared interface | Pinned Hermes WebUI with Jaeger-owned extensions/adapters |

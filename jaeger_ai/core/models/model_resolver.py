@@ -237,41 +237,17 @@ def user_cache_dir() -> pathlib.Path:
     return operator_state_root() / "models"
 
 
-def repo_models_dir() -> pathlib.Path | None:
-    """Returns the package's ``models/`` dir if jaeger_os is running from
-    a source checkout (the usual dev shape). Returns None for installed-
-    wheel deployments where there's no repo root to walk to.
-
-    Lets us treat the existing symlinks at
-    ``<repo>/jaeger_os/models/gemma-...gguf`` as valid resolution targets
-    without changing the dev workflow.
-
-    History: the dev models dir was ``<repo>/models/`` (pre-0.2.1), then
-    ``<repo>/src/jaeger_os/models/`` (0.2.1), and is
-    ``<repo>/jaeger_os/models/`` since 0.2.6 dropped the ``src/`` layer —
-    discoverable via a normal import, README committed, weights
-    gitignored. The original ``<repo>/models/`` is still walked as a
-    fallback for old checkouts."""
-    here = pathlib.Path(__file__).resolve()
-    # 0.2.6+: jaeger_os/models/ — three parents up from this file
-    # (core/models/model_resolver.py → core/models → core → jaeger_os) + /models.
-    sibling = here.parent.parent.parent / "models"
-    if sibling.is_dir():
-        return sibling
-    # Pre-0.2.1 fallback: walk up to find <repo>/models/ alongside src/.
-    for ancestor in here.parents:
-        candidate = ancestor / "models"
-        if candidate.is_dir() and (ancestor / "pyproject.toml").is_file():
-            return candidate
-    return None
-
-
-def ensure_symlink_in_repo_models(
+def ensure_symlink_in_model_cache(
     source: pathlib.Path,
     registry_key: str | None = None,
 ) -> pathlib.Path | None:
-    """Place a symlink to ``source`` inside the in-repo models slot so
+    """Place a symlink to ``source`` in the operator model cache so
     ``resolve_model_path`` finds it without a Hugging Face download.
+
+    Writes to :func:`user_cache_dir` (``~/.jaeger/models`` by default). It used
+    to write into ``jaeger_ai/models/`` inside the checkout, which put runtime
+    data in the source tree and needed a ``*.gguf`` line in ``.gitignore`` to
+    hide it — both against the Zero In-Repo State rule in ``AGENTS.md``.
 
     The wizard calls this when the operator picks "use recommended"
     and we've already discovered a matching GGUF on disk (LM Studio,
@@ -279,7 +255,6 @@ def ensure_symlink_in_repo_models(
     target, we leave it alone.
 
     Returns the symlink path on success, ``None`` when:
-      - the in-repo models dir doesn't exist (installed-wheel deploy)
       - the source doesn't exist (broken)
       - a non-symlink file with the same name already sits in the
         target dir (we refuse to overwrite a real file)
@@ -289,9 +264,7 @@ def ensure_symlink_in_repo_models(
     sidecar with provenance) can adopt it without churning callers.
     """
     del registry_key  # reserved
-    models_dir = repo_models_dir()
-    if models_dir is None:
-        return None
+    models_dir = user_cache_dir()
     try:
         src = source.expanduser().resolve(strict=False)
     except (OSError, RuntimeError):
@@ -359,11 +332,8 @@ def resolve_model_path(
                                    progress=progress)
 
     # 3. Relative path — check the usual locations in order.
-    candidates: list[pathlib.Path] = [pathlib.Path.cwd() / p]
-    repo_models = repo_models_dir()
-    if repo_models is not None:
-        candidates.append(repo_models / p.name)
-    candidates.append(user_cache_dir() / p.name)
+    candidates: list[pathlib.Path] = [pathlib.Path.cwd() / p,
+                                     user_cache_dir() / p.name]
     for c in candidates:
         if c.exists():
             return str(c.resolve())
@@ -394,14 +364,6 @@ def _resolve_registered(
     cached = user_cache_dir() / key / filename
     if cached.exists():
         return str(cached.resolve())
-
-    # 2. Repo's ./models/<file> (dev convenience — likely a symlink to
-    # LM Studio's own cache).
-    repo_models = repo_models_dir()
-    if repo_models is not None:
-        repo_path = repo_models / filename
-        if repo_path.exists():
-            return str(repo_path.resolve())
 
     # 3. LM Studio's standard layout:
     # ~/.lmstudio/models/<hf_repo>/<hf_file>.  Operators who already
@@ -675,7 +637,7 @@ def _provider_model_rows(*, include_local: bool = True) -> list[dict[str, Any]]:
     """
     rows: list[dict[str, Any]] = []
     try:
-        from jaeger_ai.core.models import model_discovery
+        from jaeger_ai.core.models import discovery as model_discovery
         from jaeger_ai.core.models.ollama_context import (
             estimate_model_context_length,
             probe_ollama_context,
@@ -881,12 +843,10 @@ def list_registered_models(
         return out
 
     for key, entry in MODEL_REGISTRY.items():
-        cached_path = user_cache_dir() / key / entry["hf_file"]
-        repo_models = repo_models_dir()
-        repo_path = (repo_models / entry["hf_file"]) if repo_models else None
-        cached = cached_path.exists()
-        local_dev = repo_path is not None and repo_path.exists()
-        downloaded = cached or local_dev
+        # One location now: the operator cache. There used to be a second,
+        # jaeger_ai/models/ inside the checkout, and "downloaded" meant either.
+        cache_path = user_cache_dir() / key / entry["hf_file"]
+        downloaded = cache_path.exists()
         out.append({
             "name": key,
             "source": "registry",
@@ -914,13 +874,10 @@ def list_registered_models(
             # list; downloaded and loaded are different states and only one
             # row in this list is ever the loaded one.
             "status": (
-                "downloaded, not loaded (in user cache)" if cached
-                else "downloaded, not loaded (repo dev copy)" if local_dev
+                "downloaded, not loaded (in user cache)" if downloaded
                 else "not downloaded"
             ),
-            "path": (str(cached_path) if cached
-                     else str(repo_path) if local_dev
-                     else None),
+            "path": str(cache_path) if downloaded else None,
             "downloaded": downloaded,
         })
     return out

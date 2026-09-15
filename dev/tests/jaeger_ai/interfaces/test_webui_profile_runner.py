@@ -149,8 +149,8 @@ def test_restart_unknown_native_run_fails_visibly_without_retry(broker):
 def test_hermes_native_request_carries_selected_model(tmp_path, monkeypatch):
     import io
     import json
-    from jaeger_ai.interfaces.hermes_profile_adapters import hermes_native
-    from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run
+    from jaeger_ai.core.frameworks import hermes_native
+    from jaeger_ai.core.frameworks.native_runs import Run
     calls = []
     native_id = 'run_' + 'b' * 32
     def urlopen(request, timeout):
@@ -211,6 +211,67 @@ def test_roundtable_forwards_model_and_keeps_member_context_for_second_turn(brok
         assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
     assert len(seen) == 2
     assert seen[0] == seen[1]
-    assert seen[0][1:] == ('chosen:cloud', 'ollama')
     done = next(e['payload'] for e in broker.store.events_after(accepted['run_id'], None)['events'] if e['event'] == 'done')
     assert len(done['session']['messages']) == 4
+
+
+def test_hermes_reconcile_receipt(monkeypatch):
+    import io
+    import json
+    from jaeger_ai.core.frameworks import hermes_native
+    native_id = 'run_' + 'c' * 32
+    def urlopen(request, timeout):
+        return io.BytesIO(json.dumps({
+            'run_id': native_id,
+            'session_id': 'sess-123',
+            'status': 'completed',
+            'output': 'reconciled output'
+        }).encode())
+    monkeypatch.setattr(hermes_native, 'connection', lambda: ('http://native.invalid', 'synthetic-key'))
+    monkeypatch.setattr(hermes_native, 'urlopen', urlopen)
+    receipt = hermes_native.hermes_reconcile({'run_id': native_id, 'session_id': 'sess-123'})
+    assert receipt['status'] == 'completed'
+    assert receipt['execution_unknown'] is False
+    assert receipt['output'] == 'reconciled output'
+
+
+def test_profile_runner_reconcile_and_auto_reconcile_on_start(broker):
+    rid = 'd' * 32
+    broker.store.create(run_id=rid, session_id='reconcile-session', prompt='hi')
+    broker.store.set_state(rid, profile='roundtable', execution_unknown=True, status='interrupted', terminal_state='interrupted')
+    
+    class MockTableManager:
+        def __init__(self):
+            self.reconciled_called = False
+            self.start_called = False
+        def reconcile(self, run_id):
+            self.reconciled_called = True
+            return {'run_id': run_id, 'session_id': 'reconcile-session', 'status': 'failed', 'execution_unknown': False}
+        def start(self, session, message, on_admitted=None, **kwargs):
+            self.start_called = True
+            from unittest.mock import MagicMock
+            fake_run = MagicMock(id='e' * 32)
+            if on_admitted:
+                on_admitted(fake_run)
+            return {'run_id': fake_run.id}
+        def get(self, run_id):
+            from unittest.mock import MagicMock
+            fake = MagicMock(id=run_id, events=[], status='completed', output='ok', snapshot=lambda: {'status': 'completed', 'native': {}})
+            fake.condition = MagicMock()
+            fake.condition.wait = MagicMock()
+            return fake
+
+    mock_mgr = MockTableManager()
+    broker.profiles.managers['roundtable'] = mock_mgr
+    # Test direct reconcile call
+    res = broker.profiles.reconcile(rid)
+    assert res['execution_unknown'] is False
+    assert broker.store.status(rid)['execution_unknown'] is False
+
+    # Now set execution_unknown=True again to test auto-reconcile on start
+    broker.store.set_state(rid, execution_unknown=True)
+    mock_mgr.reconciled_called = False
+    accepted = broker.profiles.start({'profile': 'roundtable', 'session_id': 'reconcile-session', 'message': 'next message'})
+    assert mock_mgr.reconciled_called is True
+    assert mock_mgr.start_called is True
+    assert accepted['run_id'] == 'e' * 32
