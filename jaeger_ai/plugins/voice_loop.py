@@ -325,8 +325,20 @@ def main() -> int:
     )
 
     # ── Warm TTS (and wire the reference buffer if barge-in is on) ───
-    from jaeger_agent.tools.speak import _get_tts
-    tts = _get_tts()
+    # Ported from master's 0.11.0 "the app owns the wiring": ask the tts
+    # slot's own binding rather than reaching through jaeger_agent. Same
+    # object, one hop fewer. The accessor it replaces carried a fallback
+    # that constructed KokoroTTS directly, which has been dead since the
+    # module left the OS tree — speak.py sets ``KokoroTTS = None`` on
+    # ImportError, so that "safety net" raised TypeError. Fail with a
+    # sentence that names the cause instead.
+    from jaeger_ai.modules import jaeger_kokoro_tts as _tts_slot
+    tts = _tts_slot.synth()
+    if tts is None:
+        raise RuntimeError(
+            "no module is filling the 'tts' slot — install one "
+            "(e.g. jaeger-kokoro-tts) or disable the voice loop"
+        )
     if reference_buffer is not None:
         tts.reference_buffer = reference_buffer
     # 0.3.0: tell the TTS pipeline which audio backend BEFORE warm() —

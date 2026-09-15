@@ -51,6 +51,43 @@ def say(bus: Any, text: str) -> None:
         bus.publish(topics.SpeechCommand(text=text))
 
 
+def warm() -> dict[str, Any]:
+    """Pre-load whatever fills ``tts`` so the first reply doesn't pay the
+    weight-load tax. Idempotent.
+
+    Prefer ``[config.tts] warm = true`` in the app manifest — a module
+    that warms itself needs no app-side call at all, and that is the
+    shape Mochi uses. This exists for the TUI boot path, which has no
+    chassis Supervisor yet (see jaeger.toml's header) and so starts the
+    node lazily instead of at boot.
+
+    0.11.0: was ``jaeger_agent.tools.speak.warm_kokoro``. Warming an
+    engine is the app's job — the mind should not know which module
+    fills the slot, let alone hold its warm-up lifecycle. The body was
+    always engine-neutral; only the name and its address were wrong.
+    """
+    from jaeger_os.nodes import runtime
+    runtime.ensure_tts_node(warm=True)
+    s = runtime.get_synth()
+    if s is None:
+        return {"warmed": False, "reason": "tts runtime not initialized"}
+    return s.warm()
+
+
+def synth() -> Any:
+    """The live ``Synthesizer`` the tts node wraps, or ``None``.
+
+    NON-EXECUTION configuration only — echo-cancellation reference
+    buffer, audio backend selection, warm reporting. Speech itself goes
+    over the bus through :func:`say`; a caller that reaches for this
+    object to make sound is bypassing the contract this file exists to
+    state.
+    """
+    from jaeger_os.nodes import runtime
+    runtime.ensure_tts_node()
+    return runtime.get_synth()
+
+
 def stop(bus: Any) -> None:
     """Barge-in — TWO topics, deliberately.
 

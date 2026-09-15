@@ -96,8 +96,10 @@ def _vision_enabled(config: Any) -> bool:
 
 
 def _warm_tts() -> Any:
-    from jaeger_agent.tools.speak import warm_kokoro
-    return warm_kokoro()
+    # 0.11.0: the tts SLOT's binding owns this, not jaeger-agent. The
+    # mind does not know which module makes sound; the app does.
+    from jaeger_ai.modules import jaeger_kokoro_tts as tts
+    return tts.warm()
 
 
 def _warm_stt() -> Any:

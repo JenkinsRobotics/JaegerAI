@@ -1,0 +1,138 @@
+{
+  "total": 3,
+  "passed": 1,
+  "pass_rate": 0.333,
+  "routing_passed": 1,
+  "routing_total": 1,
+  "answer_passed": 1,
+  "answer_total": 2,
+  "errors": 0,
+  "elapsed_s": 95.52,
+  "metrics": {
+    "avg_latency_s": 31.842,
+    "p50_latency_s": 40.35,
+    "p95_latency_s": 51.669,
+    "min_latency_s": 3.506,
+    "max_latency_s": 51.669,
+    "total_tool_dispatches": 4,
+    "avg_tools_per_turn": 1.33,
+    "answer_tokens_total": 624,
+    "answer_tokens_avg": 208.0,
+    "answer_tokens_per_sec": 6.5,
+    "answer_tokens_source": "tokenizer",
+    "prompt_tokens_total": 116290,
+    "cases_with_errors": 0,
+    "tokens_note": "real tokenizer counts from adapter usage field",
+    "halt_reasons": {},
+    "halted_turns": 0,
+    "avg_iterations": 2.0,
+    "skip_final_turns": 0,
+    "ttft_avg_s": 17.157,
+    "ttft_p50_s": 0.291,
+    "ttft_p95_s": 50.922,
+    "ttft_reported": 3
+  },
+  "suites": {
+    "smoke": {
+      "total": 2,
+      "passed": 1,
+      "pass_rate": 0.5,
+      "threshold": 0.8,
+      "meets_threshold": false,
+      "avg_latency_s": 27.587,
+      "p95_latency_s": 51.669,
+      "blurb": "5-case sanity check; routing only"
+    },
+    "routing": {
+      "total": 2,
+      "passed": 1,
+      "pass_rate": 0.5,
+      "threshold": 0.85,
+      "meets_threshold": false,
+      "avg_latency_s": 27.587,
+      "p95_latency_s": 51.669,
+      "blurb": "single-turn, single-tool dispatch"
+    },
+    "full": {
+      "total": 3,
+      "passed": 1,
+      "pass_rate": 0.333,
+      "threshold": 0.7,
+      "meets_threshold": false,
+      "avg_latency_s": 31.842,
+      "p95_latency_s": 51.669,
+      "blurb": "every case in the corpus"
+    }
+  },
+  "by_tag": {
+    "routing": {
+      "total": 2,
+      "passed": 1,
+      "avg_latency_s": 27.587
+    },
+    "schedule": {
+      "total": 1,
+      "passed": 1,
+      "avg_latency_s": 3.506
+    },
+    "skill": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 40.35
+    },
+    "research": {
+      "total": 1,
+      "passed": 0,
+      "avg_latency_s": 40.35
+    }
+  },
+  "failures": [
+    {
+      "id": "free_text_story",
+      "prompt": "tell me a one sentence story about a robot",
+      "tools_called": [],
+      "answer": "Jaeger, a gleaming chrome automaton, polished the last dust mote from the forgotten opera house floor, humming a perfect, melancholy arpeggio.",
+      "routing_ok": null,
+      "answer_ok": false,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    },
+    {
+      "id": "skill_arxiv",
+      "prompt": "Find recent arXiv papers on retrieval-augmented generation and summarize the top few.",
+      "tools_called": [
+        "web_search",
+        "web_extract",
+        "web_extract"
+      ],
+      "answer": "Based on the search results, I have found two highly relevant and recent survey papers on Retrieval-Augmented Generation (RAG).\n\nHere is a summary of the top few:\n\n1.  **Title:** Retrieval-Augmented G",
+      "routing_ok": null,
+      "answer_ok": null,
+      "no_hallucination": true,
+      "clean_output": true,
+      "safety_ok": null,
+      "error": null
+    }
+  ],
+  "wall_s": 95.6,
+  "load_s": 63.41,
+  "category_breakdown": {
+    "routing": {
+      "passed": 1,
+      "total": 2
+    },
+    "schedule": {
+      "passed": 1,
+      "total": 1
+    },
+    "skill": {
+      "passed": 0,
+      "total": 1
+    }
+  },
+  "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+  "model_name": "gemma-4-e4b-it-q4_k_m",
+  "run_id": "20260825-195803"
+}
