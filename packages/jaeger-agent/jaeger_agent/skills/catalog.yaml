@@ -15,6 +15,7 @@ core:
   - web-app-qa
   - docker-management
   - process-monitoring
+  - jaeger-webui
   - webhook-subscriptions
   - email-triage
   - himalaya

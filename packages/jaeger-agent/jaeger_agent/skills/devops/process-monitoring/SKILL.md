@@ -18,7 +18,8 @@ metadata:
     category: devops
     related_skills:
     - log-calculations
-    version: 1.0.0
+    - jaeger-webui
+    version: 1.1.0
     platforms:
     - macos
     - linux
@@ -112,4 +113,6 @@ terminal(command="vm_stat")                              macOS memory pressure d
 
 The user has the specific numbers/process names that answer their
 question, sourced from an actual command run this turn — and any
-suggested fix was proposed, not silently executed.
+suggested fix was proposed, not silently executed. A LISTEN/HTTP 200
+is process-up, not product-up. For the Jaeger chat UI (frozen page,
+wrong version, hard refresh/reset, chat 500) load `jaeger-webui`.

@@ -411,6 +411,19 @@ def test_oversized_dict_persists_to_artifact_dir_when_set(tmp_path):
     assert "hint" in out
 
 
+def test_file_read_artifact_contains_plain_content_not_another_envelope(tmp_path):
+    from pathlib import Path
+    guard = ContextGuard(ContextBudget(max_tool_result_chars=500, artifact_dir=tmp_path))
+    content = "source line\n" * 1000
+    result, truncated = guard.truncate_oversized_result({
+        "read": True, "path": "/source.py", "content": content,
+    })
+    assert truncated
+    assert Path(result["artifact_path"]).read_text() == content
+    assert result["read"] is True
+    assert "limit" in result["hint"]
+
+
 def test_oversized_string_persists_alongside_preview(tmp_path):
     """String results take the truncate-with-marker path; the artifact
     is still written so the operator can recover the full bytes."""

@@ -53,7 +53,7 @@ _SEARCH_SKIP = frozenset({
 # limit) read; once the same unchanged read has been served twice it returns a
 # stub instead. ``main._run_via_iter`` calls reset_read_tracker() once per turn
 # so dedup only ever fires within a single turn, never across turns.
-_READ_TRACKER: dict[tuple[str, int, int | None], dict[str, Any]] = {}
+_READ_TRACKER: dict[tuple[str, int, int | None, int], dict[str, Any]] = {}
 _DEDUP_AFTER_READS = 2   # serve content for the first 2 reads; stub the 3rd+
 _READ_TRACKER_CAP = 512  # bound the tracker against a pathological turn
 
@@ -64,7 +64,7 @@ def reset_read_tracker() -> None:
 
 
 def _remember_read(
-    key: tuple[str, int, int | None], mtime: float, total_lines: int
+    key: tuple[str, int, int | None, int], mtime: float, total_lines: int
 ) -> None:
     """Record that ``key`` was served fresh content at ``mtime``."""
     prev = _READ_TRACKER.get(key)
@@ -342,7 +342,7 @@ def copy_file(src: str, dst: str) -> dict[str, Any]:
     return result
 
 
-def file_read(path: str, offset: int = 0, limit: int | None = None) -> dict[str, Any]:
+def file_read(path: str, offset: int = 0, limit: int | None = None, column: int = 0) -> dict[str, Any]:
     """Read a text file from ANYWHERE — Jaeger's own source code, the
     repository it lives in, the wider system.
 
@@ -351,7 +351,9 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> dict[str,
     file (a hint points at ``get_credential()``).
 
     For a large file, page it: ``offset`` is the 0-based first line and
-    ``limit`` the number of lines to return (default: the whole file).
+    ``limit`` the number of lines to return (default: 200). Results are
+    capped at 12,000 characters; resume with ``next_offset`` and
+    ``next_column`` (as ``offset`` and ``column``), including long JSON lines.
     The result then also carries ``total_lines`` so you know how much
     is left.
 
@@ -373,7 +375,8 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> dict[str,
 
     rel = _display_path(target, layout)
     off = max(0, int(offset or 0))
-    key = (str(target), off, limit)
+    col = max(0, int(column or 0))
+    key = (str(target), off, limit, col)
     try:
         mtime: float | None = target.stat().st_mtime
     except OSError:
@@ -405,19 +408,30 @@ def file_read(path: str, offset: int = 0, limit: int | None = None) -> dict[str,
                 "path": path}
 
     lines = full.splitlines(keepends=True)
-    if off or limit is not None:
-        end = len(lines) if limit is None else off + max(0, int(limit))
-        content = "".join(lines[off:end])
-        result: dict[str, Any] = {
-            "read": True, "path": rel, "content": content,
-            "bytes": len(content.encode("utf-8")),
-            "offset": off, "total_lines": len(lines),
-        }
-    else:
-        result = {
-            "read": True, "path": rel, "content": full,
-            "bytes": len(full.encode("utf-8")),
-        }
+    end = min(len(lines), off + (200 if limit is None else max(0, int(limit))))
+    chunks: list[str] = []
+    remaining = 12_000
+    next_line, next_col = off, col
+    for index in range(off, end):
+        start = col if index == off else 0
+        piece = lines[index][start:]
+        taken = piece[:remaining]
+        chunks.append(taken)
+        remaining -= len(taken)
+        if len(taken) < len(piece):
+            next_line, next_col = index, start + len(taken)
+            break
+        next_line, next_col = index + 1, 0
+        if remaining == 0:
+            break
+    content = "".join(chunks)
+    result: dict[str, Any] = {
+        "read": True, "path": rel, "content": content,
+        "bytes": len(content.encode("utf-8")),
+        "offset": off, "column": col, "total_lines": len(lines),
+        "truncated": next_line < len(lines),
+        "next_offset": next_line, "next_column": next_col,
+    }
 
     if mtime is not None:
         _remember_read(key, mtime, len(lines))
@@ -460,7 +474,8 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
     Use this to find where something is defined or used instead of
     reading files one by one. Returns matches as ``{file, line, text}``;
     skips VCS/venv/cache dirs and the model store, binary files, and
-    anything over 1 MB; caps at ``max_results``."""
+    files over 16 MB; caps at ``max_results``. Omitted files are reported
+    in ``skipped_files`` so an incomplete search is never evidence of absence."""
     layout = _require_layout()
     needle = (query or "").lower()
     if not needle:
@@ -504,11 +519,14 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
     # — descending into .venv/.git/the model store — before any filtering).
     _MAX_SCAN = 50_000
     matches: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    scan_limited = False
 
     def _iter_files() -> "Any":
         if root.is_file():
             yield root
             return
+        nonlocal scan_limited
         scanned = 0
         # ``os.walk`` with in-place dir pruning: skip dirs are removed from
         # the descent set so we NEVER walk into them (vs. filtering after a
@@ -518,6 +536,7 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
             for fn in filenames:
                 scanned += 1
                 if scanned > _MAX_SCAN:
+                    scan_limited = True
                     return
                 yield Path(dirpath) / fn
 
@@ -531,12 +550,15 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         # 2026-07-06).
         try:
             if (not child.is_file()
-                    or is_sensitive_path(child)
-                    or child.stat().st_size > 1_000_000):
+                    or is_sensitive_path(child)):
+                continue
+            if child.stat().st_size > 16_000_000:
+                skipped.append({"file": _display_path(child, layout), "reason": "size limit"})
                 continue
             text = child.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue  # unreadable or binary — skip
+            skipped.append({"file": _display_path(child, layout), "reason": "unreadable or binary"})
+            continue
         for lineno, line in enumerate(text.splitlines(), 1):
             if needle in line.lower():
                 matches.append({
@@ -550,7 +572,9 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
             break
     return {
         "searched": True, "query": query, "matches": matches,
-        "count": len(matches), "truncated": len(matches) >= cap,
+        "count": len(matches), "truncated": len(matches) >= cap or scan_limited or bool(skipped),
+        "scan_limited": scan_limited, "skipped_files": skipped[:50],
+        "skipped_count": len(skipped),
     }
 
 
@@ -630,14 +654,16 @@ def _t_copy_file(src: str, dst: str) -> dict:
 @register_tool_from_function(name="read_file", side_effect="read")
 @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_file",
                summary="read a workspace file")
-def _t_read_file(path: str, offset: int = 0, limit: int | None = None) -> dict:
+def _t_read_file(path: str, offset: int = 0, limit: int | None = None, column: int = 0) -> dict:
     """Read a text file from ANYWHERE on the machine — your own
     source code, the whole repository you run from, the wider
     system. Absolute paths and `~` work; reading is not sandboxed.
     (Off-limits: the credentials/ store and OS secret files like
     ~/.ssh.) For a large file, page it: `offset` is the 0-based
-    first line, `limit` the line count (default: the whole file)."""
-    return file_read(path=path, offset=offset, limit=limit)
+    first line, `limit` the line count (default: 200). Output is capped at
+    12,000 characters. When truncated, resume using `next_offset` and
+    `next_column` as `offset` and `column`."""
+    return file_read(path=path, offset=offset, limit=limit, column=column)
 
 
 @register_tool_from_function(name="list_skill_dir", side_effect="read")

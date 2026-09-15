@@ -17,7 +17,7 @@ metadata:
     - deep-think
     - writing-plans
     - subagent-driven-development
-    version: 1.1.0
+    version: 1.3.0
     platforms:
     - linux
     - macos
@@ -87,6 +87,11 @@ needs the Deep Think coder model, ALSO call `propose_deep_think_task(description
 ## ERROR HATCH
 - `board_move`/`board_update`/`board_delete` returns "no card <id>" -> you used a
   stale id; `board_view()` to get the current card ids, then retry.
+- ANY tool error -> diagnose BEFORE retrying: read the error, `describe_tool` the
+  tool's schema, fix the args — NEVER re-emit the identical failing call.
+- "unknown tool 'X'" -> after ONE such failure the dispatcher does not expose it
+  on this surface, whatever the registry claims; stop calling it and take the
+  documented fallback path immediately.
 
 ## DONE WHEN
 Urgent work is done, every deferrable item is a card on the board (not dropped,

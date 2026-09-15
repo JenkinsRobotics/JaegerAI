@@ -312,7 +312,7 @@ What the survey found, so the chassis is shaped by real boots:
   A parked daemon exists (`jaeger_os/daemon/`: NDJSON over a Unix socket,
   `server.py: Server.register(op, fn)`, `lifecycle.py` PID-file
   start/stop/status, `attach.py`) plus piecemeal `--attach` flags
-  (`jaeger_os/plugins/voice_loop.py`, `jaeger_os/plugins/messaging_gateway.py`,
+  (`jaeger_os/plugins/voice_loop.py`, `jaeger_os/plugins/messaging_daemon.py`,
   `jaeger_os/interfaces/tray/macos.py`).
 - **Mochi** boots through `main.py: run_host()` — load `config.yaml`,
   start `core/host_monitor.py: HostMonitor` (SUB cache + REP queries),
@@ -706,7 +706,7 @@ The shell `(planned)`:
   closed while the core keeps running (`shell_quits_core = false`). This
   is the consolidation target for JROS's three ad-hoc `--attach` wirings
   (`jaeger_os/plugins/voice_loop.py`,
-  `jaeger_os/plugins/messaging_gateway.py`,
+  `jaeger_os/plugins/messaging_daemon.py`,
   `jaeger_os/interfaces/tray/macos.py`). The wire already exists
   (`jaeger_os/daemon/{protocol,client,attach}.py`); whether it stays
   NDJSON-over-Unix-socket or becomes a ZMQ bus endpoint is the daemon
