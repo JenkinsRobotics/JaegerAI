@@ -57,6 +57,9 @@ HERMES_NATIVE_API_PORT: Final = 8645
 DISPATCHER_SIDECAR_PORT: Final = 8646
 """Token-authenticated loopback proxy the Dispatcher board talks to."""
 
+OLLAMA_PORT: Final = 11434
+"""Default local Ollama HTTP API."""
+
 __all__ = [
     "A2A_GATEWAY_PORT",
     "A2A_PORT",
@@ -64,6 +67,7 @@ __all__ = [
     "GATEWAY_PORT",
     "HERMES_NATIVE_API_PORT",
     "LOOPBACK",
+    "OLLAMA_PORT",
     "MCP_GATEWAY_PORT",
     "WEBUI_ADAPTER_PORT",
     "WEBUI_PORT",

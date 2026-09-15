@@ -268,8 +268,10 @@
       nav.setAttribute("aria-label", "Stage");
       nav.innerHTML = [
         ["chat", "Chat"],
-        ["avatar", "Avatar"],
-        ["work", "Work"],
+        // Keep unfinished stages out of the active navigation until their
+        // controls have real content and state contracts.
+        // ["avatar", "Avatar"],
+        // ["work", "Work"],
       ]
         .map(
           ([id, label]) =>

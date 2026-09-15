@@ -17,6 +17,60 @@ def wait_for(predicate):
     assert predicate()
 
 
+@pytest.mark.parametrize(
+    ("terminal", "expected"),
+    [
+        ({"status": "success", "aborted": False}, "completed"),
+        ({"status": "error", "aborted": False}, "failed"),
+        ({"status": "error", "aborted": True}, "cancelled"),
+    ],
+)
+def test_openclaw_reconcile_uses_durable_terminal_trajectory(
+    tmp_path, monkeypatch, terminal, expected
+):
+    from jaeger_ai.core.frameworks import openclaw, openclaw_native
+
+    sessions = tmp_path / "agents/main/sessions"
+    sessions.mkdir(parents=True)
+    native = {"session_id": "session-key", "run_id": "native-run"}
+    rows = [
+        {
+            "type": "model.completed",
+            **native,
+            "sessionKey": native["session_id"],
+            "runId": native["run_id"],
+            "data": {"assistantTexts": ["durable answer"]},
+        },
+        {
+            "type": "session.ended",
+            "sessionKey": native["session_id"],
+            "runId": native["run_id"],
+            "data": terminal,
+        },
+    ]
+    (sessions / "receipt.trajectory.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    monkeypatch.setattr(openclaw, "_openclaw_home", lambda: tmp_path)
+
+    receipt = openclaw_native.openclaw_reconcile(native)
+
+    assert receipt["status"] == expected
+    assert receipt["execution_unknown"] is False
+    assert receipt["output"] == "durable answer"
+
+
+def test_openclaw_reconcile_retains_ownership_without_terminal_receipt(tmp_path, monkeypatch):
+    from jaeger_ai.core.frameworks import openclaw, openclaw_native
+
+    (tmp_path / "agents/main/sessions").mkdir(parents=True)
+    monkeypatch.setattr(openclaw, "_openclaw_home", lambda: tmp_path)
+    with pytest.raises(RuntimeError, match="no terminal trajectory receipt"):
+        openclaw_native.openclaw_reconcile(
+            {"session_id": "session-key", "run_id": "native-run"}
+        )
+
+
 def test_structured_list_input_and_model_override(tmp_path):
     runs = Runs(tmp_path, lambda run, workspace: f"model={run.model}")
     info = runs.start(

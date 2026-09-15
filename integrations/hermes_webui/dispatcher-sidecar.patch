@@ -1,0 +1,25 @@
+diff --git a/docker_init.bash b/docker_init.bash
+--- a/docker_init.bash
++++ b/docker_init.bash
+@@ -531,6 +531,21 @@ fi
+ ensure_hindsight_client_docker_dependency
+ ensure_honcho_client_docker_dependency
+ 
++# Jaeger extensions are an image-owned overlay. Keep their process lifecycle
++# separate from the stock WebUI server and let the supervisor restart a failed
++# sidecar without interrupting an active chat.
++if [ -f /app/hermes-agent-src/run_agent.py ]; then
++  export HERMES_WEBUI_AGENT_DIR=/app/hermes-agent-src
++fi
++if [ -x /app/venv/bin/python ]; then
++  export HERMES_WEBUI_PYTHON=/app/venv/bin/python
++fi
++export HERMES_WEBUI_EXTENSION_DIR=/apptoo/jaeger-extensions
++export HERMES_WEBUI_EXTENSION_MANIFEST=jaeger_webui_extensions.json
++python /apptoo/jaeger_sidecar_supervisor.py &
++jaeger_sidecar_supervisor_pid=$!
++trap 'kill "$jaeger_sidecar_supervisor_pid" 2>/dev/null || true; wait "$jaeger_sidecar_supervisor_pid" 2>/dev/null || true' EXIT
++
+ echo ""; echo "== Running hermes-webui"
+ cd /app; python server.py || error_exit "hermes-webui failed or exited with an error"
+ 

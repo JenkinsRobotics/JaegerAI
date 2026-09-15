@@ -1,14 +1,15 @@
 # Jaeger-owned Hermes WebUI integration
 
 Customizations belong here, not in the standalone ARES or Hermes WebUI repos.
-`upstream.patch` preserves the existing profile, gateway, command and UI fixes
+The checked overlays preserve the existing profile, gateway, command and UI fixes
 against the pinned `vendor/hermes-webui` submodule. `jaeger_ollama.py` provides
 independent Mac/Rack Ollama inventories, complete model tags, and exact routing.
 
-Run `.venv/bin/python scripts/prepare-hermes-webui.py` from JaegerAI to create
+Run `~/.jaeger/venv/bin/python scripts/prepare-hermes-webui.py` from JaegerAI to create
 a disposable build context from the pinned upstream plus these changes. The
-script checks patch applicability before applying it. Build that directory's
-Dockerfile for a fresh image. Do not build an unpatched donor checkout.
+script requires every named patch, checks applicability before applying it, stamps
+the pinned version, and packages the extension sidecar supervisor. Build that
+directory's Dockerfile for a fresh image. Do not build an unpatched donor checkout.
 
 `vendor/hermes-webui` is a submodule and is **never edited in place** — the
 script exports the pinned commit with `git archive HEAD`, so the working tree
@@ -22,12 +23,12 @@ image before replacing a running container. The live container also has this
 overlay in `/apptoo`; stop/start preserves it, but recreation must use the
 verified image or reapply the overlay.
 
-The September 6 overlay also installs `jaeger_agent_compat.py` for WebUI-created
-Hermes agents. It prevents the Ollama GLM cloud lane from misclassifying complete
-unpunctuated/list answers as truncated and replaying them four times. Genuine
-provider `length` responses retain the existing recovery behavior. See
-[Mac/workspace deployment notes](../agent_workspaces/README.md) for the active
-containers, tests, rollback, and remaining macOS privacy approvals.
+`native_adapter.py` is the single Jaeger-owned Hermes Runs integration seam. It
+checks the required native routes, restores structured SessionDB history, preserves
+resume compatibility, and adds `/version` without mutating Hermes agent classes.
+See [the prompt audit](../../docs/WEBUI_PROMPT_AUDIT.md) and
+[migration plan](../../docs/WEBUI_INTEGRATION_MIGRATION.md) for current evidence,
+deployment gates, and rollback.
 
 ## Verified September 4, 2026
 
@@ -93,20 +94,14 @@ Stop request with uncertain execution must not become a cancelled transcript.
 | `upstream.patch` | `api/{agent_runtime,commands,config,gateway_chat,profiles,routes}.py`, `static/{sessions.js,style.css}`, `docker_init.bash` |
 | `update-labels.patch` | `static/{ui,panels}.js` |
 | `native-cancel-status.patch` | `api/gateway_chat.py` |
-| `native-capabilities.patch` | `api/{config,gateway_chat}.py` |
 | `conversation.patch` | `api/routes.py` |
-| `transparent-stream-worked-for.patch` | `api/config.py`, `static/{index.html,style.css,sw.js,ui.js}` |
+| `dispatcher-sidecar.patch` | `docker_init.bash` |
 | `jaeger_*.py` | copied into `api/`, not patched |
 
-`transparent-stream-worked-for.patch` carries the "Worked for" chip and
-collapsible turns in `static/ui.js`, the matching CSS, the `jaegerpd4` ->
-`jaegerpd6` cache-bust across `index.html` and `sw.js`, and
-`chat_activity_display_mode` defaulted to `transparent_stream`.
-
-`agents-proxy.patch` is named in the installer but was deleted in `e50d0aa`.
-The installer skips a patch that is absent or empty, so this is harmless — the
-list is a superset on purpose, so a patch folded into a future submodule pin
-does not need the script edited.
+The pinned Hermes revision already contains the former profile-isolation and
+transparent-stream changes. Their patches were removed. The capabilities patch
+conflicted with the pinned API and was removed; native compatibility now fails
+at adapter assembly when a required route or factory contract changes.
 
 ## Adding a change
 

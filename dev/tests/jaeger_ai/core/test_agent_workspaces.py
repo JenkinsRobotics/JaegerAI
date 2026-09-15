@@ -166,25 +166,6 @@ def test_live_inventory_does_not_claim_a_write_test():
     assert result["observed_at"]
 
 
-def test_cloud_stop_compatibility_is_narrow_and_idempotent():
-    spec = importlib.util.spec_from_file_location("jaeger_agent_compat", ROOT / "integrations/hermes_webui/jaeger_agent_compat.py")
-    compat = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(compat)
-    class Agent:
-        model = "glm-5.3-flash:cloud"
-        def _is_ollama_glm_backend(self): return True
-        def _should_treat_stop_as_truncated(self, reason, message, messages=None): return True
-    compat.install(Agent)
-    wrapped = Agent._should_treat_stop_as_truncated
-    assert not Agent()._should_treat_stop_as_truncated("stop", "- Terminal: Linux")
-    assert Agent()._should_treat_stop_as_truncated("length", "partial")
-    local = Agent()
-    local.model = "glm-local"
-    assert local._should_treat_stop_as_truncated("stop", "partial")
-    compat.install(Agent)
-    assert Agent._should_treat_stop_as_truncated is wrapped
-
-
 def test_managed_context_is_idempotent_and_preserves_user_notes():
     installer = script("setup-agent-workspaces")
     block = "<!-- JAEGER-MAC-CONNECTION-BEGIN -->\nCURRENT\n<!-- JAEGER-MAC-CONNECTION-END -->"

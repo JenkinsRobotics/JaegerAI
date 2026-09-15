@@ -178,6 +178,22 @@ def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):
     assert captured["payload"]["choices"][0]["message"]["content"] == "READY"
 
 
+def test_jaeger_retry_classifier_does_not_replay_client_errors():
+    from urllib.error import HTTPError
+
+    assert not jaeger._is_transient_http(HTTPError("http://mcp", 400, "bad", {}, None))
+    assert not jaeger._is_transient_http(HTTPError("http://mcp", 404, "missing", {}, None))
+    assert jaeger._is_transient_http(HTTPError("http://mcp", 503, "busy", {}, None))
+
+
+def test_mcp_key_is_resolved_after_import(monkeypatch):
+    monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "late-profile-key")
+    monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
+    assert jaeger.mcp_api_key() == "late-profile-key"
+    monkeypatch.setenv("JAEGERS_MCP_API_KEY", "late-env-key")
+    assert jaeger.mcp_api_key() == "late-env-key"
+
+
 def test_jaeger_runtime_artifacts_live_outside_repository():
     assert setup.JAEGER_RUNTIME_ROOT == setup.operator_state_root() / "shared"
     assert not setup.JAEGER_RUNTIME_ROOT.resolve().is_relative_to(setup.REPO_ROOT.resolve())

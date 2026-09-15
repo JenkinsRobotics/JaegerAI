@@ -1,6 +1,13 @@
 {
   "extensions": [
     {
+      "id": "jaeger-stream-continuity",
+      "name": "Jaeger Stream Continuity",
+      "scripts": [
+        "jaeger_stream_continuity.js"
+      ]
+    },
+    {
       "id": "jaeger-dispatcher",
       "name": "Jaeger Dispatcher and Focus",
       "scripts": [

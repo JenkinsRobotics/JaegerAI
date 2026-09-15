@@ -18,22 +18,34 @@ from typing import Any
 
 from aiohttp import ClientSession, ClientTimeout, web
 
+from jaeger_ai import __version__ as JAEGER_VERSION
+from jaeger_ai.contract.ports import (
+    GATEWAY_PORT,
+    LOOPBACK,
+    OLLAMA_PORT,
+    WEBUI_ADAPTER_PORT,
+    WEBUI_PORT,
+)
 from .event_bus import GatewayEventBus, ReplayGap
 from .session_store import GatewaySessionStore, RequestBusy, RequestConflict
 from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
 
 logger = logging.getLogger("jaeger.gateway")
 
-DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", "8810"))
-DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "127.0.0.1")
+DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_PORT)))
+DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", LOOPBACK)
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
-LOCKED_OLLAMA_URL = os.environ.get("JAEGER_OLLAMA_URL", "http://192.168.64.1:11434").rstrip("/")
-LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
-    "JAEGER_BRIDGE_HEALTH_URL", "http://127.0.0.1:8791/health"
+LOCKED_OLLAMA_URL = os.environ.get(
+    "JAEGER_OLLAMA_URL", f"http://{LOOPBACK}:{OLLAMA_PORT}"
 ).rstrip("/")
-LOCKED_WEBUI_URL = os.environ.get("JAEGER_WEBUI_URL", "http://100.74.2.15:8790").rstrip("/")
-DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "qwen2.5:3b")
+LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
+    "JAEGER_BRIDGE_HEALTH_URL", f"http://{LOOPBACK}:{WEBUI_ADAPTER_PORT}/health"
+).rstrip("/")
+LOCKED_WEBUI_URL = os.environ.get(
+    "JAEGER_WEBUI_URL", f"http://{LOOPBACK}:{WEBUI_PORT}"
+).rstrip("/")
+DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "").strip()
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
@@ -117,6 +129,7 @@ class JaegerGatewayApp:
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
+        self.app.router.add_get("/version", self.handle_version)
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
@@ -136,6 +149,14 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
+
+    async def handle_version(self, request: web.Request) -> web.Response:
+        """Stable, probe-only identity for clients and deployment checks."""
+        return web.json_response({
+            "component": "jaeger-gateway",
+            "version": JAEGER_VERSION,
+            "protocol_version": "1",
+        })
 
     async def _probe_http(self, url: str, *, timeout_s: float = 2.0) -> dict[str, Any]:
         """Probe a dependency; never raises — fail-closed callers inspect ok=False.
@@ -213,10 +234,11 @@ class JaegerGatewayApp:
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
         """Read-only MCP and native-agent readiness; never executes chat."""
         from jaeger_ai.core.frameworks.jaeger import (
-            MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
+            MCP_GATEWAY_URL, MCP_HOST_HEADER, mcp_api_key,
         )
+        api_key = mcp_api_key()
         headers = {"Accept": "application/json, text/event-stream",
-                   "Authorization": f"Bearer {MCP_API_KEY}", "Host": MCP_HOST_HEADER}
+                   "Authorization": f"Bearer {api_key}", "Host": MCP_HOST_HEADER}
 
         async def rpc(client, method, params, identity):
             async with client.post(MCP_GATEWAY_URL, headers=headers, json={
@@ -932,8 +954,8 @@ class JaegerGatewayApp:
             from jaeger_ai.core.frameworks.jaeger import (
                 MCPClient,
                 MCP_GATEWAY_URL,
-                MCP_API_KEY,
                 MCP_HOST_HEADER,
+                mcp_api_key,
             )
 
             # Reuse Hermes MCPClient transport. Agentgateway (:8811) exposes
@@ -948,7 +970,7 @@ class JaegerGatewayApp:
                 native_session,
                 request_id,
             )
-            client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
+            client = MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
             client.initialize()
             names = {tool.get("name") for tool in client.list_tools()}
             tool_name = next((name for name in ("jaeger_chat", "chat") if name in names), None)
@@ -988,6 +1010,10 @@ class JaegerGatewayApp:
     async def _ollama_chat(self, text: str, *, system_prompt: str | None = None) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         model = DEFAULT_OLLAMA_MODEL
+        if not model:
+            raise RuntimeError(
+                "Explicit text-only mode requires JAEGER_GATEWAY_OLLAMA_MODEL"
+            )
         sys_content = system_prompt or "You are Jaeger. Reply briefly and helpfully."
         payload = {
             "model": model,
@@ -1216,10 +1242,10 @@ class JaegerGatewayApp:
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
             from jaeger_ai.core.frameworks.jaeger import (
-                MCPClient, MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER,
+                MCPClient, MCP_GATEWAY_URL, MCP_HOST_HEADER, mcp_api_key,
             )
             def _call() -> bool:
-                client = MCPClient(MCP_GATEWAY_URL, MCP_API_KEY, MCP_HOST_HEADER)
+                client = MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
                 client.initialize()
                 names = {tool.get("name") for tool in client.list_tools()}
                 tool = next((n for n in ("cancel_turn", "jaeger_cancel_turn") if n in names), None)

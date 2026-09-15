@@ -27,7 +27,10 @@ of them can create a cycle by doing so.
 """
 from __future__ import annotations
 
+import importlib
+import inspect
 from dataclasses import dataclass
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,20 @@ class Framework:
     orchestrated from the WebUI and exists only as browser conversations, so a
     "Roundtable terminal session" is not a thing that can exist."""
 
+    turn: str | None = None
+    """Import path for the native ``turn(run, workspace=None)`` callable."""
+
+    reconciler: str | None = None
+    """Import path for ``reconcile(native)``. Required when ``turn`` is set."""
+
+
+@dataclass(frozen=True)
+class BackendProtocol:
+    """The required native execution and recovery pair."""
+
+    turn: Callable
+    reconciler: Callable
+
 
 FRAMEWORKS: tuple[Framework, ...] = (
     Framework(
@@ -74,12 +91,16 @@ FRAMEWORKS: tuple[Framework, ...] = (
         display_name="Hermes Agent",
         agent_id="tp:hermes",
         container="jaeger-hermes-webui",
+        turn="jaeger_ai.core.frameworks.hermes_native:hermes_turn",
+        reconciler="jaeger_ai.core.frameworks.hermes_native:hermes_reconcile",
     ),
     Framework(
         runtime="jaeger",
         profile="jaeger",
         display_name="Jaeger AI",
         agent_id="native:jaeger",
+        turn="jaeger_ai.core.frameworks.jaeger:dispatcher_turn",
+        reconciler="jaeger_ai.core.frameworks.jaeger:jaeger_reconcile",
     ),
     Framework(
         runtime="openclaw",
@@ -87,6 +108,8 @@ FRAMEWORKS: tuple[Framework, ...] = (
         display_name="OpenClaw",
         agent_id="tp:openclaw",
         container="jaeger-openclaw",
+        turn="jaeger_ai.core.frameworks.openclaw_native:openclaw_turn",
+        reconciler="jaeger_ai.core.frameworks.openclaw_native:openclaw_reconcile",
     ),
     Framework(
         runtime="roundtable",
@@ -175,13 +198,39 @@ def is_known(value: object) -> bool:
     return True
 
 
+def _load_callable(path: str, role: str) -> Callable:
+    module_name, separator, attribute = path.partition(":")
+    if not separator or not module_name or not attribute:
+        raise RuntimeError(f"Invalid {role} import path: {path!r}")
+    value = getattr(importlib.import_module(module_name), attribute, None)
+    if not callable(value):
+        raise RuntimeError(f"Framework {role} is not callable: {path}")
+    return value
+
+
+def backend_protocol(value: object) -> BackendProtocol:
+    """Resolve and validate the complete native backend protocol."""
+    item = framework(value)
+    if not item.turn or not item.reconciler:
+        raise RuntimeError(f"Framework {item.runtime!r} has no complete native backend protocol")
+    turn = _load_callable(item.turn, "turn")
+    reconciler = _load_callable(item.reconciler, "reconciler")
+    if not {"run", "workspace"}.issubset(inspect.signature(turn).parameters):
+        raise RuntimeError(f"Framework {item.runtime!r} turn must accept run and workspace")
+    if "native" not in inspect.signature(reconciler).parameters:
+        raise RuntimeError(f"Framework {item.runtime!r} reconciler must accept native")
+    return BackendProtocol(turn=turn, reconciler=reconciler)
+
+
 __all__ = [
     "DEBATE_MEMBERS",
+    "BackendProtocol",
     "FRAMEWORKS",
     "Framework",
     "SESSION_OWNERS",
     "SOLO_RUNTIMES",
     "UnknownFramework",
+    "backend_protocol",
     "canonical_runtime",
     "display_name",
     "framework",

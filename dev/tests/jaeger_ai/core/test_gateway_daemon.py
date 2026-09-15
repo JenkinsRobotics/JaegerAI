@@ -108,6 +108,15 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         assert "native_mcp" in data["checks"]
         assert data["capabilities"]["end_to_end_chat_verified"] is False
 
+    async def test_version_contract_is_semver_and_side_effect_free(self):
+        resp = await self.client.request("GET", "/version")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["component"] == "jaeger-gateway"
+        assert data["version"].count(".") == 2
+        assert data["version"].replace(".", "").isdigit()
+        assert data["protocol_version"] == "1"
+
     async def test_health_fail_closed_when_native_mcp_unavailable(self):
         async def _ok_http(url, *, timeout_s: float = 2.0):
             return {"ok": True, "status_code": 200, "url": url}
@@ -201,7 +210,7 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
 
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
     monkeypatch.setattr(jaeger_mcp, "MCP_GATEWAY_URL", "http://127.0.0.1:8811/mcp")
-    monkeypatch.setattr(jaeger_mcp, "MCP_API_KEY", "")
+    monkeypatch.setattr(jaeger_mcp, "mcp_api_key", lambda: "")
     monkeypatch.setattr(jaeger_mcp, "MCP_HOST_HEADER", "127.0.0.1:8811")
 
     ok = await app._native_lead_turn("sess-native", "What is your autonomy mode?")
@@ -318,6 +327,16 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
     assert finish.event == "turn.finish"
     assert finish.data["execution_mode"] == "text_only"
     assert finish.data["capabilities"] == {"native_tools": False, "native_memory": False}
+
+
+@pytest.mark.asyncio
+async def test_text_only_model_must_be_explicit(monkeypatch, tmp_path):
+    import jaeger_ai.core.gateway.server as gateway
+
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "text-model.sqlite3"))
+    monkeypatch.setattr(gateway, "DEFAULT_OLLAMA_MODEL", "")
+    with pytest.raises(RuntimeError, match="JAEGER_GATEWAY_OLLAMA_MODEL"):
+        await app._ollama_chat("hello")
 
 
 @pytest.mark.asyncio

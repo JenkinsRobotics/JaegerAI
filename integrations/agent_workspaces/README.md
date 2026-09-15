@@ -86,20 +86,16 @@ handoff. Existing native sessions are not replaced. A useful chat request is:
 
 The Hermes report exposed a separate false-truncation bug: a complete bulleted
 answer without final punctuation was retried four times and surfaced as an
-application error. `integrations/hermes_webui/jaeger_agent_compat.py` now trusts
-the provider's `stop` for Ollama GLM **cloud** responses. Actual `length` signals
-and local-model handling remain unchanged. The repaired WebUI turn ended once
-with `finish_reason=stop`, with a successful host-tool result and no error.
-This compatibility hook applies to WebUI-created Hermes agents, not unrelated
-standalone Hermes CLI installations.
+application error. The runtime monkey patch has been removed. The provider-level
+upstream fix is drafted in
+`integrations/hermes_webui/upstream/GLM_STOP_TRUNCATION_PR.md`; deployments should
+pin that reviewed fix while preserving genuine `length` recovery.
 
 The original working Hermes image's gateway, Ollama helper, and init-script
-hashes were checked before migration. The additional compatibility fix was
-deployed to persistent `/apptoo` and active `/app` files, then the container was
-restarted. The rebuilt image `hermes-webui:jaeger-mac-workspaces-20260906` contains
-the same compatibility/runtime file hashes and is used by future migration
-plans. Rebuild through `scripts/prepare-hermes-webui.py`; do not recreate from
-an unpatched donor image. Donor repositories were not edited.
+hashes were checked before migration. Future images use the composition adapter
+and reviewed fork change described by the WebUI migration plan. Rebuild through
+`scripts/prepare-hermes-webui.py`; do not recreate from an unpatched donor image.
+Donor repositories were not edited.
 
 ## Commands
 

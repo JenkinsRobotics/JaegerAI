@@ -81,9 +81,11 @@ class ProfileRunner:
                     from jaeger_ai.features.roundtable.service import TableService
                     self.managers[profile] = TableService(root)
                 else:
-                    from jaeger_ai.core.frameworks.hermes_native import hermes_turn
-                    from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
-                    self.managers[profile] = Runs(root, {'hermes': hermes_turn, 'openclaw': openclaw_turn}[profile])
+                    from jaeger_ai.contract.frameworks import backend_protocol
+                    protocol = backend_protocol(profile)
+                    self.managers[profile] = Runs(
+                        root, protocol.turn, reconciler=protocol.reconciler
+                    )
             return self.managers[profile]
 
     def start(self, request):

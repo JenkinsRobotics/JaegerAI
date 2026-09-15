@@ -47,15 +47,11 @@ def api_options(key_file: Path, host: str, port: int) -> dict:
 async def serve(options: dict) -> int:
     from gateway.config import PlatformConfig
     from gateway.platforms.api_server import APIServerAdapter
-    from run_agent import AIAgent
 
-    # Same narrow cloud-stop fix used by the existing WebUI-created agents.
     overlay = Path(__file__).resolve().parents[1] / "integrations/hermes_webui"
     sys.path.insert(0, str(overlay))
-    from jaeger_agent_compat import install
-    from jaeger_hermes_runs import resumable_adapter
-    install(AIAgent)
-    adapter = resumable_adapter(APIServerAdapter)(PlatformConfig(enabled=True, extra=options))
+    from native_adapter import native_adapter_class
+    adapter = native_adapter_class(APIServerAdapter)(PlatformConfig(enabled=True, extra=options))
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
