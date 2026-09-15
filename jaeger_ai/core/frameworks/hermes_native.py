@@ -25,10 +25,11 @@ def connection():
     return f'http://{address}:8645', key
 
 
-def hermes_request(path, body=None, timeout=10):
+def hermes_request(path, body=None, timeout=10, headers=None):
     base, key = connection()
-    headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
-    return urlopen(Request(base + path, headers=headers,
+    request_headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
+    request_headers.update(headers or {})
+    return urlopen(Request(base + path, headers=request_headers,
                           data=None if body is None else json.dumps(body).encode()), timeout=timeout)
 
 
@@ -36,8 +37,23 @@ def hermes_reconcile(native):
     native_id = native.get('run_id')
     if not native_id:
         raise ClassifiedError('invalid_response', 'Native run identity missing for reconciliation')
-    with hermes_request(f'/v1/runs/{native_id}', timeout=10) as response:
+    receipt_id = native_id
+    if not str(native_id).startswith('run_'):
+        request_body = native.get('request')
+        if not isinstance(request_body, dict):
+            raise ClassifiedError('invalid_response', 'Hermes idempotent recovery request is missing')
+        with hermes_request('/v1/runs', request_body, timeout=10,
+                            headers={'Idempotency-Key': str(native_id)}) as response:
+            accepted = json.load(response)
+        receipt_id = accepted.get('run_id')
+        if not re.fullmatch(r'run_[0-9a-f]{32}', str(receipt_id or '')):
+            raise ClassifiedError('invalid_response', 'Hermes idempotency replay returned no valid run identity')
+    with hermes_request(f'/v1/runs/{receipt_id}', timeout=10) as response:
         receipt = json.load(response)
+    if receipt.get('run_id') != receipt_id:
+        raise ClassifiedError('invalid_response', 'Hermes returned a receipt for another native run')
+    if receipt.get('session_id') != native.get('session_id'):
+        raise ClassifiedError('invalid_response', 'Hermes returned a receipt for another session')
     status = receipt.get('status')
     if status not in {'completed', 'failed', 'cancelled'}:
         raise RuntimeError(f'Hermes native run is not terminal: {status}')
@@ -48,6 +64,7 @@ def hermes_reconcile(native):
         'execution_unknown': False,
         'output': receipt.get('output', ''),
         'source': 'hermes_native_run_receipt',
+        'source_native_run_id': receipt_id,
     }
 
 
@@ -60,12 +77,12 @@ def hermes_turn(run, workspace=None):
         return ''
     # Hermes chooses its run ID. Persist send intent before the request; a lost
     # acceptance response must leave ownership uncertain, never retry the POST.
-    run.dispatch(session_id=run.session, run_id=None)
     body = {'session_id': run.session, 'input': run.message}
     for name in ('model', 'provider'):
         if getattr(run, name, None):
             body[name] = getattr(run, name)
-    with hermes_request('/v1/runs', body) as response:
+    run.dispatch(session_id=run.session, run_id=run.id, request=body)
+    with hermes_request('/v1/runs', body, headers={'Idempotency-Key': run.id}) as response:
         accepted = json.load(response)
     native_id = accepted.get('run_id', '')
     if not re.fullmatch(r'run_[0-9a-f]{32}', native_id):

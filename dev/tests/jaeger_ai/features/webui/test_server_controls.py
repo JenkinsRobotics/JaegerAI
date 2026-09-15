@@ -47,8 +47,16 @@ def test_stop_all_reverses_dependency_order(controls, monkeypatch):
 
 def test_hermes_starts_container_before_native_api(controls):
     assert controls.change('hermes', 'start')['ok']
-    assert controls.calls[1] == ['/opt/homebrew/bin/container', 'start', 'test-hermes']
+    assert ['/opt/homebrew/bin/container', 'system', 'start', '--disable-kernel-install'] in controls.calls
+    assert ['/opt/homebrew/bin/container', 'start', 'test-hermes'] in controls.calls
     assert controls.calls[-1][-1].endswith(SERVICES['hermes'][1])
+
+
+def test_container_daemon_start_and_stop(controls):
+    assert controls.change('container', 'start')['ok']
+    assert controls.calls[-1] == ['/opt/homebrew/bin/container', 'system', 'start', '--disable-kernel-install']
+    assert controls.change('container', 'stop')['ok']
+    assert controls.calls[-1] == ['/opt/homebrew/bin/container', 'system', 'stop']
 
 
 def test_unknown_command_never_executes(controls):

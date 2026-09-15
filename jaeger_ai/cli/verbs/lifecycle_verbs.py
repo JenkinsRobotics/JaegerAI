@@ -20,6 +20,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Sequence
+from urllib.parse import urlsplit
+
+from jaeger_ai.contract.ports import OLLAMA_PORT, OLLAMA_URL
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -652,8 +655,11 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
 
     # Mac Ollama is the default. Rack services remain explicitly paused until
     # they can be managed headlessly.
-    ollama_ok = _is_port_open(11434, "127.0.0.1", timeout=0.5) or _is_port_open(11434, "192.168.64.1", timeout=0.5)
-    ollama_host = "127.0.0.1:11434" if _is_port_open(11434, "127.0.0.1", timeout=0.2) else "192.168.64.1:11434"
+    ollama_endpoint = urlsplit(OLLAMA_URL)
+    ollama_name = ollama_endpoint.hostname or "127.0.0.1"
+    ollama_port = ollama_endpoint.port or OLLAMA_PORT
+    ollama_ok = _is_port_open(ollama_port, ollama_name, timeout=0.5)
+    ollama_host = f"{ollama_name}:{ollama_port}"
     rack_enabled = os.environ.get("JAEGER_RACK_SERVICES", "").strip().lower() in {"1", "true", "yes"}
     honcho_ok = _is_port_open(8088, "10.15.0.239", timeout=1.0) if rack_enabled else False
 

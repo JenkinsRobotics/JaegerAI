@@ -13,6 +13,13 @@ def route(argv):
     return entry._route(argv, PY)
 
 
+def test_native_run_recovery_route():
+    assert route(["runs", "reconcile", "openclaw", "a" * 32]) == [
+        PY, "-m", "jaeger_ai.core.frameworks.recovery",
+        "reconcile", "openclaw", "a" * 32,
+    ]
+
+
 def test_console_subcommands_go_to_cli():
     for sub in ("skills", "personality",
                 "roadmap", "avatar", "prompt", "config",

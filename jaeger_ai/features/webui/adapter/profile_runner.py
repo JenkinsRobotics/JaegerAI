@@ -51,7 +51,20 @@ class ProfileRunner:
         # Replay a saved terminal receipt, but never restart native execution.
         for row in self.store.records():
             profile = row.get('profile')
-            if profile not in {'hermes', 'openclaw', 'roundtable'} or row.get('terminal_state'):
+            if row.get('terminal_state'):
+                continue
+            if profile == 'jaeger':
+                # Jaeger workers die with the adapter process. A leftover
+                # running row would block every later send on that session.
+                self.store.append(row['run_id'], 'apperror', {
+                    'message': 'Runner restarted; the previous Jaeger turn was interrupted.',
+                    'session_id': row.get('session_id'),
+                    'stream_id': row['run_id'],
+                })
+                self.store.set_state(row['run_id'], status='interrupted', terminal_state='interrupted',
+                                     active_controls=[], pending_approval_id=None, execution_unknown=True)
+                continue
+            if profile not in {'hermes', 'openclaw', 'roundtable'}:
                 continue
             try:
                 saved = self.manager(profile).get(row['run_id'])
@@ -81,9 +94,10 @@ class ProfileRunner:
                     from jaeger_ai.features.roundtable.service import TableService
                     self.managers[profile] = TableService(root)
                 else:
-                    from jaeger_ai.core.frameworks.hermes_native import hermes_turn
-                    from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
-                    self.managers[profile] = Runs(root, {'hermes': hermes_turn, 'openclaw': openclaw_turn}[profile])
+                    from jaeger_ai.core.frameworks.backends import backend
+                    registration = backend(profile)
+                    self.managers[profile] = Runs(
+                        root, registration.turn, reconciler=registration.reconcile)
             return self.managers[profile]
 
     def start(self, request):

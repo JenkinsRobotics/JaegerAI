@@ -157,6 +157,44 @@ def native_session_key(session):
     return f"agent:main:openai-user:hermes:{session}"
 
 
+def openclaw_reconcile(native):
+    """Accept only OpenClaw's authoritative terminal observation for a run."""
+    from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
+
+    native_id = str(native.get("run_id") or "")
+    session_id = str(native.get("session_id") or "")
+    if not native_id or not session_id:
+        raise ClassifiedError("invalid_response", "Native identity missing for reconciliation")
+    with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE) as gateway:
+        receipt = gateway.request("agent.wait", {"runId": native_id, "timeoutMs": 1})
+    if receipt.get("runId") not in {None, native_id}:
+        raise ClassifiedError("invalid_response", "OpenClaw returned a receipt for another run")
+    status = receipt.get("status")
+    stop_reason = str(receipt.get("stopReason") or "").lower()
+    confirmed_cancel = (
+        status == "timeout"
+        and stop_reason in {"aborted", "cancelled", "rpc", "stop", "user"}
+        and isinstance(receipt.get("endedAt"), (int, float))
+    )
+    if status in {"timeout", "pending"} and not confirmed_cancel:
+        raise RuntimeError(f"OpenClaw native run is not terminal: {status}")
+    if status not in {"ok", "error", "timeout"}:
+        raise ClassifiedError("invalid_response", f"OpenClaw returned an invalid run status: {status}")
+    terminal = "cancelled" if confirmed_cancel else (
+        "completed" if status == "ok" else "failed"
+    )
+    terminal_reply = receipt.get("terminalReply") or {}
+    output = terminal_reply.get("text", "") if terminal_reply.get("disposition") == "visible" else ""
+    return {
+        "run_id": native_id,
+        "session_id": session_id,
+        "status": terminal,
+        "execution_unknown": False,
+        "output": output,
+        "source": "openclaw_agent_wait",
+    }
+
+
 def openclaw_turn(run, workspace=None):
     from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
     # Identical to the existing REST adapter's user=hermes:<session> mapping.

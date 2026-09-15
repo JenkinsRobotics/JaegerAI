@@ -201,7 +201,7 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
 
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
     monkeypatch.setattr(jaeger_mcp, "MCP_GATEWAY_URL", "http://127.0.0.1:8811/mcp")
-    monkeypatch.setattr(jaeger_mcp, "MCP_API_KEY", "")
+    monkeypatch.setattr(jaeger_mcp, "mcp_api_key", lambda: "test-key")
     monkeypatch.setattr(jaeger_mcp, "MCP_HOST_HEADER", "127.0.0.1:8811")
 
     ok = await app._native_lead_turn("sess-native", "What is your autonomy mode?")
@@ -223,6 +223,55 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _BoomClient)
     failed = await app._native_lead_turn("sess-native", "hello")
     assert failed is None
+
+
+@pytest.mark.asyncio
+async def test_native_lead_reuses_catalog_and_refreshes_after_credential_rotation(monkeypatch, tmp_path):
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "mcp-cache.sqlite3"))
+    created = []
+    current_key = ["first"]
+
+    class Client:
+        def __init__(self, url, key, host):
+            self.key = key
+            self.initialized = 0
+            self.listed = 0
+            created.append(self)
+        def initialize(self): self.initialized += 1
+        def list_tools(self):
+            self.listed += 1
+            return [{"name": "jaeger_chat"}]
+        def _execute_call(self, name, arguments):
+            return {"content": [{"type": "text", "text": self.key}]}
+
+    import jaeger_ai.core.frameworks.jaeger as transport
+    monkeypatch.setattr(transport, "MCPClient", Client)
+    monkeypatch.setattr(transport, "mcp_api_key", lambda: current_key[0])
+    assert (await app._native_lead_turn("s", "one"))[0] == "first"
+    assert (await app._native_lead_turn("s", "two"))[0] == "first"
+    assert len(created) == 1
+    assert (created[0].initialized, created[0].listed) == (1, 1)
+    current_key[0] = "rotated"
+    assert (await app._native_lead_turn("s", "three"))[0] == "rotated"
+    assert len(created) == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_mcp_credential_fails_before_native_ownership(monkeypatch, tmp_path):
+    store = GatewaySessionStore(tmp_path / "missing-key.sqlite3")
+    app = JaegerGatewayApp(store=store)
+    store.ensure_session("s")
+    admitted = store.admit_request("s", "hello", request_id="request")
+    import jaeger_ai.core.frameworks.jaeger as transport
+    monkeypatch.setattr(
+        transport, "mcp_api_key",
+        lambda: (_ for _ in ()).throw(RuntimeError("MCP credential missing: configure it")),
+    )
+    await app._execute_turn("s", admitted["turn_id"], "hello", request_id="request")
+    assert store.get_request("request")["native_run_id"] is None
+    event = app.event_bus.get_replay_events("s", since_event_id=0)[-1]
+    assert event.event == "turn.failed"
+    assert "MCP credential missing" in event.data["error"]
 
 
 @pytest.mark.asyncio
@@ -268,7 +317,7 @@ async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
     async def _boom_native(*a, **k):
         raise AssertionError("specialist must not call native MCP")
 
-    async def _ollama(text, *, system_prompt=None):
+    async def _ollama(text, *, system_prompt=None, history=None):
         assert "specialist" in (system_prompt or "").lower()
         return "SPECIALIST:Ops"
 
@@ -318,6 +367,39 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
     assert finish.event == "turn.finish"
     assert finish.data["execution_mode"] == "text_only"
     assert finish.data["capabilities"] == {"native_tools": False, "native_memory": False}
+
+
+@pytest.mark.asyncio
+async def test_text_mode_sends_history_without_a_128_token_cap(monkeypatch, tmp_path):
+    captured = {}
+
+    class Response:
+        status = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def text(self): return '{"message":{"content":"remembered"}}'
+
+    class Session:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def post(self, url, *, json):
+            captured.update(json)
+            return Response()
+
+    monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "history.sqlite3"))
+    answer = await app._ollama_chat("second", history=[
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "one"},
+    ])
+    assert answer == "remembered"
+    assert captured["messages"][1:] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "one"},
+        {"role": "user", "content": "second"},
+    ]
+    assert "options" not in captured
 
 
 @pytest.mark.asyncio

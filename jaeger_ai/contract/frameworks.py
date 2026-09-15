@@ -28,6 +28,48 @@ of them can create a cycle by doing so.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable, Protocol
+
+DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
+
+
+class NativeRun(Protocol):
+    """Minimum run surface supplied to every native backend turn."""
+
+    session: str
+    message: str
+    execution_unknown: bool
+
+
+TurnFunction = Callable[[NativeRun, str | None], str]
+ReconcileFunction = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class BackendCapabilities:
+    """Behavior every registered native backend declares explicitly."""
+
+    tools: bool
+    conversation_history: bool
+    cancellation: bool
+    approvals: bool
+    reconciliation: bool
+
+
+@dataclass(frozen=True)
+class BackendRegistration:
+    """Complete executable contract for one native runtime."""
+
+    runtime: str
+    turn: TurnFunction
+    reconcile: ReconcileFunction
+    capabilities: BackendCapabilities
+
+    def __post_init__(self) -> None:
+        if not self.runtime or not callable(self.turn) or not callable(self.reconcile):
+            raise TypeError("A backend registration requires runtime, turn, and reconcile")
+        if not self.capabilities.reconciliation:
+            raise ValueError("A native backend must declare reconciliation support")
 
 
 @dataclass(frozen=True)
@@ -176,11 +218,17 @@ def is_known(value: object) -> bool:
 
 
 __all__ = [
+    "DEFAULT_AGENT_MODEL",
+    "BackendCapabilities",
+    "BackendRegistration",
     "DEBATE_MEMBERS",
     "FRAMEWORKS",
     "Framework",
+    "NativeRun",
+    "ReconcileFunction",
     "SESSION_OWNERS",
     "SOLO_RUNTIMES",
+    "TurnFunction",
     "UnknownFramework",
     "canonical_runtime",
     "display_name",

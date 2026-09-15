@@ -22,6 +22,7 @@ from typing import Callable
 from .agent_workspaces import container_name
 
 from jaeger_ai.contract.frameworks import FRAMEWORKS
+from jaeger_ai.contract.ports import OLLAMA_URL
 from jaeger_ai.core.instance.instance import operator_state_root
 
 FAILURE_THRESHOLD = 3
@@ -30,7 +31,6 @@ POLL_INTERVAL_S = 20
 REPO_ROOT = Path(__file__).resolve().parents[3]
 JAEGER_RUNTIME_ROOT = operator_state_root() / "shared"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
-MAC_OLLAMA_URL = "http://192.168.64.1:11434"
 
 
 @dataclass(frozen=True)
@@ -237,7 +237,7 @@ def components() -> tuple[Component, ...]:
         ),
         Component(
             "ollama",
-            lambda: _http(f"{MAC_OLLAMA_URL}/api/version"),
+            lambda: _http(f"{OLLAMA_URL}/api/version"),
             lambda: _kickstart("com.jenkinsrobotics.ares-ollama"),
         ),
     ]

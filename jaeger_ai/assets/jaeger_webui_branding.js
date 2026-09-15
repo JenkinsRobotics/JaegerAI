@@ -268,8 +268,9 @@
       nav.setAttribute("aria-label", "Stage");
       nav.innerHTML = [
         ["chat", "Chat"],
-        ["avatar", "Avatar"],
-        ["work", "Work"],
+        // Hidden until Avatar and Work have real panels and backing actions.
+        // ["avatar", "Avatar"],
+        // ["work", "Work"],
       ]
         .map(
           ([id, label]) =>
@@ -287,20 +288,6 @@
         if (!btn) return;
         setStage(btn.dataset.stage);
       });
-    }
-    if (!document.getElementById("jaegerStageNotice")) {
-      const main = document.querySelector("main") || document.getElementById("chat") || document.body;
-      const notice = document.createElement("div");
-      notice.id = "jaegerStageNotice";
-      notice.hidden = true;
-      notice.style.cssText =
-        "font-size:12px;color:var(--muted,#888);padding:6px 14px;text-align:center;";
-      const composer = document.getElementById("composerWrap") || document.getElementById("composerBox");
-      if (composer && composer.parentElement) {
-        composer.parentElement.insertBefore(notice, composer);
-      } else {
-        main.appendChild(notice);
-      }
     }
   };
 

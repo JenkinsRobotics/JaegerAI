@@ -19,16 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 import urllib.request
 
-
-def _default_ollama_url() -> str:
-    try:
-        from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
-        return resolve_ollama_base_url(openai_compat=False)
-    except Exception:  # noqa: BLE001
-        return "http://localhost:11434"
-
-
-OLLAMA_URL = _default_ollama_url()
+from jaeger_ai.contract.ports import OLLAMA_URL
 LMSTUDIO_URL = "http://localhost:1234"
 _PROBE_TIMEOUT = 1.5
 OLLAMA_CLOUD_URL = "https://ollama.com/v1"
@@ -303,7 +294,7 @@ def discover_jaeger() -> list[dict[str, Any]]:
 
 def discover_ollama(base: str | None = None) -> dict[str, Any]:
     """Installed Ollama models via /api/tags."""
-    base = base or _default_ollama_url()
+    base = base or OLLAMA_URL
     try:
         data = _get_json(f"{base.rstrip('/')}/api/tags")
     except Exception as exc:  # noqa: BLE001
@@ -324,7 +315,7 @@ def discover_ollama(base: str | None = None) -> dict[str, Any]:
     return {"online": True, "models": models, "endpoint": base}
 
 
-def discover_local_ollama_models(base_url: str = "http://localhost:11434") -> list[DiscoveredModel]:
+def discover_local_ollama_models(base_url: str = OLLAMA_URL) -> list[DiscoveredModel]:
     """Probe Ollama server and return as DiscoveredModel entries."""
     discovered: list[DiscoveredModel] = []
     try:

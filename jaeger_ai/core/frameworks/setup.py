@@ -17,6 +17,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL, SOLO_RUNTIMES
+from jaeger_ai.contract.ports import MCP_GATEWAY_URL, OLLAMA_OPENAI_URL
+from jaeger_ai.core.instance.instance import operator_state_root
+
 SERVICES = {
     "jaeger": ("jaeger", 8642),
     "roundtable": ("roundtable", 8643),
@@ -24,16 +28,11 @@ SERVICES = {
 }
 SUPERVISOR_LABEL = "com.jenkinsrobotics.agent-fabric-supervisor"
 SUPERVISOR_MODULE = "jaeger_ai.core.runtime.fabric_supervisor"
-DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
 AVAILABLE_AGENT_MODELS = (DEFAULT_AGENT_MODEL, "glm-5.3:cloud")
 OPENCLAW_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
-DEFAULT_OLLAMA_BASE_URL = "http://10.15.0.239:11434/v1"
-JAEGER_MCP_URL = "http://192.168.64.1:8811/mcp"
 JAEGER_A2A_URL = "http://192.168.64.1:8812"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 HONCHO_WORKSPACE = "jenkins-robotics"
-from jaeger_ai.contract.frameworks import SOLO_RUNTIMES
-from jaeger_ai.core.instance.instance import operator_state_root
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 JAEGER_RUNTIME_ROOT = operator_state_root() / "shared"
@@ -171,7 +170,7 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
     ]
     block = (
         "  jaeger-host:\n"
-        f"    url: {JAEGER_MCP_URL}\n"
+        f"    url: {MCP_GATEWAY_URL}\n"
         "    connect_timeout: 60.0\n"
         "    headers:\n"
         "      Authorization: Bearer ${MCP_ARES_HOST_API_KEY}\n"
@@ -195,11 +194,11 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
         document.setdefault("gateway", {}).pop("mcp", None)
         servers = document.setdefault("mcp", {}).setdefault("servers", {})
         servers["jaeger-host"] = {
-            "url": JAEGER_MCP_URL,
+            "url": MCP_GATEWAY_URL,
             "transport": "streamable-http",
         }
         # Do not default OpenClaw MCP to ares-agentgateway :8813 (M10).
-        # Chat spine uses JAEGER_MCP_URL (:8811) via jaeger-host only.
+        # Chat spine uses the contract MCP gateway URL (:8811) via jaeger-host only.
         servers.pop("ares-system", None)
         temporary = openclaw_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
@@ -261,14 +260,14 @@ def _configure_agent_models(home: Path | None = None) -> None:
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         _set_yaml_section_value(path, "model", "provider", "ollama")
-        _set_yaml_section_value(path, "model", "base_url", DEFAULT_OLLAMA_BASE_URL)
+        _set_yaml_section_value(path, "model", "base_url", OLLAMA_OPENAI_URL)
         text = path.read_text(encoding="utf-8")
         if not re.search(r"(?m)^ollama_hosts:", text):
             text += (
                 "ollama_hosts:\n"
                 "  rack:\n    label: Rack PC\n"
-                f"    base_url: {DEFAULT_OLLAMA_BASE_URL}\n"
-                "  mac:\n    label: Mac\n    base_url: http://192.168.64.1:11434/v1\n"
+                f"    base_url: {OLLAMA_OPENAI_URL}\n"
+                f"  mac:\n    label: Mac\n    base_url: {OLLAMA_OPENAI_URL}\n"
             )
             path.write_text(text, encoding="utf-8")
     for profile in SERVICES:
@@ -290,7 +289,7 @@ def _configure_agent_models(home: Path | None = None) -> None:
     )
     _set_yaml_section_value(
         JAEGER_INSTANCE_ROOT / "config.yaml" if home == Path.home().resolve() else home / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml",
-        "external_model", "base_url", DEFAULT_OLLAMA_BASE_URL,
+        "external_model", "base_url", OLLAMA_OPENAI_URL,
     )
 
     openclaw_path = home / ".jaeger" / "openclaw" / "openclaw.json"
@@ -330,7 +329,7 @@ def _configure_agent_models(home: Path | None = None) -> None:
         memory_search.update({
             "provider": "ollama",
             "model": OPENCLAW_EMBEDDING_MODEL,
-            "remote": {"baseUrl": "http://10.15.0.239:11434"},
+            "remote": {"baseUrl": OLLAMA_OPENAI_URL.removesuffix("/v1")},
         })
         document.setdefault("agents", {}).setdefault("defaults", {}).setdefault("model", {})["primary"] = (
             f"{provider_name}/{DEFAULT_AGENT_MODEL}"
@@ -361,10 +360,12 @@ def _plist(label: str, module: str) -> bytes:
     logs.mkdir(parents=True, exist_ok=True)
     return plistlib.dumps({
         "Label": label,
-        "ProgramArguments": [sys.executable, "-m", module],
+        "ProgramArguments": [sys.executable, "-B", "-m", module],
         "RunAtLoad": True,
         "KeepAlive": True,
         "EnvironmentVariables": {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": str(Path.home() / ".cache" / "jaeger" / "pycache"),
             "OPENCLAW_ADAPTER_NATIVE_RUNS": "1",
             "ROUNDTABLE_NATIVE_RUNS": "1",
             "PATH": f"{Path.home()}/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -382,7 +383,7 @@ def install(bridge_host: str) -> int:
     _configure_agent_models()
     print(f"agent model default: {DEFAULT_AGENT_MODEL}")
     _configure_agent_connectivity()
-    print(f"agent network: MCP {JAEGER_MCP_URL}; A2A {JAEGER_A2A_URL}")
+    print(f"agent network: MCP {MCP_GATEWAY_URL}; A2A {JAEGER_A2A_URL}")
     honcho_configs = _configure_honcho()
     print(f"agent memory: {len(honcho_configs)} Honcho profiles via {HONCHO_LAN_URL}")
     domain = f"gui/{os.getuid()}"

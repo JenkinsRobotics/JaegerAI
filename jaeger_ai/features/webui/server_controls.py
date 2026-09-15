@@ -5,6 +5,7 @@ import concurrent.futures
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import time
@@ -12,6 +13,8 @@ from urllib.request import urlopen
 
 # Fixed service identities: never accept an arbitrary launchctl label or command.
 SERVICES = {
+    'container': ('Container Daemon', None, None, None),
+    'ollama': ('Ollama', 'com.jenkinsrobotics.ares-ollama', 11434, '/api/tags'),
     'gateway': ('Gateway', 'com.jenkinsrobotics.jaeger-gateway', 8810, '/health'),
     'agent': ('Jaeger Agent', 'com.jenkinsrobotics.jaeger-bridge', None, None),
     'hermes': ('Hermes', 'com.jenkinsrobotics.hermes-native-api', None, None),
@@ -31,6 +34,10 @@ class ServerControls:
     def _execute(args):
         return subprocess.run(args, capture_output=True, text=True, timeout=25, check=False)
 
+    @staticmethod
+    def container_cli():
+        return shutil.which('container') or '/opt/homebrew/bin/container'
+
     def plist(self, service):
         return self.home / 'Library/LaunchAgents' / (SERVICES[service][1] + '.plist')
 
@@ -44,6 +51,10 @@ class ServerControls:
     def ready(self, service):
         _, _, port, path = SERVICES[service]
         try:
+            if service == 'container':
+                cli = self.container_cli()
+                res = self.execute([cli, 'system', 'status'])
+                return res.returncode == 0 and 'running' in str(res.stdout).lower()
             if service == 'agent':
                 from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
                 return bool(jaeger_bridge().health().get('ok'))
@@ -65,13 +76,18 @@ class ServerControls:
     def status_one(self, service):
         name, label, _, _ = SERVICES[service]
         ready = self.ready(service)
+        if service == 'container':
+            cli = self.container_cli()
+            configured = Path(cli).is_file() or bool(shutil.which('container'))
+            return {'id': service, 'name': name, 'ready': ready, 'configured': configured,
+                    'state': 'Ready' if ready else 'Stopped'}
         configured = label is None or self.plist(service).is_file()
         running = ready or (label is not None and self.loaded(label))
         return {'id': service, 'name': name, 'ready': ready, 'configured': configured,
                 'state': 'Ready' if ready else ('Not ready' if running else 'Stopped')}
 
     def status(self):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             return list(pool.map(self.status_one, SERVICES))
 
     def checked(self, args):
@@ -94,24 +110,37 @@ class ServerControls:
             self.checked(['/bin/launchctl', 'kickstart', *(['-k'] if action == 'restart' else []), f'{self.domain}/{label}'])
 
     def change_one(self, service, action):
+        if service == 'container':
+            cli = self.container_cli()
+            if action == 'stop':
+                self.checked([cli, 'system', 'stop'])
+            elif action == 'start':
+                self.checked([cli, 'system', 'start', '--disable-kernel-install'])
+            elif action == 'restart':
+                self.execute([cli, 'system', 'stop'])
+                self.checked([cli, 'system', 'start', '--disable-kernel-install'])
+            return
         if service in {'hermes', 'openclaw'}:
+            cli = self.container_cli()
             name = self.container(service)
             if service == 'hermes' and action in {'stop', 'restart'}:
                 self.launch(service, 'stop')
             if action in {'stop', 'restart'}:
                 # Stopping an already stopped container is a successful no-op.
-                result = self.execute(['/opt/homebrew/bin/container', 'inspect', name])
+                result = self.execute([cli, 'inspect', name])
                 if result.returncode:
                     raise RuntimeError('Configured container could not be inspected')
                 state = json.loads(result.stdout)[0]['status']['state']
                 if state == 'running':
-                    self.checked(['/opt/homebrew/bin/container', 'stop', name])
+                    self.checked([cli, 'stop', name])
             if action in {'start', 'restart'}:
-                result = self.execute(['/opt/homebrew/bin/container', 'inspect', name])
+                if not self.ready('container'):
+                    self.change_one('container', 'start')
+                result = self.execute([cli, 'inspect', name])
                 if result.returncode:
                     raise RuntimeError('Configured container is not installed')
                 if json.loads(result.stdout)[0]['status']['state'] != 'running':
-                    self.checked(['/opt/homebrew/bin/container', 'start', name])
+                    self.checked([cli, 'start', name])
                 if service == 'hermes':
                     self.launch(service, 'start')
         else:

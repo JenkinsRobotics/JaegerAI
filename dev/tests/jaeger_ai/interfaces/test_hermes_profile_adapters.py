@@ -151,11 +151,11 @@ def test_jaeger_chat_uses_a_fresh_mcp_session_per_turn(monkeypatch):
 
 def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):
     monkeypatch.setattr(
-        jaeger.mcp_client,
-        "chat",
-        lambda _message, _session_id=None: {
+        jaeger,
+        "current_mcp_client",
+        lambda: SimpleNamespace(chat=lambda _message, _session_id=None: {
             "content": [{"type": "text", "text": "READY"}],
-        },
+        }),
     )
     handler = object.__new__(jaeger.RunHandler)
     body = json.dumps({
@@ -183,6 +183,9 @@ def test_jaeger_runtime_artifacts_live_outside_repository():
     assert not setup.JAEGER_RUNTIME_ROOT.resolve().is_relative_to(setup.REPO_ROOT.resolve())
     plist = setup._plist("test.adapter", "example.module")
     assert str(setup.JAEGER_RUNTIME_ROOT / "logs").encode() in plist
+    assert b"PYTHONDONTWRITEBYTECODE" in plist
+    assert b"PYTHONPYCACHEPREFIX" in plist
+    assert b"<string>-B</string>" in plist
 
 
 def test_roundtable_keeps_other_members_when_one_fails(monkeypatch):
@@ -332,7 +335,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
         ).read_text()
     assert f"default: {setup.DEFAULT_AGENT_MODEL}" in hermes_default.read_text()
     assert f"model: {setup.DEFAULT_AGENT_MODEL}" in jaeger.read_text()
-    assert f"base_url: {setup.DEFAULT_OLLAMA_BASE_URL}" in jaeger.read_text()
+    assert f"base_url: {setup.OLLAMA_OPENAI_URL}" in jaeger.read_text()
     config = json.loads(openclaw.read_text())
     assert config["agents"]["defaults"]["model"]["primary"].endswith(setup.DEFAULT_AGENT_MODEL)
     assert config["models"]["providers"]["ollama-cloud-via-host"]["models"][0]["id"] == setup.DEFAULT_AGENT_MODEL
@@ -343,7 +346,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     assert config["agents"]["defaults"]["memorySearch"] == {
         "provider": "ollama",
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
-        "remote": {"baseUrl": "http://10.15.0.239:11434"},
+        "remote": {"baseUrl": setup.OLLAMA_OPENAI_URL.removesuffix("/v1")},
     }
 
 
@@ -364,7 +367,7 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
     ]:
         config = profile_home.joinpath("config.yaml").read_text()
         assert "jaeger-host:" in config
-        assert setup.JAEGER_MCP_URL in config
+        assert setup.MCP_GATEWAY_URL in config
     document = json.loads(openclaw.read_text())
     assert document["mcp"]["servers"]["jaeger-host"]["url"].endswith(":8811/mcp")
     assert "ares-system" not in document["mcp"]["servers"]

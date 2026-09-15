@@ -208,9 +208,10 @@ def _native_hermes_runs():
         if _hermes_runs is None:
             from jaeger_ai.core.instance.instance import operator_state_root
             from jaeger_ai.core.frameworks.native_runs import Runs
-            from jaeger_ai.core.frameworks.hermes_native import hermes_turn
+            from jaeger_ai.core.frameworks.backends import backend
             root = operator_state_root() / 'shared/roundtable/hermes-runs'
-            _hermes_runs = Runs(root, hermes_turn)
+            registration = backend("hermes")
+            _hermes_runs = Runs(root, registration.turn, reconciler=registration.reconcile)
         return _hermes_runs
 
 def chat_hermes(message: str, session_id: str = "") -> str:
