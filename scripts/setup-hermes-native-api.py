@@ -21,10 +21,14 @@ def configuration():
     logs = operator_state_root() / "shared/logs"
     python_bin = Path.home() / ".jaeger/venv/bin/python"
     python_path = str(python_bin) if python_bin.exists() else sys.executable
-    return {"Label": LABEL, "ProgramArguments": [python_path, str(ROOT/"scripts/hermes-native-api-service.py")],
+    return {"Label": LABEL, "ProgramArguments": [python_path, "-B", str(ROOT/"scripts/hermes-native-api-service.py")],
             "WorkingDirectory": str(ROOT), "RunAtLoad": True, "KeepAlive": True,
             "ThrottleInterval": 20, "StandardOutPath": str(logs/(LABEL+".log")),
-            "StandardErrorPath": str(logs/(LABEL+".err.log"))}
+            "StandardErrorPath": str(logs/(LABEL+".err.log")),
+            "EnvironmentVariables": {
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPYCACHEPREFIX": str(Path.home()/".cache/jaeger/pycache"),
+            }}
 
 
 def install():

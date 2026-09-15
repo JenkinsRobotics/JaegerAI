@@ -157,14 +157,39 @@ def native_session_key(session):
     return f"agent:main:openai-user:hermes:{session}"
 
 
-def openclaw_reconcile(native):
-    """Resolve a lost observer from OpenClaw's durable trajectory receipt."""
+def _terminal_from_agent_wait(native_id, session_id, receipt):
+    if receipt.get("runId") not in {None, native_id}:
+        raise ClassifiedError("invalid_response", "OpenClaw returned a receipt for another run")
+    status = receipt.get("status")
+    stop_reason = str(receipt.get("stopReason") or "").lower()
+    confirmed_cancel = (
+        status == "timeout"
+        and stop_reason in {"aborted", "cancelled", "rpc", "stop", "user"}
+        and isinstance(receipt.get("endedAt"), (int, float))
+    )
+    if status in {"timeout", "pending"} and not confirmed_cancel:
+        raise RuntimeError(f"OpenClaw native run is not terminal: {status}")
+    if status not in {"ok", "error", "timeout"}:
+        raise ClassifiedError("invalid_response", f"OpenClaw returned an invalid run status: {status}")
+    terminal = "cancelled" if confirmed_cancel else (
+        "completed" if status == "ok" else "failed"
+    )
+    terminal_reply = receipt.get("terminalReply") or {}
+    output = terminal_reply.get("text", "") if terminal_reply.get("disposition") == "visible" else ""
+    return {
+        "run_id": native_id,
+        "session_id": session_id,
+        "status": terminal,
+        "execution_unknown": False,
+        "output": output,
+        "source": "openclaw_agent_wait",
+    }
+
+
+def _terminal_from_trajectory(native_id, session_id):
+    """Read OpenClaw's durable local receipt when its gateway is unavailable."""
     from .openclaw import _openclaw_home
 
-    run_id = str(native.get("run_id") or "")
-    session_key = str(native.get("session_id") or "")
-    if not run_id or not session_key:
-        raise ClassifiedError("invalid_response", "OpenClaw native identity is incomplete")
     terminal = None
     output = ""
     for path in (_openclaw_home() / "agents/main/sessions").glob("*.trajectory.jsonl"):
@@ -177,7 +202,7 @@ def openclaw_reconcile(native):
                         row = json.loads(line)
                     except (TypeError, ValueError):
                         continue
-                    if row.get("runId") != run_id or row.get("sessionKey") != session_key:
+                    if row.get("runId") != native_id or row.get("sessionKey") != session_id:
                         continue
                     data = row.get("data") if isinstance(row.get("data"), dict) else {}
                     texts = data.get("assistantTexts")
@@ -196,13 +221,29 @@ def openclaw_reconcile(native):
     else:
         status = "failed"
     return {
-        "run_id": run_id,
-        "session_id": session_key,
+        "run_id": native_id,
+        "session_id": session_id,
         "status": status,
         "execution_unknown": False,
         "output": output,
         "source": "openclaw_trajectory_receipt",
     }
+
+
+def openclaw_reconcile(native):
+    """Resolve from live ``agent.wait`` or OpenClaw's durable trajectory."""
+    from .openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
+
+    native_id = str(native.get("run_id") or "")
+    session_id = str(native.get("session_id") or "")
+    if not native_id or not session_id:
+        raise ClassifiedError("invalid_response", "Native identity missing for reconciliation")
+    try:
+        with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE) as gateway:
+            receipt = gateway.request("agent.wait", {"runId": native_id, "timeoutMs": 1})
+    except (OSError, ConnectionError, TimeoutError):
+        return _terminal_from_trajectory(native_id, session_id)
+    return _terminal_from_agent_wait(native_id, session_id, receipt)
 
 
 def openclaw_turn(run, workspace=None):

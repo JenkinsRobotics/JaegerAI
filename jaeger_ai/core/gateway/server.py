@@ -12,6 +12,7 @@ import time
 import json
 import logging
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,16 +20,18 @@ from typing import Any
 from aiohttp import ClientSession, ClientTimeout, web
 
 from jaeger_ai import __version__ as JAEGER_VERSION
+from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
 from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
     LOOPBACK,
-    OLLAMA_PORT,
+    OLLAMA_URL as LOCKED_OLLAMA_URL,
     WEBUI_ADAPTER_PORT,
     WEBUI_PORT,
 )
+from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
+
 from .event_bus import GatewayEventBus, ReplayGap
 from .session_store import GatewaySessionStore, RequestBusy, RequestConflict
-from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
 
 logger = logging.getLogger("jaeger.gateway")
 
@@ -36,16 +39,13 @@ DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_POR
 DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", LOOPBACK)
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
-LOCKED_OLLAMA_URL = os.environ.get(
-    "JAEGER_OLLAMA_URL", f"http://{LOOPBACK}:{OLLAMA_PORT}"
-).rstrip("/")
 LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
     "JAEGER_BRIDGE_HEALTH_URL", f"http://{LOOPBACK}:{WEBUI_ADAPTER_PORT}/health"
 ).rstrip("/")
 LOCKED_WEBUI_URL = os.environ.get(
     "JAEGER_WEBUI_URL", f"http://{LOOPBACK}:{WEBUI_PORT}"
 ).rstrip("/")
-DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "").strip()
+DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", DEFAULT_AGENT_MODEL)
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
@@ -72,6 +72,10 @@ class JaegerGatewayApp:
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._cancel_requested: set[str] = set()
+        self._mcp_transport_lock = threading.RLock()
+        self._mcp_transport_signature: tuple[Any, ...] | None = None
+        self._mcp_transport: Any = None
+        self._mcp_tool_names: frozenset[str] = frozenset()
         self._owns_store = False
         self.app = web.Application()
         self.app.on_startup.append(self._recover_interrupted)
@@ -151,7 +155,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
 
     async def handle_version(self, request: web.Request) -> web.Response:
-        """Stable, probe-only identity for clients and deployment checks."""
+        """Stable, read-only identity for clients and deployment checks."""
         return web.json_response({
             "component": "jaeger-gateway",
             "version": JAEGER_VERSION,
@@ -236,9 +240,7 @@ class JaegerGatewayApp:
         from jaeger_ai.core.frameworks.jaeger import (
             MCP_GATEWAY_URL, MCP_HOST_HEADER, mcp_api_key,
         )
-        api_key = mcp_api_key()
-        headers = {"Accept": "application/json, text/event-stream",
-                   "Authorization": f"Bearer {api_key}", "Host": MCP_HOST_HEADER}
+        headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
 
         async def rpc(client, method, params, identity):
             async with client.post(MCP_GATEWAY_URL, headers=headers, json={
@@ -273,6 +275,7 @@ class JaegerGatewayApp:
                 return value.get("result", {})
 
         try:
+            headers["Authorization"] = f"Bearer {mcp_api_key()}"
             async with asyncio.timeout(timeout_s):
                 async with ClientSession(timeout=ClientTimeout(total=timeout_s)) as client:
                     await rpc(client, "initialize", {
@@ -341,7 +344,7 @@ class JaegerGatewayApp:
         payload = {
             "status": status,
             "service": "jaeger-gateway",
-            "version": "0.4.1",
+            "version": JAEGER_VERSION,
             "architecture": "openclaw-parity",
             "persistence_spine": True,
             "agents_api": "/v1/agents",
@@ -970,20 +973,29 @@ class JaegerGatewayApp:
                 native_session,
                 request_id,
             )
-            client = MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
-            client.initialize()
-            names = {tool.get("name") for tool in client.list_tools()}
-            tool_name = next((name for name in ("jaeger_chat", "chat") if name in names), None)
-            if tool_name is None:
-                raise RuntimeError("MCP chat tool unavailable")
-            if request_id and self.store.get_request(request_id) is not None:
-                self.store.bind_native(
-                    request_id,
-                    native_run_id=request_id,
-                    native_session=native_session,
-                    status="running",
-                )
-            result = client._execute_call(tool_name, args)
+            key = mcp_api_key()
+            signature = (MCPClient, MCP_GATEWAY_URL, key, MCP_HOST_HEADER)
+            with self._mcp_transport_lock:
+                if signature != self._mcp_transport_signature:
+                    client = MCPClient(MCP_GATEWAY_URL, key, MCP_HOST_HEADER)
+                    client.initialize()
+                    names = frozenset(tool.get("name") for tool in client.list_tools())
+                    self._mcp_transport = client
+                    self._mcp_tool_names = names
+                    self._mcp_transport_signature = signature
+                client = self._mcp_transport
+                tool_name = next(
+                    (name for name in ("jaeger_chat", "chat") if name in self._mcp_tool_names), None)
+                if tool_name is None:
+                    raise RuntimeError("MCP chat tool unavailable")
+                if request_id and self.store.get_request(request_id) is not None:
+                    self.store.bind_native(
+                        request_id,
+                        native_run_id=request_id,
+                        native_session=native_session,
+                        status="running",
+                    )
+                result = client._execute_call(tool_name, args)
             if result.get("isError"):
                 raise RuntimeError("MCP chat returned a tool error")
             response_text = JaegerGatewayApp._mcp_chat_text(result)
@@ -1005,9 +1017,19 @@ class JaegerGatewayApp:
                 "native MCP turn has no confirmed result: %s",
                 exc,
             )
+            if "MCP credential missing" in str(exc):
+                raise
+            if getattr(exc, "code", None) in {401, 403}:
+                raise RuntimeError(f"MCP credential rejected (HTTP {exc.code})") from exc
             return None
 
-    async def _ollama_chat(self, text: str, *, system_prompt: str | None = None) -> str:
+    async def _ollama_chat(
+        self,
+        text: str,
+        *,
+        system_prompt: str | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         model = DEFAULT_OLLAMA_MODEL
         if not model:
@@ -1015,6 +1037,13 @@ class JaegerGatewayApp:
                 "Explicit text-only mode requires JAEGER_GATEWAY_OLLAMA_MODEL"
             )
         sys_content = system_prompt or "You are Jaeger. Reply briefly and helpfully."
+        messages = [
+            {"role": item.get("role"), "content": item.get("content")}
+            for item in (history or [])
+            if item.get("role") in {"user", "assistant"} and item.get("content")
+        ]
+        if not messages or messages[-1] != {"role": "user", "content": text}:
+            messages.append({"role": "user", "content": text})
         payload = {
             "model": model,
             "messages": [
@@ -1022,10 +1051,9 @@ class JaegerGatewayApp:
                     "role": "system",
                     "content": sys_content,
                 },
-                {"role": "user", "content": text},
+                *messages,
             ],
             "stream": False,
-            "options": {"num_predict": 128},
         }
         timeout = ClientTimeout(total=90)
         async with ClientSession(timeout=timeout) as session:
@@ -1087,7 +1115,6 @@ class JaegerGatewayApp:
                 if rid in self._cancel_requested:
                     self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                     return
-                self.store.bind_native(rid, native_run_id=rid, native_session="dispatcher", status="running")
                 native = await self._native_lead_turn(session_id, text, request_id=rid)
                 if native is not None:
                     response_text, backend = native
@@ -1116,7 +1143,12 @@ class JaegerGatewayApp:
                     "backend": backend,
                     **agent_fields,
                 })
-                response_text = await self._ollama_chat(text, system_prompt=system_prompt)
+                current = self.store.get_session(session_id) or {}
+                response_text = await self._ollama_chat(
+                    text,
+                    system_prompt=system_prompt,
+                    history=current.get("messages") or [],
+                )
             else:
                 self.event_bus.publish(session_id, "turn.delta", {
                     "turn_id": turn_id,

@@ -8,7 +8,11 @@ import pytest
 
 from jaeger_ai.interfaces import bridge
 from jaeger_ai.core.runtime.native_turns import NativeTurns
-from jaeger_ai.core.frameworks.run_input import normalize_input, attachment_prompt
+from jaeger_ai.core.frameworks.run_input import (
+    attachment_prompt,
+    inline_webui_text_attachments,
+    normalize_input,
+)
 from jaeger_ai.core.frameworks.native_runs import RunsHTTP
 
 
@@ -29,6 +33,43 @@ def test_structured_text_and_private_attachment_bytes(tmp_path):
 @pytest.mark.parametrize('body', [[{'type':'audio','data':'x'}], [{'type':'text','text':42}], [{'type':'image_url','image_url':{'url':'data:image/png;base64,!!!!'}}]])
 def test_invalid_blocks_are_explicit_errors(body):
     with pytest.raises(ValueError): normalize_input(body)
+
+
+def test_webui_markdown_attachment_is_inlined_for_jaeger(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
+    path = tmp_path / "pasted-text-2026-09-15.md"
+    path.write_text("# Review this\n\nA long pasted document.\n", encoding="utf-8")
+    prompt = inline_webui_text_attachments(
+        "I've uploaded 1 file(s): " + str(path),
+        [{"name": path.name, "path": str(path), "mime": "text/markdown", "size": path.stat().st_size}],
+    )
+    assert "A long pasted document." in prompt
+    assert path.name in prompt
+
+
+def test_webui_markdown_attachment_alone_is_enough_to_send(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
+    path = tmp_path / "pasted-text-only.md"
+    path.write_text("document body only\n", encoding="utf-8")
+    prompt = inline_webui_text_attachments(
+        "",
+        [{"name": path.name, "path": str(path), "mime": "text/plain"}],
+    )
+    assert prompt.startswith("Attached file")
+    assert "document body only" in prompt
+
+
+def test_webui_attachment_outside_inbox_is_not_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path / "inbox"))
+    (tmp_path / "inbox").mkdir()
+    secret = tmp_path / "secret.md"
+    secret.write_text("do not leak\n", encoding="utf-8")
+    prompt = inline_webui_text_attachments(
+        "please review",
+        [{"name": "secret.md", "path": str(secret), "mime": "text/markdown"}],
+    )
+    assert "do not leak" not in prompt
+    assert "could not read attachment" in prompt
 
 
 def test_http_preserves_model_provider_and_structured_input():

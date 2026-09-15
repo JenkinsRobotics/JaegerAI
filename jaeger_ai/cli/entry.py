@@ -67,10 +67,14 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.core.gateway.server", *rest[1:]]
     if cmd == "gateway":
         return [py, "-m", "jaeger_ai.features.agentgateway", *rest]
+    if cmd == "runs":
+        return [py, "-m", "jaeger_ai.core.frameworks.recovery", *rest]
     if cmd == "hermes-webui-adapter":
         return [py, "-m", "jaeger_ai.features.webui.adapter", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
+    if cmd == "finance":
+        return [py, "-m", "jaeger_ai.features.finance.cli", *rest]
     if cmd == "update":
         # Two updaters, one word: in a DEV CHECKOUT `jaeger update` is the
         # git-pull dev loop (devtools); in a clean product install it must

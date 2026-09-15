@@ -26,13 +26,13 @@ final class WebUIChatController: ObservableObject {
 
     private init() {}
 
-    nonisolated static func profileCookie(for url: URL) -> HTTPCookie? {
+    nonisolated static func profileCookie(for url: URL, value: String = "jaeger") -> HTTPCookie? {
         guard let host = url.host, !host.isEmpty else { return nil }
         return HTTPCookie(properties: [
             .domain: host,
             .path: "/",
             .name: "hermes_profile",
-            .value: "jaeger",
+            .value: value,
         ])
     }
 
@@ -100,8 +100,18 @@ final class WebUIChatController: ObservableObject {
     }
 
     private func applyCookie(for url: URL?) {
-        guard let url, let cookie = Self.profileCookie(for: url), let store = webView?.configuration.websiteDataStore.httpCookieStore else { return }
-        store.setCookie(cookie)
+        guard let url, let store = webView?.configuration.websiteDataStore.httpCookieStore else { return }
+        let host = url.host ?? ""
+        store.getAllCookies { cookies in
+            let hasProfile = cookies.contains {
+                $0.name == "hermes_profile" && ($0.domain == host || $0.domain == ".\(host)")
+            }
+            // Seed Jaeger only when the WebUI has no profile cookie yet.
+            // Overwriting on every navigation pinned the chip to Jaeger and
+            // left Roundtable sessions unable to send or switch away.
+            guard !hasProfile, let cookie = Self.profileCookie(for: url) else { return }
+            store.setCookie(cookie)
+        }
     }
 
     private func injectPrompt(_ text: String) async -> Bool {

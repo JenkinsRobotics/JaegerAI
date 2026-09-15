@@ -135,6 +135,25 @@ def test_a_debate_is_unavailable_when_a_member_is_down() -> None:
     assert rows["jaeger"]["runtime_status"] == "Ready"
 
 
+def test_incomplete_backend_registration_is_rejected() -> None:
+    with pytest.raises(ValueError, match="turn and reconciler together"):
+        fw.Framework(
+            runtime="broken",
+            profile="broken",
+            display_name="Broken",
+            agent_id="native:broken",
+            turn="example:turn",
+        )
+
+
+def test_chat_endpoint_defaults_are_defined_once_and_use_loopback(monkeypatch) -> None:
+    from jaeger_ai.contract import ports
+
+    assert ports.MCP_GATEWAY_URL == f"http://{ports.LOOPBACK}:{ports.MCP_GATEWAY_PORT}/mcp"
+    assert ports.OLLAMA_URL == f"http://{ports.LOOPBACK}:{ports.OLLAMA_PORT}"
+    assert ports.OLLAMA_OPENAI_URL == ports.OLLAMA_URL + "/v1"
+
+
 def test_roundtables_jaeger_seat_is_pinned_to_the_jaeger_instance() -> None:
     """Roundtable's Jaeger member must not follow the UI's active delegate.
 

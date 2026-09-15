@@ -10,11 +10,14 @@ from jaeger_ai.features.webui.adapter.profile_runner import ProfileRunner
 
 
 class Bridge:
-    def __init__(self): self.calls = []
+    def __init__(self):
+        self.calls = []
+        self.texts = []
     def command(self, *args): return {}
     def query(self, *args): return []
     def turn(self, text, session, *args, **kwargs):
         self.calls.append(session)
+        self.texts.append(text)
         return {'text': 'Jaeger reply'}
 
 
@@ -186,6 +189,59 @@ def test_jaeger_halt_is_not_reported_as_success(broker):
     accepted = broker.start({'profile': 'jaeger', 'session_id': 'halt', 'message': 'hi'})
     assert wait_done(broker, accepted['run_id'])['status'] == 'failed'
     assert broker.store.events_after(accepted['run_id'], None)['events'][-1]['event'] == 'apperror'
+
+
+def test_jaeger_inlines_pasted_markdown_attachment(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
+    path = tmp_path / "pasted-text-2026-09-15_12-00-00-000.md"
+    path.write_text("# Spec\n\nPlease implement this design.\n", encoding="utf-8")
+    accepted = broker.start({
+        'profile': 'jaeger',
+        'session_id': 'paste',
+        'message': f"I've uploaded 1 file(s): {path}",
+        'attachments': [{
+            'name': path.name,
+            'path': str(path),
+            'mime': 'text/markdown',
+            'size': path.stat().st_size,
+        }],
+    })
+    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
+    assert broker.bridge.texts
+    assert "Please implement this design." in broker.bridge.texts[0]
+    assert path.name in broker.bridge.texts[0]
+
+
+def test_adapter_restart_unblocks_stale_jaeger_session(tmp_path):
+    store = RunStore(tmp_path)
+    store.create(run_id='abcdabcdabcdabcdabcdabcdabcdabcd', session_id='jaeger-stuck', prompt='old')
+    store.set_state('abcdabcdabcdabcdabcdabcdabcdabcd', profile='jaeger')
+    ProfileRunner(store)
+    assert store.status('abcdabcdabcdabcdabcdabcdabcdabcd')['terminal_state'] == 'interrupted'
+
+
+def test_stale_jaeger_run_does_not_block_the_next_send(broker):
+    sid = 'stuck-jaeger'
+    broker.store.create(run_id='deadbeefdeadbeefdeadbeefdeadbeef', session_id=sid, prompt='old')
+    broker.store.set_state('deadbeefdeadbeefdeadbeefdeadbeef', profile='jaeger')
+    accepted = broker.start({'profile': 'jaeger', 'session_id': sid, 'message': 'hello again'})
+    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
+    assert broker.bridge.texts[-1] == 'hello again'
+    assert broker.store.status('deadbeefdeadbeefdeadbeefdeadbeef')['terminal_state'] == 'interrupted'
+
+
+def test_jaeger_sends_attachment_only_markdown_paste(broker, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
+    path = tmp_path / "pasted-text-only.md"
+    path.write_text("attachment-only body\n", encoding="utf-8")
+    accepted = broker.start({
+        'profile': 'jaeger',
+        'session_id': 'paste-only',
+        'message': '',
+        'attachments': [{'name': path.name, 'path': str(path), 'mime': 'text/markdown'}],
+    })
+    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
+    assert "attachment-only body" in broker.bridge.texts[0]
 
 
 def test_default_profile_identity_survives_native_dispatch(broker):

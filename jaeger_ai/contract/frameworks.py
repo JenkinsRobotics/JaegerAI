@@ -32,6 +32,8 @@ import inspect
 from dataclasses import dataclass
 from typing import Callable
 
+DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
+
 
 @dataclass(frozen=True)
 class Framework:
@@ -74,6 +76,12 @@ class Framework:
 
     reconciler: str | None = None
     """Import path for ``reconcile(native)``. Required when ``turn`` is set."""
+
+    def __post_init__(self) -> None:
+        if bool(self.turn) != bool(self.reconciler):
+            raise ValueError(
+                f"Framework {self.runtime!r} must register turn and reconciler together"
+            )
 
 
 @dataclass(frozen=True)
@@ -223,6 +231,7 @@ def backend_protocol(value: object) -> BackendProtocol:
 
 
 __all__ = [
+    "DEFAULT_AGENT_MODEL",
     "DEBATE_MEMBERS",
     "BackendProtocol",
     "FRAMEWORKS",

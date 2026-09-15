@@ -23,11 +23,11 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting
-from .native_runs import Runs, RunsHTTP, jaeger_turn, jaeger_reconcile, profile_key
+from .native_runs import Runs, RunsHTTP, jaeger_reconcile, jaeger_turn, profile_key
+from jaeger_ai.contract.ports import MCP_GATEWAY_URL
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-MCP_GATEWAY_URL = os.environ.get("JAEGERS_MCP_URL", "http://127.0.0.1:8811/mcp")
 def _profile_secret(name: str) -> str:
     """Read a local profile secret without baking credentials into source."""
     direct = os.environ.get(name, "").strip()
@@ -45,10 +45,14 @@ def _profile_secret(name: str) -> str:
 
 
 def mcp_api_key() -> str:
-    """Resolve the credential for each connection so late provisioning recovers."""
-    return os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret(
-        "MCP_ARES_HOST_API_KEY"
-    )
+    """Resolve the current MCP credential for every connection attempt."""
+    key = os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret("MCP_ARES_HOST_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "MCP credential missing: set JAEGERS_MCP_API_KEY or MCP_ARES_HOST_API_KEY "
+            "in the Jaeger profile"
+        )
+    return key
 
 
 MCP_HOST_HEADER = os.environ.get("JAEGERS_MCP_HOST", "127.0.0.1:8811")
@@ -251,17 +255,11 @@ class MCPClient:
 _runs: dict[str, dict] = {}
 _runs_lock = threading.Lock()
 
-mcp_client = MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
+def current_mcp_client() -> MCPClient:
+    """Build a client with the latest credential instead of import-time state."""
+    return MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
 _native_runs = None
 _native_lock = threading.Lock()
-
-
-def _current_mcp_client() -> MCPClient:
-    global mcp_client
-    key = mcp_api_key()
-    if mcp_client.api_key != key:
-        mcp_client = MCPClient(MCP_GATEWAY_URL, key, MCP_HOST_HEADER)
-    return mcp_client
 
 
 def dispatcher_turn(run, workspace=None):
@@ -366,7 +364,8 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
                 from jaeger_ai.core.instance.instance import operator_state_root
                 root = operator_state_root() / "shared/webui-runs/jaeger"
                 protocol = backend_protocol("jaeger")
-                _native_runs = Runs(root, protocol.turn, reconciler=protocol.reconciler)
+                _native_runs = Runs(
+                    root, protocol.turn, reconciler=protocol.reconciler)
             return _native_runs
 
     def do_GET(self):
@@ -458,7 +457,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 
         def _run_chat():
             try:
-                result = _current_mcp_client().chat(user_msg, session_id or None)
+                result = current_mcp_client().chat(user_msg, session_id or None)
                 text = ""
                 if isinstance(result, dict):
                     content = result.get("content", [])
@@ -578,7 +577,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 
         def _run_chat():
             try:
-                result = _current_mcp_client().chat(message, session_id or None)
+                result = current_mcp_client().chat(message, session_id or None)
                 text = ""
                 if isinstance(result, dict):
                     content = result.get("content", [])
