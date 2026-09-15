@@ -3,8 +3,9 @@ import json
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters import hermes_native, roundtable
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run, Runs
+from jaeger_ai.features.roundtable import roundtable
+from jaeger_ai.core.frameworks import hermes_native
+from jaeger_ai.core.frameworks.native_runs import Run, Runs
 
 RID = 'run_' + 'a' * 32
 

@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from jaeger_ai.cli.entry import _route
-from jaeger_ai.interfaces.hermes_webui_adapter.server import HermesWebUIAdapterServer
+from jaeger_ai.features.webui.adapter.server import HermesWebUIAdapterServer
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -40,7 +40,7 @@ class _Bridge:
 
 def test_cli_routes_hermes_webui_adapter():
     assert _route(["hermes-webui-adapter", "--port", "9999"], "/python") == [
-        "/python", "-m", "jaeger_ai.interfaces.hermes_webui_adapter", "--port", "9999"
+        "/python", "-m", "jaeger_ai.features.webui.adapter", "--port", "9999"
     ]
 
 

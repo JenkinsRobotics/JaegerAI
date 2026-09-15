@@ -9,7 +9,7 @@ from pathlib import Path
 import msgspec
 import pytest
 
-from jaeger_ai.timeline import (
+from jaeger_ai.features.timeline import (
     Timeline,
     TimelineClip,
     TimelineTrack,

@@ -28,7 +28,7 @@ from pathlib import Path
 _CONSOLE = (
     "skills", "personality",
     "roadmap", "avatar", "prompt", "config",
-    "runtime", "backends",
+    "runtime", "backends", "sessions",
 )
 
 
@@ -66,9 +66,9 @@ def _route(argv: list[str], py: str) -> list[str]:
         # launcher at all while the WebUI integrations pointed clients at it.
         return [py, "-m", "jaeger_ai.core.gateway.server", *rest[1:]]
     if cmd == "gateway":
-        return [py, "-m", "jaeger_ai.features.gateway", *rest]
+        return [py, "-m", "jaeger_ai.features.agentgateway", *rest]
     if cmd == "hermes-webui-adapter":
-        return [py, "-m", "jaeger_ai.interfaces.hermes_webui_adapter", *rest]
+        return [py, "-m", "jaeger_ai.features.webui.adapter", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
     if cmd == "update":

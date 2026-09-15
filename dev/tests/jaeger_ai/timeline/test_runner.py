@@ -11,7 +11,7 @@ import time
 import pytest
 
 from jaeger_os.transport import topics
-from jaeger_ai.timeline import (
+from jaeger_ai.features.timeline import (
     Timeline,
     TimelineClip,
     TimelineRunner,

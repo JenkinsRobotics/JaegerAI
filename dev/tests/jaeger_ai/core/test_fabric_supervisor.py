@@ -139,7 +139,7 @@ def test_explicit_honcho_repair_is_unavailable_while_rack_is_paused(monkeypatch)
 
 def test_degraded_running_gateway_is_not_blindly_stopped(monkeypatch):
     from jaeger_ai.core.runtime import fabric_supervisor as supervisor
-    import jaeger_ai.features.gateway.service as gateway_service
+    import jaeger_ai.features.agentgateway.service as gateway_service
     monkeypatch.setattr(gateway_service, 'status', lambda: {'running': True})
     monkeypatch.setattr(supervisor, '_tcp', lambda *a, **kw: False)
     monkeypatch.setattr(gateway_service, 'start', lambda: (_ for _ in ()).throw(AssertionError('must not restart')))

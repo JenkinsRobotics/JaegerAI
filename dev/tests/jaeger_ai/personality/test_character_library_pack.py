@@ -1,7 +1,7 @@
 """Character library packing: authored psychology reaches the live profile."""
 from pathlib import Path
 
-from jaeger_ai.personality.character import characters_root, list_characters, load_character
+from jaeger_ai.features.personality.character import characters_root, list_characters, load_character
 
 
 def test_load_character_prefers_soul_md(tmp_path: Path):

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters import roundtable
+from jaeger_ai.features.roundtable import roundtable
 from jaeger_ai.interfaces.a2a_server import JaegerBridgeExecutor
 
 
@@ -92,7 +92,7 @@ def test_a2a_cancel_owns_native_turn_and_preserves_other_task():
 
 
 def test_native_permission_failures_are_not_transport_outages():
-    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import gateway_error
-    from jaeger_ai.interfaces.hermes_profile_adapters.resilience import failure_category
+    from jaeger_ai.core.frameworks.openclaw_native import gateway_error
+    from jaeger_ai.core.frameworks.resilience import failure_category
     assert failure_category(gateway_error({'code':'INVALID_REQUEST','message':'missing scope: operator.admin'})) == 'permission_denied'
     assert failure_category(gateway_error({'code':'NOT_PAIRED','message':'pairing required'})) == 'pairing_required'

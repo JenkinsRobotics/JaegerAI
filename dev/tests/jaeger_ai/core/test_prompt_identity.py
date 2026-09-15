@@ -15,7 +15,7 @@ import pytest
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_agent.memory.memory import load_identity_string
 from jaeger_agent.prompts.context_blocks import load_framework_prompt
-from jaeger_agent.prompts.prompts import build_system_prompt
+from jaeger_agent.prompts.assemble import build_system_prompt
 
 _IDENTITY_YAML = """\
 name: Erin Jaeger

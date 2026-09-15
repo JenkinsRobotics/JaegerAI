@@ -64,7 +64,7 @@ _LAZY = {
     "resolve_toolsets": ("jaeger_agent.schemas.tool_bundles", "resolve_toolsets"),
     "toolset_for_tool": ("jaeger_agent.schemas.tool_bundles", "toolset_for_tool"),
     "tool_visible":     ("jaeger_agent.skill_registry.toolset_scoping", "tool_visible"),
-    "build_system_prompt": ("jaeger_agent.prompts.prompts", "build_system_prompt"),
+    "build_system_prompt": ("jaeger_agent.prompts.assemble", "build_system_prompt"),
 }
 
 

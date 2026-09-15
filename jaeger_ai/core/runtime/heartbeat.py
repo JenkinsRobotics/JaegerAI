@@ -319,7 +319,7 @@ def get_reasoning_engine(workspace_root: Any = None) -> Any:
     global _reasoning_singleton
     if _reasoning_singleton is None:
         try:
-            from jaeger_ai.reasoning import ReasoningConfig, ReasoningEngine
+            from jaeger_ai.features.reasoning import ReasoningConfig, ReasoningEngine
             root = getattr(workspace_root, "root", None) if workspace_root else None
             _reasoning_singleton = ReasoningEngine(ReasoningConfig(workspace_root=root))
         except Exception:

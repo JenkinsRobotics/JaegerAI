@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.skill_tree import (
+from jaeger_ai.features.skill_tree import (
     SkillStatus,
     SkillTreeRegistry,
     default_catalog,

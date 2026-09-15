@@ -18,7 +18,7 @@ JAEGER_AI_REQUIRED_SUFFIXES = (
     "jaeger_ai/core/instance/schemas.py",
     "jaeger_ai/core/settings/catalog.py",
     "jaeger_ai/core/runtime/agent_controller.py",
-    "jaeger_ai/features/hermes_webui/service.py",
+    "jaeger_ai/features/webui/service/service.py",
 )
 
 

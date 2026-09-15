@@ -6,7 +6,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters import native_runs, roundtable
+from jaeger_ai.features.roundtable import roundtable
+from jaeger_ai.core.frameworks import native_runs
 
 
 @pytest.fixture

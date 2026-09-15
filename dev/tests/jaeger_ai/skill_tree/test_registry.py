@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_ai.skill_tree import (
+from jaeger_ai.features.skill_tree import (
     SkillNode,
     SkillStatus,
     SkillTreeRegistry,

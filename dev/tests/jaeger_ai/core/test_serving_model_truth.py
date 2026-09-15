@@ -155,7 +155,7 @@ def test_cloud_catalog_omits_local_ollama_rows(pipeline, monkeypatch):
     pipeline["client"] = _client()
     pipeline["config"] = _cfg()
     monkeypatch.setattr(
-        "jaeger_ai.core.models.model_discovery.discover_ollama",
+        "jaeger_ai.core.models.discovery.discover_ollama",
         lambda: {"online": True, "models": [{"name": "qwen3.5:397b"}]},
     )
     rows = model_resolver.list_registered_models()
@@ -178,7 +178,7 @@ def test_hybrid_ollama_catalog_separates_local_and_cloud_rows(pipeline, monkeypa
         ),
     )
     monkeypatch.setattr(
-        "jaeger_ai.core.models.model_discovery.discover_ollama",
+        "jaeger_ai.core.models.discovery.discover_ollama",
         lambda: {
             "online": True,
             "models": [

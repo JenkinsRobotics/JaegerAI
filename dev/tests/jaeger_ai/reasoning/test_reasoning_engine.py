@@ -5,11 +5,11 @@ import os
 import pytest
 from pathlib import Path
 
-from jaeger_ai.reasoning.belief import BeliefState, EpistemicContext
-from jaeger_ai.reasoning.engine import ReasoningConfig, ReasoningEngine, ReasoningResult
-from jaeger_ai.reasoning.intent import CognitiveIntent, IntentEngine, IntentKind, MediumType
-from jaeger_ai.reasoning.perception import PerceptionSnapshot, RepoStatus, SensorStream, SystemTelemetry
-from jaeger_ai.reasoning.transducers import AcousticTransducer, TransducerRegistry, VisualTransducer
+from jaeger_ai.features.reasoning.belief import BeliefState, EpistemicContext
+from jaeger_ai.features.reasoning.engine import ReasoningConfig, ReasoningEngine, ReasoningResult
+from jaeger_ai.features.reasoning.intent import CognitiveIntent, IntentEngine, IntentKind, MediumType
+from jaeger_ai.features.reasoning.perception import PerceptionSnapshot, RepoStatus, SensorStream, SystemTelemetry
+from jaeger_ai.features.reasoning.transducers import AcousticTransducer, TransducerRegistry, VisualTransducer
 from jaeger_ai.core.runtime.heartbeat import get_reasoning_engine, tick_ares
 
 
@@ -185,7 +185,7 @@ def test_heartbeat_ares_hook(temp_ares_env):
 
 def test_system_transducer_blocks_dangerous_by_default():
     async def _run():
-        from jaeger_ai.reasoning.transducers import SystemTransducer
+        from jaeger_ai.features.reasoning.transducers import SystemTransducer
 
         t = SystemTransducer(allow_dangerous_actions=False)
         intent = CognitiveIntent(
@@ -205,7 +205,7 @@ def test_system_transducer_blocks_dangerous_by_default():
 
 def test_system_transducer_clean_scratch_ok(tmp_path, monkeypatch):
     async def _run():
-        from jaeger_ai.reasoning.transducers import SystemTransducer
+        from jaeger_ai.features.reasoning.transducers import SystemTransducer
 
         scratch = tmp_path / "scratch"
         scratch.mkdir()

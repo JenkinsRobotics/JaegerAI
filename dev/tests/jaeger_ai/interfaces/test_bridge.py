@@ -966,7 +966,7 @@ def test_scoped_cancel_confirmation_requires_native_halt(monkeypatch, halt_reaso
 @pytest.mark.parametrize('cancelled', [False, True])
 def test_focus_terminal_report_survives_board_failure(monkeypatch, _instance_on_disk, cancelled):
     from types import SimpleNamespace
-    from jaeger_ai.core.runtime.dispatcher import DispatcherStore
+    from jaeger_ai.features.dispatcher.store import DispatcherStore
     layout = SimpleNamespace(memory_dir=_instance_on_disk / 'memory')
     store = DispatcherStore(layout)
     session = store.route('durability', 'Read one file')

@@ -37,7 +37,7 @@ from jaeger_ai.core.prompt_identity import (
     agent_display_name,
     register_agent_identity,
 )
-from jaeger_ai.personality.character import characters_root
+from jaeger_ai.features.personality.character import characters_root
 
 
 @dataclass
@@ -67,7 +67,7 @@ def layout(tmp_path) -> _Layout:
 
 
 def _select(layout: _Layout, character_id: str) -> None:
-    from jaeger_ai.personality.character import set_active_character
+    from jaeger_ai.features.personality.character import set_active_character
     set_active_character(layout.root, character_id)
 
 
@@ -140,7 +140,7 @@ def test_the_fragment_never_states_a_framework_name(tmp_path) -> None:
 def test_the_default_sheet_is_the_neutral_one(layout) -> None:
     """The two halves have to agree: an instance that never opened the
     picker plays the neutral sheet, so it answers to its own name."""
-    from jaeger_ai.personality.character import DEFAULT_CHARACTER_ID
+    from jaeger_ai.features.personality.character import DEFAULT_CHARACTER_ID
     assert DEFAULT_CHARACTER_ID == "assistant"
     assert agent_display_name(layout) == "Ted"
 

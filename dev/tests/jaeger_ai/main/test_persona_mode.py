@@ -29,7 +29,7 @@ from jaeger_ai.core.instance.schemas import (
     Config, ModelConfig, PersonaConfig, SkillsConfig,
 )
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.personality.character import persona_display_name
+from jaeger_ai.features.personality.character import persona_display_name
 from jaeger_ai.main import (
     _agent_cache,
     _jaeger_agents_by_session,
@@ -728,7 +728,7 @@ def test_run_turn_via_jaeger_agent_persona_first_default_no_character_falls_safe
     built), and Station 3's output filter — a no-op without a character —
     leaves the answer untouched."""
     import jaeger_ai.main as main_mod
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.features.personality.character as character_mod
     from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")
@@ -813,7 +813,7 @@ def test_run_turn_skips_persona_lane_for_neutral_assistant_sheet(
     not a costume. The persona-first lane must not run, or Qwen dumps
     perform_task XML as the answer and the inner agent never starts."""
     import jaeger_ai.main as main_mod
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.features.personality.character as character_mod
     from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")
@@ -884,7 +884,7 @@ def test_leaked_perform_task_xml_falls_through_to_clean_agent(
     monkeypatch, tmp_path,
 ):
     import jaeger_ai.main as main_mod
-    import jaeger_ai.personality.character as character_mod
+    import jaeger_ai.features.personality.character as character_mod
     from jaeger_agent import tools as agent_tools
 
     layout = InstanceLayout(root=tmp_path / "inst")

@@ -9,7 +9,7 @@ from jaeger_ai.cli.verbs import lifecycle_verbs as lifecycle
 
 @pytest.fixture(autouse=True)
 def isolate_gateway(monkeypatch):
-    import jaeger_ai.features.gateway.service as gateway
+    import jaeger_ai.features.agentgateway.service as gateway
     monkeypatch.setattr(gateway, 'start', lambda: {'ok': True})
     monkeypatch.setattr(gateway, 'stop', lambda: {'ok': True})
 
@@ -41,7 +41,7 @@ def test_stop_failure_is_reported_and_restart_does_not_start(monkeypatch, capsys
 
 @pytest.mark.parametrize("warmup_polls", [0, 20])
 def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp_path, warmup_polls):
-    import jaeger_ai.features.gateway.service as gateway
+    import jaeger_ai.features.agentgateway.service as gateway
     agents = tmp_path / 'Library/LaunchAgents'
     agents.mkdir(parents=True)
     for label, _, _ in lifecycle.SERVICES_ORDERED:
@@ -76,7 +76,7 @@ def test_container_names_follow_deployment_manifest(monkeypatch):
 
 
 def test_loaded_unhealthy_service_is_not_killed_by_start(monkeypatch, tmp_path):
-    import jaeger_ai.features.gateway.service as gateway
+    import jaeger_ai.features.agentgateway.service as gateway
     monkeypatch.setattr(Path, 'home', classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(lifecycle, '_get_launchd_jobs', lambda: {
         label: {'pid': 10, 'status': 0} for label, _, _ in lifecycle.SERVICES_ORDERED

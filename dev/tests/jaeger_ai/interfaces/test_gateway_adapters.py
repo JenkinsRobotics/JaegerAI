@@ -2,7 +2,7 @@
 
 import pytest
 import asyncio
-from jaeger_ai.interfaces.gateway import (
+from jaeger_ai.interfaces.messaging import (
     BaseMessagingGateway,
     TelegramGateway,
     DiscordGateway,

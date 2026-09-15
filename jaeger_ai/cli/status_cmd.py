@@ -91,7 +91,7 @@ def run_status(args: Any) -> int:
     print()
     print(c.bold("  Skill tree"))
     try:
-        from jaeger_ai.skill_tree import (
+        from jaeger_ai.features.skill_tree import (
             SkillTreeRegistry, seed_default_tree,
         )
         reg = SkillTreeRegistry.for_instance(layout)

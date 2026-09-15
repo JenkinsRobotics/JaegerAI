@@ -14,7 +14,7 @@ from jaeger_ai.core.prompt_documents import (
     load_cross_agent_memory,
     register_context_documents,
 )
-from jaeger_ai.core.models.local_discovery import (
+from jaeger_ai.core.models.discovery import (
     discover_local_ollama_models,
     DiscoveredModel,
 )

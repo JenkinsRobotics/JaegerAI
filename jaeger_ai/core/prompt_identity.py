@@ -1,7 +1,7 @@
 """Who the agent says it is — one identity per turn, owned here.
 
 The rule (operator, 2026-08-19; see
-:func:`jaeger_ai.personality.character.persona_display_name`): while a
+:func:`jaeger_ai.features.personality.character.persona_display_name`): while a
 character sheet is selected, the agent IS that character — its name is
 the only name in the prompt and on every surface. Only the ``neutral``
 sheet (``assistant``) yields, and then the instance's own name
@@ -72,7 +72,7 @@ def agent_display_name(layout: Any) -> str:
     except Exception:  # noqa: BLE001 — a broken identity never breaks the prompt
         name = ""
     try:
-        from jaeger_ai.personality.character import (
+        from jaeger_ai.features.personality.character import (
             active_character, persona_display_name,
         )
         return persona_display_name(name, active_character(layout.root))

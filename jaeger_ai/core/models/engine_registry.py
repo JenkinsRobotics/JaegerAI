@@ -133,7 +133,7 @@ def _load_mlx_lm(model_config: Any, *, warmup: bool = True) -> Any:
 
 
 def _load_mlx_vlm(model_config: Any, *, warmup: bool = True) -> Any:
-    from jaeger_ai.core.models.mlx_vlm_client import MlxVlmClient
+    from jaeger_ai.core.models.mlx_client import MlxVlmClient
     return MlxVlmClient(model_config.model_path, warmup=warmup)
 
 

@@ -196,7 +196,7 @@ def play_timeline(
         }
 
     try:
-        from jaeger_ai.timeline import parse_timeline_json
+        from jaeger_ai.features.timeline import parse_timeline_json
         timeline = parse_timeline_json(path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {
@@ -205,7 +205,7 @@ def play_timeline(
             "reason": f"invalid timeline JSON: {exc}",
         }
 
-    from jaeger_ai.timeline import TimelineRunner
+    from jaeger_ai.features.timeline import TimelineRunner
     from jaeger_os.nodes import runtime
     bus = runtime.get_bus()
 

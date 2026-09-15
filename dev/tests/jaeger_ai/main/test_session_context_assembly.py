@@ -68,7 +68,7 @@ def test_refresh_keeps_every_tier(tmp_path, stub_tiers, monkeypatch) -> None:
     monkeypatch.setitem(main._pipeline, "layout", layout)
     monkeypatch.setitem(main._pipeline, "active_character_sig", "stale")
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: "REBUILT_BASE",
     )
     agent = _Agent()
@@ -88,7 +88,7 @@ def test_refresh_is_a_no_op_when_nothing_changed(
     monkeypatch.setitem(main._pipeline, "layout", layout)
     builds: list[int] = []
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: builds.append(1) or "BASE",
     )
     agent = _Agent()
@@ -106,7 +106,7 @@ def test_editing_a_context_document_triggers_a_rebuild(
     monkeypatch.setitem(main._pipeline, "layout", layout)
     builds: list[str] = []
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: builds.append("build") or "BASE",
     )
     agent = _Agent()
@@ -129,7 +129,7 @@ def test_apply_live_character_rebuilds_prompt_and_keeps_history(
     layout = InstanceLayout(root=tmp_path)
     monkeypatch.setitem(main._pipeline, "layout", layout)
     monkeypatch.setattr(
-        "jaeger_agent.prompts.prompts.build_system_prompt",
+        "jaeger_agent.prompts.assemble.build_system_prompt",
         lambda _layout: "CLANKER_BASE",
     )
     agent = _Agent()

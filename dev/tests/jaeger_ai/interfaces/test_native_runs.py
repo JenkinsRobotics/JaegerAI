@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run, Runs, RunsHTTP, jaeger_turn
+from jaeger_ai.core.frameworks.native_runs import Run, Runs, RunsHTTP, jaeger_turn
 
 
 def wait_for(predicate):
@@ -118,7 +118,7 @@ def test_explicit_run_identity_cannot_overwrite_or_reexecute_completed_work(tmp_
 
 
 def test_pre_dispatch_run_identity_remains_reserved_after_owner_release(tmp_path):
-    from jaeger_ai.interfaces.hermes_profile_adapters.run_ownership import Ownership
+    from jaeger_ai.core.frameworks.run_ownership import Ownership
     original = Ownership(tmp_path)
     original.claim('session', 'a' * 32)
     original.release('a' * 32)
@@ -184,7 +184,7 @@ def test_confirmed_completion_releases_durable_ownership(tmp_path):
 
 
 def test_admission_is_atomic_across_independent_registry_connections(tmp_path):
-    from jaeger_ai.interfaces.hermes_profile_adapters.run_ownership import Ownership
+    from jaeger_ai.core.frameworks.run_ownership import Ownership
     first, second = Ownership(tmp_path), Ownership(tmp_path)
     ready = threading.Barrier(2)
     results = []
@@ -296,7 +296,7 @@ def test_jaeger_preserves_unknown_native_receipt(tmp_path, monkeypatch):
         def __init__(self, *args): pass
         def turn(self, *args, **kwargs):
             return {'text': 'partial', 'execution_unknown': True}
-    monkeypatch.setattr('jaeger_ai.interfaces.hermes_webui_adapter.bridge_client.BridgeClient', Bridge)
+    monkeypatch.setattr('jaeger_ai.features.webui.adapter.bridge_client.BridgeClient', Bridge)
     run = Run(tmp_path, 'session', 'hello')
     with pytest.raises(RuntimeError, match='uncertain'):
         jaeger_turn(run)
@@ -318,7 +318,7 @@ def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monk
             event({"type": "delta", "text": "hello"})
             run.cancel()
             return {"text": "hello"}
-    monkeypatch.setattr("jaeger_ai.interfaces.hermes_webui_adapter.bridge_client.BridgeClient", Bridge)
+    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", Bridge)
     run = Run(tmp_path, "session", "hello")
     assert jaeger_turn(run) == "hello"
     assert controls == [("cancel", {"turn_id": run.id})]
@@ -385,7 +385,7 @@ def test_http_runs_approval_replay_and_missing_run(tmp_path):
 
 def test_host_workspace_translation_rejects_escape():
     from pathlib import Path
-    from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import host_workspace
+    from jaeger_ai.core.frameworks.native_runs import host_workspace
     assert host_workspace("/mnt/host/GitHub/JaegerAI") == str(Path.home() / "GitHub/JaegerAI")
     for path in ("/etc", "/mnt/host/GitHub/../../.ssh", "/mnt/host/GitHub-other"):
         with pytest.raises(ValueError):
@@ -393,7 +393,7 @@ def test_host_workspace_translation_rejects_escape():
 
 
 def test_openclaw_native_keeps_rest_session_key_and_filters_peer_events(tmp_path, monkeypatch):
-    from jaeger_ai.interfaces.hermes_profile_adapters import openclaw_native as native
+    from jaeger_ai.core.frameworks import openclaw_native as native
     run = Run(tmp_path, "existing-session", "hello")
     calls = []
     class Gateway:
@@ -426,7 +426,7 @@ def test_openclaw_signs_native_challenge_without_changing_grants():
     import base64
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from jaeger_ai.interfaces.hermes_profile_adapters.openclaw_native import connect_params, SCOPES
+    from jaeger_ai.core.frameworks.openclaw_native import connect_params, SCOPES
     key = Ed25519PrivateKey.generate()
     identity = {"deviceId": "test-device", "privateKeyPem": key.private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()}
@@ -439,7 +439,7 @@ def test_openclaw_signs_native_challenge_without_changing_grants():
 
 def test_openclaw_fallback_streams_before_native_completion(monkeypatch):
     from io import BytesIO
-    from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
+    from jaeger_ai.core.frameworks import openclaw
     released, entered = threading.Event(), threading.Event()
     requests = []
     class Response:
@@ -476,7 +476,7 @@ def test_openclaw_fallback_streams_before_native_completion(monkeypatch):
 
 def test_openclaw_does_not_reinsert_native_history(monkeypatch):
     from io import BytesIO
-    from jaeger_ai.interfaces.hermes_profile_adapters import openclaw
+    from jaeger_ai.core.frameworks import openclaw
     calls = []
     handler = object.__new__(openclaw.Handler)
     body = json.dumps({"messages": [{"role": "user", "content": "OLD"},

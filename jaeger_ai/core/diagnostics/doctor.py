@@ -282,7 +282,7 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
 def _webui_unification_checks() -> list[Any]:
     """Fail if :8787 is advertised as the chat bookmark or the runtime image is stale while running."""
     from jaeger_ai.core.runtime.preflight import Check
-    from jaeger_ai.features.hermes_webui.service import HermesWebUIService
+    from jaeger_ai.features.webui.service.service import HermesWebUIService
     from jaeger_ai.core.runtime.agent_workspaces import HERMES_IMAGE
 
     checks: list[Any] = []

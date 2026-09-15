@@ -104,7 +104,7 @@ def test_picker_catalog_shape(monkeypatch):
     from jaeger_ai.interfaces.tui import slash_commands as slash
 
     monkeypatch.setattr(
-        "jaeger_ai.core.models.model_discovery.discover_all",
+        "jaeger_ai.core.models.discovery.discover_all",
         lambda *_a, **_k: _all_runtimes(),
     )
     cfg = type("Cfg", (), {
@@ -141,7 +141,7 @@ def test_offline_servers_are_excluded():
 def test_cloud_apis_use_curated_floor_when_history_is_empty():
     """OpenAI / Anthropic / Google now ship with curated catalogs — so the
     sub-menu is pre-populated even when the user has no history yet."""
-    from jaeger_ai.core.models.model_discovery import (
+    from jaeger_ai.core.models.discovery import (
         ANTHROPIC_CURATED, GEMINI_CURATED, OPENAI_CURATED,
     )
     providers = _build_providers_list(_all_runtimes(), None)
@@ -162,7 +162,7 @@ def test_cloud_apis_use_curated_floor_when_history_is_empty():
 def test_ollama_cloud_uses_curated_fallback_when_live_is_empty():
     """Live ollama.com/v1/models 400s in practice — the curated floor
     means the sub-menu is never empty just because the endpoint is flaky."""
-    from jaeger_ai.core.models.model_discovery import OLLAMA_CLOUD_CURATED
+    from jaeger_ai.core.models.discovery import OLLAMA_CLOUD_CURATED
 
     cloud = _by_slug(_build_providers_list(_all_runtimes(), None), "ollama-cloud")
     assert cloud.get("type_a_model") is not True
@@ -194,7 +194,7 @@ def test_history_pre_populates_cloud_provider_with_recent_models(tmp_path):
     next time the picker opens — newest first."""
     from types import SimpleNamespace
 
-    from jaeger_ai.core.models.external_model_history import record_use
+    from jaeger_ai.core.models.external_model import record_use
     from jaeger_ai.interfaces.tui.slash_commands import _TYPE_A_MODEL_LABEL
 
     memory_dir = tmp_path / "memory"

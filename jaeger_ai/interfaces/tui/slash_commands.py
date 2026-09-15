@@ -508,12 +508,12 @@ def _build_providers_list(
 
     # Lazy imports keep the module load cheap when no picker is opened.
     try:
-        from jaeger_ai.core.models.external_model_history import recent_models
+        from jaeger_ai.core.models.external_model import recent_models
     except Exception:  # noqa: BLE001
         def recent_models(*_a, **_k):  # type: ignore[no-redef]
             return []
     try:
-        from jaeger_ai.core.models.model_discovery import (
+        from jaeger_ai.core.models.discovery import (
             ANTHROPIC_CURATED,
             GEMINI_CURATED,
             OLLAMA_CLOUD_CURATED,
@@ -576,7 +576,7 @@ def picker_catalog(*, layout: Any = None, cfg: Any = None,
     """
     from pathlib import Path
 
-    from jaeger_ai.core.models.model_discovery import discover_all
+    from jaeger_ai.core.models.discovery import discover_all
     from jaeger_ai.main import _pipeline
 
     cfg = cfg if cfg is not None else _pipeline.get("config")
@@ -625,7 +625,7 @@ def _model_picker(ctx: SlashContext) -> SlashResult:
     drills / commits; ``← Back`` returns to Stage 1; Cancel / Esc closes."""
     from pathlib import Path
 
-    from jaeger_ai.core.models.model_discovery import discover_all
+    from jaeger_ai.core.models.discovery import discover_all
     from jaeger_ai.main import _pipeline
     from .picker import _PICKER_TYPE_A_MODEL, pick_provider_model
 
@@ -688,7 +688,7 @@ def _model_picker(ctx: SlashContext) -> SlashResult:
 
 def _model_list(ctx: SlashContext) -> SlashResult:
     """Print every model as a plain text catalogue (``/model list``)."""
-    from jaeger_ai.core.models.model_discovery import discover_all
+    from jaeger_ai.core.models.discovery import discover_all
     from jaeger_ai.main import _pipeline
     cfg = _pipeline.get("config")
     ctx.console.print(
@@ -892,7 +892,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
             # Pick a specific .gguf — match the discovered list by name
             # (or take a literal path / registry key), then point the
             # in-process llama-cpp backend at it.
-            from jaeger_ai.core.models.model_discovery import discover_local_gguf
+            from jaeger_ai.core.models.discovery import discover_local_gguf
             chosen = wanted
             for m in discover_local_gguf():
                 cand = {m["name"], m["name"].removesuffix(".gguf")}
@@ -908,7 +908,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         # DIRECTORIES (config.json + safetensors), discovered from the
         # same roots as GGUF (LM Studio, HF cache, repo models/,
         # custom dirs).
-        from jaeger_ai.core.models.model_discovery import discover_local_mlx
+        from jaeger_ai.core.models.discovery import discover_local_mlx
         mlx_models = discover_local_mlx()
         if not wanted:
             if len(mlx_models) == 1:
@@ -935,7 +935,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         summary = f"local · mlx · {Path(chosen).name}"
     elif target in ("ollama", "lmstudio", "lm-studio"):
         provider = "ollama" if target == "ollama" else "lmstudio"
-        from jaeger_ai.core.models.model_discovery import (
+        from jaeger_ai.core.models.discovery import (
             discover_lmstudio, discover_ollama,
         )
         disc = (discover_ollama() if provider == "ollama"
@@ -1130,7 +1130,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         # it. Local picks aren't tracked (the GGUF path lives in config).
         if targeted_external and wanted:
             try:
-                from jaeger_ai.core.models.external_model_history import record_use
+                from jaeger_ai.core.models.external_model import record_use
                 record_use(layout, target, wanted)
             except Exception:  # noqa: BLE001
                 pass

@@ -5,10 +5,10 @@ import time
 
 import pytest
 
-from jaeger_ai.interfaces.hermes_profile_adapters.native_runs import Run, TERMINAL
-from jaeger_ai.interfaces.hermes_profile_adapters.roundtable_native import TableService, member_session
-from jaeger_ai.interfaces.hermes_profile_adapters.roundtable_policy import MEMBERS, decide, plan, structured
-from jaeger_ai.interfaces.hermes_profile_adapters.roundtable_progress import Progress
+from jaeger_ai.core.frameworks.native_runs import Run, TERMINAL
+from jaeger_ai.features.roundtable.service import TableService, member_session
+from jaeger_ai.features.roundtable.policy import MEMBERS, decide, plan, structured
+from jaeger_ai.features.roundtable.progress import Progress
 
 
 def wait_for(predicate):
@@ -81,7 +81,7 @@ def test_native_member_sessions_survive_new_table_turns_and_store_restart(tmp_pa
     second = TableService(tmp_path, fake_backends(callback))
     finished(second, second.start('existing-table', '/quick @hermes recall it')['run_id'])
     assert sessions == [('hermes', member_session('existing-table', 'hermes'))] * 2
-    from jaeger_ai.interfaces.hermes_profile_adapters.roundtable import _member_session_id
+    from jaeger_ai.features.roundtable.roundtable import _member_session_id
     assert member_session('existing-table', 'jaeger') == _member_session_id('existing-table', 'jaeger')
     assert member_session('existing-table', 'hermes') == 'roundtable-hermes:' + _member_session_id('existing-table', 'hermes')
 
@@ -268,7 +268,7 @@ def test_no_global_consensus_when_another_proposal_has_dissent_or_is_truncated()
 
 
 def test_volunteers_receive_unique_task_ownership_and_invalid_metadata_is_not_authority():
-    from jaeger_ai.interfaces.hermes_profile_adapters.roundtable_policy import assign_owners
+    from jaeger_ai.features.roundtable.policy import assign_owners
     offers = {'jaeger': '```roundtable\n{"volunteer_for":["review"]}\n```',
               'hermes': '```roundtable\n{"volunteer_for":["analysis"]}\n```',
               'openclaw': '```roundtable\n{"volunteer_for":null}\n```'}
@@ -322,8 +322,9 @@ def test_member_stall_is_unknown_not_an_outage_and_does_not_rerun(tmp_path):
 def test_actual_native_roundtable_http_contract_and_auth(tmp_path, monkeypatch):
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError
-    from jaeger_ai.interfaces.hermes_profile_adapters import roundtable, native_runs
-    from jaeger_ai.interfaces.hermes_profile_adapters.ingress import ProfileHTTPServer
+    from jaeger_ai.features.roundtable import roundtable
+    from jaeger_ai.core.frameworks import native_runs
+    from jaeger_ai.core.frameworks.ingress import ProfileHTTPServer
     service = TableService(tmp_path, fake_backends())
     monkeypatch.setenv('ROUNDTABLE_NATIVE_RUNS', 'true')
     monkeypatch.setattr(native_runs, 'profile_key', lambda _: 'test-only')
@@ -358,7 +359,7 @@ def test_actual_native_roundtable_http_contract_and_auth(tmp_path, monkeypatch):
         with pytest.raises(HTTPError) as error:
             request(f'/v1/runs/{identity}/members/{"f" * 32}/stop', {})
         assert error.value.code == 404
-        from jaeger_ai.interfaces.hermes_profile_adapters.ingress import BodyReadTimeout
+        from jaeger_ai.core.frameworks.ingress import BodyReadTimeout
         def timed_out(_):
             raise BodyReadTimeout('Incomplete body')
         monkeypatch.setattr(roundtable.RoundtableHandler, 'read_json_body', timed_out)

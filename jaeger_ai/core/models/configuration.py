@@ -38,7 +38,7 @@ def _local_model(model: str) -> tuple[str, str]:
     from jaeger_ai.core.models.model_resolver import MODEL_REGISTRY
     if model in MODEL_REGISTRY:
         return model, "llama_cpp_python"
-    from jaeger_ai.core.models.model_discovery import discover_local_gguf, discover_local_mlx
+    from jaeger_ai.core.models.discovery import discover_local_gguf, discover_local_mlx
 
     for row in discover_local_gguf():
         if model in {row.get("name"), str(row.get("name") or "").removesuffix(".gguf"), row.get("path")}:

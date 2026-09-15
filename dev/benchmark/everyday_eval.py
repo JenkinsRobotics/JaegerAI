@@ -354,7 +354,7 @@ def main() -> int:
     layout, boot = _boot(source_config, warmup=warmup)
     rows: dict[str, dict] = {}
     try:
-        from jaeger_ai.personality.character import set_active_character
+        from jaeger_ai.features.personality.character import set_active_character
         set_active_character(layout.root, "lilith")
 
         # SAFETY stubs -- see module docstring. Patched around the whole

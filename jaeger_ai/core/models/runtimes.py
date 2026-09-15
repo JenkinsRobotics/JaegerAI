@@ -95,7 +95,7 @@ def discover_mlx() -> Runtime:
     description = "Apple Silicon MLX engine — MLX-format models."
     if version is not None:
         try:
-            from jaeger_ai.core.models.model_discovery import discover_local_mlx
+            from jaeger_ai.core.models.discovery import discover_local_mlx
             n = len(discover_local_mlx())
             if n:
                 description = (

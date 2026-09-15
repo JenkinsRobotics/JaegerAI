@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from jaeger_ai.core.runtime.dispatcher import DispatcherStore, context_note, session_policy
+from jaeger_ai.features.dispatcher.store import DispatcherStore, context_note, session_policy
 from jaeger_ai.core.sessions import SessionStore
 
 
@@ -102,7 +102,7 @@ def test_cancelled_focus_reports_preserve_partial_output(tmp_path):
 
 
 def test_sidecar_denies_missing_credentials_before_backend_access(tmp_path, monkeypatch):
-    from jaeger_ai.features.hermes_webui import dispatcher_sidecar as sidecar
+    from jaeger_ai.features.dispatcher import sidecar
     token = tmp_path / 'sidecar.token'
     monkeypatch.setattr(sidecar, 'token_file', lambda: token)
     monkeypatch.setattr(sidecar, 'backend', lambda: pytest.fail('Backend must not be reached'))

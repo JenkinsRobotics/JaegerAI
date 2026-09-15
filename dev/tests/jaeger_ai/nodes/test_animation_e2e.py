@@ -26,7 +26,7 @@ from jaeger_ai.nodes.animation import (
 )
 from jaeger_ai.nodes.animation import bridge as _bridge
 from jaeger_ai.nodes.animation.adapters import ImageAdapter
-from jaeger_ai.skill_tree import SkillNode, SkillTreeRegistry
+from jaeger_ai.features.skill_tree import SkillNode, SkillTreeRegistry
 from jaeger_os.transport import InProcBus
 
 

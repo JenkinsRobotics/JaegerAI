@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_ai.personality import persona_state
-from jaeger_ai.personality.character import (
+from jaeger_ai.features.personality import persona_state
+from jaeger_ai.features.personality.character import (
     active_character,
     active_character_signature,
     characters_root,
