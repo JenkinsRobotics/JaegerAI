@@ -10,6 +10,10 @@ a disposable build context from the pinned upstream plus these changes. The
 script checks patch applicability before applying it. Build that directory's
 Dockerfile for a fresh image. Do not build an unpatched donor checkout.
 
+`vendor/hermes-webui` is a submodule and is **never edited in place** — the
+script exports the pinned commit with `git archive HEAD`, so the working tree
+is not consulted and upstream stays pullable.
+
 For the incremental dependency image, build from the printed staging directory:
 `container build -f Containerfile.jaeger -t hermes-webui:jaeger-native-runs-20260906 .`
 The tar overlay and build-time assertions guard against incomplete directory
@@ -81,3 +85,55 @@ Recreated containers must use a newly assembled overlay, as described above.
 `native-cancel-status.patch` requires terminal native cancellation evidence when
 an adapter supplies `cancellation_confirmed` and `execution_unknown`. An accepted
 Stop request with uncertain execution must not become a cancelled transcript.
+
+## Patch inventory
+
+| File | Applies to |
+|---|---|
+| `upstream.patch` | `api/{agent_runtime,commands,config,gateway_chat,profiles,routes}.py`, `static/{sessions.js,style.css}`, `docker_init.bash` |
+| `update-labels.patch` | `static/{ui,panels}.js` |
+| `native-cancel-status.patch` | `api/gateway_chat.py` |
+| `native-capabilities.patch` | `api/{config,gateway_chat}.py` |
+| `conversation.patch` | `api/routes.py` |
+| `transparent-stream-worked-for.patch` | `api/config.py`, `static/{index.html,style.css,sw.js,ui.js}` |
+| `jaeger_*.py` | copied into `api/`, not patched |
+
+`transparent-stream-worked-for.patch` carries the "Worked for" chip and
+collapsible turns in `static/ui.js`, the matching CSS, the `jaegerpd4` ->
+`jaegerpd6` cache-bust across `index.html` and `sw.js`, and
+`chat_activity_display_mode` defaulted to `transparent_stream`.
+
+`agents-proxy.patch` is named in the installer but was deleted in `e50d0aa`.
+The installer skips a patch that is absent or empty, so this is harmless — the
+list is a superset on purpose, so a patch folded into a future submodule pin
+does not need the script edited.
+
+## Adding a change
+
+Edit `vendor/hermes-webui`, confirm it works, then capture it:
+
+```sh
+git -C vendor/hermes-webui diff -- <files> > integrations/hermes_webui/<name>.patch
+```
+
+Add `<name>.patch` to the list in `scripts/prepare-hermes-webui.py`, then verify
+it applies to the **pinned** tree rather than to your dirty copy:
+
+```sh
+T=$(mktemp -d); git -C vendor/hermes-webui archive HEAD | tar -x -C "$T"
+git -C "$T" apply --check integrations/hermes_webui/<name>.patch
+```
+
+A working-tree edit that is not captured this way exists in no commit in either
+repository, and a submodule reset deletes it with no warning.
+
+## Known gap: local and container serve different code
+
+`scripts/run-jaeger-webui.sh` execs `vendor/hermes-webui/server.py` from the
+**working tree** and applies none of the patches above. The container build gets
+the pinned commit plus all of them. So a patched behaviour can work in one and
+not the other, and a working-tree edit is live locally while being invisible to
+a build.
+
+Until that is reconciled, after changing a patch, reapply it to the working tree
+so local matches what a build would produce.

@@ -31,6 +31,7 @@ def prepare():
         "native-capabilities.patch",
         "conversation.patch",
         "agents-proxy.patch",
+        "transparent-stream-worked-for.patch",
     ):
         _apply_overlay(_name)
     shutil.copy2(overlay / "jaeger_conversation.py", destination / "api/jaeger_conversation.py")
