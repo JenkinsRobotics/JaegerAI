@@ -29,7 +29,7 @@ def test_prepare_produces_versioned_complete_overlay():
     staged = Path(result.stdout.strip().splitlines()[-1])
     version_source = (staged / "api/_version.py").read_text(encoding="utf-8")
     assert "unknown" not in version_source
-    assert re.search(r"exp-v0\.52\.264-15-g[0-9a-f]+", version_source)
+    assert re.search(r"exp-v0\.52\.264-\d+-g[0-9a-f]+", version_source)
     assert (staged / "jaeger-extensions/jaeger_stream_continuity.js").is_file()
     assert (staged / "jaeger_sidecar_supervisor.py").is_file()
     init = (staged / "docker_init.bash").read_text(encoding="utf-8")
