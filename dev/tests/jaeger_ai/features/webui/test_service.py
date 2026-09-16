@@ -1,27 +1,35 @@
-"""Focused tests for Hermes WebUI settings toggle + feature service."""
+"""Focused tests for Jaeger's first-party WebUI service."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
 from jaeger_ai.core.instance.schemas import ContainersConfig, WebhookConfig
-from jaeger_ai.features.webui.service.service import (
-    HermesWebUIService,
-    hermes_webui_urls,
-)
+from jaeger_ai.features.webui.service.service import WebUIService, webui_urls
 
 
-def test_containers_use_hermes_webui_is_catalogued():
-    field = ContainersConfig.model_fields["use_hermes_webui"]
-    extra = field.json_schema_extra or {}
-    assert extra.get("group") == "containers"
-    assert ContainersConfig().use_hermes_webui is False
-    assert ContainersConfig().hermes_webui_container == "hermes-webui-hermes-webui"
-    assert ContainersConfig().hermes_webui_port == 8787
-    assert ContainersConfig().adapter_port == 8791
-    assert ContainersConfig().jaeger_webui_port == 8790
-    assert ContainersConfig().tailscale_publish is False
-    assert ContainersConfig().tailscale_https_port == 8443
+def _config(layout, **changes):
+    config = {
+        "adapter_port": 8791,
+        "jaeger_webui_port": 8790,
+        "tailscale_publish": False,
+        "tailscale_https_port": 8443,
+        "layout": layout,
+        "instance": "jaeger",
+    }
+    config.update(changes)
+    return config
+
+
+def test_webui_settings_are_catalogued():
+    cfg = ContainersConfig()
+    assert cfg.adapter_port == 8791
+    assert cfg.jaeger_webui_port == 8790
+    assert cfg.tailscale_publish is False
+    assert cfg.tailscale_https_port == 8443
+    assert "use_hermes_webui" not in ContainersConfig.model_fields
+    assert "hermes_webui_container" not in ContainersConfig.model_fields
+    assert "hermes_webui_port" not in ContainersConfig.model_fields
 
 
 def test_webhook_default_no_longer_collides_with_adapter():
@@ -29,65 +37,10 @@ def test_webhook_default_no_longer_collides_with_adapter():
     assert ContainersConfig().adapter_port == 8791
 
 
-def test_hermes_webui_urls():
-    urls = hermes_webui_urls(webui_port=8787, adapter_port=8791)
-    assert urls.container_ui == "http://127.0.0.1:8787/"
+def test_webui_urls():
+    urls = webui_urls(webui_port=8787, adapter_port=8791)
     assert urls.adapter == "http://127.0.0.1:8791/"
-    assert urls.vendor_ui == "http://127.0.0.1:8790/"
-
-
-def test_start_requires_toggle_unless_forced(tmp_path, monkeypatch):
-    layout = MagicMock()
-    layout.root = tmp_path
-    layout.exists.return_value = True
-    cfg = MagicMock()
-    cfg.containers = ContainersConfig(use_hermes_webui=False)
-
-    with patch(
-        "jaeger_ai.features.webui.service.service._load_containers_config",
-        return_value={
-            "use_hermes_webui": False,
-            "hermes_webui_container": "hermes-webui-hermes-webui",
-            "hermes_webui_port": 8787,
-            "adapter_port": 8791,
-            "layout": layout,
-            "instance": "jaeger",
-        },
-    ), patch(
-        "jaeger_ai.core.runtime.agent_workspaces.container_name",
-        lambda role: "hermes-webui-hermes-webui",
-    ):
-        svc = HermesWebUIService("jaeger")
-        denied = svc.start()
-        assert denied["ok"] is False
-        assert "use_hermes_webui" in denied["error"]
-
-        with patch(
-            "jaeger_ai.features.webui.service.service.cs.container_status",
-            return_value={"found": False},
-        ), patch(
-            "jaeger_ai.features.webui.service.service.cs.stop_container",
-            return_value={"ok": True},
-        ) as stop_ctn, patch(
-            "jaeger_ai.features.webui.service.service.ensure_webui_profile_layout",
-            return_value=None,
-        ), patch(
-            "jaeger_ai.features.webui.service.service.cs.start_container",
-            return_value={"ok": True, "id": "hermes-webui-hermes-webui"},
-        ) as start_ctn, patch.object(
-            HermesWebUIService, "_start_adapter", return_value={"ok": True, "pid": 1}
-        ), patch.object(
-            HermesWebUIService,
-            "status",
-            return_value={
-                "container": {"url": "http://127.0.0.1:8787/"},
-                "adapter": {},
-            },
-        ):
-            allowed = svc.start(force=True)
-            assert allowed["ok"] is True
-            start_ctn.assert_called_once_with("hermes-webui-hermes-webui")
-            stop_ctn.assert_not_called()
+    assert urls.web_ui == "http://127.0.0.1:8787/"
 
 
 def test_webui_dispatch_registered():
@@ -96,74 +49,74 @@ def test_webui_dispatch_registered():
     assert "webui" in SUBCOMMANDS
 
 
-def test_vendor_start_runs_adapter_then_webui_and_can_publish(tmp_path):
+def test_start_runs_adapter_then_webui_and_can_publish(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
+    calls = []
     with patch(
-        "jaeger_ai.features.webui.service.service._load_containers_config",
-        return_value={
-            "use_hermes_webui": False,
-            "hermes_webui_container": "unused",
-            "hermes_webui_port": 8787,
-            "adapter_port": 8791,
-            "layout": layout,
-            "instance": "jaeger",
-        },
+        "jaeger_ai.features.webui.service.service._load_webui_config",
+        return_value=_config(layout),
     ), patch(
-        "jaeger_ai.features.webui.service.service.prepare_vendor_webui_home",
-        return_value={},
+        "jaeger_ai.features.webui.service.service.prepare_webui_home", return_value={}
     ):
-        svc = HermesWebUIService("jaeger")
-        with patch.object(svc, "_start_adapter", return_value={"ok": True}), patch.object(
-            svc, "_start_vendor", return_value={"ok": True}
+        svc = WebUIService("jaeger")
+        with patch.object(
+            svc, "_start_adapter", side_effect=lambda: calls.append("adapter") or {"ok": True}
+        ), patch.object(
+            svc, "_start_webui", side_effect=lambda: calls.append("webui") or {"ok": True}
         ), patch.object(
             svc, "publish_tailscale", return_value={"ok": True, "output": "https://jaeger.tailnet/"}
         ) as publish:
-            result = svc.start_vendor(publish_tailscale=True)
+            result = svc.start(publish_tailscale=True)
     assert result["ok"] is True
     assert result["open"] == "http://127.0.0.1:8790/"
+    assert calls == ["adapter", "webui"]
     publish.assert_called_once_with()
 
 
-def test_vendor_status_treats_listener_as_running(tmp_path):
+def test_webui_status_treats_listener_as_running(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.webui.service.service._load_containers_config",
-        return_value={
-            "use_hermes_webui": False,
-            "hermes_webui_container": "unused",
-            "hermes_webui_port": 8787,
-            "adapter_port": 8791,
-            "jaeger_webui_port": 8790,
-            "layout": layout,
-            "instance": "jaeger",
-        },
+        "jaeger_ai.features.webui.service.service._load_webui_config",
+        return_value=_config(layout),
     ):
-        svc = HermesWebUIService("jaeger")
+        svc = WebUIService("jaeger")
         with patch(
-            "jaeger_ai.features.webui.service.service._listening_pid",
-            return_value=78503,
+            "jaeger_ai.features.webui.service.service._listening_pid", return_value=78503
         ):
-            status = svc._vendor_status()
+            status = svc._webui_status()
     assert status["running"] is True
     assert status["pid"] == 78503
     assert status["source"] == "listener"
 
 
-def test_tailscale_publishes_only_vendor_ui(tmp_path):
+def test_stop_webui_reaps_listener_when_pid_file_is_missing(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.webui.service.service._load_containers_config",
-        return_value={
-            "use_hermes_webui": False,
-            "hermes_webui_container": "unused",
-            "hermes_webui_port": 8787,
-            "adapter_port": 8791,
-            "layout": layout,
-            "instance": "jaeger",
-        },
+        "jaeger_ai.features.webui.service.service._load_webui_config",
+        return_value=_config(layout),
+    ):
+        svc = WebUIService("jaeger")
+        with patch.object(
+            svc, "_webui_status", return_value={"running": True, "pid": 78503, "source": "listener"}
+        ), patch(
+            "jaeger_ai.features.webui.service.service._pid_alive", side_effect=[True, False, False]
+        ), patch(
+            "jaeger_ai.features.webui.service.service.os.kill"
+        ) as kill:
+            result = svc._stop_webui()
+    assert result["ok"] is True
+    kill.assert_called_once()
+
+
+def test_tailscale_publishes_only_webui(tmp_path):
+    layout = MagicMock()
+    layout.root = tmp_path
+    with patch(
+        "jaeger_ai.features.webui.service.service._load_webui_config",
+        return_value=_config(layout),
     ), patch(
         "jaeger_ai.features.webui.service.service.shutil.which",
         return_value="/usr/bin/tailscale",
@@ -171,7 +124,7 @@ def test_tailscale_publishes_only_vendor_ui(tmp_path):
         "jaeger_ai.features.webui.service.service.subprocess.run",
         return_value=MagicMock(returncode=0, stdout="https://jaeger.tailnet/", stderr=""),
     ) as run:
-        result = HermesWebUIService("jaeger").publish_tailscale()
+        result = WebUIService("jaeger").publish_tailscale()
     assert result["ok"] is True
     run.assert_called_once_with(
         ["/usr/bin/tailscale", "serve", "--bg", "--https=8443", "http://127.0.0.1:8790"],

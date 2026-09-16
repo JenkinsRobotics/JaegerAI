@@ -5,7 +5,7 @@ button-level coverage is not fully automated here — use this list after the
 smoke matrix is green.
 
 **Chat face:** http://100.74.2.15:8790/ (or http://127.0.0.1:8790/)  
-**Hermes runtime:** :8787 — not a chat bookmark.  
+**Hermes Agent API:** loopback :8645 — not a chat surface.
 **Adapters:** Jaeger :8642 · Roundtable :8643 · OpenClaw :8644  
 
 **Profiles that must stay available** (switch via titlebar profile chip / Agent profiles tab):

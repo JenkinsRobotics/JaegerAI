@@ -1,7 +1,7 @@
 """Wire mid-turn clarify into native WebUI adapter runs.
 
-Vendor Hermes WebUI still owns the chat-face routes on :8790
-(``/api/clarify/*`` via ``vendor/hermes-webui/api/clarify.py``). Jaeger's
+The first-party Jaeger WebUI owns the chat-face routes on :8790
+(``/api/clarify/*`` via ``jaeger_ai/features/webui/api/clarify.py``). Jaeger's
 native runner adapter (:8791) previously stubbed clarification respond as
 unsupported — this module provides the broker the adapter uses so a
 ``clarify`` / ``ask_user`` tool call mid-turn is no longer dead code.
@@ -21,7 +21,7 @@ import time
 import uuid
 from typing import Any
 
-# Public routes already served by vendor hermes-webui (chat UI :8790):
+# Public routes served by the first-party Jaeger WebUI (chat UI :8790):
 CLARIFY_PENDING_PATH = "/api/clarify/pending"
 CLARIFY_RESPOND_PATH = "/api/clarify/respond"
 CLARIFY_STREAM_PATH = "/api/clarify/stream"
@@ -32,16 +32,11 @@ ADAPTER_CLARIFY_RESPOND_PATH = "/v1/runs/{run_id}/clarifications/{clarify_id}/re
 DEFAULT_TIMEOUT_SECONDS = 120
 
 
-def vendor_clarify_module() -> str:
-    """Import path of the authoritative chat-face clarify state module."""
-    return "api.clarify"  # resolved inside vendor/hermes-webui runtime
-
-
 class ClarifyBroker:
     """In-process pending clarify queue for native adapter runs.
 
-    Mirrors the vendor clarify semantics (submit → wait → free-form respond)
-    without importing the vendored ``api.clarify`` package into the adapter
+    Mirrors the WebUI clarify semantics (submit → wait → free-form respond)
+    without importing the server's ``api.clarify`` package into the adapter
     process.
     """
 
@@ -141,7 +136,7 @@ def describe_wire() -> dict[str, Any]:
     """Machine-readable note for adapters / docs / tests."""
     return {
         "mode": "wire",
-        "authority": "vendor/hermes-webui/api/clarify.py",
+        "authority": "jaeger_ai/features/webui/api/clarify.py",
         "native_broker": "jaeger_ai.features.webui.clarify_wire.ClarifyBroker",
         "chat_port": 8790,
         "adapter_port": 8791,

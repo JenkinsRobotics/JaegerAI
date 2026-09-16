@@ -15,7 +15,7 @@ them without creating another copy.
 | [Daily-driver foundation](DAILY_DRIVER_FOUNDATION.md) | Standalone ownership, reliability boundaries, and daily checks |
 | [Product identity](PRODUCT_IDENTITY.md) | Product scope and ownership |
 | [Shared WebUI profiles](HERMES_SHARED_PROFILES.md) | Direct agent profiles and Roundtable; see integration status for current transport limitations |
-| [Integration status](../integrations/hermes_webui/RELEASE_PROGRESS.md) | Implemented, verified, and pending integration work |
+| [WebUI feature](../jaeger_ai/features/webui/README.md) | Authoritative browser implementation and operation |
 | [Security](../SECURITY.md) | Security guidance |
 | [Changelog](../CHANGELOG.md) | Release history |
 | [Repair log](reports/FIXES.md) | Dated operational repairs |
@@ -32,7 +32,7 @@ them without creating another copy.
 | [JaegerAgent](../packages/jaeger-agent/README.md) | Reusable agent package |
 | [JaegerOS](../packages/jaeger-os/README.md) | Runtime foundation |
 | [Generated agent contract](../jaeger_ai/docs/agent_contract.md) | Generator-owned reference shipped as package data |
-| [WebUI integration](../integrations/hermes_webui/README.md) | Pinned frontend and Jaeger-owned compatibility layer |
+| [WebUI consolidation decision](architecture/adr/0013-absorb-hermes-webui.md) | Why the Hermes WebUI fork and container overlay were absorbed |
 | [Workspace integration](../integrations/agent_workspaces/README.md) | Deployment mounts and container identities |
 
 ## Development

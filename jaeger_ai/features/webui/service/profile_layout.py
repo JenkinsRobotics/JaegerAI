@@ -152,7 +152,7 @@ def link_shared_profiles(*, shared: Path, agent_home: Path) -> dict[str, Any]:
 def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
     """Guarantee ``state.db`` exists with a ``source`` column.
 
-    ``vendor/hermes-webui/api/agent_sessions.py`` returns an empty list when
+    ``jaeger_ai/features/webui/api/agent_sessions.py`` returns an empty list when
     the column is missing, which is the empty-sidebar failure on :8790.
     This does not import live Hermes history — that is the Phase 1 catalog
     import.
@@ -194,8 +194,8 @@ def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
         conn.close()
 
 
-def ensure_vendor_config_yaml(agent_home: Path) -> dict[str, Any]:
-    """Ensure ``config.yaml`` exists under the vendor HERMES_HOME with a reachable Ollama URL.
+def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
+    """Ensure ``config.yaml`` exists under the WebUI HERMES_HOME with a reachable Ollama URL.
 
     Missing config leaves gateway_chat / model routing half-configured and is a
     common overnight break after HERMES_HOME moved from ``~/.jaeger_ai`` to
@@ -280,12 +280,12 @@ def ensure_profile_state_schemas(agent_home: Path, shared_profiles: Path | None 
     return {"fixed": fixed, "checked": len(seen)}
 
 
-def prepare_vendor_webui_home(
+def prepare_webui_home(
     agent_home: Path | None = None,
     *,
     hermes_home: Path | None = None,
 ) -> dict[str, Any]:
-    """Ready the :8790 vendor HERMES_HOME: names, shared profile link, state.db schema.
+    """Ready the :8790 WebUI HERMES_HOME: names, shared profile link, state.db schema.
 
     ``HERMES_HOME`` for the host WebUI is ``~/.jaeger/hermes-webui-agent``.
     That directory is the ``default`` profile, so it needs ``profile.yaml`` with
@@ -298,7 +298,7 @@ def prepare_vendor_webui_home(
     agent = (agent_home or (home / ".jaeger" / "hermes-webui-agent")).expanduser()
     layout = ensure_webui_profile_layout(hermes)
     linked = link_shared_profiles(shared=hermes / "profiles", agent_home=agent)
-    # Vendor HERMES_HOME itself is the default/root profile for :8790.
+    # The WebUI HERMES_HOME itself is the default/root profile for :8790.
     _write_display_name(agent, display_name=PROFILE_DISPLAY_NAMES["default"])
     # If the symlink is live, refresh labels on named profiles via the shared tree.
     agent_profiles = agent / "profiles"
@@ -312,7 +312,7 @@ def prepare_vendor_webui_home(
                 _write_display_name(path, display_name=label)
                 named_written[folder] = label
     schema = ensure_agent_state_schema(agent)
-    config = ensure_vendor_config_yaml(agent)
+    config = ensure_webui_config_yaml(agent)
     # A catalog entry must be selectable even on a fresh installation. Seed
     # only model selection, never another profile's credentials or history.
     import yaml

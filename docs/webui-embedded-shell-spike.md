@@ -1,5 +1,8 @@
 # WebUI-embedded chat shell — spike result (card_b1a5afefda)
 
+> **Historical spike.** Jaeger WebUI is now first-party source under
+> `jaeger_ai/features/webui`; the old submodule path below no longer exists.
+
 Date: 2026-09-14 · Author: Assistant (JROS idle tick) · Status: spike complete, acceptance run pending
 
 ## What shipped

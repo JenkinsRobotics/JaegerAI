@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Expose Hermes' own Runs API inside its existing container.
+"""Expose Hermes Agent's Runs API as a loopback host service.
 
 This is a lifecycle launcher, not an alternative agent loop. Hermes owns its
 SessionDB, tools, inference, approval policy, and native Runs implementation.
 Only the API platform is started; no messaging gateway/cron platforms are started.
-Rollback is stopping this process; the existing WebUI/default profile is unchanged.
+Rollback is stopping this process; the Jaeger WebUI/default profile is unchanged.
 """
 from __future__ import annotations
 
@@ -16,6 +16,16 @@ from pathlib import Path
 import signal
 import stat
 import sys
+
+
+ROOT = Path(__file__).resolve().parents[1]
+HERMES_AGENT_SRC = Path(
+    os.environ.get("JAEGER_HERMES_AGENT_SRC", str(Path.home() / "GitHub/hermes-agent"))
+).expanduser()
+if not (HERMES_AGENT_SRC / "gateway").is_dir():
+    raise RuntimeError(f"Hermes Agent checkout is missing: {HERMES_AGENT_SRC}")
+sys.path.insert(0, str(HERMES_AGENT_SRC))
+sys.path.insert(0, str(ROOT / "integrations/hermes_agent"))
 
 
 def provision_key(path: Path) -> None:
@@ -48,8 +58,6 @@ async def serve(options: dict) -> int:
     from gateway.config import PlatformConfig
     from gateway.platforms.api_server import APIServerAdapter
 
-    overlay = Path(__file__).resolve().parents[1] / "integrations/hermes_webui"
-    sys.path.insert(0, str(overlay))
     from native_adapter import native_adapter_class
     adapter = native_adapter_class(APIServerAdapter)(PlatformConfig(enabled=True, extra=options))
     stopped = asyncio.Event()
@@ -99,7 +107,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8645)
     parser.add_argument("--provision-key", action="store_true", help="Create a private credential, without starting a server")
-    parser.add_argument("--stop", action="store_true", help="Stop this native API inside its container")
+    parser.add_argument("--stop", action="store_true", help="Stop a matching Linux-hosted native API")
     args = parser.parse_args()
     if args.stop:
         return stop_servers(args.key_file, args.port)

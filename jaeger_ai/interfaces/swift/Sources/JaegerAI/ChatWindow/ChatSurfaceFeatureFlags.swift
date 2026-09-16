@@ -26,7 +26,7 @@
 import Foundation
 
 enum ChatSurfaceFeatureFlags {
-    /// When true, the chat tab renders the Jaeger WebUI (vendor/hermes-webui
+    /// When true, the chat tab renders the first-party Jaeger WebUI
     /// on :8790, resolved via `jaeger webui url`) inside WKWebView instead
     /// of the native ChatTranscript. Default: native renderer.
     static var useWebUITranscript: Bool {

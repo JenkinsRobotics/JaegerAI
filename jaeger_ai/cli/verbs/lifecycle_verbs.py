@@ -4,7 +4,7 @@ Controls the complete multi-agent system:
   1. macOS App (JaegerAI.app menu bar application)
   2. Background services (launchd jobs for bridge, a2a, mcp, adapters, gateway)
   3. Fabric Supervisor (agent-fabric-supervisor health watchdog)
-  4. Linux Containers (jaeger-hermes-webui, jaeger-openclaw)
+  4. Linux Containers (OpenClaw only; Hermes Agent runs on the host)
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ SUPERVISOR_SERVICE = "com.jenkinsrobotics.agent-fabric-supervisor"
 APP_PROCESS_NAME = "JaegerAI"
 
 
-def _container_names() -> tuple[str, str]:
+def _container_names() -> tuple[str, ...]:
     from jaeger_ai.core.runtime.agent_workspaces import container_name
-    return container_name("hermes"), container_name("openclaw")
+    return (container_name("openclaw"),)
 
 
 def _command(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -178,22 +178,7 @@ def _service_port_open(
     }:
         return _is_port_open(port) or _is_port_open(port, "192.168.64.1")
     if label == "com.jenkinsrobotics.hermes-native-api":
-        # Check EVERY known Hermes identity, not just the one the workspace
-        # state file happens to name. The WebUI ships under three valid
-        # container names (legacy → managed → expanded) and the state file
-        # records only the one this host last started; a container running
-        # under either of the other two is still the native API we want, and
-        # looking at a single name reported it down.
-        from jaeger_ai.core.runtime.agent_workspaces import hermes_container_aliases
-
-        for name in hermes_container_aliases():
-            container = containers.get(name)
-            if not container or container.get("state") != "running":
-                continue
-            address = (container.get("ip") or "").split("/")[0]
-            if address and _is_port_open(port, address):
-                return True
-        return False
+        return _is_port_open(port, "127.0.0.1")
     return _is_port_open(port)
 
 
@@ -262,8 +247,8 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would stop Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.webui import HermesWebUIService
-                HermesWebUIService().stop(stop_container=False)
+                from jaeger_ai.features.webui import WebUIService
+                WebUIService().stop()
                 print("  Stopped Jaeger WebUI")
             except Exception:
                 pass
@@ -328,8 +313,8 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
     names = () if args.no_containers else _container_names()
     failures = []
 
-    # Native API launchers execute inside these containers, so containers start
-    # first. A repeated start never stops a running container or launchd job.
+    # OpenClaw remains containerized. Hermes Agent and its native API run on
+    # the Mac, so WebUI lifecycle never starts a Hermes WebUI container.
     if names:
         cli = _get_container_cli()
         if cli is None:
@@ -337,46 +322,21 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
         elif not states and not args.dry_run:
             print("  Container runtime is offline (run 'container system start' to start containers)")
         else:
-            try:
-                from jaeger_ai.core.runtime.agent_workspaces import (
-                    conflicting_hermes_containers,
-                    container_name as aw_container_name,
-                )
-                hermes_target = aw_container_name("hermes")
-            except Exception:
-                hermes_target = None
-                conflicting_hermes_containers = lambda _active=None: []  # type: ignore
             for name in names:
                 state = states.get(name, {}).get("state")
                 if state == "running":
                     print(f"  Already running: {name}")
                     continue
                 if args.dry_run:
-                    if hermes_target and name == hermes_target:
-                        for sibling in conflicting_hermes_containers(name):
-                            if states.get(sibling, {}).get("state") == "running":
-                                print(f"  [dry-run] Would stop conflicting {sibling}")
                     print(f"  [dry-run] Would start container {name}")
                     continue
                 if cli and state == "stopped":
-                    # Hermes managed/legacy share host:8787 (often Tailscale-only).
-                    if hermes_target and name == hermes_target:
-                        for sibling in conflicting_hermes_containers(name):
-                            if states.get(sibling, {}).get("state") == "running":
-                                print(f"  Stopping conflicting container: {sibling}")
-                                if _command([cli, "stop", sibling], timeout=60).returncode:
-                                    failures.append(f"conflict stop: {sibling}")
                     if _command([cli, "start", name], timeout=60).returncode:
                         failures.append(f"container: {name}")
                     else:
                         print(f"  Started container: {name}")
                 elif cli and not state:
                     # list may omit stopped containers depending on runtime state cache
-                    if hermes_target and name == hermes_target:
-                        for sibling in conflicting_hermes_containers(name):
-                            if states.get(sibling, {}).get("state") == "running":
-                                print(f"  Stopping conflicting container: {sibling}")
-                                _command([cli, "stop", sibling], timeout=60)
                     started = _command([cli, "start", name], timeout=60)
                     if started.returncode:
                         failures.append(f"container: {name}")
@@ -419,13 +379,6 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
         if not ensure_service(label, name):
             failures.append(name)
         elif not args.dry_run and port is not None:
-            # If a service requires a running container and that container isn't running,
-            # don't wait 30 seconds for it.
-            if label == "com.jenkinsrobotics.hermes-native-api":
-                cstate = states.get(_container_names()[0], {}).get("state")
-                if cstate != "running":
-                    print(f"  Note: {name} is loaded; awaiting container start for :8645")
-                    continue
             # Readiness is distinct from process admission. Bound the wait;
             # report a warming/failed service without killing it to retry.
             for attempt in range(150):
@@ -479,44 +432,12 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would start Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.webui import HermesWebUIService
-                webui_svc = HermesWebUIService()
+                from jaeger_ai.features.webui import WebUIService
+                webui_svc = WebUIService()
                 w_status = webui_svc.status()
-                vendor_running = bool(w_status.get("vendor", {}).get("running")) or _is_port_open(8790)
+                webui_running = bool(w_status.get("webui", {}).get("running")) or _is_port_open(8790)
                 adapter_running = bool(w_status.get("adapter", {}).get("running")) or _is_port_open(8791)
-                # When the Hermes container toggle is on, ensure container + adapter too.
-                if webui_svc.enabled:
-                    ctn_state = ((w_status.get("container") or {}).get("state") or "")
-                    if ctn_state != "running":
-                        ctn_res = webui_svc.start(force=True)
-                        if ctn_res.get("ok"):
-                            print(
-                                "  Started Hermes runtime "
-                                f"({webui_svc.container_name}; not a chat URL)"
-                            )
-                            try:
-                                from pathlib import Path as _Path
-                                import subprocess as _sp, sys as _sys
-                                _sync = _Path(__file__).resolve().parents[3] / "scripts" / "sync-hermes-webui-static.py"
-                                if _sync.is_file():
-                                    _sp.run([_sys.executable, str(_sync)], check=False, capture_output=True, text=True)
-                            except Exception:
-                                pass
-                        else:
-                            failures.append("hermes container ui")
-                            print(f"  Failed Hermes runtime: {ctn_res.get('error') or ctn_res}")
-                    else:
-                        runtime = webui_svc.hermes_runtime_url() or webui_svc.container_name
-                        print(f"  Already running: Hermes runtime ({runtime}; not a chat URL)")
-                        try:
-                            from pathlib import Path as _Path
-                            import subprocess as _sp, sys as _sys
-                            _sync = _Path(__file__).resolve().parents[3] / "scripts" / "sync-hermes-webui-static.py"
-                            if _sync.is_file():
-                                _sp.run([_sys.executable, str(_sync)], check=False, capture_output=True, text=True)
-                        except Exception:
-                            pass
-                if vendor_running and adapter_running:
+                if webui_running and adapter_running:
                     ts = None
                     try:
                         from jaeger_ai.features.webui.service.service import _tailscale_ipv4
@@ -527,7 +448,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                     remote = f"http://{ts}:8790/" if ts else "http://0.0.0.0:8790/"
                     print(f"  Already running: Web UI ({local} / {remote})")
                 else:
-                    res = webui_svc.start_vendor()
+                    res = webui_svc.start()
                     if res.get("ok"):
                         ts = None
                         try:
@@ -629,22 +550,10 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
             "pid": pid,
         })
 
-    # Collect container statuses. The workspace state file records one name
-    # per role, but Hermes ships under three valid identities (legacy →
-    # managed → expanded). If the recorded name is absent, fall back to
-    # whichever alias is actually present before declaring it stopped —
-    # otherwise a running WebUI reports as down purely because this host
-    # last started it under a different name.
-    from jaeger_ai.core.runtime.agent_workspaces import hermes_container_aliases
-
+    # Collect OpenClaw container status. Hermes Agent is a host service.
     containers_report = []
     for cname in _container_names():
         cdata = containers.get(cname)
-        if cdata is None and cname in hermes_container_aliases():
-            for alias in hermes_container_aliases():
-                if alias in containers:
-                    cname, cdata = alias, containers[alias]
-                    break
         if cdata is None:
             cdata = {"state": "stopped", "ip": "—"}
         containers_report.append({
@@ -664,17 +573,14 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
     honcho_ok = _is_port_open(8088, "10.15.0.239", timeout=1.0) if rack_enabled else False
 
     # Collect Web UI status
-    hermes_ui = None
     try:
-        from jaeger_ai.features.webui import HermesWebUIService
+        from jaeger_ai.features.webui import WebUIService
         from jaeger_ai.features.webui.service.service import _tailscale_ipv4
-        wsvc = HermesWebUIService()
+        wsvc = WebUIService()
         wstatus = wsvc.status()
-        webui_running = bool(wstatus.get("vendor", {}).get("running")) or _is_port_open(8790)
+        webui_running = bool(wstatus.get("webui", {}).get("running")) or _is_port_open(8790)
         ts = _tailscale_ipv4()
         webui_url = f"http://{ts}:8790/" if (webui_running and ts) else "http://127.0.0.1:8790/"
-        if wsvc.enabled and ((wstatus.get("container") or {}).get("state") == "running"):
-            hermes_ui = wsvc.hermes_runtime_url()
     except Exception:
         webui_running = _is_port_open(8790)
         webui_url = "http://127.0.0.1:8790/"
@@ -682,7 +588,7 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
     if args.json:
         doc = {
             "app": {"running": len(app_pids) > 0, "pids": app_pids},
-            "webui": {"running": webui_running, "url": webui_url, "hermes_url": hermes_ui},
+            "webui": {"running": webui_running, "url": webui_url},
             "services": services_report,
             "containers": containers_report,
             "substrates": {
@@ -709,11 +615,6 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
         print(f"  {_bold('Web UI:')}       {_green('● Running')} ({webui_url})")
     else:
         print(f"  {_bold('Web UI:')}       {_dim('○ Stopped')}")
-    if hermes_ui:
-        print(
-            f"  {_bold('Hermes runtime:')} {_green('● Running')} "
-            f"({hermes_ui})  {_dim('not a chat URL')}"
-        )
     print()
 
     # Services Table

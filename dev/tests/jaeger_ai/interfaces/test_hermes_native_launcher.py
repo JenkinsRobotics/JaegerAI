@@ -46,7 +46,7 @@ def test_provision_is_private_and_does_not_rotate_existing_key(tmp_path):
 
 def test_runs_restore_native_history_without_flattening_or_cross_session_fallback():
     from types import SimpleNamespace
-    from integrations.hermes_webui.native_adapter import native_adapter_class
+    from integrations.hermes_agent.native_adapter import native_adapter_class
     history = [{'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'native-call'}]},
                {'role': 'tool', 'content': 'result', 'tool_call_id': 'native-call'}]
     seen = []
@@ -91,18 +91,17 @@ def test_service_definition_uses_repo_code_and_no_embedded_credentials():
     assert str(operator_state_root()/'shared/logs') in config['StandardErrorPath']
 
 
-def test_service_shim_discovers_active_container_without_starting_legacy_one(monkeypatch):
-    from jaeger_ai.core.runtime import agent_workspaces
-    monkeypatch.setattr(agent_workspaces, 'container_name', lambda role: 'jaeger-hermes-webui' if role == 'hermes' else None)
+def test_service_shim_starts_host_hermes_agent_api():
     root = Path(__file__).resolve().parents[4]
     args = runpy.run_path(str(root/'scripts/hermes-native-api-service.py'))['command']()
-    assert args[:5] == ['/opt/homebrew/bin/container', 'exec', '--user', 'hermeswebui', 'jaeger-hermes-webui']
-    assert 'start' not in args and '--token' not in args
+    assert args[:3] == [str(Path.home()/'.jaeger/venv/bin/python'), '-B', str(root/'scripts/run-hermes-native-api.py')]
+    assert args[-4:] == ['--host', '127.0.0.1', '--port', '8645']
+    assert '/opt/homebrew/bin/container' not in args and '--token' not in args
 
 
 def test_roundtable_native_api_resumes_existing_named_cli_lineage():
     from types import SimpleNamespace
-    from integrations.hermes_webui.native_adapter import native_adapter_class
+    from integrations.hermes_agent.native_adapter import native_adapter_class
     import uuid
     member = 'a' * 32
     legacy = uuid.uuid5(uuid.NAMESPACE_URL, f'jaeger-roundtable:{member}:hermes').hex
@@ -150,7 +149,7 @@ def test_stop_targets_only_matching_api_processes(monkeypatch, tmp_path):
     assert calls == [(222222, signal.SIGTERM)]
 
 
-def test_native_service_adopts_existing_listener_and_stops_inside_container(monkeypatch):
+def test_native_service_adopts_existing_host_listener_without_killing_it(monkeypatch):
     module = runpy.run_path(str(Path(__file__).resolve().parents[4] / 'scripts/hermes-native-api-service.py'))
     main = module['main']
 
@@ -167,8 +166,4 @@ def test_native_service_adopts_existing_listener_and_stops_inside_container(monk
     monkeypatch.setattr(module['signal'], 'signal', lambda *a: None)
     monkeypatch.setitem(main.__globals__, 'ready', lambda: True)
     monkeypatch.setattr(module['subprocess'], 'Popen', lambda *a, **k: pytest.fail('must adopt existing API'))
-    calls = []
-    monkeypatch.setattr(module['subprocess'], 'run', lambda args, **kwargs: calls.append(args))
     assert main() == 0
-    assert len(calls) == 1 and calls[0][-1] == '--stop'
-    assert 'exec' in calls[0]

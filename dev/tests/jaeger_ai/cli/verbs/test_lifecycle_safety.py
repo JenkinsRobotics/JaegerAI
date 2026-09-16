@@ -72,7 +72,7 @@ def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp
 def test_container_names_follow_deployment_manifest(monkeypatch):
     from jaeger_ai.core.runtime import agent_workspaces
     monkeypatch.setattr(agent_workspaces, 'container_name', lambda role: 'selected-' + role)
-    assert lifecycle._container_names() == ('selected-hermes', 'selected-openclaw')
+    assert lifecycle._container_names() == ('selected-openclaw',)
 
 
 def test_loaded_unhealthy_service_is_not_killed_by_start(monkeypatch, tmp_path):

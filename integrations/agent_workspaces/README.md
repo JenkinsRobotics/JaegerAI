@@ -1,5 +1,9 @@
 # Agent access to the Mac and the live JaegerAI checkout
 
+> **OpenClaw container notes.** Hermes Agent now runs directly on macOS and
+> Jaeger WebUI is first-party source. Any Hermes WebUI container instructions
+> retained below are historical evidence and must not be used for deployment.
+
 ## Current deployment
 
 | Agent | Active Apple container | Agent user | Live repo path |

@@ -44,24 +44,14 @@ def test_playback_amplitude_tracks_pcm_and_underrun():
     assert player.amplitude == 0.0
 
 
-def test_webui_url_tracks_reassigned_container_ip(monkeypatch):
-    import json
-    import subprocess
+def test_webui_url_ignores_obsolete_container_runtime(monkeypatch):
     from jaeger_ai.features.webui.service import service
 
-    ui = service.HermesWebUIService.__new__(service.HermesWebUIService)
-    ui.webui_port = 8787
-    ui.vendor_webui_port = 8790
+    ui = service.WebUIService.__new__(service.WebUIService)
+    ui.webui_port = 8790
     ui.adapter_port = 8791
     ui.adapter_host = "127.0.0.1"
-    ui.enabled = True
-    ui.container_name = "configured-webui"
-    ui._cfg = {"engine": "/configured/container"}
     monkeypatch.setattr(service, '_tailscale_ipv4', lambda: None)
-    monkeypatch.setattr(service.shutil, 'which', lambda _: '/usr/bin/container')
-    monkeypatch.setattr(service.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(
-        a, 0, json.dumps([{'status': {'state': 'running', 'networks': [{'ipv4Address': '192.168.64.99/24'}]}}])))
-    assert ui.hermes_runtime_url() == 'http://192.168.64.99:8787/'
     assert ui.browser_url() == 'http://127.0.0.1:8790/'
 
 

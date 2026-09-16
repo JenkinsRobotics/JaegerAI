@@ -104,6 +104,8 @@ jaeger_ai = [
     "plugins/**/*.yaml", "plugins/**/*.json", "plugins/**/*.md",
     "features/personality/**/*.yaml", "features/personality/**/*.md",
     "features/personality/**/*.png", "features/personality/**/*.jpg", "features/personality/**/*.jpeg",
+    "features/webui/static/**/*", "features/webui/HERMES_WEBUI_LICENSE",
+    "features/webui/requirements.txt",
     "assets/**/*", "docs/**/*.md", "contract/**/*.json",
     "interfaces/swift/Package.swift", "interfaces/swift/Sources/**/*.swift",
     "interfaces/swift/Resources/**/*", "interfaces/swift/Scripts/*.sh",
@@ -144,4 +146,5 @@ markers = [
     "subprocess: tests that spawn a real Python subprocess (boot, daemon, bench).",
     "smoke: a tiny set tagged so ``pytest -m smoke`` is a 30-second sanity check.",
     "regression: pins a specific bug fix — run on every PR even when narrowing markers.",
+    "requires_agent_modules: requires the optional Hermes Agent source checkout.",
 ]

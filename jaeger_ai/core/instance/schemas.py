@@ -1080,12 +1080,7 @@ except ImportError:
 
 
 class ContainersConfig(BaseModel):
-    """Configuration for Apple native container tools and services.
-
-    ``use_hermes_webui`` retains its compatibility name for existing config
-    files. It enables the bundled Hermes-derived container mode; the default
-    ``jaeger webui start`` path launches Jaeger's branded WebUI and adapter.
-    """
+    """Configuration for Apple native container tools and host WebUI services."""
 
     model_config = ConfigDict(extra="forbid")
     engine: str = Field(
@@ -1097,29 +1092,6 @@ class ContainersConfig(BaseModel):
         True,
         json_schema_extra=_setting("containers"),
         description="Automatically start the container system service when needed.",
-    )
-    use_hermes_webui: bool = Field(
-        False,
-        json_schema_extra=_setting("containers"),
-        description=(
-            "Run the Hermes Agent runtime container. This is not a second "
-            "chat URL; Jaeger WebUI on jaeger_webui_port remains the bookmark."
-        ),
-    )
-    hermes_webui_container: str = Field(
-        "hermes-webui-hermes-webui",
-        json_schema_extra=_setting("containers", advanced=True),
-        description="Apple container id that serves the Hermes WebUI.",
-    )
-    hermes_webui_port: int = Field(
-        8787,
-        ge=1,
-        le=65535,
-        json_schema_extra=_setting("containers", advanced=True),
-        description=(
-            "Host port published by the Hermes WebUI container "
-            "(open http://127.0.0.1:<port>/)."
-        ),
     )
     adapter_port: int = Field(
         8791,

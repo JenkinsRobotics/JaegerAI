@@ -1,6 +1,6 @@
-"""Loopback runtime adapter for Jaeger's pinned Hermes WebUI fork.
+"""Loopback runtime adapter for Jaeger's first-party WebUI.
 
-This process does not serve the browser application. The pinned WebUI owns port
+This process does not serve the browser application. The WebUI server owns port
 8790 and calls this service through ``runner-local``. The selected framework
 owns inference, tools, sessions and controls; this service translates events.
 """

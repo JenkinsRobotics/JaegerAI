@@ -19,7 +19,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import yaml
 from jaeger_ai.core.runtime import agent_workspaces as aw
-from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces, _set_yaml_section_value
+from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces
 
 ENGINE = "/opt/homebrew/bin/container"
 
@@ -119,16 +119,6 @@ def configure(backup):
         save(path)
         atomic_write(path, managed_context(path.read_text() if path.exists() else "", block))
 
-    path = aw.REPO_ROOT / ".jaeger_ai/instances/jaeger/config.yaml"
-    save(path)
-    _set_yaml_section_value(path, "containers", "hermes_webui_container", aw.MANAGED_CONTAINERS["hermes"])
-    wrapper = home / "bin/hermes"
-    save(wrapper)
-    source = aw.REPO_ROOT / "scripts/hermes-container"
-    source.chmod(0o755)
-    temporary = wrapper.with_name("hermes.workspace-new")
-    temporary.symlink_to(source)
-    os.replace(temporary, wrapper)
 
 
 def restore_configuration(backup):
@@ -156,7 +146,7 @@ def restart_host_gateway():
 
 def healthy(role):
     name = aw.MANAGED_CONTAINERS[role]
-    port = 8787 if role == "hermes" else 18789
+    port = 18789
     status = json.loads(run("inspect", name, timeout=5))[0]["status"]
     address = status["networks"][0]["ipv4Address"].split("/")[0]
     with urllib.request.urlopen(f"http://{address}:{port}/health", timeout=3) as response:
@@ -171,13 +161,14 @@ def deploy(include_personal=False):
     for role, name in aw.LEGACY_CONTAINERS.items():
         configs[role] = json.loads(run("inspect", name))[0]["configuration"]
         plans[role] = aw.create_arguments(configs[role], role, include_personal=include_personal)
-    # Ensure the validated image is already local before interrupting any agent.
-    run("image", "inspect", aw.HERMES_IMAGE)
+    # Ensure the validated OpenClaw image is local before interrupting it.
+    image = configs["openclaw"]["image"]["reference"]
+    run("image", "inspect", image)
     # Trigger mount/OS-permission errors before stopping any working service.
     probe = ["run", "--rm", "--name", "jaeger-workspace-mount-preflight", "--entrypoint", "true"]
     for source, destination in aw.workspace_mounts(include_personal=include_personal):
         probe.extend(["--volume", f"{source}:{destination}"])
-    run(*probe, aw.HERMES_IMAGE, timeout=30)
+    run(*probe, image, timeout=30)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup = aw.STATE_PATH.parent / f"workspace-migration-{stamp}"
     backup.mkdir(parents=True, mode=0o700)

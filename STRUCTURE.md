@@ -115,8 +115,7 @@ JaegerAI/
 │   └── plugins/                # 🧩 Messaging + integration plugins
 ├── scripts/                    # 🔧 Operator entry points and verify-* diagnostics
 ├── dev/                        # 🧪 dev/tests/ (the test suite) and developer docs
-├── docs/                       # 📖 User and system documentation
-└── vendor/                     # 👥 Vendored upstream (hermes-webui fork)
+└── docs/                       # 📖 User and system documentation
 ```
 
 > **`features/` vs `core/` vs `interfaces/`** — a feature is something you could

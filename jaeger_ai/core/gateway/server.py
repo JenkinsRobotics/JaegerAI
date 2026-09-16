@@ -1631,7 +1631,7 @@ def main(argv: list[str] | None = None) -> int:
     It had no route for a whole release. ``jaeger gateway`` goes to
     ``features.gateway``, which manages the *external* Agentgateway on
     :8811/:8812 — a different process entirely — while
-    ``integrations/hermes_webui/jaeger_agents.py`` and
+    ``jaeger_ai/features/webui/api/jaeger_agents.py`` and
     ``scripts/run-jaeger-webui.sh`` both pointed clients at :8810 with
     nothing listening. Adding the route is what makes those clients real.
 

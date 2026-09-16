@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Locked product topology
 DEFAULT_CHAT_URL = "http://127.0.0.1:8790/"
 TAILSCALE_CHAT_URL = "http://100.74.2.15:8790/"
-HERMES_RUNTIME_PORT = 8787
+HERMES_AGENT_API_PORT = 8645
 CHAT_PORT = 8790
 ADAPTERS = (
     ("jaeger", 8642, "Jaeger"),
@@ -51,7 +51,7 @@ REQUIRED_PROFILES = {
 }
 PROFILE_COOKIE_IDS = ("default", "jaeger", "openclaw", "roundtable")
 
-# Key UI tab endpoints discovered from vendor/hermes-webui/api/routes.py + static JS
+# Key UI tab endpoints owned by jaeger_ai/features/webui.
 TAB_ENDPOINTS = (
     ("sessions", "/api/sessions"),
     ("models", "/api/models"),
@@ -179,8 +179,8 @@ def _python() -> str:
     return sys.executable
 
 
-def ensure_started(matrix: Matrix, *, start_runtime: bool) -> None:
-    """Start adapters + chat WebUI (+ optional Hermes runtime) if missing."""
+def ensure_started(matrix: Matrix) -> None:
+    """Start adapters and the first-party Jaeger WebUI when missing."""
     domain = f"gui/{os.getuid()}"
     for _name, port, label in ADAPTERS:
         if _port_open(port):
@@ -272,58 +272,12 @@ def ensure_started(matrix: Matrix, *, start_runtime: bool) -> None:
     else:
         matrix.add("start.skip_webui_8790", True, "chat :8790 already up")
 
-    if start_runtime and not _port_open(HERMES_RUNTIME_PORT):
-        print("  Starting Hermes runtime container (:8787; not a chat bookmark)...")
-        r = subprocess.run(
-            _jaeger_bin() + ["webui", "start", "--container"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        ready = False
-        for _ in range(80):
-            if _port_open(HERMES_RUNTIME_PORT):
-                ready = True
-                break
-            time.sleep(0.25)
-        # Runtime may publish only on Tailscale; also accept container health via service.
-        if not ready:
-            try:
-                sys.path.insert(0, str(REPO_ROOT))
-                from jaeger_ai.features.webui import HermesWebUIService
-
-                st = HermesWebUIService().status()
-                ready = bool((st.get("container") or {}).get("state") == "running")
-            except Exception as exc:  # noqa: BLE001
-                detail_extra = str(exc)
-            else:
-                detail_extra = "container state running"
-        else:
-            detail_extra = "port open"
-        matrix.add(
-            "start.hermes_runtime_8787",
-            ready,
-            detail_extra,
-            required=False,  # chat face can work without container UI
-        )
-    elif _port_open(HERMES_RUNTIME_PORT):
-        matrix.add("start.skip_hermes_runtime", True, ":8787 already up", required=False)
-
-
 def check_ports(matrix: Matrix) -> None:
     matrix.add("port.8790_chat", _port_open(CHAT_PORT), "Jaeger WebUI chat face")
-    # Hermes runtime is topology-locked but not the chat bookmark.
-    # Often published on Tailscale only (100.74.2.15), not loopback.
-    runtime_up = _port_open(HERMES_RUNTIME_PORT) or _port_open(HERMES_RUNTIME_PORT, "100.74.2.15")
-    where = "127.0.0.1" if _port_open(HERMES_RUNTIME_PORT) else (
-        "100.74.2.15" if _port_open(HERMES_RUNTIME_PORT, "100.74.2.15") else "down"
-    )
     matrix.add(
-        "port.8787_hermes_runtime",
-        runtime_up,
-        f"Hermes runtime (NOT a chat bookmark) via {where}",
-        required=False,
+        "port.8645_hermes_agent",
+        _port_open(HERMES_AGENT_API_PORT),
+        "Hermes Agent native API on loopback",
     )
     for name, port, label in ADAPTERS:
         matrix.add(f"port.{port}_{name}", _port_open(port), f"{label} adapter")
@@ -625,11 +579,6 @@ def main(argv: list[str] | None = None) -> int:
         help="Start adapters + WebUI if ports are down (does not destroy data)",
     )
     parser.add_argument(
-        "--start-runtime",
-        action="store_true",
-        help="With --start, also try starting Hermes runtime container (:8787)",
-    )
-    parser.add_argument(
         "--live",
         action="store_true",
         help="Also run live LLM/chat/tool verifiers (uses model tokens; creates sessions)",
@@ -648,11 +597,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.start:
         print("\n--start: ensuring required services...")
-        ensure_started(matrix, start_runtime=args.start_runtime)
+        ensure_started(matrix)
 
     chat_url = resolve_chat_url(args.chat_url)
     print(f"  chat: {chat_url}")
-    print(f"  hermes runtime port: {HERMES_RUNTIME_PORT} (not a chat bookmark)")
+    print(f"  Hermes Agent API: 127.0.0.1:{HERMES_AGENT_API_PORT}")
 
     check_ports(matrix)
     check_http_health(matrix, chat_url)

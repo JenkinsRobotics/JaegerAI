@@ -19,16 +19,14 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
             "\n"
             "verbs:\n"
             "  start [--tailscale] [-i NAME]       start Jaeger WebUI + adapter\n"
-            "  start --container [--force]         start Hermes runtime container\n"
-            "  stop  [--keep-container] [-i NAME]  stop adapter (+ container)\n"
-            "  status [--json] [-i NAME]           toggle, ports, health\n"
+            "  stop [-i NAME]                      stop Jaeger WebUI + adapter\n"
+            "  status [--json] [-i NAME]           ports and health\n"
             "  url [-i NAME]                       print browser URL\n"
             "  servers [status|start|stop|restart] [all|NAME]  local server controls\n"
             "\n"
             "ports:\n"
             "  Jaeger WebUI     Tailscale IPv4:8790      (canonical chat URL; jaeger webui url)\n"
             "  adapter          http://127.0.0.1:8791/   (runner-local)\n"
-            "  Hermes runtime   http://127.0.0.1:8787/   (container; not a chat bookmark)\n"
             "  webhooks         127.0.0.1:8793           (no longer clashes with adapter)\n",
             file=sys.stderr,
         )
@@ -58,57 +56,33 @@ def _parse_instance(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
 
 
 def _webui_start(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import HermesWebUIService
+    from jaeger_ai.features.webui import WebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui start")
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument("--container", action="store_true")
     parser.add_argument("--tailscale", action="store_true")
     args = parser.parse_args(rest)
-    svc = HermesWebUIService(base.instance)
-    if not args.container:
-        print(f"Starting Jaeger WebUI for instance {svc.instance!r}...")
-        res = svc.start_vendor(publish_tailscale=True if args.tailscale else None)
-        if not res.get("ok"):
-            print(c.red(f"✗ {res.get('error') or res}"), file=sys.stderr)
-            return 1
-        print(c.green("✓ Jaeger WebUI is up."))
-        print(f"  Local:   {res['open']}")
-        if args.tailscale:
-            output = (res.get("tailscale") or {}).get("output")
-            print(f"  Tailnet: {output or 'published through Tailscale Serve'}")
-        return 0
-
-    print(
-        f"Starting container WebUI for instance {svc.instance!r} "
-        f"(toggle={'on' if svc.enabled else 'off'})..."
-    )
-    res = svc.start(force=args.force)
+    svc = WebUIService(base.instance)
+    print(f"Starting Jaeger WebUI for instance {svc.instance!r}...")
+    res = svc.start(publish_tailscale=True if args.tailscale else None)
     if not res.get("ok"):
         print(c.red(f"✗ {res.get('error') or res}"), file=sys.stderr)
-        if res.get("container") and not res["container"].get("ok"):
-            print(c.red(f"  container: {res['container'].get('error')}"), file=sys.stderr)
-        if res.get("adapter") and not res["adapter"].get("ok"):
-            print(c.red(f"  adapter: {res['adapter'].get('error')}"), file=sys.stderr)
         return 1
-    urls = svc.urls()
-    print(c.green("✓ Container WebUI stack is up."))
-    print(f"  Runtime: {urls.container_ui}  (Hermes container; not a chat bookmark)")
-    print(f"  Adapter: {urls.adapter}")
-    print(f"  Chat:    {urls.vendor_ui}")
+    print(c.green("✓ Jaeger WebUI is up."))
+    print(f"  Local:   {res['open']}")
+    if args.tailscale:
+        output = (res.get("tailscale") or {}).get("output")
+        print(f"  Tailnet: {output or 'published through Tailscale Serve'}")
     return 0
 
 
 def _webui_stop(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import HermesWebUIService
+    from jaeger_ai.features.webui import WebUIService
 
     base, rest = _parse_instance(argv)
-    parser = argparse.ArgumentParser(prog="jaeger webui stop")
-    parser.add_argument("--keep-container", action="store_true")
-    args = parser.parse_args(rest)
-    svc = HermesWebUIService(base.instance)
-    res = svc.stop(stop_container=not args.keep_container)
+    argparse.ArgumentParser(prog="jaeger webui stop").parse_args(rest)
+    svc = WebUIService(base.instance)
+    res = svc.stop()
     if not res.get("ok"):
         print(c.red(f"✗ stop failed: {res}"), file=sys.stderr)
         return 1
@@ -117,32 +91,24 @@ def _webui_stop(argv: list[str]) -> int:
 
 
 def _webui_status(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import HermesWebUIService
+    from jaeger_ai.features.webui import WebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui status")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(rest)
-    svc = HermesWebUIService(base.instance)
+    svc = WebUIService(base.instance)
     status = svc.status()
     if args.json:
         print(json.dumps(status, indent=2, default=str))
         return 0
-    enabled = c.green("on") if status["enabled"] else c.dim("off")
-    print(f"Container UI toggle: {enabled}  (containers.use_hermes_webui)")
     print(f"Instance:            {status['instance']}")
-    ctn = status["container"]
-    state = ctn.get("state")
-    state_s = c.green(state) if state == "running" else c.dim(str(state))
-    print(f"Container:           {ctn['id']}  [{state_s}]")
-    print(f"  URL:               {ctn['url']}")
-    print(f"  Health:            {ctn['health']}")
     ad = status["adapter"]
     ad_s = c.green("running") if ad.get("running") else c.dim("stopped")
     print(f"Adapter:             {ad_s}  pid={ad.get('pid')}")
     print(f"  URL:               {ad['url']}")
     print(f"  Health:            {ad['health']}")
-    vd = status["vendor"]
+    vd = status["webui"]
     vd_s = c.green("running") if vd.get("running") else c.dim("stopped")
     print(f"Jaeger WebUI:         {vd_s}  pid={vd.get('pid')}")
     print(f"  Chat URL:          {status.get('chat_url') or vd['url']}")
@@ -161,18 +127,17 @@ def _webui_status(argv: list[str]) -> int:
     ports = status["ports"]
     print(
         "Ports:               "
-        f"container={ports['container_webui']}  "
         f"adapter={ports['adapter']}  "
-        f"vendor={ports['vendor_webui']}  "
+        f"webui={ports['webui']}  "
         f"webhooks={ports['webhooks']}"
     )
     return 0
 
 
 def _webui_url(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import HermesWebUIService
+    from jaeger_ai.features.webui import WebUIService
 
     base, _rest = _parse_instance(argv)
-    svc = HermesWebUIService(base.instance)
+    svc = WebUIService(base.instance)
     print(svc.browser_url())
     return 0

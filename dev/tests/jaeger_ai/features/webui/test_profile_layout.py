@@ -9,7 +9,7 @@ from jaeger_ai.features.webui.service.profile_layout import (
     ensure_agent_state_schema,
     ensure_webui_profile_layout,
     link_shared_profiles,
-    prepare_vendor_webui_home,
+    prepare_webui_home,
 )
 
 
@@ -74,7 +74,7 @@ def test_ensure_agent_state_schema_creates_db_when_missing(tmp_path: Path) -> No
     assert Path(result["path"]).is_file()
 
 
-def test_prepare_vendor_webui_home_wires_layout_link_and_schema(tmp_path: Path) -> None:
+def test_prepare_webui_home_wires_layout_link_and_schema(tmp_path: Path) -> None:
     hermes = tmp_path / "hermes"
     (hermes / "profiles" / "jaeger").mkdir(parents=True)
     (hermes / "profiles" / "openclaw").mkdir()
@@ -83,7 +83,7 @@ def test_prepare_vendor_webui_home_wires_layout_link_and_schema(tmp_path: Path) 
     leftover = agent / "profiles"
     leftover.mkdir(parents=True)
 
-    result = prepare_vendor_webui_home(agent, hermes_home=hermes)
+    result = prepare_webui_home(agent, hermes_home=hermes)
 
     assert result["state_db"]["source_column"] is True
     assert result["profiles"]["linked"] is True
@@ -107,14 +107,14 @@ def test_ensure_webui_profile_layout_keeps_named_profiles_visible(tmp_path: Path
     assert "openclaw" in result["visible_named_profiles"]
 
 
-def test_prepare_writes_vendor_default_and_named_display_names(tmp_path: Path) -> None:
+def test_prepare_writes_webui_default_and_named_display_names(tmp_path: Path) -> None:
     hermes = tmp_path / "hermes"
     (hermes / "profiles" / "jaeger").mkdir(parents=True)
     (hermes / "profiles" / "openclaw").mkdir()
     (hermes / "profiles" / "roundtable").mkdir()
-    agent = tmp_path / "vendor-agent"
+    agent = tmp_path / "webui-agent"
 
-    result = prepare_vendor_webui_home(agent, hermes_home=hermes)
+    result = prepare_webui_home(agent, hermes_home=hermes)
 
     assert result["display_names"]["default"] == "Hermes Agent"
     assert result["display_names"]["jaeger"] == "Jaeger AI"
@@ -143,11 +143,11 @@ def test_prepare_creates_selectable_runtime_profiles_without_cloning_credentials
     agent.mkdir()
     (agent / 'config.yaml').write_text('model:\n  default: example\n  provider: ollama\nsecret: private\n')
     hermes = tmp_path / 'hermes'
-    prepare_vendor_webui_home(agent, hermes_home=hermes)
+    prepare_webui_home(agent, hermes_home=hermes)
     for name in ('jaeger', 'openclaw', 'roundtable'):
         cfg = yaml.safe_load((agent / 'profiles' / name / 'config.yaml').read_text())
         assert cfg == {'model': {'default': 'example', 'provider': 'ollama'}}
     target = agent / 'profiles' / 'openclaw' / 'config.yaml'
     target.write_text('model: custom\n')
-    prepare_vendor_webui_home(agent, hermes_home=hermes)
+    prepare_webui_home(agent, hermes_home=hermes)
     assert target.read_text() == 'model: custom\n'

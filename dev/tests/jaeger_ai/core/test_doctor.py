@@ -53,12 +53,9 @@ def test_webui_chat_url_fails_when_bookmark_is_8787(monkeypatch) -> None:
         def browser_url(self):
             return "http://127.0.0.1:8787/"
 
-        def hermes_runtime_url(self):
-            return "http://127.0.0.1:8787/"
-
-    monkeypatch.setattr(doctor_mod, "HermesWebUIService", Fake, raising=False)
+    monkeypatch.setattr(doctor_mod, "WebUIService", Fake, raising=False)
     monkeypatch.setattr(
-        "jaeger_ai.features.webui.service.service.HermesWebUIService", Fake
+        "jaeger_ai.features.webui.service.service.WebUIService", Fake
     )
     checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
     assert checks["webui_chat_url"].ok is False
@@ -71,19 +68,8 @@ def test_webui_chat_url_passes_for_8790(monkeypatch) -> None:
         def browser_url(self):
             return "http://100.74.2.15:8790/"
 
-        def hermes_runtime_url(self):
-            return None
-
     monkeypatch.setattr(
-        "jaeger_ai.features.webui.service.service.HermesWebUIService", Fake
-    )
-    monkeypatch.setattr(
-        "jaeger_ai.core.runtime.agent_workspaces.container_name",
-        lambda role: "jaeger-hermes-webui",
-    )
-    monkeypatch.setattr(
-        "jaeger_ai.core.runtime.container_service.container_status",
-        lambda name: {"found": False, "details": {}},
+        "jaeger_ai.features.webui.service.service.WebUIService", Fake
     )
     checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
     assert checks["webui_chat_url"].ok is True

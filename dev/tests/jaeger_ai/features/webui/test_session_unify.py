@@ -85,7 +85,7 @@ def test_reconcile_keep_unions_state_db_and_json(tmp_path: Path) -> None:
     assert result["rollback"] is False or len(result["keep"]) < ROLLBACK_MIN_KEEP
 
 
-def test_import_keep_copies_roundtable_into_vendor_state_db(tmp_path: Path) -> None:
+def test_import_keep_copies_roundtable_into_webui_state_db(tmp_path: Path) -> None:
     src = tmp_path / "hermes-state.db"
     _hermes_db(src, [
         ("roundtable-hermes:keepme", "webui", "Roundtable work", 6),
@@ -99,8 +99,8 @@ def test_import_keep_copies_roundtable_into_vendor_state_db(tmp_path: Path) -> N
     ])
     webui = tmp_path / "webui"
     webui.mkdir()
-    agent = tmp_path / "vendor-agent"
-    state_dir = tmp_path / "vendor-state"
+    agent = tmp_path / "webui-agent"
+    state_dir = tmp_path / "webui-state"
     keep_ids = [
         "roundtable-hermes:keepme", "real-chat", "dispatcher",
         "76c4ddbe5faa", "960f4565", "b8349b0769d3", "b392eea6",
@@ -108,8 +108,8 @@ def test_import_keep_copies_roundtable_into_vendor_state_db(tmp_path: Path) -> N
     result = import_keep(
         hermes_state_db=src,
         webui_sessions=webui,
-        vendor_agent_home=agent,
-        vendor_webui_state=state_dir,
+        webui_agent_home=agent,
+        webui_state=state_dir,
         keep_ids=keep_ids,
     )
     assert result["sessions"] >= 6

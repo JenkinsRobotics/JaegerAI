@@ -9,13 +9,11 @@ run, and verify the shared agent stack. Developer-only tooling is indexed in
 | Script | Purpose |
 | --- | --- |
 | `install.sh` | Public curl bootstrap; invokes the root local installer |
-| `run-jaeger-webui.sh` | Launch the pinned standalone Jaeger WebUI |
-| `prepare-hermes-webui.py` | Assemble the pinned WebUI plus Jaeger container overlay |
+| `run-jaeger-webui.sh` | Launch the first-party Jaeger WebUI |
 | `run-host-tools-gateway.sh` | Launch the existing host-tools gateway |
 | `run-host-capability-server.py` | Host capability service compatibility launcher |
-| `run-hermes-native-api.py` | Start Hermes' native API inside its container |
-| `hermes-native-api-service.py` | Host launcher for that container API |
-| `hermes-container` | Convenience wrapper for the deployment-selected Hermes container |
+| `run-hermes-native-api.py` | Start the Hermes Agent native API from the host checkout |
+| `hermes-native-api-service.py` | Host launchd entry point for the Hermes Agent API |
 
 ## Setup and migration
 
@@ -25,9 +23,9 @@ run, and verify the shared agent stack. Developer-only tooling is indexed in
 | `expand-agent-workspaces.py` | Explicit expanded workspace migration |
 | `setup-hermes-native-api.py` | Install the native API service |
 | `setup-native-runs.py` | Configure native Runs integration |
+| `migrate-webui-config.py` | Remove retired Hermes WebUI container settings during upgrade |
 
 Setup scripts can change deployment state. Read the corresponding
-[integration instructions](../integrations/hermes_webui/README.md) and
 [workspace migration notes](../integrations/agent_workspaces/README.md) before
 using them. Ordinary startup does not require rerunning setup.
 

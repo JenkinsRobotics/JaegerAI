@@ -19,16 +19,14 @@ from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from jaeger_ai.core.runtime import agent_workspaces as aw
-from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces, _set_yaml_section_value
+from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces
 
 helpers = runpy.run_path(str(aw.REPO_ROOT/'scripts/setup-agent-workspaces.py'))
 run, atomic_write = helpers['run'], helpers['atomic_write']
-WATCHERS = ('com.jenkinsrobotics.agent-fabric-supervisor', 'com.jenkinsrobotics.hermes-native-api')
+WATCHERS = ('com.jenkinsrobotics.agent-fabric-supervisor',)
 
 
-def ensure_idle(webui, openclaw):
-    if webui.get('active_runs') != 0 or webui.get('active_streams') != 0:
-        raise RuntimeError('WebUI has active or unknown work; postpone workspace maintenance')
+def ensure_idle(openclaw):
     if (openclaw.get('tasks') or {}).get('active') != 0:
         raise RuntimeError('OpenClaw has active or unknown native work; postpone workspace maintenance')
 
@@ -62,8 +60,8 @@ def transition(plans, originals, *, invoke, verify, publish, restore):
 
 def access_probe(role, name, receipt_path):
     """Retain failure diagnostics privately before raising; never echo secrets."""
-    command = [helpers['ENGINE'], 'exec', '--user', 'hermeswebui' if role == 'hermes' else 'node',
-               name, '/app/venv/bin/python' if role == 'hermes' else 'python3',
+    command = [helpers['ENGINE'], 'exec', '--user', 'node',
+               name, 'python3',
                '/mnt/host/GitHub/JaegerAI/scripts/agent-mac-check.py', '--role', role,
                '--write-probe', '--all-workspaces']
     try:
@@ -92,7 +90,7 @@ def verify(role, name, receipt_path):
         try:
             status = json.loads(run('inspect', name, timeout=5))[0]['status']
             address = status['networks'][0]['ipv4Address'].split('/')[0]
-            with urlopen(f'http://{address}:{8787 if role=="hermes" else 18789}/health', timeout=3) as response:
+            with urlopen(f'http://{address}:18789/health', timeout=3) as response:
                 if response.status == 200: break
         except Exception:
             pass
@@ -114,16 +112,16 @@ def prepare():
 
 def deploy():
     originals, configs, plans = prepare()
-    run('image','inspect',aw.HERMES_IMAGE)
+    image = configs['openclaw']['image']['reference']
+    run('image','inspect',image)
     probe = ['run','--rm','--name','jaeger-expanded-mount-preflight','--entrypoint','/bin/true']
     for source,target in aw.workspace_mounts(include_personal=True): probe += ['--volume',f'{source}:{target}']
-    run(*probe,aw.HERMES_IMAGE,timeout=30)
-    with urlopen('http://100.74.2.15:8787/health',timeout=5) as response: health=json.load(response)
+    run(*probe,image,timeout=30)
     from jaeger_ai.core.frameworks.openclaw_native import NativeGateway
     from jaeger_ai.core.frameworks.openclaw import OPENCLAW_BASE_URL,OPENCLAW_TOKEN_FILE
     with NativeGateway(OPENCLAW_BASE_URL,OPENCLAW_TOKEN_FILE) as gateway:
         native_status=gateway.request('status',{})
-    ensure_idle(health,native_status)
+    ensure_idle(native_status)
     stamp = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
     backup = aw.STATE_PATH.parent/f'workspace-expansion-{stamp}'
     backup.mkdir(mode=0o700)
@@ -151,7 +149,6 @@ def deploy():
         state.update(containers=aw.EXPANDED_CONTAINERS,rollback_containers=originals,backup=str(backup),
                      mounted_workspaces=[target for _,target in aw.workspace_mounts(include_personal=True)])
         atomic_write(aw.STATE_PATH,json.dumps(state,indent=2))
-        _set_yaml_section_value(native_config,'containers','hermes_webui_container',aw.EXPANDED_CONTAINERS['hermes'])
         _configure_webui_workspaces(home)
     receipts = {}
     def verify_and_record(role,name): receipts[role]=verify(role,name,backup/f'{role}-probe.json')

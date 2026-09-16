@@ -216,8 +216,8 @@ def components() -> tuple[Component, ...]:
         ),
         Component(
             "hermes",
-            lambda: _container_http(container_name("hermes"), 8787),
-            lambda: _restart_container(container_name("hermes")),
+            lambda: _tcp("127.0.0.1", 8645),
+            lambda: _kickstart("com.jenkinsrobotics.hermes-native-api"),
         ),
         Component(
             "openclaw",
