@@ -122,6 +122,17 @@ class DelegateExecutor:
             "failed": "failed",
             "cancelled": "cancelled",
         }[result.status]
+        # A delegate's terminal status describes its process/run, never the
+        # caller's objective. Make that distinction explicit for every caller
+        # without changing the runtime-specific result contract.
+        result = replace(
+            result,
+            metadata={
+                **dict(result.metadata),
+                "execution_completed": result.status == "completed",
+                "objective_verified": False,
+            },
+        )
         current = self.runs.get(run.id)
         if current is not None and current.state == "active":
             self.runs.transition(run.id, terminal, reason=f"delegate:{result.status}")

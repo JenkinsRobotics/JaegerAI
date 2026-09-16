@@ -1111,7 +1111,17 @@ class JaegerGatewayApp:
             response_text: str | None = None
 
             text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
-            if role_s != "specialist" and not text_only:
+            # A text-only model route is valid for informational replies only.
+            # Reuse the product's existing intent seam so an actionable
+            # request cannot be reported complete merely because Ollama
+            # returned prose without tools, effects, or verification.
+            from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
+            actionable = bool(
+                (session or {}).get("metadata", {}).get("actionable")
+                or is_actionable_request(text)
+            )
+            native_required = actionable and text_only
+            if (role_s != "specialist" and not text_only) or native_required:
                 if rid in self._cancel_requested:
                     self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                     return
@@ -1130,7 +1140,7 @@ class JaegerGatewayApp:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native acceptance")
                 return
 
-            if response_text is None and role_s != "specialist" and not text_only:
+            if response_text is None and ((role_s != "specialist" and not text_only) or native_required):
                 raise RuntimeError("Native agent did not return a confirmed result. Execution may be incomplete; "
                                    "check native run state before retrying this request.")
 

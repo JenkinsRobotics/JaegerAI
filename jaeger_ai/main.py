@@ -343,6 +343,9 @@ _MAX_HISTORY_MESSAGES = 20
 from contextvars import ContextVar
 
 _turn_sinks: ContextVar[dict[str, Any]] = ContextVar("jaeger_turn_sinks", default={})
+_actionable_controller_depth: ContextVar[int] = ContextVar(
+    "jaeger_actionable_controller_depth", default=0,
+)
 
 
 def current_turn_sink(name: str):
@@ -3587,6 +3590,80 @@ def _run_turn_via_jaeger_agent(
     }
 
 
+def _run_actionable_turn(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+    allow_persona: bool,
+) -> dict[str, Any] | None:
+    """Route an explicitly actionable request through the existing authority.
+
+    The controller owns only the outer objective loop.  Each step calls the
+    existing JaegerAgent implementation directly, avoiding a recursive
+    ``_run_turn`` dispatch while preserving the ordinary conversational path.
+    ``None`` means the request is informational and should use one inner turn.
+    """
+    from jaeger_ai.core.runtime.autonomous_runner import (
+        ensure_autonomous_ledger,
+        should_run_autonomous,
+    )
+
+    if _actionable_controller_depth.get() or not should_run_autonomous(user_text):
+        return None
+    ledger = ensure_autonomous_ledger(user_text)
+    if ledger is None:
+        return None
+
+    from jaeger_ai.core.runtime.agent_controller import JaegerAgentController
+    from jaeger_ai.core.runtime.execution import max_steps
+
+    def _step(
+        step_client: Any,
+        prompt: str,
+        *,
+        session_key: str,
+        allow_persona: bool = True,
+    ) -> dict[str, Any]:
+        return _run_turn_via_jaeger_agent(
+            step_client,
+            prompt,
+            session_key=session_key,
+            allow_persona=allow_persona,
+        )
+
+    token = _actionable_controller_depth.set(_actionable_controller_depth.get() + 1)
+    try:
+        packed = JaegerAgentController(
+            client,
+            max_steps=max_steps(),
+            turn_fn=_step,
+            isolated=False,
+            batch=True,
+            allow_persona=allow_persona,
+        ).run_to_completion(
+            user_text,
+            session_key,
+            objective=user_text,
+        )
+    finally:
+        _actionable_controller_depth.reset(token)
+
+    output = dict(packed.get("output") or {})
+    output["actionable"] = True
+    output["controller_state"] = packed.get("status")
+    output["controller_reason"] = packed.get("reason")
+    output.setdefault("error", None)
+    output.setdefault("text", output.get("summary") or "")
+    output.setdefault("tool_activity", [])
+    if packed.get("status") != "COMPLETED" and not output.get("error"):
+        output["error"] = (
+            f"actionable task {str(packed.get('status') or 'failed').lower()}: "
+            f"{packed.get('reason') or 'completion was not verified'}"
+        )
+    return output
+
+
 def _run_turn(client: Any, user_text: str, *, session_key: str,
               allow_persona: bool = True) -> dict[str, Any]:
     """The unified agent turn — the one path every entry point shares.
@@ -3604,6 +3681,12 @@ def _run_turn(client: Any, user_text: str, *, session_key: str,
     JaegerAgent is the unconditional loop implementation; JaegerAI supplies
     product prompts, tools, memory, personality, and user-facing policy through
     its runtime adapter."""
+    actionable = _run_actionable_turn(
+        client, user_text, session_key=session_key,
+        allow_persona=allow_persona,
+    )
+    if actionable is not None:
+        return actionable
     return _run_turn_via_jaeger_agent(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
