@@ -22,9 +22,9 @@ from jaeger_ai.contract.ports import MCP_GATEWAY_URL, OLLAMA_OPENAI_URL
 from jaeger_ai.core.instance.instance import operator_state_root
 
 SERVICES = {
-    "jaeger": ("jaeger", 8642),
-    "roundtable": ("roundtable", 8643),
-    "openclaw": ("openclaw", 8644),
+    "jaeger": ("jaeger_ai.core.frameworks.jaeger", 8642),
+    "roundtable": ("jaeger_ai.features.roundtable.roundtable", 8643),
+    "openclaw": ("jaeger_ai.core.frameworks.openclaw", 8644),
 }
 SUPERVISOR_LABEL = "com.jenkinsrobotics.agent-fabric-supervisor"
 SUPERVISOR_MODULE = "jaeger_ai.core.runtime.fabric_supervisor"
@@ -389,9 +389,8 @@ def install(bridge_host: str) -> int:
     domain = f"gui/{os.getuid()}"
     agents = Path.home() / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
-    for profile, (module_name, port) in SERVICES.items():
+    for profile, (module, port) in SERVICES.items():
         label = f"com.jenkinsrobotics.{profile}-hermes-adapter"
-        module = f"jaeger_ai.core.frameworks.{module_name}"
         path = agents / f"{label}.plist"
         path.write_bytes(_plist(label, module))
         _set_gateway_url(profile, port, bridge_host)
