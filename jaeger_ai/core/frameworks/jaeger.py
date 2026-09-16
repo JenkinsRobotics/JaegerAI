@@ -57,6 +57,7 @@ def mcp_api_key() -> str:
 
 MCP_HOST_HEADER = os.environ.get("JAEGERS_MCP_HOST", "127.0.0.1:8811")
 ADAPTER_PORT = int(os.environ.get("JAEGERS_ADAPTER_PORT", "8642"))
+ADAPTER_HOST = os.environ.get("JAEGERS_ADAPTER_HOST", "127.0.0.1")
 REQUEST_TIMEOUT = timeout_setting("JAEGERS_ADAPTER_REQUEST_TIMEOUT")
 
 
@@ -651,8 +652,8 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = ProfileHTTPServer(("0.0.0.0", ADAPTER_PORT), RunHandler)
-    print(f"[jaeger-bridge] REST adapter listening on :{ADAPTER_PORT}")
+    server = ProfileHTTPServer((ADAPTER_HOST, ADAPTER_PORT), RunHandler)
+    print(f"[jaeger-bridge] REST adapter listening on {ADAPTER_HOST}:{ADAPTER_PORT}")
     print(f"[jaeger-bridge] MCP gateway: {MCP_GATEWAY_URL}")
     print(f"[jaeger-bridge] Endpoints: /v1/runs, /v1/chat/completions, /health")
     try:

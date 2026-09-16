@@ -35,6 +35,7 @@ from jaeger_ai.core.frameworks.native_runs import RunsHTTP
 # ── Config ──────────────────────────────────────────────────────────────────
 
 ADAPTER_PORT = int(os.environ.get("ROUNDTABLE_PORT", "8643"))
+ADAPTER_HOST = os.environ.get("ROUNDTABLE_HOST", "127.0.0.1")
 MEMBER_TIMEOUT = timeout_setting("ROUNDTABLE_MEMBER_TIMEOUT")
 SHARED_CONTEXT_CHARS = 18000
 _inflight_members: set[str] = set()
@@ -765,11 +766,11 @@ class RoundtableHandler(RunsHTTP, BaseHTTPRequestHandler):
 
 def run_server(port: int | None = None):
     p = port or ADAPTER_PORT
-    print(f"[roundtable] C-Debate adapter on :{p}")
+    print(f"[roundtable] C-Debate adapter on {ADAPTER_HOST}:{p}")
     print("[roundtable] Hermes: Jaeger delegate registry")
     print(f"[roundtable] Jaeger adapter: {JAEGER_ADAPTER_URL}")
     print(f"[roundtable] OpenClaw adapter: {OPENCLAW_ADAPTER_URL}")
-    server = ProfileHTTPServer(("0.0.0.0", p), RoundtableHandler)
+    server = ProfileHTTPServer((ADAPTER_HOST, p), RoundtableHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
