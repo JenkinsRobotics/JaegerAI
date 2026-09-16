@@ -183,7 +183,7 @@ def test_jaeger_health_checks_the_actual_mcp_listener_not_a_nonexistent_health_r
     monkeypatch.setattr(supervisor, '_tcp', lambda host, port: ports.append(port) or True)
     jaeger = next(item for item in supervisor.components() if item.name == 'jaeger')
     assert jaeger.probe()
-    assert urls == ['http://192.168.64.1:8642/v1/health']
+    assert urls == ['http://127.0.0.1:8642/v1/health']
     assert ports == [8792, 8811]
 
 

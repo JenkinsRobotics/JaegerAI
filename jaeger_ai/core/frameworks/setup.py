@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL, SOLO_RUNTIMES
-from jaeger_ai.contract.ports import MCP_GATEWAY_URL, OLLAMA_OPENAI_URL
+from jaeger_ai.contract.ports import CONTAINER_HOST, MCP_GATEWAY_URL, OLLAMA_OPENAI_URL
 from jaeger_ai.core.instance.instance import operator_state_root
 
 SERVICES = {
@@ -30,7 +30,7 @@ SUPERVISOR_LABEL = "com.jenkinsrobotics.agent-fabric-supervisor"
 SUPERVISOR_MODULE = "jaeger_ai.core.runtime.fabric_supervisor"
 AVAILABLE_AGENT_MODELS = (DEFAULT_AGENT_MODEL, "glm-5.3:cloud")
 OPENCLAW_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
-JAEGER_A2A_URL = "http://192.168.64.1:8812"
+JAEGER_A2A_URL = f"http://{CONTAINER_HOST}:8812"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 HONCHO_WORKSPACE = "jenkins-robotics"
 
@@ -253,21 +253,24 @@ def _configure_honcho(home: Path | None = None) -> list[Path]:
     return written
 
 
-def _configure_agent_models(home: Path | None = None) -> None:
+def _configure_agent_models(
+    home: Path | None = None, *, container_host: str = CONTAINER_HOST
+) -> None:
     """Apply the cloud default to WebUI profiles and native agent runtimes."""
     home = (home or Path.home()).expanduser().resolve()
+    container_ollama_url = f"http://{container_host}:11434/v1"
     profile_homes = [home / ".hermes"] + [home / ".hermes" / "profiles" / name for name in SERVICES]
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         _set_yaml_section_value(path, "model", "provider", "ollama")
-        _set_yaml_section_value(path, "model", "base_url", OLLAMA_OPENAI_URL)
+        _set_yaml_section_value(path, "model", "base_url", container_ollama_url)
         text = path.read_text(encoding="utf-8")
         if not re.search(r"(?m)^ollama_hosts:", text):
             text += (
                 "ollama_hosts:\n"
                 "  rack:\n    label: Rack PC\n"
-                f"    base_url: {OLLAMA_OPENAI_URL}\n"
-                f"  mac:\n    label: Mac\n    base_url: {OLLAMA_OPENAI_URL}\n"
+                f"    base_url: {container_ollama_url}\n"
+                f"  mac:\n    label: Mac\n    base_url: {container_ollama_url}\n"
             )
             path.write_text(text, encoding="utf-8")
     for profile in SERVICES:
@@ -329,7 +332,7 @@ def _configure_agent_models(home: Path | None = None) -> None:
         memory_search.update({
             "provider": "ollama",
             "model": OPENCLAW_EMBEDDING_MODEL,
-            "remote": {"baseUrl": OLLAMA_OPENAI_URL.removesuffix("/v1")},
+            "remote": {"baseUrl": container_ollama_url.removesuffix("/v1")},
         })
         document.setdefault("agents", {}).setdefault("defaults", {}).setdefault("model", {})["primary"] = (
             f"{provider_name}/{DEFAULT_AGENT_MODEL}"
