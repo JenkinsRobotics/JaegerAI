@@ -6,6 +6,19 @@ from ..contracts import ParsedConversation
 from ..parsing import content_text, jsonl, timestamp
 
 
+def _is_injected_context_message(text: str) -> bool:
+    """Exclude Codex host context that is serialized as a user message.
+
+    Desktop Codex rollouts prepend repository instructions and environment
+    metadata as user-role records. They are execution context, not conversation
+    turns, and otherwise become misleading session titles in history views.
+    """
+    normalized = text.lstrip()
+    return normalized.startswith("# AGENTS.md instructions for ") or normalized.startswith(
+        "<environment_context>"
+    )
+
+
 class CodexHistorySource:
     source_id = "codex"
 
@@ -34,6 +47,8 @@ class CodexHistorySource:
                 continue
             role = str(payload.get("role") or "").lower()
             text = content_text(payload.get("content"))
+            if role == "user" and _is_injected_context_message(text):
+                continue
             if role in {"user", "assistant", "system"} and text:
                 messages.append({
                     "role": role,

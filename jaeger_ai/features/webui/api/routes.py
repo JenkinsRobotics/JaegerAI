@@ -578,6 +578,13 @@ def _is_profile_agnostic_foreign_session(cli_meta) -> bool:
     return bool(sources & profile_agnostic_sources)
 
 
+def _session_visible_in_profile_sidebar(session: dict, active_profile: str | None) -> bool:
+    """Keep profile-owned rows and global read-only external-agent transcripts."""
+    return _profiles_match(session.get("profile"), active_profile) or (
+        _is_profile_agnostic_foreign_session(session)
+    )
+
+
 def _request_session_visibility_exempt(method: str, path: str | None) -> bool:
     if not path:
         return False
@@ -2506,8 +2513,7 @@ def _build_session_list_cache_payload(
     else:
         scoped = [
             s for s in merged
-            if _profiles_match(s.get("profile"), active_profile)
-            and not _is_profile_agnostic_foreign_session(s)
+            if _session_visible_in_profile_sidebar(s, active_profile)
         ]
         other_profile_count = 0 if _is_isolated_profile_mode() else len(merged) - len(scoped)
     diag_stage("messaging_dedupe")
