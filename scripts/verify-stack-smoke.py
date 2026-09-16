@@ -427,7 +427,7 @@ def check_profiles_and_sessions(matrix: Matrix, chat_url: str) -> dict[str, str]
         expected_label = expected_labels.get(pid, expected)
         label_ok = True
         if actual and actual != pid:
-            label_ok = actual == expected or actual.lower() == expected.lower()
+            label_ok = actual.lower() == expected_label.lower()
         # /api/profiles may omit display_name; friendly label comes from profile_layout.
         detail = (
             f"id={pid} api_name={actual or '?'} expected_display={expected_label}"

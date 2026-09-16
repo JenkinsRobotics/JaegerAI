@@ -13,7 +13,7 @@ smoke matrix is green.
 | Profile id | Display name |
 |------------|--------------|
 | `default`  | Hermes Agent |
-| `jaeger`   | Jaeger |
+| `jaeger`   | Jaeger AI |
 | `openclaw` | OpenClaw |
 | `roundtable` | Roundtable |
 
@@ -29,7 +29,7 @@ Repeat the sections below **once per profile**.
 - [ ] **Skills** — skills list loads
 - [ ] **Memory** — memory panel loads
 - [ ] **Spaces** — workspaces list loads
-- [ ] **Agent profiles** — profiles list includes Hermes Agent / Jaeger / OpenClaw / Roundtable
+- [ ] **Agent profiles** — profiles list includes Hermes Agent / Jaeger AI / OpenClaw / Roundtable
 - [ ] **Todos** — current task list loads
 - [ ] **Insights** — insights panel loads; Refresh
 - [ ] **Logs** — logs load; Refresh (Copy all optional)

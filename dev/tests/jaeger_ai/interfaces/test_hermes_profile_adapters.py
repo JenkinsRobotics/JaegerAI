@@ -204,6 +204,13 @@ def test_jaeger_runtime_artifacts_live_outside_repository():
     assert b"<string>-B</string>" in plist
 
 
+def test_setup_launch_modules_exist():
+    import importlib.util
+
+    for module, _port in setup.SERVICES.values():
+        assert importlib.util.find_spec(module) is not None, module
+
+
 def test_roundtable_keeps_other_members_when_one_fails(monkeypatch):
     monkeypatch.setattr(roundtable, "chat_hermes", lambda prompt, session_id="": "Hermes answer")
     monkeypatch.setattr(roundtable, "chat_jaeger", lambda prompt, session_id="": "Jaeger answer")
