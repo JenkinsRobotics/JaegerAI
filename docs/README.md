@@ -27,6 +27,7 @@ them without creating another copy.
 | [Architecture decisions](architecture/adr/) | ADRs and ownership boundaries |
 | [Architecture status](architecture/master-build-status.md) | Architecture implementation record; check its date |
 | [World-model integration plan](WORLD_MODEL_INTEGRATION_PLAN.md) | Pending build sequence, existing code boundaries, and end-to-end acceptance for relational knowledge and action |
+| [Apple platform integration](architecture/apple-platform-integration.md) | Permanent-droid architecture for macOS, iPhone, Watch, Apple apps, and iOS 27 intelligence |
 | [Backend acceptance and benchmarks](BACKEND_ACCEPTANCE.md) | Current priority: native agent, gateway stability, then agent connections; UI-independent scoring and live measurements |
 | [JaegerAgent](../packages/jaeger-agent/README.md) | Reusable agent package |
 | [JaegerOS](../packages/jaeger-os/README.md) | Runtime foundation |
