@@ -170,12 +170,12 @@ SPM_BUNDLE_SRC="$(dirname "$SWIFT_BIN")/$SPM_BUNDLE_NAME"
 if [[ -d "$SPM_BUNDLE_SRC" ]]; then
     DEST_BUNDLE="$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME"
     cp -R "$SPM_BUNDLE_SRC" "$DEST_BUNDLE"
-    # SPM emits the resource bundle as a bare directory — no
-    # Info.plist.  codesign --deep refuses to sign a "bundle" without
-    # an Info.plist, so we drop a minimal stub in.  Bundle.module
-    # finds resources by path, not by Info.plist contents — adding
-    # this is purely to satisfy the signer.
-    cat > "$DEST_BUNDLE/Info.plist" <<'EOF'
+    # Older SwiftPM versions emitted a bare resource directory. Xcode 27 emits
+    # a standard Contents/Info.plist bundle; adding a second plist at the root
+    # makes codesign reject it as unsealed content. Supply the compatibility
+    # plist only when SwiftPM did not generate either layout.
+    if [[ ! -f "$DEST_BUNDLE/Info.plist" && ! -f "$DEST_BUNDLE/Contents/Info.plist" ]]; then
+        cat > "$DEST_BUNDLE/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -189,6 +189,7 @@ if [[ -d "$SPM_BUNDLE_SRC" ]]; then
 </dict>
 </plist>
 EOF
+    fi
 fi
 
 # OS 1 utility intelligence. This model is part of the product runtime, not
