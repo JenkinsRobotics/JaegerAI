@@ -6,6 +6,7 @@ import json
 
 from jaeger_ai.features.roundtable import roundtable
 from jaeger_ai.core.frameworks import jaeger
+from jaeger_ai.core.frameworks import openclaw
 from jaeger_ai.core.frameworks import setup
 
 
@@ -13,7 +14,6 @@ def test_runs_protocol_matches_webui_and_closes_connection(monkeypatch):
     import threading
     import urllib.request
     from http.server import ThreadingHTTPServer
-    from jaeger_ai.core.frameworks import openclaw
     monkeypatch.setattr('jaeger_ai.core.frameworks.native_runs.profile_key', lambda profile: 'test-key')
     monkeypatch.setattr(openclaw, 'profile_key', lambda profile: 'test-key')
 
@@ -209,6 +209,12 @@ def test_setup_launch_modules_exist():
 
     for module, _port in setup.SERVICES.values():
         assert importlib.util.find_spec(module) is not None, module
+
+
+def test_internal_adapters_default_to_loopback():
+    assert jaeger.ADAPTER_HOST == "127.0.0.1"
+    assert roundtable.ADAPTER_HOST == "127.0.0.1"
+    assert openclaw.ADAPTER_HOST == "127.0.0.1"
 
 
 def test_roundtable_keeps_other_members_when_one_fails(monkeypatch):
