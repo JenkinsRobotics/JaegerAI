@@ -453,6 +453,10 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
     methods = []
     catalog = []
     async def handler(request):
+        if request.method == "DELETE":
+            methods.append("DELETE")
+            assert request.headers["Mcp-Session-Id"] == "health-session"
+            return web.Response(status=204)
         body = await request.json()
         methods.append(body["method"])
         if body["method"] == "notifications/initialized":
@@ -461,9 +465,13 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
         if body["method"] == "tools/call":
             assert body["params"]["name"] == "bridge_health"
             result = {"structuredContent": {"ok": True, "ready": {"agent": "ready"}}}
-        return web.json_response({"jsonrpc": "2.0", "id": body["id"], "result": result})
+        headers = {"Mcp-Session-Id": "health-session"} if body["method"] == "initialize" else None
+        return web.json_response(
+            {"jsonrpc": "2.0", "id": body["id"], "result": result}, headers=headers,
+        )
     service = web.Application()
     service.router.add_post("/mcp", handler)
+    service.router.add_delete("/mcp", handler)
     async with TestServer(service) as server:
         monkeypatch.setattr(transport, "MCP_GATEWAY_URL", str(server.make_url("/mcp")))
         app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "health.sqlite3"))
@@ -473,6 +481,39 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
         catalog.append({"name": "bridge_health"})
         assert (await app._probe_native_mcp())["ok"] is True
     assert methods.count("tools/call") == 1
+    assert methods.count("DELETE") == 3
+
+
+@pytest.mark.asyncio
+async def test_mcp_health_terminates_session_when_catalog_probe_fails(monkeypatch, tmp_path):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+    import jaeger_ai.core.frameworks.jaeger as transport
+
+    deleted = []
+
+    async def handler(request):
+        if request.method == "DELETE":
+            deleted.append(request.headers["Mcp-Session-Id"])
+            return web.Response(status=202)
+        body = await request.json()
+        if body["method"] == "initialize":
+            return web.json_response(
+                {"jsonrpc": "2.0", "id": body["id"], "result": {"capabilities": {}}},
+                headers={"Mcp-Session-Id": "failed-health-session"},
+            )
+        if body["method"] == "notifications/initialized":
+            return web.Response(status=202)
+        return web.Response(status=500)
+
+    service = web.Application()
+    service.router.add_post("/mcp", handler)
+    service.router.add_delete("/mcp", handler)
+    async with TestServer(service) as server:
+        monkeypatch.setattr(transport, "MCP_GATEWAY_URL", str(server.make_url("/mcp")))
+        app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "failed-health.sqlite3"))
+        assert (await app._probe_native_mcp())["ok"] is False
+    assert deleted == ["failed-health-session"]
 
 
 @pytest.mark.asyncio

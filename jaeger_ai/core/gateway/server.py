@@ -242,6 +242,21 @@ class JaegerGatewayApp:
         )
         headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
 
+        async def terminate_session() -> None:
+            """Release the stdio backend allocated by the MCP handshake."""
+            if "Mcp-Session-Id" not in headers:
+                return
+            try:
+                timeout = ClientTimeout(total=min(1.0, timeout_s))
+                async with ClientSession(timeout=timeout) as client:
+                    async with client.delete(MCP_GATEWAY_URL, headers=headers) as response:
+                        # Session termination is best-effort health-check cleanup. A
+                        # proxy may answer 404 after already reaping the session.
+                        if response.status not in {200, 202, 204, 404}:
+                            response.raise_for_status()
+            except Exception:  # noqa: BLE001 — cleanup must not hide probe health
+                pass
+
         async def rpc(client, method, params, identity):
             async with client.post(MCP_GATEWAY_URL, headers=headers, json={
                 "jsonrpc": "2.0", "id": identity, "method": method, "params": params,
@@ -317,6 +332,8 @@ class JaegerGatewayApp:
                 "agent_ready": False,
                 "execution_verified": False,
             }
+        finally:
+            await terminate_session()
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Backend readiness is independent of optional HTTP adapters and UIs."""
