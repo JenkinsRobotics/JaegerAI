@@ -3,16 +3,24 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
+from pathlib import Path
 import re
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 
 
 def request(base, profile, path, payload=None):
     headers = {"Cookie": f"hermes_profile={profile}", "Content-Type": "application/json"}
     data = None if payload is None else json.dumps(payload).encode()
-    return urllib.request.urlopen(urllib.request.Request(base + path, data=data, headers=headers), timeout=180)
+    try:
+        return urllib.request.urlopen(
+            urllib.request.Request(base + path, data=data, headers=headers), timeout=180
+        )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"{profile}: {path} returned HTTP {exc.code}: {detail}") from exc
 
 
 def check_roundtable_answers(text, checkword, first_turn):
@@ -27,9 +35,14 @@ def check_roundtable_answers(text, checkword, first_turn):
         raise RuntimeError("Roundtable contains a member failure; inspect the verification session")
 
 
-def verify(base, profile, model=None):
+def verify(base, profile, model=None, workspace=None):
     started = time.monotonic()
-    body = {"workspace": "/workspace", "profile": profile, "worktree": False}
+    body = {
+        "profile": profile,
+        "worktree": False,
+    }
+    if profile == "jaeger":
+        body["workspace"] = str(workspace)
     if model:
         body["model"] = model
     with request(base, profile, "/api/session/new", body) as response:
@@ -88,6 +101,12 @@ if __name__ == "__main__":
     parser.add_argument("--url", required=True)
     parser.add_argument("--model", help="Optional model override; otherwise preserve each profile's default")
     parser.add_argument("--profiles", nargs="+", default=["default", "jaeger", "openclaw", "roundtable"])
+    parser.add_argument(
+        "--workspace",
+        default=str(Path.home() / ".jaeger" / "verification" / "webui-smoke"),
+    )
     args = parser.parse_args()
+    workspace = Path(args.workspace).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(max_workers=len(args.profiles)) as pool:
-        list(pool.map(lambda profile: verify(args.url, profile, args.model), args.profiles))
+        list(pool.map(lambda profile: verify(args.url, profile, args.model, workspace), args.profiles))
