@@ -139,7 +139,7 @@ def infer_session_origin(session_id: str, explicit: object = None) -> str:
 class SessionStore:
     """Durable conversation history keyed by ``session_id``."""
 
-    def __init__(self, db_path: Path | str) -> None:
+    def __init__(self, db_path: Path | str, *, sync_webui: bool = True) -> None:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._lock = threading.Lock()
@@ -152,11 +152,12 @@ class SessionStore:
                 "UPDATE sessions SET execution_state='interrupted' "
                 "WHERE execution_state='running'"
             )
-        try:
-            from jaeger_ai.features.webui.service.session_unify import sync_jaeger_sessions_to_hermes_webui
-            sync_jaeger_sessions_to_hermes_webui()
-        except Exception:
-            pass
+        if sync_webui:
+            try:
+                from jaeger_ai.features.webui.service.session_unify import sync_jaeger_sessions_to_hermes_webui
+                sync_jaeger_sessions_to_hermes_webui()
+            except Exception:
+                pass
 
     def _ensure_brain_columns(self) -> None:
         """Sessions record the brain that served them so get_mode /
