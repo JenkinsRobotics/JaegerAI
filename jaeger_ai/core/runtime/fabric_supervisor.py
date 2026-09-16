@@ -22,7 +22,7 @@ from typing import Callable
 from .agent_workspaces import container_name
 
 from jaeger_ai.contract.frameworks import FRAMEWORKS
-from jaeger_ai.contract.ports import OLLAMA_URL
+from jaeger_ai.contract.ports import LOOPBACK, OLLAMA_URL
 from jaeger_ai.core.instance.instance import operator_state_root
 
 FAILURE_THRESHOLD = 3
@@ -120,7 +120,7 @@ def _repair_jaeger() -> bool:
     # Preserve healthy dependencies when only one endpoint has failed.
     bridge = _bridge_ready() or _kickstart("com.jenkinsrobotics.jaeger-bridge")
     mcp = _tcp("127.0.0.1", 8792) or _kickstart("com.jenkinsrobotics.jaeger-mcp-http")
-    adapter = _http("http://192.168.64.1:8642/v1/health") or _kickstart("com.jenkinsrobotics.jaeger-hermes-adapter")
+    adapter = _http(f"http://{LOOPBACK}:8642/v1/health") or _kickstart("com.jenkinsrobotics.jaeger-hermes-adapter")
     gateway = _start_jaeger_gateway()
     return bridge and mcp and adapter and gateway
 
@@ -134,7 +134,7 @@ def _repair_a2a() -> bool:
 
 def _repair_openclaw() -> bool:
     native = _tcp("127.0.0.1", 18789) or _restart_container(container_name("openclaw"))
-    adapter = (_http("http://192.168.64.1:8644/v1/health")
+    adapter = (_http(f"http://{LOOPBACK}:8644/v1/health")
                or _kickstart("com.jenkinsrobotics.openclaw-hermes-adapter"))
     return native and adapter
 
@@ -206,7 +206,7 @@ exit 1
 
 
 def components() -> tuple[Component, ...]:
-    bridge = "192.168.64.1"
+    bridge = LOOPBACK
     local = [
         Component(
             "jaeger",

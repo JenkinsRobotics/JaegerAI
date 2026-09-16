@@ -356,13 +356,16 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text(json.dumps({"agents": {"defaults": {"model": {"primary": "old/model"}}}, "models": {"providers": {"ollama-cloud-via-host": {"models": []}}}}))
 
-    setup._configure_agent_models(tmp_path)
+    setup._configure_agent_models(tmp_path, container_host="192.168.64.1")
 
     for profile in setup.SERVICES:
-        assert f"default: {setup.DEFAULT_AGENT_MODEL}" in (
+        profile_text = (
             tmp_path / ".hermes" / "profiles" / profile / "config.yaml"
         ).read_text()
+        assert f"default: {setup.DEFAULT_AGENT_MODEL}" in profile_text
+        assert "base_url: http://192.168.64.1:11434/v1" in profile_text
     assert f"default: {setup.DEFAULT_AGENT_MODEL}" in hermes_default.read_text()
+    assert "base_url: http://192.168.64.1:11434/v1" in hermes_default.read_text()
     assert f"model: {setup.DEFAULT_AGENT_MODEL}" in jaeger.read_text()
     assert f"base_url: {setup.OLLAMA_OPENAI_URL}" in jaeger.read_text()
     config = json.loads(openclaw.read_text())
@@ -375,7 +378,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     assert config["agents"]["defaults"]["memorySearch"] == {
         "provider": "ollama",
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
-        "remote": {"baseUrl": setup.OLLAMA_OPENAI_URL.removesuffix("/v1")},
+        "remote": {"baseUrl": "http://192.168.64.1:11434"},
     }
 
 

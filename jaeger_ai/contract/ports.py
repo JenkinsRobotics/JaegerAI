@@ -24,6 +24,9 @@ from typing import Final
 LOOPBACK: Final = "127.0.0.1"
 """Bind address for everything that must not leave the machine."""
 
+CONTAINER_HOST: Final = os.environ.get("JAEGER_CONTAINER_HOST", "192.168.64.1")
+"""Mac host address visible from Apple Container guests."""
+
 # ── the chat spine ───────────────────────────────────────────────────────
 
 GATEWAY_PORT: Final = 8810
@@ -82,6 +85,7 @@ OLLAMA_PORT: Final = 11434
 __all__ = [
     "A2A_GATEWAY_PORT",
     "A2A_PORT",
+    "CONTAINER_HOST",
     "DISPATCHER_SIDECAR_PORT",
     "GATEWAY_PORT",
     "HERMES_NATIVE_API_PORT",

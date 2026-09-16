@@ -13,11 +13,13 @@ class Bridge:
     def __init__(self):
         self.calls = []
         self.texts = []
+        self.kwargs = []
     def command(self, *args): return {}
     def query(self, *args): return []
     def turn(self, text, session, *args, **kwargs):
         self.calls.append(session)
         self.texts.append(text)
+        self.kwargs.append(kwargs)
         return {'text': 'Jaeger reply'}
 
 
@@ -228,6 +230,17 @@ def test_stale_jaeger_run_does_not_block_the_next_send(broker):
     assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
     assert broker.bridge.texts[-1] == 'hello again'
     assert broker.store.status('deadbeefdeadbeefdeadbeefdeadbeef')['terminal_state'] == 'interrupted'
+
+
+def test_jaeger_forwards_selected_workspace_to_native_bridge(broker, tmp_path):
+    accepted = broker.start({
+        'profile': 'jaeger',
+        'session_id': 'workspace',
+        'message': 'read the fixture',
+        'workspace': str(tmp_path),
+    })
+    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
+    assert broker.bridge.kwargs[-1]['workspace'] == str(tmp_path)
 
 
 def test_jaeger_sends_attachment_only_markdown_paste(broker, tmp_path, monkeypatch):

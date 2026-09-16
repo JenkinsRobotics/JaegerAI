@@ -422,7 +422,15 @@ class RunnerBroker:
                 finally:
                     self.store.set_state(run_id, pending_approval_id=None)
 
-            result = self.bridge.turn(text, session_id, on_event, on_request, turn_id=run_id)
+            workspace = str(request.get("workspace") or "").strip() or None
+            result = self.bridge.turn(
+                text,
+                session_id,
+                on_event,
+                on_request,
+                turn_id=run_id,
+                workspace=workspace,
+            )
             if result.get("cancelled"):
                 self.store.append(run_id, "apperror", {"message": "Run cancelled", "status": "cancelled",
                     "session_id": session_id, "stream_id": run_id})

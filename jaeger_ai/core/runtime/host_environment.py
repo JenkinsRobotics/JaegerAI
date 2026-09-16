@@ -4,6 +4,8 @@ import os
 import platform
 from pathlib import Path
 
+from jaeger_ai.contract.ports import CONTAINER_HOST
+
 
 def snapshot(roots: list[str]) -> dict:
     return {
@@ -12,7 +14,7 @@ def snapshot(roots: list[str]) -> dict:
         "host": {"hostname": platform.node(), "os": platform.system(),
                  "os_version": platform.mac_ver()[0] or platform.release(),
                  "architecture": platform.machine(), "logical_cpus": os.cpu_count()},
-        "container_host_address": "192.168.64.1",
+        "container_host_address": CONTAINER_HOST,
         "canonical_repo": str(Path(__file__).resolve().parents[3]),
         "container_repo": "/mnt/host/GitHub/JaegerAI",
         "approved_roots": roots,

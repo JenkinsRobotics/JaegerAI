@@ -5,16 +5,17 @@ Uses model tokens. Never enables YOLO or grants persistent tool permission.
 """
 import argparse
 import json
+from pathlib import Path
 import time
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-def check(base, profile, message, model=None):
+def check(base, profile, message, workspace, expected, model=None):
     def request(path, body=None):
         return urlopen(Request(base + path, data=json.dumps(body).encode() if body is not None else None,
             headers={"Cookie": f"hermes_profile={profile}", "Content-Type": "application/json"}), timeout=150)
-    body = {"workspace": "/mnt/host/GitHub/JaegerAI", "profile": profile, "worktree": False}
+    body = {"workspace": str(workspace), "profile": profile, "worktree": False}
     if model:
         body["model"] = model
     with request("/api/session/new", body) as response:
@@ -56,9 +57,14 @@ def check(base, profile, message, model=None):
                 answers.append(payload.get("text", ""))
             elif event in {"done", "complete", "cancel"}:
                 break
+    answer = "".join(answers)
+    if not tools:
+        raise RuntimeError("No tool event was observed")
+    if expected not in answer:
+        raise RuntimeError(f"Expected synthetic marker was not returned: {answer[:500]}")
     print(json.dumps({"session": sid, "seconds": round(time.monotonic() - started, 2),
                       "events": sorted(set(events)), "tools": tools, "approvals_denied": approvals,
-                      "answer": "".join(answers)[:1500]}), flush=True)
+                      "verified": True, "answer": answer[:1500]}), flush=True)
 
 
 if __name__ == "__main__":
@@ -66,6 +72,17 @@ if __name__ == "__main__":
     parser.add_argument("--url", required=True)
     parser.add_argument("--profile", default="jaeger")
     parser.add_argument("--model", help="Optional model override; otherwise preserve the profile default")
-    parser.add_argument("--message", default="Read the first line of README.md in the current JaegerAI repository using a file tool and quote that line. Do not modify files or use network tools. Keep the answer short.")
+    parser.add_argument(
+        "--workspace",
+        default=str(Path.home() / ".jaeger" / "verification" / "native-tools"),
+    )
+    parser.add_argument("--expected", default="JAEGER-NATIVE-TOOL-CHECK")
+    parser.add_argument(
+        "--message",
+        default="Read verification.txt in the current workspace using a file tool and reply with its exact contents. Do not modify files or use network tools.",
+    )
     args = parser.parse_args()
-    check(args.url.rstrip("/"), args.profile, args.message, args.model)
+    workspace = Path(args.workspace).expanduser().resolve()
+    workspace.mkdir(parents=True, exist_ok=True)
+    workspace.joinpath("verification.txt").write_text(args.expected + "\n", encoding="utf-8")
+    check(args.url.rstrip("/"), args.profile, args.message, workspace, args.expected, args.model)
