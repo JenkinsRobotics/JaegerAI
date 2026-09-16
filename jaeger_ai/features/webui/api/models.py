@@ -45,6 +45,12 @@ from api.agent_sessions import (
     read_session_lineage_metadata,
 )
 from api.process_event_utils import stamp_message_source
+from api.codex_sessions import (
+    CODEX_SOURCE,
+    _default_codex_sessions_dir,
+    get_codex_session_messages,
+    get_codex_sessions,
+)
 
 logger = logging.getLogger(__name__)
 CLI_VISIBLE_SESSION_LIMIT = 20
@@ -7102,6 +7108,11 @@ def clear_cli_sessions_cache() -> None:
     # any file change), but clear it alongside the CLI cache so an explicit
     # reset — a mutating sidebar action or test isolation — starts fully cold.
     clear_sidecar_metadata_cache()
+    try:
+        from api.codex_sessions import clear_codex_parse_cache
+        clear_codex_parse_cache()
+    except ImportError:
+        pass
 
 
 def _copy_cli_sessions(sessions: list) -> list:
@@ -7460,6 +7471,7 @@ def _resolve_cli_sessions_context(source_filter=None, include_claude_code: bool 
 
     db_path = hermes_home / 'state.db'
     projects_dir = _default_claude_code_projects_dir()
+    codex_sessions_dir = _default_codex_sessions_dir()
     # #4842: while a turn streams, freeze the volatile state.db component of the
     # key so per-message writes don't bust the CLI cache and re-run the heavy
     # CLI/cron projection on every poll (mirrors the route-level #4808 freeze).
@@ -7477,6 +7489,8 @@ def _resolve_cli_sessions_context(source_filter=None, include_claude_code: bool 
         bool(include_claude_code),
         _path_cache_key(projects_dir),
         _path_stat_cache_key(projects_dir),
+        _path_cache_key(codex_sessions_dir),
+        _path_stat_cache_key(codex_sessions_dir),
         _path_stat_cache_key(SESSION_INDEX_FILE),
     )
     return hermes_home, db_path, cli_profile, cache_key
@@ -7615,7 +7629,13 @@ def _load_cli_sessions_uncached(
         except Exception:
             logger.debug("Claude Code session scan failed", exc_info=True)
 
-    if source_filter == CLAUDE_CODE_SOURCE:
+    if source_filter in (None, CODEX_SOURCE) and include_claude_code:
+        try:
+            cli_sessions.extend(get_codex_sessions())
+        except Exception:
+            logger.debug("Codex session scan failed", exc_info=True)
+
+    if source_filter in {CLAUDE_CODE_SOURCE, CODEX_SOURCE}:
         return cli_sessions
 
 
@@ -8047,6 +8067,8 @@ def get_cli_sessions(
             context_cache_key,
             _path_cache_key(_default_claude_code_projects_dir()),
             _path_stat_cache_key(_default_claude_code_projects_dir()),
+            _path_cache_key(_default_codex_sessions_dir()),
+            _path_stat_cache_key(_default_codex_sessions_dir()),
             _path_stat_cache_key(SESSION_INDEX_FILE),
         )
     else:
@@ -10831,6 +10853,8 @@ def get_cli_session_messages(sid, *, profile=None) -> list:
     """
     if str(sid or '').startswith(f'{CLAUDE_CODE_SOURCE}_'):
         return get_claude_code_session_messages(sid)
+    if str(sid or '').startswith(f'{CODEX_SOURCE}_'):
+        return get_codex_session_messages(sid)
     return get_state_db_session_messages(sid, stitch_continuations=True, profile=profile)
 
 
