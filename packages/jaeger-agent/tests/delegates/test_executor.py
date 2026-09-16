@@ -72,6 +72,24 @@ def test_executor_records_events_and_terminal_state_without_promoting_memory() -
     assert runs.get(run.id).state == "completed"
     assert runs.latest_checkpoint(run.id).cursor["event_sequence"] == 2
     assert [event.sequence for event in seen] == [1, 2]
+    assert result.metadata["execution_completed"] is True
+    assert result.metadata["objective_verified"] is False
+
+
+@pytest.mark.parametrize("status", ["failed", "blocked", "cancelled"])
+def test_executor_metadata_distinguishes_noncompleted_delegate_results(status: str) -> None:
+    class Terminal(FakeRuntime):
+        async def result(self, handle: DelegateHandle) -> DelegateResult:
+            return DelegateResult(status, status)
+
+    registry = DelegateRegistry()
+    registry.register(Terminal())
+    runs = InMemoryRunStore()
+    run = runs.create("commitment", provider="fake")
+    result = asyncio.run(DelegateExecutor(registry, runs).execute("fake", _request(run.id)))
+    assert result.status == status
+    assert result.metadata["execution_completed"] is False
+    assert result.metadata["objective_verified"] is False
 
 
 def test_request_rejects_relative_workspace() -> None:

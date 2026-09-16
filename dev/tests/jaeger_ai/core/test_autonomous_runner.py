@@ -9,6 +9,7 @@ from jaeger_ai.core.runtime.autonomous_runner import (
     ACCEPTANCE_GUIDANCE,
     HARNESS_PREFIX,
     ensure_autonomous_ledger,
+    is_actionable_request,
     looks_like_batch,
     next_continuation_prompt,
     run_worker_goal,
@@ -105,6 +106,25 @@ def test_batch_phrasing_rejects_casual_chat():
     ]
     for text in negatives:
         assert not looks_like_batch(text), text
+
+
+def test_actionable_classifier_keeps_chat_lightweight():
+    assert not is_actionable_request("What is the capital of Egypt?")
+    assert not is_actionable_request("Explain this function.")
+    assert is_actionable_request("Create calculator.py and verify it exists.")
+    assert is_actionable_request("Use Codex to modify the repository and run tests.")
+
+
+def test_controller_step_cannot_spawn_nested_top_level_controller(monkeypatch):
+    import jaeger_ai.main as main
+    token = main._actionable_controller_depth.set(1)
+    try:
+        assert main._run_actionable_turn(
+            object(), "Run pytest and fix failures", session_key="test",
+            allow_persona=False,
+        ) is None
+    finally:
+        main._actionable_controller_depth.reset(token)
 
 
 def test_durable_request_opens_counted_ledger_automatically():

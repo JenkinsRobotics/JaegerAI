@@ -379,6 +379,30 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_actionable_text_mode_is_promoted_to_native(monkeypatch, tmp_path):
+    store = GatewaySessionStore(tmp_path / "action.sqlite3")
+    app = JaegerGatewayApp(store=store)
+    store.ensure_session("s", metadata={"execution_mode": "text_only"})
+    seen = []
+
+    async def native(*args, **kwargs):
+        seen.append((args, kwargs))
+        return "verified native result", "mcp:test"
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("actionable text mode must not fall through to Ollama")
+
+    monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
+    monkeypatch.setattr(app, "_native_lead_turn", native)
+    monkeypatch.setattr(app, "_ollama_chat", forbidden)
+    await app._execute_turn("s", "t", "Create calculator.py and run the tests")
+    assert seen
+    finish = app.event_bus.get_replay_events("s", since_event_id=0)[-1]
+    assert finish.event == "turn.finish"
+    assert finish.data["backend"] == "mcp:test"
+
+
+@pytest.mark.asyncio
 async def test_text_mode_sends_history_without_a_128_token_cap(monkeypatch, tmp_path):
     captured = {}
 
