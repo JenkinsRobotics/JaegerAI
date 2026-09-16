@@ -2,7 +2,7 @@
 //  WebUIChatSurface.swift
 //  JaegerAI / ChatWindow
 //
-//  Canonical chat transcript is the Jaeger WebUI (vendor/hermes-webui on
+//  Canonical chat transcript is the first-party Jaeger WebUI on
 //  :8790). The Swift window hosts that renderer in WKWebView so Safari
 //  and the desktop app do not maintain two activity feeds.
 //

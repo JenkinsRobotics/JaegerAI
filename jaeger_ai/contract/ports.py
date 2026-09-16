@@ -35,7 +35,7 @@ GATEWAY_PORT: Final = 8810
 Serves ``/health``, *not* ``/v1/health``."""
 
 WEBUI_PORT: Final = 8790
-"""The browser UI (the vendored Hermes WebUI fork). What a person opens."""
+"""The first-party Jaeger WebUI. What a person opens."""
 
 WEBUI_ADAPTER_PORT: Final = 8791
 """Loopback runner the WebUI calls to execute a turn. Not browser-facing."""

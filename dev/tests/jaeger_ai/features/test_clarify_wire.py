@@ -12,7 +12,7 @@ from jaeger_ai.features.webui.clarify_wire import ClarifyBroker
 def test_clarify_wire_describes_vendor_authority():
     info = clarify_wire.describe_wire()
     assert info["mode"] == "wire"
-    assert "vendor/hermes-webui/api/clarify.py" in info["authority"]
+    assert "jaeger_ai/features/webui/api/clarify.py" in info["authority"]
     assert info["routes"]["pending"] == "/api/clarify/pending"
     assert info["chat_port"] == 8790
     assert "adapter_respond" in info["routes"]

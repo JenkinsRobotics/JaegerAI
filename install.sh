@@ -53,14 +53,6 @@ echo "JaegerAI local install"
 echo "  repo: $REPO_ROOT"
 echo
 
-# The primary browser UI is a pinned submodule. A normal `git clone` does not
-# populate it, so make the supported installer repair that automatically.
-if [[ -f "$REPO_ROOT/.gitmodules" ]]; then
-  echo "→ Initializing pinned WebUI source..."
-  git -C "$REPO_ROOT" submodule sync --recursive --quiet
-  git -C "$REPO_ROOT" submodule update --init --recursive --quiet
-fi
-
 # 1. Verify Python version. Respect a ``PY`` exported by the curl-side
 # installer (scripts/install.sh) — it already did the explicit-version
 # search and we don't want to disagree. Fall back to our own search
@@ -177,6 +169,9 @@ fi
 # 4. Scaffold ~/.jaeger/ (idempotent) — operator state root (OpenClaw standard)
 STATE_ROOT="${JAEGER_STATE_DIR:-$HOME/.jaeger}"
 mkdir -p "$STATE_ROOT/instances"
+if [[ -f "$REPO_ROOT/scripts/migrate-webui-config.py" ]]; then
+  "$VENV/bin/python" "$REPO_ROOT/scripts/migrate-webui-config.py" --state-root "$STATE_ROOT"
+fi
 
 # 5. Put `jaeger` on PATH so the command works system-wide (idempotent).
 #    PRODUCT installs only — a dev checkout must never claim the global

@@ -3,8 +3,8 @@ from pathlib import Path
 
 from jaeger_ai.contract.frameworks import FRAMEWORKS
 from jaeger_ai.features.webui import (
-    HermesWebUIService,
-    hermes_webui_urls,
+    WebUIService,
+    webui_urls,
     ensure_webui_profile_layout,
     profile_display_name,
     HermesWebUIAdapterServer,
@@ -16,12 +16,12 @@ from jaeger_ai.features.webui.service.service import (
 )
 
 _REPO = Path(__file__).resolve().parents[4]
-_INDEX = _REPO / "vendor" / "hermes-webui" / "static" / "index.html"
+_INDEX = _REPO / "jaeger_ai" / "features" / "webui" / "static" / "index.html"
 
 
 def test_webui_feature_exports():
-    assert HermesWebUIService is not None
-    assert callable(hermes_webui_urls)
+    assert WebUIService is not None
+    assert callable(webui_urls)
     assert callable(ensure_webui_profile_layout)
     # Asserted against the contract, not retyped: these two assertions said
     # "Jaeger" for weeks after the shipped name became "Jaeger AI".
@@ -32,10 +32,9 @@ def test_webui_feature_exports():
 
 
 def test_webui_urls_helper():
-    urls = hermes_webui_urls(webui_port=8642)
-    assert "8642" in urls.container_ui
+    urls = webui_urls(webui_port=8642)
+    assert "8642" in urls.web_ui
     assert "8791" in urls.adapter
-    assert "8790" in urls.vendor_ui
 
 
 def test_bundle_version_stamp_has_no_cache_suffix():

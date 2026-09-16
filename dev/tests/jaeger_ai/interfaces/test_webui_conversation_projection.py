@@ -8,7 +8,10 @@ import pytest
 
 @pytest.fixture
 def projection(monkeypatch):
-    path = Path(__file__).resolve().parents[4] / 'integrations/hermes_webui/jaeger_conversation.py'
+    path = (
+        Path(__file__).resolve().parents[4]
+        / 'jaeger_ai/features/webui/api/jaeger_conversation.py'
+    )
     spec = importlib.util.spec_from_file_location('jaeger_conversation_projection_test', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

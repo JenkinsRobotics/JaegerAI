@@ -3,7 +3,10 @@ import io
 import json
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[4] / "integrations/hermes_webui/jaeger_ollama.py"
+SOURCE = (
+    Path(__file__).resolve().parents[4]
+    / "jaeger_ai/features/webui/api/jaeger_ollama.py"
+)
 spec = importlib.util.spec_from_file_location("jaeger_ollama", SOURCE)
 ollama = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ollama)

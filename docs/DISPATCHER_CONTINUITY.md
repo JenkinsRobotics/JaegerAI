@@ -1,6 +1,10 @@
 # Continue Jaeger between the WebUI and Mac
 
-Start the stack with `./jaeger start`. In Hermes WebUI, select **Jaeger** and open
+> **Historical transport notes.** Jaeger WebUI now owns the browser source;
+> obsolete submodule and container-overlay paths below are retained only as a
+> record. See [ADR-0013](architecture/adr/0013-absorb-hermes-webui.md).
+
+Start the stack with `./jaeger start`. In Jaeger WebUI, select **Jaeger** and open
 **Dispatcher**. Open the Mac chat window and use **Dispatcher** there too. Both
 read the same saved conversation and observe the same native run. You can close
 one interface and continue in the other; closing a client does not cancel work.

@@ -1,9 +1,9 @@
 # 🌐 Jaeger Web UI Feature
 
 > **Home for the Jaeger Web Interface**  
-> The adapter, profile manager and session unifier live here. Two pieces
-> deliberately live elsewhere, because they are shared with other features —
-> the table below says exactly where and why.
+> The complete browser application, API, runtime adapter, profile manager, and
+> session unifier live here. This directory is the single implementation home
+> for JaegerAI's WebUI.
 
 ---
 
@@ -14,9 +14,8 @@ Jaeger's Web UI provides a browser-based interface for chatting with agents, sel
 It connects:
 1. **Frontend**: Jaeger-branded WebUI on port **8790** (chat UI, settings, Kanban).
 2. **Adapter**: Loopback runner on port **8791** bridging browser API requests into native Jaeger agents.
-3. **Profiles**: Different personality profiles (`jaeger`, `roundtable`, `openclaw`) with independent models and tool capabilities.
-   Port **8787** is the optional Hermes container runtime — not the chat bookmark.
-   Port **8642** is a Hermes Agent gateway default, not Jaeger WebUI.
+3. **Profiles**: Hermes Agent, Jaeger AI, OpenClaw, and Roundtable profiles with isolated sessions and independent runtime capabilities.
+4. **Hermes Agent**: Its authenticated native API runs separately on loopback port **8645**. It is an agent runtime, not another browser UI.
 
 ---
 
@@ -24,6 +23,9 @@ It connects:
 
 | Folder / File | What it does | When to edit it |
 | :--- | :--- | :--- |
+| **`server.py`** | First-party WebUI HTTP server and SSE host. | Edit when changing server startup or request handling. |
+| **`api/`** | Browser API, session store, profile operations, streaming and Jaeger gateway projections. | Edit when changing browser-visible behavior or persistence. |
+| **`static/`** | Browser HTML, JavaScript, CSS, icons and localizations. | Edit when changing the browser experience. |
 | **`adapter/server.py`** | The HTTP adapter server handling incoming Web UI REST/SSE requests. | Edit when adding or modifying API endpoints between the browser and Jaeger. |
 | **`adapter/bridge_client.py`** | Client communication between the adapter and Jaeger's core bridge. | Edit when changing low-level communication protocols. |
 | **`service/service.py`** | Background service lifecycle manager (starting, stopping, and monitoring the Web UI process). | Edit when changing port bindings, health checks, or restart behavior. |
@@ -40,8 +42,11 @@ anything else will not change what the browser loads.
 | **`jaeger_ai/assets/jaeger_webui_branding.js`** | Frontend branding + the Agents roster (app title, logo, colors, framework switching). | `jaeger_ai/assets/` is the single directory mounted into the WebUI as its extension folder (`HERMES_WEBUI_EXTENSION_DIR`). Three features ship scripts into that one mount, so the mount — not the feature — owns the directory. |
 | **`jaeger_ai/assets/jaeger_webui_extensions.json`** | Registers which extension scripts the WebUI loads. | Same mount as above; it is the manifest for that directory. |
 | **`scripts/run-jaeger-webui.sh`** | Boots the Web UI locally (port 8790). | Sits with the other operator entry-point scripts. |
-| **`scripts/prepare-hermes-webui.py`** | Applies Jaeger's overlay onto the vendored fork. | Same. |
 | **`jaeger_ai/core/frameworks/`** | Per-framework execution: Hermes, OpenClaw and Roundtable turn-running. | Historical split. `adapter/profile_runner.py` imports from here. |
+
+The browser source descends from Hermes WebUI. Its license is preserved in
+`HERMES_WEBUI_LICENSE`; JaegerAI now owns this integrated implementation and
+does not load it from a submodule or container overlay.
 
 ---
 

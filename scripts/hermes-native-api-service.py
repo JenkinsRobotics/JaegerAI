@@ -1,38 +1,26 @@
 #!/usr/bin/env python3
-"""Host lifecycle shim for the native API in the active Hermes container."""
-import os
-import json
+"""Host lifecycle supervisor for Hermes Agent's loopback native Runs API."""
 import signal
 import socket
 import subprocess
 import threading
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jaeger_ai.core.runtime.agent_workspaces import container_name
-
-ENGINE = "/opt/homebrew/bin/container"
+ROOT = Path(__file__).resolve().parents[1]
+PYTHON = Path.home() / ".jaeger/venv/bin/python"
+KEY_FILE = Path.home() / ".hermes/jaeger-native-api.key"
 
 
 def command():
-    return [ENGINE, "exec", "--user", "hermeswebui", container_name("hermes"),
-            "/app/venv/bin/python", "/mnt/host/GitHub/JaegerAI/scripts/run-hermes-native-api.py",
-            "--key-file", "/home/hermeswebui/.hermes/jaeger-native-api.key",
-            "--host", "0.0.0.0", "--port", "8645"]
+    return [str(PYTHON), "-B", str(ROOT / "scripts/run-hermes-native-api.py"),
+            "--key-file", str(KEY_FILE), "--host", "127.0.0.1", "--port", "8645"]
 
 
 def ready() -> bool:
     try:
-        result = subprocess.run([ENGINE, "inspect", container_name("hermes")],
-                                capture_output=True, text=True, timeout=5)
-        if result.returncode:
-            return False
-        status = json.loads(result.stdout)[0]["status"]
-        address = status["networks"][0]["ipv4Address"].split("/")[0]
-        with socket.create_connection((address, 8645), timeout=1):
+        with socket.create_connection(("127.0.0.1", 8645), timeout=1):
             return True
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError, TypeError):
+    except OSError:
         return False
 
 
@@ -49,15 +37,13 @@ def main() -> int:
                 child = subprocess.Popen(command())
             stopped.wait(2)
     finally:
-        try:
-            subprocess.run([*command(), "--stop"], timeout=10, check=False)
-        except (OSError, subprocess.SubprocessError) as exc:
-            print(f"Native API stop failed: {exc}", file=sys.stderr)
         if child is not None:
+            child.terminate()
             try:
                 child.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                child.terminate()
+                child.kill()
+                child.wait(timeout=5)
     return 0
 
 

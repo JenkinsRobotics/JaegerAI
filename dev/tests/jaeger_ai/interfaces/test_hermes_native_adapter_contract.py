@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from integrations.hermes_webui.native_adapter import native_adapter_class
+from integrations.hermes_agent.native_adapter import native_adapter_class
 
 
 class _UpstreamAdapter:
@@ -24,7 +24,7 @@ class _UpstreamAdapter:
 
 def test_native_adapter_adds_semver_version_without_replacing_upstream_routes(monkeypatch):
     monkeypatch.setattr(
-        "integrations.hermes_webui.native_adapter._component_version",
+        "integrations.hermes_agent.native_adapter._component_version",
         lambda: "0.20.5",
     )
     adapter = native_adapter_class(_UpstreamAdapter)()

@@ -63,6 +63,10 @@ def test_runtime_does_not_read_ares_private_session_state():
         if not path.is_file():
             continue
         relative = path.relative_to(ROOT)
+        if relative.parts[:4] == ("jaeger_ai", "features", "webui", "api"):
+            # Jaeger WebUI owns its own /api/sessions route. This guard is
+            # about reading ARES private state, not first-party browser APIs.
+            continue
         source = path.read_text(encoding="utf-8")
         for literal in forbidden:
             if literal in source:

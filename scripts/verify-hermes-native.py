@@ -10,9 +10,6 @@ from urllib.request import Request, urlopen
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from jaeger_ai.core.runtime.agent_workspaces import container_name
-
-
 def check(base, key):
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     session = "verification-native-hermes-" + uuid.uuid4().hex
@@ -53,13 +50,7 @@ def check(base, key):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url")
+    parser.add_argument("--url", default="http://127.0.0.1:8645")
     parser.add_argument("--key-file", type=Path, default=Path.home()/".hermes/jaeger-native-api.key")
     args = parser.parse_args()
-    base = args.url
-    if not base:
-        config = json.loads(subprocess.check_output(
-            ["/opt/homebrew/bin/container", "inspect", container_name("hermes")], timeout=5))[0]
-        address = config["status"]["networks"][0]["ipv4Address"].split("/")[0]
-        base = f"http://{address}:8645"
-    check(base.rstrip("/"), args.key_file.read_text().strip())
+    check(args.url.rstrip("/"), args.key_file.read_text().strip())

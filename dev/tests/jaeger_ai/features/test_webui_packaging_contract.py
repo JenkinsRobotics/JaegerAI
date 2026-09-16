@@ -1,76 +1,43 @@
 from __future__ import annotations
 
-import importlib.util
-import re
-import subprocess
-import sys
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[4]
-SUPERVISOR = ROOT / "integrations/hermes_webui/jaeger_sidecar_supervisor.py"
+FEATURE = ROOT / "jaeger_ai/features/webui"
 
 
-def _load_supervisor():
-    spec = importlib.util.spec_from_file_location("jaeger_sidecar_supervisor", SUPERVISOR)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_prepare_produces_versioned_complete_overlay():
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/prepare-hermes-webui.py")],
-        cwd=ROOT,
-        check=True,
-        text=True,
-        capture_output=True,
+def test_first_party_webui_source_is_complete() -> None:
+    required = (
+        "server.py",
+        "api/routes.py",
+        "api/models.py",
+        "api/jaeger_agents.py",
+        "api/jaeger_sessions.py",
+        "api/jaeger_conversation.py",
+        "api/jaeger_ollama.py",
+        "static/index.html",
+        "static/boot.js",
+        "static/messages.js",
+        "HERMES_WEBUI_LICENSE",
     )
-    staged = Path(result.stdout.strip().splitlines()[-1])
-    version_source = (staged / "api/_version.py").read_text(encoding="utf-8")
-    assert "unknown" not in version_source
-    assert re.search(r"exp-v0\.52\.264-\d+-g[0-9a-f]+", version_source)
-    assert (staged / "jaeger-extensions/jaeger_stream_continuity.js").is_file()
-    assert (staged / "jaeger_sidecar_supervisor.py").is_file()
-    init = (staged / "docker_init.bash").read_text(encoding="utf-8")
-    assert "jaeger_sidecar_supervisor.py" in init
+    missing = [relative for relative in required if not (FEATURE / relative).is_file()]
+    assert not missing, f"first-party WebUI source is incomplete: {missing}"
 
 
-def test_dispatcher_supervisor_restarts_after_repeated_health_failures():
-    module = _load_supervisor()
-    children = []
-    probes = iter([False, False, False, True])
+def test_webui_launcher_uses_first_party_feature() -> None:
+    launcher = (ROOT / "scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
+    assert 'webui_root="$repo_root/jaeger_ai/features/webui"' in launcher
+    assert "vendor/hermes-webui" not in launcher
+    assert "git submodule" not in launcher
 
-    class Child:
-        def __init__(self):
-            self.returncode = None
-            self.terminated = False
 
-        def poll(self):
-            return self.returncode
+def test_webui_is_included_in_non_editable_packages() -> None:
+    packaging = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"features/webui/static/**/*"' in packaging
+    assert '"features/webui/HERMES_WEBUI_LICENSE"' in packaging
 
-        def terminate(self):
-            self.terminated = True
-            self.returncode = 0
 
-        def kill(self):
-            self.returncode = -9
-
-        def wait(self, timeout=None):
-            return self.returncode
-
-    def spawn():
-        child = Child()
-        children.append(child)
-        return child
-
-    module.run(
-        stop_requested=lambda: len(children) == 2,
-        health_check=lambda: next(probes),
-        spawn=spawn,
-        sleep=lambda _seconds: None,
-    )
-
-    assert len(children) == 2
-    assert children[0].terminated is True
-    assert children[1].terminated is True
+def test_repository_has_no_webui_submodule_contract() -> None:
+    assert not (ROOT / ".gitmodules").exists()
+    assert not (ROOT / "vendor/hermes-webui").exists()

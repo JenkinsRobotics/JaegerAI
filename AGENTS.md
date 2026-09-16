@@ -55,7 +55,7 @@ exercised; none are aspirational.
 |---|---|---|---|
 | Jaeger Gateway | `127.0.0.1:8810` | `jaeger gateway daemon` | sessions, SSE, approvals |
 | Agentgateway (external) | `:8811` MCP, `:8812` A2A | `jaeger gateway start` | external MCP/A2A proxy |
-| Hermes WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
+| Jaeger WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
 | MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
 | A2A server | loopback `:8796` | `jaeger a2a` | agent-to-agent JSON-RPC |
 
@@ -110,8 +110,7 @@ JaegerAI/
 │   ├── interfaces/     # Client surfaces ONLY (swift, tui, pyside6, messaging, bridge)
 │   └── assets/         # Icons + the WebUI extension scripts (single mount point)
 ├── packages/           # Monorepo standalone packages (jaeger-os, jaeger-agent, etc.)
-├── scripts/            # Host and deployment scripts
-└── vendor/             # Isolated upstream submodules (hermes-webui)
+└── scripts/            # Host and deployment scripts
 ```
 
 ### Where a new file goes

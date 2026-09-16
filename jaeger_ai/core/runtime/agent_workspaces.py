@@ -1,4 +1,4 @@
-"""Explicit Mac mounts and active container identities for the agent fabric.
+"""Explicit Mac mounts and active OpenClaw container identities.
 
 Deployment state is local and contains no credentials. Defaults preserve older
 installations; migration keeps the old containers stopped for rollback.
@@ -13,44 +13,18 @@ from jaeger_ai.core.instance.instance import operator_state_root
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STATE_PATH = operator_state_root() / "shared/container-workspaces.json"
-LEGACY_CONTAINERS = {"hermes": "hermes-webui-hermes-webui", "openclaw": "ares-openclaw"}
+LEGACY_CONTAINERS = {"openclaw": "ares-openclaw"}
 # Managed container names come from the framework table so a rename lands in
 # one place. LEGACY_/EXPANDED_ stay literal: they are not the framework's
 # own container, they are a pre-Jaeger name and a side workspace volume.
 MANAGED_CONTAINERS = {f.runtime: f.container for f in FRAMEWORKS if f.container}
-EXPANDED_CONTAINERS = {"hermes": "jaeger-hermes-workspaces", "openclaw": "jaeger-openclaw-workspaces"}
-HERMES_IMAGE = "hermes-webui:jaeger-continuity-20260909"
-
-# In-image agent checkout + venv. Host bind ~/.hermes/hermes-agent is often
-# not importable when WebUI runs hermes_cli/main.py with system Python.
-WORKING_HERMES_AGENT_DIR = "/app/hermes-agent-src"
-WORKING_HERMES_PYTHON = "/app/venv/bin/python"
-
-
-def normalize_hermes_webui_environment(environment: list[str]) -> list[str]:
-    """Point Hermes WebUI at the working in-image agent + venv Python."""
-    rewritten: list[str] = []
-    seen_agent = False
-    seen_python = False
-    for value in environment:
-        if value.startswith("HERMES_WEBUI_AGENT_DIR="):
-            rewritten.append(f"HERMES_WEBUI_AGENT_DIR={WORKING_HERMES_AGENT_DIR}")
-            seen_agent = True
-            continue
-        if value.startswith("HERMES_WEBUI_PYTHON="):
-            rewritten.append(f"HERMES_WEBUI_PYTHON={WORKING_HERMES_PYTHON}")
-            seen_python = True
-            continue
-        rewritten.append(value)
-    if not seen_agent:
-        rewritten.append(f"HERMES_WEBUI_AGENT_DIR={WORKING_HERMES_AGENT_DIR}")
-    if not seen_python:
-        rewritten.append(f"HERMES_WEBUI_PYTHON={WORKING_HERMES_PYTHON}")
-    return rewritten
+EXPANDED_CONTAINERS = {"openclaw": "jaeger-openclaw-workspaces"}
 
 
 
 def container_name(role: str) -> str:
+    if role not in LEGACY_CONTAINERS or role not in MANAGED_CONTAINERS:
+        raise ValueError(f"{role!r} is not a containerized framework")
     if STATE_PATH.exists():
         state = json.loads(STATE_PATH.read_text())
         name = state.get("containers", {}).get(role)
@@ -59,21 +33,6 @@ def container_name(role: str) -> str:
                 raise ValueError(f"Unexpected managed container for {role}")
             return name
     return LEGACY_CONTAINERS[role]
-
-
-def hermes_container_aliases() -> tuple[str, ...]:
-    """All known Hermes WebUI container identities (legacy → managed → expanded)."""
-    return (
-        LEGACY_CONTAINERS["hermes"],
-        MANAGED_CONTAINERS["hermes"],
-        EXPANDED_CONTAINERS["hermes"],
-    )
-
-
-def conflicting_hermes_containers(active: str | None = None) -> list[str]:
-    """Sibling Hermes containers that share the published WebUI host port."""
-    current = active or container_name("hermes")
-    return [name for name in hermes_container_aliases() if name != current]
 
 
 def workspace_mounts(home: Path | None = None, *, include_personal: bool = False) -> list[tuple[Path, str]]:
@@ -112,8 +71,6 @@ def create_arguments(config: dict, role: str, *, home: Path | None = None,
     if not user:
         raise ValueError("Cannot preserve container user")
     image = config["image"]["reference"]
-    if role == "hermes":
-        image = HERMES_IMAGE
     args = ["create", "--name", targets[role], "--user", user,
             "--workdir", process["workingDirectory"], "--entrypoint", process["executable"],
             "--cpus", str(config["resources"]["cpus"]),
@@ -123,8 +80,6 @@ def create_arguments(config: dict, role: str, *, home: Path | None = None,
     if config.get("useInit"):
         args.append("--init")
     environment = process["environment"]
-    if role == "hermes":
-        environment = normalize_hermes_webui_environment(list(environment))
     for value in environment:
         args.extend(["--env", value])
     for network in config["networks"]:

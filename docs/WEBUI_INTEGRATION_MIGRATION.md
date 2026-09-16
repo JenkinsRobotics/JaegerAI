@@ -1,5 +1,9 @@
 # WebUI integration migration
 
+> **Superseded 2026-09-16.** The migration described below used a separate
+> Hermes WebUI deployment. Jaeger WebUI is now first-party source under
+> `jaeger_ai/features/webui`; see [ADR-0013](architecture/adr/0013-absorb-hermes-webui.md).
+
 ## Intended topology
 
 ```text

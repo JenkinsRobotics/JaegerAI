@@ -19,7 +19,10 @@ from urllib.parse import urlparse
 
 import pytest
 
-OVERLAY = pathlib.Path(__file__).resolve().parents[4] / "integrations/hermes_webui/jaeger_sessions.py"
+OVERLAY = (
+    pathlib.Path(__file__).resolve().parents[4]
+    / "jaeger_ai/features/webui/api/jaeger_sessions.py"
+)
 
 
 def _load():
@@ -100,6 +103,6 @@ def test_agents_overlay_chains_to_sessions():
 
 
 def test_overlay_is_installed_by_the_webui_build():
-    build = (OVERLAY.parents[2] / "scripts/prepare-hermes-webui.py").read_text(encoding="utf-8")
-    assert "jaeger_sessions.py" in build
-    assert "jaeger_gateway_console.js" in build
+    root = OVERLAY.parents[4]
+    assert OVERLAY.is_file()
+    assert (root / "jaeger_ai/assets/jaeger_gateway_console.js").is_file()

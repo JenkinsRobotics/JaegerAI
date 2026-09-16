@@ -164,43 +164,31 @@ deployed AI that plays one, with its own memory + config:
 
 ### Jaeger WebUI
 
-Jaeger's browser interface is its attributed, Jaeger-branded Hermes WebUI fork
-at `vendor/hermes-webui`. Hermes supplies the frontend lineage; Jaeger owns the
-runtime, sessions, tools, approvals, memory, models, heartbeat, and scheduled
-work. Clone with `--recurse-submodules` (or run `git submodule update --init`),
-then start the loopback adapter and browser server with one command:
+Jaeger's first-party browser interface lives at
+`jaeger_ai/features/webui`. Its browser source descends from Hermes WebUI and
+retains the upstream MIT license, while Jaeger owns the runtime, sessions,
+tools, approvals, memory, models, heartbeat, and scheduled work. Start the
+loopback adapter and browser server with one command:
 
 ```bash
 ./jaeger webui start --instance <agent-name>
 ```
 
-The launcher configures the pinned WebUI to use the loopback adapter. Jaeger
+The launcher configures the WebUI to use the loopback adapter. Jaeger
 WebUI serves the browser on port `8790`, while Jaeger remains the runtime owner for
 sessions, streamed chat and reasoning, model selection, tools, approvals,
 heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
-launch path runs `vendor/hermes-webui/server.py` directly: it does not discover,
+launch path runs `jaeger_ai/features/webui/server.py` directly: it does not discover,
 run, or import Hermes Agent and stores no state under `~/.hermes`.
 Third-party attribution is recorded in
 `jaeger_ai/features/webui/adapter/THIRD_PARTY_NOTICES.md`.
-
-#### Alternative containerized WebUI
-
-The Apple-container version remains available as an alternative development
-surface. It is not required for the primary Jaeger WebUI path:
-
-```bash
-./jaeger settings set containers.use_hermes_webui true
-./jaeger webui start --container
-open http://127.0.0.1:8787/
-```
 
 Port map (defaults chosen to avoid clashes):
 
 | Surface | Default | Notes |
 | --- | ---: | --- |
-| Hermes WebUI container (browser) | **8787** | Apple container `hermes-webui-hermes-webui` |
-| Jaeger-branded vendor WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
-| Hermes WebUI adapter | **8791** | `jaeger hermes-webui-adapter` / runner-local |
+| Jaeger WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
+| Jaeger WebUI adapter | **8791** | `jaeger hermes-webui-adapter` / runner-local |
 | Instance webhooks | **8793** | Moved off 8791 so adapter and webhooks do not collide |
 | Jaeger MCP HTTP | **8792** | `jaeger mcp --http` (Agentgateway target) |
 | Jaeger A2A backend | **8796** | `jaeger a2a` (Agentgateway proxies :8812 here) |
@@ -290,7 +278,7 @@ For the standard native development layout, start the browser process with:
 
 The optional `jaeger_ai/assets/jaeger_webui_branding.js` extension replaces
 the browser favicon and Apple touch icon with Jaeger's existing Mac app icon.
-Enable it through Hermes WebUI's supported extension variables:
+Enable it through Jaeger WebUI's supported extension variables:
 
 ```bash
 export HERMES_WEBUI_EXTENSION_DIR="$PWD/jaeger_ai/assets"

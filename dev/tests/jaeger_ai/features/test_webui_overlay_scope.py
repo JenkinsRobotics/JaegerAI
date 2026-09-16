@@ -1,7 +1,7 @@
-"""The WebUI overlay may brand the stock app — never reimplement it.
+"""The WebUI branding overlay must not duplicate first-party controls.
 
-JaegerAI runs a vendored, unmodified Hermes WebUI and reaches its other
-backends through that app's OWN profile configuration plus a loopback adapter.
+JaegerAI owns the integrated WebUI and reaches its agent runtimes through
+the WebUI's profile configuration plus a loopback adapter.
 The overlay (`jaeger_ai/assets/jaeger_webui_branding.js`) exists only for what
 stock cannot do: icons, the window title, and hiding Hermes chrome Jaeger does
 not back.
@@ -12,8 +12,8 @@ stock composer already ships. Two controls for one job meant the sidebar, the
 composer chip and the turn label could each name a different agent, and the
 operator could not tell which one a message would reach.
 
-These tests keep the overlay inside its scope, because every line in it is a
-future merge conflict when hermes-webui is pulled.
+These tests keep the overlay inside its scope so browser behavior has one
+authoritative implementation.
 """
 from __future__ import annotations
 
@@ -30,8 +30,7 @@ def overlay() -> str:
     return OVERLAY.read_text(encoding="utf-8")
 
 
-#: Stock WebUI features the overlay must not rebuild. Each maps to an endpoint
-#: or control the vendored app already provides.
+#: First-party WebUI features the branding overlay must not rebuild.
 FORBIDDEN = {
     "installAgentsSection": "the stock composer has a profile switcher",
     "activateAgent": "POST /api/profile/switch is stock",
@@ -47,8 +46,8 @@ FORBIDDEN = {
 def test_overlay_does_not_reimplement_stock(overlay: str, symbol: str, why: str) -> None:
     assert symbol not in overlay, (
         f"{symbol} is back in the WebUI overlay — {why}.\n"
-        f"The overlay may only brand the stock app and hide chrome Jaeger does "
-        f"not back. Anything that duplicates a stock control makes two sources "
+        f"The overlay may only brand the app and hide chrome Jaeger does "
+        f"not back. Anything that duplicates a WebUI control makes two sources "
         f"of truth for one decision, and makes upstream pulls conflict."
     )
 

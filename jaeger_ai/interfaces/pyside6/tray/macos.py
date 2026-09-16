@@ -162,8 +162,8 @@ def _make_actions(instance: str | None) -> TrayActions:
         _spawn([*jaeger, "start"])
 
     def open_web() -> None:
-        from jaeger_ai.features.webui import HermesWebUIService
-        _spawn(["open", HermesWebUIService(instance).browser_url()])
+        from jaeger_ai.features.webui import WebUIService
+        _spawn(["open", WebUIService(instance).browser_url()])
 
     def about() -> None:
         from jaeger_ai import __version__

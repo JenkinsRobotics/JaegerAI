@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Install the repo-owned native Hermes API supervisor, without changing profiles.
+"""Install the repo-owned host Hermes Agent API supervisor.
 
-Dry run by default. Start only after the explicit test API process is stopped.
-This service starts only Hermes' authenticated API, not its messaging platforms.
+Dry run by default. This service starts only Hermes Agent's authenticated
+loopback API, not its messaging platforms or a container.
 """
 import argparse
 import os

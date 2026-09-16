@@ -1,6 +1,6 @@
-# Shared Hermes WebUI profiles
+# Shared Jaeger WebUI profiles
 
-JaegerAI owns the adapters used by the shared Hermes WebUI profiles:
+JaegerAI owns the adapters used by the shared Jaeger WebUI profiles:
 
 - `jaeger` routes browser turns to Jaeger's MCP capability gateway.
 - `openclaw` routes browser turns to OpenClaw's authenticated chat endpoint.

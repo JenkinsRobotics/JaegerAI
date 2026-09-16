@@ -98,7 +98,6 @@ FRAMEWORKS: tuple[Framework, ...] = (
         profile="default",
         display_name="Hermes Agent",
         agent_id="tp:hermes",
-        container="jaeger-hermes-webui",
         turn="jaeger_ai.core.frameworks.hermes_native:hermes_turn",
         reconciler="jaeger_ai.core.frameworks.hermes_native:hermes_reconcile",
     ),

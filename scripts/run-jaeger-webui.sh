@@ -3,7 +3,7 @@ set -eu
 
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
-webui_root="$repo_root/vendor/hermes-webui"
+webui_root="$repo_root/jaeger_ai/features/webui"
 default_python="${HOME}/.jaeger/venv/bin/python"
 if [[ ! -x "$default_python" && -x "$repo_root/.venv/bin/python" ]]; then
   default_python="$repo_root/.venv/bin/python"
@@ -12,7 +12,7 @@ python_exe="${JAEGER_WEBUI_PYTHON:-$default_python}"
 jaeger_state_home="${JAEGER_STATE_HOME:-${HOME}/.jaeger}"
 
 if [[ ! -f "$webui_root/server.py" ]]; then
-  print -u2 "Jaeger WebUI fork is missing. Run: git submodule update --init vendor/hermes-webui"
+  print -u2 "Jaeger WebUI server is missing from jaeger_ai/features/webui"
   exit 1
 fi
 if [[ ! -x "$python_exe" ]]; then
@@ -51,7 +51,7 @@ fi
 # Shared Hermes profiles + current-schema state.db for the :8790 vendor home.
 # Leftover real profile dirs are renamed aside and replaced with a symlink.
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
-  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import prepare_vendor_webui_home; prepare_vendor_webui_home(Path(os.environ['HERMES_HOME']))"
+  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import prepare_webui_home; prepare_webui_home(Path(os.environ['HERMES_HOME']))"
 
 
 # Warm the model catalogue in the background before anyone opens the page.
@@ -62,7 +62,7 @@ PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
 # nothing — no one is waiting yet.
 #
 # Deliberately a plain HTTP call from the launcher, not a change to the WebUI:
-# the vendored app stays stock so it can be pulled from upstream.
+# the browser should never pay this startup cost on its first send.
 (
   for _ in $(seq 1 60); do
     if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${HERMES_WEBUI_PORT}/" 2>/dev/null; then

@@ -4,3 +4,7 @@
 # GitHub's "Download tarball" — `git clone` (contributors, CI) is unaffected.
 dev/        export-ignore
 .github/    export-ignore
+
+# Preserve the vendored minified stream-markdown build byte-for-byte. Its
+# template literals intentionally contain space-before-tab sequences.
+jaeger_ai/features/webui/static/vendor/smd.min.js -diff

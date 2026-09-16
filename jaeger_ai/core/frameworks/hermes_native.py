@@ -1,28 +1,28 @@
 """Authenticated native Hermes Runs client; no CLI replay or transcript copying."""
 import json
+import os
 from pathlib import Path
 import re
-import subprocess
 from urllib.request import Request, urlopen
 
-from jaeger_ai.core.runtime.agent_workspaces import container_name
 from .resilience import ClassifiedError, timeout_setting
 
 
 def connection():
-    raw = subprocess.check_output(
-        ['/opt/homebrew/bin/container', 'inspect', container_name('hermes')], timeout=5)
-    status = json.loads(raw)[0]['status']
-    if status.get('state') != 'running':
-        raise ClassifiedError('unavailable', 'Hermes container is not running')
-    address = status['networks'][0]['ipv4Address'].split('/')[0]
+    base = os.environ.get('HERMES_NATIVE_API_URL', 'http://127.0.0.1:8645').rstrip('/')
+    if base != 'http://127.0.0.1:8645':
+        raise ClassifiedError('permission_denied', 'Hermes Agent native API must use loopback')
     path = Path.home() / '.hermes/jaeger-native-api.key'
-    if path.is_symlink() or path.stat().st_mode & 0o077:
+    try:
+        mode = path.stat().st_mode
+    except OSError as exc:
+        raise ClassifiedError('unavailable', 'Hermes Agent native API credential is missing') from exc
+    if path.is_symlink() or mode & 0o077:
         raise ClassifiedError('permission_denied', 'Hermes native credential must be a private regular file')
     key = path.read_text().strip()
     if len(key) < 32:
         raise ClassifiedError('permission_denied', 'Hermes native credential is missing or invalid')
-    return f'http://{address}:8645', key
+    return base, key
 
 
 def hermes_request(path, body=None, timeout=10, headers=None):

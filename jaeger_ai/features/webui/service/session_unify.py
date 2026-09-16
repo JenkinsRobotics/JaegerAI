@@ -1,7 +1,7 @@
 """Backup, classify, and import WebUI/Jaeger KEEP sessions onto :8790.
 
 Does not merge agent transcripts into one SQLite. Copies KEEP rows from
-Hermes ``state.db`` + the WebUI JSON catalog into the vendor HERMES_HOME
+Hermes Agent ``state.db`` + the WebUI JSON catalog into the WebUI HERMES_HOME
 used by Jaeger WebUI, and tombstones junk in Jaeger ``sessions.db``.
 """
 
@@ -341,13 +341,13 @@ def import_keep(
     *,
     hermes_state_db: Path,
     webui_sessions: Path,
-    vendor_agent_home: Path,
-    vendor_webui_state: Path,
+    webui_agent_home: Path,
+    webui_state: Path,
     keep_ids: list[str],
 ) -> dict[str, Any]:
-    """Copy KEEP transcripts into the :8790 vendor stores. Never deletes sources."""
-    ensure_agent_state_schema(vendor_agent_home)
-    dest_db = vendor_agent_home / "state.db"
+    """Copy KEEP transcripts into the :8790 WebUI stores. Never deletes sources."""
+    ensure_agent_state_schema(webui_agent_home)
+    dest_db = webui_agent_home / "state.db"
     imported_sessions = 0
     imported_messages = 0
     if hermes_state_db.exists() and keep_ids:
@@ -382,7 +382,7 @@ def import_keep(
         finally:
             src.close()
             dest.close()
-    sidecar_dir = vendor_webui_state / "sessions"
+    sidecar_dir = webui_state / "sessions"
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     copied_json = 0
     index_rows = []
