@@ -14,6 +14,7 @@ from jaeger_ai.features.webui.service.session_unify import (
     infer_session_profile,
     profile_badge_for_session,
     backfill_jaeger_titles,
+    delete_authoritative_jaeger_session,
     freeze_sources,
     import_keep,
     is_junk,
@@ -245,3 +246,28 @@ def test_sync_jaeger_sessions_to_hermes_webui(tmp_path: Path, monkeypatch) -> No
     assert "Jaeger" in s_row[2]
     assert s_row[3] == 2
     conn.close()
+
+
+def test_delete_authoritative_jaeger_session_tombstones_native_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "state_root"
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(root))
+    (root / "active_instance").parent.mkdir(parents=True, exist_ok=True)
+    (root / "active_instance").write_text("test_inst", encoding="utf-8")
+    source_db = root / "instances" / "test_inst" / "memory" / "sessions.db"
+    source_db.parent.mkdir(parents=True, exist_ok=True)
+
+    store = SessionStore(source_db, sync_webui=False)
+    store.record("probe-session", "user", "Reply exactly PONG")
+    store.record("probe-session", "assistant", "PONG")
+    store.close()
+
+    assert delete_authoritative_jaeger_session("probe-session") is True
+
+    reopened = SessionStore(source_db, sync_webui=False)
+    try:
+        assert reopened.history("probe-session") == []
+        assert reopened.is_tombstoned("probe-session") is True
+    finally:
+        reopened.close()

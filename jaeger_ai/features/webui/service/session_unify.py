@@ -658,3 +658,34 @@ def sync_single_session_to_hermes_webui(
             return True
     except Exception:
         return False
+
+
+def delete_authoritative_jaeger_session(session_id: str) -> bool:
+    """Delete and tombstone a Jaeger transcript before its WebUI mirror.
+
+    ``~/.hermes/profiles/jaeger/state.db`` is a projection of the active
+    instance's ``sessions.db``. Deleting only the projection is temporary: the
+    next sync recreates it. This helper routes deletion through ``SessionStore``
+    so its transcript, messages, outbox rows, and native tombstone remain one
+    transaction. ``sync_webui=False`` avoids rebuilding the mirror immediately
+    before the caller removes it.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+
+    from jaeger_ai.core.instance.instance import operator_state_root, read_active_instance
+    from jaeger_ai.core.sessions import SessionStore
+
+    root = operator_state_root()
+    instance_name = read_active_instance() or "jaeger"
+    source_db = root / "instances" / instance_name / "memory" / "sessions.db"
+    if not source_db.exists():
+        return True
+
+    store = SessionStore(source_db, sync_webui=False)
+    try:
+        store.delete(sid)
+        return store.is_tombstoned(sid)
+    finally:
+        store.close()
