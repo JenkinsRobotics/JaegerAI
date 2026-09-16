@@ -6,7 +6,7 @@ from ..process import CommandSpec, SubprocessDelegateRuntime
 
 def _args(request: DelegateRequest, executable: str) -> tuple[str, ...]:
     del request, executable
-    return ("--print", "--output-format", "json", "--permission-mode", "dontAsk")
+    return ("--print", "--output-format", "json", "--permission-mode", "acceptEdits")
 
 
 def create_runtime() -> SubprocessDelegateRuntime:

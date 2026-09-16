@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -255,15 +256,17 @@ class SubprocessDelegateRuntime:
 
     async def cancel(self, handle: DelegateHandle) -> None:
         invocation = self._require_invocation(handle)
-        if invocation.process.returncode is None:
+        if invocation.collector is not None:
+            invocation.collector.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await invocation.collector
+        elif invocation.process.returncode is None:
             invocation.process.terminate()
             try:
                 await asyncio.wait_for(invocation.process.wait(), timeout=3)
             except TimeoutError:
                 invocation.process.kill()
                 await invocation.process.wait()
-        if invocation.collector is not None:
-            invocation.collector.cancel()
 
     async def resume(self, handle: DelegateHandle, message: str) -> DelegateHandle:
         del handle, message

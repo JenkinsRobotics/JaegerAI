@@ -81,6 +81,38 @@ def test_process_runtime_enforces_timeout(tmp_path) -> None:
     assert "timed out" in result.summary
 
 
+def test_process_runtime_cancel_reports_cancelled_and_reaps_child(tmp_path) -> None:
+    def args(request, executable):
+        del request, executable
+        return ("-c", "import time; print('started', flush=True); time.sleep(30)")
+
+    runtime = SubprocessDelegateRuntime(
+        CommandSpec(
+            runtime_id="test-cancel",
+            executables=(sys.executable,),
+            build_args=args,
+            capabilities=frozenset(),
+            local=True,
+        )
+    )
+
+    async def run():
+        handle = await runtime.start(_request(tmp_path, timeout=60))
+        stream_task = asyncio.create_task(_collect_events(runtime, handle))
+        await asyncio.sleep(0.05)
+        await runtime.cancel(handle)
+        await stream_task
+        return await runtime.result(handle)
+
+    result = asyncio.run(run())
+    assert result.status == "cancelled"
+    assert result.metadata["exit_code"] is not None
+
+
+async def _collect_events(runtime, handle):
+    return [event async for event in runtime.stream(handle)]
+
+
 # ── JSONL event streams ─────────────────────────────────────────────
 
 from jaeger_agent.delegates.process.runtime import _extract_summary  # noqa: E402
