@@ -162,13 +162,12 @@ cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 # SPM resource bundle (jaeger_icon_22.png etc.).  SwiftPM puts it
 # next to the executable in the build dir; the .app needs it in
 # Contents/Resources next to the binary AND we need to make sure
-# Bundle.module can find it at runtime.  SwiftPM's resolution looks
-# for the bundle relative to the executable, so copying it next to
-# the binary in MacOS/ keeps the resource path correct.
+# Bundle.module can find it at runtime. Xcode 27 resolves application package
+# resources below Contents/Resources.
 SPM_BUNDLE_NAME="JaegerAI_JaegerAI.bundle"
 SPM_BUNDLE_SRC="$(dirname "$SWIFT_BIN")/$SPM_BUNDLE_NAME"
+DEST_BUNDLE="$APP_BUNDLE/Contents/Resources/$SPM_BUNDLE_NAME"
 if [[ -d "$SPM_BUNDLE_SRC" ]]; then
-    DEST_BUNDLE="$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME"
     cp -R "$SPM_BUNDLE_SRC" "$DEST_BUNDLE"
     # Older SwiftPM versions emitted a bare resource directory. Xcode 27 emits
     # a standard Contents/Info.plist bundle; adding a second plist at the root
@@ -190,6 +189,9 @@ if [[ -d "$SPM_BUNDLE_SRC" ]]; then
 </plist>
 EOF
     fi
+else
+    echo "[build-app] ERROR — SwiftPM resource bundle missing at $SPM_BUNDLE_SRC" >&2
+    exit 1
 fi
 
 # OS 1 utility intelligence. This model is part of the product runtime, not
@@ -254,12 +256,11 @@ git -C "$REPO_ROOT" rev-parse HEAD > "$APP_BUNDLE/Contents/Resources/build-commi
 #   xcrun stapler staple JaegerAI.app
 SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
 echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
-codesign --force --sign "$SIGN_IDENTITY" \
-    "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" 2>/dev/null || true
+codesign --force --sign "$SIGN_IDENTITY" "$DEST_BUNDLE"
 codesign --force --options runtime --entitlements \
     "$APP_ROOT/Resources/JaegerAI.entitlements" \
-    --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1 || \
-    echo "[build-app] WARN — codesign failed (continuing; mic prompt may not fire)"
+    --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
+codesign --verify --deep --strict "$APP_BUNDLE"
 
 # Keep the app VISIBLE at the repo root (gitignored symlink) — the
 # bundle itself lives in swift/.build, which nobody should have to find.
