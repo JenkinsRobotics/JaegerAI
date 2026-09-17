@@ -121,6 +121,7 @@ def test_http_tool_list_includes_bridge_tools():
     assert {
         "chat",
         "agent_info",
+        "capability_inventory",
         "bridge_health",
         "bridge_query",
         "bridge_command",
@@ -201,4 +202,3 @@ def test_main_stdio_attaches_to_live_bridge(monkeypatch):
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 0
     assert ran == ["run"]
-

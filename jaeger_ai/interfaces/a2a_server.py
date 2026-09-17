@@ -36,10 +36,11 @@ from starlette.applications import Starlette
 from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
+from jaeger_ai.contract.ports import A2A_PORT, A2A_URL, LOOPBACK
+
 A2A_PROTOCOL_VERSION = "0.3"
-A2A_HOST = "127.0.0.1"
-A2A_PORT = 8796
-A2A_PUBLIC_URL = "http://192.168.64.1:8812"
+A2A_HOST = LOOPBACK
+A2A_PUBLIC_URL = A2A_URL
 
 
 def build_agent_card() -> AgentCard:

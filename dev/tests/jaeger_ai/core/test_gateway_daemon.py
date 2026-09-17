@@ -209,9 +209,9 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
     import jaeger_ai.core.frameworks.jaeger as jaeger_mcp
 
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
-    monkeypatch.setattr(jaeger_mcp, "MCP_GATEWAY_URL", "http://127.0.0.1:8811/mcp")
+    monkeypatch.setattr(jaeger_mcp, "MCP_URL", "http://127.0.0.1:8792/mcp")
     monkeypatch.setattr(jaeger_mcp, "mcp_api_key", lambda: "test-key")
-    monkeypatch.setattr(jaeger_mcp, "MCP_HOST_HEADER", "127.0.0.1:8811")
+    monkeypatch.setattr(jaeger_mcp, "MCP_HOST_HEADER", "127.0.0.1:8792")
 
     ok = await app._native_lead_turn("sess-native", "What is your autonomy mode?")
     assert ok is not None
@@ -473,7 +473,7 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
     service.router.add_post("/mcp", handler)
     service.router.add_delete("/mcp", handler)
     async with TestServer(service) as server:
-        monkeypatch.setattr(transport, "MCP_GATEWAY_URL", str(server.make_url("/mcp")))
+        monkeypatch.setattr(transport, "MCP_URL", str(server.make_url("/mcp")))
         app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "health.sqlite3"))
         assert (await app._probe_native_mcp())["ok"] is False
         catalog.append({"name": "chat"})
@@ -510,7 +510,7 @@ async def test_mcp_health_terminates_session_when_catalog_probe_fails(monkeypatc
     service.router.add_post("/mcp", handler)
     service.router.add_delete("/mcp", handler)
     async with TestServer(service) as server:
-        monkeypatch.setattr(transport, "MCP_GATEWAY_URL", str(server.make_url("/mcp")))
+        monkeypatch.setattr(transport, "MCP_URL", str(server.make_url("/mcp")))
         app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "failed-health.sqlite3"))
         assert (await app._probe_native_mcp())["ok"] is False
     assert deleted == ["failed-health-session"]

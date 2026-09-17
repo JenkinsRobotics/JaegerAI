@@ -5,6 +5,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from jaeger_ai.contract.ports import (
+    A2A_GATEWAY_PORT,
+    A2A_GATEWAY_URL as A2A_PUBLIC_URL,
+    A2A_PORT as A2A_BACKEND_PORT,
+    MCP_GATEWAY_PORT,
+    MCP_HTTP_PATH,
+    MCP_HTTP_PORT,
+)
+
 VERSION = "1.5.0"
 ASSET = "agentgateway-darwin-arm64"
 SHA256 = "da432d35bd696da0564f7b2b6bbc783542b6b9c616d6c0c4d4c3daef9dfa11a1"
@@ -13,14 +22,8 @@ RELEASE_URL = (
     f"v{VERSION}/{ASSET}"
 )
 
-MCP_GATEWAY_PORT = 8811
-A2A_GATEWAY_PORT = 8812
 MCP_HTTP_HOST = "127.0.0.1"
-MCP_HTTP_PORT = 8792
-MCP_HTTP_PATH = "/mcp"
 A2A_BACKEND_HOST = "127.0.0.1"
-A2A_BACKEND_PORT = 8796
-A2A_PUBLIC_URL = "http://127.0.0.1:8812"
 
 STATS_ADDR = "127.0.0.1:15020"
 READINESS_ADDR = "127.0.0.1:15021"

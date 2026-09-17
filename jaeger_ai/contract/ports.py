@@ -51,6 +51,22 @@ MCP_GATEWAY_URL: Final = os.environ.get(
 ).rstrip("/")
 """MCP chat endpoint. Environment overrides are resolved at process start."""
 
+MCP_HTTP_PORT: Final = 8792
+"""Jaeger's own loopback MCP backend; Agentgateway proxies to it."""
+
+MCP_HTTP_PATH: Final = "/mcp"
+"""Canonical streamable-HTTP MCP route."""
+
+MCP_HTTP_URL: Final = os.environ.get(
+    "JAEGER_LOCAL_MCP_URL", f"http://{LOOPBACK}:{MCP_HTTP_PORT}{MCP_HTTP_PATH}"
+).rstrip("/")
+"""Jaeger's native local MCP server. Local frameworks connect here directly."""
+
+MCP_CONTAINER_GATEWAY_URL: Final = (
+    f"http://{CONTAINER_HOST}:{MCP_GATEWAY_PORT}/mcp"
+)
+"""The same MCP gateway as seen from an Apple Container guest."""
+
 OLLAMA_PORT: Final = 11434
 """Ollama's native HTTP port."""
 
@@ -71,6 +87,15 @@ A2A_PORT: Final = 8796
 """Jaeger's own A2A JSON-RPC server, loopback only. :data:`A2A_GATEWAY_PORT`
 is the public door to it."""
 
+A2A_GATEWAY_URL: Final = f"http://{LOOPBACK}:{A2A_GATEWAY_PORT}"
+"""Canonical host-side A2A endpoint advertised to local frameworks."""
+
+A2A_CONTAINER_GATEWAY_URL: Final = f"http://{CONTAINER_HOST}:{A2A_GATEWAY_PORT}"
+"""Canonical A2A endpoint as seen from an Apple Container guest."""
+
+A2A_URL: Final = f"http://{LOOPBACK}:{A2A_PORT}"
+"""Jaeger's native local A2A server. Local frameworks connect here directly."""
+
 # ── framework sidecars ───────────────────────────────────────────────────
 
 HERMES_NATIVE_API_PORT: Final = 8645
@@ -79,20 +104,23 @@ HERMES_NATIVE_API_PORT: Final = 8645
 DISPATCHER_SIDECAR_PORT: Final = 8646
 """Token-authenticated loopback proxy the Dispatcher board talks to."""
 
-OLLAMA_PORT: Final = 11434
-"""Default local Ollama HTTP API."""
-
 __all__ = [
     "A2A_GATEWAY_PORT",
+    "A2A_GATEWAY_URL",
+    "A2A_CONTAINER_GATEWAY_URL",
+    "A2A_URL",
     "A2A_PORT",
     "CONTAINER_HOST",
     "DISPATCHER_SIDECAR_PORT",
     "GATEWAY_PORT",
     "HERMES_NATIVE_API_PORT",
     "LOOPBACK",
-    "OLLAMA_PORT",
     "MCP_GATEWAY_PORT",
     "MCP_GATEWAY_URL",
+    "MCP_CONTAINER_GATEWAY_URL",
+    "MCP_HTTP_PATH",
+    "MCP_HTTP_PORT",
+    "MCP_HTTP_URL",
     "OLLAMA_OPENAI_URL",
     "OLLAMA_PORT",
     "OLLAMA_URL",

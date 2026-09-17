@@ -166,13 +166,36 @@ def test_jaeger_repair_restores_bridge_backend_adapter_and_owned_gateway(monkeyp
 def test_a2a_health_requires_backend_and_public_gateway(monkeypatch):
     from jaeger_ai.core.runtime import fabric_supervisor as supervisor
     requested = []
-    monkeypatch.setattr(supervisor, '_http', lambda url: requested.append(url) or '8812' not in url)
+    monkeypatch.setattr(supervisor, '_http', lambda url: requested.append(url) or True)
+    monkeypatch.setattr(
+        supervisor,
+        '_agentgateway_http',
+        lambda url: requested.append(url) or False,
+    )
     a2a = next(item for item in supervisor.components() if item.name == 'a2a')
     assert not a2a.probe()
     assert requested == [
         'http://127.0.0.1:8796/.well-known/agent-card.json',
         'http://127.0.0.1:8812/.well-known/agent-card.json',
     ]
+
+
+def test_agentgateway_health_uses_private_bearer(monkeypatch, tmp_path):
+    from jaeger_ai.core.runtime import fabric_supervisor as supervisor
+    import jaeger_ai.features.agentgateway.constants as constants
+
+    token = tmp_path / 'mcp.token'
+    token.write_text('private-token\n', encoding='utf-8')
+    seen = {}
+    monkeypatch.setattr(constants, 'mcp_token_path', lambda: token)
+    monkeypatch.setattr(
+        supervisor,
+        '_http',
+        lambda url, **kwargs: seen.update(url=url, **kwargs) or True,
+    )
+
+    assert supervisor._agentgateway_http('http://127.0.0.1:8812/card')
+    assert seen['headers'] == {'Authorization': 'Bearer private-token'}
 
 
 def test_jaeger_health_checks_the_actual_mcp_listener_not_a_nonexistent_health_route(monkeypatch):

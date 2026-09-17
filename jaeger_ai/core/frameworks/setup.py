@@ -18,7 +18,16 @@ import sys
 from pathlib import Path
 
 from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL, SOLO_RUNTIMES
-from jaeger_ai.contract.ports import CONTAINER_HOST, MCP_GATEWAY_URL, OLLAMA_OPENAI_URL
+from jaeger_ai.contract.ports import (
+    A2A_CONTAINER_GATEWAY_URL,
+    A2A_GATEWAY_URL,
+    A2A_URL,
+    CONTAINER_HOST,
+    MCP_CONTAINER_GATEWAY_URL,
+    MCP_GATEWAY_URL,
+    MCP_HTTP_URL,
+    OLLAMA_OPENAI_URL,
+)
 from jaeger_ai.core.instance.instance import operator_state_root
 
 SERVICES = {
@@ -30,7 +39,6 @@ SUPERVISOR_LABEL = "com.jenkinsrobotics.agent-fabric-supervisor"
 SUPERVISOR_MODULE = "jaeger_ai.core.runtime.fabric_supervisor"
 AVAILABLE_AGENT_MODELS = (DEFAULT_AGENT_MODEL, "glm-5.3:cloud")
 OPENCLAW_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
-JAEGER_A2A_URL = f"http://{CONTAINER_HOST}:8812"
 HONCHO_LAN_URL = "http://10.15.0.239:8088"
 HONCHO_WORKSPACE = "jenkins-robotics"
 
@@ -162,31 +170,167 @@ def _set_yaml_section_value(path: Path, section: str, key: str, value: str) -> N
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
-def _configure_agent_connectivity(home: Path | None = None) -> None:
-    """Publish Jaeger's MCP endpoint to every runtime using native config."""
+def _replace_yaml_mapping_entry(
+    text: str, section: str, names: set[str], block: list[str]
+) -> str:
+    """Replace selected second-level YAML entries without rewriting the file."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line == f"{section}:"), None)
+    if start is None:
+        lines.extend(([""] if lines else []) + [f"{section}:", *block])
+        return "\n".join(lines).rstrip() + "\n"
+    end = next(
+        (i for i in range(start + 1, len(lines)) if lines[i] and not lines[i].startswith((" ", "\t"))),
+        len(lines),
+    )
+    kept: list[str] = []
+    i = start + 1
+    while i < end:
+        match = re.match(r"^  ([^:#]+):\s*$", lines[i])
+        if match and match.group(1) in names:
+            i += 1
+            while i < end and not re.match(r"^  [^ :#][^:]*:\s*$", lines[i]):
+                i += 1
+            continue
+        kept.append(lines[i])
+        i += 1
+    lines[start + 1:end] = [*kept, *block]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _configure_codex_mcp(home: Path, url: str) -> Path | None:
+    path = home / ".codex" / "config.toml"
+    if not path.exists() and not path.parent.exists():
+        return None
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines()
+    prefixes = ("[mcp_servers.ares-system]", "[mcp_servers.jaeger-local]")
+    output: list[str] = []
+    skipping = False
+    for line in lines:
+        if line.startswith("["):
+            skipping = any(line.startswith(prefix[:-1]) for prefix in prefixes)
+        if not skipping:
+            output.append(line)
+    output.extend([
+        "",
+        "[mcp_servers.jaeger-local]",
+        f"url = {json.dumps(url)}",
+        "startup_timeout_sec = 30",
+    ])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".toml.tmp")
+    temporary.write_text("\n".join(output).strip() + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+    return path
+
+
+def _configure_claude_mcp(home: Path, url: str) -> Path | None:
+    path = home / ".claude.json"
+    if not path.exists() and not (home / ".claude").exists():
+        return None
+    document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    servers = document.setdefault("mcpServers", {})
+    servers.pop("ares-system", None)
+    servers["jaeger-local"] = {"type": "http", "url": url}
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+    return path
+
+
+def _write_agent_network_manifest(home: Path) -> Path:
+    path = home / ".jaeger" / "agent-network.json"
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    proxy_token_file = home / ".jaeger" / "gateway" / "mcp.token"
+    proxy_auth = {"scheme": "bearer", "token_file": str(proxy_token_file)}
+    document = {
+        "version": 1,
+        "authority": "jaeger",
+        "mcp": {
+            "host": MCP_HTTP_URL,
+            "container": MCP_CONTAINER_GATEWAY_URL,
+            "transport": "streamable-http",
+            "optional_proxy": MCP_GATEWAY_URL,
+            "container_auth": proxy_auth,
+        },
+        "a2a": {
+            "host": A2A_URL,
+            "container": A2A_CONTAINER_GATEWAY_URL,
+            "agent_card": "/.well-known/agent-card.json",
+            "transport": "JSONRPC",
+            "optional_proxy": A2A_GATEWAY_URL,
+            "container_auth": proxy_auth,
+        },
+        "frameworks": {
+            "codex": "jaeger-local",
+            "claude-code": "jaeger-local",
+            "hermes-agent": "jaeger-host",
+            "openclaw": "jaeger-host",
+        },
+    }
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+    return path
+
+
+def _configure_hermes_cli(home: Path) -> Path | None:
+    """Expose the installed Hermes Agent CLI on Jaeger's supervisor PATH."""
+    source_root = Path(
+        os.environ.get("JAEGER_HERMES_AGENT_SRC", str(home / "GitHub" / "hermes-agent"))
+    ).expanduser()
+    source = next(
+        (
+            candidate
+            for candidate in (
+                source_root / ".venv" / "bin" / "hermes",
+                source_root / "venv" / "bin" / "hermes",
+            )
+            if candidate.is_file() and os.access(candidate, os.X_OK)
+        ),
+        None,
+    )
+    if source is None:
+        return None
+    destination = home / "bin" / "hermes"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() and destination.resolve(strict=False) == source.resolve():
+        return destination
+    if destination.exists() and not destination.is_symlink():
+        return None
+    temporary = destination.with_name(destination.name + ".tmp")
+    temporary.unlink(missing_ok=True)
+    temporary.symlink_to(source)
+    os.replace(temporary, destination)
+    return destination
+
+
+def _configure_agent_connectivity(home: Path | None = None) -> list[Path]:
+    """Publish Jaeger's MCP/A2A endpoints to every supported local runtime."""
     home = (home or Path.home()).expanduser().resolve()
+    written: list[Path] = []
     profile_homes = [home / ".hermes"] + [
         home / ".hermes" / "profiles" / profile for profile in SERVICES
     ]
-    block = (
-        "  jaeger-host:\n"
-        f"    url: {MCP_GATEWAY_URL}\n"
-        "    connect_timeout: 60.0\n"
-        "    headers:\n"
-        "      Authorization: Bearer ${MCP_ARES_HOST_API_KEY}\n"
-        "    enabled: true\n"
-    )
+    block = [
+        "  jaeger-host:",
+        f"    url: {MCP_HTTP_URL}",
+        "    connect_timeout: 60.0",
+        "    enabled: true",
+    ]
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         text = path.read_text(encoding="utf-8") if path.exists() else ""
-        # Migrate the historical label without duplicating the same endpoint.
-        text = re.sub(r"(?m)^  ares-host:$", "  jaeger-host:", text)
-        if not re.search(r"(?m)^  jaeger-host:$", text):
-            text = text.rstrip() + ("\n" if text.strip() else "")
-            text += ("mcp_servers:\n" if not re.search(r"(?m)^mcp_servers:$", text) else "")
-            text += block
+        text = _replace_yaml_mapping_entry(
+            text, "mcp_servers", {"ares-host", "mac-host", "jaeger-host"}, block
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text.rstrip() + "\n", encoding="utf-8")
+        path.write_text(text, encoding="utf-8")
+        written.append(path)
 
     openclaw_path = home / ".jaeger" / "openclaw" / "openclaw.json"
     if openclaw_path.exists():
@@ -194,21 +338,37 @@ def _configure_agent_connectivity(home: Path | None = None) -> None:
         document.setdefault("gateway", {}).pop("mcp", None)
         servers = document.setdefault("mcp", {}).setdefault("servers", {})
         servers["jaeger-host"] = {
-            "url": MCP_GATEWAY_URL,
+            "url": MCP_CONTAINER_GATEWAY_URL,
             "transport": "streamable-http",
         }
-        # Do not default OpenClaw MCP to ares-agentgateway :8813 (M10).
-        # Chat spine uses the contract MCP gateway URL (:8811) via jaeger-host only.
+        token_file = home / ".jaeger" / "gateway" / "mcp.token"
+        if token_file.is_file():
+            token = token_file.read_text(encoding="utf-8").strip()
+            if token:
+                servers["jaeger-host"]["headers"] = {
+                    "Authorization": f"Bearer {token}",
+                }
+        # OpenClaw runs in an Apple Container, so it crosses the loopback
+        # boundary through Jaeger's Agentgateway proxy.
         servers.pop("ares-system", None)
+        servers.pop("mac-host", None)
         temporary = openclaw_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, openclaw_path)
+        written.append(openclaw_path)
 
-    # The ARES host-tools gateway was retired with the standalone ARES install
-    # (2026-09-15). OpenClaw reaches host capabilities through Jaeger's own
-    # agentgateway on :8811 instead; there is no second gateway config to
-    # rewrite, and :8813 was never on the chat spine.
+    # The old ARES host-tools gateway was retired with the standalone ARES
+    # install. All supported frameworks now discover Jaeger under one name.
+    for configured in (
+        _configure_codex_mcp(home, MCP_HTTP_URL),
+        _configure_claude_mcp(home, MCP_HTTP_URL),
+        _configure_hermes_cli(home),
+    ):
+        if configured is not None:
+            written.append(configured)
+    written.append(_write_agent_network_manifest(home))
+    return written
 
 
 
@@ -322,19 +482,19 @@ def _configure_agent_models(
                 "input": ["text"],
                 "reasoning": False,
             })
-        # OpenClaw 2026.7.x stores search configuration on the agent defaults.
-        # Its newer documentation has moved this to top-level ``memory.search``;
-        # keep the deployed runtime's schema valid until that binary is upgraded.
+        # The pinned Apple-container runtime is OpenClaw 2026.7.1, whose
+        # accepted schema keeps search on the agent defaults. Upgrade this
+        # producer together with the pinned image, never from the host CLI's
+        # independently newer schema.
         document.pop("memory", None)
-        memory_search = document.setdefault("agents", {}).setdefault("defaults", {}).setdefault(
-            "memorySearch", {},
-        )
+        defaults = document.setdefault("agents", {}).setdefault("defaults", {})
+        memory_search = defaults.setdefault("memorySearch", {})
         memory_search.update({
             "provider": "ollama",
             "model": OPENCLAW_EMBEDDING_MODEL,
             "remote": {"baseUrl": container_ollama_url.removesuffix("/v1")},
         })
-        document.setdefault("agents", {}).setdefault("defaults", {}).setdefault("model", {})["primary"] = (
+        defaults.setdefault("model", {})["primary"] = (
             f"{provider_name}/{DEFAULT_AGENT_MODEL}"
         )
         temporary = openclaw_path.with_suffix(".json.tmp")
@@ -386,7 +546,7 @@ def install(bridge_host: str) -> int:
     _configure_agent_models()
     print(f"agent model default: {DEFAULT_AGENT_MODEL}")
     _configure_agent_connectivity()
-    print(f"agent network: MCP {MCP_GATEWAY_URL}; A2A {JAEGER_A2A_URL}")
+    print(f"agent network: MCP {MCP_HTTP_URL}; A2A {A2A_URL}")
     honcho_configs = _configure_honcho()
     print(f"agent memory: {len(honcho_configs)} Honcho profiles via {HONCHO_LAN_URL}")
     domain = f"gui/{os.getuid()}"

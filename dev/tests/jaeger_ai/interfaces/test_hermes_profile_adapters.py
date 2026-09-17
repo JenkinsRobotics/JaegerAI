@@ -149,6 +149,17 @@ def test_jaeger_chat_uses_a_fresh_mcp_session_per_turn(monkeypatch):
     assert created[0].calls == ["initialize", ("chat", {"message": "hello", "session_id": "table-1"})]
 
 
+def test_jaeger_host_adapter_uses_native_mcp_by_default(monkeypatch):
+    monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
+    monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
+
+    client = jaeger.current_mcp_client()
+
+    assert client.base_url == "http://127.0.0.1:8792/mcp"
+    assert client.host_header == "127.0.0.1:8792"
+    assert "Authorization" not in client._headers()
+
+
 def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):
     monkeypatch.setattr(
         jaeger,
@@ -209,6 +220,21 @@ def test_setup_launch_modules_exist():
 
     for module, _port in setup.SERVICES.values():
         assert importlib.util.find_spec(module) is not None, module
+
+
+def test_connectivity_repairs_hermes_cli_link(tmp_path):
+    source = tmp_path / "GitHub" / "hermes-agent" / ".venv" / "bin" / "hermes"
+    source.parent.mkdir(parents=True)
+    source.write_text("#!/bin/sh\n", encoding="utf-8")
+    source.chmod(0o755)
+    stale = tmp_path / "bin" / "hermes"
+    stale.parent.mkdir()
+    stale.symlink_to(tmp_path / "missing-hermes")
+
+    configured = setup._configure_hermes_cli(tmp_path)
+
+    assert configured == stale
+    assert stale.resolve() == source.resolve()
 
 
 def test_internal_adapters_default_to_loopback():
@@ -354,7 +380,15 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     jaeger.write_text("external_model:\n  enabled: true\n  model: old:cloud\n")
     openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
-    openclaw.write_text(json.dumps({"agents": {"defaults": {"model": {"primary": "old/model"}}}, "models": {"providers": {"ollama-cloud-via-host": {"models": []}}}}))
+    openclaw.write_text(json.dumps({
+        "agents": {"defaults": {
+            "model": {"primary": "old/model"},
+            "memorySearch": {"provider": "old"},
+        }},
+        "gateway": {"tailscale": {"mode": "off", "resetOnExit": False}},
+        "meta": {"lastTouchedAt": "old", "lastTouchedVersion": "2026.7"},
+        "models": {"providers": {"ollama-cloud-via-host": {"models": []}}},
+    }))
 
     setup._configure_agent_models(tmp_path, container_host="192.168.64.1")
 
@@ -380,6 +414,9 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
         "remote": {"baseUrl": "http://192.168.64.1:11434"},
     }
+    assert config["gateway"]["tailscale"]["resetOnExit"] is False
+    assert config["meta"]["lastTouchedAt"] == "old"
+    assert config["meta"]["lastTouchedVersion"] == "2026.7"
 
 
 def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
@@ -391,18 +428,55 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
     openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text("{}")
+    token_file = tmp_path / ".jaeger" / "gateway" / "mcp.token"
+    token_file.parent.mkdir(parents=True)
+    token_file.write_text("test-secret\n", encoding="utf-8")
+    codex = tmp_path / ".codex" / "config.toml"
+    codex.parent.mkdir(parents=True)
+    codex.write_text(
+        "model = \"test\"\n\n"
+        "[mcp_servers.ares-system]\n"
+        "url = \"http://127.0.0.1:8811/mcp\"\n"
+        "bearer_token_env_var = \"ARES_GATEWAY_TOKEN\"\n"
+    )
+    claude = tmp_path / ".claude.json"
+    claude.write_text(json.dumps({"mcpServers": {"ares-system": {"type": "http", "url": "old"}}}))
 
-    setup._configure_agent_connectivity(tmp_path)
+    written = setup._configure_agent_connectivity(tmp_path)
 
     for profile_home in [tmp_path / ".hermes"] + [
         tmp_path / ".hermes" / "profiles" / profile for profile in setup.SERVICES
     ]:
         config = profile_home.joinpath("config.yaml").read_text()
         assert "jaeger-host:" in config
-        assert setup.MCP_GATEWAY_URL in config
+        assert setup.MCP_HTTP_URL in config
+        assert "mac-host:" not in config
+        assert "ares-host:" not in config
     document = json.loads(openclaw.read_text())
-    assert document["mcp"]["servers"]["jaeger-host"]["url"].endswith(":8811/mcp")
+    assert document["mcp"]["servers"]["jaeger-host"]["url"] == setup.MCP_CONTAINER_GATEWAY_URL
+    assert document["mcp"]["servers"]["jaeger-host"]["headers"] == {
+        "Authorization": "Bearer test-secret",
+    }
     assert "ares-system" not in document["mcp"]["servers"]
+    codex_text = codex.read_text()
+    assert "[mcp_servers.jaeger-local]" in codex_text
+    assert setup.MCP_HTTP_URL in codex_text
+    assert "ares-system" not in codex_text
+    assert "ARES_GATEWAY_TOKEN" not in codex_text
+    claude_document = json.loads(claude.read_text())
+    assert claude_document["mcpServers"]["jaeger-local"] == {
+        "type": "http", "url": setup.MCP_HTTP_URL,
+    }
+    assert "ares-system" not in claude_document["mcpServers"]
+    manifest = json.loads((tmp_path / ".jaeger" / "agent-network.json").read_text())
+    assert manifest["authority"] == "jaeger"
+    assert manifest["mcp"]["host"] == setup.MCP_HTTP_URL
+    assert manifest["mcp"]["container"] == setup.MCP_CONTAINER_GATEWAY_URL
+    assert manifest["mcp"]["container_auth"]["token_file"] == str(token_file)
+    assert manifest["a2a"]["host"] == setup.A2A_URL
+    assert manifest["a2a"]["container"] == setup.A2A_CONTAINER_GATEWAY_URL
+    assert manifest["a2a"]["container_auth"]["scheme"] == "bearer"
+    assert codex in written and claude in written
 
 
 
@@ -429,7 +503,7 @@ def test_setup_removes_openclaw_ares_system_8813_default(tmp_path):
     setup._configure_agent_connectivity(tmp_path)
 
     document = json.loads(openclaw.read_text())
-    assert document["mcp"]["servers"]["jaeger-host"]["url"].endswith(":8811/mcp")
+    assert document["mcp"]["servers"]["jaeger-host"]["url"] == setup.MCP_CONTAINER_GATEWAY_URL
     assert "ares-system" not in document["mcp"]["servers"]
 
 def test_setup_configures_profile_isolated_honcho_peers_on_lan(tmp_path):

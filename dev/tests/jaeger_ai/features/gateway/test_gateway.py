@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from jaeger_ai.features.agentgateway.config import config_is_stale, default_config, ensure_config
@@ -31,14 +32,25 @@ def test_default_config_targets_jaeger_not_archive_ports(tmp_path: Path) -> None
         for backend in route["backends"]
     ]
     assert backends == [f"127.0.0.1:{A2A_BACKEND_PORT}"] * 3
+    policy = cfg["mcp"]["policies"]["apiKey"]
+    token = (tmp_path / "gateway" / "mcp.token").read_text().strip()
+    assert policy["mode"] == "strict"
+    assert policy["keys"] == [{
+        "keyHash": f"sha256:{hashlib.sha256(token.encode()).hexdigest()}"
+    }]
+    for route in cfg["binds"][0]["listeners"][0]["routes"]:
+        assert route["policies"]["apiKey"]["mode"] == "strict"
 
 
 def test_ensure_config_writes_token_file_without_embedding_it(tmp_path: Path) -> None:
     path = ensure_config(tmp_path)
     text = path.read_text(encoding="utf-8")
     token = (tmp_path / "gateway" / "client.token").read_text(encoding="utf-8").strip()
+    mcp_token = (tmp_path / "gateway" / "mcp.token").read_text(encoding="utf-8").strip()
     assert token
     assert token not in text
+    assert mcp_token not in text
+    assert hashlib.sha256(mcp_token.encode()).hexdigest() in text
     assert "ares" not in text.lower()
     assert path.stat().st_mode & 0o077 == 0
 
@@ -53,6 +65,26 @@ def test_stale_archive_config_is_rewritten(tmp_path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert "ares" not in text.lower()
     assert f"127.0.0.1:{MCP_HTTP_PORT}/mcp" in text
+
+
+def test_security_migration_preserves_non_jaeger_targets(tmp_path: Path) -> None:
+    gateway = tmp_path / "gateway"
+    gateway.mkdir()
+    path = gateway / "config.yaml"
+    path.write_text(
+        "mcp:\n  port: 8811\n  targets:\n"
+        "  - name: jaeger\n    mcp:\n      host: http://127.0.0.1:8792/mcp\n"
+        "  - name: custom\n    stdio:\n      cmd: /bin/custom\n"
+        "binds:\n- port: 8812\n  listeners:\n  - routes:\n"
+        "    - backends:\n      - host: 127.0.0.1:8796\n",
+        encoding="utf-8",
+    )
+
+    ensure_config(tmp_path)
+
+    text = path.read_text(encoding="utf-8")
+    assert "name: custom" in text
+    assert "apiKey:" in text
 
 
 def test_locate_binary_ignores_non_jaeger_user_link(tmp_path: Path, monkeypatch) -> None:

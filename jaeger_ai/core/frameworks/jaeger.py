@@ -24,7 +24,7 @@ import urllib.error
 from pathlib import Path
 from .resilience import CircuitBreaker, timeout_setting
 from .native_runs import Runs, RunsHTTP, jaeger_reconcile, jaeger_turn, profile_key
-from jaeger_ai.contract.ports import MCP_GATEWAY_URL
+from jaeger_ai.contract.ports import MCP_HTTP_URL
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
@@ -45,17 +45,13 @@ def _profile_secret(name: str) -> str:
 
 
 def mcp_api_key() -> str:
-    """Resolve the current MCP credential for every connection attempt."""
+    """Resolve an optional MCP credential for every connection attempt."""
     key = os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret("MCP_ARES_HOST_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "MCP credential missing: set JAEGERS_MCP_API_KEY or MCP_ARES_HOST_API_KEY "
-            "in the Jaeger profile"
-        )
     return key
 
 
-MCP_HOST_HEADER = os.environ.get("JAEGERS_MCP_HOST", "127.0.0.1:8811")
+MCP_URL = MCP_HTTP_URL
+MCP_HOST_HEADER = os.environ.get("JAEGERS_MCP_HOST", "127.0.0.1:8792")
 ADAPTER_PORT = int(os.environ.get("JAEGERS_ADAPTER_PORT", "8642"))
 ADAPTER_HOST = os.environ.get("JAEGERS_ADAPTER_HOST", "127.0.0.1")
 REQUEST_TIMEOUT = timeout_setting("JAEGERS_ADAPTER_REQUEST_TIMEOUT")
@@ -100,9 +96,10 @@ class MCPClient:
         h = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "Authorization": f"Bearer {self.api_key}",
             "Host": self.host_header,
         }
+        if self.api_key:
+            h["Authorization"] = f"Bearer {self.api_key}"
         if self._session_id:
             h["Mcp-Session-Id"] = self._session_id
         if extra:
@@ -258,7 +255,7 @@ _runs_lock = threading.Lock()
 
 def current_mcp_client() -> MCPClient:
     """Build a client with the latest credential instead of import-time state."""
-    return MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
+    return MCPClient(MCP_URL, mcp_api_key(), MCP_HOST_HEADER)
 _native_runs = None
 _native_lock = threading.Lock()
 
@@ -654,7 +651,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = ProfileHTTPServer((ADAPTER_HOST, ADAPTER_PORT), RunHandler)
     print(f"[jaeger-bridge] REST adapter listening on {ADAPTER_HOST}:{ADAPTER_PORT}")
-    print(f"[jaeger-bridge] MCP gateway: {MCP_GATEWAY_URL}")
+    print(f"[jaeger-bridge] Native MCP: {MCP_URL}")
     print(f"[jaeger-bridge] Endpoints: /v1/runs, /v1/chat/completions, /health")
     try:
         server.serve_forever()

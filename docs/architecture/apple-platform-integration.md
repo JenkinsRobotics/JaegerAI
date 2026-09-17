@@ -1,7 +1,7 @@
 # Apple platform integration
 
-Status: approved direction, implementation pending  
-Date: 2026-09-15  
+Status: macOS foundation live; mobile seam pending
+Date: 2026-09-15
 Targets: macOS 27, iOS 27, iPadOS 27, watchOS 27
 
 ## Outcome
@@ -30,6 +30,16 @@ The repository already has:
 - audited Mac tools for Calendar, Reminders, Notes, and Shortcuts;
 - `JaegerAgentController` and `WorkLedger` as the completion authority for
   actionable work.
+- native Jaeger-owned MCP and A2A servers used by local agent frameworks;
+- one generated local network contract for Codex, Claude Code, Hermes Agent,
+  and OpenClaw;
+- a launchd fabric supervisor that monitors Jaeger, Hermes Agent, OpenClaw,
+  Roundtable, A2A, and Ollama.
+
+The MCP surface exposes discovery, health, chat, delegation, finance, bridge
+queries, and bridge commands. Apple application actions remain behind the
+`chat` entrypoint so another framework cannot bypass Jaeger's identity grants,
+approval policy, controller, or WorkLedger verification.
 
 The current Apple client is macOS-only. Its Swift package requires macOS 14,
 starts a local `jaeger bridge` child, and defaults to loopback URLs. The Gateway
@@ -201,4 +211,3 @@ vertical slice is:
 
 This proves the permanent droid is reachable and trustworthy before Calendar,
 Photos, Health, Home, travel, or proactive automation increase its authority.
-

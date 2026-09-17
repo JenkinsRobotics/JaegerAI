@@ -109,6 +109,19 @@ def test_the_chat_spine_ports_are_what_the_docs_promise() -> None:
         assert str(port) in topology, f"port {port} is not in AGENTS.md's topology"
 
 
+def test_framework_protocol_urls_derive_from_the_port_contract() -> None:
+    assert ports.MCP_GATEWAY_URL == f"http://{ports.LOOPBACK}:{ports.MCP_GATEWAY_PORT}/mcp"
+    assert ports.MCP_CONTAINER_GATEWAY_URL == (
+        f"http://{ports.CONTAINER_HOST}:{ports.MCP_GATEWAY_PORT}/mcp"
+    )
+    assert ports.MCP_HTTP_URL == f"http://{ports.LOOPBACK}:{ports.MCP_HTTP_PORT}/mcp"
+    assert ports.A2A_GATEWAY_URL == f"http://{ports.LOOPBACK}:{ports.A2A_GATEWAY_PORT}"
+    assert ports.A2A_CONTAINER_GATEWAY_URL == (
+        f"http://{ports.CONTAINER_HOST}:{ports.A2A_GATEWAY_PORT}"
+    )
+    assert ports.A2A_URL == f"http://{ports.LOOPBACK}:{ports.A2A_PORT}"
+
+
 def test_hardware_ports_are_not_redeclared_here() -> None:
     """Engine facts live in jaeger_os.contract; copying them back is the bug."""
     assert not [n for n in ports.__all__ if "ANIMATION" in n or "JP01" in n], (

@@ -56,14 +56,15 @@ Check their launchd state:
 python -m jaeger_ai.core.frameworks.setup status
 ```
 
-The default bridge address is `192.168.64.1`, the macOS host address visible
-from Apple containers. Override it with `--bridge-host` when the container
-network uses another stable host address.
+Native Hermes Agent runs on macOS and uses Jaeger's direct MCP endpoint at
+`127.0.0.1:8792/mcp`. OpenClaw runs in an Apple container and crosses the host
+boundary through Jaeger's Agentgateway at `192.168.64.1:8811/mcp`. Override `--bridge-host` only when the
+container network uses another stable host address.
 
 Credentials are read from local environment/token files and are never stored
-in this package. Jaeger and Roundtable read `MCP_ARES_HOST_API_KEY` from the
-Jaeger Hermes profile `.env` when no explicit adapter environment variable is
-set. OpenClaw reads `~/.ares/openclaw/gateway.token`.
+in this package. Framework endpoint configuration is generated locally in the
+framework's normal configuration file and summarized without credentials in
+`~/.jaeger/agent-network.json`.
 
 The temporary common model default is `glm-5.3-flash:cloud` through Ollama.
 Installation applies it to the three WebUI profiles, Jaeger's native external
