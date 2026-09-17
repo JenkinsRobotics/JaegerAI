@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 from pathlib import Path
@@ -38,18 +39,27 @@ def _issue_token(path: Path) -> str:
     return value
 
 
+def _api_key_policy(root: Path | None = None) -> dict[str, Any]:
+    value = _issue_token(mcp_token_path(root))
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return {
+        "mode": "strict",
+        "keys": [{"keyHash": f"sha256:{digest}"}],
+    }
+
+
 
 def default_config(root: Path | None = None) -> dict[str, Any]:
-    """Loopback Agentgateway config targeting Jaeger MCP HTTP + A2A backend.
+    """Authenticated Agentgateway config targeting loopback Jaeger backends.
 
-    Inbound MCP/A2A on loopback are open (no copied ARES apiKey hashes).
-    A Jaeger-owned token is still issued under ~/.jaeger/gateway/ for
-    operators who later enable strict apiKey mode. The token is never
-    printed.
+    The proxy binds a container-reachable socket, so MCP and A2A require the
+    Jaeger-owned API key. Only a SHA-256 hash is stored in this config; the
+    token itself remains in a private state file and is never printed.
     """
     state = gateway_dir(root)
     mcp_url = f"http://{MCP_HTTP_HOST}:{MCP_HTTP_PORT}{MCP_HTTP_PATH}"
     a2a_backend = f"{A2A_BACKEND_HOST}:{A2A_BACKEND_PORT}"
+    api_key = _api_key_policy(root)
     return {
         "config": {
             "database": {"url": f"sqlite://{state / 'data.db'}"},
@@ -68,7 +78,8 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                         "mcp-session-id",
                     ],
                     "exposeHeaders": ["Mcp-Session-Id"],
-                }
+                },
+                "apiKey": api_key,
             },
             "targets": [
                 {
@@ -87,7 +98,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                 "matches": [
                                     {"path": {"exact": "/.well-known/agent-card.json"}}
                                 ],
-                                "policies": {"a2a": {}},
+                                "policies": {"a2a": {}, "apiKey": api_key},
                                 "backends": [{"host": a2a_backend}],
                             },
                             {
@@ -96,7 +107,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                 "matches": [
                                     {"path": {"exact": "/.well-known/agent.json"}}
                                 ],
-                                "policies": {"a2a": {}},
+                                "policies": {"a2a": {}, "apiKey": api_key},
                                 "backends": [{"host": a2a_backend}],
                             },
                             {
@@ -110,6 +121,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                         ],
                                     },
                                     "a2a": {},
+                                    "apiKey": api_key,
                                 },
                                 "backends": [{"host": a2a_backend}],
                             },
@@ -135,6 +147,8 @@ def config_is_stale(path: Path) -> bool:
         return True
     if f"{A2A_BACKEND_HOST}:{A2A_BACKEND_PORT}" not in text:
         return True
+    if "apiKey:" not in text or "keyHash:" not in text:
+        return True
     return False
 
 
@@ -149,6 +163,18 @@ def ensure_config(root: Path | None = None, *, force: bool = False) -> Path:
     if not force and not config_is_stale(output):
         return output
     payload = default_config(root)
+    if output.exists():
+        try:
+            previous = yaml.safe_load(output.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            previous = {}
+        if isinstance(previous, dict) and "ares" not in output.read_text(encoding="utf-8").lower():
+            old_targets = previous.get("mcp", {}).get("targets", [])
+            extras = [
+                target for target in old_targets
+                if isinstance(target, dict) and target.get("name") != "jaeger"
+            ]
+            payload["mcp"]["targets"].extend(extras)
     temporary = output.with_suffix(".yaml.tmp")
     temporary.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     temporary.chmod(0o600)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Any
 
@@ -18,6 +19,7 @@ from .constants import (
 )
 from .install import InstallError, install_binary
 from .service import GatewayError, start as start_gateway, status as gateway_status, stop as stop_gateway
+from .verify import verify_native_services_sync
 
 
 def _print_status(row: dict[str, Any]) -> None:
@@ -49,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("start", help="write config if needed and start the binary")
     sub.add_parser("stop", help="stop the Jaeger-owned Agentgateway process")
     sub.add_parser("status", help="show binary, config, pid, and ports")
+    verify_parser = sub.add_parser(
+        "verify", help="exercise Jaeger's native MCP and A2A protocols"
+    )
+    verify_parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
 
     try:
@@ -76,6 +82,19 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print("Agentgateway was not running")
             return 0
+        if args.command == "verify":
+            row = verify_native_services_sync()
+            if args.as_json:
+                print(json.dumps(row, indent=2, sort_keys=True))
+            else:
+                print(f"native MCP: {'ready' if row['mcp'].get('ok') else 'failed'}")
+                print(f"native A2A: {'ready' if row['a2a'].get('ok') else 'failed'}")
+                if row["mcp"].get("tools"):
+                    print(f"  MCP tools: {len(row['mcp']['tools'])}")
+                for protocol in ("mcp", "a2a"):
+                    if row[protocol].get("error"):
+                        print(f"  {protocol.upper()} error: {row[protocol]['error']}")
+            return 0 if row["ok"] else 1
         _print_status(gateway_status())
         return 0
     except (GatewayError, InstallError) as exc:

@@ -238,7 +238,7 @@ class JaegerGatewayApp:
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
         """Read-only MCP and native-agent readiness; never executes chat."""
         from jaeger_ai.core.frameworks.jaeger import (
-            MCP_GATEWAY_URL, MCP_HOST_HEADER, mcp_api_key,
+            MCP_URL, MCP_HOST_HEADER, mcp_api_key,
         )
         headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
 
@@ -249,7 +249,7 @@ class JaegerGatewayApp:
             try:
                 timeout = ClientTimeout(total=min(1.0, timeout_s))
                 async with ClientSession(timeout=timeout) as client:
-                    async with client.delete(MCP_GATEWAY_URL, headers=headers) as response:
+                    async with client.delete(MCP_URL, headers=headers) as response:
                         # Session termination is best-effort health-check cleanup. A
                         # proxy may answer 404 after already reaping the session.
                         if response.status not in {200, 202, 204, 404}:
@@ -258,7 +258,7 @@ class JaegerGatewayApp:
                 pass
 
         async def rpc(client, method, params, identity):
-            async with client.post(MCP_GATEWAY_URL, headers=headers, json={
+            async with client.post(MCP_URL, headers=headers, json={
                 "jsonrpc": "2.0", "id": identity, "method": method, "params": params,
             }) as response:
                 response.raise_for_status()
@@ -290,14 +290,16 @@ class JaegerGatewayApp:
                 return value.get("result", {})
 
         try:
-            headers["Authorization"] = f"Bearer {mcp_api_key()}"
+            key = mcp_api_key()
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
             async with asyncio.timeout(timeout_s):
                 async with ClientSession(timeout=ClientTimeout(total=timeout_s)) as client:
                     await rpc(client, "initialize", {
                         "protocolVersion": "2024-11-05", "capabilities": {},
                         "clientInfo": {"name": "jaeger-health", "version": "1"},
                     }, 1)
-                    async with client.post(MCP_GATEWAY_URL, headers=headers, json={
+                    async with client.post(MCP_URL, headers=headers, json={
                         "jsonrpc": "2.0", "method": "notifications/initialized",
                     }) as response:
                         response.raise_for_status()
@@ -316,7 +318,7 @@ class JaegerGatewayApp:
                     transport_ready = chat_available
                     ok = chat_available and agent_ready
                     return {
-                        "ok": ok, "required": True, "url": MCP_GATEWAY_URL,
+                        "ok": ok, "required": True, "url": MCP_URL,
                         "transport_ready": transport_ready,
                         "chat_tool_available": chat_available,
                         "agent_ready": agent_ready,
@@ -325,7 +327,7 @@ class JaegerGatewayApp:
                     }
         except Exception as exc:
             return {
-                "ok": False, "required": True, "url": MCP_GATEWAY_URL,
+                "ok": False, "required": True, "url": MCP_URL,
                 "error": type(exc).__name__,
                 "transport_ready": False,
                 "chat_tool_available": False,
@@ -952,7 +954,7 @@ class JaegerGatewayApp:
         mcp_session: str | None = None,
         allowed_tools: list[str] | None = None,
     ) -> tuple[str, str] | None:
-        """Lead turn via existing Hermes MCPClient chat (JAEGERS_MCP_URL / :8811).
+        """Lead turn via the Jaeger-owned native MCP server on loopback.
 
         Returns ``(response_text, backend_label)`` on success, or ``None`` when
         no result was confirmed. An uncertain execution must not be retried here.
@@ -973,13 +975,12 @@ class JaegerGatewayApp:
 
             from jaeger_ai.core.frameworks.jaeger import (
                 MCPClient,
-                MCP_GATEWAY_URL,
+                MCP_URL,
                 MCP_HOST_HEADER,
                 mcp_api_key,
             )
 
-            # Reuse Hermes MCPClient transport. Agentgateway (:8811) exposes
-            # the target as ``jaeger_chat``; direct MCP HTTP (:8792) uses ``chat``.
+            # Reuse the framework MCP client against Jaeger's native HTTP server.
             args: dict[str, Any] = {"message": text, "session_id": native_session}
             if request_id:
                 args["request_id"] = request_id
@@ -991,10 +992,10 @@ class JaegerGatewayApp:
                 request_id,
             )
             key = mcp_api_key()
-            signature = (MCPClient, MCP_GATEWAY_URL, key, MCP_HOST_HEADER)
+            signature = (MCPClient, MCP_URL, key, MCP_HOST_HEADER)
             with self._mcp_transport_lock:
                 if signature != self._mcp_transport_signature:
-                    client = MCPClient(MCP_GATEWAY_URL, key, MCP_HOST_HEADER)
+                    client = MCPClient(MCP_URL, key, MCP_HOST_HEADER)
                     client.initialize()
                     names = frozenset(tool.get("name") for tool in client.list_tools())
                     self._mcp_transport = client
@@ -1019,7 +1020,7 @@ class JaegerGatewayApp:
             if not response_text:
                 raise RuntimeError("MCP chat returned empty content")
             label = "mcp"
-            host = (urlparse(MCP_GATEWAY_URL).netloc or "").strip()
+            host = (urlparse(MCP_URL).netloc or "").strip()
             if host:
                 label = f"mcp:{host}"
             return response_text, label
@@ -1095,7 +1096,7 @@ class JaegerGatewayApp:
         *,
         request_id: str | None = None,
     ) -> None:
-        """Background turn executor: lead via MCP :8811, specialist via Ollama.
+        """Background turn executor: lead via native MCP, specialist via Ollama.
 
         Final assistant text is persisted before turn.finish is published.
         Cancellation is explicit; a dropped SSE client does not stop work.
@@ -1301,10 +1302,10 @@ class JaegerGatewayApp:
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
             from jaeger_ai.core.frameworks.jaeger import (
-                MCPClient, MCP_GATEWAY_URL, MCP_HOST_HEADER, mcp_api_key,
+                MCPClient, MCP_URL, MCP_HOST_HEADER, mcp_api_key,
             )
             def _call() -> bool:
-                client = MCPClient(MCP_GATEWAY_URL, mcp_api_key(), MCP_HOST_HEADER)
+                client = MCPClient(MCP_URL, mcp_api_key(), MCP_HOST_HEADER)
                 client.initialize()
                 names = {tool.get("name") for tool in client.list_tools()}
                 tool = next((n for n in ("cancel_turn", "jaeger_cancel_turn") if n in names), None)

@@ -40,12 +40,31 @@ class Component:
     repair: Callable[[], bool]
 
 
-def _http(url: str, *, accepted: tuple[int, ...] = (200,)) -> bool:
+def _http(
+    url: str,
+    *,
+    accepted: tuple[int, ...] = (200,),
+    headers: dict[str, str] | None = None,
+) -> bool:
     try:
-        with urllib.request.urlopen(url, timeout=4) as response:
+        request = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(request, timeout=4) as response:
             return response.status in accepted
     except Exception:  # noqa: BLE001
         return False
+
+
+def _agentgateway_http(url: str) -> bool:
+    """Probe the private MCP/A2A proxy with its Jaeger-owned bearer."""
+    try:
+        from jaeger_ai.features.agentgateway.constants import mcp_token_path
+
+        token = mcp_token_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if not token:
+        return False
+    return _http(url, headers={"Authorization": f"Bearer {token}"})
 
 
 def _tcp(host: str, port: int) -> bool:
@@ -232,7 +251,7 @@ def components() -> tuple[Component, ...]:
         Component(
             "a2a",
             lambda: _http("http://127.0.0.1:8796/.well-known/agent-card.json")
-            and _http("http://127.0.0.1:8812/.well-known/agent-card.json"),
+            and _agentgateway_http("http://127.0.0.1:8812/.well-known/agent-card.json"),
             _repair_a2a,
         ),
         Component(

@@ -5,7 +5,6 @@ Run with the repo's .venv Python. Inspection/config backups are private local
 state. This never deletes containers, copies credentials into images, or pushes.
 """
 import argparse
-import copy
 from datetime import UTC, datetime
 import json
 import os
@@ -17,9 +16,13 @@ import time
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import yaml
 from jaeger_ai.core.runtime import agent_workspaces as aw
-from jaeger_ai.core.frameworks.setup import _configure_webui_workspaces
+from jaeger_ai.core.frameworks.setup import (
+    _configure_agent_connectivity,
+    _configure_webui_workspaces,
+)
+from jaeger_ai.features.agentgateway.service import start as start_gateway
+from jaeger_ai.features.agentgateway.service import stop as stop_gateway
 
 ENGINE = "/opt/homebrew/bin/container"
 
@@ -75,43 +78,12 @@ def configure(backup):
         index.append(entry)
         atomic_write(index_path, json.dumps(index, indent=2))
 
-    gateway_path = home / ".jaeger/gateway/config.yaml"
-    gateway = yaml.safe_load(gateway_path.read_text())
-    targets = gateway["mcp"]["targets"]
-    if not any(t.get("name") == "host-hermes" for t in targets):
-        template = next(t for t in targets if t.get("name") == "host-openclaw")
-        target = copy.deepcopy(template)
-        target["name"] = "host-hermes"
-        target["stdio"]["env"]["ARES_CAPABILITY_IDENTITY"] = "hermes"
-        targets.append(target)
-    venv_py = home / ".jaeger/venv/bin/python"
-    if not venv_py.exists():
-        venv_py = aw.REPO_ROOT / ".venv/bin/python"
-    for target in targets:
-        if target.get("name") in ("host-hermes", "host-openclaw"):
-            target["stdio"]["cmd"] = str(venv_py)
-            target["stdio"]["args"] = [str(aw.REPO_ROOT / "scripts/run-host-capability-server.py")]
-    save(gateway_path)
-    atomic_write(gateway_path, yaml.safe_dump(gateway, sort_keys=False))
-
     profile_homes = [home / ".hermes"] + [home / ".hermes/profiles" / name for name in ("jaeger", "roundtable", "openclaw")]
     for profile_home in profile_homes:
-        path = profile_home / "config.yaml"
-        document = yaml.safe_load(path.read_text())
-        servers = document.setdefault("mcp_servers", {})
-        for name in ("jaeger-host", "ares-host"):
-            if name in servers:
-                servers[name]["url"] = "http://192.168.64.1:8811/mcp"
-        if profile_home == home / ".hermes":
-            servers["mac-host"] = {
-                "url": "http://192.168.64.1:8813/mcp", "enabled": True,
-                "connect_timeout": 10.0,
-                "headers": {"Authorization": "Bearer ${MCP_ARES_HOST_API_KEY}", "Host": "127.0.0.1:8813"},
-            }
-        save(path)
-        atomic_write(path, yaml.safe_dump(document, sort_keys=False))
+        save(profile_home / "config.yaml")
         state_dir = profile_home if profile_home == home / ".hermes" else profile_home / "webui_state"
         save(state_dir / "workspaces.json")
+    _configure_agent_connectivity(home)
     _configure_webui_workspaces(home)
 
     block = (aw.REPO_ROOT / "integrations/agent_workspaces/AGENT_CONTEXT.md").read_text()
@@ -140,8 +112,9 @@ def restore_configuration(backup):
 
 
 def restart_host_gateway():
-    subprocess.run(["/bin/launchctl", "kickstart", "-k",
-                    f"gui/{os.getuid()}/com.jenkinsrobotics.ares-agentgateway"], check=True, timeout=30)
+    """Restart the Jaeger-owned proxy retained for compatibility clients."""
+    stop_gateway()
+    start_gateway()
 
 
 def healthy(role):
