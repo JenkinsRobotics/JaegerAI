@@ -15,6 +15,20 @@ struct ServerReply: Decodable {
     let services: [ServerStatus]
 }
 
+private enum ServerControlError: LocalizedError {
+    case noResponse(String)
+    case invalidResponse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .noResponse(let detail):
+            return "Server controls did not respond. \(detail)"
+        case .invalidResponse(let detail):
+            return "Server controls returned invalid data. \(detail)"
+        }
+    }
+}
+
 @MainActor
 final class ServerControls: ObservableObject {
     @Published var services: [ServerStatus] = []
@@ -25,23 +39,35 @@ final class ServerControls: ObservableObject {
     private func request(_ arguments: [String]) async throws -> ServerReply {
         try await Task.detached {
             let process = Process()
-            let pipe = Pipe()
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: BridgeProcess.jaegerPath())
             process.arguments = ["webui", "servers"] + arguments
-            process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
             try process.run()
             let watchdog = Task {
                 try? await Task.sleep(for: .seconds(180))
                 if !Task.isCancelled && process.isRunning { process.terminate() }
             }
             defer { watchdog.cancel() }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
+            let stderr = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !data.isEmpty else {
-                throw BridgeError.launchFailed("Server controls did not respond. Check the Jaeger installation.")
+                let detail = stderr.isEmpty
+                    ? "Command exited with status \(process.terminationStatus)."
+                    : stderr
+                throw ServerControlError.noResponse(detail)
             }
-            return try JSONDecoder().decode(ServerReply.self, from: data)
+            do {
+                return try JSONDecoder().decode(ServerReply.self, from: data)
+            } catch {
+                let detail = stderr.isEmpty ? error.localizedDescription : stderr
+                throw ServerControlError.invalidResponse(detail)
+            }
         }.value
     }
 
@@ -52,7 +78,7 @@ final class ServerControls: ObservableObject {
         do {
             let reply = try await request(["status"])
             services = reply.services
-            if !reply.ok { error = reply.error }
+            error = reply.ok ? nil : reply.error
         } catch { self.error = error.localizedDescription }
     }
 
@@ -63,7 +89,7 @@ final class ServerControls: ObservableObject {
         do {
             let reply = try await request([action, service])
             services = reply.services
-            error = reply.error
+            error = reply.ok ? nil : reply.error
         } catch { self.error = error.localizedDescription }
         busy = false
     }

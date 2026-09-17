@@ -120,11 +120,9 @@ class ServerControls:
                 self.execute([cli, 'system', 'stop'])
                 self.checked([cli, 'system', 'start', '--disable-kernel-install'])
             return
-        if service in {'hermes', 'openclaw'}:
+        if service == 'openclaw':
             cli = self.container_cli()
             name = self.container(service)
-            if service == 'hermes' and action in {'stop', 'restart'}:
-                self.launch(service, 'stop')
             if action in {'stop', 'restart'}:
                 # Stopping an already stopped container is a successful no-op.
                 result = self.execute([cli, 'inspect', name])
@@ -141,8 +139,6 @@ class ServerControls:
                     raise RuntimeError('Configured container is not installed')
                 if json.loads(result.stdout)[0]['status']['state'] != 'running':
                     self.checked([cli, 'start', name])
-                if service == 'hermes':
-                    self.launch(service, 'start')
         else:
             self.launch(service, action)
 
