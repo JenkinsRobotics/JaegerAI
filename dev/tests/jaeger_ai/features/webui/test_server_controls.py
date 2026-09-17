@@ -45,11 +45,12 @@ def test_stop_all_reverses_dependency_order(controls, monkeypatch):
     assert seen == list(reversed(SERVICES))
 
 
-def test_hermes_starts_container_before_native_api(controls):
+def test_hermes_agent_uses_native_launch_agent_only(controls):
     assert controls.change('hermes', 'start')['ok']
-    assert ['/opt/homebrew/bin/container', 'system', 'start', '--disable-kernel-install'] in controls.calls
-    assert ['/opt/homebrew/bin/container', 'start', 'test-hermes'] in controls.calls
-    assert controls.calls[-1][-1].endswith(SERVICES['hermes'][1])
+    assert controls.calls == [
+        ['/bin/launchctl', 'print', controls.domain + '/' + SERVICES['hermes'][1]],
+        ['/bin/launchctl', 'kickstart', controls.domain + '/' + SERVICES['hermes'][1]]
+    ]
 
 
 def test_container_daemon_start_and_stop(controls):
