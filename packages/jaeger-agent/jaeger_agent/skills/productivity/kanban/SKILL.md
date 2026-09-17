@@ -17,7 +17,7 @@ metadata:
     - deep-think
     - writing-plans
     - subagent-driven-development
-    version: 1.4.0
+    version: 1.5.0
     platforms:
     - linux
     - macos
@@ -98,6 +98,10 @@ needs the Deep Think coder model, ALSO call `propose_deep_think_task(description
 - "unknown tool 'X'" -> after ONE such failure the dispatcher does not expose it
   on this surface, whatever the registry claims; stop calling it and take the
   documented fallback path immediately.
+- A tool that TIMED OUT (e.g. get_events) is presumed broken for the rest of the
+  tick — do NOT retry it, skip the side-call, and finish the board action. A
+  side-call must never kill the tick: the board work is the objective; the
+  side-call is optional garnish.
 
 ## DONE WHEN
 Urgent work is done, every deferrable item is a card on the board (not dropped,
