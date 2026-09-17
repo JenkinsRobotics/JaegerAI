@@ -128,8 +128,8 @@ def get_or_create_master_key(custom_dir: Path | None = None) -> bytes:
 class FinanceCipher:
     """Authenticated encryption (AES-256-GCM) for sensitive fields."""
 
-    def __init__(self, key: bytes | None = None) -> None:
-        self._key = key or get_or_create_master_key()
+    def __init__(self, key: bytes | None = None, custom_dir: Path | None = None) -> None:
+        self._key = key or get_or_create_master_key(custom_dir=custom_dir)
         self._aesgcm = AESGCM(self._key)
 
     def encrypt(self, plaintext: str) -> str:
