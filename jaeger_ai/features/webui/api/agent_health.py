@@ -587,7 +587,8 @@ def _run_remote_probe(base_url: str) -> dict[str, Any]:
     ``_REMOTE_PROBE_TIMEOUT_S``. It runs OUTSIDE the probe lock so a single
     "leader" thread does it while latecomers wait for the cached result.
     """
-    last_status: int | None = None
+    responded_status: int | None = None
+    responded_endpoint: str | None = None
     last_error: str | None = None
     gateway_api_key = _remote_gateway_api_key()
     for path in _REMOTE_PROBE_PATHS:
@@ -619,19 +620,36 @@ def _run_remote_probe(base_url: str) -> dict[str, Any]:
                 "checked_at": _checked_at(),
                 "details": details,
             }
-        # Remember the most informative failure signal we saw.
-        if status is not None:
-            last_status = status
+        # Any HTTP response proves that the declared gateway process is alive.
+        # Keep walking because another supported health path may still return a
+        # healthy 2xx payload, but retain the first response as degraded
+        # liveness evidence. Jaeger's /health intentionally returns 503 when a
+        # required backend is temporarily busy; treating that readiness result
+        # as process death produces a false "agent is not responding" banner
+        # during long, otherwise healthy turns.
+        if status is not None and responded_status is None:
+            responded_status = status
+            responded_endpoint = base_url + path
         if err is not None:
             last_error = err
+
+    if responded_status is not None:
+        return {
+            "alive": True,
+            "checked_at": _checked_at(),
+            "details": {
+                "state": "degraded",
+                "reason": "remote_gateway_http_response",
+                "endpoint": responded_endpoint or base_url,
+                "status_code": responded_status,
+            },
+        }
 
     details = {
         "state": "down",
         "reason": "remote_gateway_unreachable",
         "endpoint": base_url,
     }
-    if last_status is not None:
-        details["status_code"] = last_status
     if last_error is not None:
         details["error"] = last_error
     return {
