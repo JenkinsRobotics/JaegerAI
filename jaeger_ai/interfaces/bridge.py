@@ -2402,6 +2402,10 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     for field in ("model", "provider"):
                         if req.get(field):
                             voice_kwargs[field] = req[field]
+                    if req.get("is_subordinate"):
+                        voice_kwargs["is_subordinate"] = True
+                    if req.get("turn_id"):
+                        voice_kwargs["request_id"] = str(req.get("turn_id"))
                     if display_text is not None:
                         voice_kwargs["display_text"] = str(display_text)
                     def _emit_reasoning(chunk: str, _session: str = session) -> None:

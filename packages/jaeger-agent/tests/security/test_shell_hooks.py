@@ -243,7 +243,7 @@ def test_hooked_executor_blocks_the_call(instance, tmp_path, monkeypatch):
 
     out = HookedToolExecutor(inner).execute(tool, {"command": "ls"})
     assert out["ok"] is False
-    assert out["error_type"] == "blocked_by_hook"
+    assert out["error_type"] in {"blocked_by_hook", "blocked_by_authority"}
     assert out["retryable"] is False
     inner.execute.assert_not_called()
 
@@ -259,6 +259,33 @@ def test_hooked_executor_passes_through_when_allowed(instance, monkeypatch):
 
     out = HookedToolExecutor(inner).execute(tool, {})
     assert out == {"ok": True, "value": 42}
+    inner.execute.assert_called_once()
+
+
+def test_pre_tool_call_hook_fires_exactly_once(instance, tmp_path, monkeypatch):
+    """Live Phase 4: executor + AuthorityLayer must not double-fire hooks."""
+    from jaeger_agent import shell_hooks as sh
+    from jaeger_agent.tool_executor import HookedToolExecutor
+
+    cmd = _script(tmp_path, "count.sh", "exit 0\n")
+    _hooks(monkeypatch, pre_tool_call=[cmd])
+    sh.approve("pre_tool_call", cmd)
+
+    fires: list[str] = []
+    real_fire = sh.fire
+
+    def counting_fire(event, **kwargs):
+        fires.append(event)
+        return real_fire(event, **kwargs)
+
+    monkeypatch.setattr(sh, "fire", counting_fire)
+
+    inner = mock.Mock()
+    inner.execute.return_value = {"ok": True}
+    tool = mock.Mock()
+    tool.name = "terminal"
+    HookedToolExecutor(inner).execute(tool, {"command": "echo ok"})
+    assert fires.count("pre_tool_call") == 1
     inner.execute.assert_called_once()
 
 

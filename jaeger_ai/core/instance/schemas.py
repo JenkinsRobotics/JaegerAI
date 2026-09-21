@@ -318,6 +318,32 @@ class HeartbeatConfig(BaseModel):
         json_schema_extra=_setting("autonomy", advanced=True),
         description="Session key synthetic heartbeat turns run under.",
     )
+    sleep_interval_minutes: int = Field(
+        30, ge=0, le=240,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Minutes of idle time before sleep-time consolidation. 0 = off.",
+    )
+
+
+class DesktopSensorConfig(BaseModel):
+    """Optional desktop activity sensing. Off by default for privacy."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        False,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Poll safe desktop metadata (frontmost app, idle, disk).",
+    )
+    interval_seconds: float = Field(
+        15.0, ge=1.0, le=3600.0,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Seconds between desktop sensor polls.",
+    )
+
+
+class SensorsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    desktop: DesktopSensorConfig = Field(default_factory=DesktopSensorConfig)
 
 
 class TirithConfig(BaseModel):
@@ -1135,6 +1161,7 @@ class Config(BaseModel):
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
     deep_think: DeepThinkConfig = Field(default_factory=DeepThinkConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    sensors: SensorsConfig = Field(default_factory=SensorsConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     checkpoints: CheckpointsConfig = Field(default_factory=CheckpointsConfig)
     tirith: TirithConfig = Field(default_factory=TirithConfig)

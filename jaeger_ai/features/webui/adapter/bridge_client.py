@@ -64,7 +64,8 @@ class BridgeClient:
              on_request: Callable[[dict[str, Any]], str] | None = None,
              *, turn_id: str | None = None, workspace: str | None = None,
              model: str | None = None, provider: str | None = None,
-             allowed_tools: list[str] | None = None) -> dict[str, Any]:
+             allowed_tools: list[str] | None = None,
+             is_subordinate: bool = False) -> dict[str, Any]:
         with self._connection() as (_sock, rx):
             self._ready(rx)
             self._write(rx, {"op": "send", "text": text, "session": session,
@@ -72,7 +73,8 @@ class BridgeClient:
                              **({"turn_id": turn_id} if turn_id else {}),
                              **({"workspace": workspace} if workspace else {}),
                              **({"model": model} if model else {}),
-                             **({"provider": provider} if provider else {})})
+                             **({"provider": provider} if provider else {}),
+                             **({"is_subordinate": True} if is_subordinate else {})})
             for line in rx:
                 frame = protocol.parse(line)
                 if frame is None:

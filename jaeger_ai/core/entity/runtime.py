@@ -46,7 +46,12 @@ from .reflection import ReflexionStore
 from .self_refine import SelfRefineEngine
 from .self_state import SelfState
 from .sleep_time import SleepTimeProcessor
-from .verification import VerificationContract, VerificationRegistry, VerificationResult
+from .verification import (
+    VerificationContract,
+    VerificationRegistry,
+    VerificationResult,
+    VerificationStatus,
+)
 
 logger = logging.getLogger("jaeger.entity.runtime")
 
@@ -90,6 +95,11 @@ class EntityRuntime:
             self.memory_subsystem,
         )
         self.cognition_router = CognitionRouter()
+        try:
+            from .resident import try_become_resident
+            self.is_resident = try_become_resident(self.state_root)
+        except Exception:
+            self.is_resident = False
 
         # Reconstruct initial state from cold boot replay
         base_state = SelfState(
@@ -219,6 +229,48 @@ class EntityRuntime:
             }
 
         # 2. Executive Strategy Selection
+        try:
+            refs = self.reflexion_store.retrieve_applicable(user_text)
+            if refs:
+                meta["reflection_count"] = len(refs)
+                event.payload["reflection_count"] = len(refs)
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.REFLECTION_RETRIEVED.value,
+                        {
+                            "count": len(refs),
+                            "ids": [r.reflection_id for r in refs],
+                        },
+                        actor="system:reflexion",
+                        source="reflexion_store",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+        except Exception:
+            pass
+        try:
+            pipeline = getattr(self.sleep_time_processor, "skill_pipeline", None)
+            matched_skills = pipeline.matching_skills(user_text) if pipeline is not None else []
+            if matched_skills:
+                lines = ["# Learned skills (follow these verified procedures):"]
+                for rec in matched_skills:
+                    name = str(rec.get("name") or "skill")
+                    desc = str(rec.get("description") or "")
+                    lines.append(f"- {name}: {desc}".rstrip(": "))
+                    self.event_store.append(
+                        JaegerEvent.typed(
+                            EventType.SKILL_USED.value,
+                            {"skill_name": name, "description": desc},
+                            actor="agent:skill_registry",
+                            source="skills.promotion",
+                            parent_event_id=event.event_id,
+                            session_id=session_id,
+                        )
+                    )
+                ctx["learned_skills_prompt"] = "\n".join(lines)
+        except Exception:
+            pass
         exec_decision = self.executive_selector.select_strategy(event, current_state)
         self.event_store.append(
             JaegerEvent.executive_decision(
@@ -232,6 +284,13 @@ class EntityRuntime:
         # 3. Cognition Router Execution
         ctx["sleep_processor"] = self.sleep_time_processor
         ctx["reflexion_store"] = self.reflexion_store
+        if "cognition_provider" not in ctx and callable(ctx.get("model_runner")):
+            ctx["cognition_provider"] = ctx["model_runner"]
+        if "critic_provider" not in ctx and callable(ctx.get("model_runner")):
+            ctx["critic_provider"] = ctx["model_runner"]
+        ctx["parent_event_id"] = event.event_id
+        ctx["session_id"] = session_id
+        ctx["event_store"] = self.event_store
         cog_result = self.cognition_router.execute(
             strategy=exec_decision.strategy,
             event=event,
@@ -244,18 +303,102 @@ class EntityRuntime:
 
         response_text = str((cog_result or {}).get("text") or "")
 
+        if getattr(exec_decision, "refinement_required", False) and (response_text or user_text):
+            try:
+                critic_p = ctx.get("critic_provider")
+                cognition_p = ctx.get("cognition_provider")
+                draft = response_text or ""
+                if callable(cognition_p) and len(draft.strip()) < 400:
+                    try:
+                        drafted = cognition_p(
+                            "Produce a complete technical artifact as markdown. "
+                            "Include rollback, verification, and failure recovery. "
+                            "No tools. Objective:\n" + user_text
+                        )
+                        if str(drafted or "").strip():
+                            draft = str(drafted)
+                    except Exception as exc:
+                        logger.debug("Self-refine draft generation skipped: %s", exc)
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.ARTIFACT_GENERATED.value,
+                        {"chars": len(draft)},
+                        actor="agent:cognition",
+                        source="self_refine",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+                refinement = self.self_refine_engine.refine_artifact(
+                    draft or user_text,
+                    rubric="Completeness, rollback, verification, failure handling, safety",
+                    critic_provider=critic_p if callable(critic_p) else None,
+                    cognition_provider=cognition_p if callable(cognition_p) else None,
+                    max_iterations=2,
+                )
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.ARTIFACT_CRITIQUED.value,
+                        {
+                            "iterations": refinement.iterations,
+                            "approved": refinement.is_approved,
+                            "critic": "provider" if callable(critic_p) or callable(cognition_p) else "default",
+                        },
+                        actor="agent:critic",
+                        source="self_refine",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+                if refinement.refined and refinement.refined != draft:
+                    response_text = refinement.refined
+                    if isinstance(cog_result, dict):
+                        cog_result = dict(cog_result)
+                        cog_result["text"] = response_text
+                    self.event_store.append(
+                        JaegerEvent.typed(
+                            EventType.ARTIFACT_REVISED.value,
+                            {"chars": len(response_text)},
+                            actor="agent:cognition",
+                            source="self_refine",
+                            parent_event_id=event.event_id,
+                            session_id=session_id,
+                        )
+                    )
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.ARTIFACT_VALIDATED.value,
+                        {"approved": refinement.is_approved},
+                        actor="system:validator",
+                        source="self_refine",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+            except Exception as exc:
+                logger.debug("Self-refine skipped: %s", exc)
+
         # 4. Action-Specific Independent Verification
-        action = (cog_result or {}).get("action") or {}
-        if not action and (cog_result or {}).get("path"):
-            action = {
-                "action_type": "file_write",
-                "path": (cog_result or {}).get("path"),
-                "expected_content": (cog_result or {}).get("expected_content"),
-            }
-        elif not action and (cog_result or {}).get("tool_activity"):
-            tool_act = (cog_result or {}).get("tool_activity")
-            last_act = tool_act[-1] if isinstance(tool_act, list) and tool_act else ""
-            action = {"tool": last_act, "objective": user_text}
+        from .verification import derive_verification_action
+
+        turn_tools = self.event_store.query_events(
+            event_types=[
+                EventType.TOOL_STARTED.value,
+                EventType.TOOL_COMPLETED.value,
+                EventType.TOOL_FAILED.value,
+            ],
+            since_ts=event.timestamp - 0.05,
+            limit=400,
+        )
+        action = (cog_result or {}).get("action") if isinstance(cog_result, dict) else None
+        if not isinstance(action, dict) or not action.get("action_type"):
+            action = derive_verification_action(
+                user_text,
+                cog_result or {},
+                turn_tools,
+                strategy=exec_decision.strategy.value,
+                context=ctx,
+            )
 
         verif = self.verification_registry.verify(
             objective=user_text,
@@ -263,6 +406,25 @@ class EntityRuntime:
             result=cog_result or {},
             context=ctx,
         )
+        failed_tools = [
+            e for e in turn_tools
+            if e.event_type == EventType.TOOL_FAILED.value
+        ]
+        if (
+            failed_tools
+            and verif.status == VerificationStatus.OBJECTIVE_VERIFIED
+            and str(action.get("action_type") or "") in {"unknown", "read_only", ""}
+        ):
+            failed_payload = failed_tools[-1].payload or {}
+            err = str(failed_payload.get("error") or "tool failed")
+            failed_tool = str(failed_payload.get("tool") or failed_payload.get("tool_name") or "tool")
+            verif = VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=user_text,
+                evidence=f"Tool failure ({failed_tool}): {err}",
+                verifier="tool_failure_override",
+                error=err,
+            )
 
         verif_ev = JaegerEvent.verification_completed(
             objective=user_text,
@@ -302,6 +464,9 @@ class EntityRuntime:
                 metadata={
                     "strategy": exec_decision.strategy.value,
                     "plan_id": (cog_result or {}).get("plan_id"),
+                    "user_text": user_text,
+                    "agent_response": response_text,
+                    "tool_calls": (cog_result or {}).get("tool_activity") or [],
                 },
             )
 

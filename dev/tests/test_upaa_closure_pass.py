@@ -521,6 +521,10 @@ def test_closure_skill_promotion_and_restart_discovery(isolated_closure_env: Pat
     content = skill_md.read_text(encoding="utf-8")
     assert "automated_health_probe_v1" in content
     assert "verified: true" in content
+    assert "automated_health_probe_v1" in pipeline_restarted.list_promoted_skills()
+    loaded = pipeline_restarted.get_skill("automated_health_probe_v1")
+    assert loaded is not None
+    assert loaded["name"] == "automated_health_probe_v1"
 
 
 # ── 8. Degraded-Safe Mode Failure Injection in _run_turn ──────────────────

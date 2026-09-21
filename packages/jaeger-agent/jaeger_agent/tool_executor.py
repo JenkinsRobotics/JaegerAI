@@ -138,24 +138,11 @@ class HookedToolExecutor:
         args = dict(arguments)
         from jaeger_agent import shell_hooks
 
-        hook_decision = shell_hooks.fire(
-            "pre_tool_call", tool_name=tool.name, tool_input=args,
-        )
-        if hook_decision.blocked:
-            logger.info(
-                "tool %r blocked by pre_tool_call hook: %s",
-                tool.name,
-                hook_decision.reason,
-            )
-            return {
-                "ok": False,
-                "success": False,
-                "error": hook_decision.reason or "blocked by policy hook",
-                "error_type": "blocked_by_hook",
-                "retryable": False,
-            }
-
+        # Hooks are evaluated exactly once, inside AuthorityLayer. A second
+        # fire here duplicated every pre_tool_call (live Phase 4: 2x per tool).
+        # Fallback below covers the no-authority import path only.
         runtime = None
+        authority_evaluated = False
         try:
             from jaeger_ai.core.entity.authority import AuthorityLayer, ProposedAction
             from jaeger_ai.core.entity.events import JaegerEvent
@@ -187,6 +174,7 @@ class HookedToolExecutor:
 
             # Evaluate through canonical authority boundary
             auth_decision = authority.authorize(proposal)
+            authority_evaluated = True
 
             if runtime is not None:
                 try:
@@ -221,6 +209,24 @@ class HookedToolExecutor:
                 args = dict(auth_decision.authorized_arguments)
         except (ImportError, AttributeError):
             runtime = None
+
+        if not authority_evaluated:
+            hook_decision = shell_hooks.fire(
+                "pre_tool_call", tool_name=tool.name, tool_input=args,
+            )
+            if hook_decision.blocked:
+                logger.info(
+                    "tool %r blocked by pre_tool_call hook: %s",
+                    tool.name,
+                    hook_decision.reason,
+                )
+                return {
+                    "ok": False,
+                    "success": False,
+                    "error": hook_decision.reason or "blocked by policy hook",
+                    "error_type": "blocked_by_hook",
+                    "retryable": False,
+                }
 
         call_id = f"call-{int(time.time()*1000)}"
         t0 = time.time()

@@ -67,8 +67,67 @@ _DELEGATE_HINTS = re.compile(
 _ACTION_HINTS = re.compile(
     r"(?i)\b(?:create|modify|edit|change|update|delete|remove|install|build|"
     r"execute|run|fix|implement|write|move|copy|rename|configure|deploy|"
-    r"inspect|review|test|patch|search|find)\b"
+    r"inspect|review|test|patch|search|find|read_file|read|remember|memorize)\b"
 )
+
+
+_COMPARE_PLANS = re.compile(
+    r"(?i)\b(?:compare|multiple approaches|several approaches|alternative(?:s)?|"
+    r"trade-?offs?|evaluate options|choose one)\b"
+)
+_ARTIFACT_HINTS = re.compile(
+    r"(?i)\b(?:deployment procedure|rollback|architecture (?:doc|proposal)|"
+    r"security-sensitive|production code|policy|runbook)\b"
+)
+_DESTRUCTIVE = re.compile(
+    r"(?i)\b(?:delete|drop|destroy|migrate|overwrite|rm\s+-rf|format)\b"
+)
+
+
+def score_task_complexity(
+    text: str,
+    *,
+    reflection_count: int = 0,
+    active_goal_count: int = 0,
+) -> dict[str, Any]:
+    """Numeric complexity/risk score used for strategy selection."""
+    t = text or ""
+    verbs = len(_ACTION_HINTS.findall(t))
+    score = 0.0
+    reasons: list[str] = []
+    if verbs >= 3:
+        score += 0.25
+        reasons.append(f"{verbs} action verbs")
+    elif verbs >= 2:
+        score += 0.12
+    if _COMPARE_PLANS.search(t):
+        score += 0.4
+        reasons.append("explicit plan comparison")
+    if _DESTRUCTIVE.search(t):
+        score += 0.2
+        reasons.append("destructive/reversible scope")
+    if _DELIBERATE_HINTS.search(t):
+        score += 0.3
+        reasons.append("batch/goal phrasing")
+    if len(t) > 280:
+        score += 0.1
+        reasons.append("long specification")
+    if reflection_count:
+        score += min(0.25, 0.1 * reflection_count)
+        reasons.append("prior failure reflections")
+    if active_goal_count > 2:
+        score += 0.15
+        reasons.append("multiple active goals")
+    if t.count("/") >= 3 or t.count(" then ") + t.count(" and ") >= 3:
+        score += 0.15
+        reasons.append("multi-step dependencies")
+    return {
+        "score": min(1.0, score),
+        "estimated_tools": max(1, verbs),
+        "reasons": reasons,
+        "artifact": bool(_ARTIFACT_HINTS.search(t)),
+        "compare_plans": bool(_COMPARE_PLANS.search(t)),
+    }
 
 
 @dataclass(frozen=True)
@@ -78,6 +137,8 @@ class ExecutiveDecision:
     target_specialist: str | None = None
     estimated_steps: int = 1
     requires_work_ledger: bool = False
+    refinement_required: bool = False
+    complexity_score: float = 0.0
 
 
 class ExecutiveStrategySelector:
@@ -133,13 +194,31 @@ class ExecutiveStrategySelector:
                     estimated_steps=1,
                 )
 
+            meta_reflections = payload.get("reflection_count") or event.metadata.get("reflection_count") or 0
+            complexity = score_task_complexity(
+                text,
+                reflection_count=int(meta_reflections or 0),
+                active_goal_count=len(state.active_goals),
+            )
+            artifact = bool(complexity["artifact"])
+
             # Check Deliberate Planning / Batch Work
-            if _DELIBERATE_HINTS.search(text) or len(state.active_goals) > 2:
+            if (
+                complexity["score"] >= 0.45
+                or complexity["compare_plans"]
+                or _DELIBERATE_HINTS.search(text)
+                or len(state.active_goals) > 2
+            ):
                 return ExecutiveDecision(
                     strategy=CognitiveStrategy.DELIBERATE_PLANNING,
-                    reason="Detected complex goal or multi-step batch phrasing requiring work ledger",
+                    reason="Complexity score {:.2f}: {}".format(
+                        complexity["score"],
+                        ", ".join(complexity["reasons"]) or "multi-step goal",
+                    ),
                     requires_work_ledger=True,
-                    estimated_steps=20,
+                    estimated_steps=max(8, int(complexity["estimated_tools"]) * 3),
+                    refinement_required=artifact,
+                    complexity_score=float(complexity["score"]),
                 )
 
             # In agent mode (or when action hints / actionable intent present), use ReAct Tool Loop
@@ -147,7 +226,9 @@ class ExecutiveStrategySelector:
                 return ExecutiveDecision(
                     strategy=CognitiveStrategy.REACT_LOOP,
                     reason="Agent mode or actionable request; requires tool dispatch and environment consequence feedback",
-                    estimated_steps=5,
+                    estimated_steps=max(3, int(complexity["estimated_tools"])),
+                    refinement_required=artifact,
+                    complexity_score=float(complexity["score"]),
                 )
 
             # Direct Response for conversational queries
