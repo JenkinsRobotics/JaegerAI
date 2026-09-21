@@ -146,7 +146,9 @@ class SqliteEventStore:
         self,
         *,
         session_id: str | None = None,
+        event_type: str | None = None,
         event_types: list[str] | None = None,
+        actor: str | None = None,
         since_ts: float | None = None,
         limit: int = 100,
     ) -> list[JaegerEvent]:
@@ -156,10 +158,16 @@ class SqliteEventStore:
         if session_id:
             query += " AND session_id = ?"
             params.append(session_id)
-        if event_types:
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        elif event_types:
             placeholders = ",".join("?" for _ in event_types)
             query += f" AND event_type IN ({placeholders})"
             params.extend(event_types)
+        if actor:
+            query += " AND actor = ?"
+            params.append(actor)
         if since_ts is not None:
             query += " AND timestamp >= ?"
             params.append(since_ts)
