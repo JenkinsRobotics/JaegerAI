@@ -222,8 +222,15 @@ class VerificationRegistry:
 
     @staticmethod
     def _verify_file_write(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
-        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
-        path = act_dict.get("path") or act_dict.get("target_path") or (result.get("path") if isinstance(result, dict) else None)
+        act_dict = dict(action) if isinstance(action, dict) else {}
+        res_dict = dict(result) if isinstance(result, dict) else {}
+        nested = res_dict.get("result") if isinstance(res_dict.get("result"), dict) else {}
+        path = (
+            act_dict.get("path")
+            or act_dict.get("target_path")
+            or res_dict.get("path")
+            or nested.get("path")
+        )
         if not path:
             return VerificationResult(
                 status=VerificationStatus.OBJECTIVE_FAILED,
@@ -232,8 +239,17 @@ class VerificationRegistry:
                 verifier="file_write_verifier",
                 error="MissingPath",
             )
-        expected = act_dict.get("expected_content") or (result.get("expected_content") if isinstance(result, dict) else None)
-        target = Path(path).resolve()
+        expected = (
+            act_dict.get("expected_content")
+            or act_dict.get("content")
+            or res_dict.get("expected_content")
+            or nested.get("expected_content")
+        )
+        raw = Path(str(path))
+        if raw.is_absolute():
+            target = raw.resolve()
+        else:
+            target = _resolve_existing_or_candidate(str(path), context)
         if not target.exists():
             return VerificationResult(
                 status=VerificationStatus.OBJECTIVE_FAILED,
@@ -265,7 +281,7 @@ class VerificationRegistry:
             status=VerificationStatus.OBJECTIVE_VERIFIED,
             target_objective=objective,
             evidence=f"Verified file write at {target}",
-            verifier="file_write_verifier",
+            verifier="disk_probe",
         )
 
     @staticmethod
@@ -554,6 +570,16 @@ def _resolve_existing_or_candidate(path: str, context: Any) -> Path:
     raw = Path(path)
     if raw.is_absolute():
         return raw
+    ctx = dict(context) if isinstance(context, dict) else {}
+    layout = ctx.get("layout")
+    text = str(path)
+    if text.startswith("workspace/") or text.startswith("workspace\\"):
+        rel = text.split("/", 1)[-1].split("\\", 1)[-1]
+        if layout is not None and getattr(layout, "workspace_dir", None) is not None:
+            return (Path(layout.workspace_dir) / rel).resolve()
+        ws = ctx.get("workspace")
+        if ws:
+            return (Path(ws) / rel).resolve()
     for root in _workspace_roots(context):
         cand = (root / path).resolve()
         if cand.exists() or cand.parent.exists():
@@ -589,6 +615,10 @@ def _tool_records(tool_events: Sequence[Any]) -> list[dict[str, Any]]:
             rec["arguments"] = payload["arguments"]
         if "result" in payload:
             rec["result"] = payload.get("result")
+        if payload.get("path") and isinstance(rec.get("result"), dict) and not rec["result"].get("path"):
+            rec["result"]["path"] = payload.get("path")
+        elif payload.get("path") and rec.get("result") is None:
+            rec["result"] = {"path": payload.get("path")}
         if payload.get("error"):
             rec["error"] = payload.get("error")
             rec["failed"] = True

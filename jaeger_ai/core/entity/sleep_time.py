@@ -99,6 +99,7 @@ class SleepTimeProcessor:
         selected_jobs = list(job_types) if job_types else [
             SleepTimeJobType.CONSOLIDATION,
             SleepTimeJobType.REFLECTION,
+            SleepTimeJobType.INDEXING,
             SleepTimeJobType.SKILL_CANDIDATE_REVIEW,
         ]
 
@@ -186,6 +187,41 @@ class SleepTimeProcessor:
                 result.jobs_executed.append("skill_candidate_review")
             except Exception as exc:
                 err = f"Skill review job error: {exc}"
+                logger.error(err)
+                result.errors.append(err)
+
+        if SleepTimeJobType.INDEXING in selected_jobs:
+            try:
+                from jaeger_ai.core.entity.indexing import IndexCoordinator
+                from jaeger_ai.core.instance.commissioning import load_knowledge_sources
+                extra = []
+                skills_dir = self.state_root.parent / "skills" if self.state_root.name == "memory" else self.state_root / "skills"
+                docs_dir = None
+                try:
+                    instance_root = self.state_root.parent if self.state_root.name == "memory" else self.state_root
+                    commissioning_src = instance_root / "workspace" / "index-src"
+                    if commissioning_src.is_dir():
+                        extra.append(commissioning_src)
+                    for src in load_knowledge_sources(instance_root):
+                        if not src.get("approved"):
+                            continue
+                        path = Path(str(src.get("path") or ""))
+                        kind = str(src.get("kind") or "")
+                        if kind == "documentation":
+                            docs_dir = path
+                        elif kind == "skills":
+                            skills_dir = path
+                        elif path.is_dir():
+                            extra.append(path)
+                        elif path.is_file():
+                            extra.append(path.parent)
+                except Exception:
+                    pass
+                coordinator = IndexCoordinator(self.state_root, event_store=self.event_store)
+                coordinator.sweep(skills_dir=skills_dir, docs_dir=docs_dir, extra=extra, max_files=40, max_seconds=20.0)
+                result.jobs_executed.append("indexing")
+            except Exception as exc:
+                err = f"Indexing job error: {exc}"
                 logger.error(err)
                 result.errors.append(err)
 

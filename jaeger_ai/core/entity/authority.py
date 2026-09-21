@@ -122,18 +122,51 @@ def default_permissions_policy(proposal: ProposedAction) -> AuthorityDecision:
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="permission_mode")
 
 
+def _authority_instance_root(proposal: ProposedAction) -> Any:
+    """Resolve the instance that owns this proposal — never a global default."""
+    ctx = proposal.context or {}
+    for key in ("instance_root", "layout_root", "instance_dir"):
+        val = ctx.get(key)
+        if val:
+            return val
+    layout = ctx.get("layout")
+    if layout is not None:
+        root = getattr(layout, "root", None)
+        if root is not None:
+            return root
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        rt = EntityRuntime.get_singleton()
+        if getattr(rt, "layout", None) is not None:
+            return rt.layout.root
+        if getattr(rt, "state_root", None) is not None:
+            # state_root is instance memory/; policy lives on the instance root
+            memory = rt.state_root
+            if memory.name == "memory":
+                return memory.parent
+    except Exception:
+        pass
+    return None
+
+
 def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecision:
     """Capability-scoped policy written during commissioning.
 
     Human answers become this document. Missing policy fails open to the
     existing confirm/allow posture so established instances keep working.
+    The policy is always the instance bound to this runtime/proposal.
     """
     try:
         from jaeger_ai.core.instance.commissioning import load_authority_policy
-        from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir, default_instance_name
 
-        layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
-        policy = load_authority_policy(layout)
+        root = _authority_instance_root(proposal)
+        if root is None:
+            return AuthorityDecision(
+                status=AuthorizationStatus.APPROVED,
+                policy_name="commissioning_authority",
+                reason="no instance bound; policy not applied",
+            )
+        policy = load_authority_policy(root)
         if not policy:
             return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
         tool = proposal.tool_name

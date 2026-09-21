@@ -159,9 +159,15 @@ class HookedToolExecutor:
             if authority is None:
                 authority = AuthorityLayer()
 
+            ctx: dict[str, Any] = {}
+            if runtime is not None and getattr(runtime, "layout", None) is not None:
+                ctx["instance_root"] = str(runtime.layout.root)
+                ctx["layout"] = runtime.layout
+                ctx["workspace"] = str(runtime.layout.workspace_dir)
             proposal = ProposedAction(
                 tool_name=tool.name,
                 arguments=args,
+                context=ctx,
             )
 
             if runtime is not None:
@@ -372,10 +378,19 @@ class LedgerToolExecutor:
             raise validation_error
 
         key = self._effect_key(tool.name, args)
-        result, _executed = self._ledger.once(
-            key, tool.name, lambda: self._inner.execute(tool, args),
-            run_id=self._run_id,
-        )
+        try:
+            result, _executed = self._ledger.once(
+                key, tool.name, lambda: self._inner.execute(tool, args),
+                run_id=self._run_id,
+            )
+        except Exception as exc:
+            name = type(exc).__name__
+            if name in {"PermissionDenied", "HumanOverrideRequired"}:
+                try:
+                    self._ledger.abandon(key)
+                except Exception:
+                    pass
+            raise
         return result
 
     def _effect_key(self, tool_name: str, args: dict[str, Any]) -> str:

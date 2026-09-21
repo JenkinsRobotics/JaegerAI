@@ -228,7 +228,17 @@ class JaegerEvent:
             source="runtime.tool_executor",
             timestamp=time.time(),
             session_id=session_id,
-            payload={"tool": tool_name, "result": result, "call_id": call_id, "duration_s": duration_s},
+            payload={
+                "tool": tool_name,
+                "result": result,
+                "call_id": call_id,
+                "duration_s": duration_s,
+                **(
+                    {"path": result.get("path")}
+                    if isinstance(result, dict) and result.get("path")
+                    else {}
+                ),
+            },
             salience=0.6,
             idempotency_key=f"tool-done-{call_id}",
             parent_event_id=parent_event_id,
@@ -359,7 +369,17 @@ class JaegerEvent:
         error: str | None = None,
         session_id: str = "dispatcher",
         salience: float = 0.6,
+        extra: dict[str, Any] | None = None,
     ) -> JaegerEvent:
+        payload = {
+            "objective": objective,
+            "status": status,
+            "evidence": evidence,
+            "verifier": verifier,
+            "error": error,
+        }
+        if extra:
+            payload.update(extra)
         return cls(
             event_id=f"vrf-{uuid.uuid4().hex[:10]}",
             event_type=EventType.VERIFICATION_COMPLETED.value,
@@ -367,13 +387,7 @@ class JaegerEvent:
             source="verification_registry",
             timestamp=time.time(),
             session_id=session_id,
-            payload={
-                "objective": objective,
-                "status": status,
-                "evidence": evidence,
-                "verifier": verifier,
-                "error": error,
-            },
+            payload=payload,
             salience=salience,
             parent_event_id=parent_event_id,
         )

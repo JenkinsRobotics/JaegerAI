@@ -67,10 +67,47 @@ def _log_path(home: Path) -> Path:
 # ── service-file content (pure — unit-tested) ──────────────────────
 
 
+def _xml_text(value: str) -> str:
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _autostart_env_pairs() -> list[tuple[str, str]]:
+    """Pass instance isolation env into the LaunchAgent when present."""
+    keys = (
+        "JAEGER_HOME",
+        "JAEGER_STATE_DIR",
+        "JAEGER_INSTANCE_DIR",
+        "JAEGER_INSTANCE_NAME",
+        "JAEGER_GATEWAY_PORT",
+        "JAEGER_OWNER_REACT",
+        "JAEGER_ACCEPT_HOOKS",
+        "JAEGER_NO_GUI",
+        "JAEGER_RUNTIME_MODE",
+    )
+    pairs = []
+    for key in keys:
+        val = os.environ.get(key)
+        if val:
+            pairs.append((key, val))
+    return pairs
+
+
 def _launchd_plist(jaeger_exe: Path, home: Path, args: list[str]) -> str:
-    prog = "".join(f"    <string>{a}</string>\n"
+    prog = "".join(f"    <string>{_xml_text(a)}</string>\n"
                    for a in (str(jaeger_exe), *args))
     log = _log_path(home)
+    env_lines = [
+        "    <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>\n",
+        f'    <key>PYTHONPYCACHEPREFIX</key><string>{_xml_text(str(Path.home() / ".cache" / "jaeger" / "pycache"))}</string>\n',
+    ]
+    for key, val in _autostart_env_pairs():
+        env_lines.append(f"    <key>{_xml_text(key)}</key><string>{_xml_text(val)}</string>\n")
+    env_block = "".join(env_lines)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -84,8 +121,7 @@ def _launchd_plist(jaeger_exe: Path, home: Path, args: list[str]) -> str:
         '  </array>\n'
         '  <key>EnvironmentVariables</key>\n'
         '  <dict>\n'
-        '    <key>PYTHONDONTWRITEBYTECODE</key><string>1</string>\n'
-        f'    <key>PYTHONPYCACHEPREFIX</key><string>{Path.home() / ".cache" / "jaeger" / "pycache"}</string>\n'
+        f'{env_block}'
         '  </dict>\n'
         '  <key>RunAtLoad</key><true/>\n'
         '  <key>KeepAlive</key>\n'
@@ -103,6 +139,9 @@ def _launchd_plist(jaeger_exe: Path, home: Path, args: list[str]) -> str:
 
 def _systemd_unit(jaeger_exe: Path, home: Path, args: list[str]) -> str:
     execstart = " ".join([str(jaeger_exe), *args])
+    extra_env = "".join(
+        f"Environment={key}={val}\n" for key, val in _autostart_env_pairs()
+    )
     return (
         "[Unit]\n"
         "Description=JaegerAI (Jaeger-OS) agent\n"
@@ -112,6 +151,7 @@ def _systemd_unit(jaeger_exe: Path, home: Path, args: list[str]) -> str:
         "[Service]\n"
         "Environment=PYTHONDONTWRITEBYTECODE=1\n"
         f"Environment=PYTHONPYCACHEPREFIX={Path.home() / '.cache' / 'jaeger' / 'pycache'}\n"
+        f"{extra_env}"
         f"ExecStart={execstart}\n"
         f"WorkingDirectory={home}\n"
         "Restart=on-failure\n"

@@ -74,7 +74,8 @@ def collect_runtime_status(*, include_network: bool = True) -> dict[str, Any]:
         goals = 0
         runtime = None
 
-    gateway_ok = _port_open(8810) if include_network else False
+    gw_port = int(os.environ.get("JAEGER_GATEWAY_PORT") or 8810)
+    gateway_ok = _port_open(gw_port) if include_network else False
     webui_ok = _port_open(8790) if include_network else False
     bridge_ok = False
     if include_network:

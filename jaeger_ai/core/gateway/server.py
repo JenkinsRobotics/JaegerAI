@@ -77,6 +77,8 @@ class JaegerGatewayApp:
         self._mcp_transport: Any = None
         self._mcp_tool_names: frozenset[str] = frozenset()
         self._owns_store = False
+        self._owner_task: asyncio.Task | None = None
+        self._pending_resume = False
         self.app = web.Application()
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
@@ -92,29 +94,51 @@ class JaegerGatewayApp:
             from jaeger_ai.core.entity.ownership import EntityRuntimeMode
             from jaeger_ai.core.entity.runtime import EntityRuntime
             from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
+            try:
+                from jaeger_agent.memory import sqlite_store
+                from jaeger_agent.workspace import bind as bind_workspace
+                from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+                inst = os.environ.get("JAEGER_INSTANCE_DIR")
+                layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
+                sqlite_store.bind(layout)
+                bind_workspace(layout)
+            except Exception as exc:
+                logger.debug("sqlite_store/workspace bind skipped: %s", exc)
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             logger.info(
                 "Gateway attached EntityRuntime %s resident=%s",
                 rt.identity.entity_id,
                 getattr(rt, "is_resident", False),
             )
+            try:
+                from jaeger_ai.core.entity.recovery import RecoveryManager
+                rt._recovery_report = RecoveryManager().scan_resumable_runs()
+            except Exception as exc:
+                logger.debug("Recovery rescan skipped: %s", exc)
+            try:
+                from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
+                install_commissioning_permissions(getattr(rt, "layout", None))
+            except Exception as exc:
+                logger.debug("commissioning permissions install skipped: %s", exc)
             if getattr(rt, "is_resident", False):
                 try:
-                    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir, default_instance_name
                     from jaeger_ai.core.instance.schemas import Config, load_yaml
-                    layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
-                    cfg = load_yaml(layout.config_path, Config)
-                    desktop = getattr(getattr(cfg, "sensors", None), "desktop", None)
-                    if desktop is not None and getattr(desktop, "enabled", False):
-                        sup = SensorSupervisor(
-                            runtime=rt,
-                            enabled=True,
-                            interval_s=float(desktop.interval_seconds),
-                        )
-                        sup.start()
-                        rt._sensor_supervisor = sup
+                    layout = getattr(rt, "layout", None)
+                    if layout is not None:
+                        cfg = load_yaml(layout.config_path, Config)
+                        desktop = getattr(getattr(cfg, "sensors", None), "desktop", None)
+                        if desktop is not None and getattr(desktop, "enabled", False):
+                            sup = SensorSupervisor(
+                                runtime=rt,
+                                enabled=True,
+                                interval_s=float(desktop.interval_seconds),
+                            )
+                            sup.start()
+                            rt._sensor_supervisor = sup
                 except Exception as exc:
                     logger.debug("Gateway sensor supervisor skipped: %s", exc)
+                self._owner_task = asyncio.create_task(self._owner_maintenance_loop(rt))
+                self._pending_resume = True
         except Exception as exc:
             logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
         if self._background_client is not None:
@@ -127,6 +151,10 @@ class JaegerGatewayApp:
             self._background_task.cancel()
             await asyncio.gather(self._background_task, return_exceptions=True)
             self._background_task = None
+        if self._owner_task is not None:
+            self._owner_task.cancel()
+            await asyncio.gather(self._owner_task, return_exceptions=True)
+            self._owner_task = None
         tasks = list(self._running_tasks.values())
         for task in tasks:
             task.cancel()
@@ -158,6 +186,75 @@ class JaegerGatewayApp:
             # Failed/lost ACK retries delivery, never the model or its tools.
             await asyncio.to_thread(client.command, "acknowledge_background", {"delivery_id": row["delivery_id"]})
         return len(rows)
+
+    async def _owner_maintenance_loop(self, runtime: Any) -> None:
+        """Heartbeat, sleep-time, and indexing owned by the resident Gateway."""
+        interval = float(os.environ.get("JAEGER_HEARTBEAT_INTERVAL_S") or 0) or 30.0
+        while True:
+            try:
+                await asyncio.to_thread(self._owner_tick, runtime)
+            except Exception as exc:
+                logger.warning("Owner maintenance tick failed: %s", exc)
+            await asyncio.sleep(max(1.0, interval))
+
+    def _owner_tick(self, runtime: Any) -> None:
+        from jaeger_ai.core.runtime.heartbeat import execute_heartbeat_event
+
+        layout = getattr(runtime, "layout", None)
+        if layout is None:
+            return
+        force_hb = os.environ.get("JAEGER_HEARTBEAT_DUE", "").strip() in {"1", "true", "yes"}
+        event, woke, prompt = execute_heartbeat_event(layout)
+        quiet = (not woke) or force_hb
+        sleep_due = os.environ.get("JAEGER_SLEEP_DUE", "").strip() in {"1", "true", "yes"}
+        if quiet and (sleep_due or force_hb):
+            try:
+                runtime.sleep_time_processor.run_sleep_cycle(reason="gateway_idle")
+            except Exception as exc:
+                logger.debug("Sleep-time cycle skipped: %s", exc)
+        _ = prompt
+        _ = event
+
+    def _resume_safe_unknown_requests(self, runtime: Any) -> None:
+        """Continue execution_unknown turns whose runs RecoveryManager resumed.
+
+        Pending EffectLedger rows stay BLOCKED. A request with no native_run_id
+        is re-dispatched only when no effect is indeterminate.
+        """
+        report = getattr(runtime, "_recovery_report", None)
+        resumed = set(getattr(report, "resumed", None) or [])
+        pending_keys = list(getattr(report, "pending_effects", None) or [])
+        pending_run_ids = set()
+        for key in pending_keys:
+            # Effect keys are `{run_id}:{tool}:{payload}`.
+            pending_run_ids.add(str(key).split(":", 1)[0])
+        try:
+            unknown = self.store.list_requests(status="execution_unknown")
+        except Exception:
+            return
+        for req in unknown:
+            rid = str(req.get("request_id") or "")
+            sid = str(req.get("session_id") or "")
+            turn_id = str(req.get("turn_id") or "")
+            text = str(req.get("input_text") or "")
+            native = str(req.get("native_run_id") or "")
+            if not rid or not sid or not text:
+                continue
+            if native and native in pending_run_ids:
+                logger.warning("Request %s stays blocked; pending effects on run %s", rid, native)
+                continue
+            if native and native not in resumed:
+                logger.info("Request %s not re-dispatched; run %s was not resumed", rid, native)
+                continue
+            if not native and pending_keys:
+                logger.warning("Request %s stays blocked; indeterminate effects present", rid)
+                continue
+            if rid in self._running_tasks:
+                continue
+            logger.info("Re-dispatching recovered request %s run=%s", rid, native or "unbound")
+            self._running_tasks[rid] = asyncio.create_task(
+                self._execute_turn(sid, turn_id, text, request_id=rid)
+            )
 
     async def _background_loop(self) -> None:
         while True:
@@ -1148,6 +1245,54 @@ class JaegerGatewayApp:
             raise RuntimeError(f"Ollama returned empty content: {body[:500]}")
         return content
 
+    def _owner_react_turn(self, prompt: str, *, session_key: str, request_id: str) -> str:
+        """Run ReAct in the Gateway OWNER process when native MCP is not this instance."""
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.core.models.external_model import ExternalModelClient
+        from jaeger_agent.cognition.executive import TurnExecutive
+        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+        from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+        from jaeger_agent.memory import sqlite_store
+
+        runtime = EntityRuntime.get_singleton()
+        layout = runtime.layout
+        if layout is None:
+            raise RuntimeError("OWNER layout missing; cannot run in-process ReAct")
+        sqlite_store.bind(layout)
+        try:
+            from jaeger_agent.workspace import bind as bind_workspace
+            bind_workspace(layout)
+        except Exception:
+            pass
+        try:
+            from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
+            install_commissioning_permissions(layout)
+        except Exception:
+            pass
+        cfg = load_yaml(layout.config_path, Config)
+        client = ExternalModelClient(cfg.external_model, layout)
+        agent = build_jaeger_agent(client, max_iterations=12, max_tool_calls=8)
+        execu = TurnExecutive(
+            agent,
+            SqliteRunStore(),
+            SqliteCommitmentStore(),
+            provider=str(cfg.external_model.provider or "ollama"),
+        )
+        os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
+        run = execu.ensure_run()
+        try:
+            self.store.bind_native(
+                request_id,
+                native_run_id=str(run.id),
+                native_session=session_key,
+                status="running",
+            )
+        except Exception:
+            pass
+        return str(execu.run_turn(prompt) or "")
+
     async def _execute_turn(
         self,
         session_id: str,
@@ -1219,20 +1364,21 @@ class JaegerGatewayApp:
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
-                try:
-                    native_res = asyncio.run_coroutine_threadsafe(_run_native_coro(prompt), loop).result()
-                except Exception as ex:
-                    logger.warning("Error running native lead turn in gateway: %s", ex)
-                    raise
-                if native_res is not None:
-                    txt, b_end = native_res
-                    backend = b_end
-                    model = "jaeger-mcp"
-                    return {"text": txt, "status": "completed"}
-                raise RuntimeError(
-                    "Native agent did not return a confirmed result. Execution may be incomplete; "
-                    "check native run state before retrying this request."
-                )
+                owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
+                if not owner_first:
+                    try:
+                        native_res = asyncio.run_coroutine_threadsafe(_run_native_coro(prompt), loop).result()
+                        if native_res is not None:
+                            txt, b_end = native_res
+                            backend = b_end
+                            model = "jaeger-mcp"
+                            return {"text": txt, "status": "completed"}
+                    except Exception as ex:
+                        logger.warning("Native MCP unavailable; OWNER in-process ReAct: %s", ex)
+                txt = self._owner_react_turn(prompt, session_key=session_key, request_id=rid)
+                backend = "owner-react"
+                model = "jaeger-owner"
+                return {"text": txt, "status": "completed"}
 
             def _sync_model(prompt: str) -> str:
                 nonlocal backend, model
@@ -1398,6 +1544,7 @@ class JaegerGatewayApp:
                 )
             except Exception:
                 pass
+        persisted = None
         try:
             persisted = self.store.complete_request(
                 request_id,
@@ -1408,6 +1555,25 @@ class JaegerGatewayApp:
             )
             if persisted.get("event"):
                 self.event_bus.fanout(persisted["event"])
+            if status == "completed" and not persisted.get("replayed"):
+                try:
+                    from jaeger_ai.core.entity.runtime import EntityRuntime
+                    artifacts = []
+                    if isinstance(result, dict):
+                        for key in ("artifact", "path", "output_path"):
+                            if result.get(key):
+                                artifacts.append(str(result.get(key)))
+                    EntityRuntime.get_singleton().record_background_completed(
+                        request_id,
+                        {
+                            "summary": (assistant_text or str((result or {}).get("output") or ""))[:500],
+                            "originating_event_id": str((result or {}).get("turn_id") or request_id),
+                            "artifact_refs": artifacts,
+                        },
+                        session_id=session_id,
+                    )
+                except Exception:
+                    pass
         except KeyError:
             if assistant_text is not None:
                 self.store.append_message(session_id, "assistant", assistant_text)
@@ -1786,7 +1952,14 @@ async def run_gateway_forever(
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
-    print(f"[jaeger-gateway] Listening on http://{host}:{port}")
+    print(f"[jaeger-gateway] Listening on http://{host}:{port}", flush=True)
+    if getattr(gateway, "_pending_resume", False):
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            gateway._resume_safe_unknown_requests(EntityRuntime.get_singleton())
+        except Exception:
+            logger.debug("post-listen resume skipped", exc_info=True)
+        gateway._pending_resume = False
     try:
         while True:
             await asyncio.sleep(3600)

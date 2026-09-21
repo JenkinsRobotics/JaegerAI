@@ -159,3 +159,12 @@ async def test_handoff_observation_reconciles_native_receipt_without_execution(t
     await app.handle_get_handoff(Request())
     assert store.get_handoff('handoff_late')['result']['summary'] == 'late result'
     assert not app._running_tasks
+
+
+def test_list_requests_filters_execution_unknown(tmp_path):
+    store = GatewaySessionStore(tmp_path / "sessions.db")
+    store.admit_request("s", "work", request_id="running-one")
+    store.recover_interrupted_sessions()
+    unknown = store.list_requests(status="execution_unknown")
+    assert any(r["request_id"] == "running-one" for r in unknown)
+    assert store.list_requests(status="completed") == []

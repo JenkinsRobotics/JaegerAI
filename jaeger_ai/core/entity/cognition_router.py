@@ -93,6 +93,9 @@ class DirectResponseHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
+        docs_block = str(context.get("retrieved_documents") or "")
+        if docs_block:
+            text = f"{docs_block}\n\n{text}"
         model_runner = context.get("model_runner")
 
         # Explicitly enforce zero tools at the cognition boundary
@@ -150,6 +153,9 @@ class ReActHandler(CognitionStrategyHandler):
                     text = f"{block}\n\n{text}"
             except Exception as exc:
                 logger.debug("ReAct reflexion inject skipped: %s", exc)
+        docs_block = str(context.get("retrieved_documents") or "")
+        if docs_block:
+            text = f"{docs_block}\n\n{text}"
         skills_block = str(context.get("learned_skills_prompt") or "")
         if skills_block:
             text = f"{skills_block}\n\n{text}"

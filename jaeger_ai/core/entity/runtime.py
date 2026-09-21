@@ -129,12 +129,8 @@ class EntityRuntime:
                 self.is_resident = False
         except Exception:
             self.is_resident = False
-        if self.mode == EntityRuntimeMode.OWNER and self.is_resident:
-            try:
-                from .recovery import RecoveryManager
-                self._recovery_report = RecoveryManager().scan_resumable_runs()
-            except Exception:
-                self._recovery_report = None
+        # RecoveryManager may call get_singleton(); never scan while the
+        # constructor still holds the singleton lock.
 
         # Reconstruct initial state from cold boot replay
         base_state = SelfState(
@@ -155,11 +151,20 @@ class EntityRuntime:
     @classmethod
     def get_singleton(cls, state_root: Path | str | None = None, *, mode: EntityRuntimeMode | None = None) -> EntityRuntime:
         """Process-wide singleton instance of the EntityRuntime."""
+        created = False
         with cls._lock:
             if cls._instance is None:
                 resolved_mode = mode or infer_runtime_mode()
                 cls._instance = cls(state_root=state_root, mode=resolved_mode)
-            return cls._instance
+                created = True
+            instance = cls._instance
+        if created and instance.mode == EntityRuntimeMode.OWNER and instance.is_resident:
+            try:
+                from .recovery import RecoveryManager
+                instance._recovery_report = RecoveryManager().scan_resumable_runs()
+            except Exception:
+                instance._recovery_report = None
+        return instance
 
     @classmethod
     def reset_singleton(cls) -> None:
@@ -320,6 +325,44 @@ class EntityRuntime:
         )
 
         # 3. Cognition Router Execution
+        if self.layout is not None:
+            ctx.setdefault("workspace", str(self.layout.workspace_dir))
+            ctx.setdefault("instance_root", str(self.layout.root))
+            ctx.setdefault("layout", self.layout)
+        try:
+            from .indexing import IndexCoordinator
+            hits = IndexCoordinator(self.state_root, event_store=self.event_store).retrieve(user_text, limit=4)
+            if hits:
+                lines = ["# Retrieved documents (not semantic facts; provenance=RETRIEVED_DOCUMENT):"]
+                for hit in hits:
+                    src = str(hit.get("source_id") or hit.get("path") or "")
+                    snippet = str(hit.get("text") or "")[:400]
+                    lines.append(f"- {src}: {snippet}")
+                ctx["retrieved_documents"] = "\n".join(lines)
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.SYSTEM_OBSERVATION.value,
+                        {
+                            "kind": "retrieved_document",
+                            "provenance": "RETRIEVED_DOCUMENT",
+                            "query": user_text[:240],
+                            "hits": [
+                                {
+                                    "source_id": h.get("source_id"),
+                                    "provenance": "RETRIEVED_DOCUMENT",
+                                    "text": str(h.get("text") or "")[:240],
+                                }
+                                for h in hits
+                            ],
+                        },
+                        actor="system:indexer",
+                        source="indexing.retrieve",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+        except Exception:
+            pass
         ctx["sleep_processor"] = self.sleep_time_processor
         ctx["reflexion_store"] = self.reflexion_store
         if "cognition_provider" not in ctx and callable(ctx.get("model_runner")):
@@ -419,15 +462,28 @@ class EntityRuntime:
         # 4. Action-Specific Independent Verification
         from .verification import derive_verification_action
 
+        if self.layout is not None:
+            ctx.setdefault("workspace", str(self.layout.workspace_dir))
+            ctx.setdefault("instance_root", str(self.layout.root))
+            ctx.setdefault("layout", self.layout)
+        try:
+            before_id = max(0, self.event_store.latest_id() - 800)
+        except Exception:
+            before_id = 0
         turn_tools = self.event_store.query_events(
             event_types=[
                 EventType.TOOL_STARTED.value,
                 EventType.TOOL_COMPLETED.value,
                 EventType.TOOL_FAILED.value,
             ],
-            since_ts=event.timestamp - 0.05,
-            limit=400,
+            since_id=before_id,
+            limit=800,
         )
+        if event.timestamp:
+            turn_tools = [
+                e for e in turn_tools
+                if float(getattr(e, "timestamp", 0) or 0) >= event.timestamp - 0.05
+            ]
         action = (cog_result or {}).get("action") if isinstance(cog_result, dict) else None
         if not isinstance(action, dict) or not action.get("action_type"):
             action = derive_verification_action(
@@ -464,6 +520,7 @@ class EntityRuntime:
                 error=err,
             )
 
+        tool_ids = [str(getattr(e, "event_id", "") or "") for e in turn_tools if getattr(e, "event_id", "")]
         verif_ev = JaegerEvent.verification_completed(
             objective=user_text,
             status=verif.status.value,
@@ -472,6 +529,13 @@ class EntityRuntime:
             error=verif.error,
             parent_event_id=event.event_id,
             session_id=session_id,
+            extra={
+                "target": (action or {}).get("path") or (action or {}).get("target_path"),
+                "action_type": (action or {}).get("action_type"),
+                "tool_event_ids": tool_ids,
+                "request_id": request_id,
+                "trace_id": trace_id,
+            },
         )
         self.event_store.append(verif_ev)
 

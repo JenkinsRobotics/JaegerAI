@@ -110,20 +110,41 @@ class IndexManifest:
                     pass
 
     def search(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
+        import re
         q = (query or "").strip()
         if not q:
             return []
+        tokens = re.findall(r"[A-Za-z0-9_]{3,}", q)
+        fts = " OR ".join(f'"{t}"' for t in tokens[:12]) if tokens else ""
         with self._connect() as con:
-            try:
-                rows = con.execute(
-                    "SELECT chunk_id, source_id, text FROM indexed_chunks_fts WHERE indexed_chunks_fts MATCH ? LIMIT ?",
-                    (q, limit),
-                ).fetchall()
-            except sqlite3.OperationalError:
-                rows = con.execute(
-                    "SELECT chunk_id, source_id, text FROM indexed_chunks WHERE text LIKE ? LIMIT ?",
-                    (f"%{q}%", limit),
-                ).fetchall()
+            rows: list[Any] = []
+            if fts:
+                try:
+                    rows = list(con.execute(
+                        "SELECT chunk_id, source_id, text FROM indexed_chunks_fts WHERE indexed_chunks_fts MATCH ? LIMIT ?",
+                        (fts, limit),
+                    ).fetchall())
+                except sqlite3.OperationalError:
+                    rows = []
+            if not rows:
+                seen: set[str] = set()
+                merged: list[Any] = []
+                needles = tokens[:8] or [q]
+                for needle in needles:
+                    for row in con.execute(
+                        "SELECT chunk_id, source_id, text FROM indexed_chunks WHERE text LIKE ? LIMIT ?",
+                        (f"%{needle}%", limit),
+                    ).fetchall():
+                        key = str(row["chunk_id"])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(row)
+                        if len(merged) >= limit:
+                            break
+                    if len(merged) >= limit:
+                        break
+                rows = merged
         return [dict(r) for r in rows]
 
 
@@ -136,13 +157,15 @@ class IndexSourceRegistry:
     def iter_files(self, *, skills_dir: Path | None = None, docs_dir: Path | None = None) -> list[IndexSource]:
         files: list[IndexSource] = []
         roots: list[tuple[Path, str, str]] = []
+        for extra in self.extra:
+            if extra.is_dir():
+                roots.append((extra, "project", "operator_approved"))
+            elif extra.is_file():
+                roots.append((extra.parent, "project", "operator_approved"))
         if docs_dir and docs_dir.is_dir():
             roots.append((docs_dir, "docs", "system"))
         if skills_dir and skills_dir.is_dir():
             roots.append((skills_dir, "skills", "system"))
-        for extra in self.extra:
-            if extra.is_dir():
-                roots.append((extra, "project", "operator_approved"))
         for root, kind, trust in roots:
             for path in root.rglob("*"):
                 if not path.is_file():
@@ -211,7 +234,7 @@ class IndexCoordinator:
                     skipped += 1
                     continue
                 text = raw.decode("utf-8", errors="replace")
-                chunks = _chunk_text(text)
+                chunks = _chunk_text(f"{path.name}\n{text}")
                 self.manifest.upsert_source(source, digest, stat.st_mtime, chunks)
                 updated += 1
                 self._emit(EventType.INDEX_SOURCE_UPDATED.value, {"source_id": source.source_id, "chunks": len(chunks)})
@@ -222,10 +245,30 @@ class IndexCoordinator:
         return result
 
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, Any]]:
-        hits = self.manifest.search(query, limit=limit)
-        for hit in hits:
+        hits = self.manifest.search(query, limit=max(limit * 3, 12))
+        extra_roots = {str(p.resolve()) for p in self.registry.extra}
+        try:
+            from jaeger_ai.core.instance.commissioning import load_knowledge_sources
+            instance_root = self.memory_dir.parent if self.memory_dir.name == "memory" else self.memory_dir
+            for src in load_knowledge_sources(instance_root):
+                if src.get("approved") and not src.get("automatic"):
+                    extra_roots.add(str(Path(str(src.get("path") or "")).expanduser().resolve()))
+        except Exception:
+            pass
+        def _rank(hit: dict[str, Any]) -> tuple[int, int]:
+            src = str(hit.get("source_id") or "")
+            try:
+                src = str(Path(src).resolve())
+            except Exception:
+                pass
+            approved = 0 if any(src.startswith(root) for root in extra_roots if root) else 1
+            return (approved, 0)
+        hits.sort(key=_rank)
+        out = []
+        for hit in hits[:limit]:
             hit["provenance"] = "RETRIEVED_DOCUMENT"
-        return hits
+            out.append(hit)
+        return out
 
 
 def _chunk_text(text: str, size: int = 1200) -> list[str]:

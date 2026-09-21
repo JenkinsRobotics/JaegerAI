@@ -67,8 +67,9 @@ def test_validation_records_disk_evidence_not_imports(layout):
     CommissioningCoordinator(layout).tick(budget_s=40)
     report = run_validation(layout, offline=True)
     action = next(c for c in report.checks if c.id == "safe_tool_execution")
-    assert action.passed
-    assert "commissioning_tool_probe.txt" in action.evidence
+    assert action.kind == "STRUCTURAL"
+    assert action.status == "STRUCTURAL_OK"
+    assert action.passed is True
     fabric = next(c for c in report.checks if c.id == "event_fabric")
     assert "count=" in fabric.evidence or fabric.passed
 

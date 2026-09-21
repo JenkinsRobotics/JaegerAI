@@ -199,6 +199,9 @@ def route(handler, parsed, method: str) -> bool:
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
 
+    if path in ("/api/jaeger/runtime/status", "/api/runtime/status"):
+        return _proxy(handler, "GET", "/v1/runtime/status")
+
     if method == "POST" and path.startswith("/api/jaeger/approvals/"):
         approval_id = path.rsplit("/", 1)[-1]
         if not approval_id:

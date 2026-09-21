@@ -583,7 +583,7 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
 # Private ``_t_*`` names + explicit ``name=`` override so the gated tool never
 # collides with the ungated logic fn above (used by internal callers).
 # ---------------------------------------------------------------------------
-@register_tool_from_function(name="write_file")
+@register_tool_from_function(name="write_file", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="write_file",
                summary="write a file in the skills workspace")
@@ -593,7 +593,7 @@ def _t_write_file(path: str, content: str) -> dict:
     return file_write(path=path, content=content)
 
 
-@register_tool_from_function(name="append_file")
+@register_tool_from_function(name="append_file", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="append_file",
                summary="append to a file in the skills workspace")
@@ -602,7 +602,7 @@ def _t_append_file(path: str, content: str) -> dict:
     return append_file(path=path, content=content)
 
 
-@register_tool_from_function(name="patch")
+@register_tool_from_function(name="patch", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="patch",
                summary="edit a file in the skills workspace")
@@ -617,7 +617,7 @@ def _t_patch(path: str, old: str, new: str, replace_all: bool = False) -> dict:
     return edit_file(path=path, old=old, new=new, replace_all=replace_all)
 
 
-@register_tool_from_function(name="delete_file")
+@register_tool_from_function(name="delete_file", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="delete_file",
                summary="delete a file from the skills workspace")
@@ -626,7 +626,7 @@ def _t_delete_file(path: str) -> dict:
     return delete_file(path=path)
 
 
-@register_tool_from_function(name="move_file")
+@register_tool_from_function(name="move_file", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="move_file",
                summary="move a file in the skills workspace")
@@ -641,7 +641,7 @@ def _t_move_file(src: str, dst: str) -> dict:
     return move_file(src=src, dst=dst)
 
 
-@register_tool_from_function(name="copy_file")
+@register_tool_from_function(name="copy_file", side_effect="external")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files",
                operation="copy_file",
                summary="copy a file in the skills workspace")

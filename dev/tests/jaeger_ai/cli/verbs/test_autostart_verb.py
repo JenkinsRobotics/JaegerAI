@@ -15,7 +15,7 @@ def test_launchd_plist_content():
     txt = A._launchd_plist(Path("/x/jaeger"), Path("/x"), ["--tui"])
     assert "/x/jaeger" in txt and "--tui" in txt
     assert "<key>RunAtLoad</key><true/>" in txt
-    assert "<key>KeepAlive</key><true/>" in txt
+    assert "<key>KeepAlive</key>" in txt
     assert "PYTHONDONTWRITEBYTECODE" in txt
     assert "PYTHONPYCACHEPREFIX" in txt
     assert A._LABEL in txt

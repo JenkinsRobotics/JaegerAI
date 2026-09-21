@@ -81,6 +81,28 @@ class TurnExecutive:
             self.runs.heartbeat(run.id, owner_pid=os.getpid())
             self.agent.bind_run(run.id)
             return run
+        blocked = [
+            r for r in self.runs.list(commitment_id=commitment.id, state="blocked")
+            if r.reason == "owner_lost"
+        ]
+        if blocked:
+            pending = []
+            try:
+                from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+                ledger = SqliteEffectLedger()
+                pending = [
+                    e for e in ledger.list(status="pending")
+                    if e.run_id == blocked[0].id
+                ]
+            except Exception:
+                pending = []
+            if not pending:
+                run, _checkpoint = self.runs.resume(blocked[0].id, owner_pid=os.getpid())
+                self.agent.bind_run(run.id)
+                return run
+            # Indeterminate external effect: leave the run BLOCKED and
+            # open a new run for subsequent requests.
+
         run = self.runs.create(
             commitment.id, provider=self.provider, owner_pid=os.getpid(),
         )
