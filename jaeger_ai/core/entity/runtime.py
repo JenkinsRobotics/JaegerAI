@@ -31,6 +31,7 @@ import time
 from typing import Any, Callable
 
 from jaeger_ai.core.instance.instance import operator_state_root
+from .ownership import EntityRuntimeMode, infer_runtime_mode, instance_layout, runtime_state_root
 from .attention import AttentionDecision, SalienceEngine
 from .authority import AuthorityDecision, AuthorityLayer, ProposedAction
 from .cognition_router import CognitionRouter
@@ -38,7 +39,7 @@ from .deliberate_planner import DeliberatePlanner
 from .events import EventType, JaegerEvent
 from .event_store import SqliteEventStore
 from .executive import CognitiveStrategy, ExecutiveDecision, ExecutiveStrategySelector
-from .identity import EntityIdentity, resolve_entity_identity
+from .identity import EntityIdentity, resolve_entity_identity  # load_from_file used in ATTACHED_CLIENT
 from .learning import LearningDecision, LearningPipeline
 from .memory import MemorySubsystem
 from .reducer import reduce_event, replay_events
@@ -68,12 +69,34 @@ class EntityRuntime:
         identity: EntityIdentity | None = None,
         event_store: SqliteEventStore | None = None,
         salience_engine: SalienceEngine | None = None,
+        mode: EntityRuntimeMode | None = None,
     ) -> None:
-        self.state_root = Path(state_root) if state_root else operator_state_root()
+        self.mode = mode or infer_runtime_mode()
+        try:
+            self.layout = instance_layout()
+        except Exception:
+            self.layout = None
+        if state_root is not None:
+            self.state_root = Path(state_root)
+        elif self.layout is not None:
+            self.state_root = runtime_state_root()
+        else:
+            self.state_root = operator_state_root()
         self.state_root.mkdir(parents=True, exist_ok=True)
 
-        self.identity = identity or resolve_entity_identity(self.state_root)
-        self.event_store = event_store or SqliteEventStore(self.state_root / "entity_events.sqlite3")
+        identity_root = self.state_root
+        if self.mode == EntityRuntimeMode.ATTACHED_CLIENT:
+            ident_path = identity_root / "entity_identity.json"
+            if ident_path.is_file():
+                self.identity = identity or EntityIdentity.load_from_file(ident_path)
+            else:
+                self.identity = identity or resolve_entity_identity(identity_root)
+        else:
+            self.identity = identity or resolve_entity_identity(self.state_root)
+        event_path = self.state_root / "entity_events.sqlite3"
+        if self.layout is not None and state_root is None:
+            event_path = self.layout.event_store_path
+        self.event_store = event_store or SqliteEventStore(event_path)
         self.salience_engine = salience_engine or SalienceEngine()
         self.executive_selector = ExecutiveStrategySelector()
         self.authority_layer = AuthorityLayer()
@@ -97,9 +120,21 @@ class EntityRuntime:
         self.cognition_router = CognitionRouter()
         try:
             from .resident import try_become_resident
-            self.is_resident = try_become_resident(self.state_root)
+            if self.mode == EntityRuntimeMode.OWNER:
+                lock_root = self.layout.run_dir if self.layout is not None else self.state_root
+                self.is_resident = try_become_resident(lock_root)
+            elif self.mode == EntityRuntimeMode.TEST:
+                self.is_resident = try_become_resident(self.state_root)
+            else:
+                self.is_resident = False
         except Exception:
             self.is_resident = False
+        if self.mode == EntityRuntimeMode.OWNER and self.is_resident:
+            try:
+                from .recovery import RecoveryManager
+                self._recovery_report = RecoveryManager().scan_resumable_runs()
+            except Exception:
+                self._recovery_report = None
 
         # Reconstruct initial state from cold boot replay
         base_state = SelfState(
@@ -118,11 +153,12 @@ class EntityRuntime:
         )
 
     @classmethod
-    def get_singleton(cls, state_root: Path | str | None = None) -> EntityRuntime:
+    def get_singleton(cls, state_root: Path | str | None = None, *, mode: EntityRuntimeMode | None = None) -> EntityRuntime:
         """Process-wide singleton instance of the EntityRuntime."""
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls(state_root=state_root)
+                resolved_mode = mode or infer_runtime_mode()
+                cls._instance = cls(state_root=state_root, mode=resolved_mode)
             return cls._instance
 
     @classmethod
@@ -206,6 +242,8 @@ class EntityRuntime:
             meta.update(ctx["metadata"])
 
         # 1. Ingest event to Fabric, reduce SelfState, evaluate Salience
+        trace_id = str(meta.get("trace_id") or request_id or f"T{int(time.time()*1000)}")
+        meta["trace_id"] = trace_id
         event = JaegerEvent.human_message(
             user_text,
             actor=actor,
@@ -628,6 +666,11 @@ class EntityRuntime:
             session_id=session_id,
             payload={
                 "task_id": task_id,
+                "source_session": session_id,
+                "originating_event_id": str((result or {}).get("originating_event_id") or "") if isinstance(result, dict) else "",
+                "status": "failed" if error else "completed",
+                "result_summary": str((result or {}).get("summary") or result)[:500] if result is not None else (error or ""),
+                "artifact_refs": list((result or {}).get("artifact_refs") or []) if isinstance(result, dict) else [],
                 "result": result,
                 "error": error,
                 "requires_followup": requires_followup,

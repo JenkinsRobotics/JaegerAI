@@ -135,7 +135,18 @@ class ReActHandler(CognitionStrategyHandler):
         if reflexion_store is not None:
             try:
                 block = reflexion_store.to_prompt_context_block(text)
-                if block:
+                constraints = ""
+                if hasattr(reflexion_store, "to_planning_constraints"):
+                    constraints = reflexion_store.to_planning_constraints(text)
+                if constraints:
+                    text = (
+                        f"{constraints}\n\n"
+                        "Your FIRST tool call must obey the constraints above. "
+                        "Do not repeat the failed first action from those episodes.\n\n"
+                        f"{block}\n\n{text}" if block else
+                        f"{constraints}\n\nYour FIRST tool call must obey the constraints above.\n\n{text}"
+                    )
+                elif block:
                     text = f"{block}\n\n{text}"
             except Exception as exc:
                 logger.debug("ReAct reflexion inject skipped: %s", exc)

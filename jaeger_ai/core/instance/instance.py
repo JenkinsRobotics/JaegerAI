@@ -352,6 +352,14 @@ class InstanceLayout:
     def workspace_dir(self) -> Path:        return self.root / "workspace"
     @property
     def run_dir(self) -> Path:              return self.root / "run"
+    @property
+    def entity_identity_path(self) -> Path: return self.memory_dir / "entity_identity.json"
+    @property
+    def event_store_path(self) -> Path:     return self.memory_dir / "entity_events.sqlite3"
+    @property
+    def reflections_path(self) -> Path:     return self.memory_dir / "structured_reflections.json"
+    @property
+    def resident_lock_path(self) -> Path:   return self.run_dir / "entity.resident.lock"
 
     def exists(self) -> bool:
         return self.identity_path.exists() and self.config_path.exists() and self.manifest_path.exists()

@@ -89,9 +89,10 @@ class JaegerGatewayApp:
         self._owns_store = True
         self.store.recover_interrupted_sessions()
         try:
+            from jaeger_ai.core.entity.ownership import EntityRuntimeMode
             from jaeger_ai.core.entity.runtime import EntityRuntime
             from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
-            rt = EntityRuntime.get_singleton()
+            rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             logger.info(
                 "Gateway attached EntityRuntime %s resident=%s",
                 rt.identity.entity_id,
@@ -170,6 +171,7 @@ class JaegerGatewayApp:
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
+        self.app.router.add_get("/v1/runtime/status", self.handle_runtime_status)
         self.app.router.add_get("/version", self.handle_version)
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
@@ -430,6 +432,11 @@ class JaegerGatewayApp:
             },
         }
         return web.json_response(payload, status=200 if all_green else 503)
+
+    async def handle_runtime_status(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.entity.runtime_status import collect_runtime_status
+        payload = collect_runtime_status(include_network=True)
+        return web.json_response(payload, status=200 if payload.get("ready") else 503)
 
     def _entity_diagnostics(self) -> dict[str, Any]:
         try:
@@ -1344,12 +1351,28 @@ class JaegerGatewayApp:
             after_native = bool(bound.get("native_run_id"))
             status = "execution_unknown" if after_native else "failed"
             receipt = self._native_receipt(bound.get("native_run_id"), bound.get("native_session")) if after_native else None
-            if receipt and receipt.get("execution_unknown") is False and receipt.get("status") in {"failed", "cancelled"}:
+            reply = (receipt or {}).get("reply") if isinstance(receipt, dict) else None
+            reply = reply if isinstance(reply, dict) else {}
+            if receipt and receipt.get("execution_unknown") is False and receipt.get("status") in {"completed", "failed", "cancelled"}:
                 status = receipt["status"]
             result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields}
+            if status == "completed":
+                result = {
+                    "output": str(reply.get("text") or ""),
+                    "status": "completed",
+                    "turn_id": turn_id,
+                    "backend": "native_receipt",
+                    **agent_fields,
+                }
             if receipt:
                 result["native_receipt"] = receipt
-            self._persist_terminal(rid, session_id, status, result)
+            self._persist_terminal(
+                rid,
+                session_id,
+                status,
+                result,
+                assistant_text=str(reply.get("text") or "") or None if status == "completed" else None,
+            )
         finally:
             self._running_tasks.pop(rid, None)
 

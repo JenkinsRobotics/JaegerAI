@@ -205,6 +205,15 @@ class SqliteEventStore:
             cur = conn.execute("SELECT COUNT(*) AS total FROM entity_events")
             return int(cur.fetchone()["total"])
 
+    def count(self) -> int:
+        return self.count_events()
+
+    def latest_id(self) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute("SELECT MAX(id) AS mx FROM entity_events")
+            row = cur.fetchone()
+            return int(row["mx"] or 0)
+
     @staticmethod
     def _row_to_event(row: sqlite3.Row) -> JaegerEvent:
         try:
