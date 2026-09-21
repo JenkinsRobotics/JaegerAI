@@ -276,3 +276,13 @@ Isolated instance `commission-r6` / `jaeger-entity-f0e310f53564` / Gateway `:188
 * WebUI/CLI/Bridge/Gateway same `entity_id`; ATLAS continuity **PASS**.
 
 **Current verdict: OPERATIONAL — RESIDENT AGENT READY**
+
+---
+
+## Phone access (do not rewrite Round 1–6)
+
+See `docs/architecture/JAEGER_REMOTE_MOBILE.md`.
+
+The iPhone is an authenticated Tailscale HTTPS client of the existing WebUI.
+Gateway remains `127.0.0.1:8810`. `jaeger remote enable|disable|status|doctor|pair`
+is the operator surface. Round 1–6 resident-ready evidence is unchanged.

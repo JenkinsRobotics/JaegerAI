@@ -37,3 +37,8 @@ def test_signed_remote_session_is_accepted_and_tampering_is_rejected() -> None:
     assert not policy.authorize(
         "100.100.20.30", {"Cookie": f"jaeger_session={session}x"}
     ).allowed
+
+
+def test_untrusted_network_denied_even_with_valid_token() -> None:
+    policy = RemoteAccessPolicy(token="secret", remote_enabled=True)
+    assert policy.authorize("8.8.8.8", {"Authorization": "Bearer secret"}).status == 403

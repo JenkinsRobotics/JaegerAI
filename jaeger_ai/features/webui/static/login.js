@@ -3,6 +3,20 @@
  * i18n strings so the server does not need to inject JS literals.
  */
 document.addEventListener('DOMContentLoaded', function () {
+  try {
+    var pair = new URL(window.location.href).searchParams.get('pair');
+    if (pair) {
+      fetch('api/remote/pair', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
+        body: JSON.stringify({token: pair})
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data && data.ok) window.location.replace('./');
+      }).catch(function () {});
+    }
+  } catch (_) {}
+
   var form = document.getElementById('login-form');
   var input = document.getElementById('pw');
   var passkeyBtn = document.getElementById('passkey-login');

@@ -51,6 +51,7 @@ def _resolve_session_ttl() -> int:
 PUBLIC_PATHS = frozenset({
     '/login', '/health', '/favicon.ico', '/sw.js',
     '/api/auth/login', '/api/auth/status',
+    '/api/remote/pair',
     '/api/auth/oidc/start', '/api/auth/oidc/callback',
     '/api/auth/passkey/options', '/api/auth/passkey/login',
     '/share',
@@ -601,17 +602,30 @@ def verify_password(plain: str) -> bool:
     return False
 
 
-def create_session(*, auth_type: str | None = None, username: str | None = None, bound_profile: str | None = None) -> str:
+def create_session(
+    *,
+    auth_type: str | None = None,
+    username: str | None = None,
+    bound_profile: str | None = None,
+    device: str | None = None,
+    remote: bool = False,
+    user_agent: str | None = None,
+) -> str:
     """Create a new auth session. Returns signed cookie value."""
     token = secrets.token_hex(32)
     expiry = time.time() + _resolve_session_ttl()
     record: float | dict
-    if any(value is not None for value in (auth_type, username, bound_profile)):
+    if any(value is not None for value in (auth_type, username, bound_profile, device)) or remote:
         record = {
             'expiry': expiry,
             'auth_type': auth_type,
             'username': username,
             'bound_profile': bound_profile,
+            'device': device,
+            'remote': bool(remote),
+            'user_agent': (user_agent or '')[:180],
+            'created_at': time.time(),
+            'last_seen': time.time(),
         }
     else:
         record = expiry
@@ -1016,6 +1030,64 @@ def invalidate_session(cookie_value) -> None:
             if token in _sessions:
                 _sessions.pop(token, None)
                 _save_sessions(_sessions)
+
+
+def list_sessions() -> list[dict]:
+    """Return active sessions with metadata, never the raw cookie secret."""
+    _prune_expired_sessions()
+    out: list[dict] = []
+    with _SESSIONS_LOCK:
+        for token, record in _sessions.items():
+            expiry = _session_expiry(record)
+            row = {
+                'id': token[:12],
+                'token_prefix': token[:12],
+                'expiry': expiry,
+                'remote': False,
+                'device': 'Mac',
+                'local': True,
+            }
+            if isinstance(record, dict):
+                row['remote'] = bool(record.get('remote'))
+                row['device'] = record.get('device') or ('iPhone' if record.get('remote') else 'Mac')
+                row['local'] = not row['remote']
+                row['auth_type'] = record.get('auth_type')
+                row['username'] = record.get('username')
+                row['last_seen'] = record.get('last_seen') or record.get('created_at')
+                row['user_agent'] = record.get('user_agent')
+            out.append(row)
+    return out
+
+
+def revoke_session_prefix(prefix: str) -> int:
+    """Revoke sessions whose token starts with prefix. Returns count removed."""
+    needle = str(prefix or '').strip()
+    if len(needle) < 8:
+        return 0
+    removed = 0
+    with _SESSIONS_LOCK:
+        keys = [t for t in _sessions if t.startswith(needle)]
+        for token in keys:
+            _sessions.pop(token, None)
+            removed += 1
+        if removed:
+            _save_sessions(_sessions)
+    return removed
+
+
+def revoke_remote_sessions() -> int:
+    removed = 0
+    with _SESSIONS_LOCK:
+        keys = [
+            t for t, rec in _sessions.items()
+            if isinstance(rec, dict) and rec.get('remote')
+        ]
+        for token in keys:
+            _sessions.pop(token, None)
+            removed += 1
+        if removed:
+            _save_sessions(_sessions)
+    return removed
 
 
 def parse_cookie(handler) -> str | None:

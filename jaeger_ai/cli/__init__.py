@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         "  restart     restart the managed stack\n"
         "  status      inspect the live multi-agent fabric\n"
         "  webui       manage the browser interface; `webui url` prints its URL\n"
+        "  remote      phone access over Tailscale HTTPS; enable|disable|status|doctor|pair\n"
         "  delegate    manage external agent delegation\n"
         "  bridge      run the NDJSON stdio bridge the desktop app speaks\n"
         "  mcp         run the MCP server (`mcp --http` attaches to the live bridge)\n"
