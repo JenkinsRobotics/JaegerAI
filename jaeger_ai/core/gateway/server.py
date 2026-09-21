@@ -243,9 +243,6 @@ class JaegerGatewayApp:
             if native and native in pending_run_ids:
                 logger.warning("Request %s stays blocked; pending effects on run %s", rid, native)
                 continue
-            if native and native not in resumed:
-                logger.info("Request %s not re-dispatched; run %s was not resumed", rid, native)
-                continue
             if not native and pending_keys:
                 logger.warning("Request %s stays blocked; indeterminate effects present", rid)
                 continue
@@ -1274,6 +1271,13 @@ class JaegerGatewayApp:
         cfg = load_yaml(layout.config_path, Config)
         client = ExternalModelClient(cfg.external_model, layout)
         agent = build_jaeger_agent(client, max_iterations=12, max_tool_calls=8)
+        try:
+            row = self.store.get_request(request_id)
+            native = str((row or {}).get("native_run_id") or "")
+            if native:
+                agent.bind_run(native)
+        except Exception:
+            pass
         execu = TurnExecutive(
             agent,
             SqliteRunStore(),

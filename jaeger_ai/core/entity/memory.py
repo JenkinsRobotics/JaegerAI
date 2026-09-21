@@ -215,6 +215,18 @@ class SemanticMemory:
                 for r in cur.fetchall()
             ]
 
+    def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute(
+                "SELECT subject, predicate, value, confidence FROM semantic_claims "
+                "ORDER BY created_at DESC LIMIT ?",
+                (int(limit),),
+            )
+            return [
+                {"subject": r[0], "predicate": r[1], "value": r[2], "confidence": r[3]}
+                for r in cur.fetchall()
+            ]
+
 
 # ── 4. Reflective Memory ───────────────────────────────────────────────
 

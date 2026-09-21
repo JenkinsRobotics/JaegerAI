@@ -262,3 +262,17 @@ Isolated instance `commission-r5` / `jaeger-entity-4211ef75d464` / Gateway `:188
 * `aurora.txt` written; cross-session/post-restart recall of AURORA not proven.
 
 Verdict unchanged: **OPERATIONAL — MANUAL SUPERVISION REQUIRED**.
+
+---
+
+## Round 6 isolated live campaign (do not rewrite the tables above)
+
+Isolated instance `commission-r6` / `jaeger-entity-f0e310f53564` / Gateway `:18822` / WebUI `:18790` / Bridge `:18791`:
+
+* Index extra-source retrieval **PASS** (`evt-6a054f549daa`, phrase `NEBULA-COMMISSIONING-INDEX`).
+* SIGKILL same-run C-completion **PASS** (run `1af0b8b6bec2442d`, A not replayed, `crash-c.txt`=`C-DONE`).
+* Reflexion first-action **PASS** (`read_file` → `write_file`, `evt-0fcffb5e061b` / `evt-dfc84b6404dd`).
+* AURORA recall and post-restart continuity **PASS**.
+* WebUI/CLI/Bridge/Gateway same `entity_id`; ATLAS continuity **PASS**.
+
+**Current verdict: OPERATIONAL — RESIDENT AGENT READY**

@@ -202,6 +202,15 @@ class ExecutiveStrategySelector:
             )
             artifact = bool(complexity["artifact"])
 
+            if int(meta_reflections or 0) > 0:
+                return ExecutiveDecision(
+                    strategy=CognitiveStrategy.REACT_LOOP,
+                    reason="Retrieved reflections require a ReAct first-action change",
+                    estimated_steps=max(3, int(complexity["estimated_tools"])),
+                    refinement_required=artifact,
+                    complexity_score=float(complexity["score"]),
+                )
+
             # Check Deliberate Planning / Batch Work
             if (
                 complexity["score"] >= 0.45
