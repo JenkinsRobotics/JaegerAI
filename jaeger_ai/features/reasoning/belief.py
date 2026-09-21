@@ -173,14 +173,62 @@ class EpistemicContext:
             if len(self._state.recent_insights) > 20:
                 self._state.recent_insights.pop(0)
             self.persist()
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_ai.core.entity.events import JaegerEvent, EventType
+                EntityRuntime.get_singleton().ingest(
+                    JaegerEvent(
+                        event_id="",
+                        event_type=EventType.MEMORY_CONSOLIDATED.value,
+                        actor="system:reasoning",
+                        source="reasoning.belief",
+                        timestamp=time.time(),
+                        payload={"insights": [insight]},
+                        salience=0.4,
+                    )
+                )
+            except Exception:
+                pass
 
     def record_goal(self, goal_id: str, description: str) -> None:
         if not any(g.id == goal_id for g in self._state.active_goals):
             self._state.active_goals.append(GoalRecord(id=goal_id, description=description))
             self.persist()
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_ai.core.entity.events import JaegerEvent, EventType
+                EntityRuntime.get_singleton().ingest(
+                    JaegerEvent(
+                        event_id="",
+                        event_type=EventType.GOAL_CREATED.value,
+                        actor="system:reasoning",
+                        source="reasoning.belief",
+                        timestamp=time.time(),
+                        payload={"id": goal_id, "description": description},
+                        salience=0.5,
+                    )
+                )
+            except Exception:
+                pass
 
     def mark_goal_completed(self, goal_id: str) -> None:
         for g in self._state.active_goals:
             if g.id == goal_id:
                 g.completed = True
         self.persist()
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.entity.events import JaegerEvent, EventType
+            EntityRuntime.get_singleton().ingest(
+                JaegerEvent(
+                    event_id="",
+                    event_type=EventType.GOAL_COMPLETED.value,
+                    actor="system:reasoning",
+                    source="reasoning.belief",
+                    timestamp=time.time(),
+                    payload={"id": goal_id},
+                    salience=0.5,
+                )
+            )
+        except Exception:
+            pass

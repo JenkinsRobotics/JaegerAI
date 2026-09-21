@@ -312,6 +312,47 @@ def build_prompt(layout: Any, *, now: datetime | None = None) -> str:
     return heartbeat_prompt(load_checklist(layout), board_digest=digest)
 
 
+def execute_heartbeat_event(
+    layout: Any,
+    *,
+    now: datetime | None = None,
+) -> tuple[Any, bool, str]:
+    """Canonical heartbeat ingress for the Pinocchio Entity Architecture.
+
+    Replaces fake human chat messages with a persistent `system.heartbeat` event.
+    Evaluates salience via EntityRuntime:
+    - If no action/briefing is required: state is updated, event is logged, and
+      returns (event, False, HEARTBEAT_OK) with ZERO model calls.
+    - If a briefing or urgent task is due: returns (event, True, prompt) to wake
+      cognition truthfully with system event provenance.
+    """
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.entity.events import JaegerEvent
+
+    clock = now or datetime.now()
+    kind = briefing_kind(now=clock)
+    is_briefing_due = bool(kind and not already_briefed(layout, kind, now=clock))
+
+    # Ingest event into the canonical entity runtime
+    runtime = EntityRuntime.get_singleton()
+    event, decision = runtime.submit_heartbeat(
+        source="runtime.heartbeat",
+        payload={
+            "briefing_kind": kind,
+            "pending_briefing": kind if is_briefing_due else None,
+            "urgent_work": False,
+        },
+    )
+
+    if not decision.wake_cognition:
+        mark_beat(layout, now=clock.timestamp(), silent=True)
+        return event, False, HEARTBEAT_OK
+
+    prompt = build_prompt(layout, now=clock)
+    mark_beat(layout, now=clock.timestamp(), silent=False)
+    return event, True, prompt
+
+
 _reasoning_singleton: Any = None
 
 
@@ -358,6 +399,7 @@ __all__ = [
     "briefing_prompt",
     "build_prompt",
     "checklist_path",
+    "execute_heartbeat_event",
     "get_reasoning_engine",
     "heartbeat_prompt",
     "is_due",
