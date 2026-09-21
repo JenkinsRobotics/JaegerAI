@@ -1,8 +1,9 @@
 # ARCHITECTURE_AFTER.md — Pinocchio Persistent Entity Runtime Architecture
 
-**Document Version:** 1.0.0 (Pinocchio Architecture Release)  
+**Document Version:** 1.1.0 (Pinocchio Architecture Semantic Audit Release)  
 **Author:** Principal Systems Architect  
 **Status:** Canonical Production Architecture  
+**Audit Standard:** [Universal Persistent Agent Architecture (UPAA)](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md)
 
 ---
 
@@ -14,6 +15,10 @@ The Pinocchio architecture establishes a single, authoritative **Persistent Enti
 * **MODEL ≠ AGENT:** The Large Language Model is not Jaeger. Models (Hermes, Claude, OpenAI, Gemini, Ollama) are replaceable cognition engines invoked on demand.
 * **PERSONA ≠ IDENTITY:** Persona modulates expressive style, tone, and character. Identity is the persistent, immutable anchor surviving across sessions, hosts, and model swaps.
 * **SESSION ≠ IDENTITY:** Sessions and conversations belong to the entity; the entity never belongs to a session.
+* **AUTHORITY ORDERING:** `COGNITION PROPOSES ACTION → AUTHORITY LAYER → ACTION SYSTEM/EXECUTOR → ENVIRONMENT`. An executor never gets an unapproved action.
+* **VERIFICATION ≠ EFFECT LEDGER:** `TOOL RETURN SUCCESS ≠ OBJECTIVE VERIFIED`. EffectLedger accounts for execution idempotency; VerificationContract inspects independent real-world ground truth.
+* **HEARTBEAT IS A TRIGGER ONLY:** Heartbeat triggers sleep-time cycles; `SleepTimeProcessor` owns consolidation, reflection, and indexing semantics.
+* **SINGLE RUNTIME AUTHORITY:** All ingress paths (CLI, Bridge, Gateway, Heartbeat, Background, Passive/Salient Sensors) execute against the identical `EntityRuntime` singleton instance.
 
 ```
                          JAEGER ENTITY RUNTIME
@@ -42,16 +47,43 @@ The Pinocchio architecture establishes a single, authoritative **Persistent Enti
             ┌──────────────────────┴──────────────────────┐
             ▼                                             ▼
  [Salience < Threshold]                        [Salience >= Threshold]
-      Silent Record                                   Cognition
-     (0 Model Calls)                                      │
-                                                          ▼
-                                                        Action
+      Silent Record                                EXECUTIVE
+     (0 Model Calls)                       (Strategy Selection)
                                                           │
                                                           ▼
-                                                 Tool Consequence Event
+                                                   COGNITION MODES
+                                               (ReAct, Planning, etc.)
                                                           │
                                                           ▼
-                                                  Memory & Learning
+                                                   PROPOSED ACTION
+                                                          │
+                                                          ▼
+                                                   AUTHORITY LAYER
+                                                (Policy Kernel, Veto)
+                                                          │
+                                                          ▼
+                                                    ACTION SYSTEM
+                                                (EffectLedger, Tools)
+                                                          │
+                                                          ▼
+                                                     ENVIRONMENT
+                                                          │
+                                                          ▼
+                                                  CONSEQUENCE EVENT
+                                                          │
+                                                          ▼
+                                                VERIFICATION CONTRACT
+                                         (Tool Success ≠ Objective Verified)
+                                                          │
+                                                          ▼
+                                                  LEARNING PIPELINE
+                                            ┌─────────────┼─────────────┐
+                                            ▼             ▼             ▼
+                                         Memory         World        Skills
+                                                          │
+                                                          ▼
+                                                SLEEP-TIME PROCESSING
+                                              (Triggered by Heartbeat)
 ```
 
 ---
@@ -63,51 +95,72 @@ The Pinocchio architecture establishes a single, authoritative **Persistent Enti
 - Holds unique `entity_id` (`jaeger-entity-...`), display name, creation timestamp, and system purpose.
 - Fully decoupled from character sheets, persona presets, and operator identity.
 
-### 2. `JaegerEvent` (`events.py`)
-- Normalized event contract standardizing all occurrences:
-  - `human.message`, `system.heartbeat`, `system.observation`, `tool.started`, `tool.completed`, `tool.failed`
-  - `goal.created`, `goal.completed`, `commitment.created`, `commitment.updated`
-  - `agent.action`, `agent.response`, `memory.consolidated`, `background.completed`
-  - `perception.sensed`, `skill.candidate`, `skill.promoted`
-- Structured metadata: `event_id`, `actor`, `source`, `timestamp`, `session_id`, `salience`, `idempotency_key`, `payload`, `provenance`.
-
-### 3. `SqliteEventStore` (`event_store.py`)
-- Persistent append-only event log stored in `<state_root>/entity_events.sqlite3`.
-- WAL mode, busy timeout, foreign keys, index-backed time and session queries.
+### 2. `JaegerEvent` (`events.py`) & `SqliteEventStore` (`event_store.py`)
+- Normalized event contract standardizing all occurrences with monotonic IDs and causal provenance.
+- Persistent append-only event log stored in `<state_root>/entity_events.sqlite3` (WAL mode, busy timeout, foreign keys, indexed queries).
 - Complete chronological replay support for cold boot state reconstruction.
 
-### 4. `SelfState` (`self_state.py`)
-- Authoritative compact projection of the entity's current reality:
-  - Identity, boot time, last event timestamp, last user interaction timestamp.
-  - Active interfaces (`gateway`, `bridge`, `cli`), active sensors (`desktop_activity`).
-  - Current activity, current focus, active goals, commitments, important people, uncertainty areas, resource telemetry, recent insights.
-- **Truthful continuity invariant:** Strictly grounded in demonstrable runtime facts; zero fake consciousness assertions.
+### 3. `SelfState` (`self_state.py`) & `reduce_event` (`reducer.py`)
+- Authoritative compact projection of the entity's current reality (identity, active goals, commitments, telemetry, recent insights).
+- Pure deterministic reducer `(SelfState, JaegerEvent) -> SelfState` enabling zero-loss cold boot replay.
 
-### 5. `reduce_event` (`reducer.py`)
-- Pure deterministic state reducer `(SelfState, JaegerEvent) -> SelfState`.
-- Reconstructs exact `SelfState` from stored events without reliance on volatile memory.
-
-### 6. `SalienceEngine` (`attention.py`)
+### 4. `SalienceEngine` (`attention.py`)
 - Evaluates whether an incoming event warrants invoking cognition.
-- Separates routine telemetry and passive heartbeats (salience < 0.7, 0 LLM calls) from urgent alerts, human direct messages, and scheduled briefings (salience >= 0.7, cognition awakened).
+- Separates routine telemetry and passive heartbeats (salience < 0.3, 0 LLM calls) from urgent alerts, human direct messages, and scheduled briefings (salience >= 0.7, cognition awakened).
 
-### 7. `EntityRuntime` (`runtime.py`)
-- The single process-wide coordinator implementing the canonical loop:
-  `EVENT -> PERSIST -> UPDATE SELF/WORLD STATE -> ATTENTION/SALIENCE -> COGNITION IF REQUIRED -> ACTION -> OBSERVE CONSEQUENCE -> EVENT -> MEMORY/LEARNING`.
+### 5. `AuthorityLayer` (`authority.py`)
+- Enforces strict canonical authority ordering: `PROPOSED ACTION → AUTHORITY LAYER → ACTION SYSTEM → ENVIRONMENT`.
+- Evaluates `ProposedAction` through deterministic security policies and shell veto hooks (`pre_tool_call`). No executor executes an action without prior authorization.
+
+### 6. `VerificationContract` (`verification.py`)
+- Separates:
+  1. Execution Attempted (`VerificationStatus.ATTEMPTED`)
+  2. Tool Returned Success (`VerificationStatus.TOOL_SUCCESS`)
+  3. Effect Recorded (`VerificationStatus.EFFECT_RECORDED`)
+  4. Intended Objective Actually Verified (`VerificationStatus.OBJECTIVE_VERIFIED`)
+- A tool return of `ok=True` without an independent external verifier produces `OBJECTIVE_UNVERIFIED`. `verify_disk_state()` independently validates real filesystem outcomes.
+
+### 7. `MemorySubsystem` (`memory.py`)
+Explicitly owns the 5 canonical memory classes:
+1. **Working Memory:** In-memory scratchpad and active goals (`WorkingMemory`).
+2. **Episodic Memory:** Chronological immutable event log (`EpisodicMemory`, `SqliteEventStore`).
+3. **Semantic Memory:** Structured entity/claim relational tables (`SemanticMemory`, `<state_root>/knowledge.sqlite3`).
+4. **Reflective Memory:** Distilled meta-cognitive lessons (`ReflectiveMemory`, `<state_root>/reflective_insights.json`).
+5. **Procedural Memory:** Verified skills and recipes (`ProceduralMemory`, `<state_root>/skills/`).
+*Architectural Boundary Note:* `SessionStore` (`jaeger_ai/core/gateway/session_store.py`) is strictly a transport-level SSE/REST client session cache, NOT the entity's memory system.
+
+### 8. `ExecutiveStrategySelector` (`executive.py`)
+Deterministically selects among 6 cognitive strategies:
+- `PASSIVE_OBSERVE` (salience < 0.3, 0 LLM calls)
+- `DIRECT_RESPONSE` (conversational/informational prompt)
+- `REACT_LOOP` (action verbs, tool loop with consequence feedback)
+- `DELIBERATE_PLANNING` (batch work, /goal command, work ledger)
+- `SPECIALIST_DELEGATION` (routing to specialist model/agent e.g. Codex)
+- `SLEEP_TIME_CONSOLIDATION` (offline reflection triggered by idle/quiet heartbeat)
+
+### 9. `SleepTimeProcessor` (`sleep_time.py`)
+- Decouples heartbeat triggers from consolidation semantics.
+- Scheduler/heartbeat acts as a **trigger only**.
+- Coordinates consolidation (episodic -> semantic claims), reflective synthesis (error analysis -> insights), and skill review.
+- Emits low-salience `memory.consolidated` events into the Event Fabric.
+
+### 10. `LearningPipeline` (`learning.py`)
+- Converts verified real-world experience into durable cross-session updates across:
+  - Episodic memory (durable event log)
+  - Semantic knowledge / World model (verified claims)
+  - Reflective memory (lessons generated from failed objectives)
+  - Skill library (promoted candidate procedures)
+  - Strategy metadata (reinforced or penalized tool confidence)
+
+### 11. `EntityRuntime` (`runtime.py`)
+- The single process-wide runtime coordinator unifying all ingress interfaces (CLI, Bridge, Gateway, Heartbeat, Background tasks, Passive/Salient Sensors).
+- Implements the complete UPAA canonical loop.
 
 ---
 
-## 3. Integrated Capabilities
+## 3. Verification & Compliance Evidence
 
-* **Truthful Heartbeat (`heartbeat.py`):**
-  Standing checks emit `system.heartbeat` events. When quiet, state updates and returns `HEARTBEAT_OK` with ZERO LLM calls. Briefings and urgent cards wake cognition with system event provenance.
-* **Tool Consequence Loop (`tool_executor.py`):**
-  Every tool dispatch records `tool.started` and `tool.completed`/`tool.failed` with timing, parameters, and results, updating the entity's uncertainty areas and world model.
-* **Memory Consolidation / Dreaming (`consolidation.py`):**
-  Offline/idle reflection processes episodic events, extracting claims and relations into `WorldModel` (`packages/jaeger-agent/.../world.py`) and recording consolidated insights.
-* **Proactive Sensing (`sensors/`):**
-  SensorAdapter contract monitors user idle time, foreground app metadata, and disk telemetry without invasive spyware.
-* **Voyager Skill Promotion (`skills/promotion.py`):**
-  Extracts candidate skills from successful executions, subjects them to automated verification assertions, and promotes passing skills into the persistent skill library.
-* **Unified Ingress:**
-  Gateway (`server.py`), Bridge (`bridge.py`), and CLI (`main.py`) all submit events into `EntityRuntime`.
+All subsystems are validated by comprehensive automated test suites:
+- `dev/tests/test_runtime_trace.py`: Verifies authority ordering, verification distinction, memory taxonomy, executive strategy selection, sleep-time processing, learning pipeline, and single runtime authority trace (100% pass).
+- `dev/tests/test_pinocchio_entity.py`: Verifies acceptance criteria A through L (100% pass).
+- Monorepo package suites: 913 tests passing in `packages/jaeger-agent`, 283 tests passing in `packages/jaeger-os` (1,215 total tests passing).

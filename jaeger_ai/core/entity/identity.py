@@ -63,6 +63,19 @@ class EntityIdentity:
             metadata=dict(data.get("metadata") or {}),
         )
 
+    @classmethod
+    def create_default(
+        cls,
+        instance_name: str = "default",
+        display_name: str = "Jaeger",
+    ) -> EntityIdentity:
+        return cls(
+            entity_id=f"jaeger-entity-{uuid.uuid4().hex[:12]}",
+            display_name=display_name,
+            created_at=time.time(),
+            instance_name=instance_name,
+        )
+
     def save_to_file(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")

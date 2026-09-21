@@ -62,25 +62,25 @@ These invariants are mandatory across the codebase:
 
 Every major Jaeger subsystem maps directly to one of the canonical layers:
 
-| Universal Architecture Layer | Canonical Role | Jaeger Implementation Components | Alignment Notes |
-| :--- | :--- | :--- | :--- |
-| **1. Agent Identity** | Unique, stable anchor surviving restarts, provider changes, sessions, and persona swaps. | `jaeger_ai/core/entity/identity.py` (`EntityIdentity`, `resolve_entity_identity`) | Class name `EntityIdentity` implements the **Agent Identity** concept. |
-| **2. Event Fabric** | Chronological, append-only, replayable event stream with provenance. | `jaeger_ai/core/entity/events.py` (`JaegerEvent`), `jaeger_ai/core/entity/event_store.py` (`SqliteEventStore`) | Backed by durable SQLite in `<state_root>/entity_events.sqlite3`. |
-| **3. Perception Layer** | Translates raw environmental and OS changes into normalized events. | `jaeger_ai/core/entity/sensors/` (`SensorAdapter`, `DesktopActivitySensor`), `jaeger_ai/features/reasoning/perception.py` | Tiered sensing: cheap telemetry → relevance → rich perception. |
-| **4. Attention / Salience** | Decides whether an event warrants cognition or silent state reduction. | `jaeger_ai/core/entity/attention.py` (`SalienceEngine`, `AttentionDecision`) | Passive events update state with 0 model calls; salience $\ge 0.7$ wakes cognition. |
-| **5. Self State** | Compact authoritative projection of current operational reality. | `jaeger_ai/core/entity/self_state.py` (`SelfState`), `jaeger_ai/core/entity/reducer.py` (`reduce_event`) | Deterministically rebuilt from event log on cold boot; zero fake consciousness claims. |
-| **6. World Model** | Structured knowledge of entities, events, claims, and relations. | `packages/jaeger-agent/jaeger_agent/cognition/world.py` (`WorldModel`, `WorldEvent`, `Entity`, `Claim`, `Evidence`, `Relationship`) | Follows Panini-style structured semantic memory with provenance. |
-| **7. Memory System** | Multi-tiered memory (Working, Episodic, Semantic, Procedural, Reflective). | `packages/jaeger-agent/jaeger_agent/memory/` (`sqlite_knowledge.py`, `retrieval.py`), `jaeger_ai/core/gateway/session_store.py` | Explicitly separates working prompt blocks from episodic transcripts and semantic graph claims. |
-| **8. Executive** | Decides cognitive strategy (ReAct, Planning, Delegation, or Silent). | `packages/jaeger-agent/jaeger_agent/cognition/executive.py` (`TurnExecutive`), `jaeger_ai/core/runtime/autonomous_runner.py` | Orchestrates goals, commitments, budgets, and routing. |
-| **9. Cognition Layer** | Selectable cognitive modes (ReAct, deliberative search, reflection, self-refine). | `packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py`, `jaeger_ai/features/reasoning/engine.py` | Employs ReAct for tool execution and reflective passes for idle reasoning. |
-| **10. Cognition Providers** | Interchangeable, stateless LLM inference engines. | `packages/jaeger-agent/jaeger_agent/adapters/` (Hermes, Anthropic, OpenAI, Ollama, Local Llama) | Models are swappable without altering Agent Identity or Memory. |
-| **11. Action / Tool System** | Dispatches authorized operations to tools and hardware. | `packages/jaeger-agent/jaeger_agent/tool_executor.py` (`HookedToolExecutor`, `LedgerToolExecutor`), `ToolDef` | Emits `tool.started` and `tool.completed`/`tool.failed` consequence events. |
-| **12. Policy / Authority Boundary** | Deterministic gate enforcing permissions, limits, and safety. | `jaeger_ai/core/runtime/tool_repair.py`, `jaeger_agent.cognition.effects.EffectLedger`, `tool_allowlist`, subagent worktrees | Outside model discretion; models cannot grant themselves permissions. |
-| **13. Verification Layer** | Ground-truth assertions verifying attempted actions. | `EffectLedger`, Checkpointing (`checkpoints.py`), execution verification fixtures, test assertions | An action is not complete until confirmed by independent tool verification. |
-| **14. Learning Layer** | Updates persistent state, beliefs, and skills from verified experience. | `packages/jaeger-agent/jaeger_agent/skill_improvement/`, `jaeger_ai/core/entity/consolidation.py` | Preserves provenance; model opinions do not overwrite verified records. |
-| **15. Skill Library** | Reusable, verified procedures and playbooks. | `jaeger_ai/core/entity/skills/promotion.py` (`SkillPromotionPipeline`), `packages/jaeger-agent/.../skill_registry/` | Voyager-style attempt → test verify → promote → retrieve lifecycle. |
-| **16. Sleep-Time Processing** | Offline/idle memory consolidation, reflection, and indexing. | `jaeger_ai/core/entity/consolidation.py` (`MemoryConsolidator`), `jaeger_ai/core/runtime/heartbeat.py` (`execute_heartbeat_event`) | Idle processing extracts durable insights into WorldModel with zero chatter. |
-| **17. Workers / Cognitive Subagents** | Delegated worker processes acting on behalf of the persistent Agent. | `packages/jaeger-agent/jaeger_agent/delegates/`, `subagent_worktree.py`, `jaeger_ai/core/agent_registry/` | Specialist workers act on behalf of the Agent without minting new persistent identities. |
+| Universal Architecture Layer | Canonical Role | Status | Jaeger Implementation Components | Behavioral Verification Proof |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Agent Identity** | Unique, stable anchor surviving restarts, provider changes, sessions, and persona swaps. | **VERIFIED** | `jaeger_ai/core/entity/identity.py` (`EntityIdentity`, `resolve_entity_identity`) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_a_identity_continuity` (persists cold reboot). |
+| **2. Event Fabric** | Chronological, append-only, replayable event stream with provenance. | **VERIFIED** | `jaeger_ai/core/entity/events.py` (`JaegerEvent`), `jaeger_ai/core/entity/event_store.py` (`SqliteEventStore`) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_g_self_state_reconstruction` & `test_runtime_trace.py::test_audit_9_single_runtime_authority_trace`. |
+| **3. Perception Layer** | Translates raw environmental and OS changes into normalized events. | **PARTIAL** | `SensorAdapter` architecture verified; `DesktopActivitySensor` verified; **tiered multimodal perception** (vision/audio escalation) is **PLANNED**. | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_h_passive_event_without_llm` & `test_acceptance_i_salient_event_wakeup`. |
+| **4. Attention / Salience** | Decides whether an event warrants cognition or silent state reduction. | **VERIFIED** | `jaeger_ai/core/entity/attention.py` (`SalienceEngine`, `AttentionDecision`) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_h_passive_event_without_llm` (0 LLM calls) & `test_acceptance_i_salient_event_wakeup`. |
+| **5. Self State** | Compact authoritative projection of current operational reality. | **VERIFIED** | `jaeger_ai/core/entity/self_state.py` (`SelfState`), `jaeger_ai/core/entity/reducer.py` (`reduce_event`) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_g_self_state_reconstruction` (exact deterministic replay). |
+| **6. World Model** | Structured knowledge of entities, events, claims, and relations. | **VERIFIED** | `packages/jaeger-agent/jaeger_agent/cognition/world.py` (`WorldModel`, `WorldEvent`, `Entity`, `Claim`, `Evidence`, `Relationship`) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_j_memory_consolidation` (Panini-style claim extraction). |
+| **7. Memory System** | 5-part memory taxonomy (Working, Episodic, Semantic, Reflective, Procedural). | **VERIFIED** | `jaeger_ai/core/entity/memory.py` (`MemorySubsystem`). Explicitly decouples `SessionStore` as gateway transport cache only. | Verified in `dev/tests/test_runtime_trace.py::test_audit_3_memory_taxonomy` (all 5 tiers tested with dedicated persistence). |
+| **8. Executive** | Decides cognitive strategy (Passive, Direct, ReAct, Deliberate, Delegation, Sleep). | **VERIFIED** | `jaeger_ai/core/entity/executive.py` (`ExecutiveStrategySelector`, `CognitiveStrategy`), `TurnExecutive`, `AutonomousGoalRunner` | Verified in `dev/tests/test_runtime_trace.py::test_audit_4_executive_strategy_selection` (all 6 strategies evaluated). |
+| **9. Cognition Modes** | Selectable cognitive modes (ReAct, Deliberative Planning, Reflection, Delegation). | **PARTIAL** | ReAct (verified), Deliberate Planning (verified), Reflection (verified), Delegation (verified); **Autonomous Self-Refinement Loop** is **PARTIAL**. | Verified in `dev/tests/test_runtime_trace.py::test_audit_4_executive_strategy_selection` & `test_pinocchio_entity.py::test_acceptance_e_tool_consequence_loop`. |
+| **10. Cognition Providers** | Interchangeable, stateless LLM inference engines. | **VERIFIED** | `packages/jaeger-agent/jaeger_agent/adapters/` (Hermes, Claude, OpenAI, Ollama, Local Llama) | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_b_provider_independence`. |
+| **11. Action / Tool System** | Dispatches authorized operations to tools and hardware. | **VERIFIED** | `packages/jaeger-agent/jaeger_agent/tool_executor.py` (`DirectToolExecutor`, `LedgerToolExecutor`), `ToolDef` | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_e_tool_consequence_loop` (`tool.started` and `tool.completed`). |
+| **12. Policy / Authority Boundary** | Deterministic gate enforcing permissions and vetoes before execution. | **VERIFIED** | `jaeger_ai/core/entity/authority.py` (`AuthorityLayer`, `ProposedAction`), `HookedToolExecutor` (`pre_tool_call` veto) | Verified in `dev/tests/test_runtime_trace.py::test_audit_1_authority_ordering` (`Proposed Action → Authority Layer → Action System`). |
+| **13. Verification Layer** | Ground-truth assertions verifying real-world outcomes separate from tool exit codes. | **VERIFIED** | `jaeger_ai/core/entity/verification.py` (`VerificationContract`, `VerificationStatus`). `Tool Success ≠ Objective Verified`. | Verified in `dev/tests/test_runtime_trace.py::test_audit_2_verification_distinction` (disk & semantic assertions). |
+| **14. Learning Layer** | Continuous conversion of verified experience into durable updates across memory, world, and skills. | **VERIFIED** | `jaeger_ai/core/entity/learning.py` (`LearningPipeline`, `LearningTarget`). | Verified in `dev/tests/test_runtime_trace.py::test_audit_7_learning_pipeline` (verified outcomes reinforce, failures generate lessons). |
+| **15. Skill Library** | Reusable, verified procedures and operational playbooks. | **VERIFIED** | `jaeger_ai/core/entity/skills/promotion.py` (`SkillPromotionPipeline`), `ProceduralMemory` | Verified in `dev/tests/test_pinocchio_entity.py::test_acceptance_k_skill_acquisition` (Voyager lifecycle). |
+| **16. Sleep-Time Processing** | Offline/idle memory consolidation, reflection, and indexing (heartbeat as trigger only). | **VERIFIED** | `jaeger_ai/core/entity/sleep_time.py` (`SleepTimeProcessor`), `jaeger_ai/core/entity/consolidation.py` (`MemoryConsolidator`) | Verified in `dev/tests/test_runtime_trace.py::test_audit_6_sleep_time_processing` (triggered by heartbeat, executes consolidation/reflection). |
+| **17. Single Runtime Authority** | Single process-wide runtime coordinator unifying all ingress interfaces into one persistent entity. | **VERIFIED** | `jaeger_ai/core/entity/runtime.py` (`EntityRuntime` singleton). | Verified in `dev/tests/test_runtime_trace.py::test_audit_9_single_runtime_authority_trace` (CLI, Bridge, Gateway, Heartbeat, Background, Passive/Salient Sensors). |
 
 ---
 
@@ -132,33 +132,43 @@ Future architecture documentation and commit messages must adhere to these conve
              │                                         │
              ├──────────── MEMORY SYSTEM ──────────────┤
              │                                         │
-             ▼                                         ▼
-                                                COGNITION MODES
-                                              (ReAct, Deliberate)
-                                                       │
-                                              cognition providers
-                                              (Claude, Hermes...)
-                                                       │
-                                                       ▼
-                                                 ACTION SYSTEM
-                                                       │
-                                                AUTHORITY LAYER
-                                             (EffectLedger, Policy)
+              ▼                                         ▼
+                                                 COGNITION MODES
+                                              (ReAct, Deliberate,
+                                            Reflection, Delegation)
+                                                        │
+                                               cognition providers
+                                               (Claude, Hermes...)
                                                        │
                                                        ▼
-                                                  ENVIRONMENT
+                                                 PROPOSED ACTION
                                                        │
                                                        ▼
-                                                   FEEDBACK
+                                                 AUTHORITY LAYER
+                                             (Policy Kernel, Veto)
                                                        │
                                                        ▼
-                                                 VERIFICATION
+                                                   ACTION SYSTEM
+                                               (EffectLedger, Tools)
                                                        │
                                                        ▼
-                                                   LEARNING
-                                           ┌───────────┼───────────┐
-                                           ▼           ▼           ▼
-                                         memory      world       skills
+                                                   ENVIRONMENT
+                                                       │
+                                                       ▼
+                                                    FEEDBACK
+                                                       │
+                                                       ▼
+                                               CONSEQUENCE EVENT
+                                                       │
+                                                       ▼
+                                              VERIFICATION CONTRACT
+                                       (Tool Success ≠ Objective Verified)
+                                                       │
+                                                       ▼
+                                                LEARNING PIPELINE
+                                            ┌───────────┼───────────┐
+                                            ▼           ▼           ▼
+                                          memory      world       skills
                                                        │
                                                        ▼
                                              SLEEP-TIME PROCESSING

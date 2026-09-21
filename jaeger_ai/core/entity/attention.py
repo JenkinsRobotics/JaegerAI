@@ -67,6 +67,8 @@ class SalienceEngine:
         # 3. Perception / Sensor Telemetry
         if etype in (EventType.PERCEPTION_SENSED.value, EventType.SYSTEM_OBSERVATION.value):
             alerts = payload.get("alerts") or []
+            if payload.get("anomaly"):
+                alerts = list(alerts) + [str(payload.get("anomaly"))]
             if alerts:
                 return AttentionDecision(
                     wake_cognition=True,
@@ -80,6 +82,12 @@ class SalienceEngine:
                     wake_cognition=True,
                     salience=SalienceLevel.URGENT.value,
                     reason="critical low disk space",
+                )
+            if event.salience >= self.wake_threshold:
+                return AttentionDecision(
+                    wake_cognition=True,
+                    salience=event.salience,
+                    reason="high-salience sensory observation",
                 )
             return AttentionDecision(
                 wake_cognition=False,
