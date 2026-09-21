@@ -19,6 +19,7 @@ proxies server-side. Routes mirror the gateway exactly (audited from
     GET    /v1/sessions/{id}/requests/{rid} request status
     GET    /v1/sessions/{id}/stream         SSE events  ← streamed, not buffered
     POST   /v1/approvals/{id}               resolve an approval
+    GET    /v1/approvals                    list pending approvals
     GET    /health                          gateway liveness (NOT /v1/health)
 
 Errors are surfaced, never swallowed. A gateway that is down returns 503
@@ -208,6 +209,9 @@ def route(handler, parsed, method: str) -> bool:
 
     if path in ("/api/jaeger/runtime/status", "/api/runtime/status"):
         return _proxy(handler, "GET", "/v1/runtime/status")
+
+    if method == "GET" and path in ("/api/jaeger/approvals", "/v1/approvals"):
+        return _proxy(handler, "GET", "/v1/approvals")
 
     if method == "POST" and path.startswith("/api/jaeger/approvals/"):
         approval_id = path.rsplit("/", 1)[-1]

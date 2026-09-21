@@ -1,10 +1,12 @@
 """
 Hermes Web UI -- File upload: multipart parser and upload handler.
 """
+import json
 import mimetypes
 import os
 import re as _re
 import tempfile
+import uuid
 from pathlib import Path
 
 from api.config import MAX_UPLOAD_BYTES, STATE_DIR
@@ -164,6 +166,47 @@ def _reject_invisible_session(handler, session) -> bool:
     return True
 
 
+def _gateway_session(session_id: str) -> dict | None:
+    """Resolve a Gateway conversation id. Same store the resident Gateway uses."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    try:
+        from api.jaeger_sessions import gateway_base
+        from urllib.request import Request, urlopen
+        req = Request(gateway_base() + "/v1/sessions/" + sid, headers={"Accept": "application/json"})
+        with urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        if isinstance(data, dict) and not data.get("error") and data.get("session_id"):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def _gateway_upload_dir(session_id: str) -> Path:
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    layout = InstanceLayout(root=resolve_instance_dir())
+    dest = layout.workspace_dir / "uploads" / _re.sub(r"[^\w.\-]", "_", session_id)[:120]
+    dest.mkdir(parents=True, exist_ok=True)
+    return dest
+
+
+def _record_gateway_upload(session_id: str, dest: Path, mime: str) -> None:
+    try:
+        from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+        from jaeger_ai.core.instance.instance import operator_state_root
+        store = GatewaySessionStore(operator_state_root() / "gateway_sessions.sqlite3")
+        rel = str(dest)
+        store.append_message(
+            session_id,
+            "user",
+            f"[uploaded file] {dest.name} ({mime}) stored at {rel}",
+        )
+    except Exception:
+        pass
+
+
 def _write_office_upload_sidecar(workspace: Path, dest: Path, file_bytes: bytes) -> dict | None:
     """Write a Markdown preview sidecar for supported Office uploads."""
     if dest.suffix.lower() not in {'.docx', '.xlsx', '.pptx'}:
@@ -217,22 +260,33 @@ def handle_upload(handler):
         filename, file_bytes = files['file']
         if not filename:
             return j(handler, {'error': 'No filename in upload'}, status=400)
+        gateway = None
         try:
             s = get_session(session_id)
         except KeyError:
-            return j(handler, {'error': 'Session not found'}, status=404)
-        if _reject_invisible_session(handler, s):
+            s = None
+            gateway = _gateway_session(session_id)
+            if gateway is None:
+                return j(handler, {'error': 'Session not found'}, status=404)
+        if s is not None and _reject_invisible_session(handler, s):
             return True
         safe_name = _sanitize_upload_name(filename)
-        dest = _upload_destination(session_id, safe_name)
+        if gateway is not None:
+            dest = _gateway_upload_dir(session_id) / f"{uuid.uuid4().hex[:10]}_{safe_name}"
+        else:
+            dest = _upload_destination(session_id, safe_name)
         dest.write_bytes(file_bytes)
         mime = mimetypes.guess_type(safe_name)[0] or 'application/octet-stream'
+        if gateway is not None:
+            _record_gateway_upload(session_id, dest, mime)
         return j(handler, {
             'filename': dest.name,
             'path': str(dest),
             'size': dest.stat().st_size,
             'mime': mime,
             'is_image': mime.startswith('image/'),
+            'session_id': session_id,
+            'store': 'gateway' if gateway is not None else 'webui',
         })
     except ValueError as e:
         return j(handler, {'error': str(e)}, status=400)

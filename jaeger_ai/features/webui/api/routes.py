@@ -5668,6 +5668,8 @@ def _csrf_exempt_path(path: str) -> bool:
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
         "/api/csp-report",
+        "/api/remote/pair",
+        "/api/process-complete-ack",
     }
 
 
@@ -5700,17 +5702,33 @@ def _csrf_rejection_error(handler) -> str:
 
 
 def _check_csrf(handler) -> bool:
-    """Reject cross-origin or tokenless authenticated browser unsafe requests."""
+    """Reject cross-origin or tokenless authenticated cookie mutations.
+
+    Cookie-authenticated browser and cookie-authenticated curl both need a
+    CSRF token. Bearer-only infrastructure calls (no session cookie) follow
+    the existing bearer policy and are not this gate.
+    """
     if not _check_same_origin_browser_request(handler):
         return False
-    if not _is_browser_unsafe_request(handler):
-        return True  # non-browser clients (curl, MCP, agent) have no Origin/Referer
 
-    from api.auth import CSRF_HEADER_NAME, is_auth_enabled, parse_cookie, verify_csrf_token
+    from api.auth import (
+        CSRF_HEADER_NAME,
+        is_auth_enabled,
+        parse_cookie,
+        verify_csrf_token,
+        verify_session,
+    )
 
+    cookie_val = parse_cookie(handler)
+    has_cookie_session = bool(cookie_val and verify_session(cookie_val))
+    authorization = (handler.headers.get("Authorization") or "").strip()
+    bearer_only = authorization.lower().startswith("bearer ") and not has_cookie_session
+    if bearer_only:
+        return True
+    if not has_cookie_session and not _is_browser_unsafe_request(handler):
+        return True
     if not is_auth_enabled():
         return True
-    cookie_val = parse_cookie(handler)
     submitted = handler.headers.get(CSRF_HEADER_NAME) or handler.headers.get("X-CSRF-Token")
     if verify_csrf_token(cookie_val or "", submitted or ""):
         return True
@@ -15071,6 +15089,8 @@ def _resolve_new_session_workspace(body, visible_prev_session_id):
 
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
+    if not _csrf_exempt_path(parsed.path) and not _check_csrf(handler):
+        return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
     try:
         from api.jaeger_agents import route as jaeger_agents_route
         if jaeger_agents_route(handler, parsed, "POST"):
@@ -17917,6 +17937,12 @@ def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    try:
+        from api.jaeger_agents import route as jaeger_agents_route
+        if jaeger_agents_route(handler, parsed, "DELETE"):
+            return True
+    except Exception:
+        pass
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
@@ -21405,6 +21431,194 @@ def _read_anchored_file_bytes(ws_root: Path, target: Path) -> bytes:
         return fh.read(MAX_FILE_BYTES + 1)
 
 
+def _runner_local_pending(sid: str) -> dict | None:
+    """Map a parked runner-local Jaeger approval onto the stock WebUI card."""
+    from api.runtime_adapter import build_runtime_adapter, runtime_adapter_runner_enabled
+
+    if not runtime_adapter_runner_enabled():
+        return None
+    try:
+        s = get_session(sid)
+    except Exception:
+        return None
+    run_id = str(getattr(s, "active_stream_id", None) or "").strip()
+    if not run_id:
+        return None
+    try:
+        adapter = build_runtime_adapter(runner_client_factory=_runtime_runner_client_factory)
+        if adapter is None:
+            return None
+        status = adapter.get_run(run_id)
+    except Exception:
+        return None
+    aid = str(getattr(status, "pending_approval_id", None) or "").strip()
+    if not aid:
+        return None
+    desc = "Tool approval required"
+    cmd = ""
+    tool = ""
+    try:
+        stream = adapter.observe_run(run_id, cursor=None)
+        for entry in reversed(list(getattr(stream, "events", None) or [])):
+            if not isinstance(entry, dict):
+                continue
+            if _runner_event_name(entry) != "approval":
+                continue
+            payload = _runner_event_payload(entry) or {}
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("approval_id") or "").strip() not in {"", aid}:
+                continue
+            desc = str(payload.get("description") or desc)
+            cmd = str(payload.get("command") or "")
+            tool = str(payload.get("tool") or "")
+            if str(payload.get("approval_id") or "").strip() == aid:
+                break
+    except Exception:
+        logger.debug("runner approval event lookup failed for %s", run_id, exc_info=True)
+    return {
+        "approval_id": aid,
+        "run_id": run_id,
+        "description": desc,
+        "command": cmd or tool,
+        "tool": tool or cmd,
+        "session_id": sid,
+        "options": ["once", "always", "deny"],
+        "_runner_local": True,
+    }
+
+
+def _gateway_store_pending(sid: str) -> dict | None:
+    """Map a Gateway session-store approval onto the stock WebUI card."""
+    from urllib.request import urlopen
+
+    from api.jaeger_sessions import gateway_base
+
+    try:
+        req = Request(
+            gateway_base() + "/v1/approvals",
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception:
+        return None
+    rows = data.get("approvals") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("session_id") or "") != sid:
+            continue
+        if str(row.get("status") or "pending") not in {"pending", ""}:
+            continue
+        meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        tool = str(meta.get("tool") or "")
+        target = str(meta.get("target") or "")
+        reason = str(meta.get("reason") or "")
+        prompt = str(row.get("prompt") or "Approval required")
+        desc = prompt
+        if target and target not in desc:
+            desc = f"{desc}\n{target}"
+        if reason and reason not in desc:
+            desc = f"{desc} [{reason}]"
+        return {
+            "approval_id": str(row.get("approval_id") or ""),
+            "tool": tool,
+            "command": tool or target,
+            "description": desc,
+            "args": {"target": target} if target else [],
+            "risk_level": reason or "write",
+            "session_id": sid,
+            "options": row.get("options") or ["once", "deny"],
+            "_jaeger_gateway_store": True,
+        }
+    return None
+
+
+def _resident_pending_approval(sid: str) -> tuple[dict | None, int]:
+    """Pending approvals owned by runner-local or the Gateway session store."""
+    sid = str(sid or "").strip()
+    if not sid:
+        return None, 0
+    pending = _runner_local_pending(sid)
+    if pending:
+        return pending, 1
+    pending = _gateway_store_pending(sid)
+    if pending:
+        return pending, 1
+    return None, 0
+
+
+def _runner_local_resolve(sid: str, approval_id: str, choice: str) -> bool | None:
+    from api.runtime_adapter import build_runtime_adapter, runtime_adapter_runner_enabled
+
+    if not runtime_adapter_runner_enabled():
+        return None
+    try:
+        s = get_session(sid)
+    except Exception:
+        return None
+    run_id = str(getattr(s, "active_stream_id", None) or "").strip()
+    if not run_id:
+        return None
+    try:
+        adapter = build_runtime_adapter(runner_client_factory=_runtime_runner_client_factory)
+        if adapter is None:
+            return None
+        status = adapter.get_run(run_id)
+        pending_id = str(getattr(status, "pending_approval_id", None) or "").strip()
+        if pending_id and pending_id != str(approval_id or "").strip():
+            return None
+        result = adapter.respond_approval(run_id, approval_id, choice)
+    except Exception:
+        logger.debug("runner-local approval resolve failed", exc_info=True)
+        return None
+    return bool(getattr(result, "accepted", False))
+
+
+def _gateway_store_resolve(approval_id: str, choice: str) -> bool | None:
+    from urllib.request import urlopen
+
+    from api.jaeger_sessions import gateway_base
+
+    aid = str(approval_id or "").strip()
+    if not aid:
+        return None
+    decision = "deny" if str(choice) == "deny" else "once"
+    body = json.dumps({"approved": decision != "deny", "decision": decision}).encode("utf-8")
+    try:
+        req = Request(
+            gateway_base() + "/v1/approvals/" + aid,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with urlopen(req, timeout=8) as resp:
+            if 200 <= int(getattr(resp, "status", 200)) < 300:
+                return True
+            return False
+    except HTTPError as exc:
+        if int(exc.code) == 404:
+            return None
+        logger.debug("gateway approval resolve HTTP %s", exc.code, exc_info=True)
+        return False
+    except Exception:
+        logger.debug("gateway approval resolve failed", exc_info=True)
+        return None
+
+
+def _resident_resolve_approval(sid: str, approval_id: str, choice: str) -> bool | None:
+    """Resolve a runner-local or Gateway parked approval. None = not ours."""
+    mapped = "once" if str(choice) == "session" else str(choice)
+    runner = _runner_local_resolve(sid, approval_id, mapped)
+    if runner is not None:
+        return runner
+    return _gateway_store_resolve(approval_id, mapped)
+
+
 def _handle_approval_pending(handler, parsed):
     sid = parse_qs(parsed.query).get("session_id", [""])[0]
     with _lock:
@@ -21431,6 +21645,9 @@ def _handle_approval_pending(handler, parsed):
                     logger.warning("Gateway queue entry for %s has no .data attribute", sid)
     if p:
         return j(handler, {"pending": dict(p), "pending_count": total})
+    resident, count = _resident_pending_approval(sid)
+    if resident:
+        return j(handler, {"pending": dict(resident), "pending_count": count})
     return j(handler, {"pending": None, "pending_count": 0})
 
 
@@ -27111,6 +27328,12 @@ def _handle_approval_respond(handler, body):
                 return j(handler, relay_payload, status=relay_status)
     except Exception:
         pass  # fall through to local approval path
+
+    resident = _resident_resolve_approval(sid, approval_id, choice)
+    if resident is True:
+        return j(handler, {"ok": True, "choice": choice})
+    if resident is False:
+        return j(handler, {"ok": False, "error": "Approval response not accepted."}, status=409)
 
     from api.runtime_adapter import LegacyJournalRuntimeAdapter, runtime_adapter_enabled
 

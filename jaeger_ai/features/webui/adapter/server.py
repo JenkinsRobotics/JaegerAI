@@ -568,11 +568,15 @@ class RunnerBroker:
                     "choices": list(frame.get("options") or []),
                     "session_id": session_id,
                 }
+            command = str(frame.get("command") or "").strip()
+            if not command:
+                command = prompt
             return "approval", {
                 "approval_id": request_id,
                 "run_id": run_id,
                 "description": prompt or "Tool approval required",
-                "command": str(frame.get("command") or ""),
+                "command": command,
+                "tool": str(frame.get("tool") or command or ""),
                 "options": frame.get("options") or ["once", "always", "deny"],
                 "session_id": session_id,
             }

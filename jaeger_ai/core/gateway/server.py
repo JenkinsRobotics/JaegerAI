@@ -50,6 +50,81 @@ DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", DEFAULT_AGE
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
 
+class _GatewayToolConfirmationProvider:
+    """Park WRITE_LOCAL (and similar) confirms on the Gateway approval bus.
+
+    Phone/WebUI resolve them with POST /v1/approvals/{id}. Standing
+    commissioning filesystem.write grants still auto-allow.
+    """
+
+    def __init__(self, app: "JaegerGatewayApp", session_id: str, request_id: str) -> None:
+        self.app = app
+        self.session_id = session_id
+        self.request_id = request_id
+
+    def confirm(self, request: Any) -> bool:
+        from jaeger_os.core.safety.permissions import PermissionTier
+        try:
+            from jaeger_ai.core.instance.commissioning import load_authority_policy
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            rt = EntityRuntime.get_singleton()
+            policy = load_authority_policy(rt.layout.root) if getattr(rt, "layout", None) else {}
+            tier = getattr(request, "tier", None)
+            if tier == PermissionTier.READ_ONLY:
+                return True
+            if tier == PermissionTier.WRITE_LOCAL and bool((policy.get("filesystem") or {}).get("write")):
+                return True
+        except Exception:
+            pass
+        loop = getattr(self.app, "_loop", None)
+        if loop is None or not loop.is_running():
+            return False
+        skill = str(getattr(request, "skill", "") or "")
+        op = str(getattr(request, "operation", "") or "")
+        summary = str(getattr(request, "summary", "") or "")
+        aid = f"approval_{uuid.uuid4().hex[:12]}"
+        box: dict[str, Any] = {"done": threading.Event(), "approved": False}
+
+        def _arm() -> None:
+            fut = loop.create_future()
+            self.app.pending_approvals[aid] = fut
+            self.app.store.create_approval(
+                kind="tool_confirm",
+                prompt=f"Allow {skill}.{op}? {summary}".strip(),
+                options=["once", "deny"],
+                session_id=self.session_id,
+                request_id=self.request_id,
+                approval_id=aid,
+                metadata={
+                    "tool": f"{skill}.{op}" if skill else op,
+                    "target": summary,
+                    "reason": str(getattr(request, "tier", "")),
+                },
+            )
+            self.app.event_bus.publish(self.session_id, "approval.request", {
+                "approval_id": aid,
+                "tool": f"{skill}.{op}" if skill else op,
+                "target": summary,
+                "reason": str(getattr(request, "tier", "")),
+                "session_id": self.session_id,
+                "request_id": self.request_id,
+            })
+
+            def _done(f: asyncio.Future) -> None:
+                try:
+                    box["approved"] = bool(f.result())
+                except Exception:
+                    box["approved"] = False
+                box["done"].set()
+
+            fut.add_done_callback(_done)
+
+        loop.call_soon_threadsafe(_arm)
+        if not box["done"].wait(timeout=300):
+            return False
+        return bool(box["approved"])
+
+
 class JaegerGatewayApp:
     def __init__(
         self,
@@ -79,12 +154,14 @@ class JaegerGatewayApp:
         self._owns_store = False
         self._owner_task: asyncio.Task | None = None
         self._pending_resume = False
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.app = web.Application()
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
 
     async def _recover_interrupted(self, app: web.Application) -> None:
+        self._loop = asyncio.get_running_loop()
         lease = self.store.claim_process(source_file=str(Path(__file__).resolve()))
         if not lease.get("ok"):
             raise RuntimeError(f"Gateway store is owned by live pid {lease.get('owner_pid')}")
@@ -286,6 +363,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
+        self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
 
     async def handle_version(self, request: web.Request) -> web.Response:
         """Stable, read-only identity for clients and deployment checks."""
@@ -1264,10 +1342,17 @@ class JaegerGatewayApp:
         except Exception:
             pass
         try:
-            from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
-            install_commissioning_permissions(layout)
+            from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, install_policy
+            install_policy(PermissionPolicy(
+                mode=PolicyMode.NORMAL,
+                confirmation=_GatewayToolConfirmationProvider(self, session_key, request_id),
+            ))
         except Exception:
-            pass
+            try:
+                from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
+                install_commissioning_permissions(layout)
+            except Exception:
+                pass
         cfg = load_yaml(layout.config_path, Config)
         client = ExternalModelClient(cfg.external_model, layout)
         agent = build_jaeger_agent(client, max_iterations=12, max_tool_calls=8)
@@ -1369,6 +1454,14 @@ class JaegerGatewayApp:
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
                 owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
+                try:
+                    from jaeger_ai.core.entity.ownership import EntityRuntimeMode
+                    from jaeger_ai.core.entity.runtime import EntityRuntime
+                    rt = EntityRuntime.get_singleton()
+                    if rt.mode == EntityRuntimeMode.OWNER and getattr(rt, "is_resident", False):
+                        owner_first = True
+                except Exception:
+                    pass
                 if not owner_first:
                     try:
                         native_res = asyncio.run_coroutine_threadsafe(_run_native_coro(prompt), loop).result()
@@ -1790,6 +1883,10 @@ class JaegerGatewayApp:
             pass
 
         return response
+
+    async def handle_list_approvals(self, request: web.Request) -> web.Response:
+        pending = self.store.list_pending_approvals()
+        return web.json_response({"approvals": pending})
 
     async def handle_resolve_approval(self, request: web.Request) -> web.Response:
         """Resolve a pending approval. First writer wins; denial prevents effects."""
