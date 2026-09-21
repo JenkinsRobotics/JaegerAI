@@ -639,3 +639,85 @@ Round 3 FAIL/PARTIAL items are **not** silently closed. Code now contains:
 | Maintenance worktree | `MaintenanceCoordinator` isolated branch, protected paths, dry-run candidate | unit PASS |
 
 Do not treat unit PASS as live PASS.
+
+---
+
+## ROUND 4 — Resident commissioning live gates (2026-09-21)
+
+**Branch:** `pinocchio`  
+**Do not merge to master.**  
+**Isolated instance:** `commission-r4`  
+**State:** `/tmp/jaeger-commission-r4-6237`  
+**entity_id:** `jaeger-entity-2862e4595e37`  
+**Gateway:** `127.0.0.1:18820` OWNER resident  
+**Prior Round 1–3 rows are not rewritten.**
+
+False-positive commissioning checks (direct Python write, fingerprint-only idempotency, `SleepTimeProcessor is not None`, `_port_open or True`) were removed. LIVE gates require Gateway turns and event IDs.
+
+| Gate | Result | Evidence |
+| :--- | :--- | :--- |
+| Resident Gateway OWNER | PASS | `GET /v1/runtime/status` ready, `entity_id=jaeger-entity-2862e4595e37`, port 18820 |
+| Live write through Gateway | PASS | `request_id=commissioning-write-1dc0e7b08228` terminal=`completed`; `human.message` `msg-bdb30d3b16`; `tool.started` `tls-514668a647`; `tool.completed` `tlc-2fa9813316`; disk `workspace/commissioning-live-write.txt` contains `JAEGER-COMMISSIONING-OK`; exactly one `agent.response` `evt-a8f6818da6ed` |
+| Write-turn `verification.completed` | PASS | `vrf-8fdb2a6d7f` status=`objective_verified` verifier=`disk_probe` target=instance workspace file |
+| Gateway `request_id` idempotency | PASS | `commissioning-idempotency-3ca21cd763b3` replay `replayed=true` same turn `6f79f23e7f7a44a19be42272a51ce27b`; humans_replay=0 tools_replay=0 mtime unchanged; new request_id treated as new |
+| Heartbeat | PASS | `system.heartbeat` `hbt-2c2e4ec2c8` from Gateway OWNER loop |
+| Sleep-time | PASS | `sleep_time.started` `evt-2c75711cb8e3` → `sleep_time.completed` `evt-15dae7c657fc` (Gateway idle, not a direct harness call for this pair) |
+| Indexing retrieval | PASS | `NEBULA-COMMISSIONING-INDEX` retrieved with `provenance=RETRIEVED_DOCUMENT` from `commissioning-index-source.txt` |
+| EffectLedger write_file | PASS | `write_file` `side_effect=external`; crash-harness key not replayed (`a_replayed=false`, content `A-DONE`) |
+| Crash resume (controlled) | PARTIAL | `RecoveryManager` resumed run `23ffdf4a75454c76` after `owner_lost`; A not repeated. SIGKILL of resident mid-B with C completing as the same ReAct run is not this campaign’s kill of the Gateway process during a three-step tool loop |
+| WebUI/Bridge same entity | DISABLED | Default :8790/:8791 belong to the operator stack, not this isolated entity |
+| Autostart | PARTIAL | `jaeger autostart enable` exists; not enabled (would install the user LaunchAgent `com.jenkinsrobotics.jaeger`) |
+| Background.completed | PARTIAL | Payload + Gateway outbox path remain; this campaign did not disconnect a client mid-background-task |
+| Reflexion first-action change | PARTIAL | `reflection.created` on earlier failed writes; no clean AVOID-first-tool live pair in this isolated run |
+| AURORA multi-interface continuity | FAIL | Not executed (isolated stack has no WebUI/Bridge of its own) |
+
+**Round 4 isolated verdict: LIVE GATES FOR WRITE / VERIFY / IDEMPOTENCY / HEARTBEAT / SLEEP / INDEX PASS.**
+
+**Release verdict remains: OPERATIONAL — MANUAL SUPERVISION REQUIRED**
+
+`OPERATIONAL — RESIDENT AGENT READY` still requires operator-stack WebUI/Bridge identity match, autostart enablement, SIGKILL mid-run C-completion, background.completed disconnect/reconnect, and Reflexion first-action change on the same resident.
+
+---
+
+## ROUND 5 — Resident end-to-end proof (2026-09-21)
+
+**Branch:** `pinocchio`  
+**Do not merge to master.**  
+**Isolated instance:** `commission-r5` under `/tmp/jaeger-commission-r8`  
+**entity_id:** `jaeger-entity-4211ef75d464`  
+**Gateway:** `127.0.0.1:18821` OWNER resident  
+**Prior Round 1–4 rows are not rewritten.**
+
+False-positive acceptance paths were closed in code: STRUCTURAL vs LIVE vs DISABLED; Gateway write instead of Python file write; request_id replay instead of fingerprint-only; sleep-time from OWNER loop; WebUI/Bridge PASS only with matching `entity_id`.
+
+| Gate | Result | Evidence |
+| :--- | :--- | :--- |
+| Resident Gateway OWNER | PASS | `GET /v1/runtime/status` ready, `entity_id=jaeger-entity-4211ef75d464`, port 18821 |
+| Live write through Gateway | PASS | `request_id=commissioning-write-5396229182e2` terminal=`completed`; `human.message` `msg-2cf29fd199`; `tool.started` `tls-7bcfb0a072`; `tool.completed` `tlc-cbfb1eb829`; disk contains `JAEGER-COMMISSIONING-OK`; one `agent.response` `evt-c0f10f538b16` |
+| Write-turn `verification.completed` | PASS | `vrf-e20bd0b827` status=`objective_verified` verifier=`disk_probe` |
+| `background.completed` | PASS | `evt-d11a8ba7a988` task_id=`commissioning-write-5396229182e2` status=`completed` (Gateway turn completion; initiating POST returns while work continues) |
+| Gateway `request_id` idempotency | PASS | `commissioning-idempotency-61a3ab5930fc` `replayed=true` same turn `f86f8ac51d754234a992e1eab33e0749`; humans_replay=0 tools_replay=0; new request_id treated as new |
+| Heartbeat | PASS | `system.heartbeat` `hbt-bc1190d1b5` from Gateway OWNER loop |
+| Sleep-time | PASS | `sleep_time.started` `evt-7868a5f0f34c` → `sleep_time.completed` `evt-188b9bee272f` |
+| Indexing + Gateway retrieval | FAIL | Source file was indexed (`indexes.sqlite3` has `commissioning-index-source.txt` / `NEBULA-COMMISSIONING-INDEX`). Gateway ask `commissioning-index-f1d5374393` emitted `system.observation` `evt-4943267958e7` provenance=`RETRIEVED_DOCUMENT` but selected repo docs over the extra source; unique phrase not in the terminal answer |
+| CLI attach (same entity) | PASS | Gateway `:18821` ready, same `entity_id` |
+| WebUI/Bridge same entity | DISABLED | Isolated ports `:18790`/`:18791` not started; operator `:8790`/`:8791` are a different entity |
+| SIGKILL crash resume | PARTIAL | A written (`workspace/crash-a.txt`=`A-DONE`), EffectLedger key `fd1fa41d9a524815:write_file:{crash-a.txt}` not replayed, Gateway restarted READY. C was not written. Captured active run `17d34c84b7894f94` was not the crash run (`fd1fa41d9a524815`). Turn-loop runs remain `active` after a turn, so resume can bind a different run |
+| Reflexion first-action change | PARTIAL | `reflection.created` `evt-57a0be10c68b` then `reflection.retrieved` `evt-d3e0644fa1e3`; first fail tool=`read_file`; second turn had no `tool.started` |
+| AURORA continuity | PARTIAL | `workspace/aurora.txt` exists with `AURORA` (`commissioning-aurora-write-9128d1bf`). Cross-session recall `commissioning-aurora-recall-3bf668a1` and post-restart `commissioning-aurora-continue-493da98e` did not quote AURORA |
+| Autostart | PASS | `jaeger autostart enable` wrote LaunchAgent with isolated `JAEGER_STATE_DIR`/`JAEGER_GATEWAY_PORT`; service became READY with `entity_id=jaeger-entity-4211ef75d464`; `disable` removed the plist. Operator `:8810` `jaeger-entity-7615957f0fa6` stayed up |
+
+**Defects closed in this round (production path, not validator weakening):**
+
+* `write_file` is `side_effect=external`; verification uses `disk_probe` on the real path.
+* Authority policy loads from the bound instance root, not `default_instance_name()`.
+* Gateway OWNER ReAct binds workspace + sqlite + commissioning permissions; `native_run_id` is recorded.
+* `background.completed` is emitted once on Gateway `complete_request`.
+* Recovery scan no longer deadlocks inside `EntityRuntime.__init__` (`get_singleton` lock). Interrupted turns resume only after the Gateway is listening.
+* `TurnExecutive.ensure_run` does not resume `owner_lost` runs that still have pending EffectLedger rows.
+* Autostart plist/unit forwards instance isolation env.
+* Index extra/operator-approved sources are swept before repo docs; FTS queries are tokenized.
+
+**Round 5 isolated verdict: WRITE / VERIFY / IDEMPOTENCY / HEARTBEAT / SLEEP / BACKGROUND.COMPLETED / AUTOSTART PASS. INDEX RETRIEVAL, SIGKILL C-COMPLETION, REFLEXION STRATEGY CHANGE, AURORA RECALL, AND WEBUI/BRIDGE ATTACH ARE NOT LIVE PASS.**
+
+**Release verdict remains: OPERATIONAL — MANUAL SUPERVISION REQUIRED**

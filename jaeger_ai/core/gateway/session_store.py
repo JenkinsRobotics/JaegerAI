@@ -499,6 +499,19 @@ class GatewaySessionStore:
             "updated_at": row["updated_at"],
         }
 
+    def list_requests(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM client_requests WHERE status=? ORDER BY created_at",
+                    (status,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM client_requests ORDER BY created_at"
+                ).fetchall()
+            return [self._request_row(r) for r in rows]
+
     def get_request(self, request_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             row = conn.execute(

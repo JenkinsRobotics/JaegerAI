@@ -25,29 +25,77 @@ class RecoveryManager:
         try:
             from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
             from jaeger_agent.cognition.effects import EffectIndeterminate
+            import os
         except Exception as exc:
             report.errors.append(f"durable cognition unavailable: {exc}")
             return report
 
         try:
             store = SqliteRunStore()
-            blocked = store.recover()
-            for run in blocked:
+            newly = store.recover()
+            existing = [
+                r for r in store.list(state="blocked")
+                if r.reason == "owner_lost"
+            ]
+            blocked_by_id = {r.id: r for r in newly}
+            for run in existing:
+                blocked_by_id.setdefault(run.id, run)
+            ledger = SqliteEffectLedger()
+            pending = {e.key: e for e in ledger.list(status="pending")}
+            for effect in pending.values():
+                report.pending_effects.append(effect.key)
+            for run in blocked_by_id.values():
                 report.blocked_runs.append(run.id)
+                run_pending = [
+                    key for key, eff in pending.items()
+                    if eff.run_id == run.id
+                ]
+                if run_pending:
+                    # Crash mid-effect: do not resume and do not replay.
+                    logger.warning(
+                        "Run %s stays BLOCKED; indeterminate effects %s",
+                        run.id, run_pending,
+                    )
+                    continue
+                try:
+                    resumed, checkpoint = store.resume(run.id, owner_pid=os.getpid())
+                    report.resumed.append(resumed.id)
+                    logger.info(
+                        "Resumed run %s from checkpoint seq=%s",
+                        resumed.id,
+                        getattr(checkpoint, "seq", None),
+                    )
+                    try:
+                        from jaeger_ai.core.entity.events import EventType, JaegerEvent
+                        from jaeger_ai.core.entity.runtime import EntityRuntime
+                        rt = EntityRuntime.get_singleton()
+                        rt.event_store.append(
+                            JaegerEvent.typed(
+                                EventType.LEARNING_UPDATED.value
+                                if not hasattr(EventType, "RUN_RESUMED")
+                                else EventType.LEARNING_UPDATED.value,
+                                {
+                                    "run_id": resumed.id,
+                                    "reason": "owner_lost_resume",
+                                    "checkpoint": getattr(checkpoint, "cursor", None),
+                                    "effect_keys_done": True,
+                                },
+                                actor="system:recovery",
+                                source="recovery_manager",
+                            )
+                        )
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    report.errors.append(f"resume {run.id}: {exc}")
+            EffectIndeterminate  # imported for type presence
         except Exception as exc:
             report.errors.append(f"run recover: {exc}")
 
-        try:
-            ledger = SqliteEffectLedger()
-            for effect in ledger.list(status="pending"):
-                report.pending_effects.append(effect.key)
-        except Exception as exc:
-            report.errors.append(f"effect scan: {exc}")
-            EffectIndeterminate  # imported for type presence
-
         logger.info(
-            "Recovery scan blocked_runs=%s pending_effects=%s errors=%s",
+            "Recovery scan blocked_runs=%s resumed=%s pending_effects=%s errors=%s",
             len(report.blocked_runs),
+            len(report.resumed),
             len(report.pending_effects),
             report.errors,
         )

@@ -228,3 +228,37 @@ After `jaeger restart --no-app --no-containers --instance jaeger`:
 **Current verdict: OPERATIONAL — MANUAL SUPERVISION REQUIRED**
 
 Resident Gateway is the OWNER; CLI is ATTACHED_CLIENT; identity and Event Fabric are instance-scoped and shared. P0 still open: write-turn objective verification event, live crash-resume, operator-enabled autostart soak.
+
+---
+
+## Round 4 isolated live campaign (do not rewrite the table above)
+
+Isolated instance `commission-r4` / `jaeger-entity-2862e4595e37` / Gateway `:18820`:
+
+* Write-turn `verification.completed` **PASS** (`vrf-8fdb2a6d7f`, `disk_probe`, `objective_verified`).
+* Gateway request_id replay **PASS** (`commissioning-idempotency-3ca21cd763b3`, `replayed=true`).
+* Gateway OWNER heartbeat + sleep-time event chain **PASS**.
+* `write_file` is an EffectLedger `external` effect; controlled resume did not replay A.
+* Operator WebUI/Bridge ports are **not** this entity (DISABLED).
+* Autostart not enabled on the operator LaunchAgent.
+
+Verdict unchanged: **OPERATIONAL — MANUAL SUPERVISION REQUIRED**.
+
+---
+
+## Round 5 isolated live campaign (do not rewrite the tables above)
+
+Isolated instance `commission-r5` / `jaeger-entity-4211ef75d464` / Gateway `:18821`:
+
+* Write-turn `verification.completed` **PASS** (`vrf-e20bd0b827`, `disk_probe`, `objective_verified`).
+* Gateway request_id replay **PASS** (`commissioning-idempotency-61a3ab5930fc`, `replayed=true`).
+* `background.completed` **PASS** (`evt-d11a8ba7a988`).
+* Gateway OWNER heartbeat + sleep-time **PASS**.
+* Autostart enable/disable **PASS** on isolated env; operator `:8810` remained `jaeger-entity-7615957f0fa6`.
+* SIGKILL: A not replayed, Gateway became READY after a `get_singleton` deadlock fix; C did not complete on the crash run.
+* Index source file was indexed; Gateway retrieval selected repo docs (FAIL).
+* WebUI/Bridge for this entity **DISABLED**.
+* Reflexion created+retrieved; first-action change not proven.
+* `aurora.txt` written; cross-session/post-restart recall of AURORA not proven.
+
+Verdict unchanged: **OPERATIONAL — MANUAL SUPERVISION REQUIRED**.

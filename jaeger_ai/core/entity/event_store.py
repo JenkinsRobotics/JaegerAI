@@ -158,6 +158,7 @@ class SqliteEventStore:
         event_types: list[str] | None = None,
         actor: str | None = None,
         since_ts: float | None = None,
+        since_id: int | None = None,
         limit: int = 100,
     ) -> list[JaegerEvent]:
         query = "SELECT * FROM entity_events WHERE 1=1"
@@ -179,6 +180,9 @@ class SqliteEventStore:
         if since_ts is not None:
             query += " AND timestamp >= ?"
             params.append(since_ts)
+        if since_id is not None:
+            query += " AND id > ?"
+            params.append(int(since_id))
 
         query += " ORDER BY id ASC LIMIT ?"
         params.append(limit)

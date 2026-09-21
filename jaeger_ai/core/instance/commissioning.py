@@ -670,6 +670,11 @@ class CommissioningCoordinator:
         env.setdefault("JAEGER_STATE_DIR", str(operator_state_root()))
         env.setdefault("JAEGER_INSTANCE_DIR", str(layout.root))
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.setdefault("JAEGER_ACCEPT_HOOKS", "1")
+        env.setdefault("JAEGER_HEARTBEAT_INTERVAL_S", "3")
+        env.setdefault("JAEGER_HEARTBEAT_DUE", "1")
+        env.setdefault("JAEGER_SLEEP_DUE", "1")
+        env["JAEGER_OWNER_REACT"] = "1"
         proc = subprocess.Popen(
             [sys.executable, "-m", "jaeger_ai.core.gateway.server", "--host", "127.0.0.1", "--port", str(port)],
             env=env,
@@ -750,6 +755,44 @@ def _wait_gateway_ready(port: int, *, timeout_s: float) -> bool:
             pass
         time.sleep(0.3)
     return False
+
+
+class CommissioningConfirmationProvider:
+    """Approve only capabilities the operator granted during commissioning.
+
+    Headless Gateway has no TTY. Per-action confirm would refuse every write
+    even after the person said yes to files. This provider is that answer,
+    not an Allow-everything switch.
+    """
+
+    def confirm(self, request: Any) -> bool:
+        from jaeger_os.core.safety.permissions import PermissionTier
+        root = None
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            rt = EntityRuntime.get_singleton()
+            if getattr(rt, "layout", None) is not None:
+                root = rt.layout.root
+        except Exception:
+            root = None
+        policy = load_authority_policy(root) if root is not None else {}
+        tier = getattr(request, "tier", None)
+        if tier == PermissionTier.READ_ONLY:
+            return True
+        if tier == PermissionTier.WRITE_LOCAL:
+            return bool((policy.get("filesystem") or {}).get("write"))
+        if str((policy.get("shell") or {}).get("risk_mode") or "") in {"confirm", "allow"}:
+            if int(getattr(tier, "value", 99) or 99) <= 2:
+                return True
+        return False
+
+
+def install_commissioning_permissions(instance_root: Path | Any | None = None) -> None:
+    from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, install_policy
+    install_policy(PermissionPolicy(
+        mode=PolicyMode.NORMAL,
+        confirmation=CommissioningConfirmationProvider(),
+    ))
 
 
 def status_report(instance_root: Path | Any) -> dict[str, Any]:
