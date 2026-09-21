@@ -1713,8 +1713,15 @@ class BridgeConfirmationProvider:
         if self._grants.is_granted(skill):
             return True  # already approved (console "always", or ours) — no frame
         op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
+        summary = str(getattr(request, "summary", "") or "").strip()
+        tier = str(getattr(request, "tier", "") or "").strip()
+        prompt = f"Allow {op}?"
+        if summary:
+            prompt = f"{prompt} {summary}"
+        if tier:
+            prompt = f"{prompt} [{tier}]"
         answer = self.request(
-            "approval", f"Allow {op}?", ("once", "always", "deny"),
+            "approval", prompt, ("once", "always", "deny"),
         ).lower()
         if answer == "always":
             self._grants.grant_persistent(skill)

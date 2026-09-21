@@ -897,6 +897,13 @@ class GatewaySessionStore:
             "metadata": _row_meta(row["metadata_json"]),
         }
 
+    def list_pending_approvals(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM approvals WHERE status='pending' ORDER BY created_at"
+            ).fetchall()
+            return [self._approval_row(r) for r in rows]
+
     def resolve_approval(
         self,
         approval_id: str,

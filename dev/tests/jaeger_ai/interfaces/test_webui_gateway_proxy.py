@@ -62,6 +62,8 @@ def _route(mod, path, method="GET"):
     ("/api/jaeger/sessions/abc/handoff", "POST", ("POST", "/v1/sessions/abc/handoff")),
     ("/api/jaeger/sessions/abc/requests/r1", "GET", ("GET", "/v1/sessions/abc/requests/r1")),
     ("/api/jaeger/approvals/ap_1", "POST", ("POST", "/v1/approvals/ap_1")),
+    ("/api/jaeger/approvals", "GET", ("GET", "/v1/approvals")),
+    ("/v1/approvals", "GET", ("GET", "/v1/approvals")),
 ])
 def test_routes_map_to_audited_gateway_paths(overlay, path, method, expected):
     assert _route(overlay, path, method) is True
