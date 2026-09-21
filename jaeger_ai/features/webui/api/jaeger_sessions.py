@@ -195,6 +195,13 @@ def route(handler, parsed, method: str) -> bool:
     path = parsed.path
     query = f"?{parsed.query}" if parsed.query else ""
 
+    try:
+        from api.remote_phone import route as _remote_route
+        if _remote_route(handler, parsed, method):
+            return True
+    except Exception:
+        pass
+
     if path in ("/api/jaeger/gateway/health", "/api/jaeger/health"):
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")

@@ -65,6 +65,31 @@
     }
   });
 
+  function paintPhoneStatus(){
+    if(!window.fetch)return;
+    window.fetch('api/remote/phone-status',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
+      var chip=document.getElementById('phoneStatusChip');
+      if(!chip){
+        chip=document.createElement('div');
+        chip.id='phoneStatusChip';
+        chip.className='phone-status-chip';
+        var host=document.querySelector('.messages')||document.body;
+        host.insertBefore(chip, host.firstChild);
+      }
+      var current=data.current||'Idle';
+      var attention=data.needs_attention&&data.needs_attention!=='none'?(' · '+data.needs_attention):'';
+      chip.textContent=(data.online?'Jaeger Online':'Jaeger is currently unreachable')+' · '+current+attention;
+    }).catch(function(){
+      var chip=document.getElementById('phoneStatusChip');
+      if(chip)chip.textContent='Jaeger is currently unreachable';
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paintPhoneStatus);
+  else paintPhoneStatus();
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='visible')paintPhoneStatus();
+  });
+
   window.HermesPWA={
     isStandalone:isStandalone,
     syncMode:syncMode,

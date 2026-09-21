@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "Hermes",
-  "short_name": "Hermes",
-  "description": "Hermes AI Agent Web UI",
+  "name": "Jaeger",
+  "short_name": "Jaeger",
+  "description": "Jaeger resident agent",
   "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",

@@ -7357,3 +7357,38 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 /* Settings field highlight (mirrors msg-question-highlight / _highlightQuestionRow pattern) */
 .settings-field-highlight { animation: settings-field-pulse 1.6s ease-out; }
 @keyframes settings-field-pulse { 0% { box-shadow: 0 0 0 0 var(--focus-ring); } 35% { box-shadow: 0 0 0 4px var(--focus-ring); } 100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); } }
+
+/* iPhone / PWA chat: keep the desktop layout, constrain overflow */
+@media (max-width: 700px) {
+  html, body { overflow-x: hidden; }
+  .messages-inner, .msg-body { max-width: 100%; }
+  .msg-body { padding-left: 12px; }
+  pre, .msg-body pre, .msg-body code {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .composer, .composer-wrap, textarea, #composerInput {
+    padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  }
+  .approval-card, .queue-card, .clarify-card {
+    padding-left: 12px;
+    padding-right: 12px;
+    max-width: 100%;
+  }
+  #liveToolCards { padding: 0 12px; }
+}
+.phone-status-chip {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  margin: 0 auto;
+  max-width: var(--msg-max, 780px);
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.pwa-ios .phone-status-chip, .pwa-standalone .phone-status-chip { display: block; }

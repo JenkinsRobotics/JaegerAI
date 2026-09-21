@@ -39,7 +39,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "backup", "restore", "update", "reinstall", "uninstall",
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
-    "container", "webui", "delegate",
+    "container", "webui", "delegate", "remote",
 })
 
 
@@ -126,6 +126,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "webui":
         from jaeger_ai.cli.verbs.webui_verb import _cmd_webui_argv
         return _cmd_webui_argv(list(argv[1:]))
+    if argv[0] == "remote":
+        from jaeger_ai.cli.verbs.remote_verb import _cmd_remote_argv
+        return _cmd_remote_argv(list(argv[1:]))
     # ``health`` was folded into ``jaeger doctor`` (one doctor — deps +
     # runtime probe). Removed 2026-06-20.
     _print_usage()
@@ -209,7 +212,7 @@ def _repo_root() -> Path:
 def _print_usage() -> None:
     print(
         "Usage: jaeger {start|stop|restart|status|bench|agent|migrate|backup|restore|update|"
-        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate} [args]\n"
+        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate|remote} [args]\n"
         "\n"
         "  start    Cold boot the full Jaeger AI multi-agent stack (services, containers, app).\n"
         "  stop     Cleanly stop the full Jaeger AI stack (quits app, services, and containers).\n"
