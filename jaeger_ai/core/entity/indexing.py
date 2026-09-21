@@ -109,27 +109,51 @@ class IndexManifest:
                 except sqlite3.OperationalError:
                     pass
 
-    def search(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
+    def search(
+        self,
+        query: str,
+        limit: int = 8,
+        prefer_roots: Iterable[str] | None = None,
+    ) -> list[dict[str, Any]]:
         import re
         q = (query or "").strip()
         if not q:
             return []
         tokens = re.findall(r"[A-Za-z0-9_]{3,}", q)
+        needles = tokens[:8] or [q]
         fts = " OR ".join(f'"{t}"' for t in tokens[:12]) if tokens else ""
         with self._connect() as con:
             rows: list[Any] = []
+            seen: set[str] = set()
+            roots = [str(Path(r).resolve()) for r in (prefer_roots or []) if r]
+            for root in roots:
+                for needle in needles:
+                    for row in con.execute(
+                        "SELECT chunk_id, source_id, text FROM indexed_chunks "
+                        "WHERE source_id LIKE ? AND (text LIKE ? OR source_id LIKE ?) LIMIT ?",
+                        (f"{root}%", f"%{needle}%", f"%{needle}%", limit),
+                    ).fetchall():
+                        key = str(row["chunk_id"])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        rows.append(row)
+                        if len(rows) >= limit:
+                            return [dict(r) for r in rows]
             if fts:
                 try:
-                    rows = list(con.execute(
+                    for row in con.execute(
                         "SELECT chunk_id, source_id, text FROM indexed_chunks_fts WHERE indexed_chunks_fts MATCH ? LIMIT ?",
                         (fts, limit),
-                    ).fetchall())
+                    ).fetchall():
+                        key = str(row["chunk_id"])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        rows.append(row)
                 except sqlite3.OperationalError:
-                    rows = []
-            if not rows:
-                seen: set[str] = set()
-                merged: list[Any] = []
-                needles = tokens[:8] or [q]
+                    pass
+            if len(rows) < limit:
                 for needle in needles:
                     for row in con.execute(
                         "SELECT chunk_id, source_id, text FROM indexed_chunks WHERE text LIKE ? LIMIT ?",
@@ -139,12 +163,11 @@ class IndexManifest:
                         if key in seen:
                             continue
                         seen.add(key)
-                        merged.append(row)
-                        if len(merged) >= limit:
+                        rows.append(row)
+                        if len(rows) >= limit:
                             break
-                    if len(merged) >= limit:
+                    if len(rows) >= limit:
                         break
-                rows = merged
         return [dict(r) for r in rows]
 
 
@@ -245,7 +268,6 @@ class IndexCoordinator:
         return result
 
     def retrieve(self, query: str, limit: int = 6) -> list[dict[str, Any]]:
-        hits = self.manifest.search(query, limit=max(limit * 3, 12))
         extra_roots = {str(p.resolve()) for p in self.registry.extra}
         try:
             from jaeger_ai.core.instance.commissioning import load_knowledge_sources
@@ -255,20 +277,20 @@ class IndexCoordinator:
                     extra_roots.add(str(Path(str(src.get("path") or "")).expanduser().resolve()))
         except Exception:
             pass
-        def _rank(hit: dict[str, Any]) -> tuple[int, int]:
-            src = str(hit.get("source_id") or "")
-            try:
-                src = str(Path(src).resolve())
-            except Exception:
-                pass
-            approved = 0 if any(src.startswith(root) for root in extra_roots if root) else 1
-            return (approved, 0)
-        hits.sort(key=_rank)
-        out = []
-        for hit in hits[:limit]:
+        preferred = self.manifest.search(query, limit=limit, prefer_roots=extra_roots)
+        general = self.manifest.search(query, limit=max(limit * 3, 12))
+        seen: set[str] = set()
+        merged: list[dict[str, Any]] = []
+        for hit in preferred + general:
+            key = str(hit.get("chunk_id") or hit.get("source_id") or "")
+            if key in seen:
+                continue
+            seen.add(key)
             hit["provenance"] = "RETRIEVED_DOCUMENT"
-            out.append(hit)
-        return out
+            merged.append(hit)
+            if len(merged) >= limit:
+                break
+        return merged
 
 
 def _chunk_text(text: str, size: int = 1200) -> list[str]:

@@ -66,8 +66,19 @@ class TurnExecutive:
             if existing is not None:
                 if existing.state == "created":
                     existing = self.runs.transition(existing.id, "active")
-                self.runs.heartbeat(existing.id, owner_pid=os.getpid())
-                return existing
+                elif existing.state == "blocked" and existing.reason == "owner_lost":
+                    pending = self._pending_effects(existing.id)
+                    if not pending:
+                        existing, _checkpoint = self.runs.resume(
+                            existing.id, owner_pid=os.getpid(),
+                        )
+                    else:
+                        return existing
+                elif existing.state == "completed":
+                    existing = None
+                if existing is not None:
+                    self.runs.heartbeat(existing.id, owner_pid=os.getpid())
+                    return existing
         open_commitments = [
             item for item in self.commitments.list(state="active")
             if item.kind == TURN_LOOP_KIND
@@ -86,16 +97,7 @@ class TurnExecutive:
             if r.reason == "owner_lost"
         ]
         if blocked:
-            pending = []
-            try:
-                from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
-                ledger = SqliteEffectLedger()
-                pending = [
-                    e for e in ledger.list(status="pending")
-                    if e.run_id == blocked[0].id
-                ]
-            except Exception:
-                pending = []
+            pending = self._pending_effects(blocked[0].id)
             if not pending:
                 run, _checkpoint = self.runs.resume(blocked[0].id, owner_pid=os.getpid())
                 self.agent.bind_run(run.id)
@@ -110,8 +112,24 @@ class TurnExecutive:
         self.agent.bind_run(run.id)
         return run
 
+    @staticmethod
+    def _pending_effects(run_id: str) -> list[Any]:
+        try:
+            from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+            return [
+                e for e in SqliteEffectLedger().list(status="pending")
+                if e.run_id == run_id
+            ]
+        except Exception:
+            return []
+
     def run_turn(self, text: str) -> str:
         run = self.ensure_run()
+        if run.state == "blocked":
+            return (
+                f"Run {run.id} is BLOCKED ({run.reason or 'indeterminate effect'}). "
+                "Not retrying an indeterminate external effect."
+            )
         if self._bind_checkpoint is not None:
             self._bind_checkpoint(
                 lambda name, args, message: self._checkpoint_tool_result(
@@ -154,6 +172,11 @@ class TurnExecutive:
             "iterations": self.agent.last_iteration_count,
         }
         self.runs.checkpoint(run.id, cursor)
+        if not self.agent.last_halt_reason:
+            try:
+                self.runs.transition(run.id, "completed")
+            except Exception:
+                pass
         if self.claims is not None:
             self.claims.add_claim(Claim.create(
                 subject="agent", predicate="responded", value=result[:2000],

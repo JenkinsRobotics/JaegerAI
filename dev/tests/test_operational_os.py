@@ -129,15 +129,21 @@ def test_index_skips_unchanged(tmp_path: Path):
 def test_extra_sources_are_indexed_before_docs(tmp_path: Path):
     docs = tmp_path / "docs"
     docs.mkdir()
-    (docs / "a.md").write_text("commissioning index source in docs\n", encoding="utf-8")
+    for i in range(20):
+        (docs / f"a{i}.md").write_text(
+            f"commissioning index source document {i} without the unique phrase\n",
+            encoding="utf-8",
+        )
     extra = tmp_path / "index-src"
     extra.mkdir()
     (extra / "commissioning-index-source.txt").write_text("NEBULA-COMMISSIONING-INDEX\n", encoding="utf-8")
     coord = IndexCoordinator(tmp_path / "memory")
-    result = coord.sweep(docs_dir=docs, extra=[extra], max_files=1)
+    result = coord.sweep(docs_dir=docs, extra=[extra], max_files=40)
     assert result["updated"] >= 1
     hits = coord.retrieve("What does the commissioning index source say?")
-    assert any("NEBULA-COMMISSIONING-INDEX" in str(h.get("text") or "") for h in hits)
+    assert hits
+    assert "NEBULA-COMMISSIONING-INDEX" in str(hits[0].get("text") or "")
+    assert "index-src" in str(hits[0].get("source_id") or "")
 
 
 def test_maintenance_skips_protected_paths(tmp_path: Path):

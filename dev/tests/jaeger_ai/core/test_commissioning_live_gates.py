@@ -199,6 +199,42 @@ def test_ensure_run_does_not_resume_pending_effect(tmp_path: Path, monkeypatch: 
     assert nxt.id != run.id
 
 
+def test_completed_turn_does_not_stay_active(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from types import SimpleNamespace
+    from jaeger_agent.cognition.executive import TURN_LOOP_KIND, TurnExecutive
+    from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    from jaeger_agent.memory import sqlite_store
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    sqlite_store.bind(SimpleNamespace(memory_dir=tmp_path))
+    commits = SqliteCommitmentStore()
+    commits.create(TURN_LOOP_KIND, kind=TURN_LOOP_KIND)
+    runs = SqliteRunStore()
+
+    class _Agent:
+        run_id = None
+        last_halt_reason = None
+        last_iteration_count = 1
+        primary_adapter = SimpleNamespace(name="test")
+        def bind_run(self, run_id):
+            self.run_id = run_id
+        def run_turn(self, text):
+            self.last_halt_reason = None
+            return "ok"
+
+    agent = _Agent()
+    execu = TurnExecutive(agent, runs, commits, provider="test")
+    first = execu.run_turn("write a")
+    assert first == "ok"
+    run = runs.get(agent.run_id)
+    assert run is not None
+    assert run.state == "completed"
+    agent.run_id = None
+    nxt = execu.ensure_run()
+    assert nxt.id != run.id
+
+
 def test_autostart_plist_includes_instance_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from jaeger_ai.cli.verbs import autostart_verb as A
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))

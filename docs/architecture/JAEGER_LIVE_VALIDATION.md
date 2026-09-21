@@ -721,3 +721,29 @@ False-positive acceptance paths were closed in code: STRUCTURAL vs LIVE vs DISAB
 **Round 5 isolated verdict: WRITE / VERIFY / IDEMPOTENCY / HEARTBEAT / SLEEP / BACKGROUND.COMPLETED / AUTOSTART PASS. INDEX RETRIEVAL, SIGKILL C-COMPLETION, REFLEXION STRATEGY CHANGE, AURORA RECALL, AND WEBUI/BRIDGE ATTACH ARE NOT LIVE PASS.**
 
 **Release verdict remains: OPERATIONAL — MANUAL SUPERVISION REQUIRED**
+
+---
+
+## ROUND 6 — Remaining P0 live closure (2026-09-21)
+
+**Branch:** `pinocchio`  
+**Do not merge to master.**  
+**Isolated instance:** `commission-r6` under `/tmp/jaeger-commission-r10`  
+**entity_id:** `jaeger-entity-f0e310f53564`  
+**Gateway:** `127.0.0.1:18822` OWNER resident  
+**WebUI:** `:18790` **Bridge adapter:** `:18791`  
+**Prior Round 1–5 rows are not rewritten.**
+
+| Gate | Result | Evidence |
+| :--- | :--- | :--- |
+| Indexed-source retrieval | PASS | `request_id=commissioning-index-d1d990016c` phrase=`NEBULA-COMMISSIONING-INDEX`; `system.observation` `evt-6a054f549daa` provenance=`RETRIEVED_DOCUMENT`; `index.completed` `evt-100ca618eae7` |
+| Same-run SIGKILL recovery | PASS | `request_id=commissioning-crash-f60b02e338` run `1af0b8b6bec2442d`; A ledgered and not replayed; C written `C-DONE` after restart; Gateway request `completed` |
+| Reflexion first-action change | PASS | fail `read_file` then `reflection.created` `evt-0fcffb5e061b` → `reflection.retrieved` `evt-dfc84b6404dd` → first tool `write_file`; file written HELLO |
+| AURORA cross-session / post-restart | PASS | remember `commissioning-aurora-remember-34a61945`; recall `commissioning-aurora-recall-6af6df7b` quotes AURORA; write `commissioning-aurora-write-eae20e5f` disk verified; after restart `commissioning-aurora-continue-bfefc9bc` quotes AURORA |
+| WebUI + Bridge + CLI + Gateway same entity | PASS | all report `jaeger-entity-f0e310f53564`; ATLAS via WebUI `atlas-webui-296cafcc`, CLI and Bridge sessions quote ATLAS |
+| Write / verify / idempotency / heartbeat / sleep / background.completed | PASS | write `commissioning-write-e6c149288426` `vrf-491f7e7488` `evt-0e03ab90e75c`; idemp `commissioning-idempotency-50ef08d1c730`; `hbt-6b687c2167`; sleep `evt-d045d1971966`→`evt-58a1e2895e6a` |
+| Autostart | PASS | Round 5 live enable/disable; not re-run (no regression of plist env) |
+
+**Round 6 isolated verdict: remaining P0 LIVE gates PASS.**
+
+**Release verdict: OPERATIONAL — RESIDENT AGENT READY**

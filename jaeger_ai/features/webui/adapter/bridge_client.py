@@ -38,12 +38,24 @@ class BridgeClient:
         return path
 
     def health(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"ok": False, "instance": self.instance}
+        try:
+            ident = json.loads(self.layout.entity_identity_path.read_text(encoding="utf-8"))
+            entity_id = str(ident.get("entity_id") or "")
+            if entity_id:
+                payload["entity_id"] = entity_id
+                payload["Agent"] = {"entity_id": entity_id}
+        except Exception:
+            pass
         try:
             with self._connection() as (_sock, rx):
                 ready = self._ready(rx)
-            return {"ok": True, "instance": self.instance, "ready": ready}
+            payload["ok"] = True
+            payload["ready"] = ready
+            return payload
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "instance": self.instance, "error": str(exc)}
+            payload["error"] = str(exc)
+            return payload
 
     def query(self, what: str, args: dict[str, Any] | None = None, *, timeout_s: float | None = None) -> Any:
         return self._request({"op": "query", "what": what, "args": args or {}}, timeout_s=timeout_s)

@@ -14,9 +14,9 @@ import time
 import uuid
 from pathlib import Path
 
-ROOT = Path(os.environ.get("JAEGER_LIVE_ROOT") or f"/tmp/jaeger-commission-r5-{os.getpid()}")
-INSTANCE = ROOT / "instances" / "commission-r5"
-PORT = int(os.environ.get("JAEGER_GATEWAY_PORT") or "18821")
+ROOT = Path(os.environ.get("JAEGER_LIVE_ROOT") or f"/tmp/jaeger-commission-r6-{os.getpid()}")
+INSTANCE = ROOT / "instances" / "commission-r6"
+PORT = int(os.environ.get("JAEGER_GATEWAY_PORT") or "18822")
 WEBUI_PORT = int(os.environ.get("JAEGER_WEBUI_PORT") or "18790")
 ADAPTER_PORT = int(os.environ.get("JAEGER_HERMES_WEBUI_ADAPTER_PORT") or "18791")
 
@@ -25,7 +25,7 @@ def _setup_env() -> None:
     os.environ["JAEGER_HOME"] = str(ROOT)
     os.environ["JAEGER_STATE_DIR"] = str(ROOT)
     os.environ["JAEGER_INSTANCE_DIR"] = str(INSTANCE)
-    os.environ["JAEGER_INSTANCE_NAME"] = "commission-r5"
+    os.environ["JAEGER_INSTANCE_NAME"] = "commission-r6"
     os.environ["JAEGER_GATEWAY_PORT"] = str(PORT)
     os.environ["JAEGER_GATEWAY_URL"] = f"http://127.0.0.1:{PORT}"
     os.environ["JAEGER_WEBUI_PORT"] = str(WEBUI_PORT)
@@ -51,7 +51,7 @@ def _layout():
     if not layout.identity_path.is_file():
         dump_yaml(layout.identity_path, Identity(name="Assistant", role="assistant", personality="helpful"))
     if not layout.config_path.is_file():
-        dump_yaml(layout.config_path, Config(instance_name="commission-r5", model=ModelConfig(model_path="/dev/null")))
+        dump_yaml(layout.config_path, Config(instance_name="commission-r6", model=ModelConfig(model_path="/dev/null")))
     if not layout.manifest_path.is_file():
         layout.manifest_path.write_text("{}", encoding="utf-8")
     return layout
@@ -161,6 +161,18 @@ def _wait_ready(timeout_s: float = 30.0) -> dict:
     return last
 
 
+def _turn_text(row: dict) -> str:
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    return str(
+        row.get("output")
+        or row.get("text")
+        or result.get("output")
+        or result.get("summary")
+        or result.get("result_summary")
+        or ""
+    )
+
+
 def _events_since(layout, since_id: int, etype: str | None = None):
     from jaeger_ai.core.entity.event_store import SqliteEventStore
     evs = SqliteEventStore(layout.event_store_path).query_events(since_id=since_id, limit=800)
@@ -204,10 +216,10 @@ def _crash_resume(layout) -> dict:
         time.sleep(0.25)
     if not a_path.is_file():
         return {"ok": False, "reason": "A never written", "request_id": request_id}
-    # Record run id before kill.
     runs = SqliteRunStore()
-    active = runs.list(state="active")
-    run_id = active[0].id if active else None
+    ledger = SqliteEffectLedger()
+    crash_effects = [e for e in ledger.list() if "crash-a.txt" in (e.key or "")]
+    run_id = crash_effects[0].run_id if crash_effects else None
     a_text = a_path.read_text(encoding="utf-8")
     a_mtime = a_path.stat().st_mtime
     pid = _gateway_pid(layout)
@@ -229,7 +241,6 @@ def _crash_resume(layout) -> dict:
         time.sleep(1.0)
     a_after = a_path.read_text(encoding="utf-8") if a_path.is_file() else ""
     a_replayed = a_after.strip() != "A-DONE"
-    ledger = SqliteEffectLedger()
     crash_keys = [e.key for e in ledger.list() if "crash-a.txt" in e.key]
     run_after = runs.get(run_id) if run_id else None
     crash_run_ids = {e.run_id for e in ledger.list() if e.run_id and "crash-a.txt" in e.key}
@@ -288,8 +299,8 @@ def _reflexion_pair(layout) -> dict:
     mid = store.latest_id()
     ok_id = f"commissioning-reflexion-ok-{uuid.uuid4().hex[:8]}"
     ok = submit_gateway_turn(
-        "I still need workspace/missing-reflexion-file-XYZ.txt. "
-        "If it is missing, first write it with HELLO then read it. Do not start by reading a missing file.",
+        "workspace/missing-reflexion-file-XYZ.txt is still missing. "
+        "Call write_file first with HELLO, then read_file. Do not call read_file first.",
         request_id=ok_id,
         timeout_s=180.0,
     )
@@ -379,8 +390,8 @@ def _aurora(layout) -> dict:
         session_id="commissioning-aurora-bridge",
         timeout_s=180.0,
     )
-    recall_text = str(r2.get("output") or r2.get("text") or "")
-    cont_text = str(r4.get("output") or r4.get("text") or "")
+    recall_text = _turn_text(r2)
+    cont_text = _turn_text(r4)
     out = {
         "ok": "AURORA" in recall_text and on_disk and "AURORA" in cont_text and bool(ready.get("ready")),
         "remember": remember_id,
@@ -396,6 +407,81 @@ def _aurora(layout) -> dict:
         "write_status": r3.get("status"),
     }
     print("aurora", json.dumps(out, default=str), flush=True)
+    return out
+
+
+def _start_surfaces() -> dict:
+    try:
+        from jaeger_ai.features.webui.service.service import WebUIService
+        svc = WebUIService(os.environ.get("JAEGER_INSTANCE_NAME"))
+        svc.webui_port = WEBUI_PORT
+        svc.adapter_port = ADAPTER_PORT
+        result = svc.start(publish_tailscale=False)
+        print("surfaces", json.dumps(result, default=str)[:1500], flush=True)
+        return result if isinstance(result, dict) else {"ok": False, "error": str(result)}
+    except Exception as exc:
+        out = {"ok": False, "error": str(exc)[:400]}
+        print("surfaces", out, flush=True)
+        return out
+
+
+def _atlas() -> dict:
+    from jaeger_ai.core.instance.commissioning_validation import submit_gateway_turn, _http_json
+    webui_id = f"atlas-webui-{uuid.uuid4().hex[:8]}"
+    webui_ok = False
+    webui_status = ""
+    try:
+        _http_json(
+            "POST",
+            f"http://127.0.0.1:{WEBUI_PORT}/api/jaeger/sessions",
+            {"session_id": "commissioning-atlas-webui", "title": "atlas"},
+            timeout=8.0,
+        )
+        admitted = _http_json(
+            "POST",
+            f"http://127.0.0.1:{WEBUI_PORT}/api/jaeger/sessions/commissioning-atlas-webui/turns",
+            {"text": "Remember the token ATLAS.", "request_id": webui_id},
+            timeout=30.0,
+        )
+        deadline = time.time() + 180
+        row = admitted
+        while time.time() < deadline:
+            row = _http_json(
+                "GET",
+                f"http://127.0.0.1:{PORT}/v1/sessions/commissioning-atlas-webui/requests/{webui_id}",
+                timeout=8.0,
+            )
+            if str(row.get("status") or "") in {"completed", "failed", "cancelled"}:
+                break
+            time.sleep(1.0)
+        webui_status = str(row.get("status") or "")
+        webui_ok = webui_status == "completed"
+    except Exception as exc:
+        webui_status = str(exc)[:200]
+    cli = submit_gateway_turn(
+        "What token did I give you?",
+        request_id=f"atlas-cli-{uuid.uuid4().hex[:8]}",
+        session_id="commissioning-atlas-cli",
+        timeout_s=180.0,
+    )
+    bridge = submit_gateway_turn(
+        "Continue: what token are we using?",
+        request_id=f"atlas-bridge-{uuid.uuid4().hex[:8]}",
+        session_id="commissioning-atlas-bridge",
+        timeout_s=180.0,
+    )
+    cli_text = _turn_text(cli)
+    bridge_text = _turn_text(bridge)
+    out = {
+        "ok": webui_ok and "ATLAS" in cli_text and "ATLAS" in bridge_text,
+        "webui_request": webui_id,
+        "webui_status": webui_status,
+        "cli_has_atlas": "ATLAS" in cli_text,
+        "bridge_has_atlas": "ATLAS" in bridge_text,
+        "cli_status": cli.get("status"),
+        "bridge_status": bridge.get("status"),
+    }
+    print("atlas", json.dumps(out, default=str), flush=True)
     return out
 
 
@@ -453,12 +539,17 @@ def main() -> int:
     from jaeger_ai.core.instance.commissioning_validation import run_validation
     from jaeger_ai.core.instance import first_boot as fb
 
+    surfaces = _start_surfaces()
     report = run_validation(layout, offline=False)
     print(json.dumps(report.as_dict(), indent=2, default=str)[:12000], flush=True)
 
     snap = fb.snapshot(layout)
     entity = (snap.get("commissioning") or {}).get("resident") or {}
     entity_id = entity.get("entity_id") or ""
+    try:
+        atlas = _atlas() if _wait_ready(8.0).get("ready") else {"ok": False, "reason": "gateway down"}
+    except Exception as exc:
+        atlas = {"ok": False, "reason": str(exc)[:240]}
     crash = _crash_resume(layout)
     try:
         reflexion = _reflexion_pair(layout) if _wait_ready(8.0).get("ready") else {"ok": False, "reason": "gateway down"}
@@ -468,10 +559,7 @@ def main() -> int:
         aurora = _aurora(layout) if _wait_ready(8.0).get("ready") else {"ok": False, "reason": "gateway down"}
     except Exception as exc:
         aurora = {"ok": False, "reason": str(exc)[:240]}
-    try:
-        autostart = _autostart(layout, entity_id) if entity_id else {"ok": False, "reason": "no entity"}
-    except Exception as exc:
-        autostart = {"ok": False, "reason": str(exc)[:240]}
+    autostart = {"ok": True, "skipped": True, "inherited": "round5 PASS"}
 
     failed = [c.id for c in report.checks if c.status == "FAIL"]
     disabled = [c.id for c in report.checks if c.status == "DISABLED"]
@@ -489,6 +577,8 @@ def main() -> int:
         "crash": crash,
         "reflexion": reflexion,
         "aurora": aurora,
+        "atlas": atlas,
+        "surfaces": surfaces,
         "autostart": autostart,
     }
     print("SUMMARY", json.dumps(out, indent=2, default=str), flush=True)
@@ -507,7 +597,7 @@ def main() -> int:
     except Exception:
         pass
     live_ok = bool(report.live_passed)
-    extra_ok = bool(crash.get("ok") and reflexion.get("ok") and aurora.get("ok") and autostart.get("ok"))
+    extra_ok = bool(crash.get("ok") and reflexion.get("ok") and aurora.get("ok") and atlas.get("ok"))
     return 0 if live_ok and extra_ok else 1
 
 

@@ -259,6 +259,41 @@ class EntityRuntime:
         )
         current_state, attention = self.ingest(event)
 
+        try:
+            import re as _re
+            for token in _re.findall(
+                r"(?i)\bremember(?:\s+(?:the\s+)?(?:word|token|code|phrase))?\s+[\"']?([A-Za-z][A-Za-z0-9_-]{1,48})",
+                user_text,
+            ):
+                self.memory_subsystem.semantic.record_claim(
+                    "user",
+                    "remembered_word",
+                    token,
+                    source_id=event.event_id,
+                    confidence=0.95,
+                )
+        except Exception:
+            pass
+        try:
+            recall_lines = ["# Durable fabric (not a new conversation):"]
+            for claim in self.memory_subsystem.semantic.list_recent(12):
+                recall_lines.append(
+                    f"- claim {claim.get('subject')}.{claim.get('predicate')}={claim.get('value')}"
+                )
+            recent = self.event_store.query_events(
+                event_types=[EventType.HUMAN_MESSAGE.value, EventType.AGENT_RESPONSE.value],
+                since_id=max(0, self.event_store.latest_id() - 400),
+                limit=400,
+            )[-12:]
+            for ev in recent:
+                text = str((ev.payload or {}).get("text") or "")[:240]
+                if text:
+                    recall_lines.append(f"- {ev.event_type}: {text}")
+            if len(recall_lines) > 1:
+                ctx["durable_recall"] = "\n".join(recall_lines)
+        except Exception:
+            pass
+
         # Passive gate: if salience indicates no wake
         if not attention.wake_cognition:
             return {

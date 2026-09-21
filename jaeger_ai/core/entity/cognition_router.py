@@ -93,6 +93,9 @@ class DirectResponseHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
+        recall = str(context.get("durable_recall") or "")
+        if recall:
+            text = f"{recall}\n\n{text}"
         docs_block = str(context.get("retrieved_documents") or "")
         if docs_block:
             text = f"{docs_block}\n\n{text}"
@@ -134,31 +137,36 @@ class ReActHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
+        original = text
         reflexion_store = context.get("reflexion_store")
+        constraints = ""
         if reflexion_store is not None:
             try:
-                block = reflexion_store.to_prompt_context_block(text)
-                constraints = ""
                 if hasattr(reflexion_store, "to_planning_constraints"):
-                    constraints = reflexion_store.to_planning_constraints(text)
+                    constraints = reflexion_store.to_planning_constraints(original)
                 if constraints:
                     text = (
                         f"{constraints}\n\n"
-                        "Your FIRST tool call must obey the constraints above. "
+                        "Emit a tool call immediately as your first output. "
                         "Do not repeat the failed first action from those episodes.\n\n"
-                        f"{block}\n\n{text}" if block else
-                        f"{constraints}\n\nYour FIRST tool call must obey the constraints above.\n\n{text}"
+                        f"{original}"
                     )
-                elif block:
-                    text = f"{block}\n\n{text}"
+                else:
+                    block = reflexion_store.to_prompt_context_block(original)
+                    if block:
+                        text = f"{block}\n\n{original}"
             except Exception as exc:
                 logger.debug("ReAct reflexion inject skipped: %s", exc)
-        docs_block = str(context.get("retrieved_documents") or "")
-        if docs_block:
-            text = f"{docs_block}\n\n{text}"
-        skills_block = str(context.get("learned_skills_prompt") or "")
-        if skills_block:
-            text = f"{skills_block}\n\n{text}"
+        if not constraints:
+            recall = str(context.get("durable_recall") or "")
+            if recall:
+                text = f"{recall}\n\n{text}"
+            docs_block = str(context.get("retrieved_documents") or "")
+            if docs_block:
+                text = f"{docs_block}\n\n{text}"
+            skills_block = str(context.get("learned_skills_prompt") or "")
+            if skills_block:
+                text = f"{skills_block}\n\n{text}"
         react_runner = context.get("react_runner")
 
         if callable(react_runner):
