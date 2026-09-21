@@ -156,12 +156,47 @@ def _identity_name(ctx: FragmentContext) -> str:
     return f"Your name is {name}." if name else ""
 
 
+def _entity_self_state(_ctx: FragmentContext) -> str:
+    """Truthful live self-state from the canonical EntityRuntime."""
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        runtime = EntityRuntime.get_singleton()
+        if runtime and runtime.current_state:
+            return runtime.current_state.to_prompt_context_block()
+    except Exception:
+        pass
+    return ""
+
+
+def _retrieved_reflections(ctx: FragmentContext) -> str:
+    """Relevant failure warnings & hypotheses from ReflexionStore."""
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        runtime = EntityRuntime.get_singleton()
+        if runtime and hasattr(runtime, "reflexion_store") and runtime.reflexion_store:
+            query = ctx.goal or ctx.context or ""
+            return runtime.reflexion_store.to_prompt_context_block(query)
+    except Exception:
+        pass
+    return ""
+
+
 # ── the registry: order here IS the prompt order ──────────────────────
 PROMPT_FRAGMENTS: list[PromptFragment] = [
     PromptFragment(
         "three_laws", "safety", "agent/prompts/three_laws.md",
         _three_laws, _all,
         "inviolable safety contract — first thing the model sees, every mode",
+    ),
+    PromptFragment(
+        "entity_self_state", "dynamic", "(generated: EntityRuntime.current_state)",
+        _entity_self_state, _non_subagent,
+        "authoritative entity self-state projection — live facts and active goals",
+    ),
+    PromptFragment(
+        "retrieved_reflections", "dynamic", "(generated: ReflexionStore)",
+        _retrieved_reflections, _all,
+        "retrieved failure warnings and reflection hypotheses from prior experience",
     ),
     PromptFragment(
         "subagent_preamble", "framework", "(generated)",

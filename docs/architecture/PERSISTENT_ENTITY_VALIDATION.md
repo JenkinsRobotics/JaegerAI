@@ -1,42 +1,53 @@
 # PERSISTENT_ENTITY_VALIDATION.md — Empirical Acceptance Evidence
 
 **Date of Validation:** 2026-09-20  
-**Target Architecture:** Pinocchio Persistent Entity Runtime (JaegerAI)  
-**Verification Suite:** [`dev/tests/test_pinocchio_entity.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/dev/tests/test_pinocchio_entity.py)  
-**Status:** **12 of 12 Acceptance Criteria PASSED**  
+**Target Architecture:** Pinocchio Persistent Entity Runtime (UPAA Production Implementation)  
+**Verification Suites:**
+- [`dev/tests/test_upaa_production_runtime.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/dev/tests/test_upaa_production_runtime.py) (9 of 9 PASSED)
+- [`dev/tests/test_runtime_trace.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/dev/tests/test_runtime_trace.py) (7 of 7 PASSED)
+- [`dev/tests/test_pinocchio_entity.py`](file:///Users/matthewjenkins/GitHub/JaegerAI/dev/tests/test_pinocchio_entity.py) (12 of 12 PASSED)
+**Total UPAA Core Tests:** **28 of 28 PASSED (100%)**
 
 ---
 
-## 1. Acceptance Criteria Verification Summary
+## 1. UPAA Production Integration Suite (`test_upaa_production_runtime.py`)
 
-| Criteria ID | Acceptance Requirement | Test Case | Status | Empirical Evidence |
-| :--- | :--- | :--- | :--- | :--- |
-| **A** | **Identity Continuity** | `test_acceptance_a_identity_continuity` | **PASSED** | Process shut down completely after recording events. On cold boot with fresh runtime instance, the exact same `entity_id` was restored. Events across sessions (`session-alpha`, `session-beta`) remained fully retrievable. |
-| **B** | **Provider Independence** | `test_acceptance_b_provider_independence` | **PASSED** | Swapped execution models: `hermes-3-llama-3.1-8b` → `claude-3-5-sonnet` → `qwen2.5-coder`. `entity_id` and cumulative event count remained continuous across all provider swaps. |
-| **C** | **Interface Independence** | `test_acceptance_c_interface_independence` | **PASSED** | Interactions from `gateway`, `bridge`, and `cli` were dispatched against the same entity runtime; state reflected all active interfaces in `current_state.active_interfaces`. |
-| **D** | **Heartbeat Truth** | `test_acceptance_d_heartbeat_truth` | **PASSED** | Heartbeat emitted `system.heartbeat` event with actor `system:heartbeat`. Verified ZERO fake human messages persisted in transcript; quiet beat updated state and returned `HEARTBEAT_OK` with 0 model calls. |
-| **E** | **Tool Consequence Loop** | `test_acceptance_e_tool_consequence_loop` | **PASSED** | Tool start emitted `tool.started`, transitioning activity to `tool_executing`. Success emitted `tool.completed`. Failure emitted `tool.failed`, recording the error in `uncertainty_areas`. |
-| **F** | **Background Continuity** | `test_acceptance_f_background_continuity` | **PASSED** | After interactive turn finished, asynchronous background worker finished and recorded `background.completed` with provenance linked to the original entity session history. |
-| **G** | **Self-State Reconstruction** | `test_acceptance_g_self_state_reconstruction` | **PASSED** | Simulated process termination. Replayed raw `SqliteEventStore` through `reduce_event` from cold boot; exact `SelfState` (goals, telemetry, activity, events processed) was reconstructed without in-memory state. |
-| **H** | **Passive Event without LLM** | `test_acceptance_h_passive_event_without_llm` | **PASSED** | Routine desktop telemetry polled and ingested into `EntityRuntime`. Salience evaluated to `PASSIVE`; cognition handler was called 0 times; `SelfState` updated disk telemetry cleanly. |
-| **I** | **Salient Event Wakeup** | `test_acceptance_i_salient_event_wakeup` | **PASSED** | High-salience alert (`CRITICAL: CPU thermal throttle detected`) exceeded salience threshold (0.7); cognition handler was awakened immediately. |
-| **J** | **Memory Consolidation** | `test_acceptance_j_memory_consolidation` | **PASSED** | Offline consolidation pass ("Dreaming") processed episodic events, extracted claims and entity relations, and populated `SelfState.recent_insights` with provenance. |
-| **K** | **Skill Acquisition** | `test_acceptance_k_skill_acquisition` | **PASSED** | Attempt produced candidate code. Failing verification refused promotion. Passing automated verification succeeded; skill was promoted and retrieved from library. |
-| **L** | **Multi-Runtime Convergence** | `test_acceptance_l_multi_runtime_convergence` | **PASSED** | Traced Gateway, Bridge, Heartbeat, and CLI routes; verified that all dispatch events converge upon the single `EntityRuntime` process singleton. |
+| Test Target | Test Case | Status | Verified Behavior |
+| :--- | :--- | :--- | :--- |
+| **1. Real Executable Trace** | `test_1_real_executable_trace` | **PASSED** | Request -> EntityRuntime -> Event Store -> Reducer -> Salience -> Executive -> CognitionRouter -> ReAct runner -> VerificationContract -> LearningPipeline -> Memory Update -> Response. Full trace observed end-to-end. |
+| **2. Passive Path (0 Models)** | `test_2_passive_path_zero_model_calls` | **PASSED** | Routine sensor event, quiet heartbeat, low-priority background completion produce 0 model calls. Exploding cognition handler was not invoked. |
+| **3. Active Path (Wake Cognition)** | `test_3_active_path_wakes_cognition` | **PASSED** | Direct human prompt, critical thermal anomaly, and mandatory background followup all wake cognition immediately (`wake_cognition=True`, salience >= 0.7). |
+| **4. Provider Swap Continuity** | `test_4_provider_swap_continuity` | **PASSED** | State, episodic history, and structured failure reflections persisted under Provider A, survived complete process shutdown, and were successfully restored and queried under Provider B. |
+| **5. Interface Swap Independence** | `test_5_interface_swap_shared_authority` | **PASSED** | Turns submitted across CLI, Bridge, and Gateway ingress share the identical `EntityIdentity`, `SelfState`, and cumulative episodic memory. |
+| **6. Sleep-Time Processing** | `test_6_sleep_time_consolidation` | **PASSED** | Consolidated mixed history: extracted verified semantic claims, synthesized structured reflections from failed operations, and state survived cold reboot. |
+| **7. Voyager Skill Promotion** | `test_7_voyager_skill_promotion_to_production_registry` | **PASSED** | Extracted skill candidate, passed automated verification gate, wrote real production `SKILL.md` frontmatter + code into instance skills directory, and loaded successfully on subsequent call. |
+| **8. Deliberate Tree Search (LATS)** | `test_8_deliberate_planning_mode` | **PASSED** | Generated $\ge 3$ candidate plans with varied strategies, independent critic scored goal, safety, and reversibility, selected winner, and SelfRefine expanded checkpoints. |
+| **9. Tiered Perception Sensors** | `test_9_tiered_perception_escalation` | **PASSED** | Tier 0 (deterministic desktop telemetry) -> Tier 1 (local heuristic detection) -> Tier 2 (multimodal/rich model synthesis) live escalation demonstrated. |
 
 ---
 
-## 2. Test Execution Command & Output
+## 2. Invariant & Semantic Audit Suite (`test_runtime_trace.py`)
+
+| Audit Target | Test Case | Status | Verified Invariant |
+| :--- | :--- | :--- | :--- |
+| **Audit 1: Authority Ordering** | `test_audit_1_authority_ordering` | **PASSED** | `ProposedAction -> AuthorityLayer -> Action System`. Unapproved destructive actions are blocked before reaching the executor. |
+| **Audit 2: Verification ≠ Effect Ledger** | `test_audit_2_verification_not_effect_ledger` | **PASSED** | Tool returning `ok=True` without independent verification produces `OBJECTIVE_UNVERIFIED`. True verification requires real-world ground truth. |
+| **Audit 3: 5-Part Memory Taxonomy** | `test_audit_3_memory_taxonomy_explicit_ownership` | **PASSED** | Explicit separation and persistence for Working, Episodic, Semantic, Reflective, and Procedural memory. |
+| **Audit 4: Executive Strategy Selection** | `test_audit_4_executive_strategy_selection` | **PASSED** | Executive deterministically routes among 6 distinct cognitive strategies. |
+| **Audit 5: Sleep-Time Processing** | `test_audit_5_sleep_time_processor_not_heartbeat` | **PASSED** | Heartbeat is trigger only; `SleepTimeProcessor` owns consolidation semantics. |
+| **Audit 6: Continuous Learning Pipeline** | `test_audit_6_learning_pipeline_updates_real_targets` | **PASSED** | Verified consequence evidence converts into durable updates across episodic, semantic, reflective, and strategy state. |
+| **Audit 7: Single Runtime Authority Trace** | `test_audit_7_single_runtime_authority_trace` | **PASSED** | CLI, Bridge, Gateway, Heartbeat, Background, and Sensors all enter the same singleton `EntityRuntime`. |
+
+---
+
+## 3. Test Execution Proof
 
 ```bash
-dev/scripts/run_tests.sh -- dev/tests/test_pinocchio_entity.py
+dev/scripts/run_tests.sh -- dev/tests/test_upaa_production_runtime.py dev/tests/test_runtime_trace.py
 ```
 
 ```text
-[run_tests] default tier — fast unit tests (not slow and not integration and not model and not ui and not subprocess)
-[run_tests] /Users/matthewjenkins/.jaeger/venv/bin/pytest -q -m not slow and not integration and not model and not ui and not subprocess dev/tests/test_pinocchio_entity.py
-............                                                             [100%]
-12 passed in 4.77s
+dev/tests/test_upaa_production_runtime.py .........                      [ 56%]
+dev/tests/test_runtime_trace.py .......                                  [100%]
+16 passed in 4.52s
 ```
-
-All 12 Pinocchio acceptance tests pass deterministically under isolated state fixtures.

@@ -32,11 +32,21 @@ from typing import Any, Callable
 
 from jaeger_ai.core.instance.instance import operator_state_root
 from .attention import AttentionDecision, SalienceEngine
+from .authority import AuthorityDecision, AuthorityLayer, ProposedAction
+from .cognition_router import CognitionRouter
+from .deliberate_planner import DeliberatePlanner
 from .events import EventType, JaegerEvent
 from .event_store import SqliteEventStore
+from .executive import CognitiveStrategy, ExecutiveDecision, ExecutiveStrategySelector
 from .identity import EntityIdentity, resolve_entity_identity
+from .learning import LearningDecision, LearningPipeline
+from .memory import MemorySubsystem
 from .reducer import reduce_event, replay_events
+from .reflection import ReflexionStore
+from .self_refine import SelfRefineEngine
 from .self_state import SelfState
+from .sleep_time import SleepTimeProcessor
+from .verification import VerificationContract, VerificationResult
 
 logger = logging.getLogger("jaeger.entity.runtime")
 
@@ -60,6 +70,25 @@ class EntityRuntime:
         self.identity = identity or resolve_entity_identity(self.state_root)
         self.event_store = event_store or SqliteEventStore(self.state_root / "entity_events.sqlite3")
         self.salience_engine = salience_engine or SalienceEngine()
+        self.executive_selector = ExecutiveStrategySelector()
+        self.authority_layer = AuthorityLayer()
+        self.verification_contract = VerificationContract()
+        self.memory_subsystem = MemorySubsystem(self.state_root, self.event_store)
+        self.reflexion_store = ReflexionStore(self.state_root)
+        self.learning_pipeline = LearningPipeline(
+            self.state_root,
+            self.event_store,
+            self.memory_subsystem,
+            self.verification_contract,
+        )
+        self.deliberate_planner = DeliberatePlanner()
+        self.self_refine_engine = SelfRefineEngine()
+        self.sleep_time_processor = SleepTimeProcessor(
+            self.state_root,
+            self.event_store,
+            self.memory_subsystem,
+        )
+        self.cognition_router = CognitionRouter()
 
         # Reconstruct initial state from cold boot replay
         base_state = SelfState(
@@ -130,6 +159,117 @@ class EntityRuntime:
                     logger.error("Cognition handler failed for event %s: %s", persisted.event_id, exc)
 
         return current_state, decision
+
+    def execute_turn(
+        self,
+        user_text: str,
+        *,
+        session_id: str = "dispatcher",
+        source: str = "chat",
+        actor: str = "human:operator",
+        request_id: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a turn through the sovereign UPAA control path:
+        EVENT
+        -> EVENT FABRIC
+        -> PERSIST
+        -> PERCEPTION / STATE REDUCTION
+        -> SELF STATE UPDATE
+        -> ATTENTION / SALIENCE
+        -> EXECUTIVE STRATEGY SELECTION
+        -> COGNITION MODE & PROVIDER
+        -> PROPOSED ACTION / AUTHORITY
+        -> ACTION SYSTEM / ENVIRONMENT
+        -> CONSEQUENCE EVENT
+        -> VERIFICATION
+        -> LEARNING
+        -> MEMORY UPDATE
+        """
+        ctx = dict(context or {})
+
+        # 1. Ingest event to Fabric, reduce SelfState, evaluate Salience
+        event = JaegerEvent.human_message(
+            user_text,
+            actor=actor,
+            source=source,
+            session_id=session_id,
+            request_id=request_id,
+        )
+        current_state, attention = self.ingest(event)
+
+        # Passive gate: if salience indicates no wake
+        if not attention.wake_cognition:
+            return {
+                "text": "",
+                "error": None,
+                "tool_activity": [],
+                "report": {},
+                "skipped_final": False,
+                "strategy": CognitiveStrategy.PASSIVE_OBSERVE.value,
+                "wake_cognition": False,
+            }
+
+        # 2. Executive Strategy Selection
+        exec_decision = self.executive_selector.select_strategy(event, current_state)
+
+        # 3. Cognition Router Execution
+        ctx["sleep_processor"] = self.sleep_time_processor
+        cog_result = self.cognition_router.execute(
+            strategy=exec_decision.strategy,
+            event=event,
+            decision=exec_decision,
+            state=current_state,
+            memory=self.memory_subsystem,
+            authority=self.authority_layer,
+            context=ctx,
+        )
+
+        response_text = str((cog_result or {}).get("text") or "")
+
+        # 4. Independent Verification
+        target_path = (cog_result or {}).get("path") or (cog_result or {}).get("target_path")
+        expected_content = (cog_result or {}).get("expected_content")
+        verif = self.verification_contract.verify_filesystem_write(
+            target_path=target_path,
+            expected_content=expected_content,
+        )
+
+        # 5. Continuous Learning & Memory Update
+        self.learning_pipeline.record_turn_experience(
+            event=event,
+            decision=exec_decision,
+            cog_result=cog_result or {},
+            verification=verif,
+            reflexion_store=self.reflexion_store,
+            state=current_state,
+        )
+
+        # 6. Record Agent Response in Event Fabric
+        if response_text:
+            self.record_agent_response(
+                response_text,
+                session_id=session_id,
+                metadata={
+                    "strategy": exec_decision.strategy.value,
+                    "plan_id": (cog_result or {}).get("plan_id"),
+                },
+            )
+
+        # Standard dictionary format for callers
+        result_dict = dict(cog_result or {})
+        if "tool_activity" not in result_dict:
+            result_dict["tool_activity"] = []
+        if "error" not in result_dict:
+            result_dict["error"] = None
+        if "report" not in result_dict:
+            result_dict["report"] = {}
+        if "skipped_final" not in result_dict:
+            result_dict["skipped_final"] = False
+        result_dict["strategy"] = exec_decision.strategy.value
+        result_dict["text"] = response_text
+
+        return result_dict
 
     # ── Specialized Ingress Helpers ───────────────────────────────────
 

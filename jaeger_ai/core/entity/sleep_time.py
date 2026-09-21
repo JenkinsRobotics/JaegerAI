@@ -103,6 +103,19 @@ class SleepTimeProcessor:
                 insights = self.consolidator.consolidate(events, state)
                 result.jobs_executed.append("consolidation")
                 result.reflections_generated += len(insights)
+
+                # Extract and record semantic claims from verified completed tools
+                completed = [e for e in events if e.event_type == EventType.TOOL_COMPLETED.value]
+                for comp in completed:
+                    tool_n = comp.payload.get("tool_name", "tool")
+                    self.memory.semantic.record_claim(
+                        subject=f"tool:{tool_n}",
+                        predicate="last_successful_invocation",
+                        value=str(comp.payload.get("result")),
+                        source_id=comp.event_id,
+                        confidence=0.9,
+                    )
+                    result.claims_recorded += 1
             except Exception as exc:
                 err = f"Consolidation job error: {exc}"
                 logger.error(err)

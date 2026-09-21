@@ -47,6 +47,23 @@ from .memory import (
 from .reducer import reduce_event, replay_events
 from .runtime import EntityRuntime
 from .self_state import SelfState
+from .cognition_router import (
+    CognitionResult,
+    CognitionRouter,
+)
+from .deliberate_planner import (
+    CandidatePlan,
+    DeliberatePlanner,
+)
+from .reflection import (
+    ReflexionStore,
+    StructuredReflection,
+    formulate_reflection_from_failure,
+)
+from .self_refine import (
+    SelfRefineEngine,
+    SelfRefineResult,
+)
 from .sleep_time import (
     SleepCycleResult,
     SleepTimeJobType,
@@ -63,7 +80,11 @@ __all__ = [
     "AuthorityDecision",
     "AuthorityLayer",
     "AuthorizationStatus",
+    "CandidatePlan",
+    "CognitionResult",
+    "CognitionRouter",
     "CognitiveStrategy",
+    "DeliberatePlanner",
     "EntityIdentity",
     "EntityRuntime",
     "EpisodicMemory",
@@ -80,18 +101,23 @@ __all__ = [
     "ProposedAction",
     "ReflectiveInsight",
     "ReflectiveMemory",
+    "ReflexionStore",
     "SalienceEngine",
     "SalienceLevel",
+    "SelfRefineEngine",
+    "SelfRefineResult",
     "SelfState",
     "SemanticMemory",
     "SleepCycleResult",
     "SleepTimeJobType",
     "SleepTimeProcessor",
     "SqliteEventStore",
+    "StructuredReflection",
     "VerificationContract",
     "VerificationResult",
     "VerificationStatus",
     "WorkingMemory",
+    "formulate_reflection_from_failure",
     "reduce_event",
     "replay_events",
 ]
