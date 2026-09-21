@@ -215,7 +215,13 @@ def test_4_provider_swap_continuity(clean_upaa_env: Path):
     runtime_a.execute_turn(
         "Remember that my favorite programming language is Rust",
         session_id="p_swap",
-        context={"model_runner": lambda t: "Preference recorded with Provider A"},
+        context={
+            "model_runner": lambda t: "Preference recorded with Provider A",
+            "react_runner": lambda t, session_key="p_swap": {
+                "text": "Preference recorded with Provider A",
+                "tool_activity": [],
+            },
+        },
     )
     # Record structured reflection
     refl = StructuredReflection(

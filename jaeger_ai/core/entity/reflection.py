@@ -157,6 +157,15 @@ class ReflexionStore:
         results.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in results[:limit]]
 
+    def get_relevant_reflections(
+        self,
+        intent_or_prompt: str,
+        tool_names: Sequence[str] | None = None,
+        **kwargs: Any,
+    ) -> list[StructuredReflection]:
+        """Planner-facing alias used by DeliberatePlannerHandler."""
+        return self.retrieve_applicable(intent_or_prompt, tool_names, **kwargs)
+
     def to_prompt_context_block(self, intent_or_prompt: str, tool_names: Sequence[str] | None = None) -> str:
         """Render relevant failure warnings to inject into prompt context."""
         applicable = self.retrieve_applicable(intent_or_prompt, tool_names)
@@ -177,15 +186,25 @@ def formulate_reflection_from_failure(
     verification: VerificationResult,
 ) -> StructuredReflection:
     """Deterministically synthesize a structured reflection hypothesis from verified failure evidence."""
-    tool_name = str(event.payload.get("tool") or event.payload.get("tool_name") or "action")
+    tool_name = str(event.payload.get("tool") or event.payload.get("tool_name") or "")
+    text = str(event.payload.get("text") or verification.target_objective or "")
+    evidence = str(verification.evidence or verification.error or "")
+    blob = f"{text} {evidence} {event.payload}"
+    if not tool_name or tool_name == "action":
+        for name in ("read_file", "write_file", "delete_file", "terminal", "memory"):
+            if name in blob:
+                tool_name = name
+                break
+        else:
+            tool_name = "action"
     error_msg = verification.error or verification.evidence
     
     # Extract applicability keywords
     conditions = [tool_name]
     if "git" in tool_name:
         conditions.extend(["version_control", "repository"])
-    if "file" in tool_name or "path" in str(event.payload):
-        conditions.extend(["filesystem", "file_io"])
+    if "file" in tool_name or "path" in str(event.payload) or "file" in text.lower():
+        conditions.extend(["filesystem", "file_io", "not_found"])
     if "network" in error_msg.lower() or "timeout" in error_msg.lower():
         conditions.append("network")
 

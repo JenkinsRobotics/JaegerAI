@@ -13,6 +13,7 @@ a chat bubble.
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -166,6 +167,8 @@ def is_due(
     a full interval after boot (or after the last recorded beat) rather
     than firing the moment the process starts.
     """
+    if os.environ.get("JAEGER_HEARTBEAT_DUE", "").strip() in {"1", "true", "yes"}:
+        return True
     if not enabled or interval_minutes <= 0:
         return False
     stamp = last_beat_at(layout)

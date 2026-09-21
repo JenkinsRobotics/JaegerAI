@@ -3689,12 +3689,32 @@ def _run_direct_model_runner(
     session_key: str,
     allow_persona: bool = True,
 ) -> str:
-    """True direct response cognition runner: no tool catalog and zero mutation capability."""
+    """True direct response: zero tool schema on the wire, zero dispatch."""
+    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
     from jaeger_agent.tool_executor import tool_allowlist
 
+    prompt = (
+        "Answer in plain language only. Do not call tools. "
+        "Do not emit tool-call XML or JSON. If you lack a fact, say so.\n\n"
+        f"{t}"
+    )
     with tool_allowlist([]):
-        res = _run_subordinate_react(client, t, session_key=session_key, allow_persona=allow_persona)
-        return str(res.get("text") or "")
+        agent = build_jaeger_agent(client, tools=[], skip_final_tools=set())
+        agent.max_iterations = 2
+        result = drive_one_turn(agent, prompt)
+    text = str((result or {}).get("answer") or (result or {}).get("text") or "")
+    # If the model still emitted a tool-shaped blob, retry once as prose.
+    if "unknown tool" in text.lower() or ("<" in text and "tool" in text.lower()):
+        retry = (
+            "Your previous reply tried to use a tool. There are no tools. "
+            "Answer the user in one short paragraph of plain text.\n\n"
+            f"{t}"
+        )
+        with tool_allowlist([]):
+            agent = build_jaeger_agent(client, tools=[], skip_final_tools=set())
+            result = drive_one_turn(agent, retry)
+        text = str((result or {}).get("answer") or (result or {}).get("text") or text)
+    return text
 
 
 def _run_turn(
@@ -3722,7 +3742,9 @@ def _run_turn(
 
     try:
         from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.core.entity.model_capabilities import ensure_role_client
         runtime = EntityRuntime.get_singleton()
+        client = ensure_role_client(client, "react", runtime.state_root)
         context = {
             "react_runner": lambda t, session_key=session_key: _run_subordinate_react(
                 client, t, session_key=session_key, allow_persona=allow_persona,
@@ -3764,6 +3786,107 @@ def _run_turn(
             res["degraded_mode"] = True
             res["degraded_warning"] = f"EntityRuntime unavailable: {exc}"
             return res
+
+
+def _gateway_base() -> str:
+    from jaeger_ai.contract.ports import GATEWAY_PORT, LOOPBACK
+    return (os.environ.get("JAEGER_GATEWAY_URL") or f"http://{LOOPBACK}:{GATEWAY_PORT}").rstrip("/")
+
+
+def _forward_oneshot_to_gateway(
+    text: str,
+    *,
+    instance_name: str,
+    request_id: str | None = None,
+    timeout_s: float = 300.0,
+) -> int:
+    """Attach a locked-instance CLI one-shot to the resident Gateway.
+
+    When the bridge/daemon already holds InstanceLock, starting a second
+    in-process agent would mint a parallel Jaeger. One-shot prompts go
+    through the same Event Fabric instead.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+    import uuid as _uuid
+
+    base = _gateway_base()
+    try:
+        with urllib.request.urlopen(f"{base}/health", timeout=3) as resp:
+            health = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as exc:
+        print(
+            f"[jaeger] instance is locked and Gateway at {base} is unreachable ({exc}).",
+            file=sys.stderr, flush=True,
+        )
+        return 2
+    entity_id = ((health.get("diagnostics") or {}).get("entity_id") or "")
+    if entity_id:
+        print(f"[jaeger] attaching to resident Gateway entity {entity_id}", flush=True)
+    session_id = f"cli:{instance_name}"
+    rid = (request_id or "").strip() or _uuid.uuid4().hex
+    payload = json.dumps({
+        "session_id": session_id,
+        "title": f"CLI {instance_name}",
+        "profile": "jaeger",
+        "source": "cli",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/v1/sessions", data=payload, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=8).read()
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {200, 201}:
+            # 409/existing is fine; other errors still try the turn
+            if exc.code >= 500:
+                print(f"[jaeger] Gateway session create failed: {exc}", file=sys.stderr, flush=True)
+                return 2
+    except Exception as exc:
+        print(f"[jaeger] Gateway session create failed: {exc}", file=sys.stderr, flush=True)
+        return 2
+
+    turn_body = json.dumps({"text": text, "request_id": rid}).encode("utf-8")
+    turn_req = urllib.request.Request(
+        f"{base}/v1/sessions/{session_id}/turns",
+        data=turn_body, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(turn_req, timeout=30) as resp:
+            admitted = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception as exc:
+        print(f"[jaeger] Gateway turn failed: {exc}", file=sys.stderr, flush=True)
+        return 2
+    if admitted.get("replayed") and admitted.get("output"):
+        print(admitted["output"], flush=True)
+        return 0
+    deadline = time.time() + timeout_s
+    status_url = f"{base}/v1/sessions/{session_id}/requests/{rid}"
+    last = admitted
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(status_url, timeout=8) as resp:
+                last = json.loads(resp.read().decode("utf-8") or "{}")
+        except Exception:
+            time.sleep(1.0)
+            continue
+        st = str(last.get("status") or "")
+        if st in {"completed", "failed", "cancelled", "execution_unknown"}:
+            break
+        time.sleep(1.0)
+    result = last.get("result") if isinstance(last.get("result"), dict) else {}
+    output = str(last.get("output") or result.get("output") or result.get("text") or "")
+    if last.get("status") == "completed" and output:
+        print(output, flush=True)
+        return 0
+    err = last.get("error") or result.get("error") or last.get("status") or "no output"
+    print(f"[jaeger] Gateway turn ended: {err}", file=sys.stderr, flush=True)
+    if output:
+        print(output, flush=True)
+    return 0 if last.get("status") == "completed" else 1
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
@@ -5410,6 +5533,28 @@ def run_daemon(*, instance_name: str | None = None,
                         warmup=True)
     layout = boot.layout
     queue = queue_for_layout(layout)
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
+        rt = EntityRuntime.get_singleton()
+        print(
+            f"[jaeger-daemon] entity {rt.identity.entity_id} "
+            f"resident={getattr(rt, 'is_resident', False)}",
+            flush=True,
+        )
+        cfg = _pipeline.get("config")
+        desktop = getattr(getattr(cfg, "sensors", None), "desktop", None)
+        if getattr(rt, "is_resident", False) and desktop is not None and getattr(desktop, "enabled", False):
+            sup = SensorSupervisor(
+                runtime=rt,
+                enabled=True,
+                interval_s=float(getattr(desktop, "interval_seconds", 15.0) or 15.0),
+            )
+            sup.start()
+            rt._sensor_supervisor = sup
+            print("[jaeger-daemon] sensor supervisor started.", flush=True)
+    except Exception as exc:
+        print(f"[jaeger-daemon] entity runtime attach skipped: {exc}", flush=True)
 
     _stop = {"flag": False}
 
@@ -5445,6 +5590,42 @@ def run_daemon(*, instance_name: str | None = None,
     client = boot.client
     try:
         while not _stop["flag"]:
+            # Heartbeat / sleep-time first so idle consolidation is not
+            # starved by skill-review cards queued later in this same tick.
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_ai.core.runtime import heartbeat as _hb
+                from jaeger_agent.background.board import has_actionable_work
+                _rt = EntityRuntime.get_singleton()
+                _hb_cfg_pre = getattr(_pipeline.get("config"), "heartbeat", None)
+                if getattr(_rt, "is_resident", False) and _hb.is_due(
+                    layout,
+                    interval_minutes=int(getattr(_hb_cfg_pre, "interval_minutes", 30) or 0),
+                    enabled=bool(getattr(_hb_cfg_pre, "enabled", True)),
+                ):
+                    try:
+                        from jaeger_agent.background.board import board_for_layout
+                        _board_busy = any(
+                            getattr(c, "column", "") in ("ready", "in_progress")
+                            for c in board_for_layout(layout).list()
+                        )
+                    except Exception:
+                        _board_busy = has_actionable_work(layout)
+                    quiet = not _board_busy
+                    _rt.submit_heartbeat(
+                        payload={
+                            "quiet": quiet,
+                            "pending_briefing": None,
+                            "urgent_work": False,
+                        },
+                    )
+                    sleep_mins = int(getattr(_hb_cfg_pre, "sleep_interval_minutes", 30) or 0)
+                    if quiet and sleep_mins > 0:
+                        _rt.sleep_time_processor.run_sleep_cycle(reason="daemon_idle")
+                    if quiet:
+                        _hb.mark_beat(layout, silent=True)
+            except Exception:
+                pass
             # Refill: score skills from their post-use summaries and
             # probabilistically queue the worst few for review. Bounded by the
             # open-review dedup + the 'reviewing' marker resetting activation.
@@ -5486,10 +5667,10 @@ def run_daemon(*, instance_name: str | None = None,
 
             from jaeger_ai.core.runtime.idle_supervisor import Action, decide
             from jaeger_ai.core.runtime import heartbeat as _hb
+            from jaeger_agent.background.board import has_actionable_work
             from jaeger_ai.core.runtime.completions import (
                 next_completion_turn, pending_count,
             )
-            from jaeger_agent.background.board import has_actionable_work
             from jaeger_agent.prompts import AUTO_BOARD_PROMPT
 
             _cfg = _pipeline.get("config")
@@ -5997,6 +6178,12 @@ def _main_dispatch() -> int:
     try:
         lock.acquire()
     except RuntimeError as exc:
+        prompt = " ".join(args.prompt).strip()
+        if prompt:
+            print(f"[jaeger] {exc}", file=sys.stderr, flush=True)
+            return _forward_oneshot_to_gateway(
+                prompt, instance_name=instance_name,
+            )
         print(f"[jaeger] {exc}", file=sys.stderr, flush=True)
         return 2
 

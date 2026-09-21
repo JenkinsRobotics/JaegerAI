@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import time
@@ -112,6 +113,8 @@ def resolve_entity_identity(
         except Exception as exc:
             logger.warning("Corrupt or invalid entity identity file at %s: %s; re-minting", identity_path, exc)
 
+    if instance_name == "default":
+        instance_name = (os.environ.get("JAEGER_INSTANCE_NAME") or "").strip() or "default"
     new_id = f"jaeger-entity-{uuid.uuid4().hex[:12]}"
     identity = EntityIdentity(
         entity_id=new_id,

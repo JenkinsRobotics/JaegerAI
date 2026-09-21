@@ -237,6 +237,13 @@ def test_audit_4_executive_strategy_selection():
     dec_react = ExecutiveStrategySelector.select_strategy(ev_react, base_state)
     assert dec_react.strategy == CognitiveStrategy.REACT_LOOP
 
+    # 3b. Memory writes are mutating actions, not chat (live Phase 6 defect)
+    ev_remember = JaegerEvent.human_message(
+        "Remember that the validation project codename is Blue Lantern."
+    )
+    dec_remember = ExecutiveStrategySelector.select_strategy(ev_remember, base_state)
+    assert dec_remember.strategy == CognitiveStrategy.REACT_LOOP
+
     # 4. Deliberate Planning (Batch / Goal prompt)
     ev_plan = JaegerEvent.human_message("Process these 50 records and do not stop until done")
     dec_plan = ExecutiveStrategySelector.select_strategy(ev_plan, base_state)

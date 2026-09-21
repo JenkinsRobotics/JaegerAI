@@ -131,6 +131,17 @@ class ReActHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
+        reflexion_store = context.get("reflexion_store")
+        if reflexion_store is not None:
+            try:
+                block = reflexion_store.to_prompt_context_block(text)
+                if block:
+                    text = f"{block}\n\n{text}"
+            except Exception as exc:
+                logger.debug("ReAct reflexion inject skipped: %s", exc)
+        skills_block = str(context.get("learned_skills_prompt") or "")
+        if skills_block:
+            text = f"{skills_block}\n\n{text}"
         react_runner = context.get("react_runner")
 
         if callable(react_runner):
@@ -169,12 +180,46 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
         cognition_provider = context.get("cognition_provider")
         critic_provider = context.get("critic_provider")
 
+        store = context.get("event_store")
+        parent_id = str(context.get("parent_event_id") or event.event_id)
+        session_id = event.session_id
+        if prior_reflections:
+            logger.info("Deliberate planner received %d prior reflections", len(prior_reflections))
+
         # 1. Generate >= 3 candidate plans informed by prior reflections
         candidates = DeliberatePlanner.generate_candidate_plans(
             goal=goal,
             prior_reflections=prior_reflections,
             cognition_provider=cognition_provider,
         )
+        if store is not None:
+            try:
+                store.append(
+                    JaegerEvent.plan_generated(
+                        f"{len(candidates)} candidates",
+                        [c.name for c in candidates],
+                        parent_event_id=parent_id,
+                        session_id=session_id,
+                    )
+                )
+                store.append(
+                    JaegerEvent.typed(
+                        EventType.PLAN_GENERATED.value,
+                        {
+                            "candidates": [
+                                {"plan_id": c.plan_id, "name": c.name, "steps": c.steps}
+                                for c in candidates
+                            ],
+                            "source": "cognition_provider" if cognition_provider else "fallback_templates",
+                        },
+                        actor="agent:planner",
+                        source="deliberate_search",
+                        parent_event_id=parent_id,
+                        session_id=session_id,
+                    )
+                )
+            except Exception as exc:
+                logger.debug("plan.generated emit failed: %s", exc)
 
         # 2. Critic pass scoring and selecting best plan
         winning_plan = DeliberatePlanner.evaluate_and_select(
@@ -183,6 +228,34 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
             critic_provider=critic_provider,
             prior_reflections=prior_reflections,
         )
+        if store is not None:
+            try:
+                store.append(
+                    JaegerEvent.typed(
+                        EventType.PLAN_CRITICIZED.value,
+                        {
+                            "plan_id": winning_plan.plan_id,
+                            "critic_notes": winning_plan.critic_notes,
+                            "final_score": winning_plan.final_score,
+                        },
+                        actor="agent:critic",
+                        source="deliberate_search",
+                        parent_event_id=parent_id,
+                        session_id=session_id,
+                    )
+                )
+                store.append(
+                    JaegerEvent.typed(
+                        EventType.PLAN_SELECTED.value,
+                        {"plan_id": winning_plan.plan_id, "name": winning_plan.name, "steps": winning_plan.steps},
+                        actor="agent:planner",
+                        source="deliberate_search",
+                        parent_event_id=parent_id,
+                        session_id=session_id,
+                    )
+                )
+            except Exception as exc:
+                logger.debug("plan critic/select emit failed: %s", exc)
 
         # 3. If plan contains sensitive mutations, run SelfRefine pass
         if winning_plan.reversibility != "reversible":
@@ -215,6 +288,20 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
                 result["replanned"] = True
                 result["plan_id"] = replanned.plan_id
                 result["plan_name"] = replanned.name
+                if store is not None:
+                    try:
+                        store.append(
+                            JaegerEvent.typed(
+                                EventType.PLAN_REPLANNED.value,
+                                {"plan_id": replanned.plan_id, "name": replanned.name},
+                                actor="agent:planner",
+                                source="deliberate_search",
+                                parent_event_id=parent_id,
+                                session_id=session_id,
+                            )
+                        )
+                    except Exception:
+                        pass
                 return result
 
             result["plan_id"] = winning_plan.plan_id

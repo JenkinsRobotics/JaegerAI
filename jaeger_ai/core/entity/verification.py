@@ -17,9 +17,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
+import os
 from pathlib import Path
+import re
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 logger = logging.getLogger("jaeger.entity.verification")
 
@@ -515,3 +517,225 @@ class VerificationRegistry:
             evidence=f"No action-specific verifier registered for action {act_type or tool_name or 'unknown'!r}",
             verifier="unverified_default",
         )
+
+
+# ── Turn-level action derivation (independent of last tool-name string) ──
+
+_ABS_PATH = re.compile(r"(/(?:tmp|private|Users|home|var|opt)/[^\s'\"`]+)")
+_REL_FILE = re.compile(
+    r"\b((?:workspace/|sandbox/|skills/)?[\w./-]+\.[A-Za-z0-9]{1,8})\b"
+)
+_GIT_C = re.compile(r"git\s+-C\s+(\S+)")
+_CD_GIT = re.compile(r"cd\s+(\S+)\s+&&\s+git\b")
+
+
+def _workspace_roots(context: Any) -> list[Path]:
+    roots: list[Path] = []
+    ctx = dict(context) if isinstance(context, dict) else {}
+    for key in ("workspace", "workspace_path", "cwd"):
+        val = ctx.get(key)
+        if val:
+            roots.append(Path(str(val)))
+    env_ws = os.environ.get("JAEGER_WORKSPACE")
+    if env_ws:
+        roots.append(Path(env_ws))
+    roots.append(Path.cwd())
+    out: list[Path] = []
+    seen: set[str] = set()
+    for r in roots:
+        s = str(r)
+        if s not in seen:
+            seen.add(s)
+            out.append(r)
+    return out
+
+
+def _resolve_existing_or_candidate(path: str, context: Any) -> Path:
+    raw = Path(path)
+    if raw.is_absolute():
+        return raw
+    for root in _workspace_roots(context):
+        cand = (root / path).resolve()
+        if cand.exists() or cand.parent.exists():
+            return cand
+    return (Path.cwd() / path).resolve()
+
+
+def _tool_records(tool_events: Sequence[Any]) -> list[dict[str, Any]]:
+    by_call: dict[str, dict[str, Any]] = {}
+    ordered: list[dict[str, Any]] = []
+    for evt in tool_events:
+        payload = getattr(evt, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        name = str(payload.get("tool") or payload.get("tool_name") or "").strip()
+        if not name:
+            continue
+        call_id = str(payload.get("call_id") or "")
+        rec = by_call.get(call_id) if call_id else None
+        if rec is None:
+            rec = {
+                "tool": name,
+                "arguments": {},
+                "result": None,
+                "error": None,
+                "failed": False,
+            }
+            ordered.append(rec)
+            if call_id:
+                by_call[call_id] = rec
+        rec["tool"] = name or rec["tool"]
+        if payload.get("arguments"):
+            rec["arguments"] = payload["arguments"]
+        if "result" in payload:
+            rec["result"] = payload.get("result")
+        if payload.get("error"):
+            rec["error"] = payload.get("error")
+            rec["failed"] = True
+        etype = str(getattr(evt, "event_type", ""))
+        if etype.endswith("failed"):
+            rec["failed"] = True
+    return ordered
+
+
+def derive_verification_action(
+    objective: str,
+    cog_result: Any,
+    tool_events: Sequence[Any] | None = None,
+    *,
+    strategy: str = "",
+    context: Any = None,
+) -> dict[str, Any]:
+    """Build a structured action dict from the turn's real tool consequences.
+
+    Never treats a display string like ``complete_task(... Wrote ...)`` as a
+    tool name. Mutating tools in the turn win over ledger/complete_task.
+    """
+    records = _tool_records(tool_events or ())
+    result = cog_result if isinstance(cog_result, dict) else {}
+    if not records and isinstance(result.get("tool_records"), list):
+        records = [r for r in result["tool_records"] if isinstance(r, dict)]
+
+    writes: list[dict[str, Any]] = []
+    deletes: list[dict[str, Any]] = []
+    git_commits: list[dict[str, Any]] = []
+
+    for rec in records:
+        name = rec["tool"]
+        args = rec.get("arguments") if isinstance(rec.get("arguments"), dict) else {}
+        res = rec.get("result") if isinstance(rec.get("result"), dict) else {}
+        if name in {"write_file", "append_file", "patch"}:
+            path = args.get("path") or res.get("path")
+            content = args.get("content") or args.get("expected_content")
+            if path:
+                writes.append({"path": path, "expected_content": content})
+        elif name in {"delete_file"}:
+            path = args.get("path") or res.get("path")
+            if path:
+                deletes.append({"path": path})
+        elif name == "terminal":
+            cmd = str(args.get("command") or "")
+            if re.search(r"\bgit\b.*\bcommit\b", cmd):
+                repo = None
+                m = _GIT_C.search(cmd) or _CD_GIT.search(cmd)
+                if m:
+                    repo = m.group(1).strip("'\"")
+                msg_m = re.search(r'-m\s+[\'"]([^\'"]+)[\'"]', cmd)
+                git_commits.append({
+                    "repo_path": repo,
+                    "commit_message": msg_m.group(1) if msg_m else None,
+                })
+            rm = re.search(r"\brm(?:\s+-[rf]+)*\s+(\S+)", cmd)
+            if rm:
+                deletes.append({"path": rm.group(1).strip("'\"")})
+            redir = re.search(r"(?:printf|echo|cat)\b.*>\s*(\S+)", cmd)
+            if redir and "git" not in cmd:
+                writes.append({"path": redir.group(1).strip("'\""), "expected_content": None})
+
+    obj = objective or ""
+    obj_l = obj.lower()
+    wants_delete = bool(re.search(r"\b(delete|remove|rm)\b", obj_l))
+    wants_commit = bool(re.search(r"\b(git\s+commit|commit)\b", obj_l))
+    wants_write = bool(re.search(r"\b(create|write|save)\b", obj_l)) and not wants_delete
+
+    if wants_commit and git_commits:
+        chosen = git_commits[-1]
+        repo = chosen.get("repo_path")
+        if not repo:
+            abs_paths = _ABS_PATH.findall(obj)
+            repo = abs_paths[0] if abs_paths else "."
+        return {
+            "action_type": "git_commit",
+            "repo_path": repo,
+            "commit_message": chosen.get("commit_message"),
+            "tool": "terminal",
+        }
+
+    if wants_delete and deletes:
+        path = deletes[-1]["path"]
+        return {
+            "action_type": "file_delete",
+            "path": str(_resolve_existing_or_candidate(path, context)),
+            "tool": "delete_file",
+        }
+
+    if writes and (wants_write or not wants_delete):
+        with_content = [w for w in writes if w.get("expected_content")]
+        chosen = with_content[-1] if with_content else writes[-1]
+        abs_obj = [p.rstrip(".,;\"'") for p in _ABS_PATH.findall(obj)]
+        raw_path = str(chosen["path"])
+        if abs_obj and Path(abs_obj[0]).exists():
+            path = abs_obj[0]
+        elif Path(raw_path).is_absolute():
+            path = raw_path
+        else:
+            path = str(_resolve_existing_or_candidate(raw_path, context))
+            if abs_obj:
+                path = abs_obj[0]
+        expected = chosen.get("expected_content")
+        if not expected:
+            quoted = re.search(r"['\"]([^'\"]{2,120})['\"]", obj)
+            if quoted:
+                expected = quoted.group(1)
+            else:
+                q = re.search(r"containing(?: exactly)?(?: the words)?\s+(.+?)(?:\.|$)", obj, re.I)
+                if q:
+                    expected = q.group(1).strip().strip("'\"")
+        if isinstance(expected, str):
+            expected = re.sub(r"\s+Then stop\.?\s*$", "", expected, flags=re.I).strip()
+        return {
+            "action_type": "file_write",
+            "path": path,
+            "expected_content": expected,
+            "tool": "write_file",
+        }
+
+    if strategy == "direct_response" or not records:
+        return {"action_type": "unknown", "tool": ""}
+
+    if records and all(r["tool"] in {"work_ledger", "complete_task", "read_file", "list_skill_dir", "memory"} for r in records):
+        return {"action_type": "read_only", "tool": records[-1]["tool"]}
+
+    abs_paths = [p.rstrip(".,;\"'") for p in _ABS_PATH.findall(obj)]
+    expected = None
+    quoted = re.search(r"['\"]([^'\"]{2,120})['\"]", obj)
+    if quoted:
+        expected = quoted.group(1)
+    if wants_delete and abs_paths:
+        return {"action_type": "file_delete", "path": abs_paths[0], "tool": "delete_file"}
+    if wants_write and abs_paths:
+        return {
+            "action_type": "file_write",
+            "path": abs_paths[0],
+            "expected_content": expected,
+            "tool": "write_file",
+        }
+    if wants_commit and abs_paths:
+        return {
+            "action_type": "git_commit",
+            "repo_path": abs_paths[0],
+            "commit_message": expected,
+            "tool": "terminal",
+        }
+
+    return {"action_type": "unknown", "tool": records[-1]["tool"] if records else ""}

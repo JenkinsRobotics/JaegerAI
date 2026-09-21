@@ -88,6 +88,34 @@ class JaegerGatewayApp:
             raise RuntimeError(f"Gateway store is owned by live pid {lease.get('owner_pid')}")
         self._owns_store = True
         self.store.recover_interrupted_sessions()
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
+            rt = EntityRuntime.get_singleton()
+            logger.info(
+                "Gateway attached EntityRuntime %s resident=%s",
+                rt.identity.entity_id,
+                getattr(rt, "is_resident", False),
+            )
+            if getattr(rt, "is_resident", False):
+                try:
+                    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir, default_instance_name
+                    from jaeger_ai.core.instance.schemas import Config, load_yaml
+                    layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
+                    cfg = load_yaml(layout.config_path, Config)
+                    desktop = getattr(getattr(cfg, "sensors", None), "desktop", None)
+                    if desktop is not None and getattr(desktop, "enabled", False):
+                        sup = SensorSupervisor(
+                            runtime=rt,
+                            enabled=True,
+                            interval_s=float(desktop.interval_seconds),
+                        )
+                        sup.start()
+                        rt._sensor_supervisor = sup
+                except Exception as exc:
+                    logger.debug("Gateway sensor supervisor skipped: %s", exc)
+        except Exception as exc:
+            logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
         if self._background_client is not None:
             self._background_task = asyncio.create_task(self._background_loop())
 
@@ -386,7 +414,8 @@ class JaegerGatewayApp:
                             "session_store": str(self.store.path.resolve()),
                             "instance_root": str(self._instance_root()),
                             "schema_version": self.store.schema_version(),
-                            "process_lease": self.store.process_lease()},
+                            "process_lease": self.store.process_lease(),
+                            **self._entity_diagnostics()},
             "capabilities": {
                 "native_agent": bool(native_mcp.get("ok")),
                 "transport_ready": bool(native_mcp.get("transport_ready") or native_mcp.get("chat_tool_available")),
@@ -401,6 +430,18 @@ class JaegerGatewayApp:
             },
         }
         return web.json_response(payload, status=200 if all_green else 503)
+
+    def _entity_diagnostics(self) -> dict[str, Any]:
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            rt = EntityRuntime.get_singleton()
+            return {
+                "entity_id": rt.identity.entity_id,
+                "entity_resident": bool(getattr(rt, "is_resident", False)),
+                "event_count": int(rt.current_state.total_events_processed),
+            }
+        except Exception as exc:
+            return {"entity_id": None, "entity_error": str(exc)}
 
     def _registry(self):
         from jaeger_ai.core.agent_registry import AgentRegistry

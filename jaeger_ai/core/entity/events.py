@@ -40,6 +40,20 @@ class EventType(str, Enum):
     PERCEPTION_SENSED = "perception.sensed"
     SKILL_CANDIDATE = "skill.candidate"
     SKILL_PROMOTED = "skill.promoted"
+    SKILL_USED = "skill.used"
+    PLAN_CRITICIZED = "plan.criticized"
+    PLAN_SELECTED = "plan.selected"
+    PLAN_REPLANNED = "plan.replanned"
+    ARTIFACT_GENERATED = "artifact.generated"
+    ARTIFACT_CRITIQUED = "artifact.critiqued"
+    ARTIFACT_REVISED = "artifact.revised"
+    ARTIFACT_VALIDATED = "artifact.validated"
+    REFLECTION_CREATED = "reflection.created"
+    REFLECTION_RETRIEVED = "reflection.retrieved"
+    SLEEP_TIME_STARTED = "sleep_time.started"
+    SLEEP_TIME_COMPLETED = "sleep_time.completed"
+    PROVIDER_SELECTED = "provider.selected"
+    PROVIDER_REJECTED = "provider.rejected"
 
 
 @dataclass(frozen=True)
@@ -129,7 +143,7 @@ class JaegerEvent:
             idemp_key = f"human-msg-{digest}"
         payload: dict[str, Any] = {"text": text, "request_id": request_id}
         if metadata:
-            for k in ("role", "execution_mode", "actionable", "specialist", "agent_id"):
+            for k in ("role", "execution_mode", "actionable", "specialist", "agent_id", "reflection_count"):
                 if k in metadata:
                     payload[k] = metadata[k]
         return cls(
@@ -422,4 +436,28 @@ class JaegerEvent:
             session_id=session_id,
             payload=signals,
             salience=salience,
+        )
+
+    @classmethod
+    def typed(
+        cls,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        actor: str,
+        source: str,
+        parent_event_id: str = "",
+        session_id: str = "dispatcher",
+        salience: float = 0.5,
+    ) -> JaegerEvent:
+        return cls(
+            event_id="",
+            event_type=event_type,
+            actor=actor,
+            source=source,
+            timestamp=time.time(),
+            session_id=session_id,
+            payload=payload,
+            salience=salience,
+            parent_event_id=parent_event_id,
         )

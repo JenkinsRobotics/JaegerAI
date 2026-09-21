@@ -87,13 +87,15 @@ def _gateway_approval_wait(frame: dict[str, Any], request_id: str) -> str:
 
 
 def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: str = "",
-                 allowed_tools: list[str] | None = None) -> str:
+                 allowed_tools: list[str] | None = None, is_subordinate: bool = False) -> str:
     kwargs: dict[str, Any] = {}
     if allowed_tools is not None:
         kwargs["allowed_tools"] = allowed_tools
     if request_id:
         kwargs["turn_id"] = request_id
         kwargs["on_request"] = lambda frame: _gateway_approval_wait(frame, request_id)
+    if is_subordinate:
+        kwargs["is_subordinate"] = True
     out = bridge.turn(message, session=session or "mcp", **kwargs)
     if isinstance(out, dict) and (out.get("error") or out.get("halt_reason") or out.get("execution_unknown")):
         raise RuntimeError(f"Native agent has no confirmed result: {out.get('error') or out.get('halt_reason') or 'execution unknown'}")
@@ -186,7 +188,10 @@ def build_server(client: Any, instance: str, model: str | None,
         """
         session = (session_id or "").strip() or "mcp"
         if bridge is not None:
-            return _bridge_chat(bridge, message, session=session, request_id=request_id, allowed_tools=allowed_tools)
+            return _bridge_chat(
+                bridge, message, session=session, request_id=request_id,
+                allowed_tools=allowed_tools, is_subordinate=is_subordinate,
+            )
         from jaeger_agent.tool_executor import tool_allowlist
         with tool_allowlist(allowed_tools):
             return _run_chat(

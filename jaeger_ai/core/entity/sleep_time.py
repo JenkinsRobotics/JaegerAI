@@ -81,6 +81,20 @@ class SleepTimeProcessor:
         t0 = time.time()
         cycle_id = f"sleep-{int(t0*1000)}"
         logger.info("Starting sleep-time cycle %s (reason: %s)", cycle_id, reason)
+        try:
+            self.event_store.append(
+                JaegerEvent(
+                    event_id="",
+                    event_type=EventType.SLEEP_TIME_STARTED.value,
+                    actor="system:sleep_processor",
+                    source="sleep_time",
+                    timestamp=t0,
+                    payload={"cycle_id": cycle_id, "reason": reason},
+                    salience=0.2,
+                )
+            )
+        except Exception:
+            pass
 
         selected_jobs = list(job_types) if job_types else [
             SleepTimeJobType.CONSOLIDATION,
@@ -97,7 +111,7 @@ class SleepTimeProcessor:
         # 1. Job: Episodic -> Semantic Memory Consolidation
         if SleepTimeJobType.CONSOLIDATION in selected_jobs:
             try:
-                events = self.event_store.query_events(limit=100)
+                events = self.event_store.query_events(since_ts=time.time() - 86400, limit=500)
                 from .identity import EntityIdentity
                 state = SelfState(identity=EntityIdentity.create_default("sleep_processor"))
                 insights = self.consolidator.consolidate(events, state)
@@ -125,7 +139,7 @@ class SleepTimeProcessor:
         if SleepTimeJobType.REFLECTION in selected_jobs:
             try:
                 # Synthesize meta-cognitive insights from recent event patterns
-                events = self.event_store.query_events(limit=50)
+                events = self.event_store.query_events(since_ts=time.time() - 86400, limit=200)
                 failed_tools = [
                     e for e in events
                     if e.event_type == EventType.TOOL_FAILED.value
@@ -147,7 +161,28 @@ class SleepTimeProcessor:
         # 3. Job: Skill Candidate Review
         if SleepTimeJobType.SKILL_CANDIDATE_REVIEW in selected_jobs:
             try:
-                # Skill candidate verification against regression assertions
+                from collections import Counter
+                completed = [
+                    e for e in self.event_store.query_events(
+                        event_types=[EventType.TOOL_COMPLETED.value],
+                        since_ts=time.time() - 86400,
+                        limit=200,
+                    )
+                ]
+                counts = Counter(
+                    str((e.payload or {}).get("tool") or "")
+                    for e in completed
+                )
+                for tool, n in counts.items():
+                    if tool in {"write_file", "terminal", "memory"} and n >= 2:
+                        cand = self.skill_pipeline.extract_candidate(
+                            name=f"learned_{tool.replace('.', '_')}",
+                            description=f"Repeated successful {tool} procedure observed {n} times",
+                            code=f"# verified {tool} playbook\n",
+                        )
+                        ver = self.skill_pipeline.verify_candidate(cand, lambda code: "verified" in code or "playbook" in code)
+                        if self.skill_pipeline.promote(cand, ver):
+                            result.skills_promoted += 1
                 result.jobs_executed.append("skill_candidate_review")
             except Exception as exc:
                 err = f"Skill review job error: {exc}"
@@ -156,7 +191,15 @@ class SleepTimeProcessor:
 
         result.completed_at = time.time()
 
-        # Emit sleep-time consolidation event into Event Fabric
+        payload = {
+            "cycle_id": cycle_id,
+            "reason": reason,
+            "duration_s": result.duration_s,
+            "claims_recorded": result.claims_recorded,
+            "reflections_generated": result.reflections_generated,
+            "skills_promoted": result.skills_promoted,
+            "jobs": result.jobs_executed,
+        }
         self.event_store.append(
             JaegerEvent(
                 event_id="",
@@ -164,15 +207,19 @@ class SleepTimeProcessor:
                 actor="system:sleep_processor",
                 source="sleep_time",
                 timestamp=result.completed_at,
-                payload={
-                    "cycle_id": cycle_id,
-                    "reason": reason,
-                    "duration_s": result.duration_s,
-                    "claims_recorded": result.claims_recorded,
-                    "reflections_generated": result.reflections_generated,
-                    "jobs": result.jobs_executed,
-                },
-                salience=0.2,  # Low salience: background housekeeping, does not wake cognition
+                payload=payload,
+                salience=0.2,
+            )
+        )
+        self.event_store.append(
+            JaegerEvent(
+                event_id="",
+                event_type=EventType.SLEEP_TIME_COMPLETED.value,
+                actor="system:sleep_processor",
+                source="sleep_time",
+                timestamp=result.completed_at,
+                payload=payload,
+                salience=0.2,
             )
         )
 

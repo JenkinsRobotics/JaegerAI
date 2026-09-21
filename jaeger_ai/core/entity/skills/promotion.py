@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import inspect
 import logging
+import os
 from pathlib import Path
 import time
 from typing import Any, Callable
@@ -56,6 +57,56 @@ class SkillPromotionPipeline:
                 self.skills_dir = Path(os.environ.get("JAEGER_STATE_DIR", Path.home() / ".jaeger")) / "skills"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self._promoted_skills: dict[str, dict[str, Any]] = {}
+        self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        """Rebuild the in-memory registry from promoted v3 packages on disk."""
+        if not self.skills_dir.is_dir():
+            return
+        for folder in self.skills_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            skill_md = folder / "SKILL.md"
+            manifest = folder / "manifest.yaml"
+            if not skill_md.exists() and not manifest.exists():
+                continue
+            description = ""
+            code = ""
+            try:
+                text = skill_md.read_text(encoding="utf-8") if skill_md.exists() else ""
+                for line in text.splitlines():
+                    if line.startswith("description:"):
+                        description = line.split(":", 1)[1].strip()
+                        break
+                run_py = folder / "run.py"
+                if run_py.exists():
+                    code = run_py.read_text(encoding="utf-8")
+            except Exception as exc:
+                logger.debug("Failed loading skill package %s: %s", folder, exc)
+            self._promoted_skills[folder.name] = {
+                "name": folder.name,
+                "description": description,
+                "code": code,
+                "parameters": {},
+                "skill_md_path": str(skill_md),
+                "manifest_path": str(manifest),
+            }
+
+    def matching_skills(self, intent_or_prompt: str) -> list[dict[str, Any]]:
+        """Return promoted skills whose name or description overlaps the task."""
+        tokens = {
+            tok.lower()
+            for tok in (intent_or_prompt or "").replace("-", " ").replace("_", " ").split()
+            if len(tok) >= 4
+        }
+        matched: list[dict[str, Any]] = []
+        for name, rec in self._promoted_skills.items():
+            hay = f"{name} {rec.get('description') or ''}".lower().replace("_", " ")
+            if any(tok in hay for tok in tokens):
+                matched.append(rec)
+            elif name.startswith("learned_") and name.replace("learned_", "") in (intent_or_prompt or "").lower():
+                matched.append(rec)
+        return matched
 
     def extract_candidate(
         self,
@@ -147,7 +198,7 @@ class SkillPromotionPipeline:
             f'schema: "jros.skill/v3"\n'
             f'id: "{candidate.skill_name}"\n'
             f'version: "1.0.0"\n'
-            f'package: "code_skill"\n'
+            f'package: "playbook"\n'
             f'origin: "agent_authored"\n'
             f'description: "{candidate.description}"\n'
             f'entrypoint:\n'

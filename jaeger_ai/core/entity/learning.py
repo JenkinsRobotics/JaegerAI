@@ -93,6 +93,27 @@ class LearningPipeline:
             refl = formulate_reflection_from_failure(event, verification)
             if reflexion_store is not None:
                 reflexion_store.add_reflection(refl)
+                try:
+                    self.event_store.append(
+                        JaegerEvent(
+                            event_id="",
+                            event_type=EventType.REFLECTION_CREATED.value,
+                            actor="system:reflexion",
+                            source="learning_pipeline",
+                            timestamp=time.time(),
+                            session_id=event.session_id,
+                            payload={
+                                "reflection_id": refl.reflection_id,
+                                "hypothesis": refl.hypothesis,
+                                "confidence": refl.confidence,
+                                "failure_conditions": refl.failure_conditions,
+                            },
+                            parent_event_id=event.event_id,
+                            salience=0.6,
+                        )
+                    )
+                except Exception:
+                    pass
             self.memory.reflective.store_insight(
                 topic="turn_failure",
                 observation=f"Turn on '{event.payload.get('text', '')[:60]}' failed: {verification.error or cog_result.get('error')}",

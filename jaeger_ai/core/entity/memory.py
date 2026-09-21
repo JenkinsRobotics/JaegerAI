@@ -115,34 +115,30 @@ class EpisodicMemory:
         agent_response: str,
         tool_calls: list[Any] | None = None,
     ) -> None:
-        event = JaegerEvent(
-            event_id=f"epi-{int(time.time()*1000)}",
-            event_type=EventType.AGENT_RESPONSE.value,
-            actor="agent:jaeger",
-            source="memory.episodic",
-            timestamp=time.time(),
-            session_id=session_id,
-            payload={
-                "user_text": user_text,
-                "agent_response": agent_response,
-                "tool_calls": tool_calls or [],
-            },
-            salience=0.5,
-        )
-        self.store.append(event)
+        # Autobiographical assistant text is owned by EntityRuntime.record_agent_response.
+        # This helper only projects episode summaries from the canonical event log.
+        _ = (user_text, agent_response, tool_calls, session_id)
 
     def get_session_episodes(self, session_id: str) -> list[EpisodeSummary]:
-        events = self.store.query_events(session_id=session_id, limit=100)
+        events = self.store.query_events(session_id=session_id, limit=200)
         episodes = []
+        last_user = ""
         for e in events:
-            if isinstance(e.payload, dict) and "user_text" in e.payload and "agent_response" in e.payload:
-                episodes.append(EpisodeSummary(
-                    session_id=session_id,
-                    user_text=str(e.payload.get("user_text") or ""),
-                    agent_response=str(e.payload.get("agent_response") or ""),
-                    tool_calls=list(e.payload.get("tool_calls") or []),
-                    timestamp=e.timestamp,
-                ))
+            payload = e.payload if isinstance(e.payload, dict) else {}
+            etype = str(e.event_type)
+            if etype.endswith("human.message") or etype == EventType.HUMAN_MESSAGE.value:
+                last_user = str(payload.get("text") or "")
+            if etype == EventType.AGENT_RESPONSE.value:
+                text = str(payload.get("agent_response") or payload.get("text") or "")
+                user_text = str(payload.get("user_text") or last_user)
+                if text:
+                    episodes.append(EpisodeSummary(
+                        session_id=session_id,
+                        user_text=user_text,
+                        agent_response=text,
+                        tool_calls=list(payload.get("tool_calls") or []),
+                        timestamp=e.timestamp,
+                    ))
         return episodes
 
 
