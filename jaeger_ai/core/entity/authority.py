@@ -67,6 +67,61 @@ class AuthorityDecision:
 PolicyCheckFn = Callable[[ProposedAction], AuthorityDecision]
 
 
+def default_shell_hooks_policy(proposal: ProposedAction) -> AuthorityDecision:
+    """Evaluate pre_tool_call shell hooks."""
+    try:
+        from jaeger_agent import shell_hooks
+
+        decision = shell_hooks.fire(
+            "pre_tool_call",
+            tool_name=proposal.tool_name,
+            tool_input=dict(proposal.arguments),
+        )
+        if decision.blocked:
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason=decision.reason or "blocked by pre_tool_call hook",
+                policy_name="shell_hooks",
+            )
+    except Exception as exc:
+        logger.debug("Shell hooks policy check skipped: %s", exc)
+    return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="shell_hooks")
+
+
+def default_allowlist_policy(proposal: ProposedAction) -> AuthorityDecision:
+    """Evaluate current tool allowlist grant."""
+    try:
+        from jaeger_agent.tool_executor import _allowed_tools
+
+        granted = _allowed_tools.get()
+        if granted is not None and proposal.tool_name not in granted:
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason=f"Tool {proposal.tool_name!r} is outside the allowed toolset",
+                policy_name="tool_allowlist",
+            )
+    except Exception as exc:
+        logger.debug("Allowlist policy check skipped: %s", exc)
+    return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="tool_allowlist")
+
+
+def default_permissions_policy(proposal: ProposedAction) -> AuthorityDecision:
+    """Evaluate safety permission mode (e.g. PAUSED)."""
+    try:
+        from jaeger_os.core.safety.permissions import PolicyMode, current_policy
+
+        policy = current_policy()
+        if policy.mode == PolicyMode.PAUSED:
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="Operations paused by safety policy",
+                policy_name="permission_mode",
+            )
+    except Exception as exc:
+        logger.debug("Permission policy check skipped: %s", exc)
+    return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="permission_mode")
+
+
 class AuthorityLayer:
     """The canonical authority boundary guarding the action system.
     
@@ -75,7 +130,14 @@ class AuthorityLayer:
     """
 
     def __init__(self, policies: list[PolicyCheckFn] | None = None) -> None:
-        self._policies: list[PolicyCheckFn] = list(policies or [])
+        if policies is not None:
+            self._policies: list[PolicyCheckFn] = list(policies)
+        else:
+            self._policies = [
+                default_shell_hooks_policy,
+                default_allowlist_policy,
+                default_permissions_policy,
+            ]
 
     def register_policy(self, policy: PolicyCheckFn) -> None:
         self._policies.append(policy)

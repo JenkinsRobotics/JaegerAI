@@ -962,6 +962,7 @@ class JaegerGatewayApp:
         request_id: str | None = None,
         mcp_session: str | None = None,
         allowed_tools: list[str] | None = None,
+        is_subordinate: bool = True,
     ) -> tuple[str, str] | None:
         """Lead turn via the Jaeger-owned native MCP server on loopback.
 
@@ -995,6 +996,8 @@ class JaegerGatewayApp:
                 args["request_id"] = request_id
             if allowed_tools is not None:
                 args["allowed_tools"] = allowed_tools
+            if is_subordinate:
+                args["is_subordinate"] = True
             logger.info(
                 "native MCP chat session_id=%s request_id=%s",
                 native_session,
@@ -1128,13 +1131,7 @@ class JaegerGatewayApp:
             }
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
-        try:
-            from jaeger_ai.core.entity.runtime import EntityRuntime
-            EntityRuntime.get_singleton().submit_human_message(
-                text, session_id=session_id, request_id=rid
-            )
-        except Exception as ent_err:
-            logger.debug("EntityRuntime human_message ingress error: %s", ent_err)
+
         try:
             if rid in self._cancel_requested:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
@@ -1145,26 +1142,124 @@ class JaegerGatewayApp:
             response_text: str | None = None
 
             text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
-            # A text-only model route is valid for informational replies only.
-            # Reuse the product's existing intent seam so an actionable
-            # request cannot be reported complete merely because Ollama
-            # returned prose without tools, effects, or verification.
             from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
             actionable = bool(
                 (session or {}).get("metadata", {}).get("actionable")
                 or is_actionable_request(text)
             )
-            native_required = actionable and text_only
-            if (role_s != "specialist" and not text_only) or native_required:
-                if rid in self._cancel_requested:
-                    self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
-                    return
-                native = await self._native_lead_turn(session_id, text, request_id=rid)
-                if native is not None:
-                    response_text, backend = native
-                    model = "jaeger-mcp"
 
-            if rid in self._cancel_requested and response_text is None:
+            loop = asyncio.get_running_loop()
+
+            async def _run_native_coro(prompt: str) -> tuple[str, str] | None:
+                if rid in self._cancel_requested:
+                    raise RuntimeError("cancelled before native dispatch")
+                res = await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
+                if res is not None:
+                    txt, b_end = res
+                    early_res = {
+                        "output": txt,
+                        "status": "completed",
+                        "backend": b_end,
+                        "model": "jaeger-mcp",
+                        "turn_id": turn_id,
+                        "execution_mode": "agent",
+                        "capabilities": {"native_tools": True, "native_memory": True},
+                        **agent_fields,
+                    }
+                    self._persist_terminal(rid, session_id, "completed", early_res, assistant_text=txt, record_entity_event=False)
+                return res
+
+            def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
+                nonlocal backend, model
+                try:
+                    native_res = asyncio.run_coroutine_threadsafe(_run_native_coro(prompt), loop).result()
+                except Exception as ex:
+                    logger.warning("Error running native lead turn in gateway: %s", ex)
+                    raise
+                if native_res is not None:
+                    txt, b_end = native_res
+                    backend = b_end
+                    model = "jaeger-mcp"
+                    return {"text": txt, "status": "completed"}
+                raise RuntimeError(
+                    "Native agent did not return a confirmed result. Execution may be incomplete; "
+                    "check native run state before retrying this request."
+                )
+
+            def _sync_model(prompt: str) -> str:
+                nonlocal backend, model
+                backend = LOCKED_OLLAMA_URL
+                model = DEFAULT_OLLAMA_MODEL
+                current = self.store.get_session(session_id) or {}
+                chat_fut = asyncio.run_coroutine_threadsafe(
+                    self._ollama_chat(
+                        prompt,
+                        system_prompt=system_prompt,
+                        history=current.get("messages") or [],
+                    ),
+                    loop,
+                )
+                txt = chat_fut.result()
+                early_res = {
+                    "output": txt,
+                    "status": "completed",
+                    "backend": backend,
+                    "model": model,
+                    "turn_id": turn_id,
+                    "execution_mode": "text_only",
+                    "capabilities": {"native_tools": False, "native_memory": False},
+                    **agent_fields,
+                }
+                self._persist_terminal(rid, session_id, "completed", early_res, assistant_text=txt, record_entity_event=False)
+                return txt
+
+            def _sync_delegate(specialist_name: str, prompt: str, session_key: str = session_id) -> dict[str, Any]:
+                nonlocal backend, model
+                backend = LOCKED_OLLAMA_URL
+                model = DEFAULT_OLLAMA_MODEL
+                current = self.store.get_session(session_id) or {}
+                chat_fut = asyncio.run_coroutine_threadsafe(
+                    self._ollama_chat(
+                        prompt,
+                        system_prompt=system_prompt,
+                        history=current.get("messages") or [],
+                    ),
+                    loop,
+                )
+                txt = chat_fut.result()
+                return {"text": txt, "specialist": specialist_name, "status": "completed"}
+
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            runtime = EntityRuntime.get_singleton()
+
+            turn_meta = {
+                "execution_mode": "text_only" if text_only else "agent",
+                "actionable": actionable,
+                "role": role_s,
+                "agent_id": agent_fields.get("agent_id"),
+                "specialist": agent_fields.get("agent_id") if role_s == "specialist" else None,
+            }
+
+            context = {
+                "react_runner": _sync_react,
+                "model_runner": _sync_model,
+                "delegate_runner": _sync_delegate,
+                "gateway_session": session,
+                "agent_fields": agent_fields,
+                "metadata": turn_meta,
+            }
+
+            turn_result = await asyncio.to_thread(
+                runtime.execute_turn,
+                text,
+                session_id=session_id,
+                source="gateway",
+                request_id=rid,
+                context=context,
+                metadata=turn_meta,
+            )
+
+            if rid in self._cancel_requested:
                 bound = self.store.get_request(rid)
                 if bound and bound.get("native_run_id"):
                     raise RuntimeError(
@@ -1174,34 +1269,19 @@ class JaegerGatewayApp:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native acceptance")
                 return
 
-            if response_text is None and ((role_s != "specialist" and not text_only) or native_required):
-                raise RuntimeError("Native agent did not return a confirmed result. Execution may be incomplete; "
-                                   "check native run state before retrying this request.")
+            if turn_result.get("error"):
+                raise RuntimeError(str(turn_result["error"]))
 
-            if response_text is None:
-                self.event_bus.publish(session_id, "turn.delta", {
-                    "turn_id": turn_id,
-                    "request_id": rid,
-                    "delta": "",
-                    "model": model,
-                    "backend": backend,
-                    **agent_fields,
-                })
-                current = self.store.get_session(session_id) or {}
-                response_text = await self._ollama_chat(
-                    text,
-                    system_prompt=system_prompt,
-                    history=current.get("messages") or [],
-                )
-            else:
-                self.event_bus.publish(session_id, "turn.delta", {
-                    "turn_id": turn_id,
-                    "request_id": rid,
-                    "delta": "",
-                    "model": model,
-                    "backend": backend,
-                    **agent_fields,
-                })
+            response_text = str(turn_result.get("text") or "")
+
+            self.event_bus.publish(session_id, "turn.delta", {
+                "turn_id": turn_id,
+                "request_id": rid,
+                "delta": "",
+                "model": model,
+                "backend": backend,
+                **agent_fields,
+            })
 
             result = {
                 "output": response_text,
@@ -1216,7 +1296,7 @@ class JaegerGatewayApp:
                 },
                 **agent_fields,
             }
-            self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text)
+            self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
         except Exception as exc:
             logger.exception("Turn execution failed: %s", exc)
             bound = self.store.get_request(rid) or {}
@@ -1240,9 +1320,10 @@ class JaegerGatewayApp:
         result: dict[str, Any],
         *,
         assistant_text: str | None = None,
+        record_entity_event: bool = True,
     ) -> None:
         session_status = "idle" if status in {"completed", "cancelled"} else status
-        if assistant_text and status == "completed":
+        if assistant_text and status == "completed" and record_entity_event:
             try:
                 from jaeger_ai.core.entity.runtime import EntityRuntime
                 EntityRuntime.get_singleton().record_agent_response(

@@ -72,6 +72,7 @@ class SqliteEventStore:
                     timestamp REAL NOT NULL,
                     salience REAL NOT NULL,
                     idempotency_key TEXT UNIQUE,
+                    parent_event_id TEXT DEFAULT '',
                     payload_json TEXT NOT NULL DEFAULT '{}',
                     provenance_json TEXT NOT NULL DEFAULT '{}'
                 );
@@ -79,7 +80,12 @@ class SqliteEventStore:
                 CREATE INDEX IF NOT EXISTS idx_events_ts ON entity_events(timestamp);
                 CREATE INDEX IF NOT EXISTS idx_events_session ON entity_events(session_id, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_events_type ON entity_events(event_type, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_events_parent ON entity_events(parent_event_id);
             """)
+            try:
+                conn.execute("ALTER TABLE entity_events ADD COLUMN parent_event_id TEXT DEFAULT ''")
+            except Exception:
+                pass
 
     def append(self, event: JaegerEvent) -> JaegerEvent:
         """Append an event to the store.
@@ -105,8 +111,9 @@ class SqliteEventStore:
                     """
                     INSERT INTO entity_events (
                         event_id, event_type, actor, source, session_id,
-                        timestamp, salience, idempotency_key, payload_json, provenance_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        timestamp, salience, idempotency_key, parent_event_id,
+                        payload_json, provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.event_id,
@@ -117,6 +124,7 @@ class SqliteEventStore:
                         event.timestamp,
                         event.salience,
                         event.idempotency_key,
+                        event.parent_event_id,
                         payload_str,
                         prov_str,
                     ),
@@ -208,6 +216,14 @@ class SqliteEventStore:
         except json.JSONDecodeError:
             provenance = {}
 
+        parent_id = ""
+        try:
+            parent_id = str(row["parent_event_id"] or "")
+        except (IndexError, KeyError):
+            pass
+        if not parent_id:
+            parent_id = str(provenance.get("parent_event_id") or "")
+
         return JaegerEvent(
             event_id=row["event_id"],
             event_type=row["event_type"],
@@ -219,4 +235,5 @@ class SqliteEventStore:
             provenance=provenance,
             salience=float(row["salience"]),
             idempotency_key=row["idempotency_key"],
+            parent_event_id=parent_id,
         )

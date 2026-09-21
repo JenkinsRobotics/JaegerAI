@@ -1,6 +1,6 @@
 # ARCHITECTURE_AFTER.md — Pinocchio Persistent Entity Runtime Architecture
 
-**Document Version:** 2.0.0 (Universal Persistent Agent Architecture Production Implementation)  
+**Document Version:** 2.1.0 (Universal Persistent Agent Architecture Production Implementation & Closure Pass)  
 **Author:** Principal Systems Architect  
 **Status:** Canonical Production Architecture  
 **Reference Specification:** [Universal Persistent Agent Architecture (UPAA)](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md)
@@ -38,46 +38,46 @@ ATTENTION & SALIENCE ENGINE
 [Salience < 0.3]                    [Routine Anomaly]                      [Salience >= 0.6]
 Passive Record                      Tiered Perception Escalation           EXECUTIVE STRATEGY SELECTION
 (0 LLM Tokens)                      (Tier 0 -> Tier 1 -> Tier 2)           (ExecutiveStrategySelector)
-                                                                                    │
-                                           ┌────────────────────────────────────────┼────────────────────────────────────────┐
-                                           ▼                                        ▼                                        ▼
-                                     Direct Response                            ReAct Loop                           Deliberate Planner
-                                 (Informational Queries)                   (Subordinate JaegerAgent)              (LATS Tree-Search >= 3 Plans)
-                                           │                                        │                                        │
-                                           └────────────────────────────────────────┼────────────────────────────────────────┘
-                                                                                    │
-                                                                                    ▼
-                                                                           COGNITION ROUTER
-                                                                     (Canonical Strategy Boundary)
-                                                                                    │
-                                                                                    ▼
-                                                                             PROPOSED ACTION
-                                                                                    │
-                                                                                    ▼
-                                                                             AUTHORITY LAYER
-                                                                       (Deterministic Safety Policies)
-                                                                                    │
-                                                                                    ▼
-                                                                              ACTION SYSTEM
-                                                                         (ToolExecutor / Sandboxing)
-                                                                                    │
-                                                                                    ▼
-                                                                               ENVIRONMENT
-                                                                                    │
-                                                                                    ▼
-                                                                            CONSEQUENCE EVENT
-                                                                                    │
-                                                                                    ▼
-                                                                          VERIFICATION CONTRACT
-                                                                   (Tool Success ≠ Objective Verified)
-                                                                                    │
-                                                                                    ▼
-                                                                            LEARNING PIPELINE
-                                                                      (Episodic, Semantic, Reflective)
-                                                                                    │
-                                                                                    ▼
-                                                                           SLEEP-TIME PROCESSING
-                                                                   (Offline Consolidation & Skill Gates)
+                                                                               │
+                                       ┌───────────────────────────────────────┼────────────────────────────────────────┐
+                                       ▼                                       ▼                                        ▼
+                                 Direct Response                           ReAct Loop                           Deliberate Planner
+                             (Informational Queries)                  (Subordinate JaegerAgent)              (DeliberativeSearch >= 3 Plans)
+                                       │                                       │                                        │
+                                       └───────────────────────────────────────┼────────────────────────────────────────┘
+                                                                               │
+                                                                               ▼
+                                                                      COGNITION ROUTER
+                                                                (Canonical Strategy Boundary)
+                                                                               │
+                                                                               ▼
+                                                                        PROPOSED ACTION
+                                                                               │
+                                                                               ▼
+                                                                        AUTHORITY LAYER
+                                                                  (Deterministic Safety Policies)
+                                                                               │
+                                                                               ▼
+                                                                         ACTION SYSTEM
+                                                                    (HookedToolExecutor / Ledger)
+                                                                               │
+                                                                               ▼
+                                                                          ENVIRONMENT
+                                                                               │
+                                                                               ▼
+                                                                       CONSEQUENCE EVENT
+                                                                               │
+                                                                               ▼
+                                                                     VERIFICATION REGISTRY
+                                                              (Action-Specific Ground-Truth Probes)
+                                                                               │
+                                                                               ▼
+                                                                       LEARNING PIPELINE
+                                                                 (Episodic, Semantic, Reflective)
+                                                                               │
+                                                                               ▼
+                                                                      SLEEP-TIME PROCESSING
+                                                               (Offline Consolidation & Skill Gates)
 ```
 
 ---
@@ -95,19 +95,22 @@ Passive Record                      Tiered Perception Escalation           EXECU
 * **Hypothesis Store:** `ReflexionStore` (`reflection.py`) maintains `StructuredReflection` entries containing `hypothesis`, `confidence`, `failure_conditions`, `applicability_conditions`, and episode provenance.
 * **Adaptive Retrieval:** Automatically queries applicable reflections when planning similar tasks to avoid repeating known failure modes.
 
-### C. Deliberate Tree-Search Planning (LATS / Agent S)
-* **Candidate Plan Generation:** `DeliberatePlanner` (`deliberate_planner.py`) generates $\ge 3$ distinct execution strategies with varied tool choices.
+### C. Deliberate Search & Planning (DeliberativeSearch / LATS)
+* **Candidate Plan Generation:** `DeliberatePlanner` (`deliberate_planner.py`) generates $\ge 3$ distinct execution strategies via the cognition provider.
 * **Independent Critic:** Evaluates candidates across goal satisfaction, safety blast radius, reversibility, and prior reflection penalties.
-* **Refinement Engine:** Uses `SelfRefineEngine` (`self_refine.py`) to iteratively critique and expand plans with sensitive or irreversible mutations.
+* **Bounded Replanning:** If execution fails, `replan_on_failure` excludes the failed plan strategy and generates alternative approaches using consequence evidence.
+* **Refinement Engine:** Uses `SelfRefineEngine` (`self_refine.py`) with model-backed critic and reviser callbacks to iteratively critique and expand plans with sensitive or irreversible mutations.
 
 ### D. Procedural Skill Acquisition (Voyager)
 * **Automated Promotion:** `SkillPromotionPipeline` (`skills/promotion.py`) gates skill candidates behind automated verification assertions.
-* **Production Registry:** Verified skills are written as standard `SKILL.md` frontmatter and executable artifacts into the instance skills folder (`~/.jaeger/skills/`), instantly available to production loaders.
+* **Production Registry:** Verified skills are written as standard v3 packages (`manifest.yaml`, `SKILL.md`, `run.py`, `tests/smoke_test.py`) into the instance skills folder (`~/.jaeger/skills/`), instantly available to production loaders (`reload_skills()`).
 
-### E. Tiered Environmental Perception (ProactiveAgent / ProAgent)
+### E. Tiered Environmental Perception (ProactiveAgent / ProAgent) & Sensor Supervisor
 * **Tier 0:** Cheap deterministic desktop metadata (idle time, active window, disk telemetry).
 * **Tier 1:** Local heuristic classification of alerts and anomalies.
 * **Tier 2:** Expensive multimodal / model assessment only when justified by critical conditions.
+* **Privacy Redaction:** Automated scrubbing (`redact_privacy_signals`) of credentials, passwords, tokens, and protected application titles before Tier 2 model dispatch.
+* **SensorSupervisor:** Thread-safe background producer (`supervisor.py`) with permission gating, failure isolation, and direct event ingestion into `EntityRuntime.ingest()`.
 
 ### F. Offline Consolidation (Generative Agents & Sleep-Time Compute)
 * **Decoupled Triggers:** Heartbeats act as a trigger signal; `SleepTimeProcessor` (`sleep_time.py`) owns consolidation semantics.
@@ -119,9 +122,11 @@ Passive Record                      Tiered Perception Escalation           EXECU
 
 Every production turn entry point converges through `EntityRuntime.execute_turn(...)`:
 - **CLI (`main.run_command`):** Calls `_run_turn` -> `EntityRuntime.execute_turn(...)`.
-- **Bridge (`bridge.py`):** Drives turns via `_run_turn` -> `EntityRuntime.execute_turn(...)`.
-- **Gateway (`server.py`):** Leads via native MCP `chat` -> `run_for_voice` -> `_run_turn` -> `EntityRuntime.execute_turn(...)`.
-- **Background Workers / Crons:** Call `run_worker_turn` -> `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+- **Bridge (`bridge.py`):** Drives turns via `run_for_voice` -> `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+- **Gateway (`server.py`):** `_execute_turn` executes through `EntityRuntime.execute_turn(...)`. Native MCP chat is invoked subordinately (`is_subordinate=True`), completely eliminating duplicate event creation.
+- **Heartbeat (`heartbeat.py`):** Drives `execute_heartbeat_event` -> `EntityRuntime.ingest(...)`.
+- **Background Workers (`worker.py`):** Deliver results via `EntityRuntime.record_background_completed(...)`.
+- **Sensors (`supervisor.py`):** Produces events via `SensorSupervisor.poll_once(...)` -> `EntityRuntime.ingest(...)`.
 
 There are zero parallel or competing runtime authorities.
 
@@ -132,3 +137,4 @@ There are zero parallel or competing runtime authorities.
 All UPAA requirements are validated by automated end-to-end integration tests:
 - `dev/tests/test_upaa_production_runtime.py`: 9 comprehensive tests validating real trace execution, 0-model passive paths, active cognition wake, provider swap continuity, interface swap identity sharing, sleep-time processing, Voyager skill promotion, deliberate planning, and tiered perception escalation.
 - `dev/tests/test_runtime_trace.py`: 7 semantic audit tests validating authority ordering, verification contracts, memory taxonomy, and executive strategy selection.
+- `dev/tests/test_upaa_closure_pass.py`: 8 closure tests validating provider routing swap, action-specific verification dispatch, deliberate search replanning, self-refine model critic, tiered perception model calls, sensor supervisor lifecycle, and degraded-safe mode fault injection.

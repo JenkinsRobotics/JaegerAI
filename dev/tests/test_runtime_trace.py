@@ -49,10 +49,16 @@ from jaeger_ai.core.entity.verification import (
 
 
 @pytest.fixture
-def clean_entity_env(tmp_path: Path):
+def clean_entity_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Provides a fresh isolated directory and resets singleton."""
     state_dir = tmp_path / "jaeger_audit_state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    instance_dir = state_dir / "instances" / "jaeger"
+    (instance_dir / "run").mkdir(parents=True, exist_ok=True)
+    (instance_dir / "data").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("JAEGER_HOME", str(state_dir))
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(instance_dir))
     EntityRuntime.reset_singleton()
     yield state_dir
     EntityRuntime.reset_singleton()
@@ -317,71 +323,126 @@ def test_audit_7_learning_pipeline(clean_entity_env: Path):
 
 # ── Audit 9: Single Runtime Authority Executable Trace ────────────────
 
-def test_audit_9_single_runtime_authority_trace(clean_entity_env: Path):
-    """Prove all 7 entry points converge into the identical EntityRuntime singleton instance:
+def test_audit_9_single_runtime_authority_trace(clean_entity_env: Path, monkeypatch: pytest.MonkeyPatch):
+    """Prove all 7 entry points converge into the identical EntityRuntime singleton instance
+    through their REAL production entrypoints:
     
-    1. CLI human message
-    2. Bridge human message
-    3. Gateway human message
-    4. System heartbeat
-    5. Background completion
-    6. Passive sensor observation
-    7. Salient sensor observation
+    1. CLI: _run_turn / run_command
+    2. Bridge: run_for_voice
+    3. Gateway: _execute_turn
+    4. System heartbeat: execute_heartbeat_event
+    5. Background completion: record_background_completed
+    6. Passive sensor observation: SensorSupervisor.poll_once
+    7. Salient sensor observation: SensorSupervisor.poll_once (escalated Tier 2)
     """
+    import asyncio
+    from jaeger_ai.main import _run_turn, run_for_voice
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.runtime.heartbeat import execute_heartbeat_event
+    from jaeger_ai.core.entity.sensors.desktop_activity import DesktopActivitySensor
+    from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
+
     runtime = EntityRuntime.get_singleton(clean_entity_env)
     initial_entity_id = runtime.identity.entity_id
 
-    # 1. CLI human message
-    ev1, dec1 = runtime.submit_human_message("CLI user command: check status", source="cli", session_id="cli-term")
-    assert ev1.source == "cli"
-    assert runtime.current_state.total_events_processed == 1
-    assert runtime.identity.entity_id == initial_entity_id
+    # Mock low-level ReAct loop output so test runs offline without live local model
+    monkeypatch.setattr(
+        "jaeger_ai.main._run_subordinate_react",
+        lambda client, text, **kw: {"text": f"Executed subordinate ReAct: {text[:30]}", "tool_activity": []},
+    )
 
-    # 2. Bridge human message
-    ev2, dec2 = runtime.submit_human_message("Bridge client prompt: generate report", source="bridge", session_id="bridge-turn-1")
-    assert ev2.source == "bridge"
-    assert runtime.current_state.total_events_processed == 2
-    assert runtime.identity.entity_id == initial_entity_id
+    # 1. Real CLI human message: _run_turn
+    cli_result = _run_turn(
+        None,
+        "CLI user command: check status",
+        session_key="cli-term",
+        request_id="cli-req-1",
+    )
+    assert cli_result.get("text")
+    cli_events = [e for e in runtime.event_store.replay_all() if e.source == "main._run_turn"]
+    assert len(cli_events) == 1
+    ev1 = cli_events[0]
+    assert ev1.payload.get("text") == "CLI user command: check status"
 
-    # 3. Gateway human message
-    ev3, dec3 = runtime.submit_human_message("Gateway client: start server", source="gateway", session_id="gw-client-8810")
-    assert ev3.source == "gateway"
-    assert runtime.current_state.total_events_processed == 3
-    assert runtime.identity.entity_id == initial_entity_id
+    # 2. Real Bridge human message: run_for_voice
+    bridge_result = run_for_voice(
+        None,
+        "Bridge client prompt: generate report",
+        session_key="bridge-turn-1",
+        request_id="bridge-req-1",
+    )
+    assert bridge_result.get("text")
+    bridge_events = [e for e in runtime.event_store.replay_all() if e.session_id == "bridge-turn-1" and e.event_type == EventType.HUMAN_MESSAGE.value]
+    assert len(bridge_events) == 1
+    ev2 = bridge_events[0]
+    assert ev2.payload.get("text") == "Bridge client prompt: generate report"
 
-    # 4. System heartbeat
-    ev4, dec4 = runtime.submit_heartbeat(source="heartbeat", payload={"quiet": True})
+    # 3. Real Gateway human message: _execute_turn
+    gw_store = GatewaySessionStore(clean_entity_env / "gw_sessions.sqlite3")
+    gw_app = JaegerGatewayApp(store=gw_store)
+    async def _mock_native_lead(session_id, text, **kwargs):
+        return ("Gateway turn executed via native lead", "mcp:127.0.0.1:8811")
+    monkeypatch.setattr(gw_app, "_native_lead_turn", _mock_native_lead)
+    gw_store.ensure_session("gw-client-8810")
+    gw_store.admit_request("gw-client-8810", "Gateway client: start server", request_id="gw-req-1")
+
+    asyncio.run(gw_app._execute_turn(
+        "gw-client-8810",
+        "turn-gw-1",
+        "Gateway client: start server",
+        request_id="gw-req-1",
+    ))
+    gw_events = [e for e in runtime.event_store.replay_all() if e.source == "gateway" and e.event_type == EventType.HUMAN_MESSAGE.value]
+    assert len(gw_events) == 1
+    ev3 = gw_events[0]
+    assert ev3.payload.get("text") == "Gateway client: start server"
+
+    # 4. Real System heartbeat: execute_heartbeat_event
+    class DummyLayout:
+        root = clean_entity_env
+        state_dir = clean_entity_env
+        run_dir = clean_entity_env
+        heartbeat_state_file = clean_entity_env / "heartbeat.json"
+    ev4, wake, hb_text = execute_heartbeat_event(DummyLayout())
     assert ev4.event_type == EventType.SYSTEM_HEARTBEAT.value
-    assert runtime.current_state.total_events_processed == 4
-    assert runtime.identity.entity_id == initial_entity_id
 
-    # 5. Background completion
+    # 5. Real Background completion: record_background_completed
     ev5 = runtime.record_background_completed("task-bg-99", {"artifacts_written": 3}, requires_followup=False)
     assert ev5.event_type == EventType.BACKGROUND_COMPLETED.value
-    assert runtime.current_state.total_events_processed == 5
-    assert runtime.identity.entity_id == initial_entity_id
 
-    # 6. Passive sensor observation (low salience)
-    ev6, dec6 = runtime.submit_observation("desktop_activity", {"idle_seconds": 15}, salience=0.1)
-    assert not dec6.wake_cognition
-    assert runtime.current_state.total_events_processed == 6
-    assert runtime.identity.entity_id == initial_entity_id
+    # 6. Real Passive sensor observation: SensorSupervisor.poll_once (low salience)
+    sensor = DesktopActivitySensor(workspace_path=str(clean_entity_env), enabled=True)
+    supervisor = SensorSupervisor(runtime=runtime, sensor=sensor, enabled=True)
+    ev6 = supervisor.poll_once()
+    assert ev6 is not None
+    assert ev6.event_type == EventType.PERCEPTION_SENSED.value
+    assert ev6.salience <= 0.3
 
-    # 7. Salient sensor observation (high salience)
-    ev7, dec7 = runtime.submit_observation("desktop_activity", {"anomaly": "unauthorized_file_mutation"}, salience=0.85)
-    assert dec7.wake_cognition
-    assert runtime.current_state.total_events_processed == 7
-    assert runtime.identity.entity_id == initial_entity_id
+    # 7. Real Salient sensor observation: SensorSupervisor.poll_once (high salience)
+    class AnomalySensor(DesktopActivitySensor):
+        def poll(self):
+            return [JaegerEvent.perception_sensed(
+                sensor="desktop_activity",
+                signals={"active_app": "CrashReporter", "alerts": ["Critical disk failure"], "disk_free_gb": 0.5},
+                salience=0.85,
+            )]
+    salient_supervisor = SensorSupervisor(
+        runtime=runtime,
+        sensor=AnomalySensor(enabled=True),
+        enabled=True,
+    )
+    ev7 = salient_supervisor.poll_once()
+    assert ev7 is not None
+    assert ev7.salience >= 0.85
 
     # Verify that get_singleton() returns the exact same object reference
     assert EntityRuntime.get_singleton() is runtime
 
-    # Verify durable chronological continuity in the single SqliteEventStore
-    all_events = list(runtime.event_store.replay_all())
-    assert len(all_events) == 7
-    assert [e.event_id for e in all_events] == [
-        ev1.event_id, ev2.event_id, ev3.event_id, ev4.event_id,
-        ev5.event_id, ev6.event_id, ev7.event_id,
-    ]
-    # Verify all 7 events belong to the exact same EntityIdentity
+    # Verify that NO duplicate human messages exist for any entry point
+    all_human_messages = [e for e in runtime.event_store.replay_all() if e.event_type == EventType.HUMAN_MESSAGE.value]
+    assert len(all_human_messages) == 3
+    assert {e.session_id for e in all_human_messages} == {"cli-term", "bridge-turn-1", "gw-client-8810"}
+
+    # Verify all events belong to the exact same EntityIdentity
     assert runtime.current_state.identity.entity_id == initial_entity_id

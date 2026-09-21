@@ -186,3 +186,332 @@ class VerificationContract:
             evidence=f"Tool {tool_name} returned success (syntactic confirmation only; no independent objective validator)",
             verifier=f"tool:{tool_name}",
         )
+
+
+ActionVerifierFn = Callable[[str, Any, Any, Any], VerificationResult]
+
+
+class VerificationRegistry:
+    """Action-specific verification dispatch and registry.
+
+    Dispatches ground-truth verification assertions to action-specific probes.
+    Guarantees:
+    - Never defaults an unknown task to filesystem verification.
+    - Explicitly evaluates file writes, file deletions, git commits, processes,
+      HTTP mutations, read-only tools, and message receipts.
+    - Unknown actions strictly return OBJECTIVE_UNVERIFIED.
+    """
+
+    def __init__(self) -> None:
+        self._verifiers: dict[str, ActionVerifierFn] = {}
+        self._register_builtins()
+
+    def register(self, action_type: str, verifier: ActionVerifierFn) -> None:
+        self._verifiers[action_type.lower()] = verifier
+
+    def _register_builtins(self) -> None:
+        self.register("file_write", self._verify_file_write)
+        self.register("file_delete", self._verify_file_delete)
+        self.register("git_commit", self._verify_git_commit)
+        self.register("process_start", self._verify_process_start)
+        self.register("http_mutation", self._verify_http_mutation)
+        self.register("read_only", self._verify_read_only)
+        self.register("message_send", self._verify_message_send)
+
+    @staticmethod
+    def _verify_file_write(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        path = act_dict.get("path") or act_dict.get("target_path") or (result.get("path") if isinstance(result, dict) else None)
+        if not path:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence="File write verification failed: no target path specified",
+                verifier="file_write_verifier",
+                error="MissingPath",
+            )
+        expected = act_dict.get("expected_content") or (result.get("expected_content") if isinstance(result, dict) else None)
+        target = Path(path).resolve()
+        if not target.exists():
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File {target} does not exist after write",
+                verifier="file_write_verifier",
+                error="FileNotFound",
+            )
+        if expected is not None:
+            try:
+                content = target.read_text(encoding="utf-8")
+                if expected not in content:
+                    return VerificationResult(
+                        status=VerificationStatus.OBJECTIVE_FAILED,
+                        target_objective=objective,
+                        evidence=f"File {target} content does not contain expected substring",
+                        verifier="file_write_verifier",
+                        error="ContentMismatch",
+                    )
+            except Exception as exc:
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_FAILED,
+                    target_objective=objective,
+                    evidence=f"Failed to read file {target}: {exc}",
+                    verifier="file_write_verifier",
+                    error=str(exc),
+                )
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_VERIFIED,
+            target_objective=objective,
+            evidence=f"Verified file write at {target}",
+            verifier="file_write_verifier",
+        )
+
+    @staticmethod
+    def _verify_file_delete(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        path = act_dict.get("path") or act_dict.get("target_path") or (result.get("path") if isinstance(result, dict) else None)
+        if not path:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence="File delete verification failed: no target path specified",
+                verifier="file_delete_verifier",
+                error="MissingPath",
+            )
+        target = Path(path).resolve()
+        if target.exists():
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File {target} still exists after delete",
+                verifier="file_delete_verifier",
+                error="FileStillExists",
+            )
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_VERIFIED,
+            target_objective=objective,
+            evidence=f"Verified file deletion of {target} (does not exist)",
+            verifier="file_delete_verifier",
+        )
+
+    @staticmethod
+    def _verify_git_commit(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        ctx_dict = dict(context) if isinstance(context, (dict, list)) else {}
+        repo_path = act_dict.get("repo_path") or ctx_dict.get("repo_path") or "."
+        expected_msg = act_dict.get("commit_message") or act_dict.get("expected_message")
+        import subprocess
+        try:
+            cmd = ["git", "log", "-1", "--pretty=format:%H %s"]
+            proc = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=5)
+            if proc.returncode == 0 and proc.stdout.strip():
+                sha, _, msg = proc.stdout.strip().partition(" ")
+                if expected_msg and expected_msg not in msg:
+                    return VerificationResult(
+                        status=VerificationStatus.OBJECTIVE_FAILED,
+                        target_objective=objective,
+                        evidence=f"Last commit {sha[:8]} message {msg!r} does not match expected {expected_msg!r}",
+                        verifier="git_commit_verifier",
+                        error="CommitMismatch",
+                    )
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_VERIFIED,
+                    target_objective=objective,
+                    evidence=f"Verified git commit {sha[:8]}: {msg}",
+                    verifier="git_commit_verifier",
+                )
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"Git log failed: {proc.stderr}",
+                verifier="git_commit_verifier",
+                error="GitLogFailed",
+            )
+        except Exception as exc:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"Git commit verification probe exception: {exc}",
+                verifier="git_commit_verifier",
+                error=str(exc),
+            )
+
+    @staticmethod
+    def _verify_process_start(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        res_dict = dict(result) if isinstance(result, dict) else {}
+        port = act_dict.get("port") or res_dict.get("port")
+        pid = act_dict.get("pid") or res_dict.get("pid")
+        if port is not None:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)
+            try:
+                res = sock.connect_ex(("127.0.0.1", int(port)))
+                sock.close()
+                if res == 0:
+                    return VerificationResult(
+                        status=VerificationStatus.OBJECTIVE_VERIFIED,
+                        target_objective=objective,
+                        evidence=f"Verified process listening on 127.0.0.1:{port}",
+                        verifier="process_probe",
+                    )
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_FAILED,
+                    target_objective=objective,
+                    evidence=f"Socket connection refused on 127.0.0.1:{port}",
+                    verifier="process_probe",
+                    error="ConnectionRefused",
+                )
+            except Exception as exc:
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_FAILED,
+                    target_objective=objective,
+                    evidence=f"Socket probe error on port {port}: {exc}",
+                    verifier="process_probe",
+                    error=str(exc),
+                )
+        if pid is not None:
+            import os
+            try:
+                os.kill(int(pid), 0)
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_VERIFIED,
+                    target_objective=objective,
+                    evidence=f"Verified process PID {pid} is running",
+                    verifier="process_probe",
+                )
+            except OSError:
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_FAILED,
+                    target_objective=objective,
+                    evidence=f"Process PID {pid} is not running",
+                    verifier="process_probe",
+                    error="NoSuchProcess",
+                )
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_UNVERIFIED,
+            target_objective=objective,
+            evidence="Neither port nor PID specified for process verification",
+            verifier="process_probe",
+        )
+
+    @staticmethod
+    def _verify_http_mutation(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        query_url = act_dict.get("verify_url") or act_dict.get("url")
+        if not query_url:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_UNVERIFIED,
+                target_objective=objective,
+                evidence="HTTP mutation has no verification query endpoint; indeterminate",
+                verifier="http_mutation_verifier",
+            )
+        import urllib.request
+        try:
+            req = urllib.request.Request(query_url, headers={"User-Agent": "Jaeger-Verifier"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if 200 <= resp.status < 300:
+                    return VerificationResult(
+                        status=VerificationStatus.OBJECTIVE_VERIFIED,
+                        target_objective=objective,
+                        evidence=f"HTTP verification GET {query_url} returned status {resp.status}",
+                        verifier="http_mutation_verifier",
+                    )
+                return VerificationResult(
+                    status=VerificationStatus.OBJECTIVE_FAILED,
+                    target_objective=objective,
+                    evidence=f"HTTP verification GET {query_url} returned non-2xx status {resp.status}",
+                    verifier="http_mutation_verifier",
+                    error="HttpError",
+                )
+        except Exception as exc:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"HTTP verification GET {query_url} failed: {exc}",
+                verifier="http_mutation_verifier",
+                error=str(exc),
+            )
+
+    @staticmethod
+    def _verify_read_only(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        is_err = isinstance(result, dict) and (result.get("ok") is False or result.get("error"))
+        if is_err:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"Read-only tool reported execution failure: {result.get('error')}",
+                verifier="read_only_verifier",
+                error=str(result.get("error")),
+            )
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_VERIFIED,
+            target_objective=objective,
+            evidence="Read-only operation completed with intact result integrity; no state mutation required",
+            verifier="read_only_verifier",
+        )
+
+    @staticmethod
+    def _verify_message_send(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
+        receipt = None
+        if isinstance(result, dict):
+            receipt = result.get("message_id") or result.get("receipt") or result.get("delivery_id")
+        if receipt:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_VERIFIED,
+                target_objective=objective,
+                evidence=f"Verified message send receipt: {receipt}",
+                verifier="message_send_verifier",
+            )
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_UNVERIFIED,
+            target_objective=objective,
+            evidence="Message send completed without provider delivery receipt; indeterminate objective state",
+            verifier="message_send_verifier",
+        )
+
+    def verify(
+        self,
+        objective: str,
+        action: Any,
+        result: Any,
+        context: Any = None,
+    ) -> VerificationResult:
+        ctx = dict(context) if isinstance(context, dict) else {}
+        act_dict = dict(action) if isinstance(action, dict) else {}
+        act_type = str(act_dict.get("action_type") or act_dict.get("type") or "").lower()
+        tool_name = str(act_dict.get("tool") or act_dict.get("tool_name") or "").lower()
+
+        # Direct registration lookup
+        verifier = self._verifiers.get(act_type)
+        if verifier is None and tool_name:
+            verifier = self._verifiers.get(tool_name)
+
+        # Heuristic classification for standard tools when action_type is omitted
+        if verifier is None:
+            if act_type in ("file_write", "write_file") or any(k in tool_name for k in ("write", "create_file", "append")):
+                verifier = self._verifiers.get("file_write")
+            elif act_type in ("file_delete", "delete_file") or any(k in tool_name for k in ("delete", "remove", "unlink")):
+                verifier = self._verifiers.get("file_delete")
+            elif "git" in act_type or "commit" in act_type or "commit" in tool_name:
+                verifier = self._verifiers.get("git_commit")
+            elif any(k in act_type or k in tool_name for k in ("process", "server", "daemon", "listen")):
+                verifier = self._verifiers.get("process_start")
+            elif any(k in act_type or k in tool_name for k in ("http", "api", "post", "patch", "put")):
+                verifier = self._verifiers.get("http_mutation")
+            elif any(k in act_type or k in tool_name for k in ("read", "view", "grep", "search", "list", "cat", "get")):
+                verifier = self._verifiers.get("read_only")
+            elif any(k in act_type or k in tool_name for k in ("send_message", "notify", "mail")):
+                verifier = self._verifiers.get("message_send")
+
+        if verifier is not None:
+            return verifier(objective, act_dict, result, ctx)
+
+        # UNKNOWN ACTION -> strictly OBJECTIVE_UNVERIFIED, NEVER default to filesystem!
+        return VerificationResult(
+            status=VerificationStatus.OBJECTIVE_UNVERIFIED,
+            target_objective=objective,
+            evidence=f"No action-specific verifier registered for action {act_type or tool_name or 'unknown'!r}",
+            verifier="unverified_default",
+        )

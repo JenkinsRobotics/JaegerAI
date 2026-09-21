@@ -125,8 +125,9 @@ class HookedToolExecutor:
     duplicate.
     """
 
-    def __init__(self, inner: ToolExecutor | None = None) -> None:
+    def __init__(self, inner: ToolExecutor | None = None, authority_layer: Any | None = None) -> None:
         self._inner = inner or DirectToolExecutor()
+        self._authority_layer = authority_layer
 
     def bind_run(self, run_id: str | None) -> None:
         binder = getattr(self._inner, "bind_run", None)
@@ -137,30 +138,97 @@ class HookedToolExecutor:
         args = dict(arguments)
         from jaeger_agent import shell_hooks
 
-        decision = shell_hooks.fire(
-            "pre_tool_call", tool_name=tool.name, tool_input=args)
-        if decision.blocked:
-            logger.info("tool %r blocked by pre_tool_call hook: %s",
-                        tool.name, decision.reason)
-            # Shaped like every other tool failure so the model reads it as
-            # feedback and can adapt. NOT retryable: the hook will refuse the
-            # identical call again, and a retry loop against a deliberate
-            # policy veto is just noise in the operator's logs.
+        hook_decision = shell_hooks.fire(
+            "pre_tool_call", tool_name=tool.name, tool_input=args,
+        )
+        if hook_decision.blocked:
+            logger.info(
+                "tool %r blocked by pre_tool_call hook: %s",
+                tool.name,
+                hook_decision.reason,
+            )
             return {
                 "ok": False,
                 "success": False,
-                "error": decision.reason or "blocked by policy hook",
+                "error": hook_decision.reason or "blocked by policy hook",
                 "error_type": "blocked_by_hook",
                 "retryable": False,
             }
 
+        runtime = None
+        try:
+            from jaeger_ai.core.entity.authority import AuthorityLayer, ProposedAction
+            from jaeger_ai.core.entity.events import JaegerEvent
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+
+            try:
+                runtime = EntityRuntime.get_singleton()
+            except Exception:
+                pass
+
+            authority = self._authority_layer
+            if authority is None and runtime is not None:
+                authority = runtime.authority_layer
+            if authority is None:
+                authority = AuthorityLayer()
+
+            proposal = ProposedAction(
+                tool_name=tool.name,
+                arguments=args,
+            )
+
+            if runtime is not None:
+                try:
+                    runtime.event_store.append(
+                        JaegerEvent.tool_proposed(tool.name, args, parent_event_id="")
+                    )
+                except Exception:
+                    pass
+
+            # Evaluate through canonical authority boundary
+            auth_decision = authority.authorize(proposal)
+
+            if runtime is not None:
+                try:
+                    runtime.event_store.append(
+                        JaegerEvent.authority_decision(
+                            tool.name,
+                            auth_decision.is_authorized,
+                            auth_decision.reason,
+                            parent_event_id="",
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if not auth_decision.is_authorized:
+                logger.info(
+                    "tool %r blocked by authority layer (%s): %s",
+                    tool.name,
+                    auth_decision.policy_name,
+                    auth_decision.reason,
+                )
+                return {
+                    "ok": False,
+                    "success": False,
+                    "error": auth_decision.reason or "blocked by authority policy",
+                    "error_type": "blocked_by_authority",
+                    "retryable": False,
+                }
+
+            # Honor authorized or modified arguments
+            if auth_decision.authorized_arguments is not None:
+                args = dict(auth_decision.authorized_arguments)
+        except (ImportError, AttributeError):
+            runtime = None
+
         call_id = f"call-{int(time.time()*1000)}"
         t0 = time.time()
         try:
-            from jaeger_ai.core.entity.runtime import EntityRuntime
-            EntityRuntime.get_singleton().record_tool_start(
-                tool.name, args, call_id=call_id
-            )
+            if runtime is not None:
+                runtime.record_tool_start(
+                    tool.name, args, call_id=call_id
+                )
         except Exception:
             pass
 

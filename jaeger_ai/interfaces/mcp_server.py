@@ -44,11 +44,26 @@ def _off_event_loop(fn):
     return invoke
 
 
-def _run_chat(run_turn: TurnFn, client: Any, message: str, session_key: str = "mcp") -> str:
+def _run_chat(
+    run_turn: TurnFn,
+    client: Any,
+    message: str,
+    session_key: str = "mcp",
+    request_id: str = "",
+    is_subordinate: bool = False,
+) -> str:
     """Drive one turn for the ``chat`` MCP tool. Agent/tool/model output is
     forced to stderr so it never corrupts the MCP JSON-RPC stdout stream."""
     with contextlib.redirect_stdout(sys.stderr):
-        out = run_turn(client, message, session_key=session_key or "mcp")
+        kwargs: dict[str, Any] = {"session_key": session_key or "mcp"}
+        if request_id:
+            kwargs["request_id"] = request_id
+        if is_subordinate:
+            kwargs["is_subordinate"] = is_subordinate
+        try:
+            out = run_turn(client, message, **kwargs)
+        except TypeError:
+            out = run_turn(client, message, session_key=session_key or "mcp")
     if out.get("error") or out.get("halt_reason"):
         raise RuntimeError(f"Native agent failed: {out.get('error') or out['halt_reason']}")
     return out.get("text") or ""
@@ -157,7 +172,7 @@ def build_server(client: Any, instance: str, model: str | None,
     @mcp.tool()
     @_off_event_loop
     def chat(message: str, session_id: str = "", request_id: str = "",
-             allowed_tools: list[str] | None = None) -> str:
+             allowed_tools: list[str] | None = None, is_subordinate: bool = False) -> str:
         """Send a message to the local JaegerAI agent and return its reply.
 
         The agent has its own tools, memory, and skills; this drives a full
@@ -174,7 +189,14 @@ def build_server(client: Any, instance: str, model: str | None,
             return _bridge_chat(bridge, message, session=session, request_id=request_id, allowed_tools=allowed_tools)
         from jaeger_agent.tool_executor import tool_allowlist
         with tool_allowlist(allowed_tools):
-            return _run_chat(run_turn, client, message, session_key=session)
+            return _run_chat(
+                run_turn,
+                client,
+                message,
+                session_key=session,
+                request_id=request_id,
+                is_subordinate=is_subordinate,
+            )
 
     if bridge is not None:
         @mcp.tool()
