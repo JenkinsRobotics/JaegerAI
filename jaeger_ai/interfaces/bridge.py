@@ -2177,7 +2177,11 @@ def _idle_once_locked(proto: TextIO, ctx: _Ctx) -> None:
         session = "kanban_idle"
         persona = False
     elif action is Action.HEARTBEAT:
-        prompt = hb.build_prompt(layout)
+        event, wake_cognition, hb_prompt = hb.execute_heartbeat_event(layout)
+        if not wake_cognition:
+            # Standing beat is quiet: state updated, event persisted, zero model calls.
+            return
+        prompt = hb_prompt
         session = hb_session
         # A message initiated by the droid keeps its configured character.
         persona = True

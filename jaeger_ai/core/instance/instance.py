@@ -122,6 +122,13 @@ def operator_state_root() -> Path:
         from .legacy_state import migrate_operator_state
         return migrate_operator_state(root, destination)
 
+    # Protect live operator state: if executing under pytest or test isolation without
+    # an explicit override, isolate to a disposable temporary test directory.
+    if "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("JAEGER_NO_ATTACH") == "1":
+        test_dir = Path("/tmp") / "jaeger_test_state"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        return test_dir
+
     home_dir = Path.home() / ".jaeger"
     home_dir.mkdir(parents=True, exist_ok=True)
     return home_dir

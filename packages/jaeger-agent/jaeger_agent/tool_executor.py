@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -153,7 +154,45 @@ class HookedToolExecutor:
                 "retryable": False,
             }
 
-        result = self._inner.execute(tool, args)
+        call_id = f"call-{int(time.time()*1000)}"
+        t0 = time.time()
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            EntityRuntime.get_singleton().record_tool_start(
+                tool.name, args, call_id=call_id
+            )
+        except Exception:
+            pass
+
+        try:
+            result = self._inner.execute(tool, args)
+            dur = time.time() - t0
+            is_err = isinstance(result, dict) and (result.get("ok") is False or result.get("error"))
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                EntityRuntime.get_singleton().record_tool_result(
+                    tool.name,
+                    result,
+                    call_id=call_id,
+                    duration_s=dur,
+                    error=str(result.get("error")) if is_err else None,
+                )
+            except Exception:
+                pass
+        except Exception as exc:
+            dur = time.time() - t0
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                EntityRuntime.get_singleton().record_tool_result(
+                    tool.name,
+                    None,
+                    call_id=call_id,
+                    duration_s=dur,
+                    error=str(exc),
+                )
+            except Exception:
+                pass
+            raise
 
         # post_tool_call is advisory: the effect already happened, so its
         # decision is discarded (shell_hooks logs if one tries to block).

@@ -116,6 +116,15 @@ class JaegerGatewayApp:
             receipt = self.store.receive_background(row)
             if not receipt["replayed"]:
                 self.event_bus.fanout(receipt["event"])
+                try:
+                    from jaeger_ai.core.entity.runtime import EntityRuntime
+                    EntityRuntime.get_singleton().record_background_completed(
+                        str(row.get("id") or row.get("delivery_id") or ""),
+                        row,
+                        session_id=str(row.get("session_id") or "dispatcher"),
+                    )
+                except Exception:
+                    pass
             # Receipt + transcript + event are committed before native ACK.
             # Failed/lost ACK retries delivery, never the model or its tools.
             await asyncio.to_thread(client.command, "acknowledge_background", {"delivery_id": row["delivery_id"]})
@@ -1120,6 +1129,13 @@ class JaegerGatewayApp:
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
         try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            EntityRuntime.get_singleton().submit_human_message(
+                text, session_id=session_id, request_id=rid
+            )
+        except Exception as ent_err:
+            logger.debug("EntityRuntime human_message ingress error: %s", ent_err)
+        try:
             if rid in self._cancel_requested:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
@@ -1226,6 +1242,17 @@ class JaegerGatewayApp:
         assistant_text: str | None = None,
     ) -> None:
         session_status = "idle" if status in {"completed", "cancelled"} else status
+        if assistant_text and status == "completed":
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                EntityRuntime.get_singleton().record_agent_response(
+                    assistant_text,
+                    session_id=session_id,
+                    model=str(result.get("model") or ""),
+                    metadata=result,
+                )
+            except Exception:
+                pass
         try:
             persisted = self.store.complete_request(
                 request_id,

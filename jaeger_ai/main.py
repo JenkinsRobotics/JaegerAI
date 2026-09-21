@@ -3681,16 +3681,32 @@ def _run_turn(client: Any, user_text: str, *, session_key: str,
     JaegerAgent is the unconditional loop implementation; JaegerAI supplies
     product prompts, tools, memory, personality, and user-facing policy through
     its runtime adapter."""
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        EntityRuntime.get_singleton().submit_human_message(
+            user_text, session_id=session_key, source="main._run_turn"
+        )
+    except Exception:
+        pass
+
     actionable = _run_actionable_turn(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
     )
-    if actionable is not None:
-        return actionable
-    return _run_turn_via_jaeger_agent(
+    result = actionable if actionable is not None else _run_turn_via_jaeger_agent(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
     )
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        resp_text = str((result or {}).get("text") or "")
+        if resp_text:
+            EntityRuntime.get_singleton().record_agent_response(
+                resp_text, session_id=session_key, metadata=result
+            )
+    except Exception:
+        pass
+    return result
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
