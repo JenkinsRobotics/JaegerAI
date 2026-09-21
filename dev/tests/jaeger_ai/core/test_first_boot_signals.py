@@ -209,7 +209,9 @@ def test_stance_is_injected_before_the_persona_speaks(inst):
     fb.record_q2(inst, "We're close.")
     stance = fb.latent_stance(inst)
     assert stance and stance["stance"] in sig.STANCES
-    # and the name follows the calibrated register
+    # The name is chosen at persona handoff, after commissioning finishes.
+    from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+    CommissioningCoordinator(inst).tick(budget_s=30)
     assert fb.persona_name(inst)
 
 

@@ -147,16 +147,35 @@ struct FirstBootView: View {
     /// Which question the current turn is asking, in the backend's terms.
     private var questionKey: String {
         switch gate.status {
-        case "AWAITING_BENCH":     return "bench"
+        case "AWAITING_BENCH", "DISCOVERING_HOST": return "bench"
         case "AWAITING_CHARACTER": return "character"
         case "AWAITING_SOCIAL":    return "social"
         case "AWAITING_HESITANCE": return "hesitance"
         case "AWAITING_Q2":        return "q2"
+        case "AWAITING_PERMISSIONS": return "permissions"
+        case "AWAITING_INTEGRATIONS": return "integrations"
+        case "AWAITING_KNOWLEDGE_APPROVAL": return "knowledge"
+        case "DISCOVERING_SERVICES",
+             "DISCOVERING_PROVIDERS",
+             "CERTIFYING_PROVIDERS",
+             "CONFIGURING_RUNTIME",
+             "STARTING_RESIDENT",
+             "VALIDATING_CORE",
+             "VALIDATING_TOOLS",
+             "VALIDATING_MEMORY",
+             "VALIDATING_BACKGROUND",
+             "RESTARTING_FOR_PERSISTENCE_TEST",
+             "VERIFYING_PERSISTENCE",
+             "INITIAL_INDEXING":
+            return "tick"
         default:                   return "voice"
         }
     }
 
-    private var isBenchTurn: Bool { gate.status == "AWAITING_BENCH" || questionKey == "bench" }
+    private var isBenchTurn: Bool {
+        gate.status == "AWAITING_BENCH" || gate.status == "DISCOVERING_HOST" || questionKey == "bench"
+    }
+    private var isCommissioningTurn: Bool { questionKey == "tick" }
     private var isCharacterTurn: Bool { gate.status == "AWAITING_CHARACTER" }
     private var isVoiceTurn: Bool { gate.status == "AWAITING_VOICE" }
     private var showWelcome: Bool { isBenchTurn && !began }
@@ -186,6 +205,21 @@ struct FirstBootView: View {
         case "AWAITING_CHARACTER": return (1, "Your companion")
         case "AWAITING_SOCIAL", "AWAITING_HESITANCE": return (2, "Getting acquainted")
         case "AWAITING_VOICE", "AWAITING_Q2": return (3, "Voice & personality")
+        case "AWAITING_PERMISSIONS", "AWAITING_INTEGRATIONS", "AWAITING_KNOWLEDGE_APPROVAL":
+            return (3, "Getting ready")
+        case "DISCOVERING_SERVICES",
+             "DISCOVERING_PROVIDERS",
+             "CERTIFYING_PROVIDERS",
+             "CONFIGURING_RUNTIME",
+             "STARTING_RESIDENT",
+             "VALIDATING_CORE",
+             "VALIDATING_TOOLS",
+             "VALIDATING_MEMORY",
+             "VALIDATING_BACKGROUND",
+             "RESTARTING_FOR_PERSISTENCE_TEST",
+             "VERIFYING_PERSISTENCE",
+             "INITIAL_INDEXING":
+            return (3, "Setting up your AI")
         default: return (0, "Intelligence")
         }
     }
@@ -321,6 +355,8 @@ struct FirstBootView: View {
                         .buttonStyle(FirstBootActionStyle(primary: true))
                         .keyboardShortcut(.defaultAction)
                         .disabled(busy || selectedCharacterId == nil)
+                } else if isCommissioningTurn {
+                    ProgressView().controlSize(.small)
                 } else if !isCharacterTurn && !isVoiceTurn {
                     Button(turn.isPersonaHandoff ? "Continue" : "Send") { submit() }
                         .buttonStyle(FirstBootActionStyle(primary: true))
@@ -358,10 +394,12 @@ struct FirstBootView: View {
             // greeting off mid-sentence via the auto-advance.
             if isBenchTurn && began { startBenchIfNeeded() }
             if isCharacterTurn { loadCharactersIfNeeded() }
+            if isCommissioningTurn { pollCommissioning() }
         }
         .onChange(of: gate.status) { _, newStatus in
             if newStatus == "AWAITING_BENCH" && began { startBenchIfNeeded() }
             if newStatus == "AWAITING_CHARACTER" { loadCharactersIfNeeded() }
+            if questionKey == "tick" { pollCommissioning() }
         }
         .onDisappear {
             truncationWatch?.cancel()
@@ -699,6 +737,32 @@ struct FirstBootView: View {
         guard !path.isEmpty else { return "bundled model" }
         let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         return name.isEmpty ? "bundled model" : name
+    }
+
+    private func pollCommissioning() {
+        Task { @MainActor in
+            guard isCommissioningTurn else { return }
+            busy = true
+            defer { busy = false }
+            for _ in 0..<40 {
+                _ = await gate.submit(question: "tick", reply: "ok")
+                switch await gate.evaluate() {
+                case .onboard(let next):
+                    turn = next
+                    if next.awaitsReply || next.isPersonaHandoff {
+                        spoken = false
+                        speakCurrentTurn()
+                        return
+                    }
+                case .proceed:
+                    onFinish()
+                    return
+                case .unavailable:
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+        }
     }
 
     /// Manual "Use this setup" tap and the bench auto-advance share one

@@ -113,6 +113,29 @@ PERSONA_FIRST_WORDS = "*(clears throat)* Hello, I'm here."
 #: Entry into normal Companion operation, spoken by the persona.
 PERSONA_OPENING_QUESTION = "What do you want to work on first?"
 
+#: Consumer-facing commissioning copy. Architecture terms stay out of this
+#: voice; detailed diagnostics live on ``jaeger onboarding status --json``.
+PROGRESS_DISCOVERING_SERVICES = "Checking this Mac…"
+PROGRESS_DISCOVERING_PROVIDERS = "Testing available AI…"
+PROGRESS_CERTIFYING_PROVIDERS = (
+    "I found and tested the AI available on this computer. "
+    "I configured the combination that works best."
+)
+PROGRESS_CONFIGURING = "Setting up your AI…"
+PROGRESS_STARTING = "Starting your OS…"
+PROGRESS_VALIDATING = "Checking everything…"
+PROGRESS_RESTARTING = "Making sure I'll still be here after a restart…"
+PROGRESS_INDEXING = "Getting memory ready…"
+PROGRESS_READY = "Everything is ready."
+
+QUESTION_FILES = "Would you like me to help with your files and projects?"
+QUESTION_SHELL = "When you ask me to, should I be able to run commands on this Mac?"
+QUESTION_KNOWLEDGE = (
+    "I can remember your Projects, Documents, or Notes folders if you'd like. "
+    "Should I include those?"
+)
+QUESTION_GITHUB = "I found GitHub on this Mac. Should I use it when you ask?"
+
 
 @dataclass(frozen=True)
 class Turn:
@@ -203,6 +226,10 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
             status=FirstBootStatus.AWAITING_Q2,
         )
 
+    commissioning_turn = _commissioning_turn(instance_root, current)
+    if commissioning_turn is not None:
+        return commissioning_turn
+
     # INITIALIZING_PERSONA: the installer's last words, then the SI's
     # first. Emitted as one turn because the pause between them is the
     # transition — splitting it invites a progress indicator, and a
@@ -223,6 +250,46 @@ def next_turn(instance_root: Path | Any) -> Turn | None:
         awaits_reply=True,
         status=FirstBootStatus.INITIALIZING_PERSONA,
     )
+
+
+def _commissioning_turn(instance_root: Path | Any, current: FirstBootStatus) -> Turn | None:
+    """Installer voice for automatic commissioning and human authorizations."""
+    progress = {
+        FirstBootStatus.DISCOVERING_SERVICES: (PROGRESS_DISCOVERING_SERVICES,),
+        FirstBootStatus.DISCOVERING_PROVIDERS: (PROGRESS_DISCOVERING_PROVIDERS,),
+        FirstBootStatus.CERTIFYING_PROVIDERS: (PROGRESS_CERTIFYING_PROVIDERS,),
+        FirstBootStatus.CONFIGURING_RUNTIME: (PROGRESS_CONFIGURING,),
+        FirstBootStatus.STARTING_RESIDENT: (PROGRESS_STARTING,),
+        FirstBootStatus.VALIDATING_CORE: (PROGRESS_VALIDATING,),
+        FirstBootStatus.VALIDATING_TOOLS: (PROGRESS_VALIDATING,),
+        FirstBootStatus.VALIDATING_MEMORY: (PROGRESS_VALIDATING,),
+        FirstBootStatus.VALIDATING_BACKGROUND: (PROGRESS_VALIDATING,),
+        FirstBootStatus.RESTARTING_FOR_PERSISTENCE_TEST: (PROGRESS_RESTARTING,),
+        FirstBootStatus.VERIFYING_PERSISTENCE: (PROGRESS_RESTARTING,),
+        FirstBootStatus.INITIAL_INDEXING: (PROGRESS_INDEXING,),
+    }
+    if current in progress:
+        return Turn(
+            speaker="os1",
+            lines=progress[current],
+            awaits_reply=False,
+            status=current,
+        )
+
+    pending = ""
+    try:
+        pending = str((first_boot.snapshot(instance_root).get("commissioning") or {}).get("pending_human_action") or "")
+    except Exception:
+        pending = ""
+
+    if current is FirstBootStatus.AWAITING_PERMISSIONS:
+        question = QUESTION_SHELL if pending == "shell" else QUESTION_FILES
+        return Turn(speaker="os1", lines=(question,), awaits_reply=True, status=current)
+    if current is FirstBootStatus.AWAITING_INTEGRATIONS:
+        return Turn(speaker="os1", lines=(QUESTION_GITHUB,), awaits_reply=True, status=current)
+    if current is FirstBootStatus.AWAITING_KNOWLEDGE_APPROVAL:
+        return Turn(speaker="os1", lines=(QUESTION_KNOWLEDGE,), awaits_reply=True, status=current)
+    return None
 
 
 # ── answer interpretation ────────────────────────────────────────────
@@ -332,6 +399,19 @@ __all__ = [
     "QUESTION_Q2",
     "QUESTION_VOICE",
     "WELCOME",
+    "PROGRESS_CERTIFYING_PROVIDERS",
+    "PROGRESS_CONFIGURING",
+    "PROGRESS_DISCOVERING_PROVIDERS",
+    "PROGRESS_DISCOVERING_SERVICES",
+    "PROGRESS_INDEXING",
+    "PROGRESS_READY",
+    "PROGRESS_RESTARTING",
+    "PROGRESS_STARTING",
+    "PROGRESS_VALIDATING",
+    "QUESTION_FILES",
+    "QUESTION_GITHUB",
+    "QUESTION_KNOWLEDGE",
+    "QUESTION_SHELL",
     "parse_character_answer",
     "QUESTION_CHARACTER",
     "BENCH_NARRATION",

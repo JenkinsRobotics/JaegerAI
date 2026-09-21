@@ -855,7 +855,12 @@ def _prepare_and_verify(name: str) -> bool:
 
     Best-effort: any error here is reported but never fatal — the instance
     is already written, so we'd rather say "some systems need attention"
-    than crash setup."""
+    than crash setup.
+
+    This prepare boot warms weights. Final commissioning acceptance uses
+    the resident Gateway OWNER via
+    :class:`jaeger_ai.core.instance.commissioning.CommissioningCoordinator`.
+    """
     # Escape hatch: tests + CI (and operators who want a fast, verify-later
     # setup) skip the heavy verify boot. Real setup runs it.
     import os

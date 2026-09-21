@@ -35,18 +35,36 @@ def _layout(instance: str | None):
 
 def _cmd_status(args: argparse.Namespace) -> int:
     from jaeger_ai.core.instance import first_boot as fb
+    from jaeger_ai.core.instance.commissioning import status_report
 
     layout, name = _layout(args.instance)
     snap = fb.snapshot(layout)
+    report = {}
+    try:
+        report = status_report(layout)
+    except Exception:
+        report = {}
+
+    payload = {"instance": name, **snap, "commissioning": report}
 
     if args.json:
-        print(json.dumps({"instance": name, **snap}, indent=2, sort_keys=True))
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0
 
     print(f"  instance        {name}")
     print(f"  status          {snap.get('status')}")
     print(f"  schema_version  {snap.get('schema_version')}")
     print(f"  state file      {fb.state_path(layout)}")
+    if report.get("entity_id"):
+        print(f"  entity_id       {report['entity_id']}")
+    if report.get("pending_human_action"):
+        print(f"  waiting on      {report['pending_human_action']}")
+    resident = report.get("resident_runtime") or {}
+    if resident:
+        print(f"  resident        ready={resident.get('ready')} mode={resident.get('mode')}")
+    completed = report.get("completed_stages") or snap.get("completed_stages") or []
+    if completed:
+        print(f"  completed       {len(completed)} stages")
     if snap.get("migrated"):
         print(f"  migrated        yes ({snap.get('migration_reason')})")
     for key, label in (
@@ -61,6 +79,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
         print("  question 2      declined (recorded, not re-asked)")
     elif snap.get("q2_response"):
         print("  question 2      answered")
+    validation = report.get("latest_validation") or {}
+    if validation:
+        print(f"  validation      passed={validation.get('passed')}")
+    repair = report.get("latest_repair") or []
+    if repair:
+        print(f"  repairs         {len(repair)} attempt(s)")
     return 0
 
 

@@ -80,17 +80,10 @@ def request_all() -> dict[str, bool | None]:
 
 
 def first_boot_preflight() -> None:
-    """Run :func:`request_all` once per machine (marker-file guarded).
+    """Progressive authorization: do not prompt for every TCC grant at boot.
 
-    Called from the bridge boot path so the prompts carry the app's own
-    identity. Never raises; never blocks boot on a slow prompt (the OS
-    dialogs are asynchronous — the calls return immediately).
+    Commissioning requests only the permissions required for the chosen
+    interaction mode and approved capabilities. ``request_all`` remains
+    available for Advanced Setup and ``jaeger doctor``.
     """
-    if sys.platform != "darwin" or _MARKER.exists():
-        return
-    try:
-        _MARKER.parent.mkdir(parents=True, exist_ok=True)
-        request_all()
-        _MARKER.write_text("v1\n")
-    except Exception:  # noqa: BLE001 — best-effort, boot must proceed
-        pass
+    return

@@ -757,8 +757,19 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             raise ValueError("Native instance is unavailable")
         _fb.ensure_migrated(lay)
         _fb.begin(lay)  # Align the durable question key with the first rendered turn.
+        try:
+            from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+            CommissioningCoordinator(lay).tick(budget_s=12.0)
+        except Exception:
+            pass
         turn = _fbs.next_turn(lay)
         snap = _fb.snapshot(lay)
+        commissioning = {}
+        try:
+            from jaeger_ai.core.instance.commissioning import status_report
+            commissioning = status_report(lay)
+        except Exception:
+            commissioning = snap.get("commissioning") or {}
         return {
             "status": _fb.status(lay).value,
             "schema_version": _fb.SCHEMA_VERSION,
@@ -770,6 +781,8 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
             "character_id": snap.get("character_id"),
             "hardware_bench": snap.get("hardware_bench"),
             "latent_stance": _fb.latent_stance(lay),
+            "commissioning": commissioning,
+            "pending_human_action": commissioning.get("pending_human_action"),
             "turn": None if turn is None else {
                 "speaker": turn.speaker,
                 "lines": list(turn.lines),
@@ -1325,6 +1338,25 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
                 _fb.record_q2(
                     lay, reply, refused=_fbs.looks_like_refusal(reply),
                 )
+            elif question in {"tick", "continue"}:
+                from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+                CommissioningCoordinator(lay).tick(budget_s=12.0)
+            elif question == "permissions":
+                from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+                pending = str(
+                    (_fb.snapshot(lay).get("commissioning") or {}).get("pending_human_action") or "files"
+                )
+                CommissioningCoordinator(lay).record_permission_answer(pending, reply)
+            elif question == "integrations":
+                from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+                pending = str(
+                    (_fb.snapshot(lay).get("commissioning") or {}).get("pending_human_action") or "integrations.github"
+                )
+                integration_id = pending.split(".", 1)[-1] if "." in pending else "github"
+                CommissioningCoordinator(lay).record_integration_answer(integration_id, reply)
+            elif question == "knowledge":
+                from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+                CommissioningCoordinator(lay).record_knowledge_answer(reply)
             else:
                 raise ValueError(f"unknown first-boot question {question!r}")
             return True, None
