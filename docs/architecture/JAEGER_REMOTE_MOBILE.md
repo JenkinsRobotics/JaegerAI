@@ -95,3 +95,16 @@ route. Local loopback WebUI and Gateway remain.
 - `tailscale serve status` — HTTPS → `http://127.0.0.1:8790`
 - `lsof -nP -iTCP:8810 -sTCP:LISTEN` — must be `127.0.0.1`
 - Phone: Jaeger is currently unreachable → Mac awake? Tailscale up on both ends?
+
+## Activation notes (operator, 2026-09-21)
+
+Canonical origins:
+
+- Local WebUI: `http://127.0.0.1:8790` (loopback only after `jaeger remote enable`)
+- Remote: `https://matthews-mac-studio.tail80f206.ts.net:8443`
+
+Retired Serve routes: `:443 → 8787` and `:8444 → 8788` (dead listeners).
+
+Safari/iOS: this agent cannot delete an installed Home Screen PWA. Re-open the Jaeger PWA so service worker `jaegerpd7` replaces `jaegerpd6`. Unrelated Safari data was not touched.
+
+Physical iPhone Safari/Face ID/Add-to-Home-Screen was not completed in this pass. Pairing and campaign turns were exercised over the canonical HTTPS origin with an iPhone user-agent.
