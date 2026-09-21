@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary: The Consolidated Entity
 
-The Pinocchio architecture establishes a single, authoritative **Persistent Entity Runtime** for JaegerAI.
+The Pinocchio architecture establishes a single, authoritative **Persistent Entity Runtime** for JaegerAI, implementing the [Universal Persistent Agent Architecture](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md) baseline.
 
 ### The Foundational Invariants
 * **MODEL ≠ AGENT:** The Large Language Model is not Jaeger. Models (Hermes, Claude, OpenAI, Gemini, Ollama) are replaceable cognition engines invoked on demand.
